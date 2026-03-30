@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Error Check</title>
+</head>
+
+<body>
+    <h1>Error Output</h1>
+    <div id="error-log"
+        style="color: red; font-family: monospace; white-space: pre-wrap; padding: 20px; border: 1px solid red;"></div>
+
+    <script>
+        window.onerror = function (msg, url, lineNo, columnNo, error) {
+            var string = msg.toLowerCase();
+            var substring = "script error";
+            var message = [
+                'Message: ' + msg,
+                'URL: ' + url,
+                'Line: ' + lineNo,
+                'Column: ' + columnNo,
+                'Error object: ' + JSON.stringify(error)
+            ].join('\n');
+            document.getElementById('error-log').innerText += message + '\n\n';
+            return false;
+        };
+    </script>
+
+    <!-- Load only the script in question -->
+    <script src="script.js"></script>
+
+    <script>
+        setTimeout(() => {
+            if (document.getElementById('error-log').innerText === '') {
+                document.getElementById('error-log').innerText = 'No syntax errors captured!';
+                document.getElementById('error-log').style.color = 'green';
+                document.getElementById('error-log').style.borderColor = 'green';
+            }
+        }, 1000);
+    </script>
+</body>
+
+</html>

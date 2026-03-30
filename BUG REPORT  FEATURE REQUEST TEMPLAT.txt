@@ -1,0 +1,157 @@
+BUG REPORT / FEATURE REQUEST TEMPLATE
+text
+## ISSUE TYPE: [Bug Report] / [Feature Request]
+
+### MODULE: Calendar Module
+
+### CURRENT BEHAVIOR:
+[Describe what's happening now]
+
+### EXPECTED BEHAVIOR:
+[Describe what should happen]
+
+### TECHNICAL REQUIREMENTS:
+- [List specific requirements]
+- [Reference to requirements document if available]
+
+### VISUAL REFERENCE:
+[Attach screenshot or describe layout]
+
+### PRIORITY: [High/Medium/Low]
+📝 YOUR SPECIFIC FEEDBACK - COPY THIS:
+text
+## ISSUE TYPE: Bug Report / Feature Request
+
+### MODULE: Calendar Module (Phase 1)
+
+### CURRENT BEHAVIOR:
+1. Calendar is hardcoded to only show March 2026
+2. Filter button does not open any filter modal
+3. Quick Add Activity button is placed below the calendar instead of beside the filter button
+4. Calendar shows Sunday as first day (needs Monday first)
+
+### EXPECTED BEHAVIOR:
+1. Dynamic Calendar Range
+   - Calendar should work for ANY date from year 2010 to 2200
+   - Users should be able to navigate to any month/year using Previous/Next buttons
+   - "Today" button should jump to current date
+   - Date calculation should be dynamic, not hardcoded
+
+2. Calendar Display Format
+   - Week should start on Monday (not Sunday)
+   - Days should be labeled: Mon, Tue, Wed, Thu, Fri, Sat, Sun
+   - All months should render correctly with proper number of days
+   - Leap years should be handled correctly (Feb 29)
+
+3. Filter Button Functionality
+   - Clicking Filter should open filter modal
+   - Filter options should include:
+     * Filter by Agent (dropdown)
+     * Filter by Activity Type (CPS, FTF, FSA, EVENT, etc.)
+     * Date Range selector (from date - to date)
+     * Search by activity title
+   - Filters should apply to both calendar view and Today's Activities
+   - Filter state should persist during session
+
+4. UI Layout
+   - Quick Add Activity button should be moved to the right side of the filter button
+   - Layout should be: [Calendar Title] [Today] [Day] [Week] [Month] [Filter] [Quick Add]
+   - Buttons should be properly aligned in the same row
+
+5. Today's Activities Section
+   - Should show activities for the currently selected date
+   - Should update when navigating to different dates
+   - Activity cards should show correct time, type, and customer info
+
+### TECHNICAL REQUIREMENTS:
+Reference: Website Requirements Document V8.6 - Section 5: Calendar & Activity Management
+- Calendar should support years 2010-2200
+- Activities should be loaded from DataStore dynamically
+- Filter state should be saved in sessionStorage
+- Monday first day of week (ISO standard)
+
+### VISUAL REFERENCE:
+Current: Filter button not working, Quick Add below calendar
+Expected: Filter and Quick Add buttons side by side in header
+
+### PRIORITY: High
+📋 ADDITIONAL ISSUES TO REPORT
+While you're at it, check these other modules and report them similarly:
+
+For Prospect Module:
+text
+## ISSUE TYPE: Bug Report
+
+### MODULE: Prospect Module (Phase 3)
+
+### CURRENT BEHAVIOR:
+[Describe what's not working]
+
+### EXPECTED BEHAVIOR:
+- Add Prospect modal should validate all fields
+- Convert to Customer should work when purchases > RM 2000
+- Protection period calculation should be accurate
+- Tags should persist after page refresh
+For Event Module:
+text
+## ISSUE TYPE: Bug Report
+
+### MODULE: Event Management (Phase 4)
+
+### CURRENT BEHAVIOR:
+[Describe what's not working]
+
+### EXPECTED BEHAVIOR:
+- Event scoring should calculate correctly (base + engagement)
+- Check-in process should award points
+- Auto-tagging should apply after check-in
+- Event reports should show accurate attendance
+For WhatsApp Module:
+text
+## ISSUE TYPE: Feature Incomplete
+
+### MODULE: WhatsApp Marketing (Phase 10)
+
+### CURRENT BEHAVIOR:
+[Describe what's not working]
+
+### EXPECTED BEHAVIOR:
+- Templates should save to DataStore
+- Campaigns should send to selected audience
+- Message history should display correctly
+- Analytics should show real data
+📁 WHERE TO SAVE THESE FEEDBACKS
+Create a folder called feedback/ in your project and save each as separate files:
+
+text
+feedback/
+├── 01-calendar-feedback.md
+├── 02-prospect-feedback.md
+├── 03-event-feedback.md
+├── 04-whatsapp-feedback.md
+└── 05-general-feedback.md
+This way:
+
+Antigravity has clear specifications
+
+You have a record of what was reported
+
+No confusion about requirements
+
+Easy to track what's been fixed
+
+✅ NEXT STEPS
+Copy the calendar feedback format above
+
+Create similar reports for other broken features
+
+Send all feedback to Antigravity
+
+They can fix one module at a time without breaking others
+
+Would you like me to help you write feedback for any other specific module you've noticed is broken?
+
+
+
+
+

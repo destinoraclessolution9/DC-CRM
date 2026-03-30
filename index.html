@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Feng Shui CRM V8.7 - Enterprise Edition</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles-fixed.css">
+    <!-- Comment out manifest to avoid CORS error when running locally -->
+    <!-- <link rel="manifest" href="manifest.json"> -->
+</head>
+
+<body>
+    <div id="login-container" class="login-container">
+        <div class="login-box">
+            <div class="login-logo">
+                <i class="fas fa-dharmachakra fa-3x" style="color: var(--primary);"></i>
+                <h2 style="margin-top: 12px; font-size: 22px; font-weight: 700;">FENG SHUI CRM</h2>
+            </div>
+            <div class="login-form">
+                <select id="login-user-select" class="form-control" style="margin-bottom: 16px;">
+                    <!-- populated by JavaScript -->
+                </select>
+                <button class="btn primary" style="width: 100%;" onclick="app.login()">Login</button>
+            </div>
+            <p class="login-hint">Select a demo user to continue</p>
+        </div>
+    </div>
+    <div class="app-shell" id="app-shell" style="display: none;">
+        <!-- Top Navigation -->
+        <nav class="top-bar">
+            <div class="brand" id="brand-logo">
+                <i class="fas fa-dharmachakra"></i>
+                <span class="brand-name">FENG SHUI CRM</span>
+            </div>
+
+            <!-- Phase 14: Mobile hamburger menu -->
+            <div class="hamburger-menu" id="hamburger-menu" onclick="app.toggleMobileNav()">
+                <i class="fas fa-bars"></i>
+            </div>
+
+            <ul class="nav-links" id="nav-links">
+                <li id="nav-calendar" data-view="calendar">Calendar</li>
+                <li id="nav-pipeline" data-view="pipeline">Potential Pipeline Management</li>
+                <li id="nav-protection" data-view="protection">Protection Monitoring</li>
+                <li id="nav-agents" data-view="agents">Consultant</li>
+                <li id="nav-prospects" data-view="prospects">Prospect/Customer</li>
+                <li id="nav-referrals" data-view="referrals">Referral Relationship Management</li>
+                <li id="nav-cases" data-view="cases">Success Case Library</li>
+                <li id="nav-documents" data-view="documents">Document Management</li>
+                <li id="nav-import" data-view="import">Bulk Import</li>
+                <li id="nav-promotions" data-view="promotions">Monthly Promotion</li>
+                <li id="nav-marketing-lists" data-view="marketing_lists" style="display:none;">Marketing Lists</li>
+                <li id="nav-performance" data-view="performance">Ranking Performance Overview</li>
+                <li id="nav-reports" data-view="reports">Reporting KPI</li>
+                <li id="nav-risk" data-view="risk">Consultant Attrition Risk Analysis</li>
+
+                <!-- Phase 17: AI Insights -->
+                <li id="nav-ai-insights" class="dropdown-trigger" style="position:relative; cursor:pointer;">
+                    AI Insights <i class="fas fa-caret-down"></i>
+                    <ul class="dropdown-menu"
+                        style="display:none; position:absolute; top:100%; left:0; background:white; box-shadow:0 4px 12px rgba(0,0,0,0.1); border-radius:8px; min-width:200px; z-index:1000; padding:8px 0;">
+                        <li onclick="app.showAIInsightsDashboard()" style="padding:10px 16px; color:var(--gray-700);">
+                            Prediction Dashboard</li>
+                        <li onclick="app.showLeadScoring()" style="padding:10px 16px; color:var(--gray-700);">Lead
+                            Scoring</li>
+                        <li onclick="app.showSalesForecast()" style="padding:10px 16px; color:var(--gray-700);">Sales
+                            Forecast</li>
+                        <li onclick="app.showChurnRiskAnalysis()" style="padding:10px 16px; color:var(--gray-700);">
+                            Churn Risk Analysis</li>
+                        <li onclick="app.showPerformanceInsights()" style="padding:10px 16px; color:var(--gray-700);">
+                            Performance Insights</li>
+                    </ul>
+                </li>
+
+                <!-- Phase 19: Security & Compliance -->
+                <li id="nav-security" class="dropdown-trigger" style="position:relative; cursor:pointer;">
+                    Security <i class="fas fa-caret-down"></i>
+                    <ul class="dropdown-menu"
+                        style="display:none; position:absolute; top:100%; left:0; background:white; box-shadow:0 4px 12px rgba(0,0,0,0.1); border-radius:8px; min-width:200px; z-index:1000; padding:8px 0;">
+                        <li onclick="app.showSecurityDashboard()" style="padding:10px 16px; color:var(--gray-700);">
+                            Security Dashboard</li>
+                        <li onclick="app.showAuditLogs()" style="padding:10px 16px; color:var(--gray-700);">Audit Logs
+                        </li>
+                        <li onclick="app.showComplianceCenter()" style="padding:10px 16px; color:var(--gray-700);">
+                            Compliance Center</li>
+                        <li onclick="app.showTwoFactorSetup()" style="padding:10px 16px; color:var(--gray-700);">2FA
+                            Settings</li>
+                    </ul>
+                </li>
+
+                <!-- Phase 20: System Administration & Deployment -->
+                <li class="dropdown-trigger" style="position:relative; cursor:pointer;" id="nav-admin"
+                    style="display:none;">
+                    Admin <i class="fas fa-caret-down"></i>
+                    <ul class="dropdown-menu"
+                        style="display:none; position:absolute; top:100%; left:0; background:white; box-shadow:0 4px 12px rgba(0,0,0,0.1); border-radius:8px; min-width:200px; z-index:1000; padding:8px 0;">
+                        <li onclick="app.showAdminDashboard()" style="padding:10px 16px; color:var(--gray-700);">System
+                            Dashboard</li>
+                        <li onclick="app.showTenantManagement()" style="padding:10px 16px; color:var(--gray-700);">
+                            Tenant Management</li>
+                        <li onclick="app.showSystemHealth()" style="padding:10px 16px; color:var(--gray-700);">System
+                            Health</li>
+                        <li onclick="app.showBackupManager()" style="padding:10px 16px; color:var(--gray-700);">Backup &
+                            Restore</li>
+                        <li onclick="app.showPerformanceMonitor()" style="padding:10px 16px; color:var(--gray-700);">
+                            Performance Monitor</li>
+                        <li onclick="app.showDeploymentCenter()" style="padding:10px 16px; color:var(--gray-700);">
+                            Deployment Center</li>
+                        <li onclick="app.showSystemLogs()" style="padding:10px 16px; color:var(--gray-700);">System Logs
+                        </li>
+                    </ul>
+                </li>
+                <script>
+                        // Simple dropdown toggle logic for AI Insights, Security, Admin
+                        document.addEventListener('DOMContentLoaded', () => {
+                            const triggers = document.querySelectorAll('.dropdown-trigger');
+                            triggers.forEach(trigger => {
+                                trigger.addEventListener('click', function (e) {
+                                    if (e.target.tagName.toLowerCase() !== 'li' || !e.target.hasAttribute('onclick')) {
+                                        const menu = this.querySelector('.dropdown-menu');
+                                        if (menu) menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+                                    }
+                                });
+                            });
+                            document.addEventListener('click', (e) => {
+                                if (!e.target.closest('.dropdown-trigger')) {
+                                    document.querySelectorAll('.dropdown-menu').forEach(menu => menu.style.display = 'none');
+                                }
+                            });
+                        });
+                </script>
+
+                <li id="nav-integrations" data-view="integrations" onclick="app.navigateTo('integrations')">Integrations</li>
+                <li id="nav-settings" data-view="settings">Setting - Account</li>
+            </ul>
+
+            <div class="bar-right">
+                <div class="notif-bell">
+                    <i class="fas fa-bell"></i>
+                    <span class="badget">0</span>
+                </div>
+                <div class="user-info" id="current-user-display">
+                    <span id="user-name-label">Guest</span>
+                    <img id="user-avatar" src="https://ui-avatars.com/api/?name=Guest&background=8B0000&color=fff"
+                        alt="Avatar">
+                </div>
+            </div>
+        </nav>
+
+        <div class="main-layout">
+            <!-- Fixed Sidebar -->
+            <aside class="sidebar">
+                <div class="sidebar-top">
+                    <button class="search-trigger" id="sidebar-search-btn">
+                        <i class="fas fa-search"></i>
+                    </button>
+                    <div class="search-tooltip">Click to search</div>
+                </div>
+                <div class="sidebar-menu"></div>
+                <div class="sidebar-bottom"></div>
+            </aside>
+
+            <!-- Content Area -->
+            <main class="content-viewport" id="content-viewport">
+                <div class="placeholder-view">
+                    <h1>Loading Application...</h1>
+                    <p>Please wait.</p>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <!-- Local lunar calendar library (loaded before script.js) -->
+    <script src="lunar-calendar.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+    <script src="data.js"></script>
+    <script src="auth.js"></script>
+    <script src="ui.js"></script>
+    <script src="script.js"></script>
+    <script src="phase8_events.js"></script>
+    <script src="offline-storage.js"></script>
+    <script src="mobile-components.js"></script>
+    <script src="push-notifications.js"></script>
+    <script src="biometric-auth.js"></script>
+    <script src="mobile-settings.js"></script>
+
+    <!-- Phase 19: Security & Compliance Scripts -->
+    <script src="encryption.js"></script>
+    <script src="audit-log.js"></script>
+    <script src="compliance.js"></script>
+    <script src="rbac.js"></script>
+    <script src="two-factor.js"></script>
+
+    <!-- Phase 20: System Administration Scripts -->
+    <script src="tenant-manager.js"></script>
+    <script src="system-health.js"></script>
+    <script src="backup-manager.js"></script>
+    <script src="performance-monitor.js"></script>
+    <script src="deployment-manager.js"></script>
+    <script src="config-manager.js"></script>
+    <script src="system-logs.js"></script>
+
+    <!-- Event Handlers (Added after all scripts) -->
+    <script>
+        // Wait for DOM to be ready
+        document.addEventListener('DOMContentLoaded', function () {
+            console.log('DOM ready, setting up event handlers...');
+
+            // Brand logo navigation
+            const brandLogo = document.getElementById('brand-logo');
+            if (brandLogo) {
+                brandLogo.addEventListener('click', function () {
+                    if (window.app && window.app.navigateTo) {
+                        window.app.navigateTo('calendar');
+                    } else {
+                        console.warn('App not ready yet');
+                    }
+                });
+            }
+
+            // Navigation menu items
+            document.querySelectorAll('.nav-links li').forEach(li => {
+                const view = li.getAttribute('data-view');
+                if (view) {
+                    li.addEventListener('click', function () {
+                        if (window.app && window.app.navigateTo) {
+                            window.app.navigateTo(view);
+                        } else {
+                            console.warn('App not ready yet');
+                        }
+                    });
+                }
+            });
+
+            // User info click
+            const userInfo = document.getElementById('current-user-display');
+            if (userInfo) {
+                userInfo.addEventListener('click', function () {
+                    if (window.app && window.app.toggleUserMenu) {
+                        window.app.toggleUserMenu();
+                    }
+                });
+            }
+
+            // Search button
+            const searchBtn = document.getElementById('sidebar-search-btn');
+            if (searchBtn) {
+                searchBtn.addEventListener('click', function () {
+                    if (window.app && window.app.toggleSearchPanel) {
+                        window.app.toggleSearchPanel();
+                    } else {
+                        console.warn('Search not available yet');
+                    }
+                });
+            }
+
+            // Initialize app if ready
+            if (window.app && window.app.init) {
+                window.app.init();
+            }
+        });
+
+        // Fallback if scripts load after DOM
+        window.addEventListener('load', function () {
+            if (window.app && window.app.init && !window.app.initialized) {
+                window.app.init();
+            }
+        });
+    </script>
+</body>
+
+</html>

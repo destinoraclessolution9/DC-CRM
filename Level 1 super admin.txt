@@ -1,0 +1,60 @@
+Level 1 super admin
+Tab Can view -> All Tab
+Calendar | Potential Pipeline Management| Protection Monitoring | Consultant | Prospect/ Customer |  Referral relationship management | Success case library | Document Management | Bulk Import |Monthly Promotion | Marketing List | Ranking Performance Overview | Reporting KPI | Consultant Attrition Risk Analysis | AI Insights |  Security | Integrations | Setting - Account
+
+Level 2 Marketing Manager
+Calendar | Potential Pipeline Management| Protection Monitoring | Consultant | Prospect/ Customer |  Referral relationship management | Success case library | Document Management | Bulk Import |Monthly Promotion | Marketing List | Ranking Performance Overview | Reporting KPI | Consultant Attrition Risk Analysis | AI Insights |  Security | Integrations | Setting - Account
+
+Level 3 Marketing Admin
+Calendar | Protection Monitoring | Prospect/ Customer |  Referral relationship management | Success case library | Document Management | Bulk Import |Monthly Promotion | Marketing List | Setting - Account
+
+Level 4 Teacher
+Calendar | Potential Pipeline Management| Protection Monitoring | Consultant | Prospect/ Customer |  Referral relationship management | Success case library | Document Management | Monthly Promotion | Ranking Performance Overview | Reporting KPI | Setting - Account
+
+Level 5 Managers
+Calendar | Potential Pipeline Management| Protection Monitoring | Consultant | Prospect/ Customer |  Referral relationship management | Success case library | Document Management |Monthly Promotion | Ranking Performance Overview | Reporting KPI | Setting - Account
+
+Level 6 Senior Team Leader
+Calendar | Potential Pipeline Management| Protection Monitoring | Prospect/ Customer |  Referral relationship management | Success case library | Document Management |Monthly Promotion | Ranking Performance Overview | Reporting KPI | Setting - Account
+
+
+Level 7 Team Leader
+Calendar | Potential Pipeline Management | Prospect/ Customer |  Referral relationship management | Success case library | Document Management |Monthly Promotion  | Ranking Performance Overview | Reporting KPI | Setting - Account
+
+
+Level 8 Senior Consultant
+Calendar | Potential Pipeline Management | Prospect/ Customer |  Referral relationship management | Success case library | Document Management |Monthly Promotion  | Ranking Performance Overview | Reporting KPI | Setting - Account
+
+Level 9 Consultant
+Calendar | Potential Pipeline Management | Prospect/ Customer |  Referral relationship management | Success case library | Document Management |Monthly Promotion  | Ranking Performance Overview | Reporting KPI | Setting - Account
+
+Level 10 Junior Consultant
+Calendar | Potential Pipeline Management | Prospect/ Customer |  Referral relationship management | Success case library | Document Management |Monthly Promotion  | Ranking Performance Overview | Reporting KPI | Setting - Account
+
+Level 11 Senior Agent
+Calendar | Potential Pipeline Management | Prospect/ Customer |  Referral relationship management | Success case library | Document Management |Monthly Promotion  | Setting - Account
+
+Level 12 Agent
+Calendar | Prospect/ Customer |  Referral relationship management | Success case library | Document Management |Monthly Promotion  | Setting - Account
+
+Level 13 Junior Agent
+Calendar | Prospect/ Customer |  Referral relationship management | Success case library |Monthly Promotion  | Setting - Account
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

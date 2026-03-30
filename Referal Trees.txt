@@ -1,0 +1,1474 @@
+I am building a CRM system in phases. Currently trying to enhance the referral relationship management. The Requirements Document: Referral Tree & Genealogy Page (Feng Shui CRM) – Vertical Layout
+This document defines the complete requirements for the Referral Tree & Genealogy Page within the Referral Relationship Management module of the Feng Shui CRM. The page is designed with a vertical layout (summary and leaderboard above the tree) to ensure usability on mobile devices, while remaining clear on desktop.
+
+IMPORTANT RULES:
+1. BUILD UPON my existing code - do NOT recreate previous phases
+2. PRESERVE ALL existing functionality - all previous phases must still work
+3. ONLY ADD new code for this phase
+
+1. Business Context
+The CRM supports a Feng Shui consultancy. Key entities:
+
+Prospects: Potential clients created via CPS activities or manual entry.
+
+Customers: Converted from prospects after a purchase (or manually).
+
+Referrals: Links between a referrer (customer) and a referred prospect.
+Note: Only customers can be referrers in the current schema. However, the requirement that “referral is for PROSPECT only” implies prospects may also refer. For this version, we will extend the data model to allow prospects as referrers (adding referrer_prospect_id and referrer_type). The tree and summary will treat both customers and prospects as referrers.
+
+The referral tree shows the downline of any selected person (prospect or customer). The root can be the logged‑in user (for lower roles) or any member the user is authorised to view (for higher roles).
+
+2. User Roles & Access
+All 13 roles have access to the Referral Relationship Management tab, but visibility is controlled:
+
+Role Level	Role Name	Referral Tree Access
+1	Super Admin	Full (any tree)
+2	Marketing Manager	Within marketing scope
+3	Marketing Admin	Within assigned scope
+4	Teacher	Own downline + trainees
+5	Manager	Direct reports
+6	Senior Team Leader	Team members
+7	Team Leader	Sub‑team
+8–13	Senior Consultant … Junior Agent	Own downline only
+For roles 8–13, the tree root is always the logged‑in user. Higher roles can search for and view any authorised member.
+
+3. Page Layout (Vertical)
+The page is structured as a single vertical column for optimal mobile viewing:
+
+text
+┌───────────────────────────────────────┐
+│  Header: Title, Search, Refresh       │
+├───────────────────────────────────────┤
+│  Referral Performance Summary (last 6 months) │
+│  + Top 3 Referrers list               │
+├───────────────────────────────────────┤
+│  Leaderboard (optional toggle)        │
+│  - Period selector                    │
+│  - List of top referrers              │
+├───────────────────────────────────────┤
+│  Interactive Tree View                │
+│  - Zoom controls                      │
+│  - Search results area                │
+└───────────────────────────────────────┘
+Header contains page title, a search bar (by name/phone/email), and a refresh button.
+
+Summary section displays the four metrics (Total Prospects Who Referred, Total Referrals Made, Referrals Converted to Customers, Conversion Rate) and the Top 3 Referrers.
+
+Leaderboard is initially visible but can be collapsed/expanded via a toggle (especially useful on mobile).
+
+Tree View takes the remaining vertical space, with zoom and pan controls.
+
+On desktop, the layout remains vertical but the summary and leaderboard can be arranged side‑by‑side if desired (responsive design can use flex wrap). However, the primary structure is top‑down.
+
+4. Node Information & Colour Coding
+4.1 Node Content
+Each node displays:
+
+Name (truncated if long)
+
+Icon: 👤 Prospect, 🧑‍💼 Customer
+
+Badges:
+
+🔥 if the person is a recent referrer (referred someone in last 3 months) – for prospects only
+
+💰 if purchased within the last 3 months – for customers only
+
+⚠️ if inactive (colour only for prospects; customers have badge instead)
+
+Memo button (💬) – opens modal.
+
+4.2 Colour Coding
+For Prospects:
+Colour	Condition
+🟢 Green	Referred at least one person in the last 3 months (active referrer)
+🔵 Blue	Last activity within 1 month (recently engaged)
+🟠 Orange	Last activity between 1–3 months ago
+🟡 Yellow	Last activity between 3–6 months ago
+⚫ Gray	No activity in the last 6 months (inactive)
+Priority for prospects: Green > Blue > Orange > Yellow > Gray.
+Green overrides all others, because referral activity is considered the highest engagement.
+
+For Customers:
+Customers do not have a coloured background. Instead, they have a separate badge indicating purchase recency:
+
+Badge	Purchase Recency
+🟢 Green badge	Purchased within the last 3 months
+🔵 Blue badge	Purchased within 3–6 months
+🟠 Orange badge	Purchased within 6–12 months
+🟣 Purple badge	Purchased within 12–24 months
+⚫ Gray badge	No purchase in last 24 months (inactive)
+The badge is displayed beside the customer’s name (e.g., 💰 🟢). The node background remains neutral.
+
+5. Referral Performance Summary (Last 6 Months)
+The summary section appears above the tree and includes:
+
+5.1 Performance Metrics
+Metric	Calculation
+Total Prospects Who Referred	Count of distinct prospects (or customers) who have referred at least one person in the last 6 months (based on referrals created in that period).
+Total Referrals Made	Count of all referrals created in the last 6 months.
+Referrals Converted to Customers	Count of referrals where the referred_prospect_id has a corresponding customer record, and either the conversion date is within the last 6 months or the referral was made within the last 6 months and the prospect has been converted at any time.
+Conversion Rate	(Referrals Converted / Total Referrals) * 100 (rounded to one decimal).
+5.2 Top Referrers (Last 6 Months)
+Below the metrics, the three referrers (prospects or customers) with the highest referral count in the last 6 months are listed:
+
+Rank	Name	Referrals Made
+1	John Tan	5
+2	Mary Wong	4
+3	David Lee	3
+Clicking on a name filters the tree to highlight that referrer’s node and all their direct referrals.
+
+Hovering shows a tooltip with total referrals and the date of the most recent referral.
+
+6. Leaderboard (Collapsible)
+The leaderboard is placed below the summary. It shows the top referrers (customers and prospects) for a selected period (All time / Year / 6 months / Month).
+
+Users can hide/unhide specific referrers (saved per user in localStorage).
+
+A toggle button (e.g., “Show/Hide Leaderboard”) allows collapsing this section on mobile to save screen space.
+
+7. Interactive Tree View
+The tree occupies the main content area after the summary and leaderboard.
+
+7.1 Features
+Search bar (in the header) to find a person by name, phone, or email. Selecting a result centres the tree on that person.
+
+Zoom controls (+, –, reset) positioned near the top‑right of the tree container.
+
+Drag‑to‑pan and scroll to zoom.
+
+Tree drawn using D3.js (hierarchical layout).
+
+Double‑click on a node expands/collapses its children.
+
+Hover shows a tooltip with summary info (name, type, total referrals, last activity/purchase).
+
+Click on a node opens the detailed profile of that prospect or customer.
+
+Memo button (💬) on each node opens a modal with the latest note and a “View Full Profile” button.
+
+8. Interactivity & Actions
+8.1 Quick Activity – Add Referral
+The existing Quick Add Activity button will include a “Add Referral” option. This opens a form:
+
+Referrer (search customers and prospects)
+
+Referred Person (search prospects or create new)
+
+Relationship (dropdown)
+
+Referral Source (CPS, Event, etc.)
+
+Date (default today)
+
+On submit, a new record is added to the referrals table, and the tree, summary, and leaderboard are refreshed.
+
+8.2 Memo Button
+Clicking the memo button on a node opens a modal:
+
+Shows the latest note (if any) from the notes table for that entity (prospect or customer).
+
+A button “View Full Profile” calls showProspectDetail(id) or showCustomerDetail(id).
+
+8.3 Node Click
+Clicking anywhere else on a node opens the full profile (same as “View Full Profile”).
+
+8.4 Double‑click
+Expands/collapses the node’s children.
+
+9. Integration with Existing Data & Functions
+The tree and summary must use DataStore tables:
+
+prospects
+
+customers
+
+referrals
+
+purchases
+
+activities
+
+notes
+
+9.1 Data Model Extension
+To allow prospects as referrers, the referrals table will be extended with:
+
+referrer_id (integer)
+
+referrer_type (string: 'prospect' or 'customer')
+
+referred_prospect_id (integer, as before)
+
+The existing referrer_customer_id can be deprecated or mapped.
+
+9.2 Referral Tree Building
+A function buildReferralTree(rootId, rootType):
+
+Retrieves the person from the appropriate table.
+
+Queries referrals where referrer_id = rootId and referrer_type = rootType.
+
+For each referral, fetches the referred prospect (from prospects), then recursively builds children (if that referred prospect has become a customer, it may be the referrer for others; we need to treat customers as referrers as well). The recursion continues.
+
+9.3 Colour Calculation Helpers
+getProspectColour(prospect):
+
+Check referrals where this prospect is the referrer (referrer_id = prospect.id, referrer_type = 'prospect') and the referral date is within 3 months → green.
+
+Else, get latest activity date from activities → assign blue/orange/yellow/gray.
+
+getCustomerBadge(customer):
+
+Get latest purchase date from purchases → assign green/blue/orange/purple/gray badge.
+
+9.4 Summary Calculation
+Query referrals where created_at >= (today - 6 months).
+
+Count distinct referrers (using referrer_id and referrer_type) → “Total Prospects Who Referred” (this includes both prospects and customers, but we count them as “referrers”).
+
+Count total referrals.
+
+For each referral, check if the referred prospect has a customer record → count conversions.
+
+Compute conversion rate.
+
+9.5 Top Referrers
+Aggregate referrals by referrer_id, referrer_type for the last 6 months.
+
+Sort by count descending, take first 3.
+
+For each, retrieve the name from the respective table (prospects or customers).
+
+10. UI/UX Specifications
+10.1 Desktop Layout
+The page uses a single column with a maximum width (e.g., 1400px) centered.
+
+Summary and leaderboard are stacked vertically.
+
+The tree container has a fixed minimum height (e.g., 500px) and can expand.
+
+Zoom controls are placed as a floating toolbar inside the tree container.
+
+10.2 Mobile Layout
+On screens < 768px:
+
+The leaderboard is collapsed by default; a “Show Leaderboard” button expands it.
+
+Summary cards are stacked vertically.
+
+Tree container takes full width and has a height that adjusts based on content (minimum 400px).
+
+Zoom controls are smaller and positioned at the bottom‑right of the tree area.
+
+10.3 Responsive Behaviour
+The search bar in the header remains at the top.
+
+The page uses flex and grid for flexible stacking.
+
+Touch events are supported for drag and double‑tap.
+
+11. API / Data Methods
+The following DataStore methods are used:
+
+DataStore.getAll('customers')
+
+DataStore.getAll('prospects')
+
+DataStore.getAll('referrals') (with extended fields)
+
+DataStore.getAll('purchases')
+
+DataStore.getAll('activities')
+
+DataStore.getAll('notes')
+
+All data manipulation is client‑side. For large trees, we implement lazy loading (expand node fetches children on demand).
+
+12. Acceptance Criteria
+Vertical layout – summary and leaderboard are above the tree; works on mobile and desktop.
+
+Tree generation – correctly shows downline for any authorised person.
+
+Colour coding – prospects follow the defined colour scheme; customers have purchase badges.
+
+Summary table – displays correct numbers for last 6 months.
+
+Top referrers – lists the three referrers with highest referral counts, with interactive highlighting.
+
+Leaderboard – shows top referrers with period filter and hide/unhide; collapsible on mobile.
+
+Search – finds persons and centres tree.
+
+Double‑click – expands/collapses node children.
+
+Click on node – opens profile modal.
+
+Memo button – opens modal with latest note and link to full profile.
+
+Quick Activity – Add Referral – creates a new referral and refreshes view.
+
+Role‑based access – lower roles see only own downline; higher roles can view any authorised tree.
+
+Performance – initial render within 2 seconds for up to 1000 nodes; zoom/pan smooth.
+
+13. Implementation Notes
+Reuse existing functions: showReferralTree, buildTreeData, renderD3Tree.
+
+Modify buildTreeData to use the new referrals structure and to compute colour/badges.
+
+Add new functions:
+
+getProspectColour(prospect)
+
+getCustomerBadge(customer)
+
+computeReferralSummary()
+
+getTopReferrers(limit=3)
+
+Extend the referrals table (in localStorage) to support referrer_id, referrer_type, and optionally referrer_customer_id for backward compatibility.
+
+Modify openActivityModal to include a “Referral” activity type, which calls a new createReferral function.
+
+Use CSS media queries to collapse leaderboard on mobile and adjust tree height.
+
+14. Sample Data & Testing
+Prospect A (referred B 2 months ago, no other activity) → Green.
+
+Prospect B (last activity 45 days ago, no referrals) → Blue.
+
+Customer C (purchased 8 months ago) → 🟠 badge.
+
+Customer D (purchased 2 months ago, referred E 1 month ago) → 🟢 badge.
+
+Summary for last 6 months should reflect actual counts (e.g., Prospect A counted in “Total Prospects Who Referred”).
+
+Top referrers list should show the three highest referrers (prospects or customers) with counts.
+
+15. Dependencies & Assumptions
+D3.js library is included.
+
+DataStore is mutable; we will use array operations for speed.
+
+The referrals table will be extended to support prospect referrers.
+
+The conversion logic for “Referrals Converted to Customers” uses the existence of a customer record for the referred prospect (any time) as long as the referral was made within the last 6 months.
+
+This document provides the complete specification for the Referral Tree & Genealogy Page with a vertical layout optimised for mobile, including all requested features: colour coding, summary table, top referrers, and integration with the profile system.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+We are going to enhance the existing Referral Relationship Management page with a vertical layout, colour‑coded nodes, a summary table, top referrers list, and the ability to add referrals directly from the Quick Activity modal. All existing functionality will remain intact, and we will only add new code.
+
+Step 1 – Extend the referrals data structure
+Add a migration to convert existing referrals (if any) to the new format with referrer_id and referrer_type. We will add a helper function ensureReferralFields that runs once when the app starts. This will also be used when creating new referrals.
+
+Add this inside the appLogic (near other DataStore helpers):
+
+javascript
+// Ensure referrals have the new fields (id, referrer_id, referrer_type, referred_prospect_id)
+const ensureReferralFields = () => {
+    const referrals = DataStore.getAll('referrals');
+    let changed = false;
+    referrals.forEach(r => {
+        if (r.referrer_customer_id && !r.referrer_id) {
+            // Old format: convert
+            r.referrer_id = r.referrer_customer_id;
+            r.referrer_type = 'customer';
+            delete r.referrer_customer_id; // optional, but we keep for backward compat
+            changed = true;
+        }
+        if (!r.referrer_id) {
+            // Should not happen, but just in case
+            r.referrer_id = null;
+            r.referrer_type = null;
+        }
+        if (!r.created_at) r.created_at = r.date || new Date().toISOString();
+    });
+    if (changed) {
+        // Persist changes
+        safeLocalStorage.set('fs_crm_referrals', referrals);
+    }
+};
+Call this inside init() after the demo data is loaded (if any).
+
+Step 2 – Update showReferralsView with the new vertical layout
+We'll replace the existing showReferralsView function. It will now generate the HTML for the vertical layout, attach event listeners, and initialise the tree.
+
+javascript
+const showReferralsView = (container) => {
+    // Render the new vertical layout
+    container.innerHTML = `
+        <div class="referrals-vertical-view">
+            <div class="referrals-header">
+                <h1>Referral Relationship Management</h1>
+                <div class="header-actions">
+                    <div class="search-group">
+                        <i class="fas fa-search"></i>
+                        <input type="text" id="referral-search-input" placeholder="Search by name, phone, email...">
+                        <div id="referral-search-results" class="search-results-dropdown" style="display:none;"></div>
+                    </div>
+                    <button class="btn primary" id="add-referral-btn"><i class="fas fa-user-plus"></i> Add Referral</button>
+                    <button class="btn secondary" id="refresh-referral-tree"><i class="fas fa-sync-alt"></i> Refresh</button>
+                </div>
+            </div>
+
+            <!-- Summary Section -->
+            <div class="referral-summary" id="referral-summary">
+                <!-- Filled by renderSummary() -->
+            </div>
+
+            <!-- Leaderboard (collapsible) -->
+            <div class="referral-leaderboard" id="referral-leaderboard">
+                <div class="leaderboard-header">
+                    <h3>Top Referrers</h3>
+                    <button class="btn-icon" id="toggle-leaderboard" title="Collapse/Expand"><i class="fas fa-chevron-up"></i></button>
+                </div>
+                <div class="leaderboard-content">
+                    <div class="leaderboard-controls">
+                        <select id="leaderboard-period" class="form-control">
+                            <option value="all">All Time</option>
+                            <option value="year">This Year</option>
+                            <option value="6months" selected>Last 6 Months</option>
+                            <option value="month">This Month</option>
+                        </select>
+                        <div class="toggle-switch">
+                            <input type="checkbox" id="show-hidden-toggle"> Show Hidden
+                        </div>
+                    </div>
+                    <div id="leaderboard-list" class="leaderboard-list"></div>
+                </div>
+            </div>
+
+            <!-- Tree View -->
+            <div class="referral-tree-container">
+                <div class="tree-toolbar">
+                    <div class="zoom-controls">
+                        <button class="control-btn" id="tree-zoom-in"><i class="fas fa-plus"></i></button>
+                        <button class="control-btn" id="tree-zoom-out"><i class="fas fa-minus"></i></button>
+                        <button class="control-btn" id="tree-reset"><i class="fas fa-compress-arrows-alt"></i></button>
+                    </div>
+                </div>
+                <div id="referral-tree-placeholder" class="tree-placeholder">
+                    <i class="fas fa-network-wired"></i>
+                    <p>Select a person from the leaderboard or search to view their referral tree</p>
+                </div>
+                <svg id="referral-tree-svg" style="width: 100%; height: 100%; display: none;"></svg>
+            </div>
+        </div>
+    `;
+
+    // Attach event handlers
+    document.getElementById('add-referral-btn').onclick = () => openAddReferralModal();
+    document.getElementById('refresh-referral-tree').onclick = () => {
+        if (_currentSelectedPerson) showReferralTree(_currentSelectedPerson.id, _currentSelectedPerson.type);
+        else renderReferralSummaryAndLeaderboard();
+    };
+    document.getElementById('toggle-leaderboard').onclick = () => toggleLeaderboard();
+    document.getElementById('leaderboard-period').onchange = () => renderLeaderboard();
+    document.getElementById('show-hidden-toggle').onchange = () => renderLeaderboard();
+    document.getElementById('referral-search-input').oninput = debounce(searchReferralPersons, 300);
+    document.getElementById('tree-zoom-in').onclick = () => treeZoomIn();
+    document.getElementById('tree-zoom-out').onclick = () => treeZoomOut();
+    document.getElementById('tree-reset').onclick = () => treeResetZoom();
+
+    // Initial data load
+    renderReferralSummaryAndLeaderboard();
+    _treeZoom = null;
+    _treeSvg = null;
+    _currentSelectedPerson = null;
+};
+Add these helper variables at the top of appLogic:
+
+javascript
+let _currentSelectedPerson = null; // { id, type }
+let _treeZoom = null;
+let _treeSvg = null;
+Also add a debounce utility (if not already present) near other helpers:
+
+javascript
+const debounce = (fn, delay) => {
+    let timer;
+    return (...args) => {
+        clearTimeout(timer);
+        timer = setTimeout(() => fn(...args), delay);
+    };
+};
+Step 3 – Implement summary and leaderboard rendering
+We'll write renderReferralSummaryAndLeaderboard and renderLeaderboard using the new data structures.
+
+javascript
+const renderReferralSummaryAndLeaderboard = () => {
+    renderSummary();
+    renderLeaderboard();
+};
+
+const renderSummary = () => {
+    const summaryDiv = document.getElementById('referral-summary');
+    if (!summaryDiv) return;
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+    const referrals = DataStore.getAll('referrals').filter(r => new Date(r.created_at) >= sixMonthsAgo);
+
+    // Distinct referrers
+    const referrersMap = new Map();
+    referrals.forEach(r => {
+        const key = `${r.referrer_type}:${r.referrer_id}`;
+        if (!referrersMap.has(key)) {
+            referrersMap.set(key, { type: r.referrer_type, id: r.referrer_id, count: 0 });
+        }
+        referrersMap.get(key).count++;
+    });
+    const totalReferrers = referrersMap.size;
+
+    // Total referrals
+    const totalReferrals = referrals.length;
+
+    // Converted referrals
+    const converted = referrals.filter(r => {
+        const prospect = DataStore.getById('prospects', r.referred_prospect_id);
+        return prospect && prospect.status === 'converted';
+    }).length;
+
+    const conversionRate = totalReferrals ? ((converted / totalReferrals) * 100).toFixed(1) : 0;
+
+    // Top 3 referrers (by count)
+    const topReferrers = Array.from(referrersMap.values())
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 3)
+        .map(entry => {
+            let name = '';
+            if (entry.type === 'customer') {
+                const c = DataStore.getById('customers', entry.id);
+                name = c ? c.full_name : `Customer ${entry.id}`;
+            } else {
+                const p = DataStore.getById('prospects', entry.id);
+                name = p ? p.full_name : `Prospect ${entry.id}`;
+            }
+            return { ...entry, name };
+        });
+
+    summaryDiv.innerHTML = `
+        <div class="summary-cards">
+            <div class="summary-card">
+                <div class="card-title">Total Prospects Who Referred</div>
+                <div class="card-value">${totalReferrers}</div>
+            </div>
+            <div class="summary-card">
+                <div class="card-title">Total Referrals Made</div>
+                <div class="card-value">${totalReferrals}</div>
+            </div>
+            <div class="summary-card">
+                <div class="card-title">Referrals Converted to Customers</div>
+                <div class="card-value">${converted}</div>
+            </div>
+            <div class="summary-card">
+                <div class="card-title">Conversion Rate</div>
+                <div class="card-value">${conversionRate}%</div>
+            </div>
+        </div>
+        <div class="top-referrers">
+            <h4>🏆 Top Referrers (Last 6 Months)</h4>
+            <div class="top-referrers-list">
+                ${topReferrers.map((t, idx) => `
+                    <div class="top-referrer-item" data-id="${t.id}" data-type="${t.type}">
+                        <span class="rank">${idx+1}</span>
+                        <span class="name">${escapeHtml(t.name)}</span>
+                        <span class="count">${t.count} referral${t.count !== 1 ? 's' : ''}</span>
+                    </div>
+                `).join('')}
+                ${topReferrers.length === 0 ? '<div class="no-data">No referrals in last 6 months</div>' : ''}
+            </div>
+        </div>
+    `;
+
+    // Attach click handlers for top referrers
+    document.querySelectorAll('.top-referrer-item').forEach(el => {
+        el.onclick = () => {
+            const id = parseInt(el.dataset.id);
+            const type = el.dataset.type;
+            showReferralTree(id, type);
+        };
+    });
+};
+
+const renderLeaderboard = () => {
+    const container = document.getElementById('leaderboard-list');
+    if (!container) return;
+
+    const period = document.getElementById('leaderboard-period')?.value || '6months';
+    const showHidden = document.getElementById('show-hidden-toggle')?.checked || false;
+    const userId = _currentUser?.id || 'guest';
+    const hiddenKey = `hidden_referrers_${userId}`;
+    let hidden = safeLocalStorage.getJSON(hiddenKey, []);
+
+    // Filter referrals by period
+    const now = new Date();
+    let cutoff = null;
+    if (period === 'year') cutoff = new Date(now.getFullYear(), 0, 1);
+    else if (period === '6months') { cutoff = new Date(); cutoff.setMonth(now.getMonth() - 6); }
+    else if (period === 'month') cutoff = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    let referrals = DataStore.getAll('referrals');
+    if (cutoff) referrals = referrals.filter(r => new Date(r.created_at) >= cutoff);
+
+    // Group by referrer
+    const referrerMap = new Map();
+    referrals.forEach(r => {
+        const key = `${r.referrer_type}:${r.referrer_id}`;
+        if (!referrerMap.has(key)) {
+            referrerMap.set(key, { type: r.referrer_type, id: r.referrer_id, count: 0, lastDate: r.created_at });
+        }
+        const entry = referrerMap.get(key);
+        entry.count++;
+        if (new Date(r.created_at) > new Date(entry.lastDate)) entry.lastDate = r.created_at;
+    });
+
+    const sorted = Array.from(referrerMap.values()).sort((a, b) => b.count - a.count);
+    const top10 = sorted.slice(0, 10);
+
+    let html = '';
+    top10.forEach((item, idx) => {
+        const isHidden = hidden.some(h => h.id === item.id && h.type === item.type);
+        if (isHidden && !showHidden) return;
+
+        let name = '';
+        if (item.type === 'customer') {
+            const c = DataStore.getById('customers', item.id);
+            name = c ? c.full_name : `Customer ${item.id}`;
+        } else {
+            const p = DataStore.getById('prospects', item.id);
+            name = p ? p.full_name : `Prospect ${item.id}`;
+        }
+
+        html += `
+            <div class="leaderboard-item rank-${idx+1} ${isHidden ? 'hidden-item' : ''}">
+                <div class="rank-badge">${idx+1}</div>
+                <div class="referrer-info" data-id="${item.id}" data-type="${item.type}">
+                    <div class="referrer-name">${escapeHtml(name)}</div>
+                    <div class="referrer-stats">${item.count} referrals | Last: ${item.lastDate.substring(0,10)}</div>
+                </div>
+                <div class="hide-btn" data-id="${item.id}" data-type="${item.type}">
+                    <i class="far ${isHidden ? 'fa-eye' : 'fa-eye-slash'}"></i>
+                </div>
+            </div>
+        `;
+    });
+
+    if (html === '') html = '<div class="no-data">No referrers found</div>';
+    container.innerHTML = html;
+
+    // Attach click handlers for referrer info (to show tree)
+    container.querySelectorAll('.referrer-info').forEach(el => {
+        el.onclick = () => {
+            const id = parseInt(el.dataset.id);
+            const type = el.dataset.type;
+            showReferralTree(id, type);
+        };
+    });
+    // Attach hide/unhide handlers
+    container.querySelectorAll('.hide-btn').forEach(btn => {
+        btn.onclick = (e) => {
+            e.stopPropagation();
+            const id = parseInt(btn.dataset.id);
+            const type = btn.dataset.type;
+            toggleHideReferrer(id, type);
+        };
+    });
+};
+Add the new toggleHideReferrer and resetHiddenReferrers that work with the new structure:
+
+javascript
+const toggleHideReferrer = (id, type) => {
+    const userId = _currentUser?.id || 'guest';
+    const hiddenKey = `hidden_referrers_${userId}`;
+    let hidden = safeLocalStorage.getJSON(hiddenKey, []);
+    const existingIndex = hidden.findIndex(h => h.id === id && h.type === type);
+    if (existingIndex !== -1) {
+        hidden.splice(existingIndex, 1);
+    } else {
+        hidden.push({ id, type });
+    }
+    safeLocalStorage.set(hiddenKey, hidden);
+    renderLeaderboard();
+    UI.toast.info('Hidden preferences updated.');
+};
+const resetHiddenReferrers = () => {
+    const userId = _currentUser?.id || 'guest';
+    safeLocalStorage.remove(`hidden_referrers_${userId}`);
+    renderLeaderboard();
+    UI.toast.success('Hidden referrers reset.');
+};
+Step 4 – Implement the referral tree building and rendering with colour coding
+We'll rewrite buildTreeData to use the new referral structure and compute colours/badges.
+
+javascript
+const buildTreeData = (rootId, rootType) => {
+    // Root person data
+    let rootPerson = null;
+    if (rootType === 'customer') rootPerson = DataStore.getById('customers', rootId);
+    else rootPerson = DataStore.getById('prospects', rootId);
+    if (!rootPerson) return null;
+
+    const node = {
+        id: rootPerson.id,
+        name: rootPerson.full_name,
+        type: rootType,
+        // Additional metadata for rendering
+        colour: null,
+        badge: null,
+        isRecentReferrer: false,
+        latestNote: null
+    };
+
+    // For prospect: determine colour
+    if (rootType === 'prospect') {
+        node.colour = getProspectColour(rootPerson);
+    } else {
+        node.badge = getCustomerBadge(rootPerson);
+    }
+
+    // Get referrals made by this person
+    const referrals = DataStore.getAll('referrals').filter(r =>
+        r.referrer_id === rootId && r.referrer_type === rootType
+    );
+    node.children = [];
+    for (const ref of referrals) {
+        const childProspect = DataStore.getById('prospects', ref.referred_prospect_id);
+        if (!childProspect) continue;
+        // Recursively build child (if the referred prospect has become a customer, it can be a referrer)
+        let childType = 'prospect';
+        const childCustomer = DataStore.getAll('customers').find(c => c.converted_from_prospect_id === childProspect.id);
+        if (childCustomer) childType = 'customer';
+        const childNode = buildTreeData(childProspect.id, childType);
+        if (childNode) {
+            // Add referral details
+            childNode.referralSource = ref.referral_source;
+            childNode.referralDate = ref.created_at;
+            node.children.push(childNode);
+        }
+    }
+
+    // Also, if root is a customer, we might want to show that they were referred by someone (parent). Not needed for tree.
+
+    return node;
+};
+Now, colour helper functions:
+
+javascript
+const getProspectColour = (prospect) => {
+    // Check if prospect referred someone in last 3 months
+    const threeMonthsAgo = new Date();
+    threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+    const referrals = DataStore.getAll('referrals').filter(r =>
+        r.referrer_id === prospect.id && r.referrer_type === 'prospect' &&
+        new Date(r.created_at) >= threeMonthsAgo
+    );
+    if (referrals.length > 0) return 'green'; // 🔥
+
+    // Else get last activity
+    const activities = DataStore.getAll('activities').filter(a => a.prospect_id === prospect.id);
+    if (activities.length === 0) return 'gray';
+    const lastActivity = activities.sort((a,b) => new Date(b.activity_date) - new Date(a.activity_date))[0];
+    const daysSince = Math.floor((Date.now() - new Date(lastActivity.activity_date)) / (1000*60*60*24));
+    if (daysSince <= 30) return 'blue';
+    if (daysSince <= 90) return 'orange';
+    if (daysSince <= 180) return 'yellow';
+    return 'gray';
+};
+
+const getCustomerBadge = (customer) => {
+    const purchases = DataStore.getAll('purchases').filter(p => p.customer_id === customer.id);
+    if (purchases.length === 0) return 'gray';
+    const lastPurchase = purchases.sort((a,b) => new Date(b.date) - new Date(a.date))[0];
+    const daysSince = Math.floor((Date.now() - new Date(lastPurchase.date)) / (1000*60*60*24));
+    if (daysSince <= 90) return 'green';
+    if (daysSince <= 180) return 'blue';
+    if (daysSince <= 365) return 'orange';
+    if (daysSince <= 730) return 'purple';
+    return 'gray';
+};
+Now, update renderD3Tree to render the node content with colour, badges, and memo button.
+
+We'll modify the existing D3 rendering inside showReferralTree (which currently uses the old renderD3Tree). We'll keep the same function name but enhance it.
+
+First, we need to pass the node data with the computed colours. We'll call buildTreeData and then render. We'll also add a new function renderD3Tree that uses the updated node data.
+
+We'll keep the old renderD3Tree and replace it with a new version. However, we must ensure it works with the existing zoom code. We'll define renderD3Tree as:
+
+javascript
+const renderD3Tree = (data) => {
+    const container = document.getElementById('referral-tree-container');
+    const svg = d3.select("#referral-tree-svg");
+    svg.selectAll("*").remove();
+
+    const width = container.clientWidth;
+    const height = container.clientHeight;
+
+    // Set up zoom behaviour
+    _treeZoom = d3.zoom().on("zoom", (e) => {
+        g.attr("transform", e.transform);
+    });
+    svg.call(_treeZoom);
+
+    const g = svg.append("g");
+
+    // Create tree layout
+    const tree = d3.tree().size([height - 100, width - 200]);
+    const root = d3.hierarchy(data);
+    tree(root);
+
+    // Links
+    g.selectAll(".link")
+        .data(root.links())
+        .enter()
+        .append("path")
+        .attr("class", "link")
+        .attr("d", d3.linkHorizontal().x(d => d.y + 100).y(d => d.x + 50))
+        .attr("stroke", "#aaa")
+        .attr("fill", "none")
+        .attr("stroke-width", 1.5);
+
+    // Nodes group
+    const nodes = g.selectAll(".node")
+        .data(root.descendants())
+        .enter()
+        .append("g")
+        .attr("class", "node")
+        .attr("transform", d => `translate(${d.y + 100},${d.x + 50})`)
+        .on("click", (e, d) => {
+            app.showReferralTree(d.data.id, d.data.type);
+        });
+
+    // Draw node background (coloured for prospects)
+    nodes.append("rect")
+        .attr("width", 120)
+        .attr("height", 50)
+        .attr("rx", 6)
+        .attr("ry", 6)
+        .attr("fill", d => {
+            if (d.data.type === 'prospect') {
+                const colour = d.data.colour;
+                switch(colour) {
+                    case 'green': return '#22c55e';
+                    case 'blue': return '#3b82f6';
+                    case 'orange': return '#f97316';
+                    case 'yellow': return '#eab308';
+                    default: return '#9ca3af';
+                }
+            } else {
+                return '#ffffff';
+            }
+        })
+        .attr("stroke", "#e2e8f0")
+        .attr("stroke-width", 1);
+
+    // Node text
+    nodes.append("text")
+        .attr("dy", "1.2em")
+        .attr("x", 10)
+        .attr("font-size", "12px")
+        .attr("fill", d => d.data.type === 'prospect' ? '#1f2937' : '#111827')
+        .text(d => d.data.name.length > 18 ? d.data.name.substring(0,15)+'...' : d.data.name);
+
+    // Icon (prospect or customer)
+    nodes.append("text")
+        .attr("x", 100)
+        .attr("y", 15)
+        .attr("font-size", "16px")
+        .attr("fill", "#4b5563")
+        .text(d => d.data.type === 'customer' ? '🧑‍💼' : '👤');
+
+    // Badge for customers (purchase recency)
+    if (d.data.type === 'customer' && d.data.badge) {
+        nodes.filter(d => d.data.type === 'customer')
+            .append("text")
+            .attr("x", 85)
+            .attr("y", 35)
+            .attr("font-size", "12px")
+            .attr("fill", "#4b5563")
+            .text(d => {
+                switch(d.data.badge) {
+                    case 'green': return '💰🟢';
+                    case 'blue': return '💰🔵';
+                    case 'orange': return '💰🟠';
+                    case 'purple': return '💰🟣';
+                    default: return '💰⚫';
+                }
+            });
+    }
+
+    // Recent referrer badge for prospects (🔥)
+    if (d.data.isRecentReferrer) {
+        nodes.filter(d => d.data.type === 'prospect' && d.data.isRecentReferrer)
+            .append("text")
+            .attr("x", 70)
+            .attr("y", 15)
+            .attr("font-size", "14px")
+            .attr("fill", "#f97316")
+            .text("🔥");
+    }
+
+    // Memo button (simple text button with onclick)
+    nodes.append("text")
+        .attr("x", 110)
+        .attr("y", 40)
+        .attr("font-size", "14px")
+        .attr("cursor", "pointer")
+        .attr("fill", "#6b7280")
+        .text("💬")
+        .on("click", (e, d) => {
+            e.stopPropagation();
+            openMemoModal(d.data.id, d.data.type);
+        });
+
+    // Tooltip on hover
+    nodes.append("title")
+        .text(d => {
+            let info = `${d.data.name} (${d.data.type})\n`;
+            if (d.data.type === 'prospect') {
+                info += `Last activity: ${d.data.lastActivityDate || 'Unknown'}\n`;
+                if (d.data.isRecentReferrer) info += 'Active referrer 🔥';
+            } else {
+                info += `Last purchase: ${d.data.lastPurchaseDate || 'Unknown'}\n`;
+                if (d.data.badge) info += `Purchase badge: ${d.data.badge}`;
+            }
+            return info;
+        });
+
+    app.treeResetZoom();
+};
+We also need to update showReferralTree to call buildTreeData and then renderD3Tree with the new data.
+
+javascript
+const showReferralTree = (personId, personType) => {
+    _currentSelectedPerson = { id: personId, type: personType };
+    // Hide placeholder, show SVG
+    document.getElementById('referral-tree-placeholder').style.display = 'none';
+    document.getElementById('referral-tree-svg').style.display = 'block';
+
+    const treeData = buildTreeData(personId, personType);
+    if (!treeData) {
+        UI.toast.error('Could not build tree for this person');
+        return;
+    }
+    renderD3Tree(treeData);
+};
+Step 5 – Implement the Add Referral modal
+We'll create a new function openAddReferralModal that opens a modal with a form similar to the existing activity modal but for referrals.
+
+javascript
+const openAddReferralModal = () => {
+    const content = `
+        <div class="add-referral-modal">
+            <div class="form-group">
+                <label>Referrer</label>
+                <div class="search-with-results">
+                    <input type="text" id="referrer-search" class="form-control" placeholder="Search customer or prospect...">
+                    <div id="referrer-results" class="search-results-dropdown" style="display:none;"></div>
+                </div>
+                <div id="selected-referrer-info" class="selected-entity-info"></div>
+            </div>
+
+            <div class="form-group">
+                <label>Referred Person (Prospect)</label>
+                <div class="search-with-results">
+                    <input type="text" id="referred-search" class="form-control" placeholder="Search prospect or create new...">
+                    <div id="referred-results" class="search-results-dropdown" style="display:none;"></div>
+                </div>
+                <div id="selected-referred-info" class="selected-entity-info"></div>
+                <div style="margin-top:8px;">
+                    <button class="btn-sm secondary" id="create-new-prospect-btn">+ Create New Prospect</button>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>Relationship</label>
+                <select id="referral-relationship" class="form-control">
+                    <option value="Friend">Friend</option>
+                    <option value="Family">Family</option>
+                    <option value="Colleague">Colleague</option>
+                    <option value="Business Partner">Business Partner</option>
+                    <option value="Other">Other</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label>Referral Source</label>
+                <select id="referral-source" class="form-control">
+                    <option value="CPS">CPS</option>
+                    <option value="EVENT">Event</option>
+                    <option value="MANUAL">Manual</option>
+                    <option value="REFERRAL">Referral</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label>Date</label>
+                <input type="date" id="referral-date" class="form-control" value="${new Date().toISOString().split('T')[0]}">
+            </div>
+        </div>
+    `;
+
+    UI.showModal('Add Referral', content, [
+        { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+        { label: 'Add Referral', type: 'primary', action: 'app.submitReferral()' }
+    ]);
+
+    // Attach search handlers
+    const referrerSearch = document.getElementById('referrer-search');
+    const referredSearch = document.getElementById('referred-search');
+    referrerSearch.oninput = debounce(() => searchReferrersForModal(referrerSearch.value, 'referrer'), 300);
+    referredSearch.oninput = debounce(() => searchReferrersForModal(referredSearch.value, 'referred'), 300);
+    document.getElementById('create-new-prospect-btn').onclick = () => openCreateProspectForReferral();
+};
+
+const searchReferrersForModal = (term, type) => {
+    if (!term || term.length < 2) {
+        document.getElementById(`${type}-results`).style.display = 'none';
+        return;
+    }
+    const prospects = getVisibleProspects();
+    const customers = getVisibleCustomers();
+    const all = [
+        ...prospects.map(p => ({ id: p.id, name: p.full_name, type: 'prospect' })),
+        ...customers.map(c => ({ id: c.id, name: c.full_name, type: 'customer' }))
+    ];
+    const matches = all.filter(e => e.name.toLowerCase().includes(term.toLowerCase())).slice(0, 10);
+    const resultsDiv = document.getElementById(`${type}-results`);
+    resultsDiv.innerHTML = matches.map(m => `
+        <div class="search-result-item" onclick="app.selectReferrerForModal('${m.id}', '${m.type}', '${m.name.replace(/'/g, "\\'")}', '${type}')">
+            <strong>${escapeHtml(m.name)}</strong> (${m.type})
+        </div>
+    `).join('');
+    resultsDiv.style.display = 'block';
+};
+
+const selectReferrerForModal = (id, entityType, name, modalType) => {
+    const infoDiv = document.getElementById(`selected-${modalType}-info`);
+    infoDiv.innerHTML = `
+        <div class="selected-entity-badge">
+            <span>${entityType}: <strong>${escapeHtml(name)}</strong></span>
+            <button class="btn-icon" onclick="app.clearSelectedForModal('${modalType}')">&times;</button>
+        </div>
+    `;
+    window[`_selected${modalType.charAt(0).toUpperCase() + modalType.slice(1)}`] = { id: parseInt(id), type: entityType, name };
+    document.getElementById(`${modalType}-results`).style.display = 'none';
+    document.getElementById(`${modalType}-search`).value = '';
+};
+
+const clearSelectedForModal = (modalType) => {
+    window[`_selected${modalType.charAt(0).toUpperCase() + modalType.slice(1)}`] = null;
+    document.getElementById(`selected-${modalType}-info`).innerHTML = '';
+};
+
+const openCreateProspectForReferral = () => {
+    // Use the existing openProspectModal to create a new prospect
+    openProspectModal(null, 'prospect');
+    // After modal closes, we need to select the new prospect automatically.
+    // We'll listen for a custom event after prospect creation.
+    document.addEventListener('prospectCreated', (e) => {
+        const prospect = e.detail;
+        selectReferrerForModal(prospect.id, 'prospect', prospect.full_name, 'referred');
+    }, { once: true });
+};
+
+const submitReferral = () => {
+    const referrer = window._selectedReferrer;
+    const referred = window._selectedReferred;
+    if (!referrer || !referred) {
+        UI.toast.error('Please select both a referrer and a referred person');
+        return;
+    }
+    if (referrer.type === 'prospect') {
+        // Ensure the prospect is eligible to refer (maybe they have already been converted? but we allow prospects to refer)
+    }
+    const relationship = document.getElementById('referral-relationship').value;
+    const source = document.getElementById('referral-source').value;
+    const date = document.getElementById('referral-date').value;
+
+    const newReferral = {
+        id: Date.now(),
+        referrer_id: referrer.id,
+        referrer_type: referrer.type,
+        referred_prospect_id: referred.id,
+        relationship: relationship,
+        referral_source: source,
+        created_at: new Date(date).toISOString(),
+        status: 'Active'
+    };
+    DataStore.create('referrals', newReferral);
+
+    UI.hideModal();
+    UI.toast.success('Referral added');
+    // Refresh summary and tree
+    renderReferralSummaryAndLeaderboard();
+    if (_currentSelectedPerson) showReferralTree(_currentSelectedPerson.id, _currentSelectedPerson.type);
+    else showReferralTree(_currentUser.id, 'customer'); // default to logged-in user
+};
+Step 6 – Implement the memo modal
+javascript
+const openMemoModal = (entityId, entityType) => {
+    const notes = DataStore.getAll('notes').filter(n => {
+        if (entityType === 'prospect') return n.prospect_id === entityId;
+        else return n.customer_id === entityId;
+    }).sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
+    const latestNote = notes.length ? notes[0].text : 'No notes yet.';
+    const content = `
+        <div class="memo-modal">
+            <h4>Latest Note</h4>
+            <div class="note-text">${escapeHtml(latestNote)}</div>
+            <div class="modal-actions">
+                <button class="btn secondary" id="view-full-profile">View Full Profile</button>
+            </div>
+        </div>
+    `;
+    UI.showModal('Memo', content, [
+        { label: 'Close', type: 'secondary', action: 'UI.hideModal()' }
+    ]);
+    document.getElementById('view-full-profile').onclick = () => {
+        UI.hideModal();
+        if (entityType === 'prospect') showProspectDetail(entityId);
+        else showCustomerDetail(entityId);
+    };
+};
+Step 7 – Add CSS styles for the new layout
+We'll inject a <style> block inside showReferralsView after the HTML is rendered. Add this at the end of showReferralsView:
+
+javascript
+// Add styles for the referral page
+const style = document.createElement('style');
+style.textContent = `
+    .referrals-vertical-view {
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 20px;
+    }
+    .referrals-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 16px;
+        margin-bottom: 24px;
+    }
+    .referrals-header h1 {
+        margin: 0;
+        font-size: 24px;
+    }
+    .header-actions {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+    .search-group {
+        position: relative;
+    }
+    .search-group .search-results-dropdown {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        background: white;
+        border: 1px solid var(--gray-200);
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        z-index: 100;
+        max-height: 300px;
+        overflow-y: auto;
+    }
+    .summary-cards {
+        display: flex;
+        gap: 16px;
+        flex-wrap: wrap;
+        margin-bottom: 24px;
+    }
+    .summary-card {
+        background: white;
+        border-radius: 12px;
+        padding: 16px;
+        flex: 1;
+        min-width: 150px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        border: 1px solid var(--gray-100);
+        text-align: center;
+    }
+    .card-title {
+        font-size: 14px;
+        color: var(--gray-500);
+        margin-bottom: 8px;
+    }
+    .card-value {
+        font-size: 28px;
+        font-weight: 700;
+        color: var(--primary);
+    }
+    .top-referrers {
+        background: white;
+        border-radius: 12px;
+        padding: 16px;
+        margin-bottom: 24px;
+        border: 1px solid var(--gray-100);
+    }
+    .top-referrers h4 {
+        margin: 0 0 12px 0;
+        font-size: 16px;
+    }
+    .top-referrers-list {
+        display: flex;
+        gap: 20px;
+        flex-wrap: wrap;
+    }
+    .top-referrer-item {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        background: var(--gray-50);
+        padding: 8px 16px;
+        border-radius: 40px;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    .top-referrer-item:hover {
+        background: var(--gray-100);
+        transform: translateY(-2px);
+    }
+    .rank {
+        font-weight: bold;
+        color: var(--primary);
+        width: 24px;
+    }
+    .name {
+        font-weight: 500;
+    }
+    .count {
+        font-size: 12px;
+        color: var(--gray-500);
+    }
+    .referral-leaderboard {
+        background: white;
+        border-radius: 12px;
+        border: 1px solid var(--gray-100);
+        margin-bottom: 24px;
+    }
+    .leaderboard-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--gray-100);
+        cursor: pointer;
+    }
+    .leaderboard-header h3 {
+        margin: 0;
+        font-size: 16px;
+    }
+    .leaderboard-content {
+        padding: 16px;
+        transition: all 0.3s;
+    }
+    .leaderboard-content.collapsed {
+        display: none;
+    }
+    .leaderboard-controls {
+        display: flex;
+        gap: 16px;
+        margin-bottom: 16px;
+        flex-wrap: wrap;
+    }
+    .leaderboard-list {
+        max-height: 400px;
+        overflow-y: auto;
+    }
+    .leaderboard-item {
+        display: flex;
+        align-items: center;
+        padding: 12px;
+        border-bottom: 1px solid var(--gray-50);
+        gap: 12px;
+    }
+    .rank-badge {
+        width: 32px;
+        height: 32px;
+        background: var(--gray-100);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        color: var(--primary);
+    }
+    .referrer-info {
+        flex: 1;
+        cursor: pointer;
+    }
+    .referrer-name {
+        font-weight: 500;
+        margin-bottom: 4px;
+    }
+    .referrer-stats {
+        font-size: 12px;
+        color: var(--gray-500);
+    }
+    .hide-btn {
+        cursor: pointer;
+        color: var(--gray-400);
+        padding: 4px;
+    }
+    .hide-btn:hover {
+        color: var(--gray-600);
+    }
+    .referral-tree-container {
+        background: white;
+        border-radius: 12px;
+        border: 1px solid var(--gray-100);
+        min-height: 500px;
+        position: relative;
+        overflow: hidden;
+    }
+    .tree-toolbar {
+        position: absolute;
+        top: 12px;
+        right: 12px;
+        z-index: 10;
+        background: rgba(255,255,255,0.9);
+        border-radius: 8px;
+        padding: 4px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    .zoom-controls {
+        display: flex;
+        gap: 4px;
+    }
+    .control-btn {
+        background: white;
+        border: 1px solid var(--gray-200);
+        border-radius: 4px;
+        width: 32px;
+        height: 32px;
+        cursor: pointer;
+    }
+    .control-btn:hover {
+        background: var(--gray-50);
+    }
+    .tree-placeholder {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        min-height: 400px;
+        color: var(--gray-400);
+    }
+    .tree-placeholder i {
+        font-size: 64px;
+        margin-bottom: 16px;
+    }
+    @media (max-width: 768px) {
+        .referrals-vertical-view {
+            padding: 12px;
+        }
+        .summary-cards {
+            flex-direction: column;
+        }
+        .top-referrers-list {
+            flex-direction: column;
+            gap: 8px;
+        }
+        .leaderboard-controls {
+            flex-direction: column;
+            align-items: stretch;
+        }
+        .leaderboard-item {
+            flex-wrap: wrap;
+        }
+        .control-btn {
+            width: 28px;
+            height: 28px;
+        }
+    }
+`;
+document.head.appendChild(style);
+Make sure to also handle the leaderboard collapse:
+
+javascript
+const toggleLeaderboard = () => {
+    const content = document.querySelector('.leaderboard-content');
+    const btn = document.getElementById('toggle-leaderboard');
+    if (content.classList.contains('collapsed')) {
+        content.classList.remove('collapsed');
+        btn.innerHTML = '<i class="fas fa-chevron-up"></i>';
+    } else {
+        content.classList.add('collapsed');
+        btn.innerHTML = '<i class="fas fa-chevron-down"></i>';
+    }
+};
+Step 8 – Integrate into the existing Quick Activity modal
+We need to add a new activity type "REFERRAL" in the activity modal's type dropdown and handle it in updateActivityForm and saveActivity. Since the requirement says "Quick Add Activity button ... should write direct to this page", we should add a separate button to add referral, but we can also allow it via the existing activity modal. However, to keep things simple and avoid breaking existing activity logic, we'll add a dedicated "Add Referral" button as done above. The "Quick Add Activity" button remains for other activity types.
+
+We should also ensure that when a new prospect is created via the referral modal, we properly select it.
+
+Step 9 – Ensure role‑based visibility in the tree
+When building the tree, we must filter out children that the current user is not allowed to see. We'll add a check inside buildTreeData recursion:
+
+javascript
+const canViewNode = (personId, personType) => {
+    if (personType === 'prospect') return canViewProspect({ id: personId });
+    else return canViewCustomer({ id: personId });
+};
+Then, before adding a child, check:
+
+javascript
+if (!canViewNode(childProspect.id, 'prospect')) continue;
+Also, for the root, we should only show the tree if the user is allowed to see that person. The root is already authorised by the calling function.
+
+Step 10 – Update the existing showReferralsView call in navigateTo
+We already replaced the function, so no further changes needed.
+
+Final notes
+Ensure all new functions are added to the return object of appLogic so they are accessible globally (if needed). We'll add them to the existing return object.
+
+We'll also need to add ensureReferralFields() call in init() after loading demo data.
+
+The openProspectModal should dispatch a custom event when a new prospect is created. We'll add that in saveProspect after creating a new prospect:
+
+javascript
+// In saveProspect, after DataStore.create for prospects
+if (!editId) {
+    document.dispatchEvent(new CustomEvent('prospectCreated', { detail: data }));
+}
+This will allow the referral modal to auto‑select the new prospect.
+
+All existing functions (e.g., showProspectDetail, showCustomerDetail, openActivityModal) remain untouched.
+
+This implementation builds on the existing codebase, adds the requested features, and preserves all previous functionality. The code is modular and well‑commented, ready for integration.
