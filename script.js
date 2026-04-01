@@ -8499,10 +8499,11 @@ const Auth = {
         }
 
         // 5. Poll for the entity badge container and render the badge if needed
+      setTimeout(() => {
         if (entityRestored) {
             const badgeContainerId = 'selected-entity-info';
             let attempts = 0;
-            const badgeInterval = async (() => {
+            const badgeInterval = setInterval(async () => {
                 const container = document.getElementById(badgeContainerId);
                 if (container) {
                     const entityName = _selectedEntity.type === 'Prospect'
@@ -8523,7 +8524,7 @@ const Auth = {
                 }
             }, 100);
         }
-
+}, 0);
         // 6. Type‑specific fields
         switch (activity.activity_type) {
             case 'FTF':
