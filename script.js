@@ -5446,6 +5446,27 @@ In a production system, this would show the actual file contents.
         });
     }
 
+// Simple Auth wrapper using Supabase
+const Auth = {
+    async login(email, password) {
+        const { data, error } = await window.supabase.auth.signInWithPassword({
+            email,
+            password
+        });
+        if (error) throw error;
+        return data.user;
+    },
+    async logout() {
+        const { error } = await window.supabase.auth.signOut();
+        if (error) throw error;
+    },
+    async getCurrentUser() {
+        const { data: { user }, error } = await window.supabase.auth.getUser();
+        if (error) throw error;
+        return user;
+    }
+};
+
     async function login() {
         // Login is now handled by the #loginBtn Supabase click handler
         console.warn('app.await login() called – use the loginBtn form instead');
@@ -8409,7 +8430,7 @@ In a production system, this would show the actual file contents.
 
         // If prospectId is provided, pre-select it
         if (prospectId) {
-            (() => {
+            setTimeout(async () => {
                 const prospect = await DataStore.getById('prospects', prospectId);
                 if (prospect) {
                     _selectedEntity = { id: prospectId, type: 'Prospect' };
@@ -10181,7 +10202,7 @@ In a production system, this would show the actual file contents.
             return;
         }
 
-        (() => {
+        setTimeout(async () => {
             await addWhatsAppButtonToProfile('customer', customerId);
         }, 100);
 
@@ -10669,7 +10690,7 @@ In a production system, this would show the actual file contents.
         const statusColor = protectionStatus === 'normal' ? 'success' : protectionStatus === 'warning' ? 'secondary' : 'error';
         const statusLabel = protectionStatus === 'normal' ? 'Normal' : protectionStatus === 'warning' ? 'Expiring Soon' : 'Critical';
 
-        (() => {
+        setTimeout(async () => {
             await addWhatsAppButtonToProfile('prospect', prospectId);
         }, 100);
 
@@ -16913,7 +16934,7 @@ In a production system, this would show the actual file contents.
 
     const refreshPipelineCalculations = async () => {
         UI.toast.info('Recalculating pipeline...');
-        (() => {
+        setTimeout(async () => {
             await refreshPipeline();
         }, 500);
     };
