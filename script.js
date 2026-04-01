@@ -176,13 +176,13 @@ const appLogic = (() => {
 
     // Similar for customers, activities, etc. – you can add as needed.
 
-    const canViewNode = async (personId, personType) => {const DataStore =
-        if (personType === 'prospect') {
-            return await canViewProspect({ id: personId });
-        } else if (personType === 'customer') {
-            return await canViewCustomer({ id: personId });
-        }
-        return false;
+    const canViewNode = async (personId, personType) => {
+    if (personType === 'prospect') {
+        return await canViewProspect({ id: personId });
+    } else if (personType === 'customer') {
+        return await canViewCustomer({ id: personId });
+    }
+    return false;
     };
 
     // ========== HELPER FUNCTIONS ==========
@@ -5527,6 +5527,7 @@ const Auth = {
             btn.disabled = false;
             btn.textContent = 'Login';
         }
+	const user = await Auth.login(email, password);
     };
 }
 
