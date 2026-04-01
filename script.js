@@ -11913,18 +11913,17 @@ const openAddSolutionModal = async (prospectId) => {
                     </div>
 
 
-
 <div class="performance-card">
-    <h4><i class="fas fa-sticky-note"></i> Agent Notes</h4>
-    <div class="add-note-section">
-        <textarea id="agent-note-text-${agent.id}" class="form-control" rows="3" placeholder="Add note about agent performance..."></textarea>
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
-            <button class="btn-icon" onclick="app. openVoiceRecorder('agent-note-text-${agent.id}', 'agent', ${agent.id})" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
-            <button class="btn primary btn-sm" onclick="app. addAgentNote(${agent.id})">Add Note</button>
+        <h4><i class="fas fa-sticky-note"></i> Agent Notes</h4>
+        <div class="add-note-section">
+            <textarea id="agent-note-text-${agent.id}" class="form-control" rows="3" placeholder="Add note about agent performance..."></textarea>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
+                <button class="btn-icon" onclick="app. openVoiceRecorder('agent-note-text-${agent.id}', 'agent', ${agent.id})" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+                <button class="btn primary btn-sm" onclick="app. addAgentNote(${agent.id})">Add Note</button>
+            </div>
         </div>
+        <div id="agent-notes-list-${agent.id}" style="margin-top:12px;"></div>
     </div>
-    <div id="agent-notes-list-${agent.id}" style="margin-top:12px;"></div>
-</div>
 
 setTimeout(async () => {
     const agentNotes = await DataStore.query('notes', { agent_id: agent.id });
@@ -11939,10 +11938,9 @@ setTimeout(async () => {
             </div>
         `).join('')
         : '<p style="color:var(--gray-400); font-size:13px;">No notes yet.</p>';
-    const notesDiv = document.getElementById(`agent-notes-list-${agent.id}`);
-    if (notesDiv) notesDiv.innerHTML = notesHtml;
+    const notesContainer = document.getElementById(`agent-notes-list-${agent.id}`);
+    if (notesContainer) notesContainer.innerHTML = notesHtml;
 }, 100);
-
 
 
 
