@@ -5483,7 +5483,7 @@ const Auth = {
         _wireLoginBtn();
     }
 
-    function _wireLoginBtn() {
+function _wireLoginBtn() {
     const btn = document.getElementById('loginBtn');
     if (!btn || btn._supabaseSetup) return;
     btn._supabaseSetup = true;
@@ -5497,10 +5497,7 @@ const Auth = {
         try {
             btn.disabled = true;
             btn.textContent = 'Logging in...';
-            // 1. Authenticate with Supabase Auth
             const user = await Auth.login(email, password);
-            
-            // 2. Fetch the corresponding profile from the 'users' table
             const { data: profile, error: profileError } = await window.supabase
                 .from('users')
                 .select('*')
@@ -5509,11 +5506,7 @@ const Auth = {
             if (profileError || !profile) {
                 throw new Error('User profile not found. Contact admin.');
             }
-            
-            // 3. Store the full profile (with name, role, etc.)
             _currentUser = profile;
-            
-            // 4. Show the main app
             document.getElementById('login-container').style.display = 'none';
             document.getElementById('app-shell').style.display = 'block';
             updateUserDisplay();
@@ -5527,8 +5520,8 @@ const Auth = {
             btn.disabled = false;
             btn.textContent = 'Login';
         }
-	const user = await Auth.login(email, password);
     };
+    // ← the problematic line was here, remove it
 }
 
     // ==================== INIT ====================
