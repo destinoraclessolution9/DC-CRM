@@ -176,7 +176,7 @@ const appLogic = (() => {
 
     // Similar for customers, activities, etc. – you can add as needed.
 
-    const canViewNode = async (personId, personType) => {
+    const canViewNode = async (personId, personType) => {const DataStore =
         if (personType === 'prospect') {
             return await canViewProspect({ id: personId });
         } else if (personType === 'customer') {
@@ -8806,7 +8806,7 @@ const Auth = {
                 // Diagnostic: Ensure searchReferrers is bound
                 (() => {
                     const input = document.getElementById('cps-referrer');
-                    if (input) input.onkeyup = async () => await app.await searchReferrers();
+                    if (input) input.onkeyup = setInterval(async () => await app.await searchReferrers();
                 }, 100);
                 break;
 
@@ -11866,7 +11866,7 @@ const Auth = {
                             </div>
                         </div>
                         <div id="agent-notes-list-${agent.id}" style="margin-top:12px;">
-                            ${(() => {
+                            ${setTimeout(() => {
                 const agentNotes = await DataStore.query('notes', { agent_id: agent.id });
                 if (!agentNotes.length) return '<p style="color:var(--gray-400); font-size:13px;">No notes yet.</p>';
                 return agentNotes.map(n => `
@@ -13196,7 +13196,7 @@ const Auth = {
         await loadOverrideHistory();
 
         // Add event listeners for async filters
-        (() => {
+        setTimeout(() => {
             ['hist-type', 'hist-status'].forEach(id => {
                 document.getElementById(id).addEventListenerasync async ('change', async () => await loadOverrideHistory());
             });
