@@ -232,16 +232,16 @@ const appLogic = (() => {
         // Fallback: return a simple error message (but conversion should work now)
         return 'Conversion failed';
     };
-
-    const escapeHtml = async (unsafe) => {
-        if (!unsafe || typeof unsafe !== 'string') return unsafe || '';
-        return unsafe
-            .replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;")
-            .replace(/"/g, "&quot;")
-            .replace(/'/g, "&#039;");
-    };
+	const escapeHtml = (unsafe) => {
+    if (!unsafe || typeof unsafe !== 'string') return unsafe || '';
+    return unsafe
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+};
+    
 
     const FILE_ICONS = {
         // Documents
@@ -11447,52 +11447,56 @@ for (const p of allPackages) {
     };
 
     // Solution Functions
-    const openAddSolutionModal = async (prospectId) => {
-        const content = `
-    <div class="form-group">
-                <label>Solution</label>
-                <select id="solution-name" class="form-control">
-                    <option value="PR4 Power Ring">PR4 Power Ring</option>
-                    <option value="PR3 Ring">PR3 Ring</option>
-                    <option value="PR5 Ring">PR5 Ring</option>
-                    <option value="Office Audit">Office Audit</option>
-                    <option value="Home Audit">Home Audit</option>
-                    <option value="Career Consultation">Career Consultation</option>
-                    <option value="Harmony Painting">Harmony Painting</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label>Proposed Date</label>
-                <input type="date" id="solution-date" class="form-control" value="${new Date().toISOString().split('T')[0]}">
-            </div>
-            <div class="form-group">
-                <label>Status</label>
-                <select id="solution-status" class="form-control">
-                    <option value="Proposed">Proposed</option>
-                    <option value="Approved">Approved</option>
-                    <option value="Rejected">Rejected</option>
-                    <option value="Purchased">Purchased</option>
-                </select>
-            </div>
-            <!-- Solution Proposed Dropdown -->
-            <div class="form-group">
-                <label>Solution Proposed</label>
-                <select name="activity-outcome" class="form-control">
-                    <option value="">-- Select Solution --</option>
-                    ${(DataStore.get('products') || []).map(p => `
-                        <option value="${await escapeHtml(p.name)}">${await escapeHtml(p.name)}</option>
-                    `).join('')}
-                    <option value="No Solution Needed">No Solution Needed</option>
-                    <option value="Follow-up Required">Follow-up Required</option>
-                </select>
-            </div>
-`;
+const openAddSolutionModal = async (prospectId) => {
+    const products = await DataStore.getAll('products');
+    const productOptions = products
+        .filter(p => p.is_active !== false)
+        .map(p => `<option value="${escapeHtml(p.name)}">${escapeHtml(p.name)}</option>`)
+        .join('');
 
-        UI.showModal('Add Proposed Solution', content, [
-            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save', type: 'primary', action: `await app. saveSolution(${prospectId})` }
-        ]);
-    };
+    const content = `
+        <div class="form-group">
+            <label>Solution</label>
+            <select id="solution-name" class="form-control">
+                <option value="PR4 Power Ring">PR4 Power Ring</option>
+                <option value="PR3 Ring">PR3 Ring</option>
+                <option value="PR5 Ring">PR5 Ring</option>
+                <option value="Office Audit">Office Audit</option>
+                <option value="Home Audit">Home Audit</option>
+                <option value="Career Consultation">Career Consultation</option>
+                <option value="Harmony Painting">Harmony Painting</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>Proposed Date</label>
+            <input type="date" id="solution-date" class="form-control" value="${new Date().toISOString().split('T')[0]}">
+        </div>
+        <div class="form-group">
+            <label>Status</label>
+            <select id="solution-status" class="form-control">
+                <option value="Proposed">Proposed</option>
+                <option value="Approved">Approved</option>
+                <option value="Rejected">Rejected</option>
+                <option value="Purchased">Purchased</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>Solution Proposed</label>
+            <select name="activity-outcome" class="form-control">
+                <option value="">-- Select Solution --</option>
+                ${productOptions}
+                <option value="No Solution Needed">No Solution Needed</option>
+                <option value="Follow-up Required">Follow-up Required</option>
+            </select>
+        </div>
+    `;
+
+    UI.showModal('Add Proposed Solution', content, [
+        { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+        { label: 'Save', type: 'primary', action: `await app. saveSolution(${prospectId})` }
+    ]);
+};
+
 
     const saveSolution = async (prospectId) => {
         const solution = document.getElementById('solution-name')?.value;
