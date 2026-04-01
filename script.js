@@ -85,14 +85,14 @@ const appLogic = (() => {
 
     // Get all subordinate user IDs (including self) for a given user based on reporting_to.
     // Returns an array of user IDs, or 'all' for roles that see everything.
-    const getVisibleUserIds = (user) => {
+    const getVisibleUserIds = async (user) => {
         if (!user) return [];
         const role = user.role;
         if (role === 'super_admin' || role === 'marketing_manager' || role === 'manager') {
             return 'all'; // special marker
         }
         // For team leaders and consultants, traverse down the reporting tree
-        const allUsers = DataStore.getAll('users');
+        const allUsers =await DataStore.getAll('users');
         const result = [];
         const collect = (uid) => {
             result.push(uid);
@@ -103,42 +103,42 @@ const appLogic = (() => {
     };
 
     // Check if current user can view a given prospect
-    const canViewProspect = (prospect) => {
+    const canViewProspect = async (prospect) => {
         const user = _currentUser;
         if (!user) return false;
-        const visibleIds = getVisibleUserIds(user);
+        const visibleIds = await getVisibleUserIds(user);
         if (visibleIds === 'all') return true;
         return visibleIds.includes(prospect.responsible_agent_id);
     };
 
     // Get all prospects visible to current user
-    const getVisibleProspects = () => {
-        const all = DataStore.getAll('prospects');
+    const getVisibleProspects = async () => {
+        const all = await DataStore.getAll('prospects');
         const user = _currentUser;
         if (!user) return [];
-        const visibleIds = getVisibleUserIds(user);
+        const visibleIds = await getVisibleUserIds(user);
         if (visibleIds === 'all') return all;
         return all.filter(p => visibleIds.includes(p.responsible_agent_id));
     };
 
     // Similarly for customers
-    const canViewCustomer = (customer) => {
+    const canViewCustomer = async (customer) => {
         const user = _currentUser;
         if (!user) return false;
-        const visibleIds = getVisibleUserIds(user);
+        const visibleIds = await getVisibleUserIds(user);
         if (visibleIds === 'all') return true;
         return visibleIds.includes(customer.responsible_agent_id);
     };
 
-    const getVisibleCustomers = () => {
+    const getVisibleCustomers = async () => {
         if (_currentUser && (isSystemAdmin(_currentUser) || isMarketingManager(_currentUser) || _currentUser.role === 'admin')) {
-            return DataStore.getAll('customers');
+            return await DataStore.getAll('customers');
         }
-        return DataStore.getAll('customers').filter(c => c.agent_id === _currentUser?.id);
+        return (await DataStore.getAll('customers')).filter(c => c.agent_id === _currentUser?.id);
     };
 
     // For activities: visible if current user is lead, co-agent, or the activity is 'open', or if the lead agent is within visible users.
-    const canViewActivity = (activity) => {
+    const canViewActivity = async (activity) => {
         const user = _currentUser;
         if (!user) return false;
         if (activity.visibility === 'open') return true;
@@ -146,24 +146,24 @@ const appLogic = (() => {
         const isCoAgent = activity.co_agents && activity.co_agents.some(ca => ca.id === user.id);
         if (isLead || isCoAgent) return true;
         // For managers/team leaders: check if lead agent is in visible subordinates
-        const visibleIds = getVisibleUserIds(user);
+        const visibleIds = await getVisibleUserIds(user);
         if (visibleIds === 'all') return true;
         return visibleIds.includes(activity.lead_agent_id);
     };
 
-    const getVisibleActivities = () => {
-        const all = DataStore.getAll('activities');
-        return all.filter(a => canViewActivity(a));
+    const getVisibleActivities = async () => {
+        const all = await DataStore.getAll('activities');
+        return all.filter(async a => await canViewActivity(a));
     };
 
     // Check edit permission: super_admin, marketing_manager, manager can edit anything;
     // team leader can edit prospects of subordinates; consultant only own.
-    const canEditProspect = (prospect) => {
+    const canEditProspect = async (prospect) => {
         const user = _currentUser;
         if (!user) return false;
         if (user.role === 'super_admin' || user.role === 'marketing_manager' || user.role === 'manager') return true;
         if (user.role === 'team_leader' || user.role?.includes('Level 7')) {
-            const visibleIds = getVisibleUserIds(user);
+            const visibleIds = await getVisibleUserIds(user);
             return visibleIds.includes(prospect.responsible_agent_id);
         }
         if (user.role === 'consultant') {
@@ -174,11 +174,11 @@ const appLogic = (() => {
 
     // Similar for customers, activities, etc. – you can add as needed.
 
-    const canViewNode = (personId, personType) => {
+    const canViewNode = async (personId, personType) => {
         if (personType === 'prospect') {
-            return canViewProspect({ id: personId });
+            return await canViewProspect({ id: personId });
         } else if (personType === 'customer') {
-            return canViewCustomer({ id: personId });
+            return await canViewCustomer({ id: personId });
         }
         return false;
     };
@@ -194,7 +194,7 @@ const appLogic = (() => {
     };
 
     // Check lunar library after a short delay
-    setTimeout(() => {
+    (() => {
         if (typeof LunarCalendar === 'undefined' && typeof lunarCalendar === 'undefined' && typeof Lunar === 'undefined') {
             console.error('LunarCalendar library failed to load. Check network tab.');
         } else {
@@ -230,7 +230,7 @@ const appLogic = (() => {
         return 'Conversion failed';
     };
 
-    const escapeHtml = (unsafe) => {
+    const escapeHtml = async (unsafe) => {
         if (!unsafe || typeof unsafe !== 'string') return unsafe || '';
         return unsafe
             .replace(/&/g, "&amp;")
@@ -335,17 +335,17 @@ const appLogic = (() => {
         return textExts.includes(getFileExtension(filename));
     };
 
-    const debounce = (fn, delay) => {
+    const debounce = async (fn, delay) => {
         let timer;
         return (...args) => {
             clearTimeout(timer);
-            timer = setTimeout(() => fn(...args), delay);
+            timer = (() => fn(...args), delay);
         };
     };
 
     // Ensure referrals have the new fields (id, referrer_id, referrer_type, referred_prospect_id)
-    const ensureReferralFields = () => {
-        const referrals = DataStore.getAll('referrals');
+    const ensureReferralFields = async () => {
+        const referrals = await DataStore.getAll('referrals');
         let changed = false;
         referrals.forEach(r => {
             if (r.referrer_customer_id && !r.referrer_id) {
@@ -424,16 +424,16 @@ const appLogic = (() => {
 
 
     // Section 10.4: Search Panel Toggle
-    const toggleSearchPanel = () => {
+    const toggleSearchPanel = async () => {
         _searchPanelVisible = !_searchPanelVisible;
         if (_searchPanelVisible) {
-            showSearchPanel();
+            await showSearchPanel();
         } else {
             hideSearchPanel();
         }
     };
 
-    const showSearchPanel = () => {
+    const showSearchPanel = async () => {
         const viewport = document.getElementById('content-viewport');
 
         // Create overlay and panel
@@ -448,16 +448,16 @@ const appLogic = (() => {
                 <div class="search-presets">
                     <h3>Quick Presets</h3>
                     <div class="preset-buttons">
-                        <button class="preset-btn" onclick="app.loadPreset('agent-monthly')">Agent Monthly Report</button>
-                        <button class="preset-btn" onclick="app.loadPreset('high-score')">High Score Prospects</button>
-                        <button class="preset-btn" onclick="app.loadPreset('recent-activities')">Recent Activities</button>
-                        <button class="preset-btn" onclick="app.loadPreset('cai-ku-not-purchased')">CAI KU Painting Not Purchased</button>
+                        <button class="preset-btn" onclick="app.await loadPreset('agent-monthly')">Agent Monthly Report</button>
+                        <button class="preset-btn" onclick="app.await loadPreset('high-score')">High Score Prospects</button>
+                        <button class="preset-btn" onclick="app.await loadPreset('recent-activities')">Recent Activities</button>
+                        <button class="preset-btn" onclick="app.await loadPreset('cai-ku-not-purchased')">CAI KU Painting Not Purchased</button>
                     </div>
                 </div>
                 
                 <div class="search-entity-selector">
                     <label>Search in:</label>
-                    <select id="search-entity" onchange="app.updateFilterSections()">
+                    <select id="search-entity" onchange="app.await updateFilterSections()">
                         <option value="agents">Agents</option>
                         <option value="prospects" selected>Prospects</option>
                         <option value="customers">Customers</option>
@@ -540,10 +540,10 @@ const appLogic = (() => {
         viewport.insertAdjacentHTML('beforebegin', searchHTML);
 
         // Load saved searches
-        renderSavedSearches();
+        await renderSavedSearches();
 
         // Initial filter render
-        updateFilterSections();
+        await updateFilterSections();
 
         // Render condition groups
         renderConditionGroups();
@@ -558,7 +558,7 @@ const appLogic = (() => {
     };
 
     // Section 10.5: Dynamic Filter Rendering
-    const updateFilterSections = () => {
+    const updateFilterSections = async () => {
         const entity = document.getElementById('search-entity')?.value || 'prospects';
         _currentSearchEntity = entity;
 
@@ -572,10 +572,10 @@ const appLogic = (() => {
                 html += renderAgentFilters();
                 break;
             case 'prospects':
-                html += renderProspectCustomerFilters();
+                html += await renderProspectCustomerFilters();
                 break;
             case 'customers':
-                html += renderProspectCustomerFilters(true);
+                html += await renderProspectCustomerFilters(true);
                 break;
             case 'activities':
                 html += renderActivityFilters();
@@ -628,7 +628,7 @@ const appLogic = (() => {
         `;
     };
 
-    const renderProspectCustomerFilters = (isCustomer = false) => {
+    const renderProspectCustomerFilters = async (isCustomer = false) => {
         const type = isCustomer ? 'customer' : 'prospect';
 
         return `
@@ -679,14 +679,14 @@ const appLogic = (() => {
                     <label>Has Purchased</label>
                     <select id="filter-prospect-has-purchased" class="form-control">
                         <option value="">Select Product</option>
-                        ${DataStore.getAll('products').filter(p => p.is_active !== false).map(p => `<option value="${p.name}">${p.name}</option>`).join('')}
+                        ${(await DataStore.getAll('products')).filter(p => p.is_active !== false).map(p => `<option value="${p.name}">${p.name}</option>`).join('')}
                     </select>
                 </div>
                 <div class="filter-group">
                     <label>Has Not Purchased</label>
                     <select id="filter-prospect-not-purchased" class="form-control">
                         <option value="">Select Product</option>
-                        ${DataStore.getAll('products').filter(p => p.is_active !== false).map(p => `<option value="${p.name}">${p.name}</option>`).join('')}
+                        ${(await DataStore.getAll('products')).filter(p => p.is_active !== false).map(p => `<option value="${p.name}">${p.name}</option>`).join('')}
                     </select>
                 </div>
             </div>
@@ -948,34 +948,34 @@ const appLogic = (() => {
 
 
     // Section 10.7: Presets & Search Execution
-    const loadPreset = (presetId) => {
+    const loadPreset = async (presetId) => {
         clearAllFilters();
 
         switch (presetId) {
             case 'agent-monthly':
                 document.getElementById('search-entity').value = 'agents';
-                updateFilterSections();
+                await updateFilterSections();
                 document.getElementById('filter-agent-status').value = 'active';
                 break;
             case 'high-score':
                 document.getElementById('search-entity').value = 'prospects';
-                updateFilterSections();
+                await updateFilterSections();
                 document.getElementById('filter-prospect-score-min').value = 800;
                 break;
             case 'cai-ku-not-purchased':
                 document.getElementById('search-entity').value = 'prospects';
-                updateFilterSections();
+                await updateFilterSections();
                 document.getElementById('filter-prospect-not-purchased').value = 'CAI KU Painting';
                 break;
             case 'recent-activities':
                 document.getElementById('search-entity').value = 'activities';
-                updateFilterSections();
+                await updateFilterSections();
                 const today = new Date().toISOString().split('T')[0];
                 document.getElementById('search-date-from').value = today;
                 break;
         }
 
-        executeSearch();
+        await executeSearch();
     };
 
     const collectFilters = () => {
@@ -1009,29 +1009,29 @@ const appLogic = (() => {
         return filters;
     };
 
-    const executeSearch = () => {
+    const executeSearch = async () => {
         const filters = collectFilters();
         let results = [];
 
         switch (filters.entity) {
-            case 'agents': results = performAgentSearch(filters); break;
-            case 'prospects': results = performProspectSearch(filters); break;
-            case 'customers': results = performCustomerSearch(filters); break;
-            case 'activities': results = performActivitySearch(filters); break;
-            case 'transactions': results = performTransactionSearch(filters); break;
-            case 'events': results = performEventSearch(filters); break;
+            case 'agents': results = await performAgentSearch(filters); break;
+            case 'prospects': results = await performProspectSearch(filters); break;
+            case 'customers': results = await performCustomerSearch(filters); break;
+            case 'activities': results = await performActivitySearch(filters); break;
+            case 'transactions': results = await performTransactionSearch(filters); break;
+            case 'events': results = await performEventSearch(filters); break;
         }
 
         _currentSearchResults = results;
         _totalResults = results.length;
         _currentPage = 1;
 
-        renderSearchResults();
+        await renderSearchResults();
         addToSearchHistory(filters);
     };
 
-    const performAgentSearch = (filters) => {
-        let items = DataStore.getAll('users').filter(u => isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'));
+    const performAgentSearch = async (filters) => {
+        let items = (await DataStore.getAll('users')).filter(u => isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'));
 
         // Basic filters
         if (filters.basic.name) {
@@ -1048,8 +1048,8 @@ const appLogic = (() => {
         return applyComplexConditions(items, filters.complex);
     };
 
-    const performProspectSearch = (filters) => {
-        let items = getVisibleProspects();
+    const performProspectSearch = async (filters) => {
+        let items = await getVisibleProspects();
 
         // Basic filters
         if (filters.basic.name) {
@@ -1064,11 +1064,11 @@ const appLogic = (() => {
         }
         if (filters.basic['has-purchased']) {
             const product = filters.basic['has-purchased'];
-            items = items.filter(i => hasProspectPurchasedProduct(i.id, product));
+            items = items.filter(async i => await hasProspectPurchasedProduct(i.id, product));
         }
         if (filters.basic['not-purchased']) {
             const product = filters.basic['not-purchased'];
-            items = items.filter(i => !hasProspectPurchasedProduct(i.id, product));
+            items = items.filter(async i => !await hasProspectPurchasedProduct(i.id, product));
         }
 
         if (filters.basic.keyword) {
@@ -1110,16 +1110,16 @@ const appLogic = (() => {
         return applyComplexConditions(items, filters.complex);
     };
 
-    const hasProspectPurchasedProduct = (prospectId, productName) => {
-        const purchases = DataStore.getAll('purchases');
+    const hasProspectPurchasedProduct = async (prospectId, productName) => {
+        const purchases = await DataStore.getAll('purchases');
         if (purchases.some(p => p.customer_id === prospectId && p.item && p.item.includes(productName))) return true;
 
-        const activities = DataStore.getAll('activities');
+        const activities = await DataStore.getAll('activities');
         return activities.some(a => (a.prospect_id === prospectId || a.customer_id === prospectId) && a.is_closing && a.solution_sold === productName);
     };
 
-    const performCustomerSearch = (filters) => {
-        let items = getVisibleCustomers();
+    const performCustomerSearch = async (filters) => {
+        let items = await getVisibleCustomers();
 
         if (filters.basic.name) {
             const query = filters.basic.name.toLowerCase();
@@ -1165,8 +1165,8 @@ const appLogic = (() => {
         return applyComplexConditions(items, filters.complex);
     };
 
-    const performActivitySearch = (filters) => {
-        let items = DataStore.getAll('activities');
+    const performActivitySearch = async (filters) => {
+        let items = await DataStore.getAll('activities');
 
         if (filters.basic.type) {
             items = items.filter(i => i.activity_type === filters.basic.type);
@@ -1175,8 +1175,8 @@ const appLogic = (() => {
         return applyComplexConditions(items, filters.complex);
     };
 
-    const performTransactionSearch = (filters) => {
-        let items = DataStore.getAll('purchases');
+    const performTransactionSearch = async (filters) => {
+        let items = await DataStore.getAll('purchases');
 
         if (filters.basic.product) {
             const query = filters.basic.product.toLowerCase();
@@ -1186,8 +1186,8 @@ const appLogic = (() => {
         return applyComplexConditions(items, filters.complex);
     };
 
-    const performEventSearch = (filters) => {
-        let items = DataStore.getAll('events');
+    const performEventSearch = async (filters) => {
+        let items = await DataStore.getAll('events');
 
         if (filters.basic.title) {
             const query = filters.basic.title.toLowerCase();
@@ -1228,7 +1228,7 @@ const appLogic = (() => {
     };
 
     // Section 10.9: Results Rendering
-    const renderSearchResults = () => {
+    const renderSearchResults = async () => {
         const container = document.getElementById('search-results');
         if (!container) return;
 
@@ -1253,10 +1253,10 @@ const appLogic = (() => {
                     </tr>
                 </thead>
                 <tbody>
-                    ${pageItems.map(item => {
+                    ${(await Promise.all(pageItems.map(async item => {
             let agentName = '-';
             if (item.lead_agent_id || item.responsible_agent_id) {
-                const agent = DataStore.getById('users', item.lead_agent_id || item.responsible_agent_id);
+                const agent = await DataStore.getById('users', item.lead_agent_id || item.responsible_agent_id);
                 if (agent) agentName = agent.full_name;
             }
 
@@ -1278,16 +1278,16 @@ const appLogic = (() => {
                             </td>
                         </tr>
                         `;
-        }).join('')}
+        }))).join('')}
                 </tbody>
             </table>
         `;
 
         container.innerHTML = html;
-        renderPagination();
+        await renderPagination();
     };
 
-    const renderPagination = () => {
+    const renderPagination = async () => {
         const container = document.getElementById('search-pagination');
         if (!container) return;
 
@@ -1299,24 +1299,24 @@ const appLogic = (() => {
 
         container.innerHTML = `
             <div class="pagination-controls">
-                <button ${_currentPage === 1 ? 'disabled' : ''} onclick="app.goToPage(${_currentPage - 1})">Prev</button>
+                <button ${_currentPage === 1 ? 'disabled' : ''} onclick="app.await goToPage(${_currentPage - 1})">Prev</button>
                 <span>Page ${_currentPage} of ${totalPages}</span>
-                <button ${_currentPage === totalPages ? 'disabled' : ''} onclick="app.goToPage(${_currentPage + 1})">Next</button>
+                <button ${_currentPage === totalPages ? 'disabled' : ''} onclick="app.await goToPage(${_currentPage + 1})">Next</button>
             </div>
         `;
     };
 
-    const goToPage = (page) => {
+    const goToPage = async (page) => {
         _currentPage = page;
-        renderSearchResults();
+        await renderSearchResults();
     };
 
     // Section 10.10: Saved Searches & History
-    const renderSavedSearches = () => {
+    const renderSavedSearches = async () => {
         const container = document.getElementById('saved-searches-list');
         if (!container) return;
 
-        const searches = DataStore.getAll('saved_searches');
+        const searches = await DataStore.getAll('saved_searches');
         if (searches.length === 0) {
             container.innerHTML = '<p class="text-muted" style="font-size: 12px; margin: 12px 0;">No saved searches yet.</p>';
             return;
@@ -1324,26 +1324,26 @@ const appLogic = (() => {
 
         container.innerHTML = searches.map(s => `
             <div class="saved-search-item">
-                <div class="saved-search-info" onclick="app.loadSavedSearch(${s.id})">
+                <div class="saved-search-info" onclick="app.await loadSavedSearch(${s.id})">
                     <i class="fas fa-bookmark"></i>
                     <span>${s.search_name}</span>
                     <small>${s.entity}</small>
                 </div>
-                <button class="btn-icon" onclick="app.deleteSavedSearch(${s.id})">
+                <button class="btn-icon" onclick="app.await deleteSavedSearch(${s.id})">
                     <i class="fas fa-trash"></i>
                 </button>
             </div>
         `).join('');
     };
 
-    const openSaveSearchModal = () => {
+    const openSaveSearchModal = async () => {
         const name = prompt('Enter a name for this search:');
         if (name) {
-            saveCurrentSearch(name);
+            await saveCurrentSearch(name);
         }
     };
 
-    const saveCurrentSearch = (name) => {
+    const saveCurrentSearch = async (name) => {
         const filters = collectFilters();
         const savedSearch = {
             id: Date.now(),
@@ -1353,13 +1353,13 @@ const appLogic = (() => {
             created_at: new Date().toISOString()
         };
 
-        DataStore.create('saved_searches', savedSearch);
+        await DataStore.create('saved_searches', savedSearch);
         UI.toast.success('Search saved successfully');
-        renderSavedSearches();
+        await renderSavedSearches();
     };
 
-    const loadSavedSearch = (id) => {
-        const search = DataStore.getById('saved_searches', id);
+    const loadSavedSearch = async (id) => {
+        const search = await DataStore.getById('saved_searches', id);
         if (!search) return;
 
         UI.toast.info(`Loading search: ${search.search_name}`);
@@ -1367,7 +1367,7 @@ const appLogic = (() => {
 
         // Restore UI
         document.getElementById('search-entity').value = filters.entity;
-        updateFilterSections();
+        await updateFilterSections();
 
         document.getElementById('search-date-from').value = filters.dateRange.from || '';
         document.getElementById('search-date-to').value = filters.dateRange.to || '';
@@ -1376,14 +1376,14 @@ const appLogic = (() => {
         renderConditionGroups();
 
         // Execute
-        executeSearch();
+        await executeSearch();
     };
 
-    const deleteSavedSearch = (id) => {
+    const deleteSavedSearch = async (id) => {
         if (confirm('Are you sure you want to delete this saved search?')) {
-            DataStore.delete('saved_searches', id);
+            await DataStore.delete('saved_searches', id);
             UI.toast.success('Search deleted');
-            renderSavedSearches();
+            await renderSavedSearches();
         }
     };
 
@@ -1461,7 +1461,7 @@ const appLogic = (() => {
 
     // --- PHASE 11: DOCUMENT MANAGEMENT SYSTEM FUNCTIONS ---
 
-    const showDocumentManagementView = (container) => {
+    const showDocumentManagementView = async (container) => {
         container.innerHTML = `
             <div class="dms-view">
                 <div class="dms-header">
@@ -1507,7 +1507,7 @@ const appLogic = (() => {
                                         <button class="btn-icon ${_viewMode === 'list' ? 'active' : ''}" onclick="app.setViewMode('list')">
                                             <i class="fas fa-list"></i>
                                         </button>
-                                        <button class="btn-icon ${_viewMode === 'grid' ? 'active' : ''}" onclick="app.setViewMode('grid')">
+                                        <button class="btn-icon ${_viewMode === 'grid' ? 'active' : ''}" onclick="app.await setViewMode('grid')">
                                             <i class="fas fa-th-large"></i>
                                         </button>
                                     </div>
@@ -1527,21 +1527,21 @@ const appLogic = (() => {
                 </div>
             </div>
         `;
-        renderFolderTree();
-        loadFolderContents();
+        await renderFolderTree();
+        await loadFolderContents();
     };
 
-    const renderFolderTree = (parentId = null, level = 0, container = null) => {
+    const renderFolderTree = async (parentId = null, level = 0, container = null) => {
         const treeContainer = container || document.getElementById('folder-tree');
         if (!treeContainer) return;
         if (parentId === null) treeContainer.innerHTML = '';
 
-        const folders = DataStore.getAll('folders')
+        const folders = await DataStore.getAll('folders')
             .filter(f => f.parent_id === parentId)
             .sort((a, b) => a.name.localeCompare(b.name));
 
-        folders.forEach(folder => {
-            const hasChildren = DataStore.getAll('folders').some(f => f.parent_id === folder.id);
+        for (const folder of folders) {
+            const hasChildren = (await DataStore.getAll('folders')).some(f => f.parent_id === folder.id);
             const isActive = _currentFolder === folder.id;
 
             const div = document.createElement('div');
@@ -1562,185 +1562,187 @@ const appLogic = (() => {
                 </div>
             `;
             treeContainer.appendChild(div);
-            if (hasChildren) renderFolderTree(folder.id, level + 1, treeContainer);
-        });
+            if (hasChildren) await renderFolderTree(folder.id, level + 1, treeContainer);
+        }
     };
 
-    const renderBreadcrumb = () => {
+    const renderBreadcrumb = async () => {
         const container = document.getElementById('breadcrumb');
         if (!container) return;
         const path = [];
-        let curr = _currentFolder ? DataStore.getById('folders', _currentFolder) : null;
-        while (curr) { path.unshift(curr); curr = curr.parent_id ? DataStore.getById('folders', curr.parent_id) : null; }
+        let curr = _currentFolder ? await DataStore.getById('folders', _currentFolder) : null;
+        while (curr) { path.unshift(curr); curr = curr.parent_id ? await DataStore.getById('folders', curr.parent_id) : null; }
 
-        let html = '<span class="breadcrumb-item" onclick="app.navigateToFolder(null)">Root</span>';
-        path.forEach(f => { html += `<span class="breadcrumb-separator">/</span><span class="breadcrumb-item" onclick="app.navigateToFolder(${f.id})">${f.name}</span>`; });
+        let html = '<span class="breadcrumb-item" onclick="app.await navigateToFolder(null)">Root</span>';
+        for (const f of path) { html += `<span class="breadcrumb-separator">/</span><span class="breadcrumb-item" onclick="app.await navigateToFolder(${f.id})">${f.name}</span>`; }
         container.innerHTML = html;
     };
 
-    const navigateToFolder = (id) => { _currentFolder = id; deselectAll(); loadFolderContents(); renderFolderTree(); };
-    const setViewMode = (mode) => { _viewMode = mode; loadFolderContents(); };
-    const sortFiles = (sortBy) => { _fileSortBy = sortBy; loadFolderContents(); };
-    const searchFiles = (q) => { _fileFilter = q; loadFolderContents(); };
-    const refreshFolderTree = () => { renderFolderTree(); };
+    const navigateToFolder = async (id) => { _currentFolder = id; await deselectAll(); await loadFolderContents(); await renderFolderTree(); };
+    const setViewMode = async (mode) => { _viewMode = mode; await loadFolderContents(); };
+    const sortFiles = async (sortBy) => { _fileSortBy = sortBy; await loadFolderContents(); };
+    const searchFiles = async (q) => { _fileFilter = q; await loadFolderContents(); };
+    const refreshFolderTree = async () => { await renderFolderTree(); };
 
-    const openNewFolderModal = () => {
+    const openNewFolderModal = async () => {
         UI.showModal('New Folder', `
             <div class="form-group"><label>Folder Name</label><input type="text" id="new-folder-name" class="form-control" placeholder="Enter name..."></div>
             <div class="form-group"><label>Label Color</label><input type="color" id="new-folder-color" class="form-control" value="#f59e0b"></div>
-        `, [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Create', type: 'primary', action: 'app.createFolder()' }]);
+        `, [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Create', type: 'primary', action: 'await app.createFolder()' }]);
     };
 
-    const createFolder = () => {
+    const createFolder = async () => {
         const name = document.getElementById('new-folder-name')?.value;
         if (!name) return UI.toast.error('Name required');
-        DataStore.create('folders', { id: Date.now(), name, parent_id: _currentFolder, color: document.getElementById('new-folder-color').value, created_by: _currentUser?.id, created_at: new Date().toISOString() });
-        UI.hideModal(); UI.toast.success('Folder created'); renderFolderTree();
+        await DataStore.create('folders', { id: Date.now(), name, parent_id: _currentFolder, color: document.getElementById('new-folder-color').value, created_by: _currentUser?.id, created_at: new Date().toISOString() });
+        UI.hideModal(); UI.toast.success('Folder created'); await renderFolderTree();
     };
 
-    const renameFolder = (id) => {
-        const folder = DataStore.getById('folders', id);
+    const renameFolder = async (id) => {
+        const folder = await DataStore.getById('folders', id);
         UI.showModal('Rename Folder', `<div class="form-group"><label>New Name</label><input type="text" id="rename-folder-input" class="form-control" value="${folder.name}"></div>`,
-            [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Rename', type: 'primary', action: `app.confirmRenameFolder(${id})` }]);
+            [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Rename', type: 'primary', action: `await app.await confirmRenameFolder(${id})` }]);
     };
-    window.app.confirmRenameFolder = (id) => {
+    window.app.confirmRenameFolder = async (id) => {
         const name = document.getElementById('rename-folder-input')?.value;
         if (!name) return;
-        DataStore.update('folders', id, { name }); UI.hideModal(); renderFolderTree(); renderBreadcrumb();
+        await DataStore.update('folders', id, { name }); UI.hideModal(); await renderFolderTree(); await renderBreadcrumb();
     };
 
-    const deleteFolder = (id) => {
-        const hasSub = DataStore.getAll('folders').some(f => f.parent_id === id);
-        const hasFiles = DataStore.getAll('documents').some(d => d.folder_id === id);
+    const deleteFolder = async (id) => {
+        const hasSub =(await DataStore.getAll('folders')).some(f => f.parent_id === id);
+        const hasFiles = (await DataStore.getAll('documents')).some(d => d.folder_id === id);
         if (hasSub || hasFiles) return UI.toast.error('Cannot delete: Folder is not empty');
-        UI.showModal('Delete Folder', '<p>Are you sure?</p>', [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Delete', type: 'primary', action: `app.confirmDeleteFolder(${id})` }]);
+        UI.showModal('Delete Folder', '<p>Are you sure?</p>', [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Delete', type: 'primary', action: `await app.await confirmDeleteFolder(${id})` }]);
     };
-    window.app.confirmDeleteFolder = (id) => { DataStore.delete('folders', id); UI.hideModal(); if (_currentFolder === id) _currentFolder = null; renderFolderTree(); loadFolderContents(); };
+    window.app.confirmDeleteFolder = async (id) => { await DataStore.delete('folders', id); UI.hideModal(); if (_currentFolder === id) _currentFolder = null; await renderFolderTree(); await loadFolderContents(); };
 
-    const showRecentFiles = () => {
-        const allFiles = DataStore.getAll('documents').sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at));
-        renderFileListView(allFiles.slice(0, 20)); // Show top 20
-        _currentFolder = 'recent'; renderBreadcrumb();
+    const showRecentFiles = async () => {
+        const allFiles = (await DataStore.getAll('documents')).sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at));
+        await renderFileListView(allFiles.slice(0, 20)); // Show top 20
+        _currentFolder = 'recent'; await renderBreadcrumb();
     };
 
-    const showAllFiles = () => { renderFileListView(DataStore.getAll('documents')); _currentFolder = 'all'; renderBreadcrumb(); };
-    const showStarredFiles = () => { renderFileListView(DataStore.getAll('documents').filter(d => d.is_starred)); _currentFolder = 'starred'; renderBreadcrumb(); };
+    const showAllFiles = async () => { await renderFileListView(await DataStore.getAll('documents')); _currentFolder = 'all'; await renderBreadcrumb(); };
+    const showStarredFiles = async () => { await renderFileListView((await DataStore.getAll('documents')).filter(d => d.is_starred)); _currentFolder = 'starred'; await renderBreadcrumb(); };
 
-    const toggleStar = (id) => { const f = DataStore.getById('documents', id); DataStore.update('documents', id, { is_starred: !f.is_starred }); loadFolderContents(); };
+    const toggleStar = async (id) => { const f = await DataStore.getById('documents', id); await DataStore.update('documents', id, { is_starred: !f.is_starred }); await loadFolderContents(); };
 
     const downloadFile = (id) => { UI.toast.info('Starting download...'); /* Implementation depends on environment */ };
 
     const handleFileDragStart = (e, id) => { _draggedFileId = id; e.dataTransfer.setData('text/plain', id); e.target.classList.add('dragging'); };
     const handleFileDragEnd = (e) => { e.target.classList.remove('dragging'); _draggedFileId = null; };
-    const handleDropOnFolder = (e, folderId) => {
+    const handleDropOnFolder = async (e, folderId) => {
         e.preventDefault();
         const fileId = parseInt(e.dataTransfer.getData('text/plain'));
-        if (fileId) { DataStore.update('documents', fileId, { folder_id: folderId }); UI.toast.success('Moved successfully'); loadFolderContents(); renderFolderTree(); }
+        if (fileId) { await DataStore.update('documents', fileId, { folder_id: folderId }); UI.toast.success('Moved successfully'); await loadFolderContents(); await renderFolderTree(); }
     };
 
-    const showVersionHistory = (fileId) => {
-        const file = DataStore.getById('documents', fileId);
-        const versions = DataStore.getAll('document_versions').filter(v => v.document_id === fileId).sort((a, b) => b.version_number - a.version_number);
+    const showVersionHistory = async (fileId) => {
+        const file = await DataStore.getById('documents', fileId);
+        const versions = (await DataStore.getAll('document_versions')).filter(v => v.document_id === fileId).sort((a, b) => b.version_number - a.version_number);
         const content = `
             <div class="version-history">
                 <div class="version-header"><h3>Version History: ${file.filename}</h3><p>Current: v${file.current_version || 1}</p></div>
                 <table class="version-table">
                     <thead><tr><th>Version</th><th>Date</th><th>Size</th><th>By</th><th>Notes</th><th>Actions</th></tr></thead>
                     <tbody>
-                        ${versions.map(v => `
+                        ${(await Promise.all(versions.map(async v => `
                             <tr class="${v.version_number === file.current_version ? 'current-version' : ''}">
                                 <td>v${v.version_number}</td>
                                 <td>${new Date(v.created_at).toLocaleString()}</td>
                                 <td>${formatFileSize(v.size)}</td>
-                                <td>${DataStore.getById('users', v.created_by)?.full_name || 'System'}</td>
+                                <td>${(await DataStore.getById('users', v.created_by))?.full_name || 'System'}</td>
                                 <td>${v.change_note || '-'}</td>
                                 <td>
                                     <button class="btn-icon" onclick="app.downloadVersion(${v.id})"><i class="fas fa-download"></i></button>
-                                    <button class="btn-icon" onclick="app.restoreVersion(${v.id})"><i class="fas fa-undo"></i></button>
+                                    <button class="btn-icon" onclick="app.await restoreVersion(${v.id})"><i class="fas fa-undo"></i></button>
                                 </td>
                             </tr>
-                        `).join('')}
+                        `))).join('')}
                     </tbody>
                 </table>
-                ${versions.length >= 2 ? `<div class="compare-row"><button class="btn secondary" onclick="app.showCompareTool(${fileId})">Compare Versions</button></div>` : ''}
+                ${versions.length >= 2 ? `<div class="compare-row"><button class="btn secondary" onclick="app.await showCompareTool(${fileId})">Compare Versions</button></div>` : ''}
             </div>
         `;
         UI.showModal('Version History', content, [{ label: 'Close', type: 'primary', action: 'UI.hideModal()' }]);
     };
 
-    const showCompareTool = (fileId) => {
-        const versions = DataStore.getAll('document_versions').filter(v => v.document_id === fileId);
+    const showCompareTool = async (fileId) => {
+        const versions = (await DataStore.getAll('document_versions')).filter(v => v.document_id === fileId);
         UI.showModal('Compare Versions', `
             <div class="compare-setup">
                 <select id="v1" class="form-control">${versions.map(v => `<option value="${v.id}">Version ${v.version_number}</option>`).join('')}</select>
                 <span>vs</span>
                 <select id="v2" class="form-control">${versions.map(v => `<option value="${v.id}">Version ${v.version_number}</option>`).join('')}</select>
             </div>
-        `, [{ label: 'Compare', type: 'primary', action: `app.compareVersions(${fileId})` }]);
+        `, [{ label: 'Compare', type: 'primary', action: `app.await compareVersions(${fileId})` }]);
     };
 
-    const compareVersions = (fileId) => {
-        const v1 = DataStore.getById('document_versions', parseInt(document.getElementById('v1').value));
-        const v2 = DataStore.getById('document_versions', parseInt(document.getElementById('v2').value));
+    const compareVersions = async (fileId) => {
+        const v1 = await DataStore.getById('document_versions', parseInt(document.getElementById('v1').value));
+        const v2 = await DataStore.getById('document_versions', parseInt(document.getElementById('v2').value));
         UI.showModal('Comparison', `<div class="diff-view"><pre>${v1.data || ''}</pre><pre>${v2.data || ''}</pre></div>`, [{ label: 'Close', type: 'primary', action: 'UI.hideModal()' }]);
     };
 
     const downloadVersion = (versionId) => { UI.toast.info(`Downloading version ${versionId}...`); };
-    const restoreVersion = (versionId) => {
-        const ver = DataStore.getById('document_versions', versionId);
-        DataStore.update('documents', ver.document_id, { current_version: ver.version_number, updatedAt: new Date().toISOString() });
-        UI.toast.success(`Restored to version ${ver.version_number}`); UI.hideModal(); loadFolderContents();
+    const restoreVersion = async (versionId) => {
+        const ver = await DataStore.getById('document_versions', versionId);
+        await DataStore.update('documents', ver.document_id, { current_version: ver.version_number, updatedAt: new Date().toISOString() });
+        UI.toast.success(`Restored to version ${ver.version_number}`); UI.hideModal(); await loadFolderContents();
     };
 
-    const openShareModal = (fileId) => {
-        const file = DataStore.getById('documents', fileId);
-        const users = DataStore.getAll('users').filter(u => u.id !== _currentUser?.id);
-        const shares = DataStore.getAll('document_shares').filter(s => s.document_id === fileId);
+    const openShareModal = async (fileId) => {
+        const file = await DataStore.getById('documents', fileId);
+        const users = (await DataStore.getAll('users')).filter(u => u.id !== _currentUser?.id);
+        const shares = (await DataStore.getAll('document_shares')).filter(s => s.document_id === fileId);
         const content = `
             <div class="share-modal">
                 <h3>Share: ${file.filename}</h3>
                 <div class="share-form">
                     <select id="share-user" class="form-control"><option value="">Select User...</option>${users.map(u => `<option value="${u.id}">${u.full_name}</option>`).join('')}</select>
-                    <button class="btn primary" onclick="app.createShare(${fileId})">Add Share</button>
+                    <button class="btn primary" onclick="app.await createShare(${fileId})">Add Share</button>
                 </div>
                 <div class="share-list">
-                    ${shares.map(s => `<div class="share-item">${DataStore.getById('users', s.shared_with)?.full_name} (${s.permission}) <button onclick="app.removeShare(${s.id})">x</button></div>`).join('')}
+                    ${(await Promise.all(shares.map(async s => `<div class="share-item">${(await DataStore.getById('users', s.shared_with))?.full_name} (${s.permission}) <button onclick="app.await removeShare(${s.id})">x</button></div>`))).join('')}
                 </div>
             </div>
         `;
         UI.showModal('Share Document', content, [{ label: 'Done', type: 'primary', action: 'UI.hideModal()' }]);
     };
 
-    const createShare = (fileId) => {
+    const createShare = async (fileId) => {
         const userId = parseInt(document.getElementById('share-user').value);
         if (!userId) return;
-        DataStore.create('document_shares', { id: Date.now(), document_id: fileId, shared_with: userId, permission: 'view', shared_by: _currentUser?.id });
-        openShareModal(fileId);
+        await DataStore.create('document_shares', { id: Date.now(), document_id: fileId, shared_with: userId, permission: 'view', shared_by: _currentUser?.id });
+        await openShareModal(fileId);
     };
 
-    const removeShare = (id) => { DataStore.delete('document_shares', id); UI.toast.success('Share removed'); UI.hideModal(); };
+    const removeShare = async (id) => { await DataStore.delete('document_shares', id); UI.toast.success('Share removed'); UI.hideModal(); };
 
-    const initDefaultFolders = () => {
-        if (DataStore.getAll('folders').length === 0) {
+    const initDefaultFolders = async () => {
+        if (await DataStore.getAll('folders').length === 0) {
             const defaults = [
                 { id: 1, name: 'Company Policies', color: '#3b82f6', parent_id: null },
                 { id: 2, name: 'Customer Documents', color: '#10b981', parent_id: null },
                 { id: 3, name: 'Agent Agreements', color: '#f59e0b', parent_id: null },
                 { id: 4, name: 'Marketing Materials', color: '#ef4444', parent_id: null }
             ];
-            defaults.forEach(f => DataStore.create('folders', f));
+            for (const f of defaults) {
+                await DataStore.create('folders', f);
+            }
         }
     };
 
-    const initSampleDocuments = () => {
-        if (DataStore.getAll('documents').length === 0) {
-            DataStore.create('documents', { id: 101, filename: 'Welcome Guide.pdf', folder_id: 1, size: 1024 * 500, created_at: new Date().toISOString() });
-            DataStore.create('documents', { id: 102, filename: 'Privacy Policy.docx', folder_id: 1, size: 1024 * 200, created_at: new Date().toISOString() });
+    const initSampleDocuments = async () => {
+        if (await DataStore.getAll('documents').length === 0) {
+            await DataStore.create('documents', { id: 101, filename: 'Welcome Guide.pdf', folder_id: 1, size: 1024 * 500, created_at: new Date().toISOString() });
+            await DataStore.create('documents', { id: 102, filename: 'Privacy Policy.docx', folder_id: 1, size: 1024 * 200, created_at: new Date().toISOString() });
         }
     };
 
-    const getFilesInCurrentFolder = () => {
-        let files = DataStore.getAll('documents');
+    const getFilesInCurrentFolder = async () => {
+        let files = await DataStore.getAll('documents');
 
         // Filter by current folder
         if (_currentFolder && _currentFolder !== 'recent' && _currentFolder !== 'all' && _currentFolder !== 'starred') {
@@ -1761,11 +1763,11 @@ const appLogic = (() => {
         return files;
     };
 
-    const loadFolderContents = () => {
+    const loadFolderContents = async () => {
         const container = document.getElementById('file-container');
         if (!container) return;
 
-        const files = getFilesInCurrentFolder();
+        const files = await getFilesInCurrentFolder();
 
         // Apply sorting
         files.sort((a, b) => {
@@ -1791,19 +1793,19 @@ const appLogic = (() => {
 
         // Render based on view mode
         if (_viewMode === 'list') {
-            renderFileListView(files);
+            await renderFileListView(files);
         } else {
-            renderFileGridView(files);
+            await renderFileGridView(files);
         }
 
         // Update breadcrumb
-        renderBreadcrumb();
+        await renderBreadcrumb();
 
         // Update batch actions
-        updateBatchActions();
+        await updateBatchActions();
     };
 
-    const renderFileListView = (files) => {
+    const renderFileListView = async (files) => {
         const container = document.getElementById('file-container');
 
         if (files.length === 0) {
@@ -1812,7 +1814,7 @@ const appLogic = (() => {
                     <i class="fas fa-folder-open fa-5x"></i>
                     <h3>This folder is empty</h3>
                     <p>Upload files or create a new folder to get started</p>
-                    <button class="btn primary" onclick="app.openUploadModal()">
+                    <button class="btn primary" onclick="app.await openUploadModal()">
                         <i class="fas fa-upload"></i> Upload Files
                     </button>
                 </div>
@@ -1828,13 +1830,13 @@ const appLogic = (() => {
                             <input type="checkbox" onchange="app.selectAllFiles()" 
                                    ${_selectedFiles.length === files.length && files.length > 0 ? 'checked' : ''}>
                         </th>
-                        <th onclick="app.sortFiles('name')" style="cursor: pointer;">
+                        <th onclick="app.await sortFiles('name')" style="cursor: pointer;">
                             Name ${_fileSortBy === 'name' ? (_fileSortDirection === 'asc' ? '↑' : '↓') : ''}
                         </th>
-                        <th onclick="app.sortFiles('date')" style="cursor: pointer;">
+                        <th onclick="app.await sortFiles('date')" style="cursor: pointer;">
                             Modified ${_fileSortBy === 'date' ? (_fileSortDirection === 'asc' ? '↑' : '↓') : ''}
                         </th>
-                        <th onclick="app.sortFiles('size')" style="cursor: pointer;">
+                        <th onclick="app.await sortFiles('size')" style="cursor: pointer;">
                             Size ${_fileSortBy === 'size' ? (_fileSortDirection === 'asc' ? '↑' : '↓') : ''}
                         </th>
                         <th>Actions</th>
@@ -1848,10 +1850,10 @@ const appLogic = (() => {
                             ondragstart="app.handleFileDragStart(event, ${file.id})"
                             ondragend="app.handleFileDragEnd(event)">
                             <td onclick="event.stopPropagation()">
-                                <input type="checkbox" onchange="app.toggleFileSelection(${file.id})" 
+                                <input type="checkbox" onchange="app.await toggleFileSelection(${file.id})" 
                                        ${_selectedFiles.includes(file.id) ? 'checked' : ''}>
                             </td>
-                            <td ondblclick="app.previewFile(${file.id})">
+                            <td ondblclick="app.await previewFile(${file.id})">
                                 <i class="fas ${getFileIcon(file.filename)} file-icon"></i>
                                 <span class="file-name">${file.filename}</span>
                                 ${file.is_starred ? '<i class="fas fa-star starred"></i>' : ''}
@@ -1860,22 +1862,22 @@ const appLogic = (() => {
                             <td>${(file.size > 1048576 ? (file.size / 1048576).toFixed(1) + " MB" : (file.size / 1024).toFixed(0) + " KB")}</td>
                             <td>
                                 <div class="action-buttons" style="display: flex; gap: 4px;">
-                                    <button class="btn-icon" onclick="app.previewFile(${file.id}); event.stopPropagation();" title="Preview">
+                                    <button class="btn-icon" onclick="app.await previewFile(${file.id}); event.stopPropagation();" title="Preview">
                                         <i class="fas fa-eye"></i>
                                     </button>
                                     <button class="btn-icon" onclick="app.downloadFile(${file.id}); event.stopPropagation();" title="Download">
                                         <i class="fas fa-download"></i>
                                     </button>
-                                    <button class="btn-icon" onclick="app.showVersionHistory(${file.id}); event.stopPropagation();" title="Versions">
+                                    <button class="btn-icon" onclick="app.await showVersionHistory(${file.id}); event.stopPropagation();" title="Versions">
                                         <i class="fas fa-history"></i>
                                     </button>
-                                    <button class="btn-icon" onclick="app.openShareModal(${file.id}); event.stopPropagation();" title="Share">
+                                    <button class="btn-icon" onclick="app.await openShareModal(${file.id}); event.stopPropagation();" title="Share">
                                         <i class="fas fa-share-alt"></i>
                                     </button>
-                                    <button class="btn-icon" onclick="app.showFileMetadata(${file.id}); event.stopPropagation();" title="Info">
+                                    <button class="btn-icon" onclick="app.await showFileMetadata(${file.id}); event.stopPropagation();" title="Info">
                                         <i class="fas fa-info-circle"></i>
                                     </button>
-                                    <button class="btn-icon" onclick="app.toggleStar(${file.id}); event.stopPropagation();" title="Star">
+                                    <button class="btn-icon" onclick="app.await toggleStar(${file.id}); event.stopPropagation();" title="Star">
                                         <i class="fas fa-star${file.is_starred ? '' : '-o'}"></i>
                                     </button>
                                     <button class="btn-icon" onclick="app.deleteFile(${file.id}); event.stopPropagation();" title="Delete">
@@ -1892,7 +1894,7 @@ const appLogic = (() => {
         container.innerHTML = html;
     };
 
-    const renderFileGridView = (files) => {
+    const renderFileGridView = async (files) => {
         const container = document.getElementById('file-container');
 
         if (files.length === 0) {
@@ -1911,7 +1913,7 @@ const appLogic = (() => {
 
         let html = '<div class="file-grid">';
 
-        files.forEach(file => {
+        for (const file of files) {
             html += `
                 <div class="file-card ${_selectedFiles.includes(file.id) ? 'selected' : ''}" 
                      data-id="${file.id}"
@@ -1919,14 +1921,14 @@ const appLogic = (() => {
                      ondragstart="app.handleFileDragStart(event, ${file.id})"
                      ondragend="app.handleFileDragEnd(event)">
                     <div class="file-card-header">
-                        <input type="checkbox" onchange="app.toggleFileSelection(${file.id})" 
+                        <input type="checkbox" onchange="app.await toggleFileSelection(${file.id})" 
                                ${_selectedFiles.includes(file.id) ? 'checked' : ''} 
                                onclick="event.stopPropagation()">
-                        <button class="btn-icon" onclick="app.toggleStar(${file.id}); event.stopPropagation();" title="Star">
+                        <button class="btn-icon" onclick="app.await toggleStar(${file.id}); event.stopPropagation();" title="Star">
                             <i class="fas fa-star${file.is_starred ? '' : '-o'}"></i>
                         </button>
                     </div>
-                    <div class="file-card-icon" ondblclick="app.previewFile(${file.id})">
+                    <div class="file-card-icon" ondblclick="app.await previewFile(${file.id})">
                         <i class="fas ${getFileIcon(file.filename)} fa-4x"></i>
                     </div>
                     <div class="file-card-name" title="${file.filename}">${truncateFilename(file.filename, 20)}</div>
@@ -1935,22 +1937,22 @@ const appLogic = (() => {
                         <span>${new Date(file.updated_at || file.created_at).toLocaleDateString()}</span>
                     </div>
                     <div class="file-card-actions">
-                        <button class="btn-icon" onclick="app.previewFile(${file.id}); event.stopPropagation();" title="Preview">
+                        <button class="btn-icon" onclick="app.await previewFile(${file.id}); event.stopPropagation();" title="Preview">
                             <i class="fas fa-eye"></i>
                         </button>
                         <button class="btn-icon" onclick="app.downloadFile(${file.id}); event.stopPropagation();" title="Download">
                             <i class="fas fa-download"></i>
                         </button>
-                        <button class="btn-icon" onclick="app.showVersionHistory(${file.id}); event.stopPropagation();" title="Versions">
+                        <button class="btn-icon" onclick="app.await showVersionHistory(${file.id}); event.stopPropagation();" title="Versions">
                             <i class="fas fa-history"></i>
                         </button>
-                        <button class="btn-icon" onclick="app.openShareModal(${file.id}); event.stopPropagation();" title="Share">
+                        <button class="btn-icon" onclick="app.await openShareModal(${file.id}); event.stopPropagation();" title="Share">
                             <i class="fas fa-share-alt"></i>
                         </button>
                     </div>
                 </div>
             `;
-        });
+        }
 
         html += '</div>';
         container.innerHTML = html;
@@ -1965,7 +1967,7 @@ const appLogic = (() => {
         return truncated + '...' + ext;
     };
 
-    const updateBatchActions = () => {
+    const updateBatchActions = async () => {
         const container = document.getElementById('batch-actions');
         if (!container) return;
 
@@ -1987,38 +1989,38 @@ const appLogic = (() => {
                 <button class="btn-icon" onclick="app.moveSelected()" title="Move Selected">
                     <i class="fas fa-cut"></i>
                 </button>
-                <button class="btn-icon" onclick="app.deleteSelected()" title="Delete Selected">
+                <button class="btn-icon" onclick="app.await deleteSelected()" title="Delete Selected">
                     <i class="fas fa-trash"></i>
                 </button>
-                <button class="btn-icon" onclick="app.deselectAll()" title="Clear Selection">
+                <button class="btn-icon" onclick="app.await deselectAll()" title="Clear Selection">
                     <i class="fas fa-times"></i>
                 </button>
             </div>
         `;
     };
 
-    const toggleFileSelection = (fileId) => {
+    const toggleFileSelection = async (fileId) => {
         const index = _selectedFiles.indexOf(fileId);
         if (index === -1) {
             _selectedFiles.push(fileId);
         } else {
             _selectedFiles.splice(index, 1);
         }
-        loadFolderContents(); // Refresh to show selection
+        await loadFolderContents(); // Refresh to show selection
     };
 
-    const selectAllFiles = () => {
-        const files = getFilesInCurrentFolder();
+    const selectAllFiles = async () => {
+        const files = await getFilesInCurrentFolder();
         _selectedFiles = files.map(f => f.id);
-        loadFolderContents();
+        await loadFolderContents();
     };
 
-    const deselectAll = () => {
+    const deselectAll = async () => {
         _selectedFiles = [];
-        loadFolderContents();
+        await loadFolderContents();
     };
 
-    const deleteSelected = () => {
+    const deleteSelected = async () => {
         if (_selectedFiles.length === 0) return;
 
         UI.showModal('Delete Files',
@@ -2026,17 +2028,17 @@ const appLogic = (() => {
     <p class="text-error">This action cannot be undone.</p>`,
             [
                 { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-                { label: 'Delete', type: 'primary', action: 'app.confirmDeleteSelected()' }
+                { label: 'Delete', type: 'primary', action: 'await app.confirmDeleteSelected()' }
             ]
         );
     };
 
-    const confirmDeleteSelected = () => {
-        _selectedFiles.forEach(fileId => {
-            DataStore.delete('documents', fileId);
-        });
+    const confirmDeleteSelected = async () => {
+        for (const fileId of _selectedFiles) {
+            await DataStore.delete('documents', fileId);
+        }
         _selectedFiles = [];
-        loadFolderContents();
+        await loadFolderContents();
         UI.hideModal();
         UI.toast.success('Files deleted');
     };
@@ -2053,7 +2055,7 @@ const appLogic = (() => {
     const copySelected = () => { UI.toast.info('Copy selected files'); };
     const moveSelected = () => { UI.toast.info('Move selected files'); };
 
-    const openUploadModal = () => {
+    const openUploadModal = async () => {
         const content = `
             <div class="upload-modal">
                 <div class="upload-drop-zone" id="upload-drop-zone">
@@ -2090,7 +2092,7 @@ const appLogic = (() => {
             { label: 'Upload', type: 'primary', action: 'app.uploadFiles()' }
         ]);
 
-        setTimeout(initUploadDragDrop, 100);
+        await setTimeout(initUploadDragDrop, 100);
     };
 
     const initUploadDragDrop = () => {
@@ -2152,9 +2154,9 @@ const appLogic = (() => {
         let uploaded = 0;
         const total = files.length;
 
-        // Simulate upload (in production, actually upload)
-        files.forEach((file, index) => {
-            setTimeout(() => {
+        // Simulate async upload (in production, actually upload)
+        for (const [index, file] of files.entries()) {
+            await setTimeout(async () => {
                 // Create document record
                 const newDoc = {
                     id: Date.now() + index,
@@ -2171,7 +2173,7 @@ const appLogic = (() => {
                     is_starred: false
                 };
 
-                DataStore.create('documents', newDoc);
+                await DataStore.create('documents', newDoc);
 
                 uploaded++;
                 const percent = (uploaded / total) * 100;
@@ -2179,18 +2181,18 @@ const appLogic = (() => {
                 document.getElementById('upload-status').textContent = `Uploaded ${uploaded} of ${total} files`;
 
                 if (uploaded === total) {
-                    setTimeout(() => {
+                    await setTimeout(async () => {
                         UI.hideModal();
                         UI.toast.success(`${total} files uploaded successfully`);
-                        loadFolderContents();
+                        await loadFolderContents();
                     }, 500);
                 }
             }, index * 300); // Stagger for demo effect
-        });
+        }
     };
 
-    const previewFile = (fileId) => {
-        const file = DataStore.getById('documents', fileId);
+    const previewFile = async (fileId) => {
+        const file = await DataStore.getById('documents', fileId);
         if (!file) return;
 
         const filename = file.filename;
@@ -2241,17 +2243,17 @@ In a production system, this would show the actual file contents.
 
         UI.showModal(`Preview: ${file.filename}`, previewContent, [
             { label: 'Download', type: 'secondary', action: `app.downloadFile(${fileId})` },
-            { label: 'Share', type: 'secondary', action: `app.openShareModal(${fileId})` },
+            { label: 'Share', type: 'secondary', action: `await app.await openShareModal(${fileId})` },
             { label: 'Close', type: 'primary', action: 'UI.hideModal()' }
         ], 'fullscreen');
     };
 
-    const showFileMetadata = (fileId) => {
-        const file = DataStore.getById('documents', fileId);
+    const showFileMetadata = async (fileId) => {
+        const file = await DataStore.getById('documents', fileId);
         if (!file) return;
 
-        const creator = file.created_by ? DataStore.getById('users', file.created_by) : null;
-        const versions = DataStore.getAll('document_versions').filter(v => v.document_id === fileId);
+        const creator = file.created_by ? await DataStore.getById('users', file.created_by) : null;
+        const versions = (await DataStore.getAll('document_versions')).filter(v => v.document_id === fileId);
 
         const content = `
             <div class="file-metadata">
@@ -2272,7 +2274,7 @@ In a production system, this would show the actual file contents.
                         </div>
                         <div class="metadata-row">
                             <span class="metadata-label">Location:</span>
-                            <span class="metadata-value">${getFolderPath(file.folder_id)}</span>
+                            <span class="metadata-value">${await getFolderPath(file.folder_id)}</span>
                         </div>
                     </div>
                 </div>
@@ -2323,39 +2325,39 @@ In a production system, this would show the actual file contents.
         `;
 
         UI.showModal('File Information', content, [
-            { label: 'Edit Description', type: 'secondary', action: `app.editFileDescription(${fileId})` },
+            { label: 'Edit Description', type: 'secondary', action: `await app.await editFileDescription(${fileId})` },
             { label: 'Close', type: 'primary', action: 'UI.hideModal()' }
         ]);
     };
 
-    const getFolderPath = (folderId) => {
+    const getFolderPath = async (folderId) => {
         if (!folderId) return 'Root';
         const path = [];
-        let current = DataStore.getById('folders', folderId);
-        while (current) { path.unshift(current.name); current = current.parent_id ? DataStore.getById('folders', current.parent_id) : null; }
+        let current = await DataStore.getById('folders', folderId);
+        while (current) { path.unshift(current.name); current = current.parent_id ? await DataStore.getById('folders', current.parent_id) : null; }
         return path.join(' / ');
     };
 
-    const editFileDescription = (fileId) => {
-        const file = DataStore.getById('documents', fileId);
+    const editFileDescription = async (fileId) => {
+        const file = await DataStore.getById('documents', fileId);
         UI.showModal('Edit Description', `<div class="form-group"><label>Description</label><textarea id="edit-file-desc" class="form-control" rows="4">${file.description || ''}</textarea></div>`,
-            [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Save', type: 'primary', action: `app.saveFileDescription(${fileId})` }]);
+            [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Save', type: 'primary', action: `await app.await saveFileDescription(${fileId})` }]);
     };
 
-    const saveFileDescription = (fileId) => {
+    const saveFileDescription = async (fileId) => {
         const description = document.getElementById('edit-file-desc')?.value;
-        DataStore.update('documents', fileId, { description }); UI.hideModal(); UI.toast.success('Description updated'); showFileMetadata(fileId);
+        await DataStore.update('documents', fileId, { description }); UI.hideModal(); UI.toast.success('Description updated'); await showFileMetadata(fileId);
     };
 
     console.log('App initializing...');
 
     // ==================== PHASE 14: CUSTOMER & AGENT NOTE HELPERS ====================
 
-    const addCustomerNote = (customerId) => {
+    const addCustomerNote = async (customerId) => {
         const text = document.getElementById('customer-note-text')?.value?.trim();
         if (!text) { UI.toast.error('Please enter a note'); return; }
-        const currentUser = Auth.getCurrentUser();
-        DataStore.create('notes', {
+        const currentUser = await Auth.getCurrentUser();
+        await DataStore.create('notes', {
             id: Date.now(),
             customer_id: customerId,
             text,
@@ -2364,22 +2366,22 @@ In a production system, this would show the actual file contents.
         });
         document.getElementById('customer-note-text').value = '';
         UI.toast.success('Note added');
-        showCustomerDetail(customerId);
+        await showCustomerDetail(customerId);
     };
 
-    const deleteCustomerNote = (customerId, noteId) => {
-        UI.confirm('Delete Note?', 'Are you sure?', () => {
-            DataStore.delete('notes', noteId);
+    const deleteCustomerNote = async (customerId, noteId) => {
+        UI.confirm('Delete Note?', 'Are you sure?', async () => {
+            await DataStore.delete('notes', noteId);
             UI.toast.success('Note deleted');
-            showCustomerDetail(customerId);
+            await showCustomerDetail(customerId);
         });
     };
 
-    const addAgentNote = (agentId) => {
+    const addAgentNote = async (agentId) => {
         const text = document.getElementById(`agent-note-text-${agentId}`)?.value?.trim();
         if (!text) { UI.toast.error('Please enter a note'); return; }
-        const currentUser = Auth.getCurrentUser();
-        DataStore.create('notes', {
+        const currentUser = await Auth.getCurrentUser();
+        await DataStore.create('notes', {
             id: Date.now(),
             agent_id: agentId,
             text,
@@ -2388,20 +2390,20 @@ In a production system, this would show the actual file contents.
         });
         document.getElementById(`agent-note-text-${agentId}`).value = '';
         UI.toast.success('Note added');
-        showAgentDetail(agentId);
+        await showAgentDetail(agentId);
     };
 
-    const deleteAgentNote = (agentId, noteId) => {
-        UI.confirm('Delete Note?', 'Are you sure?', () => {
-            DataStore.delete('notes', noteId);
+    const deleteAgentNote = async (agentId, noteId) => {
+        UI.confirm('Delete Note?', 'Are you sure?', async () => {
+            await DataStore.delete('notes', noteId);
             UI.toast.success('Note deleted');
-            showAgentDetail(agentId);
+            await showAgentDetail(agentId);
         });
     };
 
     // ==================== PHASE 14: VOICE RECORDING FUNCTIONS ====================
 
-    const openVoiceRecorder = (targetElementId, entityType, entityId) => {
+    const openVoiceRecorder = async (targetElementId, entityType, entityId) => {
         window._voiceTarget = { elementId: targetElementId, entityType, entityId };
 
         const modalContent = `
@@ -2411,7 +2413,7 @@ In a production system, this would show the actual file contents.
                 </div>
 
                 <div class="recorder-controls">
-                    <button class="btn primary btn-large" id="voice-record-btn" onclick="app.startRecording()">
+                    <button class="btn primary btn-large" id="voice-record-btn" onclick="app.await startRecording()">
                         <i class="fas fa-circle" style="color:#ef4444;"></i> RECORD
                     </button>
                     <button class="btn error btn-large" id="voice-stop-btn" style="display:none;" onclick="app.stopRecording()">
@@ -2430,7 +2432,7 @@ In a production system, this would show the actual file contents.
                 </div>
 
                 <div class="recorder-actions" id="voice-recorder-actions" style="display:none;">
-                    <button class="btn primary" onclick="app.saveTranscription()">
+                    <button class="btn primary" onclick="app.await saveTranscription()">
                         <i class="fas fa-save"></i> Save Text
                     </button>
                     <button class="btn secondary" onclick="app.editTranscription()">
@@ -2467,7 +2469,7 @@ In a production system, this would show the actual file contents.
             _mediaRecorder = new MediaRecorder(_recordingStream);
 
             _mediaRecorder.ondataavailable = (e) => { _audioChunks.push(e.data); };
-            _mediaRecorder.onstop = () => { processRecording(); };
+            _mediaRecorder.onstop = async () => { await processRecording(); };
             _mediaRecorder.start();
             _recordingStartTime = Date.now();
 
@@ -2480,7 +2482,7 @@ In a production system, this would show the actual file contents.
             if (micIcon) micIcon.className = 'fas fa-microphone recording';
 
             // Start timer
-            _recordingTimer = setInterval(() => {
+            _recordingTimer = (() => {
                 const elapsed = Math.floor((Date.now() - _recordingStartTime) / 1000);
                 const m = Math.floor(elapsed / 60).toString().padStart(2, '0');
                 const s = (elapsed % 60).toString().padStart(2, '0');
@@ -2494,7 +2496,7 @@ In a production system, this would show the actual file contents.
                 waveform.innerHTML = Array.from({ length: 40 }, () =>
                     `<div class="waveform-bar" style="height:${Math.floor(Math.random() * 28) + 4}px;"></div>`
                 ).join('');
-                window._waveformInterval = setInterval(() => {
+                window._waveformInterval = (() => {
                     document.querySelectorAll('.waveform-bar').forEach(b => {
                         b.style.height = (Math.floor(Math.random() * 28) + 4) + 'px';
                     });
@@ -2530,11 +2532,11 @@ In a production system, this would show the actual file contents.
         if (transcribedEl) transcribedEl.placeholder = '⏳ Transcribing audio...';
     };
 
-    const processRecording = () => {
+    const processRecording = async () => {
         const voiceSettings = JSON.parse(localStorage.getItem('voice_settings') || '{}');
         const delay = voiceSettings.quality === 'high' ? 3000 : voiceSettings.quality === 'fast' ? 1000 : 2000;
 
-        setTimeout(() => {
+        (() => {
             const samples = [
                 "Customer is facing career stagnation and financial difficulties. Interested in PR4 solution. Office located in Bangsar with main entrance facing North-West.",
                 "Discussed upcoming Feng Shui workshop. Client wants to bring two friends. Follow up next week with registration details.",
@@ -2563,7 +2565,7 @@ In a production system, this would show the actual file contents.
         }, delay);
     };
 
-    const saveTranscription = () => {
+    const saveTranscription = async () => {
         const transcribedText = document.getElementById('voice-transcribed-text')?.value?.trim();
         if (!transcribedText) { UI.toast.error('No text to save'); return; }
 
@@ -2578,14 +2580,14 @@ In a production system, this would show the actual file contents.
             UI.toast.success('Voice text inserted');
         } else {
             // Create a note record
-            createNoteFromVoice(target.entityType, target.entityId, transcribedText);
+            await createNoteFromVoice(target.entityType, target.entityId, transcribedText);
             UI.hideModal();
             UI.toast.success('Voice note saved');
         }
     };
 
-    const createNoteFromVoice = (entityType, entityId, text) => {
-        const currentUser = Auth.getCurrentUser();
+    const createNoteFromVoice = async (entityType, entityId, text) => {
+        const currentUser = await Auth.getCurrentUser();
         const noteData = {
             id: Date.now(),
             text,
@@ -2596,18 +2598,18 @@ In a production system, this would show the actual file contents.
 
         if (entityType === 'prospect') {
             noteData.prospect_id = entityId;
-            DataStore.create('notes', noteData);
-            if (entityId) showProspectDetail(entityId);
+            await DataStore.create('notes', noteData);
+            if (entityId) await showProspectDetail(entityId);
         } else if (entityType === 'customer') {
             noteData.customer_id = entityId;
-            DataStore.create('notes', noteData);
-            if (entityId) showCustomerDetail(entityId);
+            await DataStore.create('notes', noteData);
+            if (entityId) await showCustomerDetail(entityId);
         } else if (entityType === 'agent') {
             noteData.agent_id = entityId;
-            DataStore.create('notes', noteData);
-            if (entityId) showAgentDetail(entityId);
+            await DataStore.create('notes', noteData);
+            if (entityId) await showAgentDetail(entityId);
         } else {
-            DataStore.create('notes', noteData);
+            await DataStore.create('notes', noteData);
         }
     };
 
@@ -2690,21 +2692,21 @@ In a production system, this would show the actual file contents.
 
     const isMobile = () => window.innerWidth <= 768;
 
-    const renderMobileBottomNav = () => {
+    const renderMobileBottomNav = async () => {
         if (document.querySelector('.mobile-bottom-nav')) return; // Already added
         const bottomNav = document.createElement('div');
         bottomNav.className = 'mobile-bottom-nav';
         bottomNav.id = 'mobile-bottom-nav';
         bottomNav.innerHTML = `
-            <div class="mobile-nav-item" onclick="app.navigateTo('calendar')">
+            <div class="mobile-nav-item" onclick="app.await navigateTo('calendar')">
                 <i class="fas fa-calendar-alt"></i>
                 <span>Calendar</span>
             </div>
-            <div class="mobile-nav-item" onclick="app.navigateTo('prospects')">
+            <div class="mobile-nav-item" onclick="app.await navigateTo('prospects')">
                 <i class="fas fa-users"></i>
                 <span>Prospects</span>
             </div>
-            <div class="mobile-nav-item" onclick="app.navigateTo('pipeline')">
+            <div class="mobile-nav-item" onclick="app.await navigateTo('pipeline')">
                 <i class="fas fa-chart-line"></i>
                 <span>Pipeline</span>
             </div>
@@ -2716,7 +2718,7 @@ In a production system, this would show the actual file contents.
         document.body.appendChild(bottomNav);
     };
 
-    const showMobileMenu = () => {
+    const showMobileMenu = async () => {
         const menuItems = [
             { view: 'agents', label: 'Consultant', icon: 'fas fa-user-tie' },
             { view: 'promotions', label: 'Promotions', icon: 'fas fa-bullhorn' },
@@ -2729,7 +2731,7 @@ In a production system, this would show the actual file contents.
         const content = `
             <div class="mobile-menu">
                 ${menuItems.map(item => `
-                    <div class="mobile-menu-item" onclick="app.navigateTo('${item.view}'); UI.hideModal()">
+                    <div class="mobile-menu-item" onclick="app.await navigateTo('${item.view}'); UI.hideModal()">
                         <i class="${item.icon}"></i>
                         <span>${item.label}</span>
                     </div>
@@ -2755,7 +2757,7 @@ In a production system, this would show the actual file contents.
         }, { passive: true });
     };
 
-    const initPullToRefresh = () => {
+    const initPullToRefresh = async () => {
         const content = document.querySelector('.content-viewport');
         if (!content) return;
 
@@ -2783,8 +2785,8 @@ In a production system, this would show the actual file contents.
             const diff = e.changedTouches[0].clientY - startY;
             if (diff > 80) {
                 refreshEl.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i> Refreshing...';
-                setTimeout(() => {
-                    navigateTo(_currentView || 'calendar');
+                await setTimeout(async () => {
+                    await navigateTo(_currentView || 'calendar');
                     refreshEl.classList.remove('show');
                     refreshEl.innerHTML = '<i class="fas fa-arrow-down"></i> Pull to refresh';
                 }, 800);
@@ -2811,10 +2813,10 @@ In a production system, this would show the actual file contents.
         updateOfflineIndicator();
     };
 
-    const handleOnline = () => {
+    const handleOnline = async () => {
         _isOnline = true;
         UI.toast.success('Back online – syncing data...');
-        processOfflineQueue();
+        await processOfflineQueue();
         updateOfflineIndicator();
     };
 
@@ -2863,9 +2865,9 @@ In a production system, this would show the actual file contents.
         for (const item of queue) {
             try {
                 if (item.action.startsWith('create_')) {
-                    DataStore.create(item.action.replace('create_', ''), item.data);
+                    await DataStore.create(item.action.replace('create_', ''), item.data);
                 } else if (item.action.startsWith('update_')) {
-                    DataStore.update(item.action.replace('update_', ''), item.data.id, item.data);
+                    await DataStore.update(item.action.replace('update_', ''), item.data.id, item.data);
                 }
                 success++;
             } catch (e) {
@@ -2880,14 +2882,14 @@ In a production system, this would show the actual file contents.
         else UI.toast.warning(`Synced ${success}, failed ${fail} `);
     };
 
-    const offlineCreate = (tableName, data) => {
-        if (_isOnline) return DataStore.create(tableName, data);
+    const offlineCreate = async (tableName, data) => {
+        if (_isOnline) return await DataStore.create(tableName, data);
         addToOfflineQueue('create_' + tableName, data);
         return { ...data, id: 'offline-' + Date.now(), offline: true };
     };
 
-    const offlineUpdate = (tableName, id, data) => {
-        if (_isOnline) return DataStore.update(tableName, id, data);
+    const offlineUpdate = async (tableName, id, data) => {
+        if (_isOnline) return await DataStore.update(tableName, id, data);
         addToOfflineQueue('update_' + tableName, { ...data, id });
         return { ...data, id, offline: true };
     };
@@ -2904,7 +2906,7 @@ In a production system, this would show the actual file contents.
         }
 
         async createEvent(activity) {
-            const token = await this.getAccessToken();
+            const token = await this.await getAccessToken();
             if (!token) return null;
 
             const event = {
@@ -2942,7 +2944,7 @@ In a production system, this would show the actual file contents.
         }
 
         async updateEvent(activity, googleEventId) {
-            const token = await this.getAccessToken();
+            const token = await this.await getAccessToken();
             if (!token) return false;
 
             try {
@@ -2956,7 +2958,7 @@ In a production system, this would show the actual file contents.
         }
 
         async deleteEvent(googleEventId) {
-            const token = await this.getAccessToken();
+            const token = await this.await getAccessToken();
             if (!token) return false;
 
             try {
@@ -2970,7 +2972,7 @@ In a production system, this would show the actual file contents.
         }
 
         async listEvents(timeMin, timeMax) {
-            const token = await this.getAccessToken();
+            const token = await this.await getAccessToken();
             if (!token) return [];
 
             try {
@@ -2996,7 +2998,7 @@ In a production system, this would show the actual file contents.
             this.syncInProgress = true;
 
             try {
-                const activities = DataStore.getAll('activities');
+                const activities = await DataStore.getAll('activities');
                 const syncLog = this.getSyncLog();
 
                 let synced = 0, created = 0, updated = 0, deleted = 0;
@@ -3006,17 +3008,17 @@ In a production system, this would show the actual file contents.
 
                     if (this.needsSync(activity, syncRecord)) {
                         if (activity.status === 'cancelled' && syncRecord?.google_event_id) {
-                            await this.googleCalendar.deleteEvent(syncRecord.google_event_id);
+                            await this.googleCalendar.await deleteEvent(syncRecord.google_event_id);
                             this.removeSyncRecord(activity.id);
                             deleted++;
                         } else if (syncRecord?.google_event_id) {
-                            await this.googleCalendar.updateEvent(activity, syncRecord.google_event_id);
-                            this.updateSyncRecord(activity.id, syncRecord.google_event_id);
+                            await this.googleCalendar.await updateEvent(activity, syncRecord.google_event_id);
+                            await this.await updateSyncRecord(activity.id, syncRecord.google_event_id);
                             updated++;
                         } else {
-                            const googleEventId = await this.googleCalendar.createEvent(activity);
+                            const googleEventId = await this.googleCalendar.await createEvent(activity);
                             if (googleEventId) {
-                                this.addSyncRecord(activity.id, googleEventId);
+                                await this.await addSyncRecord(activity.id, googleEventId);
                                 created++;
                             }
                         }
@@ -3063,7 +3065,7 @@ In a production system, this would show the actual file contents.
             return log ? JSON.parse(log) : [];
         }
 
-        addSyncRecord(activityId, googleEventId) {
+        async addSyncRecord(activityId, googleEventId) {
             const log = this.getSyncLog();
             log.push({
                 activity_id: activityId,
@@ -3073,9 +3075,9 @@ In a production system, this would show the actual file contents.
             localStorage.setItem('google_sync_log', JSON.stringify(log));
 
             // Also add to sync_history table
-            const connection = getGoogleConnection();
+            const connection = await getGoogleConnection();
             if (connection && _currentUser) {
-                DataStore.create('sync_history', {
+                await DataStore.create('sync_history', {
                     integration_id: connection.integration_id,
                     user_id: _currentUser.id,
                     activity_id: activityId,
@@ -3088,7 +3090,7 @@ In a production system, this would show the actual file contents.
             }
         }
 
-        updateSyncRecord(activityId, googleEventId) {
+        async updateSyncRecord(activityId, googleEventId) {
             const log = this.getSyncLog();
             const record = log.find(r => r.activity_id === activityId);
             if (record) {
@@ -3102,9 +3104,9 @@ In a production system, this would show the actual file contents.
             }
             localStorage.setItem('google_sync_log', JSON.stringify(log));
 
-            const connection = getGoogleConnection();
+            const connection = await getGoogleConnection();
             if (connection && _currentUser) {
-                DataStore.create('sync_history', {
+                await DataStore.create('sync_history', {
                     integration_id: connection.integration_id,
                     user_id: _currentUser.id,
                     activity_id: activityId,
@@ -3123,7 +3125,7 @@ In a production system, this would show the actual file contents.
             localStorage.setItem('google_sync_log', JSON.stringify(filtered));
         }
 
-        resolveConflict(choice, activityId, eventId) {
+        await resolveConflict(choice, activityId, eventId) {
             UI.hideModal();
             UI.toast.success(`Conflict resolved. Chose: ${choice}`);
         }
@@ -3131,7 +3133,7 @@ In a production system, this would show the actual file contents.
 
     // Refresh Google Token - mock implementation for demo
     const refreshGoogleToken = async () => {
-        const connection = getGoogleConnection();
+        const connection = await getGoogleConnection();
         if (connection && connection.access_token) {
             return connection.access_token;
         }
@@ -3146,7 +3148,7 @@ In a production system, this would show the actual file contents.
         _syncManager = new SyncManager();
     };
 
-    const showIntegrationHub = (container) => {
+    const showIntegrationHub = async (container) => {
         container.innerHTML = `
             <div class="integration-hub">
                 <div class="integration-header">
@@ -3154,24 +3156,24 @@ In a production system, this would show the actual file contents.
                         <h1>Integration Hub</h1>
                         <p>Connect your CRM with external services</p>
                     </div>
-                    <button class="btn secondary" onclick="app.navigateTo('settings')">
+                    <button class="btn secondary" onclick="app.await navigateTo('settings')">
                         <i class="fas fa-arrow-left"></i> Back to Settings
                     </button>
                 </div>
                 
                 <div class="integration-grid">
-                    ${renderIntegrationCard('google', 'Google Calendar', 'Two-way sync', 'calendar', getConnectionStatus('google'))}
-                    ${renderIntegrationCard('outlook', 'Outlook Calendar', 'One-way sync', 'calendar', getConnectionStatus('outlook'))}
-                    ${renderIntegrationCard('whatsapp', 'WhatsApp Business', 'Outbound only', 'messaging', getConnectionStatus('whatsapp'))}
-                    ${renderIntegrationCard('twilio', 'Twilio SMS', 'Outbound only', 'messaging', getConnectionStatus('twilio'))}
-                    ${renderIntegrationCard('quickbooks', 'QuickBooks', 'One-way sync', 'accounting', getConnectionStatus('quickbooks'))}
-                    ${renderIntegrationCard('googledrive', 'Google Drive', 'Two-way sync', 'storage', getConnectionStatus('googledrive'))}
+                    ${await renderIntegrationCard('google', 'Google Calendar', 'Two-way sync', 'calendar', await getConnectionStatus('google'))}
+                    ${await renderIntegrationCard('outlook', 'Outlook Calendar', 'One-way sync', 'calendar', await getConnectionStatus('outlook'))}
+                    ${await renderIntegrationCard('whatsapp', 'WhatsApp Business', 'Outbound only', 'messaging', await getConnectionStatus('whatsapp'))}
+                    ${await renderIntegrationCard('twilio', 'Twilio SMS', 'Outbound only', 'messaging', await getConnectionStatus('twilio'))}
+                    ${await renderIntegrationCard('quickbooks', 'QuickBooks', 'One-way sync', 'accounting', await getConnectionStatus('quickbooks'))}
+                    ${await renderIntegrationCard('googledrive', 'Google Drive', 'Two-way sync', 'storage', await getConnectionStatus('googledrive'))}
                 </div>
             </div>
         `;
     };
 
-    const renderIntegrationCard = (id, name, description, type, status) => {
+    const renderIntegrationCard = async (id, name, description, type, status) => {
         const statusColors = {
             connected: 'status-connected',
             disconnected: 'status-disconnected',
@@ -3186,7 +3188,7 @@ In a production system, this would show the actual file contents.
         };
 
         return `
-            <div class="integration-card" onclick="app.showIntegrationDetails('${id}')">
+            <div class="integration-card" onclick="app.await showIntegrationDetails('${id}')">
                 <div class="integration-icon ${type}">
                     <i class="${statusIcons[type] || 'fas fa-plug'}"></i>
                 </div>
@@ -3198,7 +3200,7 @@ In a production system, this would show the actual file contents.
                     </div>
                 </div>
                 <div class="integration-action">
-                    <button class="btn ${status === 'connected' ? 'secondary' : 'primary'}" onclick="event.stopPropagation(); id === 'whatsapp' ? app.showWhatsAppIntegration() : app.showIntegrationDetails('${id}')">
+                    <button class="btn ${status === 'connected' ? 'secondary' : 'primary'}" onclick="event.stopPropagation(); id === 'whatsapp' ? await app.await showWhatsAppIntegration() : app.await showIntegrationDetails('${id}')">
                         ${status === 'connected' ? 'Configure' : 'Connect'}
                     </button>
                 </div>
@@ -3206,9 +3208,9 @@ In a production system, this would show the actual file contents.
         `;
     };
 
-    const getConnectionStatus = (integrationId) => {
-        const connections = DataStore.query('integration_connections', {
-            integration_id: getIntegrationId(integrationId),
+    const getConnectionStatus = async (integrationId) => {
+        const connections = await DataStore.query('integration_connections', {
+            integration_id: await getIntegrationId(integrationId),
             user_id: _currentUser?.id || 1
         });
 
@@ -3222,29 +3224,29 @@ In a production system, this would show the actual file contents.
         return conn.status;
     };
 
-    const getIntegrationId = (provider) => {
-        const integrations = DataStore.getAll('integrations');
+    const getIntegrationId = async (provider) => {
+        const integrations = await DataStore.getAll('integrations');
         const integration = integrations.find(i => i.provider === provider);
         return integration ? integration.id : null;
     };
 
-    const showIntegrationDetails = (provider) => {
+    const showIntegrationDetails = async (provider) => {
         if (provider === 'google') {
-            showGoogleCalendarIntegration();
+            await showGoogleCalendarIntegration();
         } else {
             UI.toast.info(`${provider} integration coming soon`);
         }
     };
 
-    const showGoogleCalendarIntegration = () => {
-        const connection = getGoogleConnection();
+    const showGoogleCalendarIntegration = async () => {
+        const connection = await getGoogleConnection();
         const isConnected = connection && connection.status === 'connected';
 
         const viewport = document.getElementById('content-viewport');
         viewport.innerHTML = `
             <div class="integration-detail">
                 <div class="detail-header">
-                    <button class="btn secondary" onclick="app.showIntegrationHub(document.getElementById('content-viewport'))">
+                    <button class="btn secondary" onclick="app.await showIntegrationHub(document.getElementById('content-viewport'))">
                         <i class="fas fa-arrow-left"></i> Back to Integrations
                     </button>
                     <h1>Google Calendar Integration</h1>
@@ -3330,7 +3332,7 @@ In a production system, this would show the actual file contents.
                             <button class="btn primary" onclick="app.saveGoogleSettings()">Save Settings</button>
                             <button class="btn secondary" onclick="app.syncGoogleCalendar()">Sync Now</button>
                             <button class="btn secondary" onclick="app.viewSyncHistory()">View Sync History</button>
-                            <button class="btn error" onclick="app.disconnectGoogle()">Disconnect</button>
+                            <button class="btn error" onclick="app.await disconnectGoogle()">Disconnect</button>
                         </div>
                     </div>
                 ` : ''}
@@ -3338,11 +3340,11 @@ In a production system, this would show the actual file contents.
         `;
     };
 
-    const getGoogleConnection = () => {
-        const integrationId = getIntegrationId('google');
+    const getGoogleConnection = async () => {
+        const integrationId = await getIntegrationId('google');
         if (!integrationId) return null;
 
-        const connections = DataStore.query('integration_connections', {
+        const connections = await DataStore.query('integration_connections', {
             integration_id: integrationId,
             user_id: _currentUser?.id || 1
         });
@@ -3350,7 +3352,7 @@ In a production system, this would show the actual file contents.
         return connections.length > 0 ? connections[0] : null;
     };
 
-    const initiateGoogleOAuth = () => {
+    const initiateGoogleOAuth = async () => {
         UI.showModal('Connect Google Calendar', `
             <div class="oauth-simulator">
                 <p>This would open Google's OAuth consent screen.</p>
@@ -3376,15 +3378,15 @@ In a production system, this would show the actual file contents.
             </div>
         `, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Simulate Connection', type: 'primary', action: 'app.simulateGoogleConnection()' }
+            { label: 'Simulate Connection', type: 'primary', action: 'await app.await simulateGoogleConnection()' }
         ]);
     };
 
-    const simulateGoogleConnection = () => {
+    const simulateGoogleConnection = async () => {
         UI.hideModal();
-        let integration = DataStore.getAll('integrations').find(i => i.provider === 'google');
+        let integration = (await DataStore.getAll('integrations')).find(i => i.provider === 'google');
         if (!integration) {
-            integration = DataStore.create('integrations', {
+            integration = await DataStore.create('integrations', {
                 integration_name: 'Google Calendar',
                 provider: 'google',
                 type: 'calendar',
@@ -3394,15 +3396,15 @@ In a production system, this would show the actual file contents.
             });
         }
 
-        const oldConn = getGoogleConnection();
+        const oldConn = await getGoogleConnection();
         if (oldConn) {
-            DataStore.update('integration_connections', oldConn.id, {
+            await DataStore.update('integration_connections', oldConn.id, {
                 status: 'connected',
                 token_expires_at: new Date(Date.now() + 3600 * 1000).toISOString(),
                 updated_at: new Date().toISOString()
             });
         } else {
-            DataStore.create('integration_connections', {
+            await DataStore.create('integration_connections', {
                 integration_id: integration.id,
                 user_id: _currentUser?.id || 1,
                 access_token: 'encrypted_mock_token',
@@ -3421,11 +3423,11 @@ In a production system, this would show the actual file contents.
         }
 
         UI.toast.success('Google Calendar connected successfully');
-        showGoogleCalendarIntegration();
+        await showGoogleCalendarIntegration();
     };
 
-    const saveGoogleSettings = () => {
-        const connection = getGoogleConnection();
+    const saveGoogleSettings = async () => {
+        const connection = await getGoogleConnection();
         if (!connection) return;
 
         const settings = {
@@ -3441,7 +3443,7 @@ In a production system, this would show the actual file contents.
             reminder: document.getElementById('default-reminder')?.value || '15'
         };
 
-        DataStore.update('integration_connections', connection.id, {
+        await DataStore.update('integration_connections', connection.id, {
             sync_settings: settings,
             updated_at: new Date().toISOString()
         });
@@ -3456,20 +3458,20 @@ In a production system, this would show the actual file contents.
 
         UI.toast.info('Starting Google Calendar sync...');
 
-        await _syncManager.syncCRMtoGoogle();
-        await _syncManager.syncGoogleToCRM();
+        await _syncManager.await syncCRMtoGoogle();
+        await _syncManager.await syncGoogleToCRM();
 
-        const connection = getGoogleConnection();
+        const connection = await getGoogleConnection();
         if (connection) {
-            DataStore.update('integration_connections', connection.id, {
+            await DataStore.update('integration_connections', connection.id, {
                 last_sync: new Date().toISOString()
             });
         }
-        showGoogleCalendarIntegration();
+        await showGoogleCalendarIntegration();
     };
 
-    const viewSyncHistory = () => {
-        const syncHistory = DataStore.getAll('sync_history').filter(
+    const viewSyncHistory = async () => {
+        const syncHistory = (await DataStore.getAll('sync_history')).filter(
             h => h.user_id === (_currentUser?.id || 1)
         ).sort((a, b) => new Date(b.synced_at) - new Date(a.synced_at));
 
@@ -3481,7 +3483,7 @@ In a production system, this would show the actual file contents.
                         <option value="30">Last 30 days</option>
                         <option value="90">Last 90 days</option>
                     </select>
-                    <button class="btn secondary" onclick="app.refreshSyncHistory()">Apply</button>
+                    <button class="btn secondary" onclick="app.await refreshSyncHistory()">Apply</button>
                 </div>
                 
                 <table class="history-table" style="width:100%;border-collapse:collapse;margin-bottom:16px;">
@@ -3508,8 +3510,8 @@ In a production system, this would show the actual file contents.
                 </tr>
             `;
         } else {
-            syncHistory.slice(0, 10).forEach((item, index) => {
-                const activity = DataStore.getById('activities', item.activity_id);
+            for (const [index, item] of syncHistory.slice(0, 10).entries()) {
+                const activity = await DataStore.getById('activities', item.activity_id);
                 const directionIcon = item.direction === 'crm_to_google' ? '→' : '←';
                 const statusIcon = item.status === 'success' ? '✓' : item.status === 'conflict' ? '⚠' : '✗';
                 const statusColor = item.status === 'success' ? '#10b981' : item.status === 'conflict' ? '#f59e0b' : '#ef4444';
@@ -3523,7 +3525,7 @@ In a production system, this would show the actual file contents.
                         <td style="padding:12px;">${new Date(item.synced_at).toLocaleTimeString()}</td>
                     </tr>
                 `;
-            });
+            }
         }
 
         tableHtml += `
@@ -3532,7 +3534,7 @@ In a production system, this would show the actual file contents.
                 
                 <div class="history-actions" style="display:flex;gap:12px;justify-content:flex-end;">
                     <button class="btn secondary" onclick="app.exportSyncHistory()">Export Log</button>
-                    <button class="btn secondary" onclick="app.clearSyncHistory()">Clear History</button>
+                    <button class="btn secondary" onclick="app.await clearSyncHistory()">Clear History</button>
                 </div>
             </div>
         `;
@@ -3543,40 +3545,40 @@ In a production system, this would show the actual file contents.
     };
 
     const exportSyncHistory = () => { UI.toast.info('Exporting sync history...'); };
-    const clearSyncHistory = () => {
-        const logs = DataStore.getAll('sync_history').filter(h => h.user_id !== (_currentUser?.id || 1));
+    const clearSyncHistory = async () => {
+        const logs =await  (await DataStore.getAll('sync_history')).filter(h => h.user_id !== (_currentUser?.id || 1));
         localStorage.setItem('fs_crm_sync_history', JSON.stringify(logs));
         UI.toast.success('Sync history cleared');
-        viewSyncHistory();
+        await viewSyncHistory();
     };
-    const refreshSyncHistory = () => { viewSyncHistory(); };
+    const refreshSyncHistory = async () => { await viewSyncHistory(); };
 
-    const disconnectGoogle = () => {
+    const disconnectGoogle = async () => {
         UI.showModal('Disconnect Google Calendar', `
             <p>Are you sure you want to disconnect Google Calendar?</p>
             <p>This will stop all sync between CRM and Google Calendar.</p>
             <p class="warning-text" style="color:var(--error);font-weight:600;">Your existing activities will remain in both systems.</p>
         `, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Disconnect', type: 'error', action: 'app.confirmDisconnectGoogle()' }
+            { label: 'Disconnect', type: 'error', action: 'await app.await confirmDisconnectGoogle()' }
         ]);
     };
 
-    const confirmDisconnectGoogle = () => {
-        const connection = getGoogleConnection();
+    const confirmDisconnectGoogle = async () => {
+        const connection = await getGoogleConnection();
         if (connection) {
-            DataStore.update('integration_connections', connection.id, {
+            await DataStore.update('integration_connections', connection.id, {
                 status: 'disconnected',
                 updated_at: new Date().toISOString()
             });
         }
         UI.hideModal();
         UI.toast.success('Google Calendar disconnected');
-        showGoogleCalendarIntegration();
+        await showGoogleCalendarIntegration();
     };
 
-    const resolveConflict = (choice, activityId, eventId) => {
-        if (_syncManager) _syncManager.resolveConflict(choice, activityId, eventId);
+    const resolveConflict = async (choice, activityId, eventId) => {
+        if (_syncManager) _syncManager.await resolveConflict(choice, activityId, eventId);
     };
 
     // Hook into activity CRUD for auto-sync
@@ -3584,40 +3586,40 @@ In a production system, this would show the actual file contents.
     const originalUpdateActivity = DataStore.update;
     const originalDeleteActivity = DataStore.delete;
 
-    DataStore.create = function (tableName, data) {
-        const result = originalCreateActivity.call(this, tableName, data);
+    DataStore.create = async function (tableName, data) {
+        const result = await originalCreateActivity.call(this, tableName, data);
         if (tableName === 'activities' && _syncManager) {
-            setTimeout(() => {
-                const connection = getGoogleConnection();
+            await setTimeout(async () => {
+                const connection = await getGoogleConnection();
                 if (connection && connection.sync_settings?.syncTypes[data.activity_type?.toLowerCase()]) {
-                    _syncManager.syncCRMtoGoogle().catch(console.error);
+                    await _syncManager.await syncCRMtoGoogle().catch(console.error);
                 }
             }, 1000);
         }
         return result;
     };
 
-    DataStore.update = function (tableName, id, data) {
-        const result = originalUpdateActivity.call(this, tableName, id, data);
+    DataStore.update = async function (tableName, id, data) {
+        const result = await originalUpdateActivity.call(this, tableName, id, data);
         if (tableName === 'activities' && _syncManager) {
-            setTimeout(() => {
-                const connection = getGoogleConnection();
-                const activity = DataStore.getById('activities', id);
+            await setTimeout(async () => {
+                const connection = await getGoogleConnection();
+                const activity = await DataStore.getById('activities', id);
                 if (connection && activity && connection.sync_settings?.syncTypes[activity.activity_type?.toLowerCase()]) {
-                    _syncManager.syncCRMtoGoogle().catch(console.error);
+                    await _syncManager.await syncCRMtoGoogle().catch(console.error);
                 }
             }, 1000);
         }
         return result;
     };
 
-    DataStore.delete = function (tableName, id) {
-        const result = originalDeleteActivity.call(this, tableName, id);
+    DataStore.delete = async function (tableName, id) {
+        const result = await originalDeleteActivity.call(this, tableName, id);
         if (tableName === 'activities' && _syncManager) {
-            setTimeout(() => {
-                const connection = getGoogleConnection();
+            await setTimeout(async () => {
+                const connection = await getGoogleConnection();
                 if (connection) {
-                    _syncManager.syncCRMtoGoogle().catch(console.error);
+                    await _syncManager.await syncCRMtoGoogle().catch(console.error);
                 }
             }, 1000);
         }
@@ -3638,13 +3640,13 @@ In a production system, this would show the actual file contents.
     };
 
     // Get WhatsApp connection
-    const getWhatsAppConnection = () => {
-        const integrations = DataStore.getAll('integrations');
+    const getWhatsAppConnection = async () => {
+        const integrations = await DataStore.getAll('integrations');
         const whatsappIntegration = integrations.find(i => i.provider === 'whatsapp');
 
         if (!whatsappIntegration) return null;
 
-        const connections = DataStore.query('integration_connections', {
+        const connections = await DataStore.query('integration_connections', {
             integration_id: whatsappIntegration.id,
             user_id: _currentUser?.id || 1
         });
@@ -3653,14 +3655,14 @@ In a production system, this would show the actual file contents.
     };
 
     // Show WhatsApp integration settings
-    const showWhatsAppIntegration = () => {
-        const connection = getWhatsAppConnection();
+    const showWhatsAppIntegration = async () => {
+        const connection = await getWhatsAppConnection();
         const isConnected = connection && connection.status === 'connected';
 
         const content = `
             <div class="whatsapp-integration">
                 <div class="detail-header" style="margin-bottom: 24px; display: flex; align-items: center; gap: 16px;">
-                    <button class="btn secondary" onclick="app.showIntegrationHub(document.getElementById('content-viewport'))">
+                    <button class="btn secondary" onclick="app.await showIntegrationHub(document.getElementById('content-viewport'))">
                         <i class="fas fa-arrow-left"></i> Back to Integrations
                     </button>
                     <h1 style="margin: 0; font-size: 24px;">WhatsApp Business Integration</h1>
@@ -3701,7 +3703,7 @@ In a production system, this would show the actual file contents.
                         <label>Access Token</label>
                         <div class="token-input">
                             <input type="password" id="access-token" class="form-control" value="${connection?.access_token ? '••••••••' : ''}" placeholder="Enter access token">
-                            <button class="btn secondary" onclick="app.testWhatsAppConnection()">Test Connection</button>
+                            <button class="btn secondary" onclick="app.await testWhatsAppConnection()">Test Connection</button>
                         </div>
                     </div>
                     
@@ -3719,7 +3721,7 @@ In a production system, this would show the actual file contents.
                         <label>Verification Token</label>
                         <div class="token-input">
                             <input type="password" id="verify-token" class="form-control" value="${connection?.verify_token || ''}" placeholder="Enter verification token">
-                            <button class="btn secondary" onclick="app.verifyWebhook()">Verify</button>
+                            <button class="btn secondary" onclick="app.await verifyWebhook()">Verify</button>
                         </div>
                     </div>
                     
@@ -3730,10 +3732,10 @@ In a production system, this would show the actual file contents.
                 </div>
                 
                 <div class="form-actions">
-                    <button class="btn primary" onclick="app.saveWhatsAppConnection()">Save Connection</button>
+                    <button class="btn primary" onclick="app.await saveWhatsAppConnection()">Save Connection</button>
                     ${isConnected ? `
-                        <button class="btn secondary" onclick="app.testWhatsAppConnection()">Test Connection</button>
-                        <button class="btn error" onclick="app.disconnectWhatsApp()">Disconnect</button>
+                        <button class="btn secondary" onclick="app.await testWhatsAppConnection()">Test Connection</button>
+                        <button class="btn error" onclick="app.await disconnectWhatsApp()">Disconnect</button>
                     ` : ''}
                 </div>
             </div>
@@ -3749,7 +3751,7 @@ In a production system, this would show the actual file contents.
     };
 
     // Save WhatsApp connection
-    const saveWhatsAppConnection = () => {
+    const saveWhatsAppConnection = async () => {
         const businessAccountId = document.getElementById('waba-id')?.value;
         const phoneNumberId = document.getElementById('phone-id')?.value;
         const businessPhone = document.getElementById('business-phone')?.value;
@@ -3761,9 +3763,9 @@ In a production system, this would show the actual file contents.
             return;
         }
 
-        let integration = DataStore.getAll('integrations').find(i => i.provider === 'whatsapp');
+        let integration = (await DataStore.getAll('integrations')).find(i => i.provider === 'whatsapp');
         if (!integration) {
-            integration = DataStore.create('integrations', {
+            integration = await DataStore.create('integrations', {
                 integration_name: 'WhatsApp Business',
                 provider: 'whatsapp',
                 type: 'messaging',
@@ -3773,7 +3775,7 @@ In a production system, this would show the actual file contents.
             });
         }
 
-        const existingConnection = getWhatsAppConnection();
+        const existingConnection = await getWhatsAppConnection();
         const connectionData = {
             integration_id: integration.id,
             user_id: _currentUser?.id || 1,
@@ -3787,9 +3789,9 @@ In a production system, this would show the actual file contents.
         };
 
         if (existingConnection) {
-            DataStore.update('integration_connections', existingConnection.id, connectionData);
+            await DataStore.update('integration_connections', existingConnection.id, connectionData);
         } else {
-            DataStore.create('integration_connections', {
+            await DataStore.create('integration_connections', {
                 ...connectionData,
                 created_at: new Date().toISOString()
             });
@@ -3797,21 +3799,21 @@ In a production system, this would show the actual file contents.
 
         UI.hideModal();
         UI.toast.success('WhatsApp connection saved');
-        showWhatsAppIntegration();
+        await showWhatsAppIntegration();
     };
 
     const testWhatsAppConnection = async () => {
         UI.toast.info('Testing connection...');
-        setTimeout(() => {
+        (() => {
             UI.toast.success('Connection successful!');
         }, 1500);
     };
 
-    const verifyWebhook = () => {
+    const verifyWebhook = async () => {
         UI.toast.success('Webhook verified successfully');
-        const connection = getWhatsAppConnection();
+        const connection = await getWhatsAppConnection();
         if (connection) {
-            DataStore.update('integration_connections', connection.id, {
+            await DataStore.update('integration_connections', connection.id, {
                 webhook_verified: true,
                 updated_at: new Date().toISOString()
             });
@@ -3825,41 +3827,41 @@ In a production system, this would show the actual file contents.
         UI.toast.success('Webhook URL copied to clipboard');
     };
 
-    const disconnectWhatsApp = () => {
+    const disconnectWhatsApp = async () => {
         UI.showModal('Disconnect WhatsApp', `
             <p>Are you sure you want to disconnect WhatsApp Business?</p>
             <p>This will stop all messaging and template sync.</p>
         `, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Disconnect', type: 'error', action: 'app.confirmDisconnectWhatsApp()' }
+            { label: 'Disconnect', type: 'error', action: 'await app.confirmDisconnectWhatsApp()' }
         ]);
     };
 
-    const confirmDisconnectWhatsApp = () => {
-        const connection = getWhatsAppConnection();
+    const confirmDisconnectWhatsApp = async () => {
+        const connection = await getWhatsAppConnection();
         if (connection) {
-            DataStore.update('integration_connections', connection.id, {
+            await DataStore.update('integration_connections', connection.id, {
                 status: 'disconnected',
                 updated_at: new Date().toISOString()
             });
         }
         UI.hideModal();
         UI.toast.success('WhatsApp disconnected');
-        showWhatsAppIntegration();
+        await showWhatsAppIntegration();
     };
 
-    const openSendWhatsAppModal = (entityType, entityId) => {
+    const openSendWhatsAppModal = async (entityType, entityId) => {
         const entity = entityType === 'prospect'
-            ? DataStore.getById('prospects', entityId)
-            : DataStore.getById('customers', entityId);
+            ? await DataStore.getById('prospects', entityId)
+            : await DataStore.getById('customers', entityId);
         if (!entity) return;
 
         // Create demo templates if empty
-        let templates = DataStore.getAll('whatsapp_templates');
+        let templates = await DataStore.getAll('whatsapp_templates');
         if (templates.length === 0) {
             templates = [
-                DataStore.create('whatsapp_templates', { template_name: 'Birthday Greeting', status: 'APPROVED', content: 'Hi {{name}}, wishing you a very happy birthday!' }),
-                DataStore.create('whatsapp_templates', { template_name: 'Appointment Reminder', status: 'APPROVED', content: 'Hi {{name}}, your appointment is confirmed.' })
+                await DataStore.create('whatsapp_templates', { template_name: 'Birthday Greeting', status: 'APPROVED', content: 'Hi {{name}}, wishing you a very happy birthday!' }),
+                await DataStore.create('whatsapp_templates', { template_name: 'Appointment Reminder', status: 'APPROVED', content: 'Hi {{name}}, your appointment is confirmed.' })
             ];
         }
 
@@ -3878,7 +3880,7 @@ In a production system, this would show the actual file contents.
                 <div id="template-section">
                     <div class="form-group">
                         <label>Template</label>
-                        <select id="template-select" class="form-control" onchange="app.previewTemplate()">
+                        <select id="template-select" class="form-control" onchange="app.await previewTemplate()">
                             <option value="">Select a template</option>
                             ${templates.map(t => `<option value="${t.id}">${t.template_name}</option>`).join('')}
                         </select>
@@ -3900,7 +3902,7 @@ In a production system, this would show the actual file contents.
         `;
         UI.showModal('Send WhatsApp Message', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Send', type: 'primary', action: `app.sendWhatsApp('${entityType}', ${entityId})` }
+            { label: 'Send', type: 'primary', action: `app.await sendWhatsApp('${entityType}', ${entityId})` }
         ]);
         window._currentWhatsAppEntity = { type: entityType, id: entityId, phone: entity.phone };
     };
@@ -3911,16 +3913,16 @@ In a production system, this would show the actual file contents.
         document.getElementById('free-text-section').style.display = isTemplate ? 'none' : 'block';
     };
 
-    const sendWhatsApp = (entityType, entityId) => {
+    const sendWhatsApp = async (entityType, entityId) => {
         const isTemplate = document.querySelector('input[name="msg-type"]:checked')?.value === 'template';
         const isNow = document.querySelector('input[name="schedule"]:checked')?.value === 'now';
 
         if (isTemplate) {
             const templateId = document.getElementById('template-select')?.value;
             if (!templateId) { UI.toast.error('Please select a template'); return; }
-            const template = DataStore.getById('whatsapp_templates', parseInt(templateId));
-            setTimeout(() => {
-                DataStore.create('whatsapp_messages', {
+            const template = await DataStore.getById('whatsapp_templates', parseInt(templateId));
+            await setTimeout(async () => {
+                await DataStore.create('whatsapp_messages', {
                     id: 'wamid_' + Date.now(),
                     entity_type: entityType,
                     entity_id: entityId,
@@ -3933,14 +3935,14 @@ In a production system, this would show the actual file contents.
                 });
                 UI.hideModal();
                 UI.toast.success('Message sent successfully');
-                if (entityType === 'prospect') app.showProspectDetail(entityId);
-                else app.showCustomerDetail(entityId);
+                if (entityType === 'prospect') await app.await showProspectDetail(entityId);
+                else await app.await showCustomerDetail(entityId);
             }, 800);
         } else {
             const message = document.getElementById('free-message')?.value;
             if (!message) { UI.toast.error('Please enter a message'); return; }
-            setTimeout(() => {
-                DataStore.create('whatsapp_messages', {
+            await setTimeout(async () => {
+                await DataStore.create('whatsapp_messages', {
                     id: 'wamid_' + Date.now(),
                     entity_type: entityType,
                     entity_id: entityId,
@@ -3952,14 +3954,14 @@ In a production system, this would show the actual file contents.
                 });
                 UI.hideModal();
                 UI.toast.success('Message sent successfully');
-                if (entityType === 'prospect') app.showProspectDetail(entityId);
-                else app.showCustomerDetail(entityId);
+                if (entityType === 'prospect') await app.await showProspectDetail(entityId);
+                else await app.await showCustomerDetail(entityId);
             }, 800);
         }
     };
 
-    const renderWhatsAppHistoryTab = (entityType, entityId) => {
-        const messages = DataStore.getAll('whatsapp_messages')
+    const renderWhatsAppHistoryTab = async (entityType, entityId) => {
+        const messages = await DataStore.getAll('whatsapp_messages')
             .filter(m => m.entity_type === entityType && m.entity_id == entityId)
             .sort((a, b) => new Date(b.sent_at || b.created_at) - new Date(a.sent_at || a.created_at));
 
@@ -3989,7 +3991,7 @@ In a production system, this would show the actual file contents.
                                 ${msg.status === 'sent' ? '✓ Sent' : msg.status === 'delivered' ? '✓✓ Delivered' : msg.status === 'read' ? '👁️ Read' : '❌ Failed'}
                             </span>
                             <div class="message-actions">
-                                <button class="btn-icon" onclick="app.viewMessageDetails('${msg.id}')"><i class="fas fa-eye"></i></button>
+                                <button class="btn-icon" onclick="app.await viewMessageDetails('${msg.id}')"><i class="fas fa-eye"></i></button>
                                 <button class="btn-icon" onclick="app.todo('Resend Message')"><i class="fas fa-redo"></i></button>
                             </div>
                         </div>
@@ -3999,22 +4001,22 @@ In a production system, this would show the actual file contents.
         `;
     };
 
-    const addWhatsAppButtonToProfile = (entityType, entityId) => {
+    const addWhatsAppButtonToProfile = async (entityType, entityId) => {
         const headers = document.querySelectorAll('.header-actions');
-        headers.forEach(header => {
+        for (const header of headers) {
             // Prevent duplicate buttons
             if (!header.querySelector('.btn-whatsapp-add')) {
                 const button = document.createElement('button');
                 button.className = 'btn secondary btn-whatsapp-add';
                 button.innerHTML = '<i class="fab fa-whatsapp" style="color:#25D366;"></i> WhatsApp';
-                button.onclick = () => openSendWhatsAppModal(entityType, entityId);
+                button.onclick = async () => await openSendWhatsAppModal(entityType, entityId);
                 header.insertBefore(button, header.lastElementChild);
             }
-        });
+        }
     };
 
-    const viewMessageDetails = (messageId) => {
-        const message = DataStore.getAll('whatsapp_messages').find(m => m.id === messageId);
+    const viewMessageDetails = async (messageId) => {
+        const message = (await DataStore.getAll('whatsapp_messages')).find(m => m.id === messageId);
         if (!message) return;
         const content = `
             <div class="message-details">
@@ -4052,7 +4054,7 @@ In a production system, this would show the actual file contents.
     let _currentModelVersion = '1.0.0';
 
     // Initialize AI Service
-    const initAIAnalytics = () => {
+    const initAIAnalytics = async () => {
         console.log('Initializing AI Analytics...');
 
         _aiService = {
@@ -4064,18 +4066,18 @@ In a production system, this would show the actual file contents.
         };
 
         // Check if AI models exist, create default if not
-        ensureAIModelsExist();
+        await ensureAIModelsExist();
 
         // Run initial predictions
-        setTimeout(() => {
-            batchUpdateLeadScores();
-            batchUpdateChurnRisks();
+        await setTimeout(async () => {
+            await batchUpdateLeadScores();
+            await batchUpdateChurnRisks();
         }, 2000);
     };
 
     // Ensure AI models exist in DataStore
-    const ensureAIModelsExist = () => {
-        const models = DataStore.getAll('ai_models');
+    const ensureAIModelsExist = async () => {
+        const models = await DataStore.getAll('ai_models');
 
         if (models.length === 0) {
             // Create default models
@@ -4136,16 +4138,16 @@ In a production system, this would show the actual file contents.
                 }
             ];
 
-            defaultModels.forEach(model => {
-                DataStore.create('ai_models', model);
-            });
+            for (const model of defaultModels) {
+                await DataStore.create('ai_models', model);
+            }
 
             console.log('Default AI models created');
         }
     };
 
     // Show AI Insights Dashboard
-    const showAIInsightsDashboard = () => {
+    const showAIInsightsDashboard = async () => {
         const content = `
             <div class="ai-dashboard">
                 <div class="dashboard-header">
@@ -4156,7 +4158,7 @@ In a production system, this would show the actual file contents.
                 </div>
                 
                 <div class="stats-grid">
-                    ${renderAIStatsCards()}
+                    ${await renderAIStatsCards()}
                 </div>
                 
                 <div class="chart-container">
@@ -4173,25 +4175,25 @@ In a production system, this would show the actual file contents.
                 </div>
                 
                 <div class="insights-grid">
-                    <div class="insight-card" onclick="app.showLeadScoring()">
+                    <div class="insight-card" onclick="app.await showLeadScoring()">
                         <i class="fas fa-chart-line"></i>
                         <h4>Lead Scoring</h4>
                         <p>156 leads> 80 score</p>
                         <span class="trend up">+34 this week</span>
                     </div>
-                    <div class="insight-card" onclick="app.showSalesForecast()">
+                    <div class="insight-card" onclick="app.await showSalesForecast()">
                         <i class="fas fa-dollar-sign"></i>
                         <h4>Sales Forecast</h4>
                         <p>$2.4M next 30 days</p>
                         <span class="trend down">-12% vs last month</span>
                     </div>
-                    <div class="insight-card" onclick="app.showChurnRiskAnalysis()">
+                    <div class="insight-card" onclick="app.await showChurnRiskAnalysis()">
                         <i class="fas fa-exclamation-triangle"></i>
                         <h4>Churn Risk</h4>
                         <p>23 customers at risk</p>
                         <span class="trend up warning">+15% increase</span>
                     </div>
-                    <div class="insight-card" onclick="app.showPerformanceInsights()">
+                    <div class="insight-card" onclick="app.await showPerformanceInsights()">
                         <i class="fas fa-users"></i>
                         <h4>Team Insights</h4>
                         <p>8 recommendations</p>
@@ -4212,7 +4214,7 @@ In a production system, this would show the actual file contents.
                             </tr>
                         </thead>
                         <tbody>
-                            ${renderTopPredictions()}
+                            ${await renderTopPredictions()}
                         </tbody>
                     </table>
                 </div>
@@ -4225,16 +4227,16 @@ In a production system, this would show the actual file contents.
     };
 
     // Render AI Stats Cards
-    const renderAIStatsCards = () => {
+    const renderAIStatsCards = async () => {
         // Get forecast data
-        const forecasts = DataStore.getAll('forecast_history')
+        const forecasts = await DataStore.getAll('forecast_history')
             .filter(f => new Date(f.forecast_date) > new Date(Date.now() - 30 * 24 * 60 * 60 * 1000))
             .sort((a, b) => new Date(b.forecast_date) - new Date(a.forecast_date));
 
         const latestForecast = forecasts[0] || { predicted_amount: 2400000 };
 
         // Get lead scores
-        const leadScores = DataStore.getAll('lead_scores')
+        const leadScores = await DataStore.getAll('lead_scores')
             .filter(l => new Date(l.score_date) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000));
 
         const highValueLeads = leadScores.filter(l => l.overall_score >= 80).length;
@@ -4244,7 +4246,7 @@ In a production system, this would show the actual file contents.
         ).length;
 
         // Get churn risks
-        const churnRisks = DataStore.getAll('churn_risk')
+        const churnRisks = await DataStore.getAll('churn_risk')
             .filter(c => c.risk_level === 'high');
 
         return `
@@ -4322,18 +4324,19 @@ In a production system, this would show the actual file contents.
     };
 
     // Render Top Predictions
-    const renderTopPredictions = () => {
+    const renderTopPredictions = async () => {
         // Combine lead scores and churn risks for display
         const predictions = [];
 
         // Add top lead scores
-        const leadScores = DataStore.getAll('lead_scores')
+        const allLeadScores = await DataStore.getAll('lead_scores');
+        const leadScores = (allLeadScores || [])
             .filter(l => l.prospect_id)
             .sort((a, b) => b.overall_score - a.overall_score)
             .slice(0, 3);
 
-        leadScores.forEach(score => {
-            const prospect = DataStore.getById('prospects', score.prospect_id);
+        for (const score of leadScores) {
+            const prospect = await DataStore.getById('prospects', score.prospect_id);
             if (prospect) {
                 predictions.push({
                     name: prospect.full_name,
@@ -4344,15 +4347,16 @@ In a production system, this would show the actual file contents.
                     icon: '🔥'
                 });
             }
-        });
+        }
 
         // Add top churn risks
-        const churnRisks = DataStore.getAll('churn_risk')
+        const allChurnRisks = await DataStore.getAll('churn_risk');
+        const churnRisks = (allChurnRisks || [])
             .sort((a, b) => b.risk_score - a.risk_score)
             .slice(0, 2);
 
-        churnRisks.forEach(risk => {
-            const customer = DataStore.getById('customers', risk.customer_id);
+        for (const risk of churnRisks) {
+            const customer = await DataStore.getById('customers', risk.customer_id);
             if (customer) {
                 predictions.push({
                     name: customer.full_name,
@@ -4363,7 +4367,7 @@ In a production system, this would show the actual file contents.
                     icon: '⚠️'
                 });
             }
-        });
+        }
 
         // Sort by score descending
         predictions.sort((a, b) => b.score - a.score);
@@ -4387,20 +4391,22 @@ In a production system, this would show the actual file contents.
     };
 
     // Show Lead Scoring Interface
-    const showLeadScoring = () => {
+    const showLeadScoring = async () => {
         // Get active model
-        const model = DataStore.getAll('ai_models').find(m => m.model_name === 'lead_scoring' && m.is_active);
+        const allModels = await DataStore.getAll('ai_models');
+        const model = (allModels || []).find(m => m.model_name === 'lead_scoring' && m.is_active);
 
         // Get recent lead scores
-        const leadScores = DataStore.getAll('lead_scores')
+        const allLeadScores = await DataStore.getAll('lead_scores');
+        const leadScores = (allLeadScores || [])
             .filter(l => l.prospect_id)
             .sort((a, b) => new Date(b.score_date) - new Date(a.score_date))
             .slice(0, 10);
 
         let scoresHTML = '';
-        leadScores.forEach(score => {
-            const prospect = DataStore.getById('prospects', score.prospect_id);
-            if (!prospect) return;
+        for (const score of leadScores) {
+            const prospect = await DataStore.getById('prospects', score.prospect_id);
+            if (!prospect) continue;
 
             const trendIcon = score.trend === 'up' ? '⬆️' : score.trend === 'down' ? '⬇️' : '➡️';
             const scoreClass = score.overall_score >= 80 ? 'high' : score.overall_score >= 60 ? 'medium' : 'low';
@@ -4415,7 +4421,7 @@ In a production system, this would show the actual file contents.
                     <td><button class="btn-icon" onclick="app.viewLeadDetails(${prospect.id})"><i class="fas fa-eye"></i></button></td>
                 </tr>
             `;
-        });
+        }
 
         const content = `
             <div class="lead-scoring-dashboard">
@@ -4423,7 +4429,7 @@ In a production system, this would show the actual file contents.
                     <h3>AI Lead Scoring</h3>
                     <div>
                         <span class="model-badge">Model v${model?.model_version || '1.0'} • Accuracy: ${model?.accuracy || 87.5}%</span>
-                        <button class="btn secondary" onclick="app.retrainAIModels()">
+                        <button class="btn secondary" onclick="app.await retrainAIModels()">
                             <i class="fas fa-sync-alt"></i> Retrain
                         </button>
                     </div>
@@ -4529,12 +4535,12 @@ In a production system, this would show the actual file contents.
     };
 
     // Predict lead score for a prospect
-    const predictLeadScore = (prospectId) => {
-        const prospect = DataStore.getById('prospects', prospectId);
+    const predictLeadScore = async (prospectId) => {
+        const prospect = await DataStore.getById('prospects', prospectId);
         if (!prospect) return null;
 
         // Get activities for this prospect
-        const activities = DataStore.query('activities', { prospect_id: prospectId });
+        const activities = await DataStore.query('activities', { prospect_id: prospectId });
 
         // Calculate engagement score (0-100)
         const recentActivities = activities.filter(a =>
@@ -4585,8 +4591,8 @@ In a production system, this would show the actual file contents.
             (recencyScore * 0.05)
         );
 
-        // Determine trend (compare with last score)
-        const lastScore = DataStore.getAll('lead_scores')
+        // Determine async trend (compare with last score)
+        const lastScore = await DataStore.getAll('lead_scores')
             .filter(l => l.prospect_id === prospectId)
             .sort((a, b) => new Date(b.score_date) - new Date(a.score_date))[0];
 
@@ -4631,26 +4637,27 @@ In a production system, this would show the actual file contents.
             created_at: new Date().toISOString()
         };
 
-        DataStore.create('lead_scores', leadScore);
+        await DataStore.create('lead_scores', leadScore);
 
         return leadScore;
     };
 
     // Batch update all lead scores
-    const batchUpdateLeadScores = () => {
-        const prospects = DataStore.getAll('prospects').filter(p => p.status === 'active');
+    const batchUpdateLeadScores = async () => {
+        const allProspects = await DataStore.getAll('prospects');
+        const prospects = (allProspects || []).filter(p => p.status === 'active');
 
-        prospects.forEach(prospect => {
-            predictLeadScore(prospect.id);
-        });
+        for (const prospect of prospects) {
+            await predictLeadScore(prospect.id);
+        }
 
         console.log(`Updated scores for ${prospects.length} prospects`);
         UI.toast.success(`Updated scores for ${prospects.length} prospects`);
     };
 
     // Show Sales Forecast
-    const showSalesForecast = () => {
-        const forecast = generateSalesForecast('quarterly');
+    const showSalesForecast = async () => {
+        const forecast = await generateSalesForecast('quarterly');
 
         const content = `
             <div class="forecast-dashboard">
@@ -4773,12 +4780,12 @@ In a production system, this would show the actual file contents.
     };
 
     // Generate sales forecast
-    const generateSalesForecast = (period = 'quarterly') => {
+    const generateSalesForecast = async (period = 'quarterly') => {
         // Get historical transactions
-        const transactions = DataStore.getAll('transactions');
+        const transactions = await DataStore.getAll('transactions');
 
         // Get pipeline deals
-        const prospects = DataStore.getAll('prospects').filter(p => p.status === 'active');
+        const prospects = (await DataStore.getAll('prospects')).filter(p => p.status === 'active');
 
         // Simple forecast calculation
         const historicalAvg = transactions.length > 0
@@ -4811,7 +4818,7 @@ In a production system, this would show the actual file contents.
             created_at: new Date().toISOString()
         };
 
-        DataStore.create('forecast_history', forecast);
+        await DataStore.create('forecast_history', forecast);
 
         return {
             predicted_amount: predictedAmount,
@@ -4872,9 +4879,10 @@ In a production system, this would show the actual file contents.
     };
 
     // Show Churn Risk Analysis
-    const showChurnRiskAnalysis = () => {
+    const showChurnRiskAnalysis = async () => {
         // Get all churn risks
-        const churnRisks = DataStore.getAll('churn_risk')
+        const allChurnRisks = await DataStore.getAll('churn_risk');
+        const churnRisks = (allChurnRisks || [])
             .sort((a, b) => b.risk_score - a.risk_score);
 
         const highRisk = churnRisks.filter(c => c.risk_level === 'high').length;
@@ -4883,9 +4891,10 @@ In a production system, this would show the actual file contents.
         const total = churnRisks.length || 1; // avoid div by 0
 
         let risksHTML = '';
-        churnRisks.slice(0, 5).forEach(risk => {
-            const customer = DataStore.getById('customers', risk.customer_id);
-            if (!customer) return;
+        const topRisks = churnRisks.slice(0, 5);
+        for (const risk of topRisks) {
+            const customer = await DataStore.getById('customers', risk.customer_id);
+            if (!customer) continue;
 
             const riskClass = risk.risk_level === 'high' ? 'high' : risk.risk_level === 'medium' ? 'medium' : 'low';
             const factors = risk.factors || {};
@@ -4904,7 +4913,7 @@ In a production system, this would show the actual file contents.
                     <td><button class="btn-link" onclick="app.contactAtRiskCustomer(${customer.id})">Contact</button></td>
                 </tr>
             `;
-        });
+        }
 
         const content = `
             <div class="churn-dashboard">
@@ -4993,12 +5002,12 @@ In a production system, this would show the actual file contents.
     };
 
     // Calculate churn risk for a customer
-    const calculateChurnRisk = (customerId) => {
-        const customer = DataStore.getById('customers', customerId);
+    const calculateChurnRisk = async (customerId) => {
+        const customer = await DataStore.getById('customers', customerId);
         if (!customer) return null;
 
         // Get customer activities
-        const activities = DataStore.query('activities', { customer_id: customerId });
+        const activities = await DataStore.query('activities', { customer_id: customerId });
 
         // Calculate activity recency
         const lastActivity = activities.sort((a, b) =>
@@ -5099,30 +5108,32 @@ In a production system, this would show the actual file contents.
             updated_at: new Date().toISOString()
         };
 
-        DataStore.create('churn_risk', churnRisk);
+        await DataStore.create('churn_risk', churnRisk);
 
         return churnRisk;
     };
 
     // Batch update all churn risks
-    const batchUpdateChurnRisks = () => {
-        const customers = DataStore.getAll('customers').filter(c => c.status === 'active');
+    const batchUpdateChurnRisks = async () => {
+        const allCustomers = await DataStore.getAll('customers');
+        const customers = (allCustomers || []).filter(c => c.status === 'active');
 
-        customers.forEach(customer => {
-            calculateChurnRisk(customer.id);
-        });
+        for (const customer of customers) {
+            await calculateChurnRisk(customer.id);
+        }
 
         console.log(`Updated churn risks for ${customers.length} customers`);
         UI.toast.success(`Updated churn risks for ${customers.length} customers`);
     };
 
     // Show Performance Insights
-    const showPerformanceInsights = () => {
-        const agents = DataStore.getAll('users').filter(isAgent);
+    const showPerformanceInsights = async () => {
+        const allAgents = await DataStore.getAll('users');
+        const agents = (allAgents || []).filter(isAgent);
 
         let insightsHTML = '';
-        agents.forEach(agent => {
-            const insights = generateAgentInsights(agent.id);
+        for (const agent of agents) {
+            const insights = await generateAgentInsights(agent.id);
 
             if (insights) {
                 const varianceClass = insights.variance > 0 ? 'positive' : 'negative';
@@ -5145,7 +5156,7 @@ In a production system, this would show the actual file contents.
                     </tr>
                 `;
             }
-        });
+        }
 
         const content = `
             <div class="performance-dashboard">
@@ -5234,13 +5245,13 @@ In a production system, this would show the actual file contents.
     };
 
     // Generate insights for an agent
-    const generateAgentInsights = (agentId) => {
+    const generateAgentInsights = async (agentId) => {
         // Get agent stats
-        const stats = DataStore.query('agent_stats', { agent_id: agentId })[0];
+        const stats = await DataStore.query('agent_stats', { agent_id: agentId })[0];
         if (!stats) return null;
 
         // Get agent targets
-        const target = DataStore.query('monthly_targets', { agent_id: agentId })[0];
+        const target = await DataStore.query('monthly_targets', { agent_id: agentId })[0];
 
         // Mock data for demo
         const actual = 435000 + Math.floor(Math.random() * 150000);
@@ -5257,7 +5268,7 @@ In a production system, this would show the actual file contents.
         ];
 
         const improvements = [
-            'Follow-up speed (2.1 days vs 1.2 avg)',
+            'Follow-up async speed (2.1 days vs 1.2 avg)',
             'Call volume ↓40% this month',
             'Needs more prospecting',
             'Upsell rate below target'
@@ -5279,7 +5290,7 @@ In a production system, this would show the actual file contents.
             created_at: new Date().toISOString()
         };
 
-        DataStore.create('performance_insights', insight);
+        await DataStore.create('performance_insights', insight);
 
         return {
             target: targetValue,
@@ -5292,7 +5303,7 @@ In a production system, this would show the actual file contents.
     };
 
     // AI Model Management
-    const retrainAIModels = () => {
+    const retrainAIModels = async () => {
         UI.showModal('Retrain AI Models', `
             <div class="retrain-models">
                 <p>This will retrain all AI models with the latest data.</p>
@@ -5312,17 +5323,17 @@ In a production system, this would show the actual file contents.
             </div>
         `, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Start Training', type: 'primary', action: 'app.startModelTraining()' }
+            { label: 'Start Training', type: 'primary', action: 'app.await startModelTraining()' }
         ]);
     };
 
-    const startModelTraining = () => {
+    const startModelTraining = async () => {
         UI.hideModal();
         UI.toast.info('AI model training started...');
 
         // Simulate training progress
         let progress = 0;
-        const interval = setInterval(() => {
+        const interval = await setInterval(async () => {
             progress += 10;
             UI.toast.info(`Training progress: ${progress}%`);
 
@@ -5330,16 +5341,16 @@ In a production system, this would show the actual file contents.
                 clearInterval(interval);
 
                 // Update model versions and accuracy
-                const models = DataStore.getAll('ai_models');
-                models.forEach(model => {
+                const models = Object.values(await DataStore.getAll('ai_models') || {});
+                for (const model of models) {
                     model.model_version = '1.1.0';
                     model.accuracy += Math.random() * 3 - 1; // Random change
                     model.trained_at = new Date().toISOString();
                     model.trained_on_records += Math.floor(Math.random() * 100);
                     model.updated_at = new Date().toISOString();
 
-                    DataStore.update('ai_models', model.id, model);
-                });
+                    await DataStore.update('ai_models', model.id, model);
+                }
 
                 UI.toast.success('AI models trained successfully! Accuracy improved.');
             }
@@ -5347,8 +5358,8 @@ In a production system, this would show the actual file contents.
     };
 
     // Navigation function
-    const showAIPredictionDashboard = () => {
-        showAIInsightsDashboard();
+    const showAIPredictionDashboard = async () => {
+        await showAIInsightsDashboard();
     };
 
     // ========== AUTHENTICATION & NAVIGATION ==========
@@ -5371,12 +5382,8 @@ In a production system, this would show the actual file contents.
 
 
     function populateLoginDropdown() {
-        console.log("populateLoginDropdown called");
-        const select = document.getElementById('login-user-select');
-        if (!select) return;
-        const users = DataStore.getAll('users');
-        select.innerHTML = '<option value="">-- Select User --</option>' +
-            users.map(u => `<option value="${u.id}">${u.full_name} (${u.role})</option>`).join('');
+        // No-op: login is now handled by Supabase email/password form
+        console.log('populateLoginDropdown: Supabase auth – dropdown removed');
     }
 
     function updateNavVisibility() {
@@ -5436,102 +5443,122 @@ In a production system, this would show the actual file contents.
         });
     }
 
-    function login() {
-        const userId = document.getElementById('login-user-select')?.value;
-        if (!userId) {
-            UI.toast.error('Please select a user');
-            return;
-        }
-        const user = Auth.login(parseInt(userId));
-        if (user) {
-            _currentUser = user;
-            document.getElementById('login-container').style.display = 'none';
-            document.getElementById('app-shell').style.display = 'block';
-            updateUserDisplay();
-            updateNavVisibility();
-            UI.toast.success(`Welcome, ${user.full_name}`);
-            navigateTo('calendar');
-        }
+    async function login() {
+        // Login is now handled by the #loginBtn Supabase click handler
+        console.warn('app.await login() called – use the loginBtn form instead');
     }
 
-    function logout() {
-        Auth.logout();
+    async function logout() {
+        await Auth.await logout();
         _currentUser = null;
         document.getElementById('app-shell').style.display = 'none';
         document.getElementById('login-container').style.display = 'flex';
-        populateLoginDropdown();
         UI.hideModal();      // close the user menu modal
         UI.toast.info('Logged out successfully');
+        // Re-wire loginBtn after logout in case DOM re-rendered
+        _wireLoginBtn();
+    }
+
+    function _wireLoginBtn() {
+        const btn = document.getElementById('loginBtn');
+        if (!btn || btn._supabaseSetup) return;
+        btn._supabaseSetup = true;
+        btn.onclick = async () => {
+            const email = document.getElementById('loginEmail')?.value?.trim();
+            const password = document.getElementById('loginPassword')?.value;
+            if (!email || !password) {
+                alert('Please enter email and password');
+                return;
+            }
+            try {
+                btn.disabled = true;
+                btn.textContent = 'Logging in...';
+                const user = await Auth.await login(email, password);
+                _currentUser = user;
+                document.getElementById('login-container').style.display = 'none';
+                document.getElementById('app-shell').style.display = 'block';
+                updateUserDisplay();
+                updateNavVisibility();
+                UI.toast.success('Welcome!');
+                await navigateTo('calendar');
+            } catch (err) {
+                alert('Login failed: ' + err.message);
+                btn.disabled = false;
+                btn.textContent = 'Login';
+            }
+        };
     }
 
     // ==================== INIT ====================
 
-    const init = () => {
+    const init = async () => {
+        await DataStore.await init();
         console.log('App initializing...');
 
         try {
             // Check if tables exist, if not init demo data
-            if (!DataStore.getAll('users').length) {
+            if (!await DataStore.getAll('users').length) {
                 console.log('No users found. Initializing demo data...');
-                initDemoData();
-                initDefaultFolders();
-                initSampleDocuments();
-                initImportDemoData();
+                await initDemoData();
+                await initDefaultFolders();
+                await initSampleDocuments();
+                await initImportDemoData();
                 
                 // Explicitly populate dropdown after data init
-                populateLoginDropdown();
+                await populateLoginDropdown();
             }
 
-            _currentUser = Auth.getCurrentUser();
-            console.log('User loaded:', _currentUser?.username);
+            _currentUser = await Auth.getCurrentUser();
+            console.log('User loaded:', _currentUser?.email ?? _currentUser?.username);
 
             if (!_currentUser) {
                 // Show login screen
                 document.getElementById('login-container').style.display = 'flex';
                 document.getElementById('app-shell').style.display = 'none';
-                populateLoginDropdown();
+                // Wire up Supabase login button
+                _wireLoginBtn();
             } else {
                 // Show app shell
                 document.getElementById('login-container').style.display = 'none';
                 document.getElementById('app-shell').style.display = 'block';
                 updateUserDisplay();
                 updateNavVisibility();
-                expireOldOverrides();
+                await expireOldOverrides();
 
                 // Initialize other modules
                 initGoogleIntegration();
                 initWhatsAppIntegration();
-                initAIAnalytics();
+                await initAIAnalytics();
 
-                navigateTo('calendar');
+                await navigateTo('calendar');
 
                 // Phase 14: Initialize offline support and mobile features
                 initOfflineSupport();
                 if (isMobile()) {
-                    renderMobileBottomNav();
+                    await renderMobileBottomNav();
                     initSwipeActions();
-                    initPullToRefresh();
+                    await initPullToRefresh();
                 }
 
                 // Phase 18: Initialize Mobile App Features
                 if (typeof initMobileApp === 'function') {
-                    initMobileApp();
+                    await initMobileApp();
                 }
 
                 // Step 1: Migration for referrals
-                ensureReferralFields();
+                await ensureReferralFields();
             }
 
             // Phase 20: System Administration
             if (typeof SystemHealth !== 'undefined' && typeof SystemHealth.init === 'function') {
-                SystemHealth.init();
+                await SystemHealth.await init();
             }
             if (typeof ConfigManager !== 'undefined' && typeof ConfigManager.init === 'function') {
-                ConfigManager.init();
+                await ConfigManager.await init();
             }
 
             // Phase 5 Agent Table Event Delegation
-            document.addEventListener('click', (e) => {
+            document.addEventListener('click', async (e) => {
                 // Edit button handler
                 const editBtn = e.target.closest('.edit-agent-btn');
                 if (editBtn) {
@@ -5547,7 +5574,7 @@ In a production system, this would show the actual file contents.
                 if (viewBtn) {
                     e.stopPropagation();
                     const agentId = viewBtn.dataset.agentId;
-                    app.showAgentDetail(agentId);
+                    await app.await showAgentDetail(agentId);
                     return;
                 }
 
@@ -5555,7 +5582,7 @@ In a production system, this would show the actual file contents.
                 const row = e.target.closest('.agent-row');
                 if (row && !e.target.closest('.btn-icon')) {
                     const agentId = row.dataset.agentId;
-                    app.showAgentDetail(agentId);
+                    await app.await showAgentDetail(agentId);
                 }
             });
 
@@ -5572,8 +5599,8 @@ In a production system, this would show the actual file contents.
         }
     };
 
-    const openAddNameModal = (prospectId, nameId = null) => {
-        const nameData = nameId ? DataStore.getById('names', nameId) : null;
+    const openAddNameModal = async (prospectId, nameId = null) => {
+        const nameData = nameId ? await DataStore.getById('names', nameId) : null;
         const isEdit = !!nameData;
 
         const content = `
@@ -5608,11 +5635,11 @@ In a production system, this would show the actual file contents.
 
         UI.showModal(isEdit ? 'Edit Name' : 'Add Name', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save', type: 'primary', action: `app.saveName(${prospectId})` }
+            { label: 'Save', type: 'primary', action: `await app.await saveName(${prospectId})` }
         ]);
     };
 
-    const saveName = (prospectId) => {
+    const saveName = async (prospectId) => {
         const name = document.getElementById('name-full')?.value;
         if (!name) {
             UI.toast.error('Name is required');
@@ -5629,101 +5656,79 @@ In a production system, this would show the actual file contents.
         };
 
         if (nameId) {
-            DataStore.update('names', parseInt(nameId), data);
+            await DataStore.update('names', parseInt(nameId), data);
             UI.toast.success('Name updated successfully');
         } else {
-            DataStore.create('names', data);
+            await DataStore.create('names', data);
             UI.toast.success('Name added successfully');
         }
 
         UI.hideModal();
-        app.showProspectDetail(prospectId); // Refresh detail view
+        await app.await showProspectDetail(prospectId); // Refresh detail view
     };
 
-    const deleteName = (prospectId, nameId) => {
+    const deleteName = async (prospectId, nameId) => {
         UI.showModal('Confirm Delete', 'Are you sure you want to delete this name?', [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Delete', type: 'primary', action: `app.confirmDeleteName(${prospectId}, ${nameId})` }
+            { label: 'Delete', type: 'primary', action: `await app.await confirmDeleteName(${prospectId}, ${nameId})` }
         ]);
     };
 
-    const confirmDeleteName = (prospectId, nameId) => {
-        DataStore.delete('names', nameId);
+    const confirmDeleteName = async (prospectId, nameId) => {
+        await DataStore.delete('names', nameId);
         UI.hideModal();
         UI.toast.success('Name deleted');
-        app.showProspectDetail(prospectId);
+        await app.await showProspectDetail(prospectId);
     };
 
 
-    const initDemoData = () => {
-        if (DataStore.getAll('users').length === 0) {
-            console.log('Loading demo data...');
+    const initDemoData = async () => {
+        console.log('Checking for demo data seeding...');
 
-            // Roles
-            const roles = USER_ROLES.map(r => ({ role_name: r, permissions: { all: true } }));
-            // Add legacy roles for compatibility
-            roles.push(
+        // 1. Roles
+        const roles = await DataStore.getAll('roles');
+        if (roles.length === 0) {
+            console.log('Seeding roles...');
+            const defaultRoles = USER_ROLES.map(r => ({ role_name: r, permissions: { all: true } }));
+            defaultRoles.push(
                 { role_name: 'super_admin', permissions: { all: true } },
                 { role_name: 'marketing_manager', permissions: { 'view-dashboard': true, 'manage-promotions': true, 'view-reports': true } },
                 { role_name: 'team_leader', permissions: { 'view-dashboard': true, 'view-team-data': true } },
                 { role_name: 'consultant', permissions: { 'view-dashboard': true, 'manage-self-prospects': true } }
             );
-            roles.forEach(r => DataStore.create('roles', r));
+            for (const r of defaultRoles) {
+                await DataStore.create('roles', r);
+            }
+        }
 
-            // Teams
-            const teamA = DataStore.create('teams', { team_name: 'Team A' });
-
-            // Users/Agents
-            const users = [
+        // 2. Users
+        const users = await DataStore.getAll('users');
+        if (users.length === 0) {
+            console.log('Seeding users...');
+            const demoUsers = [
                 { id: 1, username: 'admin', password: 'admin123', full_name: 'System Admin', role: 'Level 1 super admin' },
                 { id: 2, username: 'marketing', password: 'mkt123', full_name: 'Marketing Manager', role: 'Level 2 Marketing Manager' },
-                { id: 3, username: 'teamlead', password: 'tl123', full_name: 'Team Leader', role: 'Level 7 Team Leader', team_id: teamA.id, reporting_to: 10 },
-                { id: 4, username: 'consultant', password: 'cons123', full_name: 'Consultant', role: 'Level 12 Agent', team_id: teamA.id },
-                { id: 5, username: 'michelle', password: 'michelle123', full_name: 'Michelle Tan', role: 'Level 9 Senior Consultant', team_id: teamA.id, reporting_to: 3 },
-                { id: 6, username: 'ahseng', password: 'ahseng123', full_name: 'Ah Seng', role: 'Level 13 Junior Agent', team_id: teamA.id, reporting_to: 3 },
-                { id: 7, username: 'meiling', password: 'meiling123', full_name: 'Mei Ling', role: 'Level 13 Junior Agent', team_id: teamA.id, reporting_to: 3 },
-                { id: 8, username: 'raj', password: 'raj123', full_name: 'Raj Kumar', role: 'Level 13 Junior Agent', team_id: teamA.id, reporting_to: 3 },
-                { id: 10, username: 'manager', password: 'manager123', full_name: 'Manager', role: 'Level 8 Consultant Manager', team_id: teamA.id, reporting_to: null },
-                { id: 11, username: 'admin_lvl1', password: '123', full_name: 'Level 1 Admin', role: 'Level 1 super admin' },
-                { id: 12, username: 'mkt_lvl3', password: '123', full_name: 'Level 3 Marketing', role: 'Level 3 Marketing Admin' },
-                { id: 13, username: 'teacher_lvl4', password: '123', full_name: 'Level 4 Teacher', role: 'Level 4 Teacher' },
-                { id: 14, username: 'agent_lvl13', password: '123', full_name: 'Level 13 Agent', role: 'Level 13 Junior Agent' }
+                { id: 3, username: 'teamlead', password: 'tl123', full_name: 'Team Leader', role: 'Level 7 Team Leader', team_id: 1, reporting_to: 10 },
+                { id: 4, username: 'consultant', password: 'cons123', full_name: 'Consultant', role: 'Level 12 Agent', team_id: 1 },
+                { id: 5, username: 'michelle', password: 'michelle123', full_name: 'Michelle Tan', role: 'Level 9 Senior Consultant', team_id: 1, reporting_to: 3 },
+                { id: 10, username: 'manager', password: 'manager123', full_name: 'Manager', role: 'Level 8 Consultant Manager', team_id: 1, reporting_to: null }
             ];
-            users.forEach(u => DataStore.create('users', u));
+            for (const u of demoUsers) {
+                await DataStore.create('users', u);
+            }
+        }
 
-
-            // Tags
-            const tags = [
-                { id: 1, name: 'Career Focused', color: 'blue' },
-                { id: 2, name: 'MG4', color: 'purple' },
-                { id: 3, name: 'Referred By Customer', color: 'green' },
-                { id: 4, name: 'High Score', color: 'orange' },
-                { id: 5, name: 'Business Owner', color: 'teal' },
-                { id: 6, name: 'Event Attendee', color: 'gray' }
-            ];
-            tags.forEach(t => DataStore.create('tags', t));
-
-            // Prospects
-            const prospects = [
+        // 3. Prospects
+        const prospects = await DataStore.getAll('prospects');
+        if (prospects.length === 0) {
+            console.log('Seeding prospects...');
+            const demoProspects = [
                 {
                     id: 1,
                     full_name: 'Tan Ah Kow',
                     phone: '012-3456789',
-                    ic_number: '901212-10-1234',
-                    date_of_birth: '1990-12-12',
                     score: 850,
                     responsible_agent_id: 5,
-                    title: 'Mr.',
-                    gender: 'Male',
-                    nationality: 'Malaysian',
-                    email: 'tan.ah.kow@email.com',
-                    occupation: 'Business Owner - Construction',
-                    company_name: 'Ah Kow Construction Sdn Bhd',
-                    income_range: 'RM 15,000 - RM 20,000',
-                    address: '123, Jalan SS2, Petaling Jaya, Selangor',
-                    cps_agent_id: 5,
-                    cps_assignment_date: '2026-02-15',
-                    protection_deadline: '2026-03-17',
                     ming_gua: 'MG4',
                     element: 'Wood'
                 },
@@ -5735,925 +5740,57 @@ In a production system, this would show the actual file contents.
                     responsible_agent_id: 6,
                     protection_deadline: '2026-03-20',
                     ming_gua: 'MG2'
-                },
-                {
-                    id: 3,
-                    full_name: 'Lee Meng Hui',
-                    phone: '011-2223334',
-                    score: 680,
-                    responsible_agent_id: 5,
-                    protection_deadline: '2026-03-25',
-                    ming_gua: 'MG5'
-                },
-                {
-                    id: 4,
-                    full_name: 'Lim Ah Boy',
-                    phone: '017-5556667',
-                    score: 620,
-                    responsible_agent_id: 7,
-                    protection_deadline: '2026-03-15',
-                    ming_gua: 'MG7'
-                },
-                {
-                    id: 5,
-                    full_name: 'Siti Aminah',
-                    phone: '019-9990001',
-                    score: 580,
-                    responsible_agent_id: 8,
-                    protection_deadline: '2026-03-10',
-                    ming_gua: 'MG3'
                 }
             ];
-            prospects.forEach(p => DataStore.create('prospects', p));
-
-            // Entity Tags for Tan Ah Kow
-            const entityTags = [
-                { entity_type: 'prospect', entity_id: 1, tag_id: 1 },
-                { entity_type: 'prospect', entity_id: 1, tag_id: 2 },
-                { entity_type: 'prospect', entity_id: 1, tag_id: 3 },
-                { entity_type: 'prospect', entity_id: 1, tag_id: 4 },
-                { entity_type: 'prospect', entity_id: 1, tag_id: 5 },
-                { entity_type: 'prospect', entity_id: 1, tag_id: 6 }
-            ];
-            entityTags.forEach(et => DataStore.create('entity_tags', et));
-
-            // Proposed Solutions for Tan Ah Kow
-            const solutions = [
-                { prospect_id: 1, solution: 'PR4 Power Ring', proposed_date: '2026-03-04', status: 'Proposed', notes: '' },
-                { prospect_id: 1, solution: 'Office Audit', proposed_date: '2026-03-04', status: 'Proposed', notes: '' }
-            ];
-            solutions.forEach(s => DataStore.create('proposed_solutions', s));
-
-            // Activities - FIXED with proper end_time for all
-            const activities = [
-                {
-                    activity_type: 'CPS',
-                    activity_title: 'Initial Consultation',
-                    activity_date: '2026-03-04',
-                    start_time: '09:00',
-                    end_time: '10:00',
-                    prospect_id: 1,
-                    lead_agent_id: 5,
-                    co_agents: [{ id: 6, name: 'Ah Seng', role: 'Supporting' }],
-                    summary: 'Initial consultation scheduling'
-                },
-                {
-                    activity_type: 'FTF',
-                    activity_title: 'Face to Face Meeting',
-                    activity_date: '2026-03-04',
-                    start_time: '11:00',
-                    end_time: '12:00',
-                    prospect_id: 2,
-                    lead_agent_id: 6,
-                    co_agents: [{ id: 7, name: 'Mei Ling', role: 'Supporting' }, { id: 8, name: 'Raj', role: 'Observer' }],
-                    summary: 'Discussed career advancement and PR4 interest confirmed. Next Step: Send quote by 11 Mar'
-                },
-                {
-                    activity_type: 'FSA',
-                    activity_title: 'Feng Shui Analysis',
-                    activity_date: '2026-03-04',
-                    start_time: '14:00',
-                    end_time: '16:00',
-                    prospect_id: 4,
-                    lead_agent_id: 7,
-                    location_address: '123, Jalan SS2, PJ',
-                    summary: 'Site analysis for Lim Ah Boy'
-                },
-                {
-                    activity_type: 'EVENT',
-                    activity_title: 'Understanding Your Life Gua',
-                    activity_date: '2026-03-04',
-                    start_time: '18:00',
-                    end_time: '20:00',
-                    lead_agent_id: 8,
-                    score_value: 10,
-                    event_title: 'Understanding Your Life Gua',
-                    attendees: '12 Prospects + 4 Agents',
-                    summary: 'Public lecture on Feng Shui'
-                }
-            ];
-            activities.forEach(ac => DataStore.create('activities', ac));
-
-            // Notes for Tan Ah Kow
-            const notes = [
-                { prospect_id: 1, author: 'Michelle Tan', date: '2026-02-28', text: 'Wife also interested in relationship consultation. Should consider couple package.' },
-                { prospect_id: 1, author: 'Michelle Tan', date: '2026-03-02', text: 'Customer is knowledgeable about Feng Shui, already reads books on the subject.' },
-                { prospect_id: 1, author: 'Michelle Tan', date: '2026-03-04', text: 'Office facing North-West. Need compass reading for accurate assessment.' }
-            ];
-            notes.forEach(n => DataStore.create('notes', n));
-
-            // Names (Family/Referrals) for Tan Ah Kow
-            const names = [
-                { prospect_id: 1, relation: 'Spouse', full_name: 'Tan Ai Ling', date_of_birth: '1992-05-15', notes: 'Involved in decision making' },
-                { prospect_id: 1, relation: 'Child', full_name: 'Tan Wei Ming', date_of_birth: '2015-08-10', notes: '' },
-                { prospect_id: 1, relation: 'Child', full_name: 'Tan Wei Jie', date_of_birth: '2018-03-22', notes: '' },
-                { prospect_id: 1, relation: 'Parent', full_name: 'Tan Ah Hock', date_of_birth: '1960-06-05', notes: 'Lives with family' },
-                { prospect_id: 1, relation: 'Business Partner', full_name: 'Lee Meng Chew', date_of_birth: '', notes: 'Co-owner of construction company' }
-            ];
-            names.forEach(n => DataStore.create('names', n));
-
-            // Phase 6: Pipeline Demo Data
-            // Manual overrides
-            const overrides = [
-                {
-                    id: 1001,
-                    user_id: 5, // Michelle Tan
-                    prospect_id: 3, // Lee Meng Hui
-                    override_type: 'boost',
-                    system_rank: 3,
-                    new_priority: 1,
-                    reason_category: 'urgency',
-                    justification: 'CEO direct contact, board approved budget, wants to move quickly',
-                    status: 'active',
-                    created_at: '2026-03-03T10:30:00Z',
-                    expires_at: '2026-03-10T10:30:00Z'
-                },
-                {
-                    id: 1002,
-                    user_id: 5,
-                    prospect_id: 4, // Lim Ah Boy
-                    override_type: 'boost',
-                    system_rank: 5,
-                    new_priority: 3,
-                    reason_category: 'conversation',
-                    justification: 'High budget confirmed, ready to purchase within week',
-                    status: 'active',
-                    created_at: '2026-03-02T14:15:00Z',
-                    expires_at: '2026-03-09T14:15:00Z'
-                },
-                {
-                    id: 1003,
-                    user_id: 5,
-                    prospect_id: 2, // Ong Bee Ling
-                    override_type: 'demote',
-                    system_rank: 2,
-                    new_priority: 4,
-                    reason_category: 'urgency',
-                    justification: 'Less urgent than other opportunities',
-                    status: 'expired',
-                    created_at: '2026-03-01T09:00:00Z',
-                    expires_at: '2026-03-08T09:00:00Z'
-                }
-            ];
-            overrides.forEach(o => DataStore.create('manual_overrides', o));
-
-            // My potential list
-            const potentialList = [
-                {
-                    id: 2001,
-                    user_id: 5,
-                    prospect_id: 3,
-                    priority_order: 1,
-                    expected_close_date: '2026-03-15',
-                    estimated_value: 3200,
-                    status: 'active'
-                },
-                {
-                    id: 2002,
-                    user_id: 5,
-                    prospect_id: 1,
-                    priority_order: 2,
-                    expected_close_date: '2026-03-25',
-                    estimated_value: 2488,
-                    status: 'active'
-                },
-                {
-                    id: 2003,
-                    user_id: 5,
-                    prospect_id: 4,
-                    priority_order: 3,
-                    expected_close_date: '2026-03-20',
-                    estimated_value: 888,
-                    status: 'active'
-                },
-                {
-                    id: 2004,
-                    user_id: 5,
-                    prospect_id: 2,
-                    priority_order: 4,
-                    expected_close_date: '2026-03-18',
-                    estimated_value: 1288,
-                    status: 'active'
-                },
-                {
-                    id: 2005,
-                    user_id: 5,
-                    prospect_id: 5,
-                    priority_order: 5,
-                    expected_close_date: '2026-03-30',
-                    estimated_value: 588,
-                    status: 'active'
-                }
-            ];
-            potentialList.forEach(p => DataStore.create('my_potential_list', p));
-
-            UI.toast.success('Demo data loaded successfully.');
-        } else {
-            // Re-initialize activities to ensure no duplicates for Phase 7
-            const activities = [
-                {
-                    id: 101,
-                    activity_type: 'CPS',
-                    activity_title: 'Initial Consultation',
-                    activity_date: '2026-03-04',
-                    start_time: '09:00',
-                    end_time: '10:00',
-                    prospect_id: 1,
-                    lead_agent_id: 5,
-                    co_agents: [{ id: 6, name: 'Ah Seng', role: 'Supporting' }],
-                    summary: 'Initial consultation scheduling'
-                },
-                {
-                    id: 102,
-                    activity_type: 'FTF',
-                    activity_title: 'Face to Face Meeting',
-                    activity_date: '2026-03-04',
-                    start_time: '11:00',
-                    end_time: '12:00',
-                    prospect_id: 2,
-                    lead_agent_id: 6,
-                    co_agents: [{ id: 7, name: 'Mei Ling', role: 'Supporting' }, { id: 8, name: 'Raj', role: 'Observer' }],
-                    summary: 'Discussed career advancement and PR4 interest confirmed. Next Step: Send quote by 11 Mar'
-                },
-                {
-                    id: 103,
-                    activity_type: 'FSA',
-                    activity_title: 'Feng Shui Analysis',
-                    activity_date: '2026-03-04',
-                    start_time: '14:00',
-                    end_time: '16:00',
-                    prospect_id: 4,
-                    lead_agent_id: 7,
-                    location_address: '123, Jalan SS2, PJ',
-                    summary: 'Site analysis for Lim Ah Boy'
-                },
-                {
-                    id: 104,
-                    activity_type: 'EVENT',
-                    activity_title: 'Understanding Your Life Gua',
-                    activity_date: '2026-03-04',
-                    start_time: '18:00',
-                    end_time: '20:00',
-                    lead_agent_id: 8,
-                    score_value: 10,
-                    event_title: 'Understanding Your Life Gua',
-                    attendees: '12 Prospects + 4 Agents',
-                    summary: 'Public lecture on Feng Shui'
-                }
-            ];
-
-            // Clear existing and re-add
-            const existingActivities = DataStore.getAll('activities');
-            existingActivities.forEach(a => DataStore.delete('activities', a.id));
-            activities.forEach(ac => DataStore.create('activities', ac));
-        }
-
-        // Additional Phase 4 Demo Data - Ensure it exists
-        if (DataStore.getAll('customers').length === 0) {
-            // Customers
-            const customers = [
-                {
-                    id: 101,
-                    full_name: 'Ong Bee Ling',
-                    phone: '012-9876543',
-                    email: 'ong.beeling@email.com',
-                    ic_number: '850505-12-3456',
-                    date_of_birth: '1982-03-04',
-                    ming_gua: 'MG4',
-                    element: 'Wood',
-                    gender: 'Female',
-                    nationality: 'Malaysian',
-                    occupation: 'Retail Owner',
-                    company_name: 'Bee Ling Fashion Boutique',
-                    income: 'RM 8,000 - RM 12,000',
-                    address: '456, Jalan Ampang, Kuala Lumpur',
-                    converted_from_prospect_id: 2,
-                    conversion_date: '2026-02-20',
-                    conversion_amount: 2200,
-                    lifetime_value: 3152,
-                    bank_name: 'Maybank Berhad',
-                    bank_account_number: '5123-4567-8901',
-                    account_holder: 'Ong Bee Ling',
-                    payment_methods: 'Bank Transfer, Credit Card',
-                    responsible_agent_id: 6,
-                    status: 'active',
-                    customer_since: '2026-02-20'
-                }
-            ];
-            customers.forEach(c => DataStore.create('customers', c));
-
-            // Platform IDs
-            const platformIds = [
-                { id: 1001, customer_id: 101, platform: 'Bujishu', platform_id: 'BJ-87654321' },
-                { id: 1002, customer_id: 101, platform: 'Metapoint', platform_id: 'MP-12345678' },
-                { id: 1003, customer_id: 101, platform: 'Formula', platform_id: 'FM-55667788' },
-                { id: 1004, customer_id: 101, platform: 'Monalisa', platform_id: 'ML-99887766' },
-                { id: 1005, customer_id: 101, platform: 'Florida', platform_id: 'FL-11223344' },
-                { id: 1006, customer_id: 101, platform: 'Far Coffee', platform_id: 'FC-44332211' },
-                { id: 1007, customer_id: 101, platform: 'Patiseri', platform_id: 'PT-77889900' }
-            ];
-            platformIds.forEach(p => DataStore.create('platform_ids', p));
-
-            // Purchases
-            const purchases = [
-                {
-                    id: 2001,
-                    customer_id: 101,
-                    date: '2026-02-20',
-                    invoice: 'INV-0032',
-                    item: 'PR3 Ring',
-                    amount: 888,
-                    status: 'COLLECTED',
-                    proof: 'image1.jpg'
-                },
-                {
-                    id: 2002,
-                    customer_id: 101,
-                    date: '2026-02-20',
-                    invoice: 'INV-0033',
-                    item: 'Career Consultation',
-                    amount: 588,
-                    status: 'N/A'
-                },
-                {
-                    id: 2003,
-                    customer_id: 101,
-                    date: '2026-03-01',
-                    invoice: 'INV-0041',
-                    item: 'Office Audit',
-                    amount: 388,
-                    status: 'COMPLETED',
-                    proof: 'report1.pdf'
-                },
-                {
-                    id: 2004,
-                    customer_id: 101,
-                    date: '2026-03-04',
-                    invoice: 'Q-0045',
-                    item: 'Harmony Painting',
-                    amount: 1288,
-                    status: 'PENDING'
-                }
-            ];
-            purchases.forEach(p => DataStore.create('purchases', p));
-
-            // Referrals
-            const referrals = [
-                {
-                    id: 3001,
-                    referrer_customer_id: 101,
-                    referred_prospect_id: 1, // Tan Ah Kow
-                    relationship: 'Friend',
-                    date: '2026-02-15',
-                    status: 'Active',
-                    reward_status: 'Pending',
-                    referral_source: 'CPS',
-                    source_id: generateId()
-                },
-                {
-                    id: 3002,
-                    referrer_customer_id: 101,
-                    referred_prospect_id: 4, // Lim Ah Boy
-                    relationship: 'Cousin',
-                    date: '2026-02-20',
-                    status: 'Warm',
-                    reward_status: 'Pending',
-                    referral_source: 'EVENT',
-                    source_id: generateId()
-                },
-                {
-                    id: 3003,
-                    referrer_customer_id: 1, // Tan Ah Kow
-                    referred_prospect_id: 2, // Ong Bee Ling
-                    relationship: 'Colleague',
-                    date: '2026-03-01',
-                    status: 'Active',
-                    reward_status: 'None',
-                    referral_source: 'MANUAL',
-                    source_id: null
-                }
-            ];
-            referrals.forEach(r => DataStore.create('referrals', r));
-
-            // Add original_source to existing prospects
-            const p1 = DataStore.getById('prospects', 1);
-            if (p1 && !p1.original_source) DataStore.update('prospects', 1, { original_source: 'CPS' });
-            const p4 = DataStore.getById('prospects', 4);
-            if (p4 && !p4.original_source) DataStore.update('prospects', 4, { original_source: 'EVENT', source_id: 'EVT-001' });
-        }
-
-        // Phase 5 Agent Management Demo Data
-        if (DataStore.getAll('agent_stats').length === 0) {
-            // Agents (users already exist, but need additional agent fields)
-            const teamA = DataStore.query('teams', { team_name: 'Team A' })[0];
-
-            const agentUpdates = [
-                {
-                    id: 5, // Michelle Tan
-                    agent_code: 'AGN-2026-001',
-                    license_start: '2026-01-01',
-                    license_expiry: '2026-12-31',
-                    commission_rate: 30,
-                    monthly_target: 25000,
-                    team: 'Team A',
-                    reporting_to: null, // Team Leader
-                    join_date: '2026-01-01',
-                    probation_end: '2026-03-01',
-                    status: 'active',
-                    bank_name: 'Maybank Berhad',
-                    bank_account: '5123-1111-2222',
-                    business_address: '123, Jalan SS2, Petaling Jaya'
-                },
-                {
-                    id: 6, // Ah Seng
-                    agent_code: 'AGN-2026-002',
-                    license_start: '2026-01-15',
-                    license_expiry: '2026-12-31',
-                    commission_rate: 30,
-                    monthly_target: 20000,
-                    team: 'Team A',
-                    reporting_to: 5, // Michelle Tan
-                    join_date: '2026-01-15',
-                    probation_end: '2026-03-15',
-                    status: 'active',
-                    bank_name: 'Public Bank',
-                    bank_account: '3123-3333-4444',
-                    business_address: '456, Jalan Ampang, Kuala Lumpur'
-                },
-                {
-                    id: 7, // Mei Ling
-                    agent_code: 'AGN-2026-003',
-                    license_start: '2026-02-01',
-                    license_expiry: '2026-12-31',
-                    commission_rate: 30,
-                    monthly_target: 18000,
-                    team: 'Team A',
-                    reporting_to: 5,
-                    join_date: '2026-02-01',
-                    probation_end: '2026-04-01',
-                    status: 'probation',
-                    bank_name: 'CIMB Bank',
-                    bank_account: '1234-5678-9012',
-                    business_address: '789, Jalan Bukit Bintang, Kuala Lumpur'
-                },
-                {
-                    id: 8, // Raj Kumar
-                    agent_code: 'AGN-2026-004',
-                    license_start: '2026-02-15',
-                    license_expiry: '2026-12-31',
-                    commission_rate: 30,
-                    monthly_target: 20000,
-                    team: 'Team A',
-                    reporting_to: 5,
-                    join_date: '2026-02-15',
-                    probation_end: '2026-04-15',
-                    status: 'active',
-                    bank_name: 'Hong Leong Bank',
-                    bank_account: '5678-1234-5678',
-                    business_address: '321, Jalan Tun Razak, Kuala Lumpur'
-                }
-            ];
-
-            agentUpdates.forEach(update => {
-                const user = DataStore.getById('users', update.id);
-                if (user) {
-                    DataStore.update('users', update.id, { ...user, ...update });
-                }
-            });
-
-            // Add Ong Bee Ling as new agent (converted from customer)
-            const ongBeeLingAgent = {
-                id: 9,
-                username: 'ong.beeling',
-                password: 'agent123',
-                full_name: 'Ong Bee Ling',
-                role: 'consultant',
-                team_id: teamA ? teamA.id : null,
-                agent_code: 'AGN-2026-034',
-                license_start: '2026-03-05',
-                license_expiry: '2027-03-04',
-                commission_rate: 30,
-                monthly_target: 20000,
-                team: 'Team A',
-                reporting_to: 5, // Michelle Tan
-                join_date: '2026-03-05',
-                probation_end: '2026-06-05',
-                status: 'active',
-                bank_name: 'Maybank Berhad',
-                bank_account: '5123-4567-8901',
-                business_address: '456, Jalan Ampang, Kuala Lumpur',
-                ic_number: '850505-12-3456',
-                phone: '012-9876543',
-                email: 'ong.beeling@fengshui.com',
-                date_of_birth: '1982-03-04',
-                gender: 'Female',
-                company_name: 'Bee Ling Fashion Boutique'
-            };
-
-            DataStore.create('users', ongBeeLingAgent);
-
-            // Update customer to mark as converted to agent
-            const customer = DataStore.getById('customers', 101);
-            if (customer) {
-                DataStore.update('customers', 101, {
-                    converted_to_agent: true,
-                    converted_to_agent_id: 9,
-                    agent_package_purchased: 'Premium Package',
-                    agent_package_amount: 5500,
-                    agent_purchase_date: '2026-03-05'
-                });
+            for (const p of demoProspects) {
+                await DataStore.create('prospects', p);
             }
-
-            // Add follow-up stats
-            const followupStats = [
-                {
-                    agent_id: 5,
-                    total_assigned: 52,
-                    followed_up_7d: 48,
-                    inactive_3_7d: 2,
-                    inactive_8_14d: 2,
-                    inactive_15d_plus: 0,
-                    followup_rate: 92
-                },
-                {
-                    agent_id: 6,
-                    total_assigned: 50,
-                    followed_up_7d: 31,
-                    inactive_3_7d: 8,
-                    inactive_8_14d: 6,
-                    inactive_15d_plus: 5,
-                    followup_rate: 62
-                }
-            ];
-            followupStats.forEach(s => DataStore.create('agent_stats', s));
-
-            // Add current assignments
-            const assignments = [
-                { agent_id: 5, prospect_id: 1, status: 'Active', next_action: '2026-03-11' },
-                { agent_id: 5, prospect_id: 3, status: 'Warm', next_action: '2026-03-07' },
-                { agent_id: 5, prospect_id: 5, status: 'Cold', next_action: 'ASAP' },
-                { agent_id: 6, prospect_id: 2, status: 'Active', next_action: '2026-03-04' }
-            ];
-            assignments.forEach(a => DataStore.create('assignments', a));
-
-            // Add performance targets
-            const targets = [
-                { agent_id: 5, month: '2026-03', target_amount: 20000, current_amount: 12500, target_cps: 15, current_cps: 8, target_meetings: 20, current_meetings: 12, target_conversion: 25, current_conversion: 18 }
-            ];
-            targets.forEach(t => DataStore.create('agent_targets', t));
         }
 
-        // Phase 8 Event Demo Data
-        if (DataStore.getAll('event_categories').length === 0) {
-            const eventCategories = [
-                { id: 1, category_name: 'Lecture', base_score: 10, score_multiplier: 1.0, color_code: '#3b82f6' },
-                { id: 2, category_name: 'Workshop', base_score: 15, score_multiplier: 1.2, color_code: '#f59e0b' },
-                { id: 3, category_name: 'Course', base_score: 20, score_multiplier: 1.5, color_code: '#10b981' },
-                { id: 4, category_name: 'Museum Tour', base_score: 12, score_multiplier: 1.0, color_code: '#8b5cf6' }
-            ];
-            eventCategories.forEach(c => DataStore.create('event_categories', c));
-
-            const events = [
+        // 4. Activities
+        const activities = await DataStore.getAll('activities');
+        if (activities.length === 0) {
+            console.log('Seeding activities...');
+            const demoActivities = [
                 {
-                    id: 101,
-                    event_title: 'Understanding Your Life Gua',
-                    event_category_id: 1,
-                    description: 'Learn about your Life Gua and how it affects your destiny',
-                    event_date: '2026-03-10',
-                    start_time: '18:00',
-                    end_time: '20:00',
-                    location: 'Feng Shui Center, Kuala Lumpur',
-                    event_type: 'public',
-                    capacity: 50,
-                    ticket_price: 50,
-                    base_score: 10,
-                    override_multiplier: false,
-                    custom_multiplier: 1.0,
-                    enable_friend_bonus: true,
-                    friend_points_per_friend: 10,
-                    max_friends: 3,
-                    enable_question_bonus: true,
-                    question_points_per_question: 5,
-                    enable_stay_bonus: true,
-                    stay_points: 5,
-                    enable_purchase_bonus: true,
-                    purchase_base_points: 15,
-                    purchase_points_per_100: 10,
-                    auto_tags: ['Event Attendee'],
-                    conditional_tags: { friend: 'Friend Bringer', question: 'Engaged Attendee', purchase: 'Event Buyer' },
-                    status: 'upcoming',
-                    registered_count: 45,
-                    attended_count: 0,
-                    created_by: 5,
-                    created_at: '2026-02-15T10:00:00Z'
-                },
-                {
-                    id: 102,
-                    event_title: 'Feng Shui Basics Course',
-                    event_category_id: 3,
-                    description: 'Comprehensive introduction to Feng Shui principles',
-                    event_date: '2026-03-15',
+                    activity_type: 'CPS',
+                    activity_title: 'Initial Consultation',
+                    activity_date: '2026-03-04',
                     start_time: '09:00',
-                    end_time: '17:00',
-                    location: 'Online via Zoom',
-                    event_type: 'public',
-                    capacity: 100,
-                    ticket_price: 120,
-                    base_score: 20,
-                    override_multiplier: false,
-                    custom_multiplier: 1.5,
-                    enable_friend_bonus: true,
-                    friend_points_per_friend: 10,
-                    max_friends: 3,
-                    enable_question_bonus: true,
-                    question_points_per_question: 5,
-                    max_questions: 3,
-                    enable_stay_bonus: true,
-                    stay_points: 5,
-                    enable_purchase_bonus: true,
-                    purchase_base_points: 15,
-                    purchase_points_per_100: 10,
-                    auto_tags: ['Event Attendee', 'Course Participant'],
-                    conditional_tags: { friend: 'Friend Bringer', question: 'Engaged Attendee', purchase: 'Event Buyer' },
-                    status: 'upcoming',
-                    registered_count: 28,
-                    attended_count: 0,
-                    created_by: 5,
-                    created_at: '2026-02-20T14:30:00Z'
-                },
-                {
-                    id: 103,
-                    event_title: 'Museum Tour',
-                    event_category_id: 4,
-                    description: 'Guided tour of the Asian Civilizations Museum',
-                    event_date: '2026-03-20',
-                    start_time: '10:00',
-                    end_time: '13:00',
-                    location: 'Asian Civilizations Museum',
-                    event_type: 'public',
-                    capacity: 40,
-                    ticket_price: 30,
-                    base_score: 12,
-                    override_multiplier: false,
-                    custom_multiplier: 1.0,
-                    enable_friend_bonus: true,
-                    friend_points_per_friend: 10,
-                    max_friends: 3,
-                    enable_question_bonus: true,
-                    question_points_per_question: 5,
-                    max_questions: 3,
-                    enable_stay_bonus: true,
-                    stay_points: 5,
-                    enable_purchase_bonus: false,
-                    auto_tags: ['Event Attendee'],
-                    conditional_tags: { friend: 'Friend Bringer', question: 'Engaged Attendee' },
-                    status: 'upcoming',
-                    registered_count: 35,
-                    attended_count: 0,
-                    created_by: 5,
-                    created_at: '2026-02-25T09:15:00Z'
-                }
-            ];
-            events.forEach(e => DataStore.create('events', e));
-
-            const registrations = [
-                {
-                    id: 1001,
-                    event_id: 101,
-                    attendee_type: 'prospect',
+                    end_time: '10:00',
                     prospect_id: 1,
-                    registered_by: 5,
-                    registered_at: '2026-02-20T11:30:00Z',
-                    checked_in: false,
-                    checked_in_at: null,
-                    brought_friends: 0,
-                    asked_questions: 0,
-                    stayed_till_end: false,
-                    made_purchase: false,
-                    purchase_amount: 0,
-                    points_awarded: 0,
-                    scoring_processed: false
+                    lead_agent_id: 5,
+                    summary: 'Initial consultation scheduling'
                 },
                 {
-                    id: 1002,
-                    event_id: 101,
-                    attendee_type: 'prospect',
+                    activity_type: 'FTF',
+                    activity_title: 'Face to Face Meeting',
+                    activity_date: '2026-03-04',
+                    start_time: '11:00',
+                    end_time: '12:00',
                     prospect_id: 2,
-                    registered_by: 6,
-                    registered_at: '2026-02-21T14:20:00Z',
-                    checked_in: false,
-                    checked_in_at: null,
-                    brought_friends: 0,
-                    asked_questions: 0,
-                    stayed_till_end: false,
-                    made_purchase: false,
-                    purchase_amount: 0,
-                    points_awarded: 0,
-                    scoring_processed: false
+                    lead_agent_id: 6,
+                    summary: 'Discussed career advancement'
                 }
             ];
-            registrations.forEach(r => DataStore.create('event_registrations', r));
+            for (const ac of demoActivities) {
+                await DataStore.create('activities', ac);
+            }
         }
 
-        // Phase 9: Reporting & KPI Dashboard Demo Data
-        if (DataStore.getAll('yearly_targets').length === 0) {
-            // Yearly Targets
-            const yearlyTargets = [
-                {
-                    id: 1,
-                    target_year: 2026,
-                    cps_count_target: 840,
-                    total_sales_target: 1680000,
-                    pop_case_count_target: 100,
-                    pop_sales_target: 250000,
-                    epp_case_count_target: 80,
-                    epp_sales_target: 200000,
-                    new_agents_target: 48,
-                    new_customers_target: 240,
-                    total_meetings_target: 1200,
-                    activity_headcount_target: 600,
-                    seasonal_weighting: { q1: 0.9, q2: 1.0, q3: 1.1, q4: 1.2 },
-                    created_by: 1,
-                    created_at: '2026-01-01T00:00:00Z'
-                }
-            ];
-            yearlyTargets.forEach(t => DataStore.create('yearly_targets', t));
-
-            // Quarterly Targets
-            const quarterlyTargets = [
-                { id: 1, yearly_target_id: 1, quarter: 1, year: 2026, cps_count_target: 180, total_sales_target: 360000, pop_case_count_target: 22, pop_sales_target: 55000, epp_case_count_target: 18, epp_sales_target: 45000, new_agents_target: 12, new_customers_target: 60, total_meetings_target: 280, activity_headcount_target: 140, seasonal_factor: 0.9 },
-                { id: 2, yearly_target_id: 1, quarter: 2, year: 2026, cps_count_target: 200, total_sales_target: 400000, pop_case_count_target: 24, pop_sales_target: 60000, epp_case_count_target: 20, epp_sales_target: 50000, new_agents_target: 12, new_customers_target: 60, total_meetings_target: 300, activity_headcount_target: 150, seasonal_factor: 1.0 },
-                { id: 3, yearly_target_id: 1, quarter: 3, year: 2026, cps_count_target: 220, total_sales_target: 440000, pop_case_count_target: 26, pop_sales_target: 65000, epp_case_count_target: 21, epp_sales_target: 52500, new_agents_target: 12, new_customers_target: 60, total_meetings_target: 310, activity_headcount_target: 155, seasonal_factor: 1.1 },
-                { id: 4, yearly_target_id: 1, quarter: 4, year: 2026, cps_count_target: 240, total_sales_target: 480000, pop_case_count_target: 28, pop_sales_target: 70000, epp_case_count_target: 21, epp_sales_target: 52500, new_agents_target: 12, new_customers_target: 60, total_meetings_target: 310, activity_headcount_target: 155, seasonal_factor: 1.2 }
-            ];
-            quarterlyTargets.forEach(t => DataStore.create('quarterly_targets', t));
-
-            // Monthly Targets (sample for Q1)
-            const monthlyTargets = [
-                { id: 1, quarterly_target_id: 1, month: 1, year: 2026, cps_count_target: 58, total_sales_target: 116000, working_days: 22 },
-                { id: 2, quarterly_target_id: 1, month: 2, year: 2026, cps_count_target: 60, total_sales_target: 120000, working_days: 20 },
-                { id: 3, quarterly_target_id: 1, month: 3, year: 2026, cps_count_target: 62, total_sales_target: 124000, working_days: 23 }
-            ];
-            monthlyTargets.forEach(t => DataStore.create('monthly_targets', t));
-
-            // Weekly Targets (sample for March)
-            const weeklyTargets = [
-                { id: 1, monthly_target_id: 3, week_number: 1, week_start_date: '2026-03-01', week_end_date: '2026-03-07', cps_count_target: 15, total_sales_target: 30000 },
-                { id: 2, monthly_target_id: 3, week_number: 2, week_start_date: '2026-03-08', week_end_date: '2026-03-14', cps_count_target: 16, total_sales_target: 32000 },
-                { id: 4, monthly_target_id: 3, week_number: 4, week_start_date: '2026-03-22', week_end_date: '2026-03-28', cps_count_target: 15, total_sales_target: 30000 }
-            ];
-            weeklyTargets.forEach(t => DataStore.create('weekly_targets', t));
+        // 5. Projects & Tasks
+        const projects = await DataStore.getAll('projects');
+        if (projects.length === 0) {
+            await DataStore.create('projects', { name: 'Website Redesign', status: 'active' });
+            await DataStore.create('projects', { name: 'Mobile App', status: 'planning' });
         }
 
-        // Phase 12: WhatsApp Marketing Demo Data
-        if (DataStore.getAll('whatsapp_templates').length === 0) {
-            const templates = [
-                {
-                    id: 1,
-                    template_name: 'Happy Birthday Wishes',
-                    category: 'Birthday',
-                    content: 'Hi {{name}}, wishing you a very happy birthday! May the {{zodiac}} year bring you prosperity and success!',
-                    buttons: [{ text: 'Thank you!', type: 'quick_reply' }, { text: 'View Offers', type: 'url' }],
-                    variables: ['name', 'zodiac'],
-                    footer_text: 'Reply STOP to opt out',
-                    is_approved: true,
-                    status: 'active',
-                    created_by: 5,
-                    created_at: '2026-02-15T10:00:00Z'
-                },
-                {
-                    id: 2,
-                    template_name: 'PR4 Special Offer',
-                    category: 'Promotion',
-                    content: 'Hi {{name}}, special offer for you! Get 15% off on PR4 Power Ring this month. Use code: PR4{{offer}}',
-                    buttons: [{ text: 'I\'m interested', type: 'quick_reply' }, { text: 'Learn more', type: 'url' }],
-                    variables: ['name', 'offer'],
-                    footer_text: 'Reply STOP to opt out',
-                    is_approved: true,
-                    status: 'active',
-                    created_by: 5,
-                    created_at: '2026-02-20T14:30:00Z'
-                },
-                {
-                    id: 3,
-                    template_name: 'Event Invitation',
-                    category: 'Event',
-                    content: 'Join us for {{event_title}} on {{event_date}} at {{location}}. Limited seats available!',
-                    buttons: [{ text: 'Yes, I\'ll attend', type: 'quick_reply' }, { text: 'View details', type: 'url' }],
-                    variables: ['name', 'event_title', 'event_date', 'location'],
-                    footer_text: 'Reply STOP to opt out',
-                    is_approved: true,
-                    status: 'active',
-                    created_by: 5,
-                    created_at: '2026-02-25T09:15:00Z'
-                }
-            ];
-            templates.forEach(t => DataStore.create('whatsapp_templates', t));
+        const tasks = await DataStore.getAll('tasks');
+        if (tasks.length === 0) {
+            await DataStore.create('tasks', { title: 'Design mockups', project_id: 1, completed: false });
         }
 
-        if (DataStore.getAll('whatsapp_campaigns').length === 0) {
-            const campaigns = [
-                {
-                    id: 1,
-                    campaign_name: 'March Birthday Blast',
-                    template_id: 1,
-                    status: 'scheduled',
-                    scheduled_date: '2026-03-10T09:00:00',
-                    audience_config: { segments: ['birthday-month'] },
-                    total_recipients: 45,
-                    sent_count: 45,
-                    delivered_count: 44,
-                    opened_count: 42,
-                    replied_count: 12,
-                    clicked_count: 8,
-                    converted_count: 5,
-                    created_by: 5,
-                    created_at: '2026-03-01T11:00:00Z'
-                },
-                {
-                    id: 2,
-                    campaign_name: 'PR4 Follow-up Campaign',
-                    template_id: 2,
-                    status: 'active',
-                    scheduled_date: '2026-03-05T14:00:00',
-                    audience_config: { segments: ['high-score'] },
-                    total_recipients: 120,
-                    sent_count: 120,
-                    delivered_count: 118,
-                    opened_count: 108,
-                    replied_count: 22,
-                    clicked_count: 15,
-                    converted_count: 8,
-                    created_by: 5,
-                    created_at: '2026-03-04T16:30:00Z'
-                },
-                {
-                    id: 3,
-                    campaign_name: 'Post-Event Thank You',
-                    template_id: 1,
-                    status: 'completed',
-                    scheduled_date: '2026-03-02T18:00:00',
-                    audience_config: { segments: ['event-attendees'] },
-                    total_recipients: 85,
-                    sent_count: 85,
-                    delivered_count: 85,
-                    opened_count: 82,
-                    replied_count: 15,
-                    clicked_count: 10,
-                    converted_count: 3,
-                    created_by: 5,
-                    created_at: '2026-03-01T10:00:00Z',
-                    completed_date: '2026-03-03T10:00:00Z'
-                }
-            ];
-            campaigns.forEach(c => DataStore.create('whatsapp_campaigns', c));
-        }
-
-        // Phase: Marketing Manager Listings - Seed Products
-        if (DataStore.getAll('products').length === 0) {
-            const productNames = [
-                "PR1", "PR2", "PR3", "PR4", "PR5", "PR6", "PR7", "PR8", "PR9", "PRH",
-                "简易", "灵活", "专案", "商业", "润雷益德", "源禄晋富", "黄离元吉",
-                "曲全霍盈利生藏钜", "有无相生难易相成", "大满福", "三富天",
-                "富田盘2", "富田盘1", "天至喜4", "天至喜3", "天至喜2", "天至喜1",
-                "万富通", "长胜决", "宝王象3", "宝王象2", "宝王象1", "元极大通",
-                "上善若水", "云行雨施", "滴水兴波", "元亨利贞", "谦卑而光",
-                "长丰-顺利昭德雷风赫惠", "聚人曰财", "枢机富丽", "自天祐之吉无不利",
-                "厚德载物", "经传录", "圣智", "渊慧", "魁星踢斗独占鳌头", "文昌图",
-                "见龙在田", "终日乾乾夕惕若厉", "劳谦有终曲成万物", "天道酬勤",
-                "财库", "财托", "观象防危", "命卦紫兆", "星卦解运",
-                "生命蓝图3年", "生命蓝图5年", "择日生子", "新生儿取名", "个人测名"
-            ];
-            productNames.forEach(name => {
-                DataStore.create('products', {
-                    name,
-                    price: 0,
-                    remarks: "",
-                    delivery_lead_time: "",
-                    is_active: true
-                });
-            });
-        }
-
-        // Phase: Marketing Manager Listings - Seed Events
-        if (DataStore.getAll('events').length === 0) {
-            const eventTitles = [
-                "9-Stars", "Fengshui DIY", "Museum", "Sharing- PR", "Sharing- Calligraphy",
-                "Sharing - FengShui JY", "Sharing - FengShui Flexi", "Sharing - FengShui ZhuanAn",
-                "Huiji- JY", "Huiji- Flexi", "Huijio ZhuanAn", "Chuan Fu", "Boss Month Event",
-                "CNY Event", "Annual Prediction Talk", "Special Topic", "916 Event"
-            ];
-            eventTitles.forEach(title => {
-                DataStore.create('events', {
-                    title,
-                    ticket_price: 0,
-                    duration: "",
-                    target_group: "",
-                    description: "",
-                    is_active: true
-                });
-            });
-        }
+        UI.toast.success('Check complete. Missing demo data seeded.');
     };
 
     const updateUserDisplay = () => {
@@ -6678,7 +5815,7 @@ In a production system, this would show the actual file contents.
         return phaseMap[viewId] || '?';
     };
 
-    const navigateTo = (viewId) => {
+    const navigateTo = async (viewId) => {
         document.querySelectorAll('.nav-links li').forEach(li => {
             li.classList.toggle('active', li.getAttribute('data-view') === viewId);
         });
@@ -6687,43 +5824,43 @@ In a production system, this would show the actual file contents.
 
         if (viewId === 'calendar') {
             _currentView = 'month';
-            showCalendarView(viewport);
+            await showCalendarView(viewport);
         } else if (viewId === 'prospects') {
             _currentView = 'prospects';
-            showProspectsView(viewport);
+            await showProspectsView(viewport);
         } else if (viewId === 'pipeline') {
             _currentView = 'pipeline';
-            showPipelineView(viewport);
+            await showPipelineView(viewport);
         } else if (viewId === 'agents') {
             _currentView = 'agents';
-            showAgentsView(viewport);
+            await showAgentsView(viewport);
         } else if (viewId === 'promotions') {
             _currentView = 'promotions';
-            showMarketingAutomationView(viewport);
+            await showMarketingAutomationView(viewport);
         } else if (viewId === 'reports') {
             _currentView = 'reports';
-            showKPIDashboard(viewport);
+            await showKPIDashboard(viewport);
         } else if (viewId === 'documents') {
             _currentView = 'documents';
-            showDocumentManagementView(viewport);
+            await showDocumentManagementView(viewport);
         } else if (viewId === 'protection') {
             _currentView = 'protection';
-            showProtectionMonitoringView(viewport);
+            await showProtectionMonitoringView(viewport);
         } else if (viewId === 'import') {
             _currentView = 'import';
-            showImportDashboard(viewport);
+            await showImportDashboard(viewport);
         } else if (viewId === 'integrations') {
             _currentView = 'integrations';
-            showIntegrationHub(viewport);
+            await showIntegrationHub(viewport);
         } else if (viewId === 'referrals') {
             _currentView = 'referrals';
-            showReferralsView(viewport);
+            await showReferralsView(viewport);
         } else if (viewId === 'cases') {
             _currentView = 'cases';
-            showCasesView(viewport);
+            await showCasesView(viewport);
         } else if (viewId === 'marketing_lists') {
             _currentView = 'marketing_lists';
-            showMarketingListsView(viewport);
+            await showMarketingListsView(viewport);
         } else {
             viewport.innerHTML = `
                 <div class="placeholder-view">
@@ -6739,7 +5876,7 @@ In a production system, this would show the actual file contents.
 
     // ========== PHASE 7: REFERRALS MODULE IMPLEMENTATION (VERTICAL LAYOUT) ==========
 
-    const showReferralsView = (container) => {
+    const showReferralsView = async (container) => {
         _currentView = 'referrals';
         container.innerHTML = `
             <div class="referrals-view-v2">
@@ -6751,10 +5888,10 @@ In a production system, this would show the actual file contents.
                     <div class="ref-v2-actions">
                         <div class="search-box-v2">
                             <i class="fas fa-search"></i>
-                            <input type="text" id="tree-search-input" placeholder="Search person to view tree..." autocomplete="off" onkeyup="app.debounce(app.searchTreePerson(this.value), 300)">
+                            <input type="text" id="tree-search-input" placeholder="Search person to view tree..." autocomplete="off" onkeyup="app.await debounce(await app.await searchTreePerson(this.value), 300)">
                             <div id="tree-search-results" class="search-results-v2"></div>
                         </div>
-                        <button class="btn primary" onclick="app.openAddReferralModal()">
+                        <button class="btn primary" onclick="app.await openAddReferralModal()">
                             <i class="fas fa-plus"></i> Add Referral
                         </button>
                         <button class="btn secondary" onclick="app.refreshCurrentView()">
@@ -6807,7 +5944,7 @@ In a production system, this would show the actual file contents.
                 .ref-v2-actions { display: flex; gap: 12px; align-items: center; }
                 
                 .search-box-v2 { position: relative; width: 300px; }
-                .search-box-v2 i { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--gray-400); }
+                .search-box-v2 i { position: absolute; left: 12px; top: 50%; transform: await translateY(-50%); color: var(--gray-400); }
                 .search-box-v2 input { width: 100%; padding: 8px 12px 8px 36px; border-radius: 8px; border: 1px solid var(--gray-200); }
                 .search-results-v2 { position: absolute; top: 100%; left: 0; right: 0; background: white; border-radius: 8px; border: 1px solid var(--gray-200); box-shadow: var(--shadow-lg); z-index: 100; display: none; margin-top: 4px; max-height: 300px; overflow-y: auto; }
                 .result-item-v2 { padding: 10px 16px; border-bottom: 1px solid var(--gray-100); cursor: pointer; display: flex; align-items: center; gap: 10px; }
@@ -6884,7 +6021,7 @@ In a production system, this would show the actual file contents.
             document.head.appendChild(style);
         }
 
-        renderReferralSummaryAndLeaderboard();
+        await renderReferralSummaryAndLeaderboard();
 
         // Determine initial root for lower roles
         const user = _currentUser;
@@ -6893,9 +6030,9 @@ In a production system, this would show the actual file contents.
             const lowerRoles = ['consultant', 'junior_consultant', 'senior_consultant', 'agent', 'junior_agent', 'senior_agent'];
             if (lowerRoles.includes(role)) {
                 // Show their own tree if they have any downline, else show placeholder
-                const rootPerson = DataStore.getById('customers', user.id) || DataStore.getById('prospects', user.id);
+                const rootPerson = await DataStore.getById('customers', user.id) || await DataStore.getById('prospects', user.id);
                 if (rootPerson) {
-                    app.showReferralTree(rootPerson.id, rootPerson.id in DataStore.getAll('customers') ? 'customer' : 'prospect');
+                    await app.await showReferralTree(rootPerson.id, rootPerson.id in await DataStore.getAll('customers') ? 'customer' : 'prospect');
                 } else {
                     // Show placeholder – no data
                     const ph = document.getElementById('referral-tree-placeholder');
@@ -6925,16 +6062,16 @@ In a production system, this would show the actual file contents.
         }
     };
 
-    const renderReferralSummaryAndLeaderboard = () => {
-        renderSummary();
-        renderLeaderboard();
+    const renderReferralSummaryAndLeaderboard = async () => {
+        await renderSummary();
+        await renderLeaderboard();
     };
 
-    const renderSummary = () => {
+    const renderSummary = async () => {
         const container = document.getElementById('referral-summary-container');
         if (!container) return;
 
-        const referrals = DataStore.getAll('referrals');
+        const referrals = await DataStore.getAll('referrals');
         const totalReferrals = referrals.length;
         const totalReferrers = new Set(referrals.map(r => r.referrer_id)).size;
         
@@ -6952,7 +6089,7 @@ In a production system, this would show the actual file contents.
             .sort((a, b) => b[1] - a[1])
             .slice(0, 3)
             .map(([id, count]) => {
-                const person = DataStore.getById('customers', id) || DataStore.getById('prospects', id);
+                const person = await DataStore.getById('customers', id) || await DataStore.getById('prospects', id);
                 return { name: person?.full_name || `ID: ${id}`, count };
             });
 
@@ -6983,7 +6120,7 @@ In a production system, this would show the actual file contents.
         `;
     };
 
-    const renderLeaderboard = () => {
+    const renderLeaderboard = async () => {
         const container = document.getElementById('referral-leaderboard-container');
         if (!container) return;
 
@@ -6991,7 +6128,7 @@ In a production system, this would show the actual file contents.
         const hiddenKey = `hidden_top_referrers_v2_${userId}`;
         const hiddenIds = JSON.parse(localStorage.getItem(hiddenKey) || '[]');
         
-        const referrals = DataStore.getAll('referrals');
+        const referrals = await DataStore.getAll('referrals');
         const grouped = {};
         referrals.forEach(r => {
             if (!r.referrer_id) return;
@@ -7005,6 +6142,28 @@ In a production system, this would show the actual file contents.
 
         const sorted = Object.values(grouped).sort((a, b) => b.count - a.count);
 
+        const leaderboardItems = await Promise.all(sorted.map(async (item, idx) => {
+            if (hiddenIds.includes(String(item.id))) return '';
+            const person = await DataStore.getById('customers', item.id) || await DataStore.getById('prospects', item.id);
+            if (!person) return '';
+            return `
+                <tr class="rank-${idx + 1}">
+                    <td class="rank-cell">${idx + 1}</td>
+                    <td class="name-cell" onclick="app.await showReferralTree(${item.id}, '${item.type}')">
+                        ${person.full_name} ${item.type === 'customer' ? '<span class="badge" style="background:#dcfce7; color:#166534">C</span>' : ''}
+                    </td>
+                    <td>${item.count}</td>
+                    <td><span style="color:#10b981; font-weight:600">${item.converted}</span></td>
+                    <td>${UI.formatDate(item.latest)}</td>
+                    <td class="text-right">
+                        <button class="btn-icon" onclick="app.await toggleHideReferrer('${item.id}')" title="Hide from leaderboard">
+                            <i class="far fa-eye-slash"></i>
+                        </button>
+                    </td>
+                </tr>
+            `;
+        }));
+
         container.innerHTML = `
             <div class="leaderboard-controls-v2">
                 <div style="display:flex; gap:12px; align-items:center;">
@@ -7013,7 +6172,7 @@ In a production system, this would show the actual file contents.
                         <option>This Year</option>
                         <option>This Month</option>
                     </select>
-                    <button class="btn secondary btn-sm" onclick="app.resetHiddenReferrers()">Reset Hidden</button>
+                    <button class="btn secondary btn-sm" onclick="app.await resetHiddenReferrers()">Reset Hidden</button>
                 </div>
                 <div class="text-muted" font-size="12px">Showing top contributors</div>
             </div>
@@ -7029,27 +6188,7 @@ In a production system, this would show the actual file contents.
                     </tr>
                 </thead>
                 <tbody>
-                    ${sorted.map((item, idx) => {
-                        if (hiddenIds.includes(String(item.id))) return '';
-                        const person = DataStore.getById('customers', item.id) || DataStore.getById('prospects', item.id);
-                        if (!person) return '';
-                        return `
-                            <tr class="rank-${idx + 1}">
-                                <td class="rank-cell">${idx + 1}</td>
-                                <td class="name-cell" onclick="app.showReferralTree(${item.id}, '${item.type}')">
-                                    ${person.full_name} ${item.type === 'customer' ? '<span class="badge" style="background:#dcfce7; color:#166534">C</span>' : ''}
-                                </td>
-                                <td>${item.count}</td>
-                                <td><span style="color:#10b981; font-weight:600">${item.converted}</span></td>
-                                <td>${UI.formatDate(item.latest)}</td>
-                                <td class="text-right">
-                                    <button class="btn-icon" onclick="app.toggleHideReferrer('${item.id}')" title="Hide from leaderboard">
-                                        <i class="far fa-eye-slash"></i>
-                                    </button>
-                                </td>
-                            </tr>
-                        `;
-                    }).join('')}
+                    ${leaderboardItems.join('')}
                     ${sorted.length === 0 ? '<tr><td colspan="6" class="text-center p-4 text-muted">No referrer data found.</td></tr>' : ''}
                 </tbody>
             </table>
@@ -7063,7 +6202,7 @@ In a production system, this would show the actual file contents.
         header.classList.toggle('collapsed');
     };
 
-    const toggleHideReferrer = (id) => {
+    const toggleHideReferrer = async (id) => {
         const userId = _currentUser?.id || 'guest';
         const hiddenKey = `hidden_top_referrers_v2_${userId}`;
         let hiddenIds = JSON.parse(localStorage.getItem(hiddenKey) || '[]');
@@ -7074,27 +6213,27 @@ In a production system, this would show the actual file contents.
             hiddenIds.push(id);
         }
         localStorage.setItem(hiddenKey, JSON.stringify(hiddenIds));
-        renderLeaderboard();
+        await renderLeaderboard();
         UI.toast.info("Leaderboard preferences updated.");
     };
 
-    const resetHiddenReferrers = () => {
+    const resetHiddenReferrers = async () => {
         const userId = _currentUser?.id || 'guest';
         const hiddenKey = `hidden_top_referrers_v2_${userId}`;
         localStorage.removeItem(hiddenKey);
-        renderLeaderboard();
+        await renderLeaderboard();
         UI.toast.success("Hidden referrers reset.");
     };
 
-    const searchTreePerson = (query) => {
+    const searchTreePerson = async (query) => {
         const results = document.getElementById('tree-search-results');
         if (!query || query.length < 2) {
             results.style.display = 'none';
             return;
         }
 
-        const prospects = DataStore.getAll('prospects');
-        const customers = DataStore.getAll('customers');
+        const prospects = await DataStore.getAll('prospects');
+        const customers = await DataStore.getAll('customers');
         const all = [
             ...prospects.map(p => ({ ...p, type: 'prospect' })),
             ...customers.map(c => ({ ...c, type: 'customer' }))
@@ -7104,7 +6243,7 @@ In a production system, this would show the actual file contents.
 
         if (filtered.length > 0) {
             results.innerHTML = filtered.map(p => `
-                <div class="result-item-v2" onclick="app.showReferralTree(${p.id}, '${p.type}')">
+                <div class="result-item-v2" onclick="app.await showReferralTree(${p.id}, '${p.type}')">
                     <div style="background: ${p.type === 'customer' ? '#dcfce7' : '#f1f5f9'}; width:32px; height:32px; border-radius:50%; display:flex; align-items:center; justify-content:center;">
                         <i class="fas ${p.type === 'customer' ? 'fa-user-check' : 'fa-user'}" style="color:${p.type === 'customer' ? '#166534' : '#64748b'}; font-size:12px;"></i>
                     </div>
@@ -7122,24 +6261,24 @@ In a production system, this would show the actual file contents.
         }
     };
 
-    const showReferralTree = (personId, personType) => {
+    const showReferralTree = async (personId, personType) => {
         _currentSelectedPerson = { id: personId, type: personType };
         document.getElementById('tree-search-results').style.display = 'none';
         document.getElementById('tree-search-input').value = '';
         document.getElementById('referral-tree-placeholder').style.display = 'none';
         document.getElementById('referral-tree-svg').style.display = 'block';
 
-        _currentTreeData = buildTreeData(personId, personType);
+        _currentTreeData = await buildTreeData(personId, personType);
         if (!_currentTreeData) {
             UI.toast.error('Could not build tree for this person');
             return;
         }
-        renderD3Tree(_currentTreeData);
+        await renderD3Tree(_currentTreeData);
     };
 
-    const buildTreeData = (rootId, rootType) => {
-        const person = DataStore.getById(rootType === 'customer' ? 'customers' : 'prospects', rootId);
-        if (!person || !canViewNode(rootId, rootType)) return null;
+    const buildTreeData = async (rootId, rootType) => {
+        const person = await DataStore.getById(rootType === 'customer' ? 'customers' : 'prospects', rootId);
+        if (!person || !await canViewNode(rootId, rootType)) return null;
 
         const node = {
             id: person.id,
@@ -7150,24 +6289,24 @@ In a production system, this would show the actual file contents.
         };
 
         // Find child referrals
-        const referrals = DataStore.getAll('referrals');
+        const referrals = await DataStore.getAll('referrals');
         // Match by referrer_id (new format)
         const children = referrals.filter(r => String(r.referrer_id) === String(rootId));
 
-        children.forEach(r => {
-            const childNode = buildTreeData(r.referred_prospect_id, 'prospect');
+        for (const r of children) {
+            const childNode = await buildTreeData(r.referred_prospect_id, 'prospect');
             if (childNode) {
                 childNode.referralSource = r.referral_source;
                 childNode.referralDate = r.created_at;
                 node.children.push(childNode);
             }
-        });
+        }
 
         return node;
     };
 
-    const getProspectColour = (prospectId) => {
-        const prospect = DataStore.getById('prospects', prospectId);
+    const getProspectColour = async (prospectId) => {
+        const prospect = await DataStore.getById('prospects', prospectId);
         if (!prospect) return "#cbd5e1"; // Gray default
         const status = prospect.pipeline_stage?.toLowerCase();
         
@@ -7182,18 +6321,18 @@ In a production system, this would show the actual file contents.
         }
     };
 
-    const getCustomerBadge = (customerId) => {
-        const customer = DataStore.getById('customers', customerId);
+    const getCustomerBadge = async (customerId) => {
+        const customer = await DataStore.getById('customers', customerId);
         if (!customer) return null;
         
         // Logic for Hot/Cool badges
-        const purchases = DataStore.getAll('purchases').filter(p => p.customer_id == customerId);
+        const purchases = (await DataStore.getAll('purchases')).filter(p => p.customer_id == customerId);
         if (purchases.length > 3) return { icon: "🔥", color: "#ef4444" }; // Hot
         if (customer.conversion_amount > 5000) return { icon: "💰", color: "#f59e0b" }; // VIP
         return null;
     };
 
-    const renderD3Tree = (rootData) => {
+    const renderD3Tree = async (rootData) => {
         const container = document.getElementById('referral-tree-container');
         if (!container) return;
         
@@ -7244,7 +6383,7 @@ In a production system, this would show the actual file contents.
             .attr("x", -80)
             .attr("y", -22)
             .attr("rx", 6)
-            .attr("fill", d => d.data.type === 'customer' ? '#ffffff' : getProspectColour(d.data.id))
+            .attr("fill", d => d.data.type === 'customer' ? '#ffffff' : await getProspectColour(d.data.id))
             .attr("stroke", d => d.data.type === 'customer' ? '#0d9488' : 'none')
             .attr("stroke-width", 2)
             .style("filter", "drop-shadow(0 2px 4px rgba(0,0,0,0.05))");
@@ -7286,22 +6425,22 @@ In a production system, this would show the actual file contents.
             .text("\uf075") // fa-comment
             .on("click", (e, d) => {
                 e.stopPropagation();
-                app.openMemoModal(d.data.id, d.data.type);
+                await app.await openMemoModal(d.data.id, d.data.type);
             });
 
-        // Click Handler (View Profile)
+        // Click async Handler (View Profile)
         nodes.on("click", (e, d) => {
             if (d.data.type === 'customer') {
-                app.showCustomerDetail(d.data.id);
+                await app.await showCustomerDetail(d.data.id);
             } else {
-                app.showProspectDetail(d.data.id);
+                await app.await showProspectDetail(d.data.id);
             }
         });
 
         // Expand/collapse on double-click
         nodes.on("dblclick", (e, d) => {
             e.stopPropagation();
-            app.showReferralTree(d.data.id, d.data.type);
+            await app.await showReferralTree(d.data.id, d.data.type);
         });
 
         // Center the tree
@@ -7336,7 +6475,7 @@ In a production system, this would show the actual file contents.
     let _modalSelectedReferrer = null;
     let _modalSelectedReferred = null;
  
-    const openAddReferralModal = () => {
+    const openAddReferralModal = async () => {
         _modalSelectedReferrer = null;
         _modalSelectedReferred = null;
  
@@ -7345,7 +6484,7 @@ In a production system, this would show the actual file contents.
                 <div class="ref-form-step">
                     <label>1. Who is the Referrer?</label>
                     <div class="search-field">
-                        <input type="text" id="referrer-search" class="form-control" placeholder="Search customer or prospect..." onkeyup="app.searchReferrersForModal(this.value, 'referrer')">
+                        <input type="text" id="referrer-search" class="form-control" placeholder="Search customer or prospect..." onkeyup="app.await searchReferrersForModal(this.value, 'referrer')">
                         <div id="referrer-search-results" class="search-dropdown"></div>
                     </div>
                     <div id="selected-referrer-info" class="selected-entity-display"></div>
@@ -7356,7 +6495,7 @@ In a production system, this would show the actual file contents.
                     <div class="search-field">
                         <div style="display:flex; gap:8px">
                             <input type="text" id="referred-search" class="form-control" placeholder="Search existing prospect..." onkeyup="app.searchReferrersForModal(this.value, 'referred')">
-                            <button class="btn secondary" onclick="app.openCreateProspectForReferral()"><i class="fas fa-user-plus"></i> New</button>
+                            <button class="btn secondary" onclick="app.await openCreateProspectForReferral()"><i class="fas fa-user-plus"></i> New</button>
                         </div>
                         <div id="referred-search-results" class="search-dropdown"></div>
                     </div>
@@ -7391,19 +6530,19 @@ In a production system, this would show the actual file contents.
  
         UI.showModal("Add New Referral", content, [
             { label: "Cancel", type: "secondary", action: "UI.hideModal()" },
-            { label: "Create Referral", type: "primary", action: "app.submitReferral()" }
+            { label: "Create Referral", type: "primary", action: "await app.await submitReferral()" }
         ]);
     };
  
-    const searchReferrersForModal = (query, modalType) => {
+    const searchReferrersForModal = async (query, modalType) => {
         const resultsDiv = document.getElementById(`${modalType}-search-results`);
         if (!query || query.length < 2) {
             resultsDiv.style.display = 'none';
             return;
         }
  
-        const prospects = DataStore.getAll('prospects');
-        const customers = DataStore.getAll('customers');
+        const prospects = await DataStore.getAll('prospects');
+        const customers = await DataStore.getAll('customers');
         const all = [
             ...prospects.map(p => ({ ...p, type: 'prospect' })),
             ...customers.map(c => ({ ...c, type: 'customer' }))
@@ -7413,7 +6552,7 @@ In a production system, this would show the actual file contents.
  
         if (filtered.length > 0) {
             resultsDiv.innerHTML = filtered.map(p => `
-                <div class="result-item-v2" onclick="app.selectReferrerForModal(${p.id}, '${p.type}', '${modalType}')">
+                <div class="result-item-v2" onclick="app.await selectReferrerForModal(${p.id}, '${p.type}', '${modalType}')">
                     <div style="flex-grow:1">
                         <strong>${p.full_name}</strong>
                         <div style="font-size:10px">${p.type.toUpperCase()}</div>
@@ -7427,8 +6566,8 @@ In a production system, this would show the actual file contents.
         }
     };
  
-    const selectReferrerForModal = (id, type, modalType) => {
-        const person = DataStore.getById(type === 'customer' ? 'customers' : 'prospects', id);
+    const selectReferrerForModal = async (id, type, modalType) => {
+        const person = await DataStore.getById(type === 'customer' ? 'customers' : 'prospects', id);
         if (!person) return;
  
         if (modalType === 'referrer') _modalSelectedReferrer = { id, type, name: person.full_name };
@@ -7452,18 +6591,18 @@ In a production system, this would show the actual file contents.
         document.getElementById(`selected-${modalType}-info`).innerHTML = '';
     };
  
-    const openCreateProspectForReferral = () => {
-        app.openProspectModal();
+    const openCreateProspectForReferral = async () => {
+        await app.await openProspectModal();
         // Listener for the custom event we added to saveProspect
-        const handler = (e) => {
+        const handler = async (e) => {
             const newProspect = e.detail;
-            selectReferrerForModal(newProspect.id, 'prospect', 'referred');
+            await selectReferrerForModal(newProspect.id, 'prospect', 'referred');
             document.removeEventListener('prospectCreated', handler);
         };
         document.addEventListener('prospectCreated', handler);
     };
  
-    const submitReferral = () => {
+    const submitReferral = async () => {
         if (!_modalSelectedReferrer || !_modalSelectedReferred) {
             UI.toast.error("Please select both a referrer and a referred person.");
             return;
@@ -7481,19 +6620,20 @@ In a production system, this would show the actual file contents.
             created_at: new Date().toISOString()
         };
 
-        DataStore.create('referrals', referral);
+        await DataStore.create('referrals', referral);
         UI.toast.success("Referral created successfully!");
         UI.hideModal();
         
         // Refresh views
-        renderReferralSummaryAndLeaderboard();
+        await renderReferralSummaryAndLeaderboard();
         if (_currentSelectedPerson && String(_currentSelectedPerson.id) === String(_selectedReferrer.id)) {
-            showReferralTree(_currentSelectedPerson.id, _currentSelectedPerson.type);
+            await showReferralTree(_currentSelectedPerson.id, _currentSelectedPerson.type);
         }
     };
 
-    const openMemoModal = (id, type) => {
-        const notes = DataStore.getAll('notes').filter(n => n.entity_type === type && n.entity_id == id);
+    const openMemoModal = async (id, type) => {
+        const notesArr = await DataStore.getAll('notes');
+        const notes = (notesArr || []).filter(n => n.entity_type === type && n.entity_id == id);
         const latest = notes.sort((a,b) => new Date(b.created_at) - new Date(a.created_at))[0];
 
         const content = `
@@ -7502,7 +6642,7 @@ In a production system, this would show the actual file contents.
                 <div style="background:#f1f5f9; padding:16px; border-radius:8px; margin:16px 0; border-left:4px solid #3b82f6">
                     ${latest ? latest.content : 'No memos found for this person.'}
                     <div style="font-size:11px; color:#64748b; margin-top:8px">
-                        ${latest ? 'Written by ' + (DataStore.getById('users', latest.created_by)?.full_name || 'Admin') + ' on ' + UI.formatDate(latest.created_at) : ''}
+                        ${latest ? 'Written by ' + ((await DataStore.getById('users', latest.created_by))?.full_name || 'Admin') + ' on ' + UI.formatDate(latest.created_at) : ''}
                     </div>
                 </div>
                 <button class="btn secondary btn-block" onclick="UI.hideModal(); app.show${type.charAt(0).toUpperCase() + type.slice(1)}Detail(${id})">View Full Profile</button>
@@ -7517,7 +6657,7 @@ In a production system, this would show the actual file contents.
 
 
 
-    const showCasesView = (container) => {
+    const showCasesView = async (container) => {
         container.innerHTML = `
             <div class="cases-view">
                 <div class="prospects-header">
@@ -7539,7 +6679,7 @@ In a production system, this would show the actual file contents.
                         <label>Product</label>
                         <select id="case-product-filter" onchange="app.handleCaseFilterChange()">
                             <option value="all">All Products</option>
-                            ${(DataStore.getAll('products') || []).filter(p => p.is_active !== false).map(p => `<option value="${p.name}" ${_caseFilters.product === p.name ? 'selected' : ''}>${p.name}</option>`).join('')}
+                            ${((await DataStore.getAll('products')) || []).filter(p => p.is_active !== false).map(p => `<option value="${p.name}" ${_caseFilters.product === p.name ? 'selected' : ''}>${p.name}</option>`).join('')}
                         </select>
                     </div>
                     <div class="filter-group">
@@ -7573,7 +6713,7 @@ In a production system, this would show the actual file contents.
                             </tr>
                         </thead>
                         <tbody id="cases-list-body">
-                            <!-- Rows rendered by renderCasesList() -->
+                            <!-- Rows rendered by await renderCasesList() -->
                         </tbody>
                     </table>
                     <div id="cases-empty-state" style="display: none; padding: 40px; text-align: center; color: var(--gray-400);">
@@ -7584,28 +6724,28 @@ In a production system, this would show the actual file contents.
             </div>
         `;
 
-        renderCasesList();
+        await renderCasesList();
     };
 
-    const handleCaseSearch = (e) => {
+    const handleCaseSearch = async (e) => {
         _caseFilters.search = e.target.value;
-        renderCasesList();
+        await renderCasesList();
     };
 
-    const handleCaseFilterChange = () => {
+    const handleCaseFilterChange = async () => {
         _caseFilters.product = document.getElementById('case-product-filter').value;
         _caseFilters.from = document.getElementById('case-date-from').value;
         _caseFilters.to = document.getElementById('case-date-to').value;
         _caseFilters.visibility = document.getElementById('case-visibility-filter').value;
-        renderCasesList();
+        await renderCasesList();
     };
 
-    const renderCasesList = () => {
+    const renderCasesList = async () => {
         const tbody = document.getElementById('cases-list-body');
         const emptyState = document.getElementById('cases-empty-state');
         if (!tbody) return;
 
-        let cases = DataStore.getAll('case_studies');
+        let cases = await DataStore.getAll('case_studies');
         const currentUser = _currentUser;
 
         // Apply Permission/Visibility Filters
@@ -7626,11 +6766,11 @@ In a production system, this would show the actual file contents.
             cases = cases.filter(c => {
                 let nameMatch = false;
                 if (c.prospect_id) {
-                    const p = DataStore.getById('prospects', c.prospect_id);
+                    const p = await DataStore.getById('prospects', c.prospect_id);
                     if (p?.full_name?.toLowerCase().includes(q)) nameMatch = true;
                 }
                 if (c.customer_id) {
-                    const cust = DataStore.getById('customers', c.customer_id);
+                    const cust = await DataStore.getById('customers', c.customer_id);
                     if (cust?.full_name?.toLowerCase().includes(q)) nameMatch = true;
                 }
                 return c.title.toLowerCase().includes(q) || nameMatch;
@@ -7660,20 +6800,20 @@ In a production system, this would show the actual file contents.
             let entityName = '-';
             let entityLink = '#';
             if (c.customer_id) {
-                const cust = DataStore.getById('customers', c.customer_id);
+                const cust = await DataStore.getById('customers', c.customer_id);
                 entityName = cust ? `<i class="fas fa-user-check" title="Customer"></i> ${cust.full_name}` : 'Unknown Customer';
-                entityLink = `app.showCustomerDetail(${c.customer_id})`;
+                entityLink = `await app.await showCustomerDetail(${c.customer_id})`;
             } else if (c.prospect_id) {
-                const pros = DataStore.getById('prospects', c.prospect_id);
+                const pros = await DataStore.getById('prospects', c.prospect_id);
                 entityName = pros ? `<i class="fas fa-user" title="Prospect"></i> ${pros.full_name}` : 'Unknown Prospect';
-                entityLink = `app.showProspectDetail(${c.prospect_id})`;
+                entityLink = `await app.await showProspectDetail(${c.prospect_id})`;
             }
 
             const isOwner = c.created_by === currentUser?.id;
             const isAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || currentUser?.role?.includes('Level 3') || currentUser?.role?.includes('Level 7') || currentUser?.role === 'team_leader' || currentUser?.role === 'admin';
 
             return `
-                <tr class="clickable" onclick="app.showCaseStudyDetail(${c.id})">
+                <tr class="clickable" onclick="app.await showCaseStudyDetail(${c.id})">
                     <td>
                         <div class="case-title">
                             <strong>${c.title}</strong>
@@ -7686,10 +6826,10 @@ In a production system, this would show the actual file contents.
                     <td>${c.closing_date || '-'}</td>
                     <td class="text-right">
                         <div class="actions">
-                            <button class="btn-icon" title="View" onclick="event.stopPropagation(); app.showCaseStudyDetail(${c.id})"><i class="fas fa-eye"></i></button>
+                            <button class="btn-icon" title="View" onclick="event.stopPropagation(); app.await showCaseStudyDetail(${c.id})"><i class="fas fa-eye"></i></button>
                             ${(isOwner || isAdmin) ? `
-                                <button class="btn-icon" title="Edit" onclick="event.stopPropagation(); app.openCaseStudyModal(${c.id})"><i class="fas fa-edit"></i></button>
-                                <button class="btn-icon text-danger" title="Delete" onclick="event.stopPropagation(); app.deleteCaseStudy(${c.id})"><i class="fas fa-trash"></i></button>
+                                <button class="btn-icon" title="Edit" onclick="event.stopPropagation(); app.await openCaseStudyModal(${c.id})"><i class="fas fa-edit"></i></button>
+                                <button class="btn-icon text-danger" title="Delete" onclick="event.stopPropagation(); app.await deleteCaseStudy(${c.id})"><i class="fas fa-trash"></i></button>
                             ` : ''}
                         </div>
                     </td>
@@ -7698,8 +6838,8 @@ In a production system, this would show the actual file contents.
         }).join('');
     };
 
-    const showCaseStudyDetail = (id) => {
-        const c = DataStore.getById('case_studies', id);
+    const showCaseStudyDetail = async (id) => {
+        const c = await DataStore.getById('case_studies', id);
         if (!c) return;
 
         const viewport = document.getElementById('content-viewport');
@@ -7709,21 +6849,21 @@ In a production system, this would show the actual file contents.
 
         let entityInfo = 'Generic Case Study';
         if (c.customer_id) {
-            const cust = DataStore.getById('customers', c.customer_id);
+            const cust = await DataStore.getById('customers', c.customer_id);
             entityInfo = cust ? `Customer: ${cust.full_name}` : 'Unknown Customer';
         } else if (c.prospect_id) {
-            const pros = DataStore.getById('prospects', c.prospect_id);
+            const pros = await DataStore.getById('prospects', c.prospect_id);
             entityInfo = pros ? `Prospect: ${pros.full_name}` : 'Unknown Prospect';
         }
 
-        const creator = DataStore.getById('users', c.created_by);
+        const creator = await DataStore.getById('users', c.created_by);
         const creatorName = creator ? (creator.full_name || creator.username) : 'System';
 
         viewport.innerHTML = `
             <div class="case-detail-view">
                 <div class="detail-header">
                     <div class="header-left">
-                        <button class="btn-back" onclick="app.navigateTo('cases')"><i class="fas fa-arrow-left"></i> Back to List</button>
+                        <button class="btn-back" onclick="app.await navigateTo('cases')"><i class="fas fa-arrow-left"></i> Back to List</button>
                         <h1>${c.title}</h1>
                         <div class="case-meta-header">
                             <span><i class="fas fa-user-circle"></i> ${entityInfo}</span>
@@ -7734,11 +6874,11 @@ In a production system, this would show the actual file contents.
                     </div>
                     <div class="header-actions">
                         ${(isOwner || isAdmin) ? `
-                            <button class="btn secondary" onclick="app.toggleCasePublic(${c.id})">
+                            <button class="btn secondary" onclick="app.await toggleCasePublic(${c.id})">
                                 <i class="fas ${c.is_public ? 'fa-lock' : 'fa-share'}"></i> ${c.is_public ? 'Make Private' : 'Share Publicly'}
                             </button>
-                            <button class="btn secondary" onclick="app.openCaseStudyModal(${c.id})"><i class="fas fa-edit"></i> Edit</button>
-                            <button class="btn-icon text-danger" onclick="app.deleteCaseStudy(${c.id})"><i class="fas fa-trash"></i></button>
+                            <button class="btn secondary" onclick="app.await openCaseStudyModal(${c.id})"><i class="fas fa-edit"></i> Edit</button>
+                            <button class="btn-icon text-danger" onclick="app.await deleteCaseStudy(${c.id})"><i class="fas fa-trash"></i></button>
                         ` : ''}
                         <button class="btn secondary" onclick="app.copyCaseLink(${c.id})"><i class="fas fa-link"></i> Copy Link</button>
                     </div>
@@ -7785,12 +6925,12 @@ In a production system, this would show the actual file contents.
         `;
     };
 
-    const toggleCasePublic = (id) => {
-        const c = DataStore.getById('case_studies', id);
+    const toggleCasePublic = async (id) => {
+        const c = await DataStore.getById('case_studies', id);
         if (!c) return;
-        DataStore.update('case_studies', id, { is_public: !c.is_public });
+        await DataStore.update('case_studies', id, { is_public: !c.is_public });
         UI.toast.success(`Case study is now ${!c.is_public ? 'public' : 'private'}.`);
-        showCaseStudyDetail(id);
+        await showCaseStudyDetail(id);
     };
 
     const copyCaseLink = (id) => {
@@ -7800,29 +6940,29 @@ In a production system, this would show the actual file contents.
         });
     };
 
-    const deleteCaseStudy = (id) => {
+    const deleteCaseStudy = async (id) => {
         if (confirm("Are you sure you want to delete this case study? This action cannot be undone.")) {
-            DataStore.delete('case_studies', id);
+            await DataStore.delete('case_studies', id);
             UI.toast.success("Case study deleted.");
             if (_currentView === 'cases') {
-                renderCasesList();
+                await renderCasesList();
             } else {
-                app.navigateTo('cases');
+                await app.await navigateTo('cases');
             }
         }
     };
 
-    const openCaseStudyModal = (id = null) => {
-        const c = id ? DataStore.getById('case_studies', id) : null;
+    const openCaseStudyModal = async (id = null) => {
+        const c = id ? await DataStore.getById('case_studies', id) : null;
         const title = id ? 'Edit Case Study' : 'New Case Study';
 
         let entityName = '';
         if (c) {
             if (c.customer_id) {
-                const cust = DataStore.getById('customers', c.customer_id);
+                const cust = await DataStore.getById('customers', c.customer_id);
                 entityName = cust ? cust.full_name : '';
             } else if (c.prospect_id) {
-                const pros = DataStore.getById('prospects', c.prospect_id);
+                const pros = await DataStore.getById('prospects', c.prospect_id);
                 entityName = pros ? pros.full_name : '';
             }
         }
@@ -7855,7 +6995,7 @@ In a production system, this would show the actual file contents.
                             <label>Product</label>
                             <select id="case-product" class="form-control">
                                 <option value="">Select Product...</option>
-                                ${(DataStore.getAll('products') || []).map(p => `<option value="${p.name}" ${c && c.product === p.name ? 'selected' : ''}>${p.name}</option>`).join('')}
+                                ${((await DataStore.getAll('products')) || []).map(p => `<option value="${p.name}" ${c && c.product === p.name ? 'selected' : ''}>${p.name}</option>`).join('')}
                             </select>
                         </div>
                     </div>
@@ -7909,7 +7049,7 @@ In a production system, this would show the actual file contents.
 
         UI.modal.show(title, modalHtml, [
             { text: 'Cancel', class: 'secondary', onclick: 'UI.modal.hide()' },
-            { text: id ? 'Update Case' : 'Save Case Study', class: 'primary', onclick: `app.saveCaseStudy(${id || 'null'})` }
+            { text: id ? 'Update Case' : 'Save Case Study', class: 'primary', onclick: `await app.await saveCaseStudy(${id || 'null'})` }
         ]);
     };
 
@@ -7921,15 +7061,17 @@ In a production system, this would show the actual file contents.
         document.getElementById(`case-tab-${tabId}`).classList.add('active');
     };
 
-    const searchCaseEntities = (query) => {
+    const searchCaseEntities = async (query) => {
         const results = document.getElementById('case-entity-results');
         if (!query || query.length < 2) {
             results.style.display = 'none';
             return;
         }
 
-        const prospects = DataStore.getAll('prospects').filter(p => p.full_name?.toLowerCase().includes(query.toLowerCase()));
-        const customers = DataStore.getAll('customers').filter(c => c.full_name?.toLowerCase().includes(query.toLowerCase()));
+        const allP = await DataStore.getAll('prospects');
+        const prospects = (allP || []).filter(p => p.full_name?.toLowerCase().includes(query.toLowerCase()));
+        const allC = await DataStore.getAll('customers');
+        const customers = (allC || []).filter(c => c.full_name?.toLowerCase().includes(query.toLowerCase()));
 
         let html = '';
         if (prospects.length > 0) {
@@ -7956,7 +7098,7 @@ In a production system, this would show the actual file contents.
         document.getElementById('case-entity-results').style.display = 'none';
     };
 
-    const saveCaseStudy = (id) => {
+    const saveCaseStudy = async (id) => {
         const title = document.getElementById('case-title').value.trim();
         if (!title) {
             UI.toast.error("Title is required.");
@@ -7980,27 +7122,27 @@ In a production system, this would show the actual file contents.
         };
 
         if (id) {
-            DataStore.update('case_studies', id, data);
+            await DataStore.update('case_studies', id, data);
             UI.toast.success("Case study updated.");
         } else {
             data.created_by = _currentUser?.id || 1;
             data.created_at = new Date().toISOString();
-            const newCase = DataStore.create('case_studies', data);
+            const newCase = await DataStore.create('case_studies', data);
             UI.toast.success("Case study created.");
             id = newCase.id;
         }
 
         UI.modal.hide();
         if (_currentView === 'cases') {
-            renderCasesList();
+            await renderCasesList();
         } else {
-            showCaseStudyDetail(id);
+            await showCaseStudyDetail(id);
         }
     };
 
     // ========== PHASE 1: FULL CALENDAR IMPLEMENTATION ==========
 
-    const showCalendarView = (container) => {
+    const showCalendarView = async (container) => {
         container.innerHTML = `
             <div class="calendar-view-container">
                 <!-- Section 1.1: Header -->
@@ -8019,10 +7161,10 @@ In a production system, this would show the actual file contents.
                             <!-- <button class="btn-toggle" onclick="app.switchView('week')">Week</button> -->
                             <button class="btn-toggle active" onclick="app.switchView('month')">Month</button>
                         </div>
-                        <button class="btn secondary" onclick="app.openCalendarFilterModal()">
+                        <button class="btn secondary" onclick="app.await openCalendarFilterModal()">
                             Filter <i class="fas fa-chevron-down" style="font-size: 10px; margin-left: 4px;"></i>
                         </button>
-                        <button class="btn-quick-add" onclick="app.openActivityModal()" style="margin-left: 10px;">
+                        <button class="btn-quick-add" onclick="app.await openActivityModal()" style="margin-left: 10px;">
                             <i class="fas fa-plus"></i> Quick Add Activity
                         </button>
                     </div>
@@ -8063,12 +7205,12 @@ In a production system, this would show the actual file contents.
             </div>
         `;
 
-        renderCalendar();
-        renderTodayActivities();
-        renderBirthdaySection();
+        await renderCalendar();
+        await renderTodayActivities();
+        await renderBirthdaySection();
     };
 
-    const renderCalendar = () => {
+    const renderCalendar = async () => {
         updateMonthHeader(_currentDate);
 
         const header = document.getElementById('calendar-days-header');
@@ -8098,10 +7240,10 @@ In a production system, this would show the actual file contents.
             html += `<div class="calendar-cell"><span class="date-num other-month">${dateNum}</span></div>`;
         }
 
-        let activities = DataStore.getAll('activities');
+        let activities = await DataStore.getAll('activities');
 
-        // Apply visibility filters using the same logic as getVisibleActivities()
-        activities = activities.filter(a => canViewActivity(a));
+        // Apply visibility filters using the same logic as await async getVisibleActivities()
+        activities = activities.filter(async a => await canViewActivity(a));
 
         // Apply filters if any
         if (_filters.agent && _filters.agent !== 'all') {
@@ -8128,20 +7270,20 @@ In a production system, this would show the actual file contents.
             let activityHtml = '';
             const seenIds = new Set();
 
-            dayActivities.forEach(a => {
+            for (const a of dayActivities) {
                 if (!seenIds.has(a.id)) {
                     seenIds.add(a.id);
-                    const prospect = a.prospect_id ? DataStore.getById('prospects', a.prospect_id) : null;
-                    const customer = a.customer_id ? DataStore.getById('customers', a.customer_id) : null;
+                    const prospect = a.prospect_id ? await DataStore.getById('prospects', a.prospect_id) : null;
+                    const customer = a.customer_id ? await DataStore.getById('customers', a.customer_id) : null;
                     const entityName = prospect ? prospect.full_name : (customer ? customer.full_name : (a.activity_title || a.customer_name || 'Event'));
 
                     if (entityName) {
-                        const agent = a.lead_agent_id ? DataStore.getById('users', a.lead_agent_id) : null;
+                        const agent = a.lead_agent_id ? await DataStore.getById('users', a.lead_agent_id) : null;
                         const agentName = agent ? agent.full_name : 'No Agent';
 
                         activityHtml += `
                             <div class="calendar-appointment ${a.activity_type.toLowerCase()} ${a.closing_amount ? 'closed-case' : ''}" 
-                                onclick="app.viewActivityDetails(${a.id})">
+                                onclick="app.await viewActivityDetails(${a.id})">
                                 <div class="appointment-time">${a.start_time || '00:00'} - ${a.end_time || '00:00'}</div>
                                 <div class="appointment-agent">👤 ${agentName} ${a.co_agents && a.co_agents.length > 0 ? '<small>+1</small>' : ''}</div>
                                 <div class="appointment-customer">📋 ${entityName}</div>
@@ -8157,7 +7299,7 @@ In a production system, this would show the actual file contents.
                         `;
                     }
                 }
-            });
+            }
 
             html += `
                 <div class="calendar-cell ${isToday ? 'today' : ''}">
@@ -8189,8 +7331,8 @@ In a production system, this would show the actual file contents.
         }
     };
 
-    const openCalendarFilterModal = () => {
-        const agents = DataStore.getAll('users').filter(u => isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'));
+    const openCalendarFilterModal = async () => {
+        const agents = (await DataStore.getAll('users')).filter(u => isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'));
         const types = ['CPS', 'FTF', 'FSA', 'EVENT', 'CALL', 'EMAIL', 'WHATSAPP'];
 
         const content = `
@@ -8233,12 +7375,12 @@ In a production system, this would show the actual file contents.
             `;
 
         UI.showModal('Calendar Filters', content, [
-            { label: 'Clear Filters', type: 'secondary', action: 'app.clearCalendarFilters()' },
-            { label: 'Apply', type: 'primary', action: 'app.applyCalendarFilters()' }
+            { label: 'Clear Filters', type: 'secondary', action: 'await app.await clearCalendarFilters()' },
+            { label: 'Apply', type: 'primary', action: 'await app.await applyCalendarFilters()' }
         ]);
     };
 
-    const applyCalendarFilters = () => {
+    const applyCalendarFilters = async () => {
         _filters.agent = document.getElementById('cal-filter-agent').value;
         _filters.type = document.getElementById('cal-filter-type').value;
         _filters.from = document.getElementById('cal-filter-from').value;
@@ -8252,17 +7394,17 @@ In a production system, this would show the actual file contents.
 
         UI.hideModal();
 
-        if (_currentView === 'month') renderCalendar();
-        else if (_currentView === 'day') renderTodayActivities();
-        else switchView(_currentView); // other views
+        if (_currentView === 'month') await renderCalendar();
+        else if (_currentView === 'day') await renderTodayActivities();
+        else await switchView(_currentView); // other views
     };
 
-    const clearCalendarFilters = () => {
+    const clearCalendarFilters = async () => {
         _filters = { agent: 'all', type: 'all', from: '', to: '', caseStatus: 'all' };
         sessionStorage.removeItem('calendar_filters');
         UI.hideModal();
-        if (_currentView === 'month') renderCalendar();
-        else switchView(_currentView);
+        if (_currentView === 'month') await renderCalendar();
+        else await switchView(_currentView);
     };
 
     // Load from SessionStorage on init
@@ -8273,14 +7415,14 @@ In a production system, this would show the actual file contents.
         } catch (e) { }
     }
 
-    const renderTodayActivities = () => {
+    const renderTodayActivities = async () => {
         const grid = document.getElementById('today-activities-grid');
         if (!grid) return;
 
         const today = new Date();
         const dateStr = `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, '0')}-${today.getDate().toString().padStart(2, '0')}`;
 
-        let activities = getVisibleActivities().filter(a => a.activity_date === dateStr);
+        let activities = await getVisibleActivities().filter(a => a.activity_date === dateStr);
 
         // Apply filters
         if (_filters && _filters.agent && _filters.agent !== 'all') {
@@ -8317,10 +7459,10 @@ In a production system, this would show the actual file contents.
                     <tbody>
             `;
 
-        activities.forEach(a => {
-            const agent = DataStore.getById('users', a.lead_agent_id) || { full_name: 'Unknown Agent' };
-            const prospect = a.prospect_id ? DataStore.getById('prospects', a.prospect_id) : null;
-            const customer = a.customer_id ? DataStore.getById('customers', a.customer_id) : null;
+        for (const a of activities) {
+            const agent = await DataStore.getById('users', a.lead_agent_id) || { full_name: 'Unknown Agent' };
+            const prospect = a.prospect_id ? await DataStore.getById('prospects', a.prospect_id) : null;
+            const customer = a.customer_id ? await DataStore.getById('customers', a.customer_id) : null;
             const entityName = prospect ? prospect.full_name : (customer ? customer.full_name : (a.customer_name || 'N/A'));
 
             html += `
@@ -8333,15 +7475,15 @@ In a production system, this would show the actual file contents.
                             ${a.closing_amount ? '<br><small style="color:green;">Closed</small>' : ''}
                         </td>
                         <td>
-                            <button class="btn btn-sm secondary" onclick="app.viewActivityDetails(${a.id})">View</button>
-                            <button class="btn btn-sm secondary" onclick="app.postMeetupNotes(${a.id})">post MtUp</button>
-                            <button class="btn btn-sm secondary" onclick="app.editActivity(${a.id})">Edit</button>
-                            <button class="btn btn-sm secondary" onclick="app.rescheduleActivity(${a.id})">Reschedule</button>
-                            <button class="btn btn-sm secondary" onclick="app.addCoAgentToActivity(${a.id})">+ Add co</button>
+                            <button class="btn btn-sm secondary" onclick="app.await viewActivityDetails(${a.id})">View</button>
+                            <button class="btn btn-sm secondary" onclick="app.await postMeetupNotes(${a.id})">post MtUp</button>
+                            <button class="btn btn-sm secondary" onclick="app.await editActivity(${a.id})">Edit</button>
+                            <button class="btn btn-sm secondary" onclick="app.await rescheduleActivity(${a.id})">Reschedule</button>
+                            <button class="btn btn-sm secondary" onclick="app.await addCoAgentToActivity(${a.id})">+ Add co</button>
                         </td>
                     </tr>
                 `;
-        });
+        }
 
         html += `
                     </tbody>
@@ -8351,27 +7493,27 @@ In a production system, this would show the actual file contents.
         grid.innerHTML = html;
     };
 
-    const renderBirthdaySection = () => {
+    const renderBirthdaySection = async () => {
         const todayList = document.getElementById('bday-today-list');
         const upcomingList = document.getElementById('bday-upcoming-list');
         if (!todayList || !upcomingList) return;
 
         const today = new Date();
-        const mmdd = (d) => `${(d.getMonth() + 1).toString().padStart(2, '0')} -${d.getDate().toString().padStart(2, '0')} `;
-        const todayStr = mmdd(today);
+        const mmdd = async (d) => `${(d.getMonth() + 1).toString().padStart(2, '0')} -${d.getDate().toString().padStart(2, '0')} `;
+        const todayStr = await mmdd(today);
 
         // Get tomorrow and day after
         const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
-        const tomorrowStr = mmdd(tomorrow);
+        const tomorrowStr = await mmdd(tomorrow);
         const day2 = new Date(today); day2.setDate(today.getDate() + 2);
-        const day2Str = mmdd(day2);
+        const day2Str = await mmdd(day2);
 
-        const prospects = DataStore.getAll('prospects');
-        const customers = DataStore.getAll('customers');
+        const prospects = await DataStore.getAll('prospects');
+        const customers = await DataStore.getAll('customers');
         const all = [...prospects, ...customers];
 
-        const getBdayInfo = (p) => {
-            const agent = DataStore.getById('users', p.responsible_agent_id || p.lead_agent_id);
+        const getBdayInfo = async (p) => {
+            const agent = await DataStore.getById('users', p.responsible_agent_id || p.lead_agent_id);
             return {
                 name: p.full_name,
                 info: `Agent: ${agent?.full_name || 'Michelle Tan'} · ${p.customer_since ? 'Customer' : 'Prospect'} `,
@@ -8382,7 +7524,7 @@ In a production system, this would show the actual file contents.
         const todayBdays = all.filter(p => p.date_of_birth && p.date_of_birth.substring(5) === todayStr).map(getBdayInfo);
         const upcomingBdays = all.filter(p => p.date_of_birth && (p.date_of_birth.substring(5) === tomorrowStr || p.date_of_birth.substring(5) === day2Str))
             .map(p => {
-                const info = getBdayInfo(p);
+                const info = await getBdayInfo(p);
                 const isTomorrow = p.date_of_birth.substring(5) === tomorrowStr;
                 info.info += ` · ${isTomorrow ? 'Tomorrow' : 'In 2 days'} `;
                 return info;
@@ -8414,7 +7556,7 @@ In a production system, this would show the actual file contents.
 
 
     // --- Phase 7 Navigation & Filter Functions ---
-    const switchView = (view) => {
+    const switchView = async (view) => {
         _currentView = view;
 
         document.querySelectorAll('.btn-toggle').forEach(btn => {
@@ -8425,21 +7567,21 @@ In a production system, this would show the actual file contents.
         });
 
         if (view === 'month') {
-            renderMonthView();
+            await renderMonthView();
         } else if (view === 'week') {
-            renderWeekView();
+            await renderWeekView();
         } else if (view === 'day') {
-            renderDayView();
+            await renderDayView();
         }
     };
 
-    const goToToday = () => {
+    const goToToday = async () => {
         _currentDate = new Date();
         updateMonthHeader(_currentDate);
-        switchView(_currentView);
+        await switchView(_currentView);
     };
 
-    const goToPrevious = () => {
+    const goToPrevious = async () => {
         if (_currentView === 'month') {
             _currentDate.setMonth(_currentDate.getMonth() - 1);
         } else if (_currentView === 'week') {
@@ -8449,10 +7591,10 @@ In a production system, this would show the actual file contents.
         }
         if (_currentDate.getFullYear() < 2010) _currentDate.setFullYear(2010);
         updateMonthHeader(_currentDate);
-        switchView(_currentView);
+        await switchView(_currentView);
     };
 
-    const goToNext = () => {
+    const goToNext = async () => {
         if (_currentView === 'month') {
             _currentDate.setMonth(_currentDate.getMonth() + 1);
         } else if (_currentView === 'week') {
@@ -8462,7 +7604,7 @@ In a production system, this would show the actual file contents.
         }
         if (_currentDate.getFullYear() > 2200) _currentDate.setFullYear(2200);
         updateMonthHeader(_currentDate);
-        switchView(_currentView);
+        await switchView(_currentView);
     };
 
     const updateMonthHeader = (date) => {
@@ -8477,11 +7619,11 @@ In a production system, this would show the actual file contents.
         }
     };
 
-    const renderMonthView = () => {
-        renderCalendar();
+    const renderMonthView = async () => {
+        await renderCalendar();
     };
 
-    const renderWeekView = () => {
+    const renderWeekView = async () => {
         const grid = document.getElementById('calendar-grid');
         if (!grid) return;
 
@@ -8512,9 +7654,9 @@ In a production system, this would show the actual file contents.
         html += '<div class="week-body">';
 
         // Get all activities
-        const activities = DataStore.getAll('activities');
+        const activities = await DataStore.getAll('activities');
 
-        // Time slots (8 AM to 8 PM)
+        // Time async slots (8 AM to 8 PM)
         for (let hour = 8; hour <= 20; hour++) {
             html += '<div class="week-hour-row">';
             html += `<div class="hour-label">${hour.toString().padStart(2, '0')}:00</div>`;
@@ -8532,17 +7674,17 @@ In a production system, this would show the actual file contents.
                 );
 
                 html += '<div class="week-hour-cell">';
-                dayActivities.forEach(a => {
-                    const prospect = a.prospect_id ? DataStore.getById('prospects', a.prospect_id) : null;
-                    const customer = a.customer_id ? DataStore.getById('customers', a.customer_id) : null;
+                for (const a of dayActivities) {
+                    const prospect = a.prospect_id ? await DataStore.getById('prospects', a.prospect_id) : null;
+                    const customer = a.customer_id ? await DataStore.getById('customers', a.customer_id) : null;
                     const name = prospect?.full_name || customer?.full_name || 'Activity';
 
                     html += `
-    <div class="week-activity ${a.activity_type.toLowerCase()}" onclick="app.viewActivityDetails(${a.id})">
+    <div class="week-activity ${a.activity_type.toLowerCase()}" onclick="app.await viewActivityDetails(${a.id})">
         ${a.start_time} ${name}
     </div>
     `;
-                });
+                }
                 html += '</div>';
             }
             html += '</div>';
@@ -8552,10 +7694,10 @@ In a production system, this would show the actual file contents.
         grid.innerHTML = html;
     };
 
-    const renderDayView = () => {
+    const renderDayView = async () => {
         const grid = document.getElementById('calendar-grid');
         const todayStr = _currentDate.toISOString().split('T')[0];
-        const dayActivities = DataStore.getAll('activities').filter(a => a.activity_date === todayStr);
+        const dayActivities = (await DataStore.getAll('activities')).filter(a => a.activity_date === todayStr);
 
         // Calculate summary stats
         const totalMeetings = dayActivities.filter(a => a.activity_type === 'FTF').length;
@@ -8565,7 +7707,7 @@ In a production system, this would show the actual file contents.
         html += `
                 <div class="day-header">
                     <h2>${_currentDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</h2>
-                    <button class="btn primary btn-sm" onclick="app.openActivityModal('${todayStr}')">
+                    <button class="btn primary btn-sm" onclick="app.await openActivityModal('${todayStr}')">
                         <i class="fas fa-plus"></i> Add Activity
                     </button>
                 </div>
@@ -8599,20 +7741,20 @@ In a production system, this would show the actual file contents.
                     <div class="timeline-slot">
             `;
 
-            hourActivities.forEach(a => {
-                const prospect = a.prospect_id ? DataStore.getById('prospects', a.prospect_id) : null;
-                const customer = a.customer_id ? DataStore.getById('customers', a.customer_id) : null;
+            for (const a of hourActivities) {
+                const prospect = a.prospect_id ? await DataStore.getById('prospects', a.prospect_id) : null;
+                const customer = a.customer_id ? await DataStore.getById('customers', a.customer_id) : null;
                 const name = prospect?.full_name || customer?.full_name || '';
-                const agent = DataStore.getById('users', a.lead_agent_id);
+                const agent = await DataStore.getById('users', a.lead_agent_id);
 
                 html += `
-                    <div class="timeline-activity ${a.activity_type.toLowerCase()}" onclick="app.viewActivityDetails(${a.id})">
+                    <div class="timeline-activity ${a.activity_type.toLowerCase()}" onclick="app.await viewActivityDetails(${a.id})">
                         <div class="activity-time">${a.start_time} - ${a.end_time || '?'}</div>
                         <div class="activity-title"><strong>${a.activity_title || a.activity_type}</strong> ${name}</div>
                         <div class="activity-agent">Agent: ${agent?.full_name || 'Unknown'}</div>
                     </div>
                 `;
-            });
+            }
 
             html += '</div></div>';
         }
@@ -8621,10 +7763,10 @@ In a production system, this would show the actual file contents.
         grid.innerHTML = html;
     };
 
-    const generateDayHours = () => {
+    const generateDayHours = async () => {
         let hoursHtml = '';
         const todayStr = _currentDate.toISOString().split('T')[0];
-        const dayActs = DataStore.getAll('activities').filter(a => a.activity_date === todayStr);
+        const dayActs = (await DataStore.getAll('activities')).filter(a => a.activity_date === todayStr);
 
         for (let i = 8; i <= 20; i++) {
             const hourStr = `${i.toString().padStart(2, '0')}:00`;
@@ -8637,7 +7779,7 @@ In a production system, this would show the actual file contents.
                         ${actsAtHour.map(a => `
                             <div class="day-act-item">
                                 <strong>${a.activity_type}</strong>: ${a.activity_title}
-                                ${a.prospect_id ? `(${DataStore.getById('prospects', a.prospect_id)?.full_name})` : ''}
+                                ${a.prospect_id ? `(${await DataStore.getById('prospects', a.prospect_id)?.full_name})` : ''}
                             </div>
                         `).join('')}
                     </div>
@@ -8647,7 +7789,7 @@ In a production system, this would show the actual file contents.
         return hoursHtml;
     };
 
-    const openFilterModal = () => {
+    const openFilterModal = async () => {
         const content = `
             <div class="filter-modal">
                 <div class="form-group">
@@ -8693,12 +7835,12 @@ In a production system, this would show the actual file contents.
 
         UI.showModal('Filter Calendar', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Apply Filters', type: 'primary', action: 'app.applyFilters()' },
-            { label: 'Clear Filters', type: 'secondary', action: 'app.clearFilters()' }
+            { label: 'Apply Filters', type: 'primary', action: 'await app.await applyFilters()' },
+            { label: 'Clear Filters', type: 'secondary', action: 'await app.await clearFilters()' }
         ]);
     };
 
-    const applyFilters = () => {
+    const applyFilters = async () => {
         _filters.agent = document.getElementById('filter-agent')?.value || 'all';
         _filters.type = document.getElementById('filter-activity-type')?.value || 'all';
         _filters.from = document.getElementById('filter-date-from')?.value || '';
@@ -8709,16 +7851,16 @@ In a production system, this would show the actual file contents.
         UI.hideModal();
         UI.toast.success('Filters applied');
 
-        renderCalendar();
-        renderTodayActivities();
+        await renderCalendar();
+        await renderTodayActivities();
     };
 
-    const clearFilters = () => {
+    const clearFilters = async () => {
         _filters = { agent: 'all', type: 'all', from: '', to: '', search: '' };
         sessionStorage.setItem('calendar_filters', JSON.stringify(_filters));
         UI.hideModal();
-        renderCalendar();
-        renderTodayActivities();
+        await renderCalendar();
+        await renderTodayActivities();
         UI.toast.success('Filters cleared');
     };
 
@@ -8726,26 +7868,26 @@ In a production system, this would show the actual file contents.
         UI.toast.info(msg);
     };
 
-    const viewActivityDetails = (activityId) => {
-        const activity = DataStore.getById('activities', activityId);
+    const viewActivityDetails = async (activityId) => {
+        const activity = await DataStore.getById('activities', activityId);
         if (!activity) return;
 
-        const prospect = activity.prospect_id ? DataStore.getById('prospects', activity.prospect_id) : null;
-        const customer = activity.customer_id ? DataStore.getById('customers', activity.customer_id) : null;
+        const prospect = activity.prospect_id ? await DataStore.getById('prospects', activity.prospect_id) : null;
+        const customer = activity.customer_id ? await DataStore.getById('customers', activity.customer_id) : null;
         const entityName = prospect?.full_name || customer?.full_name || 'Unknown';
 
         let attendeeHtml = '';
         if (activity.activity_type === 'EVENT' && activity.event_id) {
-            const attendees = DataStore.getAll('event_attendees').filter(a => a.event_id === activity.event_id);
+            const attendees = (await DataStore.getAll('event_attendees')).filter(a => a.event_id === activity.event_id);
             if (attendees.length > 0) {
-                const prospects = DataStore.getAll('prospects');
-                const customers = DataStore.getAll('customers');
+                const prospects = await DataStore.getAll('prospects');
+                const customers = await DataStore.getAll('customers');
                 const all = [...prospects, ...customers];
 
                 let rows = attendees.map(att => {
                     const person = all.find(p => p.id === att.entity_id);
                     const name = person ? person.full_name : 'Unknown';
-                    const agent = DataStore.getById('users', att.added_by_agent_id);
+                    const agent = await DataStore.getById('users', att.added_by_agent_id);
                     const agentName = agent ? agent.full_name : 'Unknown';
                     return `
                         <div class="info-row" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #eee; padding-bottom:5px; margin-bottom:5px;">
@@ -8755,9 +7897,9 @@ In a production system, this would show the actual file contents.
                                 <div style="font-size:11px; color:gray;">Added by: ${agentName}</div>
                             </div>
                             <div style="display:flex; gap:8px; align-items:center;">
-                                <button class="btn btn-sm secondary" title="Outcome" onclick="app.openAttendeeOutcomeModal(${att.entity_id}, '${att.attendee_type}', ${activity.id})">📝 Outcome</button>
-                                <button class="btn btn-sm secondary" title="Notes" onclick="app.openAttendeeNotesModal(${att.entity_id}, '${att.attendee_type}', ${activity.id})">📋 Notes</button>
-                                <button class="btn btn-sm secondary" onclick="app.postEventFollowUp(${activity.event_id}, ${att.entity_id})">Follow-up</button>
+                                <button class="btn btn-sm secondary" title="Outcome" onclick="app.await openAttendeeOutcomeModal(${att.entity_id}, '${att.attendee_type}', ${activity.id})">📝 Outcome</button>
+                                <button class="btn btn-sm secondary" title="Notes" onclick="app.await openAttendeeNotesModal(${att.entity_id}, '${att.attendee_type}', ${activity.id})">📋 Notes</button>
+                                <button class="btn btn-sm secondary" onclick="app.await postEventFollowUp(${activity.event_id}, ${att.entity_id})">Follow-up</button>
                             </div>
                         </div>
                     `;
@@ -8794,7 +7936,7 @@ In a production system, this would show the actual file contents.
                 
                 <div class="detail-section">
                     <h4>Agents</h4>
-                    <div class="info-row"><span class="info-label">Lead:</span> <span>${getAgentName(activity.lead_agent_id)}</span></div>
+                    <div class="info-row"><span class="info-label">Lead:</span> <span>${await getAgentName(activity.lead_agent_id)}</span></div>
                     ${activity.co_agents?.length ? `
                         <div class="info-row"><span class="info-label">Co-Agents:</span> 
                             <span>${activity.co_agents.map(a => a.name).join(', ')}</span>
@@ -8807,98 +7949,98 @@ In a production system, this would show the actual file contents.
 
         const modalActions = [
             { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Mark Complete', type: 'secondary', action: `app.markActivityComplete(${activityId})` },
-            { label: 'Edit', type: 'secondary', action: `app.editActivity(${activityId})` }
+            { label: 'Mark Complete', type: 'secondary', action: `await app.await markActivityComplete(${activityId})` },
+            { label: 'Edit', type: 'secondary', action: `await app.await editActivity(${activityId})` }
         ];
 
         if (activity.prospect_id) {
             modalActions.push({
                 label: 'Complete Prospect Profile',
                 type: 'secondary',
-                action: `UI.hideModal(); app.showProspectDetail(${activity.prospect_id})`
+                action: `UI.hideModal(); await app.await showProspectDetail(${activity.prospect_id})`
             });
         }
 
-        modalActions.push({ label: 'Delete', type: 'primary', action: `app.deleteActivity(${activityId})` });
+        modalActions.push({ label: 'Delete', type: 'primary', action: `await app.await deleteActivity(${activityId})` });
 
         UI.showModal('Activity Details', content, modalActions);
     };
 
-    const editActivity = (activityId) => {
-        const activity = DataStore.getById('activities', activityId);
+    const editActivity = async (activityId) => {
+        const activity = await DataStore.getById('activities', activityId);
         if (!activity) return;
         UI.hideModal(); // close any open modal
-        openActivityModal(null, null, activity);
+        await openActivityModal(null, null, activity);
     };
 
-    const deleteActivity = (activityId) => {
+    const deleteActivity = async (activityId) => {
         UI.showModal('Confirm Delete',
             '<p>Are you sure you want to delete this activity? This action cannot be undone.</p>',
             [
                 { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-                { label: 'Delete', type: 'primary', action: `app.confirmDeleteActivity(${activityId})` }
+                { label: 'Delete', type: 'primary', action: `await app.await confirmDeleteActivity(${activityId})` }
             ]
         );
     };
 
-    const confirmDeleteActivity = (activityId) => {
-        DataStore.delete('activities', activityId);
+    const confirmDeleteActivity = async (activityId) => {
+        await DataStore.delete('activities', activityId);
         UI.hideModal();
         UI.toast.success('Activity deleted');
         if (document.querySelector('.calendar-view-container')) {
-            renderCalendar();
-            renderTodayActivities();
+            await renderCalendar();
+            await renderTodayActivities();
         }
     };
 
-    const markActivityComplete = (activityId) => {
-        const activity = DataStore.getById('activities', activityId);
+    const markActivityComplete = async (activityId) => {
+        const activity = await DataStore.getById('activities', activityId);
         if (!activity) return;
 
         activity.status = 'completed';
         activity.completed_at = new Date().toISOString();
-        DataStore.update('activities', activityId, activity);
+        await DataStore.update('activities', activityId, activity);
 
         UI.toast.success('Activity marked as complete');
         if (document.querySelector('.calendar-view-container')) {
-            renderCalendar();
-            renderTodayActivities();
+            await renderCalendar();
+            await renderTodayActivities();
         }
     };
 
-    const postMeetupNotes = (activityId) => {
-        app.editActivity(activityId);
-        setTimeout(() => {
+    const postMeetupNotes = async (activityId) => {
+        await app.await editActivity(activityId);
+        (() => {
             document.getElementById('note-key-points')?.focus();
         }, 350);
     };
 
-    const rescheduleActivity = (activityId) => {
-        app.editActivity(activityId);
-        setTimeout(() => {
+    const rescheduleActivity = async (activityId) => {
+        await app.await editActivity(activityId);
+        (() => {
             const dateEl = document.getElementById('activity-date');
             if (dateEl) {
                 dateEl.focus();
                 dateEl.style.boxShadow = '0 0 0 2px var(--primary-color)';
-                setTimeout(() => dateEl.style.boxShadow = '', 2000);
+                (() => dateEl.style.boxShadow = '', 2000);
             }
         }, 350);
     };
 
-    const postEventFollowUp = (eventId, entityId) => {
+    const postEventFollowUp = async (eventId, entityId) => {
         UI.hideModal();
-        const ev = DataStore.getById('events', eventId);
-        app.openActivityModal();
-        setTimeout(() => {
+        const ev = await DataStore.getById('events', eventId);
+        await app.await openActivityModal();
+        (() => {
             const all = [...DataStore.getAll('prospects'), ...DataStore.getAll('customers')];
             const p = all.find(x => x.id === entityId);
-            if (p) app.selectEntity(entityId, p.is_customer ? 'customer' : 'prospect');
+            if (p) app.await selectEntity(entityId, p.is_customer ? 'customer' : 'prospect');
 
             const typeEl = document.getElementById('modal-activity-type');
             if (typeEl) {
                 typeEl.value = 'CALL';
-                app.updateActivityForm();
-                setTimeout(() => {
+                await app.await updateActivityForm();
+                (() => {
                     const titleEl = document.getElementById('meeting-title');
                     if (titleEl && ev) titleEl.value = `Follow-up from ${ev.title}`;
                     document.getElementById('note-key-points')?.focus();
@@ -8907,12 +8049,12 @@ In a production system, this would show the actual file contents.
         }, 300);
     };
 
-    const openAttendeeOutcomeModal = (attendeeId, attendeeType, activityId) => {
+    const openAttendeeOutcomeModal = async (attendeeId, attendeeType, activityId) => {
         const attendee = attendeeType === 'agent'
-            ? DataStore.getById('users', attendeeId)
-            : (attendeeType === 'prospect' ? DataStore.getById('prospects', attendeeId) : DataStore.getById('customers', attendeeId));
+            ? await DataStore.getById('users', attendeeId)
+            : (attendeeType === 'prospect' ? await DataStore.getById('prospects', attendeeId) : await DataStore.getById('customers', attendeeId));
 
-        const existingNote = DataStore.getAll('notes').find(n => n.activity_id === activityId && n.note_type === 'outcome' &&
+        const existingNote =(await DataStore.getAll('notes')).find(n => n.activity_id === activityId && n.note_type === 'outcome' &&
             ((attendeeType === 'agent' && n.agent_id === attendeeId) ||
                 (attendeeType === 'prospect' && n.prospect_id === attendeeId) ||
                 (attendeeType === 'customer' && n.customer_id === attendeeId)));
@@ -8926,16 +8068,16 @@ In a production system, this would show the actual file contents.
 
         UI.showModal('Meeting Outcome', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save Outcome', type: 'primary', action: `app.saveAttendeeNote(${attendeeId}, '${attendeeType}', ${activityId}, 'outcome')` }
+            { label: 'Save Outcome', type: 'primary', action: `await app.await saveAttendeeNote(${attendeeId}, '${attendeeType}', ${activityId}, 'outcome')` }
         ]);
     };
 
-    const openAttendeeNotesModal = (attendeeId, attendeeType, activityId) => {
+    const openAttendeeNotesModal = async (attendeeId, attendeeType, activityId) => {
         const attendee = attendeeType === 'agent'
-            ? DataStore.getById('users', attendeeId)
-            : (attendeeType === 'prospect' ? DataStore.getById('prospects', attendeeId) : DataStore.getById('customers', attendeeId));
+            ? await DataStore.getById('users', attendeeId)
+            : (attendeeType === 'prospect' ? await DataStore.getById('prospects', attendeeId) : await DataStore.getById('customers', attendeeId));
 
-        const existingNote = DataStore.getAll('notes').find(n => n.activity_id === activityId && n.note_type === 'post_meetup' &&
+        const existingNote = (await DataStore.getAll('notes')).find(n => n.activity_id === activityId && n.note_type === 'post_meetup' &&
             ((attendeeType === 'agent' && n.agent_id === attendeeId) ||
                 (attendeeType === 'prospect' && n.prospect_id === attendeeId) ||
                 (attendeeType === 'customer' && n.customer_id === attendeeId)));
@@ -8949,11 +8091,11 @@ In a production system, this would show the actual file contents.
 
         UI.showModal('Post-Meetup Notes', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save Notes', type: 'primary', action: `app.saveAttendeeNote(${attendeeId}, '${attendeeType}', ${activityId}, 'post_meetup')` }
+            { label: 'Save Notes', type: 'primary', action: `await app.await saveAttendeeNote(${attendeeId}, '${attendeeType}', ${activityId}, 'post_meetup')` }
         ]);
     };
 
-    const saveAttendeeNote = (attendeeId, attendeeType, activityId, noteType) => {
+    const saveAttendeeNote = async (attendeeId, attendeeType, activityId, noteType) => {
         const textAreaId = noteType === 'outcome' ? 'attendee-outcome-text' : 'attendee-notes-text';
         const text = document.getElementById(textAreaId)?.value?.trim();
 
@@ -8962,7 +8104,7 @@ In a production system, this would show the actual file contents.
             return;
         }
 
-        const currentUser = Auth.getCurrentUser();
+        const currentUser = await Auth.getCurrentUser();
         const noteData = {
             activity_id: activityId,
             note_type: noteType,
@@ -8976,15 +8118,15 @@ In a production system, this would show the actual file contents.
         else if (attendeeType === 'customer') noteData.customer_id = attendeeId;
 
         // Check if note already exists to update
-        const existingNote = DataStore.getAll('notes').find(n => n.activity_id === activityId && n.note_type === noteType &&
+        const existingNote = (await DataStore.getAll('notes')).find(n => n.activity_id === activityId && n.note_type === noteType &&
             ((attendeeType === 'agent' && n.agent_id === attendeeId) ||
                 (attendeeType === 'prospect' && n.prospect_id === attendeeId) ||
                 (attendeeType === 'customer' && n.customer_id === attendeeId)));
 
         if (existingNote) {
-            DataStore.update('notes', existingNote.id, noteData);
+            await DataStore.update('notes', existingNote.id, noteData);
         } else {
-            DataStore.create('notes', noteData);
+            await DataStore.create('notes', noteData);
         }
 
         UI.toast.success('Note saved successfully');
@@ -8993,9 +8135,9 @@ In a production system, this would show the actual file contents.
         // but since notes aren't directly rendered in the list yet, we'll just close.
     };
 
-    const addCoAgentToActivity = (activityId) => {
-        app.editActivity(activityId);
-        setTimeout(() => {
+    const addCoAgentToActivity = async (activityId) => {
+        await app.await editActivity(activityId);
+        (() => {
             const coSectionStr = document.getElementById('co-agent-section')?.style.display;
             if (coSectionStr === 'none' || !coSectionStr) {
                 app.toggleCoAgentSection();
@@ -9004,14 +8146,14 @@ In a production system, this would show the actual file contents.
         }, 350);
     };
 
-    const getAgentName = (agentId) => {
-        const agent = DataStore.getById('users', agentId);
+    const getAgentName = async (agentId) => {
+        const agent = await DataStore.getById('users', agentId);
         return agent?.full_name || 'Unknown';
     };
 
     // ========== PHASE 2: ACTIVITY MODAL FUNCTIONS ==========
 
-    const openActivityModal = (prefillDate = null, prospectId = null, activity = null) => {
+    const openActivityModal = async (prefillDate = null, prospectId = null, activity = null) => {
         const today = new Date().toISOString().split('T')[0];
 
         // Reset all temporary state to avoid interference between uses
@@ -9025,7 +8167,7 @@ In a production system, this would show the actual file contents.
             <div class="activity-modal-form">
                 <div class="form-group">
                     <label>Activity Type <span class="required">*</span></label>
-                    <select id="modal-activity-type" class="form-control" onchange="app.updateActivityForm()">
+                    <select id="modal-activity-type" class="form-control" onchange="app.await updateActivityForm()">
                         <option value="CPS">🟢 CPS - Consultation/Planning Session</option>
                         <option value="FTF">🔵 FTF - Face to Face Meeting</option>
                         <option value="FSA">🟠 FSA - Feng Shui Analysis</option>
@@ -9060,7 +8202,7 @@ In a production system, this would show the actual file contents.
                         <label>Search and Add Co-Agents</label>
                         <div class="co-agent-search" style="display:flex; gap:8px;">
                             <input type="text" id="co-agent-search-input" class="form-control" placeholder="Type agent name..." onkeyup="app.searchAgents()">
-                            <button class="btn secondary btn-sm" onclick="app.searchAgents()">Search</button>
+                            <button class="btn secondary btn-sm" onclick="app.await searchAgents()">Search</button>
                         </div>
                         <div id="agent-search-results" class="search-results-dropdown"></div>
                     </div>
@@ -9107,7 +8249,7 @@ In a production system, this would show the actual file contents.
                         <div class="form-group">
                             <label>Product/Service Sold</label>
                             <select id="solution-sold" class="form-control">
-                                ${DataStore.getAll('products').filter(p => p.is_active !== false).map(p => `<option value="${p.name}">${p.name}</option>`).join('') || '<option value="">No products available</option>'}
+                                ${(await DataStore.getAll('products')).filter(p => p.is_active !== false).map(p => `<option value="${p.name}">${p.name}</option>`).join('') || '<option value="">No products available</option>'}
                             </select>
                         </div>
                         <div class="form-row">
@@ -9196,35 +8338,35 @@ In a production system, this would show the actual file contents.
                         <label>Key Points Discussed:</label>
                         <div style="display:flex; gap:8px;">
                             <textarea id="note-key-points" class="form-control" rows="2" placeholder="Main discussion points..."></textarea>
-                            <button class="btn-icon" onclick="app.openVoiceRecorder('note-key-points', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+                            <button class="btn-icon" onclick="app.await openVoiceRecorder('note-key-points', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
                         </div>
                     </div>
                     <div class="form-group">
                         <label>Outcome:</label>
                         <div style="display:flex; gap:8px;">
                             <textarea id="note-outcome" class="form-control" rows="2" placeholder="What was the result?"></textarea>
-                            <button class="btn-icon" onclick="app.openVoiceRecorder('note-outcome', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+                            <button class="btn-icon" onclick="app.await openVoiceRecorder('note-outcome', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
                         </div>
                     </div>
                     <div class="form-group">
                         <label>Next Steps:</label>
                         <div style="display:flex; gap:8px;">
                             <textarea id="note-next-steps" class="form-control" rows="2" placeholder="Action items..."></textarea>
-                            <button class="btn-icon" onclick="app.openVoiceRecorder('note-next-steps', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+                            <button class="btn-icon" onclick="app.await openVoiceRecorder('note-next-steps', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
                         </div>
                     </div>
                     <div class="form-group">
                         <label>Customer Needs/Interests:</label>
                         <div style="display:flex; gap:8px;">
                             <textarea id="note-needs" class="form-control" rows="2" placeholder="What are they looking for?"></textarea>
-                            <button class="btn-icon" onclick="app.openVoiceRecorder('note-needs', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+                            <button class="btn-icon" onclick="app.await openVoiceRecorder('note-needs', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
                         </div>
                     </div>
                     <div class="form-group">
                         <label>Pain Points:</label>
                         <div style="display:flex; gap:8px;">
                             <textarea id="note-pain-points" class="form-control" rows="2" placeholder="Dislikes or problems to solve..."></textarea>
-                            <button class="btn-icon" onclick="app.openVoiceRecorder('note-pain-points', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+                            <button class="btn-icon" onclick="app.await openVoiceRecorder('note-pain-points', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
                         </div>
                     </div>
                 </div>
@@ -9233,22 +8375,22 @@ In a production system, this would show the actual file contents.
 
         UI.showModal('Quick Add Activity', modalContent, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save & Add Another', type: 'secondary', action: 'app.saveAndAddAnother()' },
-            { label: 'Save Activity', type: 'primary', action: 'app.saveActivity()' }
+            { label: 'Save & Add Another', type: 'secondary', action: 'await app.saveAndAddAnother()' },
+            { label: 'Save Activity', type: 'primary', action: 'await app.saveActivity()' }
         ]);
 
-        updateActivityForm();
+        await updateActivityForm();
 
         if (activity) {
-            setTimeout(() => {
+            (() => {
                 fillActivityForm(activity);
             }, 300); // Increased timeout to ensure DOM is ready
         }
 
         // If prospectId is provided, pre-select it
         if (prospectId) {
-            setTimeout(() => {
-                const prospect = DataStore.getById('prospects', prospectId);
+            (() => {
+                const prospect = await DataStore.getById('prospects', prospectId);
                 if (prospect) {
                     _selectedEntity = { id: prospectId, type: 'Prospect' };
                     const infoDiv = document.getElementById('selected-entity-info');
@@ -9265,12 +8407,12 @@ In a production system, this would show the actual file contents.
         }
     };
 
-    const fillActivityForm = (activity) => {
+    const fillActivityForm = async (activity) => {
     // 1. Set activity type and trigger dynamic form generation
     const typeSelect = document.getElementById('modal-activity-type');
     if (typeSelect) {
         typeSelect.value = activity.activity_type;
-        updateActivityForm();
+        await updateActivityForm();
     } else {
         console.error('modal-activity-type not found');
         return;
@@ -9286,8 +8428,8 @@ In a production system, this would show the actual file contents.
         }
     };
 
-    // 3. Wait for the dynamic fields to be injected (first wave)
-    setTimeout(() => {
+    // 3. Wait for the dynamic fields to be async injected (first wave)
+    (() => {
         // Common fields for all activity types
         setField('activity-date', activity.activity_date);
         setField('start-time', activity.start_time);
@@ -9302,13 +8444,13 @@ In a production system, this would show the actual file contents.
         // 4. Restore selected entity (store in module variable)
         let entityRestored = false;
         if (activity.prospect_id) {
-            const prospect = DataStore.getById('prospects', activity.prospect_id);
+            const prospect = await DataStore.getById('prospects', activity.prospect_id);
             if (prospect) {
                 _selectedEntity = { id: prospect.id, type: 'Prospect' };
                 entityRestored = true;
             }
         } else if (activity.customer_id) {
-            const customer = DataStore.getById('customers', activity.customer_id);
+            const customer = await DataStore.getById('customers', activity.customer_id);
             if (customer) {
                 _selectedEntity = { id: customer.id, type: 'Customer' };
                 entityRestored = true;
@@ -9319,12 +8461,12 @@ In a production system, this would show the actual file contents.
         if (entityRestored) {
             const badgeContainerId = 'selected-entity-info';
             let attempts = 0;
-            const badgeInterval = setInterval(() => {
+            const badgeInterval = async (() => {
                 const container = document.getElementById(badgeContainerId);
                 if (container) {
                     const entityName = _selectedEntity.type === 'Prospect'
-                        ? DataStore.getById('prospects', _selectedEntity.id)?.full_name
-                        : DataStore.getById('customers', _selectedEntity.id)?.full_name;
+                        ? await DataStore.getById('prospects', _selectedEntity.id)?.full_name
+                        : await DataStore.getById('customers', _selectedEntity.id)?.full_name;
                     if (entityName) {
                         container.innerHTML = `
                             <div class="selected-entity-badge">
@@ -9367,14 +8509,14 @@ In a production system, this would show the actual file contents.
 
         // 8. If this is a CPS activity, poll for CPS‑specific fields
         if (activity.activity_type === 'CPS' && activity.prospect_id) {
-            const prospect = DataStore.getById('prospects', activity.prospect_id);
+            const prospect = await DataStore.getById('prospects', activity.prospect_id);
             if (!prospect) {
                 console.error('Prospect not found for ID:', activity.prospect_id);
                 return;
             }
 
             let attempts = 0;
-            const cpsInterval = setInterval(() => {
+            const cpsInterval = (() => {
                 const cpsName = document.getElementById('cps-name');
                 if (cpsName) {
                     // CPS fields are present – populate all prospect fields
@@ -9405,13 +8547,13 @@ In a production system, this would show the actual file contents.
         const saveBtn = document.querySelector('.modal-footer .btn.primary');
         if (saveBtn) {
             saveBtn.textContent = 'Update Activity';
-            saveBtn.onclick = () => app.updateActivity(activity.id);
+            saveBtn.onclick = async () => await app.await updateActivity(activity.id);
         }
     }, 500);
 };
 
-    const updateActivity = (activityId) => {
-    const activity = DataStore.getById('activities', activityId);
+    const updateActivity = async (activityId) => {
+    const activity = await DataStore.getById('activities', activityId);
     if (!activity) return;
 
     const updatedData = {
@@ -9447,14 +8589,14 @@ In a production system, this would show the actual file contents.
         console.log('No entity selected – clearing IDs');
     }
 
-    DataStore.update('activities', activityId, { ...activity, ...updatedData });
+    await DataStore.update('activities', activityId, { ...activity, ...updatedData });
     UI.hideModal();
     UI.toast.success('Activity updated');
-    if (typeof renderCalendar === 'function') renderCalendar();
-    if (typeof renderTodayActivities === 'function') renderTodayActivities();
+    if (typeof renderCalendar === 'function') await renderCalendar();
+    if (typeof renderTodayActivities === 'function') await renderTodayActivities();
 };
 
-    const updateActivityForm = () => {
+    const updateActivityForm = async () => {
         const type = document.getElementById('modal-activity-type')?.value;
         const container = document.getElementById('dynamic-form-fields');
         if (!container) return;
@@ -9564,7 +8706,7 @@ In a production system, this would show the actual file contents.
                             <div class="form-group half">
                                 <label>Referrer</label>
                                 <div class="search-with-results" style="position: relative;">
-                                    <input type="text" id="cps-referrer" class="form-control" placeholder="Search referrer..." onkeyup="app.searchReferrers()">
+                                    <input type="text" id="cps-referrer" class="form-control" placeholder="Search referrer..." onkeyup="app.await searchReferrers()">
                                     <div id="referrer-results" class="search-results-dropdown" style="display:none; position:absolute; z-index:1000; background:white; border:1px solid #ddd; width:100%;"></div>
                                 </div>
                                 <div id="selected-referrer-info" class="selected-entity-info" style="margin-top: 8px;"></div>
@@ -9620,9 +8762,9 @@ In a production system, this would show the actual file contents.
                     </div>
                 `;
                 // Diagnostic: Ensure searchReferrers is bound
-                setTimeout(() => {
+                (() => {
                     const input = document.getElementById('cps-referrer');
-                    if (input) input.onkeyup = () => app.searchReferrers();
+                    if (input) input.onkeyup = async () => await app.await searchReferrers();
                 }, 100);
                 break;
 
@@ -9636,7 +8778,7 @@ In a production system, this would show the actual file contents.
                         <h4>🔍 Select ${type === 'CALL' || type === 'WHATSAPP' ? 'Prospect/Customer' : 'Existing Prospect/Customer'}</h4>
                         <div class="form-group">
                             <div class="search-with-results">
-                                <input type="text" id="entity-search" class="form-control" placeholder="Type name, phone, or email..." onkeyup="app.searchEntities()">
+                                <input type="text" id="entity-search" class="form-control" placeholder="Type name, phone, or email..." onkeyup="app.await searchEntities()">
                                 <div id="search-results" class="search-results-dropdown"></div>
                             </div>
                         </div>
@@ -9656,7 +8798,7 @@ In a production system, this would show the actual file contents.
                         <h4>🔍 Select Existing Prospect/Customer</h4>
                         <div class="form-group">
                             <div class="search-with-results">
-                                <input type="text" id="entity-search" class="form-control" placeholder="Type name, phone, or email..." onkeyup="app.searchEntities()">
+                                <input type="text" id="entity-search" class="form-control" placeholder="Type name, phone, or email..." onkeyup="app.await searchEntities()">
                                 <div id="search-results" class="search-results-dropdown"></div>
                             </div>
                         </div>
@@ -9705,7 +8847,7 @@ In a production system, this would show the actual file contents.
                                 <label>Choose ${type.includes('AGENT') ? 'Meeting/Training' : 'Event'}</label>
                                 <select id="existing-event" class="form-control">
                                     <option value="">-- Select --</option>
-                                    ${DataStore.getAll('events').filter(e => e.is_active !== false).map(e => `<option value="${e.id}">${e.title}</option>`).join('')}
+                                    ${(await DataStore.getAll('events')).filter(e => e.is_active !== false).map(e => `<option value="${e.id}">${e.title}</option>`).join('')}
                                 </select>
                             </div>
                         </div>
@@ -9786,7 +8928,7 @@ In a production system, this would show the actual file contents.
 
         if (input && resultsContainer) {
             clearTimeout(window.attendeeSearchTimeout);
-            window.attendeeSearchTimeout = setTimeout(() => {
+            window.attendeeSearchTimeout = (async () => {
                 const searchTerm = input.value.toLowerCase();
                 if (searchTerm.length < 2) {
                     resultsContainer.style.display = 'none';
@@ -9808,7 +8950,7 @@ In a production system, this would show the actual file contents.
                 }
 
                 if (isAgentRelevant) {
-                    const agents = DataStore.getAll('users').filter(u =>
+                    const agents = (await DataStore.getAll('users')).filter(u =>
                         isAgent(u) &&
                         !_selectedAttendees.find(a => a.id === u.id && a.type === 'agent')
                     );
@@ -9891,7 +9033,7 @@ In a production system, this would show the actual file contents.
         }
     };
 
-    const searchReferrers = () => {
+    const searchReferrers = async () => {
         try {
             const term = document.getElementById('cps-referrer')?.value.toLowerCase();
             const resultsDiv = document.getElementById('referrer-results');
@@ -9903,9 +9045,9 @@ In a production system, this would show the actual file contents.
                 return;
             }
 
-            const prospects = DataStore.getAll('prospects').filter(p => !p.status || p.status === 'active');
-            const customers = DataStore.getAll('customers').filter(c => !c.status || c.status === 'active');
-            const agents = DataStore.getAll('users').filter(u => isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'));
+            const prospects = (await DataStore.getAll('prospects')).filter(p => !p.status || p.status === 'active');
+            const customers = (await DataStore.getAll('customers')).filter(c => !c.status || c.status === 'active');
+            const agents = (await DataStore.getAll('users')).filter(u => isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'));
 
             const all = [
                 ...prospects.map(p => ({ id: p.id, name: p.full_name, type: 'Prospect' })),
@@ -9954,7 +9096,7 @@ In a production system, this would show the actual file contents.
         if (infoDiv) infoDiv.innerHTML = '';
     };
 
-    const searchEntities = () => {
+    const searchEntities = async () => {
         const searchTerm = document.getElementById('entity-search')?.value.toLowerCase();
         const resultsDiv = document.getElementById('search-results');
         if (!searchTerm || searchTerm.length < 2) {
@@ -9962,15 +9104,15 @@ In a production system, this would show the actual file contents.
             return;
         }
 
-        const prospects = getVisibleProspects();
-        const customers = getVisibleCustomers();
+        const prospects = await getVisibleProspects();
+        const customers = await getVisibleCustomers();
         const all = [...prospects.map(p => ({ ...p, type: 'Prospect' })), ...customers.map(c => ({ ...c, type: 'Customer' }))];
 
         const matches = all.filter(e => e.full_name ? e.full_name.toLowerCase().includes(searchTerm) : false).slice(0, 5);
 
         if (resultsDiv) {
             resultsDiv.innerHTML = matches.map(m => `
-                <div class="search-result-item" onclick="app.selectEntity(${m.id}, '${m.type}')">
+                <div class="search-result-item" onclick="app.await selectEntity(${m.id}, '${m.type}')">
                     <strong>${m.full_name}</strong> (${m.type})
                 </div>
             `).join('') || '<div class="search-result-item">No results</div>';
@@ -9978,11 +9120,11 @@ In a production system, this would show the actual file contents.
         }
     };
 
-    const selectEntity = (id, type) => {
+    const selectEntity = async (id, type) => {
         _selectedEntity = { id, type };
         const entity = type === 'Prospect'
-            ? DataStore.getById('prospects', id)
-            : DataStore.getById('customers', id);
+            ? await DataStore.getById('prospects', id)
+            : await DataStore.getById('customers', id);
 
         const infoDiv = document.getElementById('selected-entity-info');
         if (infoDiv) {
@@ -10005,12 +9147,12 @@ In a production system, this would show the actual file contents.
         if (infoDiv) infoDiv.innerHTML = '';
     };
 
-    const searchAgents = () => {
+    const searchAgents = async () => {
         const term = document.getElementById('co-agent-search-input')?.value.toLowerCase();
         const resultsDiv = document.getElementById('agent-search-results');
         if (!term || term.length < 2) return;
 
-        const users = DataStore.getAll('users').filter(isAgent);
+        const users = (await DataStore.getAll('users')).filter(isAgent);
         const matches = users.filter(u => u.full_name.toLowerCase().includes(term));
 
         if (resultsDiv) {
@@ -10065,7 +9207,7 @@ In a production system, this would show the actual file contents.
         }
     };
 
-    const saveActivity = (stayOpen = false) => {
+    const saveActivity = async (stayOpen = false) => {
         const type = document.getElementById('modal-activity-type')?.value;
         const date = document.getElementById('activity-date')?.value;
         const start = document.getElementById('start-time')?.value;
@@ -10108,8 +9250,8 @@ In a production system, this would show the actual file contents.
 
             // Phase X: Duplicate checking
             if (!window._cpsDuplicateConfirmed) {
-                const prospects = getVisibleProspects();
-                const customers = getVisibleCustomers();
+                const prospects = await getVisibleProspects();
+                const customers = await getVisibleCustomers();
                 const all = [...prospects, ...customers];
 
                 const normalize = str => str ? str.toLowerCase().replace(/\s+/g, '') : '';
@@ -10117,9 +9259,9 @@ In a production system, this would show the actual file contents.
                 const isDuplicate = all.find(p => p.phone === phone || normalize(p.full_name) === normName);
 
                 if (isDuplicate) {
-                    const agent = DataStore.getById('users', isDuplicate.responsible_agent_id || isDuplicate.lead_agent_id) || { full_name: 'Unknown Agent' };
+                    const agent = await DataStore.getById('users', isDuplicate.responsible_agent_id || isDuplicate.lead_agent_id) || { full_name: 'Unknown Agent' };
                     // Find last activity
-                    const activities = DataStore.getAll('activities').filter(a => a.prospect_id === isDuplicate.id || a.customer_id === isDuplicate.id);
+                    const activities = (await DataStore.getAll('activities')).filter(a => a.prospect_id === isDuplicate.id || a.customer_id === isDuplicate.id);
                     activities.sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
                     const lastDate = activities.length > 0 ? activities[0].activity_date : 'N/A';
 
@@ -10127,7 +9269,7 @@ In a production system, this would show the actual file contents.
 
                     UI.showModal('Potential Duplicate Found', `<p>${msg}</p>`, [
                         { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-                        { label: 'Continue', type: 'primary', action: `window._cpsDuplicateConfirmed = true; app.saveActivity(${stayOpen})` }
+                        { label: 'Continue', type: 'primary', action: `window._cpsDuplicateConfirmed = true; await app.await saveActivity(${stayOpen})` }
                     ]);
                     return;
                 }
@@ -10165,7 +9307,7 @@ In a production system, this would show the actual file contents.
                 prospectData.lunar_birth = document.getElementById('cps-lunar')?.value;
             }
 
-            const prospect = DataStore.create('prospects', prospectData);
+            const prospect = await DataStore.create('prospects', prospectData);
             activity.prospect_id = prospect.id;
             activity.activity_title = `CPS With ${name}`;
 
@@ -10201,7 +9343,7 @@ In a production system, this would show the actual file contents.
                 if (type === 'AGENT_MEETING') category = 'Meeting';
                 if (type === 'AGENT_TRAINING') category = 'Training';
 
-                const newEvent = DataStore.create('events', {
+                const newEvent = await DataStore.create('events', {
                     title: title,
                     date: date,
                     time: start,
@@ -10219,7 +9361,7 @@ In a production system, this would show the actual file contents.
                     UI.toast.error('Please select an event.');
                     return;
                 }
-                const ev = DataStore.getById('events', eventId);
+                const ev = await DataStore.getById('events', eventId);
                 activity.activity_title = ev ? ev.title : 'Existing Event';
                 // Update visibility on existing event if needed (optional, keeping it simple for now)
             }
@@ -10233,15 +9375,15 @@ In a production system, this would show the actual file contents.
             }
 
             // Save attendees
-            _selectedAttendees.forEach(att => {
-                DataStore.create('event_attendees', {
+            for (const att of _selectedAttendees) {
+                await DataStore.create('event_attendees', {
                     event_id: parseInt(eventId),
                     attendee_id: att.id,
                     attendee_type: att.type, // 'prospect', 'customer', 'agent'
                     attendance_status: att.status,
                     added_by_agent_id: 5 // Default Michelle Tan
                 });
-            });
+            }
         } else {
             if (!_selectedEntity) {
                 UI.toast.error('Please select a prospect or customer.');
@@ -10303,7 +9445,7 @@ In a production system, this would show the actual file contents.
             }
         }
 
-        const savedActivity = DataStore.create('activities', activity);
+        const savedActivity = await DataStore.create('activities', activity);
 
         if (document.getElementById('is-closing')?.checked) {
             const salesIdea = document.getElementById('case-sales-idea')?.value;
@@ -10311,7 +9453,7 @@ In a production system, this would show the actual file contents.
             const successStory = document.getElementById('case-success-story')?.value;
 
             if (salesIdea || planDetails || successStory) {
-                DataStore.create('case_studies', {
+                await DataStore.create('case_studies', {
                     title: `Case Study: ${activity.activity_title}`,
                     prospect_id: activity.prospect_id || null,
                     customer_id: activity.customer_id || null,
@@ -10330,36 +9472,36 @@ In a production system, this would show the actual file contents.
 
         UI.toast.success('Activity saved!');
 
-        renderCalendar();
-        renderTodayActivities();
+        await renderCalendar();
+        await renderTodayActivities();
 
         if (!stayOpen) {
             UI.hideModal();
         } else {
             // Reset co-agents when staying open for another add
             _selectedCoAgents = [];
-            openActivityModal(date);
+            await openActivityModal(date);
         }
     };
 
-    const saveAndAddAnother = () => saveActivity(true);
+    const saveAndAddAnother = async () => await saveActivity(true);
 
     // ========== PHASE 3: PROSPECT MANAGEMENT FUNCTIONS ==========
 
     let _sortField = 'score';
     let _sortDirection = 'desc';
 
-    const sortProspects = (field) => {
+    const sortProspects = async (field) => {
         if (_sortField === field) {
             _sortDirection = _sortDirection === 'asc' ? 'desc' : 'asc';
         } else {
             _sortField = field;
             _sortDirection = 'desc';
         }
-        renderProspectsTable();
+        await renderProspectsTable();
     };
 
-    const showProspectsView = (container) => {
+    const showProspectsView = async (container) => {
         container.innerHTML = `
             <div class="prospects-view">
                 <div class="tab-navigation">
@@ -10374,7 +9516,7 @@ In a production system, this would show the actual file contents.
                             <p>Track and manage potential customers through the lifecycle.</p>
                         </div>
                         <div class="header-actions">
-                            <button class="btn secondary" onclick="app.openImportWizard()">
+                            <button class="btn secondary" onclick="app.await openImportWizard()">
                                 <i class="fas fa-file-import"></i> Bulk Import
                             </button>
                             <button class="btn primary" onclick="app.openAddProspectModal()">
@@ -10424,18 +9566,18 @@ In a production system, this would show the actual file contents.
                     <table class="prospects-table" id="prospects-table">
                         <thead>
                             <tr>
-                                <th onclick="app.sortProspects('name')" style="cursor: pointer;">Name ${_sortField === 'name' ? (_sortDirection === 'asc' ? '↑' : '↓') : ''}</th>
-                                <th onclick="app.sortProspects('score')" style="cursor: pointer;">Score ${_sortField === 'score' ? (_sortDirection === 'asc' ? '↑' : '↓') : ''}</th>
+                                <th onclick="app.await sortProspects('name')" style="cursor: pointer;">Name ${_sortField === 'name' ? (_sortDirection === 'asc' ? '↑' : '↓') : ''}</th>
+                                <th onclick="app.await sortProspects('score')" style="cursor: pointer;">Score ${_sortField === 'score' ? (_sortDirection === 'asc' ? '↑' : '↓') : ''}</th>
                                 <th>Ming Gua</th>
                                 <th>Occupation/Company</th>
-                                <th onclick="app.sortProspects('activity')" style="cursor: pointer;">Last Activity ${_sortField === 'activity' ? (_sortDirection === 'asc' ? '↑' : '↓') : ''}</th>
-                                <th onclick="app.sortProspects('protection')" style="cursor: pointer;">Protection ${_sortField === 'protection' ? (_sortDirection === 'asc' ? '↑' : '↓') : ''}</th>
+                                <th onclick="app.await sortProspects('activity')" style="cursor: pointer;">Last Activity ${_sortField === 'activity' ? (_sortDirection === 'asc' ? '↑' : '↓') : ''}</th>
+                                <th onclick="app.await sortProspects('protection')" style="cursor: pointer;">Protection ${_sortField === 'protection' ? (_sortDirection === 'asc' ? '↑' : '↓') : ''}</th>
                                 <th>Actions</th>
                             </tr>
 
                         </thead>
                         <tbody id="prospects-table-body">
-                            <!-- Populated by renderProspectsTable() -->
+                            <!-- Populated by await renderProspectsTable() -->
                         </tbody>
                     </table>
                 </div>
@@ -10445,10 +9587,10 @@ In a production system, this would show the actual file contents.
                 </div>
             </div>
         `;
-        renderProspectsTable();
+        await renderProspectsTable();
     };
 
-    const switchCustomerTab = (tabName) => {
+    const switchCustomerTab = async (tabName) => {
         const pTab = document.getElementById('prospects-tab-content');
         const cTab = document.getElementById('customers-tab-content');
         const btns = document.querySelectorAll('.tab-btn');
@@ -10458,16 +9600,16 @@ In a production system, this would show the actual file contents.
             pTab.style.display = 'block';
             cTab.style.display = 'none';
             btns[0].classList.add('active');
-            renderProspectsTable();
+            await renderProspectsTable();
         } else {
             pTab.style.display = 'none';
             cTab.style.display = 'block';
             btns[1].classList.add('active');
-            showCustomersView(cTab);
+            await showCustomersView(cTab);
         }
     };
 
-    const showCustomersView = (container) => {
+    const showCustomersView = async (container) => {
         container.innerHTML = `
             <div class="customers-view">
                 <div class="prospects-header">
@@ -10476,7 +9618,7 @@ In a production system, this would show the actual file contents.
                         <p>Manage converted customers and their lifecycle events. Customer records are permanent.</p>
                     </div>
                     <div class="header-actions">
-                        <button class="btn primary" onclick="app.openAddCustomerModal()">
+                        <button class="btn primary" onclick="app.await openAddCustomerModal()">
                             <i class="fas fa-plus"></i> Add Customer
                         </button>
                     </div>
@@ -10535,34 +9677,34 @@ In a production system, this would show the actual file contents.
                             </tr>
                         </thead>
                         <tbody id="customers-table-body">
-                            <!-- Populated by renderCustomersTable() -->
+                            <!-- Populated by await renderCustomersTable() -->
                         </tbody>
                     </table>
                 </div>
             </div>
         `;
-        renderCustomersTable();
+        await renderCustomersTable();
     };
 
-    const renderCustomersTable = () => {
+    const renderCustomersTable = async () => {
         const tbody = document.getElementById('customers-table-body');
         if (!tbody) return;
 
-        const customers = getVisibleCustomers();
+        const customers = await getVisibleCustomers();
         const searchQuery = document.getElementById('customer-search')?.value.toLowerCase() || '';
         const typeFilter = document.getElementById('filter-customer-type')?.value || '';
         const guaFilter = document.getElementById('filter-customer-gua')?.value || '';
         const purchaseFilter = document.getElementById('filter-purchase-status')?.value || '';
 
         let html = '';
-        customers.forEach(c => {
+        for (const c of customers) {
             if (searchQuery && !c.full_name.toLowerCase().includes(searchQuery) && !c.phone.includes(searchQuery)) return;
             if (guaFilter && c.ming_gua !== guaFilter) return;
             // Type and Purchase filters simplified for demo
             if (typeFilter === 'VIP' && c.lifetime_value < 5000) return;
 
             html += `
-                <tr onclick="app.showCustomerDetail(${c.id})">
+                <tr onclick="app.await showCustomerDetail(${c.id})">
                     <td><strong>${c.full_name}</strong></td>
                     <td>RM ${c.lifetime_value.toLocaleString()} <span style="color:var(--success); font-size:12px;"><i class="fas fa-caret-up"></i></span></td>
                     <td>${c.customer_since}</td>
@@ -10571,24 +9713,24 @@ In a production system, this would show the actual file contents.
                     <td><span class="score-badge score-A+">${c.status.toUpperCase()}</span></td>
                     <td onclick="event.stopPropagation()">
                         <button class="btn-icon" title="Edit"><i class="fas fa-edit"></i></button>
-                        <button class="btn-icon" title="Add Purchase" onclick="app.openAddPurchaseModal(${c.id})"><i class="fas fa-shopping-cart"></i></button>
+                        <button class="btn-icon" title="Add Purchase" onclick="app.await openAddPurchaseModal(${c.id})"><i class="fas fa-shopping-cart"></i></button>
                         <button class="btn-icon" title="Referral" onclick="app.todo('Referral workflow')"><i class="fas fa-user-plus"></i></button>
-                        <button class="btn-icon" title="Recruit" onclick="app.openRecruitModal(${c.id})"><i class="fas fa-user-tie"></i></button>
+                        <button class="btn-icon" title="Recruit" onclick="app.await openRecruitModal(${c.id})"><i class="fas fa-user-tie"></i></button>
                     </td>
                 </tr>
             `;
-        });
+        }
         tbody.innerHTML = html || '<tr><td colspan="7" style="text-align:center; padding:20px;">No customers found</td></tr>';
     };
 
-    const filterCustomers = () => renderCustomersTable();
+    const filterCustomers = async () => await renderCustomersTable();
 
-    const renderProspectsTable = () => {
+    const renderProspectsTable = async () => {
         const tbody = document.getElementById('prospects-table-body');
         if (!tbody) return;
 
-        let prospects = getVisibleProspects();
-        const activities = getVisibleActivities();
+        let prospects = await getVisibleProspects();
+        const activities = await getVisibleActivities();
         const searchQuery = document.getElementById('prospect-search')?.value.toLowerCase() || '';
         const scoreFilter = document.getElementById('filter-score')?.value || '';
         const guaFilter = document.getElementById('filter-gua')?.value || '';
@@ -10624,7 +9766,7 @@ In a production system, this would show the actual file contents.
         let html = '';
         let visibleCount = 0;
 
-        prospects.forEach(p => {
+        for (const p of prospects) {
             // Search filter (Name, Phone, Email, ID)
             const matchesSearch = !searchQuery ||
                 p.full_name.toLowerCase().includes(searchQuery) ||
@@ -10661,7 +9803,7 @@ In a production system, this would show the actual file contents.
             }
 
             html += `
-                <tr onclick="app.showProspectDetail(${p.id})">
+                <tr onclick="app.await showProspectDetail(${p.id})">
                     <td><strong>${p.full_name}</strong></td>
                     <td>
                         <span class="score-badge score-${grade.replace('+', '-plus')}">${p.score || 0} (${grade})</span>
@@ -10676,14 +9818,14 @@ In a production system, this would show the actual file contents.
                         </div>
                     </td>
                     <td onclick="event.stopPropagation()">
-                        <button class="btn-icon" title="Edit" onclick="app.openProspectModal(${p.id})"><i class="fas fa-edit"></i></button>
-                        <button class="btn-icon" title="Add Activity" onclick="app.openActivityModal('', ${p.id})"><i class="fas fa-calendar-plus"></i></button>
-                        <button class="btn-icon" title="Convert to Customer" onclick="app.convertToCustomer(${p.id})"><i class="fas fa-user-check"></i></button>
+                        <button class="btn-icon" title="Edit" onclick="app.await openProspectModal(${p.id})"><i class="fas fa-edit"></i></button>
+                        <button class="btn-icon" title="Add Activity" onclick="app.await openActivityModal('', ${p.id})"><i class="fas fa-calendar-plus"></i></button>
+                        <button class="btn-icon" title="Convert to Customer" onclick="app.await convertToCustomer(${p.id})"><i class="fas fa-user-check"></i></button>
                     </td>
                 </tr>
             `;
             visibleCount++;
-        });
+        }
 
         if (visibleCount === 0) {
             html = '<tr><td colspan="7" style="text-align:center; padding:40px;">No prospects found. Click "Add Prospect" to create one.</td></tr>';
@@ -10716,10 +9858,10 @@ In a production system, this would show the actual file contents.
         return 'critical';
     };
 
-    const openProspectModal = (prospectId = null) => {
+    const openProspectModal = async (prospectId = null) => {
         if (prospectId) {
-            const prospect = DataStore.getById('prospects', prospectId);
-            const currentUser = _currentUser || Auth.getCurrentUser();
+            const prospect = await DataStore.getById('prospects', prospectId);
+            const currentUser = _currentUser || await Auth.getCurrentUser();
             const isAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || currentUser.role?.includes('Level 3') || currentUser.role?.includes('Level 7') || currentUser.role === 'team_leader';
             const isOwner = prospect.responsible_agent_id == currentUser.id;
             if (!isAdmin && !isOwner) {
@@ -10727,7 +9869,7 @@ In a production system, this would show the actual file contents.
                 return;
             }
         }
-        const prospect = prospectId ? DataStore.getById('prospects', prospectId) : null;
+        const prospect = prospectId ? await DataStore.getById('prospects', prospectId) : null;
         const isEdit = !!prospect;
 
         const content = `
@@ -10911,7 +10053,7 @@ In a production system, this would show the actual file contents.
 
         UI.showModal(isEdit ? 'Edit Prospect' : 'Add New Prospect', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: isEdit ? 'Update Prospect' : 'Create Prospect', type: 'primary', action: 'app.saveProspect()' }
+            { label: isEdit ? 'Update Prospect' : 'Create Prospect', type: 'primary', action: 'await app.await saveProspect()' }
         ]);
     };
 
@@ -10927,7 +10069,7 @@ In a production system, this would show the actual file contents.
         }
     };
 
-    const saveProspect = () => {
+    const saveProspect = async () => {
         const editId = document.getElementById('edit-prospect-id')?.value;
         const name = document.getElementById('prospect-name')?.value?.trim();
         const phone = document.getElementById('prospect-phone')?.value?.trim();
@@ -10940,20 +10082,20 @@ In a production system, this would show the actual file contents.
         let hasError = false;
 
         if (!name) {
-            showFieldError('prospect-name', 'Name is required');
+            await showFieldError('prospect-name', 'Name is required');
             hasError = true;
         }
 
         if (!phone) {
-            showFieldError('prospect-phone', 'Phone is required');
+            await showFieldError('prospect-phone', 'Phone is required');
             hasError = true;
         } else if (!/^[0-9\+\-\s]{8,}$/.test(phone)) {
-            showFieldError('prospect-phone', 'Enter a valid phone number (min 8 digits)');
+            await async showFieldError('prospect-phone', 'Enter a valid phone number (min 8 digits)');
             hasError = true;
         }
 
         if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-            showFieldError('prospect-email', 'Invalid email format');
+            await showFieldError('prospect-email', 'Invalid email format');
             hasError = true;
         }
 
@@ -10987,14 +10129,14 @@ In a production system, this would show the actual file contents.
         };
 
         if (editId) {
-            DataStore.update('prospects', parseInt(editId), data);
+            await DataStore.update('prospects', parseInt(editId), data);
             UI.toast.success('Prospect updated successfully');
         } else {
             data.id = Date.now();
             data.protection_deadline = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
             data.score = 5;
             data.created_at = new Date().toISOString();
-            DataStore.create('prospects', data);
+            await DataStore.create('prospects', data);
             UI.toast.success('Prospect created successfully');
 
             // Step 8: Trigger event for referral modal
@@ -11002,25 +10144,25 @@ In a production system, this would show the actual file contents.
         }
 
         UI.hideModal();
-        renderProspectsTable();
-        if (editId) showProspectDetail(parseInt(editId));
+        await renderProspectsTable();
+        if (editId) await showProspectDetail(parseInt(editId));
     };
 
 
-    const filterProspects = () => {
-        renderProspectsTable();
+    const filterProspects = async () => {
+        await renderProspectsTable();
     };
 
-    const showCustomerDetail = (customerId) => {
-        const customer = DataStore.getById('customers', customerId);
-        if (!customer || !canViewCustomer(customer)) {
+    const showCustomerDetail = async (customerId) => {
+        const customer = await DataStore.getById('customers', customerId);
+        if (!customer || !await canViewCustomer(customer)) {
             UI.toast.error('You do not have permission to view this customer.');
-            navigateTo('prospects');
+            await navigateTo('prospects');
             return;
         }
 
-        setTimeout(() => {
-            addWhatsAppButtonToProfile('customer', customerId);
+        (() => {
+            await addWhatsAppButtonToProfile('customer', customerId);
         }, 100);
 
         const container = document.getElementById('content-viewport');
@@ -11044,11 +10186,11 @@ In a production system, this would show the actual file contents.
                         </div>
                     </div>
                     <div class="header-actions">
-                        <button class="btn secondary" onclick="app.openProspectModal(${customer.id})"><i class="fas fa-edit"></i> Edit</button>
-                        <button class="btn secondary" onclick="app.openAddPurchaseModal(${customer.id})"><i class="fas fa-plus"></i> Add Purchase</button>
+                        <button class="btn secondary" onclick="app.await openProspectModal(${customer.id})"><i class="fas fa-edit"></i> Edit</button>
+                        <button class="btn secondary" onclick="app.await openAddPurchaseModal(${customer.id})"><i class="fas fa-plus"></i> Add Purchase</button>
                         <button class="btn secondary" onclick="app.todo('Refer a Friend')"><i class="fas fa-user-plus"></i> Refer a Friend</button>
-                        <button class="btn secondary" onclick="app.openSendWhatsAppModal('customer', ${customer.id})"><i class="fab fa-whatsapp"></i> WhatsApp</button>
-                        <button class="btn primary" style="background:#6b21a8;" onclick="app.openRecruitModal(${customer.id})"><i class="fas fa-user-tie"></i> Recruit as Agent</button>
+                        <button class="btn secondary" onclick="app.await openSendWhatsAppModal('customer', ${customer.id})"><i class="fab fa-whatsapp"></i> WhatsApp</button>
+                        <button class="btn primary" style="background:#6b21a8;" onclick="app.await openRecruitModal(${customer.id})"><i class="fas fa-user-tie"></i> Recruit as Agent</button>
                     </div>
                 </div>
 
@@ -11059,12 +10201,12 @@ In a production system, this would show the actual file contents.
                 <div class="profile-content-grid" style="display:grid; grid-template-columns: 1fr 300px; gap:24px;">
                     <div class="profile-main-column">
                         <div class="tab-navigation">
-                            <button class="profile-tab-btn active" onclick="app.switchProfileTab(this, 'basic', ${customer.id})">Basic & Info</button>
-                            <button class="profile-tab-btn" onclick="app.switchProfileTab(this, 'platforms', ${customer.id})">Platform IDs</button>
-                             <button class="profile-tab-btn" onclick="app.switchProfileTab(this, 'purchases', ${customer.id})">Purchase History</button>
-                            <button class="profile-tab-btn" onclick="app.switchProfileTab(this, 'activity', ${customer.id})">Activity History</button>
-                            <button class="profile-tab-btn" onclick="app.switchProfileTab(this, 'referrals', ${customer.id})">Referrals Made</button>
-                            <button class="profile-tab-btn" onclick="app.switchProfileTab(this, 'events', ${customer.id})">Events Attended</button>
+                            <button class="profile-tab-btn active" onclick="app.await switchProfileTab(this, 'basic', ${customer.id})">Basic & Info</button>
+                            <button class="profile-tab-btn" onclick="app.await switchProfileTab(this, 'platforms', ${customer.id})">Platform IDs</button>
+                             <button class="profile-tab-btn" onclick="app.await switchProfileTab(this, 'purchases', ${customer.id})">Purchase History</button>
+                            <button class="profile-tab-btn" onclick="app.await switchProfileTab(this, 'activity', ${customer.id})">Activity History</button>
+                            <button class="profile-tab-btn" onclick="app.await switchProfileTab(this, 'referrals', ${customer.id})">Referrals Made</button>
+                            <button class="profile-tab-btn" onclick="app.await switchProfileTab(this, 'events', ${customer.id})">Events Attended</button>
                         </div>
 
                         <div id="profile-tab-content" style="background:var(--white); padding:24px; border-radius:12px; border:1px solid var(--gray-200);">
@@ -11105,30 +10247,30 @@ In a production system, this would show the actual file contents.
         container.insertAdjacentHTML('beforeend', scrollContainer);
 
         // Fill sections
-        renderBasicBankTab(customer, 'section-basic-bank');
-        renderPlatformIdsTab(customer, 'section-platforms');
-        renderPurchaseHistoryTab(customer, 'section-purchases');
-        renderReferralsTab(customer, 'section-referrals');
+        await renderBasicBankTab(customer, 'section-basic-bank');
+        await renderPlatformIdsTab(customer, 'section-platforms');
+        await renderPurchaseHistoryTab(customer, 'section-purchases');
+        await renderReferralsTab(customer, 'section-referrals');
         renderEventHistory(customer);
-        renderAgentEligibility(customer);
-        renderCustomerTags(customer);
+        await renderAgentEligibility(customer);
+        await renderCustomerTags(customer);
     };
 
-    const switchProfileTab = (btn, tabName, cId) => {
+    const switchProfileTab = async (btn, tabName, cId) => {
         document.querySelectorAll('.profile-tab-btn').forEach(b => b.classList.remove('active'));
         if (btn) btn.classList.add('active');
 
         const customerId = cId || 101; // Mocking fallback
-        const customer = DataStore.getById('customers', customerId);
+        const customer = await DataStore.getById('customers', customerId);
         if (!customer) return;
 
-        if (tabName === 'basic') renderBasicBankTab(customer);
-        else if (tabName === 'platforms') renderPlatformIdsTab(customer);
-        else if (tabName === 'purchases') renderPurchaseHistoryTab(customer);
-        else if (tabName === 'activity') renderCustomerActivityTab(customer);
-        else if (tabName === 'referrals') renderReferralsTab(customer);
+        if (tabName === 'basic') await renderBasicBankTab(customer);
+        else if (tabName === 'platforms') await renderPlatformIdsTab(customer);
+        else if (tabName === 'purchases') await renderPurchaseHistoryTab(customer);
+        else if (tabName === 'activity') await renderCustomerActivityTab(customer);
+        else if (tabName === 'referrals') await renderReferralsTab(customer);
         else if (tabName === 'events') {
-            const registrations = DataStore.getAll('event_registrations').filter(
+            const registrations = (await DataStore.getAll('event_registrations')).filter(
                 r => r.attendee_type === 'customer' && r.attendee_id == customerId
             );
             let html = '<h4>Events Attended</h4>';
@@ -11136,17 +10278,17 @@ In a production system, this would show the actual file contents.
                 html += '<p>No events attended.</p>';
             } else {
                 html += '<table class="events-table"><thead><tr><th>Event</th><th>Date</th><th>Status</th><th>Points</th></tr></thead><tbody>';
-                registrations.forEach(r => {
-                    const event = DataStore.getById('events', r.event_id);
+                for (const r of registrations) {
+                    const event = await DataStore.getById('events', r.event_id);
                     html += `<tr><td>${event?.title || 'Unknown'}</td><td>${r.event_date || '-'}</td><td>${r.attendance_status}</td><td>${r.points_awarded || 0}</td></tr>`;
-                });
+                }
                 html += '</tbody></table>';
             }
             document.getElementById('profile-tab-content').innerHTML = html;
         }
     };
 
-    const renderBasicBankTab = (customer, containerId = 'profile-tab-content') => {
+    const renderBasicBankTab = async (customer, containerId = 'profile-tab-content') => {
         const container = document.getElementById(containerId);
         container.innerHTML = `
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:32px;">
@@ -11214,22 +10356,22 @@ In a production system, this would show the actual file contents.
         `;
 
         // Phase 14: Append Internal Notes section
-        const customerNotes = DataStore.query('notes', { customer_id: customer.id });
+        const customerNotes = await DataStore.query('notes', { customer_id: customer.id });
         container.insertAdjacentHTML('beforeend', `
             <div class="profile-section" style="margin-top:24px; border:1px solid var(--gray-200); border-radius:12px; padding:20px; background:var(--white);">
                 <h4 style="font-size:16px; font-weight:600; margin-bottom:16px; color:var(--primary);"><i class="fas fa-sticky-note"></i> Internal Notes</h4>
                 <div class="add-note-section">
                     <textarea id="customer-note-text" class="form-control" rows="3" placeholder="Add a new note..."></textarea>
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
-                        <button class="btn-icon" onclick="app.openVoiceRecorder('customer-note-text', 'customer', ${customer.id})" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
-                        <button class="btn primary btn-sm" onclick="app.addCustomerNote(${customer.id})">Add Note</button>
+                        <button class="btn-icon" onclick="app.await openVoiceRecorder('customer-note-text', 'customer', ${customer.id})" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+                        <button class="btn primary btn-sm" onclick="app.await addCustomerNote(${customer.id})">Add Note</button>
                     </div>
                 </div>
                 ${customerNotes.length > 0 ? customerNotes.map(n => `
                     <div class="notes-item" style="margin-top:10px;">
                         <div class="notes-header">
                             <span>${n.date} - ${n.author}${n.is_voice_note ? ' <i class="fas fa-microphone voice-note-icon" title="Voice note"></i>' : ''}</span>
-                            <button class="btn-icon" onclick="app.deleteCustomerNote(${customer.id}, ${n.id})"><i class="fas fa-trash"></i></button>
+                            <button class="btn-icon" onclick="app.await deleteCustomerNote(${customer.id}, ${n.id})"><i class="fas fa-trash"></i></button>
                         </div>
                         <div>"${n.text}"</div>
                     </div>
@@ -11238,8 +10380,8 @@ In a production system, this would show the actual file contents.
         `);
     };
 
-    const renderPlatformIdsTab = (customer, containerId = 'profile-tab-content') => {
-        const platformData = DataStore.query('platform_ids', { customer_id: customer.id });
+    const renderPlatformIdsTab = async (customer, containerId = 'profile-tab-content') => {
+        const platformData = await DataStore.query('platform_ids', { customer_id: customer.id });
         const internal = platformData.slice(0, 4);
         const external = platformData.slice(4);
 
@@ -11277,8 +10419,8 @@ In a production system, this would show the actual file contents.
         });
     };
 
-    const renderPurchaseHistoryTab = (customer, containerId = 'profile-tab-content') => {
-        const purchases = DataStore.query('purchases', { customer_id: customer.id });
+    const renderPurchaseHistoryTab = async (customer, containerId = 'profile-tab-content') => {
+        const purchases = await DataStore.query('purchases', { customer_id: customer.id });
         const container = document.getElementById(containerId);
 
         let totalPaid = 0;
@@ -11326,13 +10468,13 @@ In a production system, this would show the actual file contents.
                 <div style="font-size:18px;">Lifetime Total: <span style="color:var(--primary);">RM ${(totalPaid + totalPending).toLocaleString()}</span></div>
             </div>
             <div style="margin-top:16px;">
-                <button class="btn primary" onclick="app.openAddPurchaseModal(${customer.id})">Add Purchase</button>
+                <button class="btn primary" onclick="app.await openAddPurchaseModal(${customer.id})">Add Purchase</button>
             </div>
         `;
     };
 
-    const renderReferralsTab = (customer, containerId = 'profile-tab-content') => {
-        const refs = DataStore.query('referrals', { referrer_customer_id: customer.id });
+    const renderReferralsTab = async (customer, containerId = 'profile-tab-content') => {
+        const refs = await DataStore.query('referrals', { referrer_customer_id: customer.id });
         const container = document.getElementById(containerId);
 
         container.innerHTML = `
@@ -11349,7 +10491,7 @@ In a production system, this would show the actual file contents.
                 </thead>
                 <tbody>
                     ${refs.map(r => {
-            const prospect = DataStore.getById('prospects', r.referred_prospect_id);
+            const prospect = await DataStore.getById('prospects', r.referred_prospect_id);
             return `
                         <tr>
                             <td><strong>${prospect?.full_name || 'N/A'}</strong></td>
@@ -11391,7 +10533,7 @@ In a production system, this would show the actual file contents.
         `;
     };
 
-    const renderAgentEligibility = (customer) => {
+    const renderAgentEligibility = async (customer) => {
         const container = document.getElementById('agent-eligibility-section');
         container.innerHTML = `
             <div class="eligibility-card">
@@ -11408,15 +10550,15 @@ In a production system, this would show the actual file contents.
                     Recommendations: Active participant, makes referrals, good purchase history.
                 </div>
                 
-                <button class="btn primary" style="width:100%; background:#6b21a8; border:none;" onclick="app.openRecruitModal(${customer.id})">Offer Agent Package</button>
+                <button class="btn primary" style="width:100%; background:#6b21a8; border:none;" onclick="app.await openRecruitModal(${customer.id})">Offer Agent Package</button>
             </div>
         `;
     };
 
-    const renderCustomerActivityTab = (customer, containerId = 'profile-tab-content') => {
+    const renderCustomerActivityTab = async (customer, containerId = 'profile-tab-content') => {
         const container = document.getElementById(containerId);
         // Combine activities linked to this customer OR original prospect
-        const activities = DataStore.getAll('activities').filter(a =>
+        const activities = (await DataStore.getAll('activities')).filter(a =>
             a.customer_id == customer.id ||
             (customer.converted_from_prospect_id && a.prospect_id == customer.converted_from_prospect_id)
         ).sort((a, b) => new Date(b.date || b.created_at) - new Date(a.date || a.created_at));
@@ -11424,7 +10566,7 @@ In a production system, this would show the actual file contents.
         container.innerHTML = `
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
                 <h4 style="font-size:16px; font-weight:600; color:var(--primary); margin:0;">Activity History</h4>
-                <button class="btn primary btn-sm" onclick="app.openActivityModal(null, 'customer', ${customer.id})">+ Log Activity</button>
+                <button class="btn primary btn-sm" onclick="app.await openActivityModal(null, 'customer', ${customer.id})">+ Log Activity</button>
             </div>
             ${activities.length > 0 ? `
                 <div class="activity-timeline">
@@ -11452,68 +10594,68 @@ In a production system, this would show the actual file contents.
         `;
     };
 
-    const renderCustomerTags = (customer) => {
+    const renderCustomerTags = async (customer) => {
         const container = document.getElementById('customer-tags-section');
-        const entityTags = DataStore.query('entity_tags', { entity_type: 'customer', entity_id: customer.id });
+        const entityTags = await DataStore.query('entity_tags', { entity_type: 'customer', entity_id: customer.id });
 
         container.innerHTML = `
             <div style="background:var(--white); padding:16px; border-radius:12px; border:1px solid var(--gray-200);">
                 <h4 style="font-size:13px; font-weight:700; color:var(--gray-500); margin-bottom:12px;">TAGS</h4>
                 <div style="display:flex; flex-wrap:wrap; gap:8px;">
                     ${entityTags.length > 0 ? entityTags.map(et => {
-            const tag = DataStore.getById('tags', et.tag_id);
+            const tag = await DataStore.getById('tags', et.tag_id);
             return tag ? `
                             <span class="score-badge" style="background:${tag.color || 'var(--primary)'}; color:white; display:flex; align-items:center; gap:4px; font-size:11px;">
-                                ${tag.name} <span style="cursor:pointer;" onclick="app.removeTagFromCustomer(${customer.id}, ${tag.id})">&times;</span>
+                                ${tag.name} <span style="cursor:pointer;" onclick="app.await removeTagFromCustomer(${customer.id}, ${tag.id})">&times;</span>
                             </span>
                         ` : '';
         }).join('') : '<p style="color:var(--gray-400); font-size:12px;">No tags yet.</p>'}
-                    <button class="btn-sm secondary" style="border-radius:20px; font-size:11px;" onclick="app.openAddTagModal(${customer.id}, 'customer')">+ Add Tag</button>
+                    <button class="btn-sm secondary" style="border-radius:20px; font-size:11px;" onclick="app.await openAddTagModal(${customer.id}, 'customer')">+ Add Tag</button>
                 </div>
             </div>
         `;
     };
 
-    const showProspectDetail = (prospectId) => {
-        const prospect = DataStore.getById('prospects', prospectId);
-        if (!prospect || !canViewProspect(prospect)) {
+    const showProspectDetail = async (prospectId) => {
+        const prospect = await DataStore.getById('prospects', prospectId);
+        if (!prospect || !await canViewProspect(prospect)) {
             UI.toast.error('You do not have permission to view this prospect.');
-            navigateTo('prospects');
+            await navigateTo('prospects');
             return;
         }
 
         if (!prospect) return;
 
         // RBAC check
-        const currentUser = _currentUser || Auth.getCurrentUser();
-        const isAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || currentUser.role?.includes('Level 3') || currentUser.role?.includes('Level 7') || currentUser.role === 'team_leader';
-        const isOwner = prospect.responsible_agent_id == currentUser.id;
+        const currentUser = _currentUser || await Auth.getCurrentUser();
+        const isAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || currentUser?.role?.includes('Level 3') || currentUser?.role?.includes('Level 7') || currentUser?.role === 'team_leader';
+        const isOwner = prospect.responsible_agent_id == currentUser?.id;
         if (!isAdmin && !isOwner) {
             UI.toast.error('You do not have permission to view this prospect.');
-            navigateTo('prospects');
+            await navigateTo('prospects');
             return;
         }
 
         const container = document.getElementById('content-viewport');
         if (!container) return;
 
-        const solutions = DataStore.query('proposed_solutions', { prospect_id: prospectId });
-        const activities = DataStore.getAll('activities').filter(a => a.prospect_id == prospectId);
-        const notes = DataStore.query('notes', { prospect_id: prospectId });
-        const names = DataStore.query('names', { prospect_id: prospectId });
+        const solutions = await DataStore.query('proposed_solutions', { prospect_id: prospectId });
+        const activities =await  (await DataStore.getAll('activities')).filter(a => a.prospect_id == prospectId);
+        const notes = await DataStore.query('notes', { prospect_id: prospectId });
+        const names = await DataStore.query('names', { prospect_id: prospectId });
 
         const daysLeft = calculateProtectionDays(prospect);
         const protectionStatus = getProtectionStatus(daysLeft);
         const statusColor = protectionStatus === 'normal' ? 'success' : protectionStatus === 'warning' ? 'secondary' : 'error';
         const statusLabel = protectionStatus === 'normal' ? 'Normal' : protectionStatus === 'warning' ? 'Expiring Soon' : 'Critical';
 
-        setTimeout(() => {
-            addWhatsAppButtonToProfile('prospect', prospectId);
+        (() => {
+            await addWhatsAppButtonToProfile('prospect', prospectId);
         }, 100);
 
         container.innerHTML = `
             <div class="profile-view">
-                <button class="btn secondary btn-sm" onclick="app.showProspectsView(document.getElementById('content-viewport'))" style="margin-bottom: 20px;">
+                <button class="btn secondary btn-sm" onclick="app.await showProspectsView(document.getElementById('content-viewport'))" style="margin-bottom: 20px;">
                     <i class="fas fa-arrow-left"></i> Back to List
                 </button>
 
@@ -11528,8 +10670,8 @@ In a production system, this would show the actual file contents.
                         </div>
                     </div>
                     <div class="profile-actions">
-                        <button class="btn secondary" onclick="app.editProspect(${prospect.id})"><i class="fas fa-edit"></i> Edit</button>
-                        <button class="btn primary" onclick="app.convertToCustomer(${prospect.id})"><i class="fas fa-user-check"></i> Convert</button>
+                        <button class="btn secondary" onclick="app.await editProspect(${prospect.id})"><i class="fas fa-edit"></i> Edit</button>
+                        <button class="btn primary" onclick="app.await convertToCustomer(${prospect.id})"><i class="fas fa-user-check"></i> Convert</button>
                     </div>
                 </div>
 
@@ -11538,7 +10680,7 @@ In a production system, this would show the actual file contents.
                     <div class="profile-section" id="section-basic">
                         <h2>
                             <span><i class="fas fa-info-circle"></i> Basic Information</span>
-                            <button class="btn-section-edit" onclick="app.openProspectModal(${prospect.id})"><i class="fas fa-edit"></i> Edit</button>
+                            <button class="btn-section-edit" onclick="app.await openProspectModal(${prospect.id})"><i class="fas fa-edit"></i> Edit</button>
                         </h2>
                         <div class="detail-grid">
                             <div class="info-row"><div class="info-label">Title</div><div class="info-value">${prospect.title || '-'}</div></div>
@@ -11554,7 +10696,7 @@ In a production system, this would show the actual file contents.
                     <div class="profile-section" id="section-personal">
                         <h2>
                             <span><i class="fas fa-user-shield"></i> Personal Details</span>
-                            <button class="btn-section-edit" onclick="app.openProspectModal(${prospect.id})"><i class="fas fa-edit"></i> Edit</button>
+                            <button class="btn-section-edit" onclick="app.await openProspectModal(${prospect.id})"><i class="fas fa-edit"></i> Edit</button>
                         </h2>
                         <div class="detail-grid">
                             <div class="info-row"><div class="info-label">Date of Birth</div><div class="info-value">${prospect.date_of_birth || '-'}</div></div>
@@ -11573,7 +10715,7 @@ In a production system, this would show the actual file contents.
                         <h2>
                             <span><i class="fas fa-users"></i> Name List</span>
                             <span class="section-actions">
-                                <button class="btn primary btn-sm" onclick="app.openAddNameModal(${prospect.id})"><i class="fas fa-plus"></i> Add Name</button>
+                                <button class="btn primary btn-sm" onclick="app.await openAddNameModal(${prospect.id})"><i class="fas fa-plus"></i> Add Name</button>
                             </span>
                         </h2>
                         <table class="name-list-table">
@@ -11586,14 +10728,14 @@ In a production system, this would show the actual file contents.
                                 </tr>
                             </thead>
                             <tbody>
-                                ${DataStore.query('names', { prospect_id: prospect.id }).length > 0 ? DataStore.query('names', { prospect_id: prospect.id }).map(n => `
+                                ${await DataStore.query('names', { prospect_id: prospect.id }).length > 0 ? await DataStore.query('names', { prospect_id: prospect.id }).map(n => `
                                     <tr>
                                         <td>${n.relation}</td>
                                         <td>${n.full_name}</td>
                                         <td>${n.date_of_birth || '-'}</td>
                                         <td>
-                                            <button class="btn-icon" onclick="app.openAddNameModal(${prospect.id}, ${n.id})"><i class="fas fa-edit"></i></button>
-                                            <button class="btn-icon" onclick="app.deleteName(${prospect.id}, ${n.id})"><i class="fas fa-trash"></i></button>
+                                            <button class="btn-icon" onclick="app.await openAddNameModal(${prospect.id}, ${n.id})"><i class="fas fa-edit"></i></button>
+                                            <button class="btn-icon" onclick="app.await deleteName(${prospect.id}, ${n.id})"><i class="fas fa-trash"></i></button>
                                         </td>
                                     </tr>
                                 `).join('') : '<tr><td colspan="4" style="text-align:center; padding:20px;">No names added.</td></tr>'}
@@ -11606,16 +10748,16 @@ In a production system, this would show the actual file contents.
                         <h2>
                             <span><i class="fas fa-history"></i> Activity & Information</span>
                             <span class="section-actions">
-                                <button class="btn primary btn-sm" onclick="app.openActivityModal('', ${prospect.id})"><i class="fas fa-plus"></i> Add Activity</button>
+                                <button class="btn primary btn-sm" onclick="app.await openActivityModal('', ${prospect.id})"><i class="fas fa-plus"></i> Add Activity</button>
                             </span>
                         </h2>
                         <div class="profile-tabs" style="margin-bottom:15px; border-bottom:1px solid var(--gray-200);">
-                            <button class="profile-tab active" onclick="app.switchProspectTab('info', ${prospect.id}, this)">Info</button>
-                            <button class="profile-tab" onclick="app.switchProspectTab('personal', ${prospect.id}, this)">Personal</button>
-                            <button class="profile-tab" onclick="app.switchProspectTab('names', ${prospect.id}, this)">Names</button>
-                            <button class="profile-tab" onclick="app.switchProspectTab('activity', ${prospect.id}, this)">Activity</button>
-                            <button class="profile-tab" onclick="app.switchProspectTab('events', ${prospect.id}, this)">Events</button>
-                            <button class="profile-tab" onclick="app.switchProspectTab('notes', ${prospect.id}, this)">Notes</button>
+                            <button class="profile-tab active" onclick="app.await switchProspectTab('info', ${prospect.id}, this)">Info</button>
+                            <button class="profile-tab" onclick="app.await switchProspectTab('personal', ${prospect.id}, this)">Personal</button>
+                            <button class="profile-tab" onclick="app.await switchProspectTab('names', ${prospect.id}, this)">Names</button>
+                            <button class="profile-tab" onclick="app.await switchProspectTab('activity', ${prospect.id}, this)">Activity</button>
+                            <button class="profile-tab" onclick="app.await switchProspectTab('events', ${prospect.id}, this)">Events</button>
+                            <button class="profile-tab" onclick="app.await switchProspectTab('notes', ${prospect.id}, this)">Notes</button>
                         </div>
                         <div id="prospect-tab-content">
                             <!-- Populated by switchProspectTab -->
@@ -11639,7 +10781,7 @@ In a production system, this would show the actual file contents.
                             <div class="fill" style="width: ${Math.min(100, (daysLeft / 30) * 100)}%; background: var(--${statusColor});"></div>
                         </div>
                         <div style="display: flex; gap: 12px; margin-top: 16px;">
-                            <button class="btn secondary btn-sm" onclick="app.extendProtection(${prospect.id})">Extend</button>
+                            <button class="btn secondary btn-sm" onclick="app.await extendProtection(${prospect.id})">Extend</button>
                             <button class="btn secondary btn-sm" onclick="app.transferProspect(${prospect.id})">Transfer</button>
                             <button class="btn secondary btn-sm" onclick="app.reassignProspect(${prospect.id})">Reassign</button>
                         </div>
@@ -11650,12 +10792,12 @@ In a production system, this would show the actual file contents.
                         <h2>
                             <i class="fas fa-tags"></i> Tags
                             <span class="section-actions">
-                                <button class="btn primary btn-sm" onclick="app.openAddTagModal(${prospect.id})"><i class="fas fa-plus"></i></button>
+                                <button class="btn primary btn-sm" onclick="app.await openAddTagModal(${prospect.id})"><i class="fas fa-plus"></i></button>
                             </span>
                         </h2>
                         <div class="tags-container" id="prospect-tags-container">
                             ${prospect.tags && prospect.tags.length > 0 ? prospect.tags.map(t => `
-                                            <span class="tag ${t.color}">${t.name} <i class="fas fa-times remove" onclick="app.removeTagFromProspect(${prospect.id}, ${t.id})"></i></span>
+                                            <span class="tag ${t.color}">${t.name} <i class="fas fa-times remove" onclick="app.await removeTagFromProspect(${prospect.id}, ${t.id})"></i></span>
                                         `).join('') : '<span>No tags yet</span>'}
                         </div>
                     </div>
@@ -11677,10 +10819,10 @@ In a production system, this would show the actual file contents.
             </div>
         `;
         // Load the default tab content
-        app.switchProspectTab('info', prospectId, document.querySelector('.profile-tabs .profile-tab.active'));
+        await app.await switchProspectTab('info', prospectId, document.querySelector('.profile-tabs .profile-tab.active'));
     };
 
-    const switchProspectTab = (tab, prospectId, btn) => {
+    const switchProspectTab = async (tab, prospectId, btn) => {
         document.querySelectorAll('.profile-tab').forEach(t => {
             t.classList.remove('active');
             t.style.color = 'var(--gray-800)';
@@ -11692,7 +10834,7 @@ In a production system, this would show the actual file contents.
             btn.style.fontWeight = '600';
         }
 
-        const prospect = DataStore.getById('prospects', prospectId);
+        const prospect = await DataStore.getById('prospects', prospectId);
         const container = document.getElementById('prospect-tab-content');
         if (!container || !prospect) return;
 
@@ -11755,13 +10897,13 @@ In a production system, this would show the actual file contents.
     `;
         }
         else if (tab === 'names') {
-            const names = DataStore.query('names', { prospect_id: prospectId });
+            const names = await DataStore.query('names', { prospect_id: prospectId });
             container.innerHTML = `
     <div class="profile-section">
                     <h2>
                         <i class="fas fa-users"></i> Name List
                         <span class="section-actions">
-                            <button class="btn primary btn-sm" onclick="app.openAddNameModal(${prospect.id})"><i class="fas fa-plus"></i> Add Name</button>
+                            <button class="btn primary btn-sm" onclick="app.await openAddNameModal(${prospect.id})"><i class="fas fa-plus"></i> Add Name</button>
                         </span>
                     </h2>
                     <table class="name-list-table">
@@ -11783,7 +10925,7 @@ In a production system, this would show the actual file contents.
                                     <td>${n.notes || '-'}</td>
                                     <td>
                                         <button class="btn-icon" onclick="app.todo('Edit name')"><i class="fas fa-edit"></i></button>
-                                        <button class="btn-icon" onclick="app.deleteName(${prospect.id}, ${n.id})"><i class="fas fa-trash"></i></button>
+                                        <button class="btn-icon" onclick="app.await deleteName(${prospect.id}, ${n.id})"><i class="fas fa-trash"></i></button>
                                     </td>
                                 </tr>
                             `).join('') : `
@@ -11795,13 +10937,13 @@ In a production system, this would show the actual file contents.
     `;
         }
         else if (tab === 'activity') {
-            const activities = DataStore.getAll('activities').filter(a => a.prospect_id == prospectId);
+            const activities =await  (await DataStore.getAll('activities')).filter(a => a.prospect_id == prospectId);
             container.innerHTML = `
     <div class="profile-section">
                     <h2>
                         <i class="fas fa-history"></i> Activity History
                         <span class="section-actions">
-                            <button class="btn primary btn-sm" onclick="app.openActivityModal('', ${prospect.id})"><i class="fas fa-plus"></i> Add Activity</button>
+                            <button class="btn primary btn-sm" onclick="app.await openActivityModal('', ${prospect.id})"><i class="fas fa-plus"></i> Add Activity</button>
                         </span>
                     </h2>
                     <div class="history-timeline">
@@ -11812,7 +10954,7 @@ In a production system, this would show the actual file contents.
                                     <h4>${a.activity_type} - ${a.activity_title || 'Meeting'}</h4>
                                     <p style="font-size:13px; color:var(--gray-500); margin-bottom:4px;">Agent: Michelle Tan ${a.score_value ? `| Score: +${a.score_value}` : ''}</p>
                                     <p style="font-size:14px; margin-bottom:8px;">${a.summary || a.location_address || ''}</p>
-                                    <button class="btn btn-sm secondary" onclick="app.viewActivityDetails(${a.id})">View Details</button>
+                                    <button class="btn btn-sm secondary" onclick="app.await viewActivityDetails(${a.id})">View Details</button>
                                 </div>
                             </div>
                         `).join('') : `
@@ -11823,22 +10965,22 @@ In a production system, this would show the actual file contents.
     `;
         }
         else if (tab === 'notes') {
-            const notes = DataStore.query('notes', { prospect_id: prospectId });
+            const notes = await DataStore.query('notes', { prospect_id: prospectId });
             container.innerHTML = `
     <div class="profile-section" style="margin-bottom: 24px;">
                 <h2><i class="fas fa-sticky-note"></i> Notes</h2>
                     <div class="add-note-section">
                         <textarea id="new-note-text" class="form-control" rows="3" placeholder="Add a new note..."></textarea>
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
-                            <button class="btn-icon" onclick="app.openVoiceRecorder('new-note-text', 'prospect', ${prospect.id})" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
-                            <button class="btn primary btn-sm" onclick="app.addNote(${prospect.id})">Add Note</button>
+                            <button class="btn-icon" onclick="app.await openVoiceRecorder('new-note-text', 'prospect', ${prospect.id})" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+                            <button class="btn primary btn-sm" onclick="app.await addNote(${prospect.id})">Add Note</button>
                         </div>
                     </div>
                     ${notes.length > 0 ? notes.map(n => `
                         <div class="notes-item">
                             <div class="notes-header">
                                 <span>${n.date} - ${n.author}${n.is_voice_note ? ' <i class="fas fa-microphone voice-note-icon" title="Voice note"></i>' : ''}</span>
-                                <button class="btn-icon" onclick="app.deleteNote(${prospect.id}, ${n.id})"><i class="fas fa-trash"></i></button>
+                                <button class="btn-icon" onclick="app.await deleteNote(${prospect.id}, ${n.id})"><i class="fas fa-trash"></i></button>
                             </div>
                             <div>"${n.text}"</div>
                         </div>
@@ -11858,7 +11000,7 @@ In a production system, this would show the actual file contents.
 `;
         }
         else if (tab === 'events') {
-            const registrations = DataStore.getAll('event_registrations').filter(
+            const registrations =await  (await DataStore.getAll('event_registrations')).filter(
                 r => r.attendee_type === 'prospect' && r.attendee_id == prospectId
             );
             let html = '<h2>Events Attended</h2>';
@@ -11866,23 +11008,23 @@ In a production system, this would show the actual file contents.
                 html += '<p>No events attended.</p>';
             } else {
                 html += '<table class="events-table"><thead><tr><th>Event</th><th>Date</th><th>Status</th><th>Points</th></tr></thead><tbody>';
-                registrations.forEach(r => {
-                    const event = DataStore.getById('events', r.event_id);
+                for (const r of registrations) {
+                    const event = await DataStore.getById('events', r.event_id);
                     html += `<tr><td>${event?.title || 'Unknown'}</td><td>${r.event_date || '-'}</td><td>${r.attendance_status}</td><td>${r.points_awarded || 0}</td></tr> `;
-                });
+                }
                 html += '</tbody></table>';
             }
             container.innerHTML = html;
         }
     };
 
-    const editProspect = (prospectId) => openProspectModal(prospectId);
+    const editProspect = async (prospectId) => await openProspectModal(prospectId);
 
-    const addNote = (prospectId) => {
+    const addNote = async (prospectId) => {
         const text = document.getElementById('new-note-text')?.value?.trim();
         if (!text) return;
-        const currentUser = Auth.getCurrentUser();
-        DataStore.create('notes', {
+        const currentUser = await Auth.getCurrentUser();
+        await DataStore.create('notes', {
             id: Date.now(),
             prospect_id: prospectId,
             text: text,
@@ -11891,19 +11033,19 @@ In a production system, this would show the actual file contents.
         });
         document.getElementById('new-note-text').value = '';
         UI.toast.success('Note added');
-        app.switchProspectTab('notes', prospectId, document.querySelector('.profile-tab.active'));
+        await app.await switchProspectTab('notes', prospectId, document.querySelector('.profile-tab.active'));
     };
 
-    const deleteNote = (prospectId, noteId) => {
+    const deleteNote = async (prospectId, noteId) => {
         UI.confirm('Delete Note?', 'Are you sure you want to delete this note?', () => {
-            DataStore.delete('notes', noteId);
+            await DataStore.delete('notes', noteId);
             UI.toast.success('Note deleted');
-            app.switchProspectTab('notes', prospectId, document.querySelector('.profile-tab.active'));
+            await app.await switchProspectTab('notes', prospectId, document.querySelector('.profile-tab.active'));
         });
     };
 
 
-    const openAddCustomerModal = () => {
+    const openAddCustomerModal = async () => {
         const content = `
     <div class="warning-banner" style="background:#fff3cd; border:1px solid #ffc107; color:#856404; padding:12px; border-radius:8px; margin-bottom:16px;">
                     <i class="fas fa-exclamation-triangle"></i>
@@ -11928,14 +11070,14 @@ In a production system, this would show the actual file contents.
 `;
         UI.showModal('Add New Customer (Legacy Import)', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Create Customer', type: 'primary', action: 'app.saveCustomer()' }
+            { label: 'Create Customer', type: 'primary', action: 'await app.await saveCustomer()' }
         ]);
     };
 
-    const saveCustomer = () => {
+    const saveCustomer = async () => {
         const name = document.getElementById('cust-name')?.value;
         if (!name) return UI.toast.error('Name is required');
-        DataStore.create('customers', {
+        await DataStore.create('customers', {
             full_name: name,
             phone: document.getElementById('cust-phone')?.value,
             email: document.getElementById('cust-email')?.value,
@@ -11947,11 +11089,11 @@ In a production system, this would show the actual file contents.
         });
         UI.hideModal();
         UI.toast.success('Customer created (Legacy)');
-        if (document.getElementById('customers-table-body')) renderCustomersTable();
+        if (document.getElementById('customers-table-body')) await renderCustomersTable();
     };
 
-    const openAddPurchaseModal = (customerId) => {
-        const customer = DataStore.getById('customers', customerId);
+    const openAddPurchaseModal = async (customerId) => {
+        const customer = await DataStore.getById('customers', customerId);
         const content = `
     <div class="form-section">
                     <div class="form-group">
@@ -12009,11 +11151,11 @@ In a production system, this would show the actual file contents.
     `;
         UI.showModal(`Add Purchase for ${customer.full_name}`, content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Add Purchase', type: 'primary', action: `app.savePurchase(${customerId})` }
+            { label: 'Add Purchase', type: 'primary', action: `await app.await savePurchase(${customerId})` }
         ]);
     };
 
-    const savePurchase = (customerId) => {
+    const savePurchase = async (customerId) => {
         const amt = parseFloat(document.getElementById('pur-amt')?.value);
         if (!amt) return UI.toast.error('Amount is required');
 
@@ -12021,9 +11163,9 @@ In a production system, this would show the actual file contents.
 
         // Match with promotion package if exists
         let packageId = null;
-        const allPackages = DataStore.getAll('promotion_packages');
+        const allPackages = await DataStore.getAll('promotion_packages');
         const matchingPkg = allPackages.find(p => p.is_active && p.product_ids.some(pid => {
-            const prod = DataStore.getById('products', pid);
+            const prod = await DataStore.getById('products', pid);
             return prod && prod.name === item;
         }));
         if (matchingPkg) packageId = matchingPkg.id;
@@ -12038,20 +11180,20 @@ In a production system, this would show the actual file contents.
             proof: document.getElementById('pur-file')?.value ? 'image_uploaded.png' : '',
             package_id: packageId
         };
-        DataStore.create('purchases', pur);
+        await DataStore.create('purchases', pur);
 
         // Update lifetime value
-        const customer = DataStore.getById('customers', customerId);
-        DataStore.update('customers', customerId, { lifetime_value: (customer.lifetime_value || 0) + amt });
+        const customer = await DataStore.getById('customers', customerId);
+        await DataStore.update('customers', customerId, { lifetime_value: (customer.lifetime_value || 0) + amt });
 
         UI.hideModal();
         UI.toast.success('Purchase added');
-        if (document.getElementById('profile-tab-content')) renderPurchaseHistoryTab(customer);
-        else if (document.getElementById('customers-table-body')) renderCustomersTable();
+        if (document.getElementById('profile-tab-content')) await renderPurchaseHistoryTab(customer);
+        else if (document.getElementById('customers-table-body')) await renderCustomersTable();
     };
 
-    const openRecruitModal = (customerId) => {
-        const customer = DataStore.getById('customers', customerId);
+    const openRecruitModal = async (customerId) => {
+        const customer = await DataStore.getById('customers', customerId);
         const content = `
     <div class="form-section">
                     <h4 style="margin-bottom:12px;">Package Selection</h4>
@@ -12088,20 +11230,20 @@ In a production system, this would show the actual file contents.
     };
 
 
-    const confirmDelete = (id) => {
+    const confirmDelete = async (id) => {
         UI.showModal('Delete Confirmation',
             '<p>Are you sure you want to delete this prospect? This action cannot be undone.</p>', [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Confirm Delete', type: 'primary', action: `app.executeDelete(${id})` }
+            { label: 'Confirm Delete', type: 'primary', action: `await app.await executeDelete(${id})` }
         ]
         );
     };
 
-    const executeDelete = (id) => {
+    const executeDelete = async (id) => {
         UI.hideModal();
-        DataStore.delete('prospects', id);
+        await DataStore.delete('prospects', id);
         UI.toast.success('Prospect deleted successfully');
-        showProspectsView(document.getElementById('content-viewport'));
+        await showProspectsView(document.getElementById('content-viewport'));
     };
 
     const calculateAge = (dob) => {
@@ -12112,9 +11254,9 @@ In a production system, this would show the actual file contents.
     };
 
     // Tag Functions
-    const openAddTagModal = (entityId, entityType = 'prospect') => {
-        const allTags = DataStore.getAll('tags');
-        const existingTagMappings = DataStore.query('entity_tags', { entity_type: entityType, entity_id: entityId });
+    const openAddTagModal = async (entityId, entityType = 'prospect') => {
+        const allTags = await DataStore.getAll('tags');
+        const existingTagMappings = await DataStore.query('entity_tags', { entity_type: entityType, entity_id: entityId });
         const existingTagIds = existingTagMappings.map(et => et.tag_id);
         const availableTags = allTags.filter(t => !existingTagIds.includes(t.id));
 
@@ -12145,11 +11287,11 @@ In a production system, this would show the actual file contents.
 
         UI.showModal('Add Tag', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Add Tag', type: 'primary', action: `app.addTagToEntity(${entityId}, '${entityType}')` }
+            { label: 'Add Tag', type: 'primary', action: `await app.await addTagToEntity(${entityId}, '${entityType}')` }
         ]);
     };
 
-    const addTagToEntity = (entityId, entityType) => {
+    const addTagToEntity = async (entityId, entityType) => {
         const tagSelect = document.getElementById('tag-select');
         const newTagName = document.getElementById('new-tag-name')?.value;
         const newTagColor = document.getElementById('new-tag-color')?.value;
@@ -12159,7 +11301,7 @@ In a production system, this would show the actual file contents.
         if (tagSelect && tagSelect.value) {
             tagId = parseInt(tagSelect.value);
         } else if (newTagName) {
-            const newTag = DataStore.create('tags', {
+            const newTag = await DataStore.create('tags', {
                 name: newTagName,
                 color: newTagColor || 'blue'
             });
@@ -12169,7 +11311,7 @@ In a production system, this would show the actual file contents.
             return;
         }
 
-        DataStore.create('entity_tags', {
+        await DataStore.create('entity_tags', {
             entity_type: entityType,
             entity_id: entityId,
             tag_id: tagId
@@ -12177,41 +11319,41 @@ In a production system, this would show the actual file contents.
 
         UI.hideModal();
         if (entityType === 'prospect') {
-            app.showProspectDetail(entityId);
+            await app.await showProspectDetail(entityId);
         } else if (entityType === 'customer') {
-            app.showCustomerDetail(entityId);
+            await app.await showCustomerDetail(entityId);
         }
         UI.toast.success('Tag added');
     };
 
-    const removeTagFromCustomer = (customerId, tagId) => {
-        const mappings = DataStore.query('entity_tags', {
+    const removeTagFromCustomer = async (customerId, tagId) => {
+        const mappings = await DataStore.query('entity_tags', {
             entity_type: 'customer',
             entity_id: customerId,
             tag_id: tagId
         });
         if (mappings.length > 0) {
-            DataStore.delete('entity_tags', mappings[0].id);
-            app.showCustomerDetail(customerId);
+            await DataStore.delete('entity_tags', mappings[0].id);
+            await app.await showCustomerDetail(customerId);
             UI.toast.success('Tag removed');
         }
     };
 
-    const removeTagFromProspect = (prospectId, tagId) => {
-        const mappings = DataStore.query('entity_tags', {
+    const removeTagFromProspect = async (prospectId, tagId) => {
+        const mappings = await DataStore.query('entity_tags', {
             entity_type: 'prospect',
             entity_id: prospectId,
             tag_id: tagId
         });
         if (mappings.length > 0) {
-            DataStore.delete('entity_tags', mappings[0].id);
-            app.showProspectDetail(prospectId);
+            await DataStore.delete('entity_tags', mappings[0].id);
+            await app.await showProspectDetail(prospectId);
             UI.toast.success('Tag removed');
         }
     };
 
     // Solution Functions
-    const openAddSolutionModal = (prospectId) => {
+    const openAddSolutionModal = async (prospectId) => {
         const content = `
     <div class="form-group">
                 <label>Solution</label>
@@ -12244,7 +11386,7 @@ In a production system, this would show the actual file contents.
                 <select name="activity-outcome" class="form-control">
                     <option value="">-- Select Solution --</option>
                     ${(DataStore.get('products') || []).map(p => `
-                        <option value="${escapeHtml(p.name)}">${escapeHtml(p.name)}</option>
+                        <option value="${await escapeHtml(p.name)}">${await escapeHtml(p.name)}</option>
                     `).join('')}
                     <option value="No Solution Needed">No Solution Needed</option>
                     <option value="Follow-up Required">Follow-up Required</option>
@@ -12254,11 +11396,11 @@ In a production system, this would show the actual file contents.
 
         UI.showModal('Add Proposed Solution', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save', type: 'primary', action: `app.saveSolution(${prospectId})` }
+            { label: 'Save', type: 'primary', action: `await app.await saveSolution(${prospectId})` }
         ]);
     };
 
-    const saveSolution = (prospectId) => {
+    const saveSolution = async (prospectId) => {
         const solution = document.getElementById('solution-name')?.value;
         const date = document.getElementById('solution-date')?.value;
         const status = document.getElementById('solution-status')?.value;
@@ -12269,7 +11411,7 @@ In a production system, this would show the actual file contents.
             return;
         }
 
-        DataStore.create('proposed_solutions', {
+        await DataStore.create('proposed_solutions', {
             prospect_id: prospectId,
             solution: solution,
             proposed_date: date,
@@ -12278,13 +11420,13 @@ In a production system, this would show the actual file contents.
         });
 
         UI.hideModal();
-        app.showProspectDetail(prospectId);
+        await app.await showProspectDetail(prospectId);
         UI.toast.success('Solution added');
     };
 
     // Name List Functions
-    const confirmConvertToCustomer = (prospectId, isManual = false) => {
-        const prospect = DataStore.getById('prospects', prospectId);
+    const confirmConvertToCustomer = async (prospectId, isManual = false) => {
+        const prospect = await DataStore.getById('prospects', prospectId);
         if (!prospect) return;
 
         const amount = isManual
@@ -12323,12 +11465,12 @@ In a production system, this would show the actual file contents.
             referral_relationship: prospect.referral_relationship
         };
 
-        const newCustomer = DataStore.create('customers', customer);
-        DataStore.update('prospects', prospectId, { status: 'converted' });
+        const newCustomer = await DataStore.create('customers', customer);
+        await DataStore.update('prospects', prospectId, { status: 'converted' });
 
         // Phase X: Create purchase record for conversion amount
         if (amount > 0) {
-            DataStore.create('purchases', {
+           await  await DataStore.create('purchases', {
                 customer_id: newCustomer.id,
                 date: customer.customer_since,
                 item: 'Conversion Package / First Deal',
@@ -12343,17 +11485,17 @@ In a production system, this would show the actual file contents.
         UI.toast.success('Converted to customer successfully!');
 
         const content = document.getElementById('main-content');
-        if (content) showProspectsView(content);
+        if (content) await showProspectsView(content);
     };
 
-    const extendProtection = (prospectId) => {
-        const prospect = DataStore.getById('prospects', prospectId);
+    const extendProtection = async (prospectId) => {
+        const prospect = await DataStore.getById('prospects', prospectId);
         if (!prospect) return;
         const currentDeadline = new Date(prospect.protection_deadline || Date.now());
         const newDeadline = new Date(currentDeadline.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-        DataStore.update('prospects', prospectId, { protection_deadline: newDeadline });
+        await DataStore.update('prospects', prospectId, { protection_deadline: newDeadline });
         UI.toast.success('Protection extended by 30 days');
-        app.showProspectDetail(prospectId);
+        await app.await showProspectDetail(prospectId);
     };
 
     const transferProspect = (prospectId) => {
@@ -12365,11 +11507,11 @@ In a production system, this would show the actual file contents.
     };
 
 
-    const convertToCustomer = (prospectId) => {
-        const prospect = DataStore.getById('prospects', prospectId);
+    const convertToCustomer = async (prospectId) => {
+        const prospect = await DataStore.getById('prospects', prospectId);
         if (!prospect) return;
 
-        const totalPurchases = DataStore.getAll('purchases')
+        const totalPurchases = await DataStore.getAll('purchases')
             .filter(p => p.prospect_id === prospectId)
             .reduce((sum, p) => sum + (p.amount || 0), 0);
 
@@ -12388,7 +11530,7 @@ In a production system, this would show the actual file contents.
                  </div>`,
                 [
                     { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-                    { label: 'Convert Manually', type: 'primary', action: `app.confirmConvertToCustomer(${prospectId}, true)` }
+                    { label: 'Convert Manually', type: 'primary', action: `await app.await confirmConvertToCustomer(${prospectId}, true)` }
                 ]
             );
             return;
@@ -12410,11 +11552,11 @@ In a production system, this would show the actual file contents.
 
         UI.showModal('Convert to Customer', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Convert', type: 'primary', action: `app.confirmConvertToCustomer(${prospectId})` }
+            { label: 'Convert', type: 'primary', action: `await app.await confirmConvertToCustomer(${prospectId})` }
         ]);
     };
 
-    const showAgentsView = (container) => {
+    const showAgentsView = async (container) => {
 
         container.innerHTML = `
     <div class="agents-view">
@@ -12424,7 +11566,7 @@ In a production system, this would show the actual file contents.
                         <p>Monitor agent performance, licenses, and assignments.</p>
                     </div>
                     <div class="header-actions">
-                        <button class="btn primary" onclick="app.openAddAgentModal()">
+                        <button class="btn primary" onclick="app.await openAddAgentModal()">
                             <i class="fas fa-plus"></i> Add Agent
                         </button>
                     </div>
@@ -12433,18 +11575,18 @@ In a production system, this would show the actual file contents.
                 <div class="agent-filters">
                     <div class="search-group" style="flex:1; min-width:200px; display:flex; align-items:center; gap:8px; background:var(--gray-50); padding:8px 12px; border-radius:6px; border:1px solid var(--gray-200);">
                         <i class="fas fa-search" style="color:var(--gray-400);"></i>
-                        <input type="text" id="agent-search" placeholder="Search agents by name, code, or phone" onkeyup="app.filterAgents()" style="border:none; background:transparent; outline:none; width:100%;">
+                        <input type="text" id="agent-search" placeholder="Search agents by name, code, or phone" onkeyup="app.await filterAgents()" style="border:none; background:transparent; outline:none; width:100%;">
                     </div>
-                    <select id="filter-agent-team" onchange="app.filterAgents()" class="form-control" style="width:140px;">
+                    <select id="filter-agent-team" onchange="app.await filterAgents()" class="form-control" style="width:140px;">
                         <option value="">All Teams</option>
                         <option value="Team A">Team A</option>
                         <option value="Team B">Team B</option>
                     </select>
-                    <select id="filter-agent-role" onchange="app.filterAgents()" class="form-control" style="width:160px;">
+                    <select id="filter-agent-role" onchange="app.await filterAgents()" class="form-control" style="width:160px;">
                         <option value="">All Roles</option>
                         ${USER_ROLES.map(r => `<option value="${r}">${r}</option>`).join('')}
                     </select>
-                    <select id="filter-agent-status" onchange="app.filterAgents()" class="form-control" style="width:140px;">
+                    <select id="filter-agent-status" onchange="app.await filterAgents()" class="form-control" style="width:140px;">
                         <option value="">All Status</option>
                         <option value="active">Active</option>
                         <option value="probation">Probation</option>
@@ -12467,48 +11609,48 @@ In a production system, this would show the actual file contents.
                             </tr>
                         </thead>
                         <tbody id="agents-table-body">
-                            <!-- Populated by renderAgentsTable() -->
+                            <!-- Populated by await renderAgentsTable() -->
                         </tbody>
                     </table>
                 </div>
             </div>
     `;
-        renderAgentsTable();
+        await renderAgentsTable();
     };
 
-    const renderAgentsTable = () => {
+    const renderAgentsTable = async () => {
         const tbody = document.getElementById('agents-table-body');
         if (!tbody) {
             console.error('agents-table-body not found');
             return;
         }
 
-        const agents = DataStore.getAll('users').filter(u => isAgent(u) || u.agent_code);
+        const agents = (await DataStore.getAll('users')).filter(u => isAgent(u) || u.agent_code);
         const searchQuery = document.getElementById('agent-search')?.value.toLowerCase() || '';
         const teamFilter = document.getElementById('filter-agent-team')?.value || '';
         const roleFilter = document.getElementById('filter-agent-role')?.value || '';
         const statusFilter = document.getElementById('filter-agent-status')?.value || '';
 
         let html = '';
-        agents.forEach(agent => {
+        for (const agent of agents) {
             if (searchQuery && !agent.full_name.toLowerCase().includes(searchQuery) && !agent.agent_code?.toLowerCase().includes(searchQuery)) return;
             if (teamFilter && agent.team !== teamFilter) return;
             if (roleFilter && agent.role !== roleFilter) return;
             if (statusFilter && agent.status !== statusFilter) return;
 
-            const stats = DataStore.query('agent_stats', { agent_id: agent.id })[0] || { total_assigned: 0, followup_rate: 0 };
+            const stats = await DataStore.query('agent_stats', { agent_id: agent.id })[0] || { total_assigned: 0, followup_rate: 0 };
             const rateClass = stats.followup_rate >= 90 ? 'rate-good' : (stats.followup_rate >= 70 ? 'rate-warning' : 'rate-critical');
             const status = agent.status || 'active';
 
             html += `
                 <tr data-agent-id="${agent.id}" class="agent-row">
                     <td>
-                        <div style="font-weight:600;">${escapeHtml(agent.full_name)}</div>
-                        <div style="font-size:12px; color:var(--gray-500);">${escapeHtml(agent.agent_code) || 'N/A'}</div>
+                        <div style="font-weight:600;">${await escapeHtml(agent.full_name)}</div>
+                        <div style="font-size:12px; color:var(--gray-500);">${await escapeHtml(agent.agent_code) || 'N/A'}</div>
                     </td>
-                    <td>${escapeHtml(agent.team) || 'Unassigned'}</td>
+                    <td>${await escapeHtml(agent.team) || 'Unassigned'}</td>
                     <td><span class="status-badge status-${status}">${status.toUpperCase()}</span></td>
-                    <td>${escapeHtml(agent.license_expiry) || 'N/A'}</td>
+                    <td>${await escapeHtml(agent.license_expiry) || 'N/A'}</td>
                     <td>${stats.total_assigned} prospects</td>
                     <td>
                         <div class="followup-rate">
@@ -12522,20 +11664,20 @@ In a production system, this would show the actual file contents.
                     </td>
                 </tr>
             `;
-        });
+        }
 
         tbody.innerHTML = '';
         tbody.insertAdjacentHTML('beforeend', html || '<tr><td colspan="7" style="text-align:center; padding:20px;">No agents found</td></tr>');
     };
 
-    const filterAgents = () => renderAgentsTable();
+    const filterAgents = async () => await renderAgentsTable();
 
-    const showAgentDetail = (agentId) => {
-        const agent = DataStore.getById('users', agentId);
+    const showAgentDetail = async (agentId) => {
+        const agent = await DataStore.getById('users', agentId);
         if (!agent) return;
 
         // --- NEW: define isAdminOrLead ---
-        const currentUser = _currentUser || Auth.getCurrentUser();
+        const currentUser = _currentUser || await Auth.getCurrentUser();
         const isAdminOrLead = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || 
                               currentUser?.role?.includes('Level 3') || 
                               currentUser?.role?.includes('Level 7') || 
@@ -12550,7 +11692,7 @@ In a production system, this would show the actual file contents.
         viewport.innerHTML = `
     <div class="agent-profile-view">
                 <div class="header-actions" style="margin-bottom:16px;">
-                    <button class="btn secondary" onclick="app.navigateTo('agents')"><i class="fas fa-arrow-left"></i> Back to Agents</button>
+                    <button class="btn secondary" onclick="app.await navigateTo('agents')"><i class="fas fa-arrow-left"></i> Back to Agents</button>
                 </div>
 
                 <div class="profile-header" style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:24px;">
@@ -12598,7 +11740,7 @@ In a production system, this would show the actual file contents.
                         </div>
                     </div>
                     <div class="license-actions">
-                        <button class="btn primary" onclick="app.renewLicense(${agent.id})" ${calculateDaysDiff(agent.license_expiry) > 60 ? 'disabled' : ''}>Renew Now</button>
+                        <button class="btn primary" onclick="app.await renewLicense(${agent.id})" ${calculateDaysDiff(agent.license_expiry) > 60 ? 'disabled' : ''}>Renew Now</button>
                         <button class="btn secondary" onclick="app.sendRenewalReminder(${agent.id})">Send Reminder</button>
                     </div>
                 </div>
@@ -12634,25 +11776,25 @@ In a production system, this would show the actual file contents.
 
                     <div class="performance-card">
                         <h4><i class="fas fa-chart-line"></i> Follow-up Performance</h4>
-                        ${renderFollowupStats(agent.id)}
+                        ${await renderFollowupStats(agent.id)}
                     </div>
                 </div>
 
                 <div class="performance-grid">
                    <div class="performance-card">
                         <h4><i class="fas fa-list-check"></i> Current Assignments</h4>
-                        ${renderCurrentAssignments(agent.id)}
+                        ${await renderCurrentAssignments(agent.id)}
                     </div>
                     <div class="performance-card">
                         <h4><i class="fas fa-bullseye"></i> Performance Targets (March)</h4>
-                        ${renderPerformanceTargets(agent.id)}
+                        ${await renderPerformanceTargets(agent.id)}
                     </div>
                 </div>
 
                 <div class="performance-grid">
                     <div class="performance-card">
                         <h4><i class="fas fa-history"></i> Customer History</h4>
-                        ${renderCustomerHistory(agent.id)}
+                        ${await renderCustomerHistory(agent.id)}
                     </div>
                     <div class="performance-card">
                         <h4><i class="fas fa-clock-rotate-left"></i> Agent Activity History</h4>
@@ -12677,19 +11819,19 @@ In a production system, this would show the actual file contents.
                         <div class="add-note-section">
                             <textarea id="agent-note-text-${agent.id}" class="form-control" rows="3" placeholder="Add note about agent performance..."></textarea>
                             <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
-                                <button class="btn-icon" onclick="app.openVoiceRecorder('agent-note-text-${agent.id}', 'agent', ${agent.id})" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
-                                <button class="btn primary btn-sm" onclick="app.addAgentNote(${agent.id})">Add Note</button>
+                                <button class="btn-icon" onclick="app.await openVoiceRecorder('agent-note-text-${agent.id}', 'agent', ${agent.id})" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+                                <button class="btn primary btn-sm" onclick="app.await addAgentNote(${agent.id})">Add Note</button>
                             </div>
                         </div>
                         <div id="agent-notes-list-${agent.id}" style="margin-top:12px;">
                             ${(() => {
-                const agentNotes = DataStore.query('notes', { agent_id: agent.id });
+                const agentNotes = await DataStore.query('notes', { agent_id: agent.id });
                 if (!agentNotes.length) return '<p style="color:var(--gray-400); font-size:13px;">No notes yet.</p>';
                 return agentNotes.map(n => `
                                     <div class="notes-item" style="margin-top:8px;">
                                         <div class="notes-header">
                                             <span>${n.date} - ${n.author}${n.is_voice_note ? ' <i class="fas fa-microphone voice-note-icon" title="Voice note"></i>' : ''}</span>
-                                            <button class="btn-icon" onclick="app.deleteAgentNote(${agent.id}, ${n.id})"><i class="fas fa-trash"></i></button>
+                                            <button class="btn-icon" onclick="app.await deleteAgentNote(${agent.id}, ${n.id})"><i class="fas fa-trash"></i></button>
                                         </div>
                                         <div>"${n.text}"</div>
                                     </div>
@@ -12702,14 +11844,14 @@ In a production system, this would show the actual file contents.
     `;
     };
 
-    const renderCustomerHistory = (agentId) => {
-        const customers = getVisibleCustomers().filter(c => c.responsible_agent_id === agentId);
+    const renderCustomerHistory = async (agentId) => {
+        const customers = await getVisibleCustomers().filter(c => c.responsible_agent_id === agentId);
         if (customers.length === 0) return '<p>No converted customers yet.</p>';
 
         return `
     <div class="assignments-list">
         ${customers.map(c => `
-                    <div class="assignment-item" onclick="app.showCustomerDetail(${c.id})">
+                    <div class="assignment-item" onclick="app.await showCustomerDetail(${c.id})">
                         <div>
                             <div class="assignment-prospect">${c.full_name}</div>
                             <div class="next-action">Customer Since: ${c.customer_since}</div>
@@ -12722,7 +11864,7 @@ In a production system, this would show the actual file contents.
     `;
     };
 
-    const renewLicense = (agentId) => {
+    const renewLicense = async (agentId) => {
         const content = `
     <div class="renewal-form">
                 <p>Select a renewal package to extend your agent license for 12 months.</p>
@@ -12745,14 +11887,14 @@ In a production system, this would show the actual file contents.
 
         UI.showModal('License Renewal', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Purchase Package', type: 'primary', action: `app.executeRenewal(${agentId})` }
+            { label: 'Purchase Package', type: 'primary', action: `await app.await executeRenewal(${agentId})` }
         ]);
     };
 
-    const executeRenewal = (agentId) => {
-        const agent = DataStore.getById('users', agentId);
+    const executeRenewal = async (agentId) => {
+        const agent = await DataStore.getById('users', agentId);
         if (agent) {
-            DataStore.update('users', agentId, {
+            await DataStore.update('users', agentId, {
                 renewal_status: 'PENDING_REVIEW',
                 license_renewal_requested: true,
                 license_renewal_date: new Date().toISOString().split('T')[0]
@@ -12760,7 +11902,7 @@ In a production system, this would show the actual file contents.
         }
         UI.hideModal();
         UI.toast.success('Renewal request submitted for admin review.');
-        showAgentDetail(agentId);
+        await showAgentDetail(agentId);
     };
 
     const calculateDaysDiff = (dateStr) => {
@@ -12771,8 +11913,8 @@ In a production system, this would show the actual file contents.
         return Math.ceil(diff / (1000 * 60 * 60 * 24));
     };
 
-    const renderFollowupStats = (agentId) => {
-        const stats = DataStore.query('agent_stats', { agent_id: agentId })[0];
+    const renderFollowupStats = async (agentId) => {
+        const stats = await DataStore.query('agent_stats', { agent_id: agentId })[0];
         if (!stats) return '<p>No performance data available.</p>';
 
         return `
@@ -12805,16 +11947,16 @@ In a production system, this would show the actual file contents.
 `;
     };
 
-    const renderCurrentAssignments = (agentId) => {
-        const assignments = DataStore.query('assignments', { agent_id: agentId });
+    const renderCurrentAssignments = async (agentId) => {
+        const assignments = await DataStore.query('assignments', { agent_id: agentId });
         if (assignments.length === 0) return '<p>No active assignments.</p>';
 
         return `
     <div class="assignments-list">
         ${assignments.map(a => {
-            const p = DataStore.getById('prospects', a.prospect_id);
+            const p = await DataStore.getById('prospects', a.prospect_id);
             return `
-                    <div class="assignment-item" onclick="app.showProspectDetail(${a.prospect_id})">
+                    <div class="assignment-item" onclick="app.await showProspectDetail(${a.prospect_id})">
                         <div>
                             <div class="assignment-prospect">${p.full_name}</div>
                             <div class="next-action">Next: ${a.next_action}</div>
@@ -12829,8 +11971,8 @@ In a production system, this would show the actual file contents.
     `;
     };
 
-    const renderPerformanceTargets = (agentId) => {
-        const target = DataStore.query('agent_targets', { agent_id: agentId })[0];
+    const renderPerformanceTargets = async (agentId) => {
+        const target = await DataStore.query('agent_targets', { agent_id: agentId })[0];
         if (!target) return '<p>No targets set for this month.</p>';
 
         return `
@@ -12864,7 +12006,7 @@ In a production system, this would show the actual file contents.
     `;
     };
 
-    const openAddAgentModal = () => {
+    const openAddAgentModal = async () => {
         const content = `
     <div class="add-agent-form">
                 <div class="form-section">
@@ -12931,11 +12073,11 @@ In a production system, this would show the actual file contents.
 
         UI.showModal('Add New Agent', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Create Agent Account', type: 'primary', action: 'app.saveAgent()' }
+            { label: 'Create Agent Account', type: 'primary', action: 'await app.await saveAgent()' }
         ]);
     };
 
-    const saveAgent = () => {
+    const saveAgent = async () => {
         const name = document.getElementById('agent-name').value;
         if (!name) return UI.toast.error('Agent name is required');
 
@@ -12956,15 +12098,15 @@ In a production system, this would show the actual file contents.
             join_date: new Date().toISOString().split('T')[0]
         };
 
-        DataStore.create('users', newAgent);
+        await DataStore.create('users', newAgent);
         UI.hideModal();
         UI.toast.success('Agent account created successfully');
-        renderAgentsTable();
+        await renderAgentsTable();
     };
 
 
-    const updateAgentTargets = (agentId) => {
-        const target = DataStore.query('agent_targets', { agent_id: agentId })[0];
+    const updateAgentTargets = async (agentId) => {
+        const target = await DataStore.query('agent_targets', { agent_id: agentId })[0];
         const content = `
     <div class="form-group" style="margin-bottom:15px;">
                 <label>Monthly Sales target (RM)</label>
@@ -12981,44 +12123,44 @@ In a production system, this would show the actual file contents.
 `;
         UI.showModal('Update Agent Targets', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save Targets', type: 'primary', action: `app.saveAgentTargets(${agentId})` }
+            { label: 'Save Targets', type: 'primary', action: `await app.await saveAgentTargets(${agentId})` }
         ]);
     };
 
-    const saveAgentTargets = (agentId) => {
-        const target = DataStore.query('agent_targets', { agent_id: agentId })[0];
+    const saveAgentTargets = async (agentId) => {
+        const target = await DataStore.query('agent_targets', { agent_id: agentId })[0];
         const data = {
             target_amount: parseInt(document.getElementById('target-sales').value),
             target_cps: parseInt(document.getElementById('target-cps').value),
             target_meetings: parseInt(document.getElementById('target-meetings').value)
         };
         if (target) {
-            DataStore.update('agent_targets', target.id, data);
+            await DataStore.update('agent_targets', target.id, data);
         } else {
             data.agent_id = agentId;
             data.current_amount = 0;
             data.current_cps = 0;
             data.current_meetings = 0;
-            DataStore.create('agent_targets', data);
+            await DataStore.create('agent_targets', data);
         }
         UI.hideModal();
         UI.toast.success('Agent targets updated');
-        showAgentDetail(agentId);
+        await showAgentDetail(agentId);
     };
 
-    const deactivateAgent = (agentId) => {
+    const deactivateAgent = async (agentId) => {
         UI.confirm('Deactivate Agent?', 'This will prevent the agent from logging in. You should reassign their active prospects first.', () => {
-            DataStore.update('users', agentId, { status: 'inactive' });
+            await DataStore.update('users', agentId, { status: 'inactive' });
             UI.toast.success('Agent deactivated');
             const main = document.getElementById('main-content');
-            if (main) showAgentsView(main);
+            if (main) await showAgentsView(main);
         });
     };
 
-    const assignProspectToAgent = (prospectId, agentId) => {
-        DataStore.update('prospects', prospectId, { responsible_agent_id: agentId });
+    const assignProspectToAgent = async (prospectId, agentId) => {
+        await DataStore.update('prospects', prospectId, { responsible_agent_id: agentId });
         UI.toast.success('Prospect reassigned');
-        app.showProspectDetail(prospectId);
+        await app.await showProspectDetail(prospectId);
     };
 
     const sendRenewalReminder = (agentId) => {
@@ -13087,8 +12229,8 @@ In a production system, this would show the actual file contents.
         return { percentage, label, badges };
     };
 
-    const getProposedProduct = (prospectId) => {
-        const solutions = DataStore.query('proposed_solutions', { prospect_id: prospectId });
+    const getProposedProduct = async (prospectId) => {
+        const solutions = await DataStore.query('proposed_solutions', { prospect_id: prospectId });
         if (solutions.length > 0) {
             return {
                 name: solutions[0].product_name || 'Standard Consultation',
@@ -13098,16 +12240,16 @@ In a production system, this would show the actual file contents.
         return { name: 'General Interest', amount: 0 };
     };
 
-    const getNoteCount = (prospectId) => {
-        return DataStore.query('notes', { prospect_id: prospectId }).length +
-            DataStore.query('activities', { prospect_id: prospectId }).length;
+    const getNoteCount = async (prospectId) => {
+        return await DataStore.query('notes', { prospect_id: prospectId }).length +
+            await DataStore.query('activities', { prospect_id: prospectId }).length;
     };
 
-    const getProspectOutcome = (prospect) => {
+    const getProspectOutcome = async (prospect) => {
         if (prospect.status === 'converted') return 'Won';
         if (prospect.status === 'lost') return 'Lost';
 
-        const purchases = DataStore.query('purchases', { prospect_id: prospect.id });
+        const purchases = await DataStore.query('purchases', { prospect_id: prospect.id });
         if (purchases.length > 0) return 'Won';
 
         return 'Open';
@@ -13117,11 +12259,11 @@ In a production system, this would show the actual file contents.
     let _pipelineAgentFilter = 'all';
     let _pipelineStatusFilter = 'all';
 
-    const showPipelineView = (container) => {
+    const showPipelineView = async (container) => {
         const userId = _currentUser?.id || 5;
-        const allActivities = getVisibleActivities();
-        let prospects = getVisibleProspects();
-        const agents = DataStore.getAll('users').filter(u => isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'));
+        const allActivities = await getVisibleActivities();
+        let prospects = await getVisibleProspects();
+        const agents = (await DataStore.getAll('users')).filter(u => isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'));
 
         // --- NEW: Apply Filters ---
         if (_pipelineAgentFilter !== 'all') {
@@ -13131,7 +12273,7 @@ In a production system, this would show the actual file contents.
             prospects = prospects.filter(p => p.status === _pipelineStatusFilter);
         }
 
-        const focusList = DataStore.query('my_potential_list', { user_id: userId })
+        const focusList = await DataStore.query('my_potential_list', { user_id: userId })
             .filter(rec => prospects.some(p => p.id == rec.prospect_id)) // Filter focus list too
             .sort((a, b) => a.priority_order - b.priority_order);
 
@@ -13151,7 +12293,7 @@ In a production system, this would show the actual file contents.
         </div>
         <div class="header-actions" style="display: flex; gap: 12px; align-items: center;">
             <div class="filter-group" style="display: flex; gap: 8px;">
-                <select class="form-control" style="width: 160px; height: 38px;" onchange="app.setPipelineFilter('agent', this.value)">
+                <select class="form-control" style="width: 160px; height: 38px;" onchange="app.await setPipelineFilter('agent', this.value)">
                     <option value="all">All Agents</option>
                     ${agents.map(a => `<option value="${a.id}" ${_pipelineAgentFilter == a.id ? 'selected' : ''}>${a.full_name}</option>`).join('')}
                 </select>
@@ -13167,7 +12309,7 @@ In a production system, this would show the actual file contents.
             <button class="btn secondary" onclick="app.refreshPipeline()">
                 <i class="fas fa-sync-alt"></i> Refresh
             </button>
-            <button class="btn primary" onclick="app.openPipelineConfigModal()">
+            <button class="btn primary" onclick="app.await openPipelineConfigModal()">
                 <i class="fas fa-cog"></i> Configure Rules
             </button>
         </div>
@@ -13180,7 +12322,7 @@ In a production system, this would show the actual file contents.
                 <h2 style="font-size: 18px; font-weight: 600; margin: 0;">🔥 MONTH FOCUS - My Priority List</h2>
                 <span style="background: #F3F4F6; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600;" id="focus-count">${focusList.length} prospects</span>
             </div>
-            <button class="btn-icon" onclick="app.saveManualOrder()" title="Save Order">
+            <button class="btn-icon" onclick="app.await saveManualOrder()" title="Save Order">
                 <i class="fas fa-save"></i>
             </button>
         </div>
@@ -13204,7 +12346,7 @@ In a production system, this would show the actual file contents.
                     </tr>
                 </thead>
                 <tbody id="focus-list-body">
-                    ${focusList.map((rec, idx) => renderFocusRow(rec, idx, allActivities)).join('')}
+                    ${focusList.mapasync async ((rec, idx) => await renderFocusRow(rec, idx, allActivities)).join('')}
                     ${focusList.length === 0 ? '<tr><td colspan="7" style="padding: 32px; text-align: center; color: #9CA3AF;">No prospects in your focus list yet.</td></tr>' : ''}
                 </tbody>
             </table>
@@ -13235,7 +12377,7 @@ In a production system, this would show the actual file contents.
                     </tr>
                 </thead>
                 <tbody id="pipeline-list-body">
-                    ${systemProspects.map(p => renderSystemRow(p, allActivities)).join('')}
+                    ${systemProspects.map(async p => await renderSystemRow(p, allActivities)).join('')}
                     ${systemProspects.length === 0 ? '<tr><td colspan="7" style="padding: 32px; text-align: center; color: #9CA3AF;">No active prospects found.</td></tr>' : ''}
                 </tbody>
             </table>
@@ -13245,14 +12387,14 @@ In a production system, this would show the actual file contents.
     `;
     };
 
-    const renderFocusRow = (rec, idx, allActivities) => {
-        const prospect = DataStore.getById('prospects', rec.prospect_id);
+    const renderFocusRow = async (rec, idx, allActivities) => {
+        const prospect = await DataStore.getById('prospects', rec.prospect_id);
         if (!prospect) return '';
 
         const readiness = calculateReadiness(prospect, allActivities);
-        const productInfo = getProposedProduct(prospect.id);
-        const noteCount = getNoteCount(prospect.id);
-        const outcome = getProspectOutcome(prospect);
+        const productInfo = await getProposedProduct(prospect.id);
+        const noteCount = await getNoteCount(prospect.id);
+        const outcome = await getProspectOutcome(prospect);
 
         const readinessColor = readiness.label === 'HOT' ? '#DC2626' : (readiness.label === 'WARM' ? '#F59E0B' : '#6B7280');
 
@@ -13262,14 +12404,14 @@ In a production system, this would show the actual file contents.
                     <div class="drag-handle" style="cursor: grab; color: #9CA3AF;"><i class="fas fa-bars"></i></div>
                 </td>
                 <td style="padding: 16px;">
-                    <div style="font-weight: 600; color: #111827;">${escapeHtml(prospect.name)}</div>
+                    <div style="font-weight: 600; color: #111827;">${await escapeHtml(prospect.name)}</div>
                     <div style="font-size: 12px; color: #6B7280; margin-top: 2px;">Created: ${prospect.created_at || 'N/A'}</div>
                 </td>
                 <td style="padding: 16px;">
-                    <div style="font-size: 13px;">${escapeHtml(DataStore.getById('users', prospect.responsible_agent_id)?.full_name || 'Unassigned')}</div>
+                    <div style="font-size: 13px;">${await escapeHtml(await DataStore.getById('users', prospect.responsible_agent_id)?.full_name || 'Unassigned')}</div>
                 </td>
                 <td style="padding: 16px;">
-                    <div style="font-weight: 500;">${escapeHtml(productInfo.name)}</div>
+                    <div style="font-weight: 500;">${await escapeHtml(productInfo.name)}</div>
                 </td>
                 <td style="padding: 16px; font-weight: 600; color: #059669;">RM ${productInfo.amount.toLocaleString()}</td>
                 <td style="padding: 16px;">
@@ -13285,14 +12427,14 @@ In a production system, this would show the actual file contents.
                 </td>
                 <td style="padding: 16px;">
                     <div style="display: flex; align-items: center; gap: 8px;">
-                        <button class="btn-icon" onclick="event.stopPropagation(); app.showProspectMenu(${prospect.id})" title="Options">
+                        <button class="btn-icon" onclick="event.stopPropagation(); app.await showProspectMenu(${prospect.id})" title="Options">
                             <i class="fas fa-ellipsis-v"></i>
                         </button>
-                        <button class="btn-icon" onclick="event.stopPropagation(); app.showComments(${prospect.id})" style="position: relative;" title="Comments">
+                        <button class="btn-icon" onclick="event.stopPropagation(); app.await showComments(${prospect.id})" style="position: relative;" title="Comments">
                             <i class="fas fa-comment"></i>
                             <span style="position: absolute; top: -5px; right: -5px; background: #EF4444; color: white; border-radius: 50%; width: 16px; height: 16px; font-size: 10px; display: flex; align-items: center; justify-content: center;">${noteCount}</span>
                         </button>
-                        <button class="btn-icon text-danger" onclick="event.stopPropagation(); app.removeFromFocusList(${rec.id})" title="Remove from Focus">
+                        <button class="btn-icon text-danger" onclick="event.stopPropagation(); app.await removeFromFocusList(${rec.id})" title="Remove from Focus">
                             <i class="fas fa-trash-alt"></i>
                         </button>
                     </div>
@@ -13301,28 +12443,28 @@ In a production system, this would show the actual file contents.
         `;
     };
 
-    const renderSystemRow = (prospect, allActivities) => {
+    const renderSystemRow = async (prospect, allActivities) => {
         const readiness = calculateReadiness(prospect, allActivities);
-        const productInfo = getProposedProduct(prospect.id);
-        const noteCount = getNoteCount(prospect.id);
-        const outcome = getProspectOutcome(prospect);
+        const productInfo = await getProposedProduct(prospect.id);
+        const noteCount = await getNoteCount(prospect.id);
+        const outcome = await getProspectOutcome(prospect);
 
         const readinessColor = readiness.label === 'HOT' ? '#DC2626' : (readiness.label === 'WARM' ? '#F59E0B' : '#6B7280');
 
         return `
             <tr class="pipeline-row" data-prospect-id="${prospect.id}" style="border-bottom: 1px solid #F3F4F6;">
                 <td style="padding: 16px;">
-                    <div style="font-weight: 600; color: #111827;">${escapeHtml(prospect.name)}</div>
+                    <div style="font-weight: 600; color: #111827;">${await escapeHtml(prospect.name)}</div>
                     <div style="display: flex; align-items: center; gap: 4px; margin-top: 4px;">
                         <span style="font-size: 12px; color: #F59E0B;">⭐ ${prospect.score || 0}</span>
-                        ${prospect.tags ? prospect.tags.split(',').map(t => `<span style="background: #FEF3C7; color: #92400E; padding: 2px 6px; border-radius: 4px; font-size: 10px;">${escapeHtml(t.trim())}</span>`).join('') : ''}
+                        ${prospect.tags ? prospect.tags.split(',').map(t => `<span style="background: #FEF3C7; color: #92400E; padding: 2px 6px; border-radius: 4px; font-size: 10px;">${await escapeHtml(t.trim())}</span>`).join('') : ''}
                     </div>
                 </td>
                 <td style="padding: 16px;">
-                    <div style="font-size: 13px;">${escapeHtml(DataStore.getById('users', prospect.responsible_agent_id)?.full_name || 'Unassigned')}</div>
+                    <div style="font-size: 13px;">${await escapeHtml(await DataStore.getById('users', prospect.responsible_agent_id)?.full_name || 'Unassigned')}</div>
                 </td>
                 <td style="padding: 16px;">
-                    <div style="font-weight: 500;">${escapeHtml(productInfo.name)}</div>
+                    <div style="font-weight: 500;">${await escapeHtml(productInfo.name)}</div>
                 </td>
                 <td style="padding: 16px; font-weight: 600; color: #059669;">RM ${productInfo.amount.toLocaleString()}</td>
                 <td style="padding: 16px;">
@@ -13350,13 +12492,13 @@ In a production system, this would show the actual file contents.
                 </td>
                 <td style="padding: 16px;">
                     <div style="display: flex; align-items: center; gap: 8px;">
-                        <button class="btn secondary btn-sm" style="padding: 4px 12px; font-size: 12px;" onclick="app.addToFocusList(${prospect.id})">
+                        <button class="btn secondary btn-sm" style="padding: 4px 12px; font-size: 12px;" onclick="app.await addToFocusList(${prospect.id})">
                             <i class="fas fa-plus"></i> Add to Focus
                         </button>
-                        <button class="btn-icon" onclick="event.stopPropagation(); app.showProspectMenu(${prospect.id})" title="Options">
+                        <button class="btn-icon" onclick="event.stopPropagation(); app.await showProspectMenu(${prospect.id})" title="Options">
                             <i class="fas fa-ellipsis-v"></i>
                         </button>
-                        <button class="btn-icon" onclick="event.stopPropagation(); app.showComments(${prospect.id})" style="position: relative;" title="Comments">
+                        <button class="btn-icon" onclick="event.stopPropagation(); app.await showComments(${prospect.id})" style="position: relative;" title="Comments">
                             <i class="fas fa-comment"></i>
                             <span style="position: absolute; top: -5px; right: -5px; background: #3B82F6; color: white; border-radius: 50%; width: 16px; height: 16px; font-size: 10px; display: flex; align-items: center; justify-content: center;">${noteCount}</span>
                         </button>
@@ -13366,14 +12508,14 @@ In a production system, this would show the actual file contents.
         `;
     };
 
-    const refreshPipeline = () => {
+    const refreshPipeline = async () => {
         const container = document.getElementById('content-viewport');
-        if (container) showPipelineView(container);
+        if (container) await showPipelineView(container);
     };
 
-    const addToFocusList = (prospectId) => {
+    const addToFocusList = async (prospectId) => {
         const userId = _currentUser?.id || 5;
-        const currentList = DataStore.query('my_potential_list', { user_id: userId });
+        const currentList = await DataStore.query('my_potential_list', { user_id: userId });
 
         // Check if already in list
         if (currentList.some(item => item.prospect_id == prospectId)) {
@@ -13383,42 +12525,42 @@ In a production system, this would show the actual file contents.
 
         const nextPriority = currentList.length + 1;
 
-        DataStore.create('my_potential_list', {
+        await DataStore.create('my_potential_list', {
             user_id: userId,
             prospect_id: prospectId,
             priority_order: nextPriority
         });
 
         UI.toast.success('Added to Focus List');
-        refreshPipeline();
+        await refreshPipeline();
     };
 
-    const removeFromFocusList = (listItemId) => {
-        const item = DataStore.getById('my_potential_list', listItemId);
+    const removeFromFocusList = async (listItemId) => {
+        const item = await DataStore.getById('my_potential_list', listItemId);
         if (!item) return;
 
         const userId = item.user_id;
-        DataStore.delete('my_potential_list', listItemId);
+        await DataStore.delete('my_potential_list', listItemId);
 
         // Re-compact
-        const remaining = DataStore.query('my_potential_list', { user_id: userId })
+        const remaining = await DataStore.query('my_potential_list', { user_id: userId })
             .sort((a, b) => a.priority_order - b.priority_order);
 
-        remaining.forEach((rec, idx) => {
-            DataStore.update('my_potential_list', rec.id, { priority_order: idx + 1 });
-        });
+        for (const [idx, rec] of remaining.entries()) {
+            await DataStore.update('my_potential_list', rec.id, { priority_order: idx + 1 });
+        }
 
         UI.toast.info('Removed from Focus List');
-        refreshPipeline();
+        await refreshPipeline();
     };
 
-    const setPipelineFilter = (type, value) => {
+    const setPipelineFilter = async (type, value) => {
         if (type === 'agent') _pipelineAgentFilter = value;
         if (type === 'status') _pipelineStatusFilter = value;
-        refreshPipeline();
+        await refreshPipeline();
     };
 
-    const openPipelineConfigModal = () => {
+    const openPipelineConfigModal = async () => {
         const config = loadReadinessConfig();
         const content = `
             <div class="config-modal" style="padding: 10px;">
@@ -13474,11 +12616,11 @@ In a production system, this would show the actual file contents.
 
         UI.showModal('Configure Pipeline Rules', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save Configuration', type: 'primary', action: 'app.savePipelineConfig()' }
+            { label: 'Save Configuration', type: 'primary', action: 'await app.await savePipelineConfig()' }
         ]);
     };
 
-    const savePipelineConfig = () => {
+    const savePipelineConfig = async () => {
         const fullWeightDays = parseInt(document.getElementById('config-full-weight-days').value);
         const decayDays = parseInt(document.getElementById('config-decay-days').value);
 
@@ -13507,22 +12649,22 @@ In a production system, this would show the actual file contents.
         localStorage.setItem('pipeline_readiness_config', JSON.stringify(config));
         UI.toast.success('Pipeline configuration saved.');
         UI.hideModal();
-        refreshPipeline();
+        await refreshPipeline();
     };
 
-    const showProspectMenu = (prospectId) => {
+    const showProspectMenu = async (prospectId) => {
         if (typeof app.showProspectDetail === 'function') {
-            app.showProspectDetail(prospectId);
+            await app.await showProspectDetail(prospectId);
         } else {
             UI.toast.info(`Viewing profile for prospect ID: ${prospectId} `);
         }
     };
 
-    const showComments = (prospectId) => {
-        const prospect = DataStore.getById('prospects', prospectId);
-        const notes = DataStore.query('notes', { prospect_id: prospectId })
+    const showComments = async (prospectId) => {
+        const prospect = await DataStore.getById('prospects', prospectId);
+        const notes = await DataStore.query('notes', { prospect_id: prospectId })
             .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-        const activities = DataStore.query('activities', { prospect_id: prospectId })
+        const activities = await DataStore.query('activities', { prospect_id: prospectId })
             .sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
 
         const content = `
@@ -13530,7 +12672,7 @@ In a production system, this would show the actual file contents.
                 <div style="background: #F9FAFB; padding: 12px; border-radius: 8px; margin-bottom: 16px;">
                     <textarea id="new-note-content" class="form-control" placeholder="Add a new comment/note..." style="min-height: 80px;"></textarea>
                     <div style="display: flex; justify-content: flex-end; margin-top: 8px;">
-                        <button class="btn primary btn-sm" onclick="app.addPipelineNote(${prospectId})">Add Note</button>
+                        <button class="btn primary btn-sm" onclick="app.await addPipelineNote(${prospectId})">Add Note</button>
                     </div>
                 </div>
 
@@ -13560,14 +12702,14 @@ In a production system, this would show the actual file contents.
         ]);
     };
 
-    const addPipelineNote = (prospectId) => {
+    const addPipelineNote = async (prospectId) => {
         const content = document.getElementById('new-note-content').value;
         if (!content.trim()) {
             UI.toast.warn('Please enter some content for the note.');
             return;
         }
 
-        DataStore.create('notes', {
+        await DataStore.create('notes', {
             prospect_id: prospectId,
             content: content.trim(),
             created_at: new Date().toISOString(),
@@ -13575,8 +12717,8 @@ In a production system, this would show the actual file contents.
         });
 
         UI.toast.success('Note added.');
-        showComments(prospectId); // Refresh modal
-        refreshPipeline(); // Refresh badge count
+        await showComments(prospectId); // Refresh modal
+        await refreshPipeline(); // Refresh badge count
     };
 
     const calculateDealValue = (prospect) => {
@@ -13606,10 +12748,10 @@ In a production system, this would show the actual file contents.
         e.target.classList.add('dragging');
     };
 
-    const handleStageDrop = (e, stageId) => {
+    const handleStageDrop = async (e, stageId) => {
         e.preventDefault();
         const prospectId = e.dataTransfer.getData('text/plain');
-        const prospect = DataStore.getById('prospects', parseInt(prospectId));
+        const prospect = await DataStore.getById('prospects', parseInt(prospectId));
 
         if (!prospect) return;
 
@@ -13630,7 +12772,7 @@ In a production system, this would show the actual file contents.
                  </div>`,
                 [
                     { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-                    { label: 'Close Won', type: 'primary', action: `app.closeDealWon(${prospect.id})` }
+                    { label: 'Close Won', type: 'primary', action: `await app.await closeDealWon(${prospect.id})` }
                 ]
             );
         }
@@ -13655,14 +12797,14 @@ In a production system, this would show the actual file contents.
                  </div>`,
                 [
                     { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-                    { label: 'Close Lost', type: 'primary', action: `app.closeDealLost(${prospect.id})` }
+                    { label: 'Close Lost', type: 'primary', action: `await app.await closeDealLost(${prospect.id})` }
                 ]
             );
         }
         // Normal stage move
         else {
             prospect.pipeline_stage = stageId;
-            DataStore.update('prospects', prospect.id, prospect);
+            await DataStore.update('prospects', prospect.id, prospect);
 
             // Log to audit
             if (typeof AuditLogger !== 'undefined') {
@@ -13673,13 +12815,13 @@ In a production system, this would show the actual file contents.
                 });
             }
 
-            showPipelineView(document.getElementById('content-viewport'));
+            await showPipelineView(document.getElementById('content-viewport'));
             UI.toast.success(`${prospect.full_name || prospect.name} moved to ${stageId}`);
         }
     };
 
-    const closeDealWon = (prospectId) => {
-        const prospect = DataStore.getById('prospects', prospectId);
+    const closeDealWon = async (prospectId) => {
+        const prospect = await DataStore.getById('prospects', prospectId);
         const amount = parseFloat(document.getElementById('deal-amount')?.value || prospect.deal_value || 5000);
         const closeDate = document.getElementById('close-date')?.value || new Date().toISOString().split('T')[0];
 
@@ -13706,7 +12848,7 @@ In a production system, this would show the actual file contents.
             conversion_date: closeDate
         };
 
-        DataStore.create('customers', customer);
+        await DataStore.create('customers', customer);
 
         // Update prospect
         prospect.status = 'converted';
@@ -13714,7 +12856,7 @@ In a production system, this would show the actual file contents.
         prospect.deal_value = amount;
         prospect.closed_at = new Date().toISOString();
         prospect.closed_date = closeDate;
-        DataStore.update('prospects', prospect.id, prospect);
+        await DataStore.update('prospects', prospect.id, prospect);
 
         // Log to audit
         if (typeof AuditLogger !== 'undefined') {
@@ -13728,11 +12870,11 @@ In a production system, this would show the actual file contents.
 
         UI.hideModal();
         UI.toast.success(`Deal closed at RM ${amount.toLocaleString()} !Customer created.`);
-        showPipelineView(document.getElementById('content-viewport'));
+        await showPipelineView(document.getElementById('content-viewport'));
     };
 
-    const closeDealLost = (prospectId) => {
-        const prospect = DataStore.getById('prospects', prospectId);
+    const closeDealLost = async (prospectId) => {
+        const prospect = await DataStore.getById('prospects', prospectId);
         const reason = document.getElementById('lost-reason')?.value || 'Not specified';
         const notes = document.getElementById('lost-notes')?.value || '';
 
@@ -13741,7 +12883,7 @@ In a production system, this would show the actual file contents.
         prospect.lost_notes = notes;
         prospect.lost_at = new Date().toISOString();
         prospect.status = 'lost';
-        DataStore.update('prospects', prospect.id, prospect);
+        await DataStore.update('prospects', prospect.id, prospect);
 
         // Log to audit
         if (typeof AuditLogger !== 'undefined') {
@@ -13754,15 +12896,15 @@ In a production system, this would show the actual file contents.
 
         UI.hideModal();
         UI.toast.info(`Deal marked as lost: ${reason} `);
-        showPipelineView(document.getElementById('content-viewport'));
+        await showPipelineView(document.getElementById('content-viewport'));
     };
 
-    const renderSystemRanking = () => {
+    const renderSystemRanking = async () => {
         const list = document.getElementById('system-ranking-list');
         if (!list) return;
 
         // Get top 5 prospects by score
-        const prospects = getVisibleProspects()
+        const prospects = await getVisibleProspects()
             .filter(p => p.status !== 'converted' && p.status !== 'lost')
             .sort((a, b) => (b.score || 0) - (a.score || 0))
             .slice(0, 5);
@@ -13781,19 +12923,19 @@ In a production system, this would show the actual file contents.
         `).join('');
     };
 
-    const renderManualPriority = () => {
+    const renderManualPriority = async () => {
         const userId = _currentUser?.id || 5;
-        const potentialRecords = DataStore.query('my_potential_list', { user_id: userId })
+        const potentialRecords = await DataStore.query('my_potential_list', { user_id: userId })
             .filter(rec => {
-                const p = DataStore.getById('prospects', rec.prospect_id);
+                const p = await DataStore.getById('prospects', rec.prospect_id);
                 return p && p.status !== 'converted' && p.status !== 'lost';
             })
             .sort((a, b) => a.priority_order - b.priority_order);
 
         // Since renderManualPriority usually calls refreshPipeline or similar, 
         // we should ensure the filtering is applied where the list is actually rendered.
-        // The existing code just calls refreshPipeline().
-        refreshPipeline();
+        // The existing code just calls await refreshPipeline().
+        await refreshPipeline();
     };
 
     const handleDragStart = (e, id) => {
@@ -13808,14 +12950,14 @@ In a production system, this would show the actual file contents.
         return false;
     };
 
-    const handleDrop = (e, targetId) => {
+    const handleDrop = async (e, targetId) => {
         e.preventDefault();
         e.stopPropagation();
 
         if (_draggedId === targetId) return;
 
         const userId = _currentUser?.id || 5;
-        const list = DataStore.query('my_potential_list', { user_id: userId })
+        const list = await DataStore.query('my_potential_list', { user_id: userId })
             .sort((a, b) => a.priority_order - b.priority_order);
 
         const draggedIndex = list.findIndex(i => i.id === _draggedId);
@@ -13828,25 +12970,25 @@ In a production system, this would show the actual file contents.
         list.splice(targetIndex, 0, removed);
 
         // Update priority_order and PERSIST
-        list.forEach((item, idx) => {
-            DataStore.update('my_potential_list', item.id, { priority_order: idx + 1 });
-        });
+        for (const [idx, item] of list.entries()) {
+            await DataStore.update('my_potential_list', item.id, { priority_order: idx + 1 });
+        }
 
         UI.toast.info('Order rearranged.');
-        refreshPipeline();
+        await refreshPipeline();
     };
 
-    const saveManualOrder = () => {
+    const saveManualOrder = async () => {
         // Since we persist in handleDrop, this just ensures everything is synced
         UI.toast.success('Manual priority order synced.');
-        refreshPipeline();
+        await refreshPipeline();
     };
 
-    const renderRecentOverrides = () => {
+    const renderRecentOverrides = async () => {
         const container = document.getElementById('recent-overrides-table');
         if (!container) return;
 
-        const overrides = DataStore.query('manual_overrides', { user_id: _currentUser?.id || 5 })
+        const overrides = await DataStore.query('manual_overrides', { user_id: _currentUser?.id || 5 })
             .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
             .slice(0, 3);
 
@@ -13868,7 +13010,7 @@ In a production system, this would show the actual file contents.
                 </thead>
                 <tbody>
                     ${overrides.map(o => {
-            const prospect = DataStore.getById('prospects', o.prospect_id);
+            const prospect = await DataStore.getById('prospects', o.prospect_id);
             const date = new Date(o.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
             return `
                             <tr>
@@ -13887,9 +13029,9 @@ In a production system, this would show the actual file contents.
 
 
     // Boost Logic
-    const openBoostModal = () => {
-        const prospects = getVisibleProspects();
-        const manualList = DataStore.query('my_potential_list', { user_id: _currentUser?.id || 5 });
+    const openBoostModal = async () => {
+        const prospects = await getVisibleProspects();
+        const manualList = await DataStore.query('my_potential_list', { user_id: _currentUser?.id || 5 });
 
         const options = manualList.map(item => {
             const p = prospects.find(pro => pro.id === item.prospect_id);
@@ -13921,11 +13063,11 @@ In a production system, this would show the actual file contents.
 
         UI.showModal('Boost Opportunity', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Confirm Boost', type: 'primary', action: 'app.submitBoost()' }
+            { label: 'Confirm Boost', type: 'primary', action: 'await app.await submitBoost()' }
         ]);
     };
 
-    const submitBoost = () => {
+    const submitBoost = async () => {
         const prospectId = parseInt(document.getElementById('boost-prospect-id').value);
         const justification = document.getElementById('boost-justification').value;
         const reason = document.querySelector('input[name="boost-reason"]:checked').value;
@@ -13936,7 +13078,7 @@ In a production system, this would show the actual file contents.
             return;
         }
 
-        const manualList = DataStore.query('my_potential_list', { user_id: _currentUser?.id || 5 })
+        const manualList = await DataStore.query('my_potential_list', { user_id: _currentUser?.id || 5 })
             .sort((a, b) => a.priority_order - b.priority_order);
 
         const currentItem = manualList.find(i => i.prospect_id === prospectId);
@@ -13944,13 +13086,13 @@ In a production system, this would show the actual file contents.
 
         // Move to Rank 1 (priority_order = 1)
         // Shift others down
-        manualList.forEach(item => {
+        for (const item of manualList) {
             if (item.priority_order < oldRank) {
                 item.priority_order += 1;
-                DataStore.update('my_potential_list', item.id, { priority_order: item.priority_order });
+                await DataStore.update('my_potential_list', item.id, { priority_order: item.priority_order });
             }
-        });
-        DataStore.update('my_potential_list', currentItem.id, { priority_order: 1 });
+        }
+        await DataStore.update('my_potential_list', currentItem.id, { priority_order: 1 });
 
         // Log override
         const override = {
@@ -13964,16 +13106,16 @@ In a production system, this would show the actual file contents.
             status: 'active',
             expires_at: expires ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString() : null
         };
-        DataStore.create('manual_overrides', override);
+        await DataStore.create('manual_overrides', override);
 
         UI.hideModal();
-        renderManualPriority();
-        renderRecentOverrides();
+        await renderManualPriority();
+        await renderRecentOverrides();
         UI.toast.success('Opportunity boosted to priority #1.');
     };
 
     // History Logic
-    const openHistoryModal = () => {
+    const openHistoryModal = async () => {
         const content = `
             <div class="filter-bar" style="margin-bottom: 20px;">
                 <div class="filter-group">
@@ -14009,21 +13151,21 @@ In a production system, this would show the actual file contents.
             { label: 'Close', type: 'secondary', action: 'UI.hideModal()' }
         ]);
 
-        loadOverrideHistory();
+        await loadOverrideHistory();
 
-        // Add event listeners for filters
-        setTimeout(() => {
+        // Add event listeners for async filters
+        (() => {
             ['hist-type', 'hist-status'].forEach(id => {
-                document.getElementById(id).addEventListener('change', () => loadOverrideHistory());
+                document.getElementById(id).addEventListenerasync async ('change', () => await loadOverrideHistory());
             });
         }, 100);
     };
 
-    const loadOverrideHistory = () => {
+    const loadOverrideHistory = async () => {
         const type = document.getElementById('hist-type').value;
         const status = document.getElementById('hist-status').value;
 
-        let overrides = DataStore.query('manual_overrides', { user_id: _currentUser?.id || 5 });
+        let overrides = await DataStore.query('manual_overrides', { user_id: _currentUser?.id || 5 });
 
         if (type !== 'all') overrides = overrides.filter(o => o.override_type === type);
         if (status !== 'all') overrides = overrides.filter(o => o.status === status);
@@ -14045,7 +13187,7 @@ In a production system, this would show the actual file contents.
                 </thead>
                 <tbody>
                     ${overrides.map(o => {
-            const prospect = DataStore.getById('prospects', o.prospect_id);
+            const prospect = await DataStore.getById('prospects', o.prospect_id);
             const date = new Date(o.created_at).toLocaleDateString();
             return `
                             <tr>
@@ -14054,7 +13196,7 @@ In a production system, this would show the actual file contents.
                                 <td><span class="type-badge type-${o.override_type}">${o.override_type.toUpperCase()}</span></td>
                                 <td>#${o.system_rank} → #${o.new_priority}</td>
                                 <td><span class="status-badge status-${o.status}">${o.status.toUpperCase()}</span></td>
-                                <td><button class="btn btn-sm secondary" onclick="app.viewJustification(${o.id})">View</button></td>
+                                <td><button class="btn btn-sm secondary" onclick="app.await viewJustification(${o.id})">View</button></td>
                             </tr>
                         `;
         }).join('')}
@@ -14063,11 +13205,11 @@ In a production system, this would show the actual file contents.
         `;
     };
 
-    const viewJustification = (overrideId) => {
-        const override = DataStore.getById('manual_overrides', overrideId);
+    const viewJustification = async (overrideId) => {
+        const override = await DataStore.getById('manual_overrides', overrideId);
         if (!override) return;
 
-        const prospect = DataStore.getById('prospects', override.prospect_id);
+        const prospect = await DataStore.getById('prospects', override.prospect_id);
 
         const content = `
             <div style="padding: 10px;">
@@ -14108,7 +13250,7 @@ In a production system, this would show the actual file contents.
     let _customDateTo = new Date().toISOString().split('T')[0];
     let _revenueChart = null;
 
-    const showKPIDashboard = (container) => {
+    const showKPIDashboard = async (container) => {
         _selectedEntity = null; // Clear selection
         container.innerHTML = `
             <div class="kpi-dashboard">
@@ -14137,18 +13279,18 @@ In a production system, this would show the actual file contents.
                         <button class="time-toggle-btn ${_currentTimeFilter === 'weekly' ? 'active' : ''}" onclick="app.setTimeFilter('weekly')">Weekly</button>
                         <button class="time-toggle-btn ${_currentTimeFilter === 'monthly' ? 'active' : ''}" onclick="app.setTimeFilter('monthly')">Monthly</button>
                         <button class="time-toggle-btn ${_currentTimeFilter === 'quarterly' ? 'active' : ''}" onclick="app.setTimeFilter('quarterly')">Quarterly</button>
-                        <button class="time-toggle-btn ${_currentTimeFilter === 'yearly' ? 'active' : ''}" onclick="app.setTimeFilter('yearly')">Yearly</button>
+                        <button class="time-toggle-btn ${_currentTimeFilter === 'yearly' ? 'active' : ''}" onclick="app.await setTimeFilter('yearly')">Yearly</button>
                     </div>
                     <div class="role-filter-group" style="margin-left: 20px;">
-                        <select id="kpi-role-filter" class="form-control" onchange="app.setRoleFilter(this.value)" style="width: 200px;">
+                        <select id="kpi-role-filter" class="form-control" onchange="app.await setRoleFilter(this.value)" style="width: 200px;">
                             <option value="All">All Roles</option>
                             ${USER_ROLES.map(r => `<option value="${r}" ${_currentRoleFilter === r ? 'selected' : ''}>${r}</option>`).join('')}
                         </select>
                     </div>
                     <div class="date-range-picker" style="margin-left: auto;">
-                        <input type="date" id="kpi-date-from" value="${_customDateFrom}" onchange="app.setCustomDateRange(this.value, document.getElementById('kpi-date-to').value)">
+                        <input type="date" id="kpi-date-from" value="${_customDateFrom}" onchange="app.await setCustomDateRange(this.value, document.getElementById('kpi-date-to').value)">
                         <span>to</span>
-                        <input type="date" id="kpi-date-to" value="${_customDateTo}" onchange="app.setCustomDateRange(document.getElementById('kpi-date-from').value, this.value)">
+                        <input type="date" id="kpi-date-to" value="${_customDateTo}" onchange="app.await setCustomDateRange(document.getElementById('kpi-date-from').value, this.value)">
                     </div>
                 </div>
 
@@ -14193,36 +13335,36 @@ In a production system, this would show the actual file contents.
             </div>
 `;
 
-        refreshKPIDashboard();
+        await refreshKPIDashboard();
     };
 
-    const setTimeFilter = (filter) => {
+    const setTimeFilter = async (filter) => {
         _currentTimeFilter = filter;
-        refreshKPIDashboard();
+        await refreshKPIDashboard();
     };
 
-    const setRoleFilter = (role) => {
+    const setRoleFilter = async (role) => {
         _currentRoleFilter = role;
-        refreshKPIDashboard();
+        await refreshKPIDashboard();
     };
 
-    const setCustomDateRange = (from, to) => {
+    const setCustomDateRange = async (from, to) => {
         _customDateFrom = from;
         _customDateTo = to;
         _currentTimeFilter = 'custom';
-        refreshKPIDashboard();
+        await refreshKPIDashboard();
     };
 
-    const refreshKPIDashboard = () => {
+    const refreshKPIDashboard = async () => {
         const ranges = getDateRanges(_currentTimeFilter, _customDateFrom, _customDateTo);
-        const kpis = calculateKPIs(ranges.current.from, ranges.current.to);
-        const prevKpis = calculateKPIs(ranges.previous.from, ranges.previous.to);
+        const kpis = await calculateKPIs(ranges.current.from, ranges.current.to);
+        const prevKpis = await calculateKPIs(ranges.previous.from, ranges.previous.to);
 
         renderKPIStats(kpis, prevKpis);
-        renderTargetOverview();
-        renderPerformanceTable();
-        renderAgentLeaderboard();
-        renderRevenueChart(_currentTimeFilter, ranges.current);
+        await renderTargetOverview();
+        await renderPerformanceTable();
+        await renderAgentLeaderboard();
+        await renderRevenueChart(_currentTimeFilter, ranges.current);
     };
 
     const getDateRanges = (filter, from, to) => {
@@ -14266,98 +13408,98 @@ In a production system, this would show the actual file contents.
         };
     };
 
-    const calculateKPIs = (from, to) => {
+    const calculateKPIs = async (from, to) => {
         return {
-            cpsCount: getCPSCount(from, to),
-            totalSales: getTotalSales(from, to),
-            popCaseCount: getPOPCaseCount(from, to),
-            popSales: getPOPSales(from, to),
-            eppCaseCount: getEPPCaseCount(from, to),
-            eppSales: getEPPSales(from, to),
-            newAgents: getNewAgents(from, to),
-            newCustomers: getNewCustomers(from, to),
-            totalMeetings: getTotalMeetings(from, to),
-            activityHeadcount: getActivityHeadcount(from, to),
-            conversionRate: getConversionRate(from, to)
+            cpsCount: await getCPSCount(from, to),
+            totalSales: await getTotalSales(from, to),
+            popCaseCount: await getPOPCaseCount(from, to),
+            popSales: await getPOPSales(from, to),
+            eppCaseCount: await getEPPCaseCount(from, to),
+            eppSales: await getEPPSales(from, to),
+            newAgents: await getNewAgents(from, to),
+            newCustomers: await getNewCustomers(from, to),
+            totalMeetings: await getTotalMeetings(from, to),
+            activityHeadcount: await getActivityHeadcount(from, to),
+            conversionRate: await getConversionRate(from, to)
         };
     };
 
-    const getConversionRate = (from, to) => {
-        const totalProspects = DataStore.getAll('prospects').filter(p => p.created_at >= from && p.created_at <= to).length;
-        const convertedCount = DataStore.getAll('customers').filter(c => c.customer_since >= from && c.customer_since <= to).length;
+    const getConversionRate = async (from, to) => {
+        const totalProspects = (await DataStore.getAll('prospects')).filter(p => p.created_at >= from && p.created_at <= to).length;
+        const convertedCount = (await DataStore.getAll('customers')).filter(c => c.customer_since >= from && c.customer_since <= to).length;
         if (totalProspects === 0) return 0;
         return Math.round((convertedCount / totalProspects) * 100);
     };
 
-    const getCPSCount = (from, to) => {
-        return DataStore.getAll('activities').filter(a => {
+    const getCPSCount = async (from, to) => {
+        return (await DataStore.getAll('activities')).filter(a => {
             if (a.activity_type !== 'CPS' || a.activity_date < from || a.activity_date > to) return false;
             if (_currentRoleFilter !== 'All') {
-                const agent = DataStore.getById('users', a.agent_id);
+                const agent = await DataStore.getById('users', a.agent_id);
                 if (!agent || agent.role !== _currentRoleFilter) return false;
             }
             return true;
         }).length;
     };
 
-    const getTotalSales = (from, to) => {
-        // Sum purchases (excluding agent packages)
-        return DataStore.getAll('purchases').filter(p => {
+    const getTotalSales = async (from, to) => {
+        // Sum async purchases (excluding agent packages)
+        return (await DataStore.getAll('purchases')).filter(p => {
             if (p.date < from || p.date > to || p.is_agent_package) return false;
             if (_currentRoleFilter !== 'All') {
-                const agent = DataStore.getById('users', p.agent_id);
+                const agent = await DataStore.getById('users', p.agent_id);
                 if (!agent || agent.role !== _currentRoleFilter) return false;
             }
             return true;
         }).reduce((sum, p) => sum + (p.amount || 0), 0);
     };
 
-    const getPOPCaseCount = (from, to) => {
-        return DataStore.getAll('purchases').filter(p => {
+    const getPOPCaseCount = async (from, to) => {
+        return (await DataStore.getAll('purchases')).filter(p => {
             if (p.payment_method !== 'POP' || p.date < from || p.date > to) return false;
             if (_currentRoleFilter !== 'All') {
-                const agent = DataStore.getById('users', p.agent_id);
+                const agent = await DataStore.getById('users', p.agent_id);
                 if (!agent || agent.role !== _currentRoleFilter) return false;
             }
             return true;
         }).length;
     };
 
-    const getPOPSales = (from, to) => {
-        return DataStore.getAll('purchases').filter(p => {
+    const getPOPSales = async (from, to) => {
+        return (await DataStore.getAll('purchases')).filter(p => {
             if (p.payment_method !== 'POP' || p.date < from || p.date > to) return false;
             if (_currentRoleFilter !== 'All') {
-                const agent = DataStore.getById('users', p.agent_id);
+                const agent = await DataStore.getById('users', p.agent_id);
                 if (!agent || agent.role !== _currentRoleFilter) return false;
             }
             return true;
         }).reduce((sum, p) => sum + (p.amount || 0), 0);
     };
 
-    const getEPPCaseCount = (from, to) => {
-        return DataStore.getAll('purchases').filter(p => {
+    const getEPPCaseCount = async (from, to) => {
+        return (await DataStore.getAll('purchases')).filter(p => {
             if (p.payment_method !== 'EPP' || p.date < from || p.date > to) return false;
             if (_currentRoleFilter !== 'All') {
-                const agent = DataStore.getById('users', p.agent_id);
+                const agent = await DataStore.getById('users', p.agent_id);
                 if (!agent || agent.role !== _currentRoleFilter) return false;
             }
             return true;
         }).length;
     };
 
-    const getEPPSales = (from, to) => {
-        return DataStore.getAll('purchases').filter(p => {
+    const getEPPSales = async (from, to) => {
+        return (await DataStore.getAll('purchases')).filter(p => {
             if (p.payment_method !== 'EPP' || p.date < from || p.date > to) return false;
             if (_currentRoleFilter !== 'All') {
-                const agent = DataStore.getById('users', p.agent_id);
+                const agent = await DataStore.getById('users', p.agent_id);
                 if (!agent || agent.role !== _currentRoleFilter) return false;
             }
             return true;
         }).reduce((sum, p) => sum + (p.amount || 0), 0);
     };
 
-    const getNewAgents = (from, to) => {
-        return DataStore.getAll('users').filter(u => {
+    const getNewAgents = async (from, to) => {
+        return (await DataStore.getAll('users')).filter(u => {
             if (u.join_date < from || u.join_date > to) return false;
             if (_currentRoleFilter !== 'All') {
                 if (u.role !== _currentRoleFilter) return false;
@@ -14369,30 +13511,30 @@ In a production system, this would show the actual file contents.
         }).length;
     };
 
-    const getNewCustomers = (from, to) => {
-        return DataStore.getAll('customers').filter(c =>
+    const getNewCustomers = async (from, to) => {
+        return await  (await DataStore.getAll('customers')).filter(c =>
             c.customer_since >= from && c.customer_since <= to
         ).length;
     };
 
-    const getTotalMeetings = (from, to) => {
+    const getTotalMeetings = async (from, to) => {
         // Sum attendees across all meetings (activities) in date range
-        return DataStore.getAll('activities').filter(a => {
+        return (await DataStore.getAll('activities')).filter(a => {
             if (a.activity_date < from || a.activity_date > to) return false;
             if (_currentRoleFilter !== 'All') {
-                const agent = DataStore.getById('users', a.agent_id);
+                const agent = await DataStore.getById('users', a.agent_id);
                 if (!agent || agent.role !== _currentRoleFilter) return false;
             }
             return true;
         }).length;
     };
 
-    const getActivityHeadcount = (from, to) => {
+    const getActivityHeadcount = async (from, to) => {
         // Sum attendees from registrations
-        return DataStore.getAll('event_registrations').filter(r => {
+        return (await DataStore.getAll('event_registrations')).filter(r => {
             if (!r.checked_in || r.checked_in_at < from || r.checked_in_at > to) return false;
             if (_currentRoleFilter !== 'All') {
-                const agent = DataStore.getById('users', r.agent_id); // Assuming agent_id exists in registration
+                const agent = await DataStore.getById('users', r.agent_id); // Assuming agent_id exists in registration
                 if (!agent || agent.role !== _currentRoleFilter) return false;
             }
             return true;
@@ -14444,12 +13586,12 @@ In a production system, this would show the actual file contents.
         }).join('');
     };
 
-    const renderTargetOverview = () => {
+    const renderTargetOverview = async () => {
         const container = document.getElementById('target-overview-container');
         if (!container) return;
 
         const year = 2026;
-        const qTargets = DataStore.getAll('quarterly_targets').filter(t => t.year === year);
+        const qTargets =await  (await DataStore.getAll('quarterly_targets')).filter(t => t.year === year);
 
         container.innerHTML = `
             <div class="targets-card">
@@ -14471,7 +13613,7 @@ In a production system, this would show the actual file contents.
             // Sum actual sales for this quarter
             const qStart = `${year}-${((q - 1) * 3 + 1).toString().padStart(2, '0')}-01`;
             const qEnd = `${year}-${(q * 3).toString().padStart(2, '0')}-${new Date(year, q * 3, 0).getDate()}`;
-            const actualSales = DataStore.getAll('purchases').filter(p =>
+            const actualSales =await  (await DataStore.getAll('purchases')).filter(p =>
                 p.date >= qStart && p.date <= qEnd && !p.is_agent_package
             ).reduce((sum, p) => sum + (p.amount || 0), 0);
 
@@ -14500,15 +13642,15 @@ In a production system, this would show the actual file contents.
         `;
     };
 
-    const renderPerformanceTable = () => {
+    const renderPerformanceTable = async () => {
         const container = document.getElementById('quarterly-performance-table');
         if (!container) return;
 
         const ranges = getDateRanges('quarterly');
-        const kpis = calculateKPIs(ranges.current.from, ranges.current.to);
+        const kpis = await calculateKPIs(ranges.current.from, ranges.current.to);
         const year = new Date().getFullYear();
         const quarter = Math.floor(new Date().getMonth() / 3) + 1;
-        const qTarget = DataStore.getAll('quarterly_targets').find(t => t.year === year && t.quarter === quarter) || {};
+        const qTarget = (await DataStore.getAll('quarterly_targets')).find(t => t.year === year && t.quarter === quarter) || {};
 
         const metrics = [
             { name: 'CPS Count', target: qTarget.cps_count_target || 0, actual: kpis.cpsCount },
@@ -14556,23 +13698,23 @@ In a production system, this would show the actual file contents.
         `;
     };
 
-    const renderAgentLeaderboard = () => {
+    const renderAgentLeaderboard = async () => {
         const container = document.getElementById('agent-leaderboard-table');
         if (!container) return;
 
         // Get all agents
-        let agentsList = DataStore.getAll('users').filter(isAgent);
+        let agentsList = (await DataStore.getAll('users')).filter(isAgent);
         if (_currentRoleFilter !== 'All') {
             agentsList = agentsList.filter(u => u.role === _currentRoleFilter);
         }
         const ranges = getDateRanges(_currentTimeFilter);
 
         const agentStats = agentsList.map(agent => {
-            const currentSales = DataStore.getAll('purchases').filter(p =>
+            const currentSales =await  (await DataStore.getAll('purchases')).filter(p =>
                 p.agent_id === agent.id && p.date >= ranges.current.from && p.date <= ranges.current.to
             ).reduce((sum, p) => sum + (p.amount || 0), 0);
 
-            const prevSales = DataStore.getAll('purchases').filter(p =>
+            const prevSales = (await DataStore.getAll('purchases')).filter(p =>
                 p.agent_id === agent.id && p.date >= ranges.previous.from && p.date <= ranges.previous.to
             ).reduce((sum, p) => sum + (p.amount || 0), 0);
 
@@ -14624,7 +13766,7 @@ In a production system, this would show the actual file contents.
         `;
     };
 
-    const renderRevenueChart = (filter, range) => {
+    const renderRevenueChart = async (filter, range) => {
         const ctx = document.getElementById('revenue-trend-chart');
         if (!ctx) return;
 
@@ -14635,15 +13777,15 @@ In a production system, this would show the actual file contents.
         let targetData = [];
 
         const year = new Date().getFullYear();
-        const yTarget = DataStore.getAll('yearly_targets').find(t => t.target_year === year) || {};
-        const qTargets = DataStore.getAll('quarterly_targets').filter(t => t.year === year);
+        const yTarget = (await DataStore.getAll('yearly_targets')).find(t => t.target_year === year) || {};
+        const qTargets = (await DataStore.getAll('quarterly_targets')).filter(t => t.year === year);
 
         if (filter === 'weekly') {
             labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
             const dayMap = { 0: 6, 1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5 }; // Sunday is 0 in JS
             actualData = [0, 0, 0, 0, 0, 0, 0];
 
-            const currentWeekPurchases = DataStore.getAll('purchases').filter(p =>
+            const currentWeekPurchases = (await DataStore.getAll('purchases')).filter(p =>
                 p.date >= range.from && p.date <= range.to && !p.is_agent_package
             );
 
@@ -14659,7 +13801,7 @@ In a production system, this would show the actual file contents.
             actualData = Array(12).fill(0);
             targetData = Array(12).fill(0);
 
-            const yearPurchases = DataStore.getAll('purchases').filter(p =>
+            const yearPurchases = (await DataStore.getAll('purchases')).filter(p =>
                 p.date.startsWith(year.toString()) && !p.is_agent_package
             );
 
@@ -14681,7 +13823,7 @@ In a production system, this would show the actual file contents.
             actualData = Array(4).fill(0);
             targetData = [0, 0, 0, 0];
 
-            const yearPurchases = DataStore.getAll('purchases').filter(p =>
+            const yearPurchases = (await DataStore.getAll('purchases')).filter(p =>
                 p.date.startsWith(year.toString()) && !p.is_agent_package
             );
 
@@ -14708,7 +13850,7 @@ In a production system, this would show the actual file contents.
                 const dStr = d.toISOString().split('T')[0];
                 labels.push(dStr.split('-').slice(1).join('/'));
 
-                actualData[i] = DataStore.getAll('purchases').filter(p =>
+                actualData[i] = (await DataStore.getAll('purchases')).filter(p =>
                     p.date === dStr && !p.is_agent_package
                 ).reduce((sum, p) => sum + (p.amount || 0), 0);
             }
@@ -14767,9 +13909,9 @@ In a production system, this would show the actual file contents.
         });
     };
 
-    const openTargetManagementModal = () => {
+    const openTargetManagementModal = async () => {
         const year = new Date().getFullYear();
-        const existing = DataStore.getAll('yearly_targets').find(t => t.target_year === year) || {};
+        const existing = (await DataStore.getAll('yearly_targets')).find(t => t.target_year === year) || {};
 
         const content = `
             <div class="target-form">
@@ -14815,11 +13957,11 @@ In a production system, this would show the actual file contents.
 
         UI.showModal('Target Management', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save Targets', type: 'primary', action: 'app.saveYearlyTargets()' }
+            { label: 'Save Targets', type: 'primary', action: 'await app.await saveYearlyTargets()' }
         ]);
     };
 
-    const saveYearlyTargets = () => {
+    const saveYearlyTargets = async () => {
         const data = {
             target_year: parseInt(document.getElementById('target-year').value),
             cps_count_target: parseInt(document.getElementById('target-cps').value),
@@ -14832,22 +13974,22 @@ In a production system, this would show the actual file contents.
             seasonal_weighting: { q1: 0.9, q2: 1.0, q3: 1.1, q4: 1.2 }
         };
 
-        const existing = DataStore.getAll('yearly_targets').find(t => t.target_year === data.target_year);
+        const existing = (await DataStore.getAll('yearly_targets')).find(t => t.target_year === data.target_year);
         if (existing) {
-            DataStore.update('yearly_targets', existing.id, data);
+            await DataStore.update('yearly_targets', existing.id, data);
         } else {
-            DataStore.create('yearly_targets', data);
+            await DataStore.create('yearly_targets', data);
         }
 
         // Auto-calculate quarterly
-        calculateQuarterlyBreakdown(data);
+        await calculateQuarterlyBreakdown(data);
 
         UI.hideModal();
         UI.toast.success('Targets saved successfully.');
-        if (_currentView === 'reports') refreshKPIDashboard();
+        if (_currentView === 'reports') await refreshKPIDashboard();
     };
 
-    const calculateQuarterlyBreakdown = (yearlyTarget) => {
+    const calculateQuarterlyBreakdown = async (yearlyTarget) => {
         const factors = { 1: 0.9, 2: 1.0, 3: 1.1, 4: 1.2 };
         const totalFactor = Object.values(factors).reduce((a, b) => a + b, 0);
 
@@ -14867,18 +14009,18 @@ In a production system, this would show the actual file contents.
                 seasonal_factor: factors[q]
             };
 
-            const existing = DataStore.getAll('quarterly_targets').find(t => t.year === qTarget.year && t.quarter === q);
+            const existing = (await DataStore.getAll('quarterly_targets')).find(t => t.year === qTarget.year && t.quarter === q);
             if (existing) {
-                DataStore.update('quarterly_targets', existing.id, qTarget);
+                await DataStore.update('quarterly_targets', existing.id, qTarget);
             } else {
-                DataStore.create('quarterly_targets', qTarget);
+                await DataStore.create('quarterly_targets', qTarget);
             }
         });
     };
 
-    const exportKPIReport = (format) => {
+    const exportKPIReport = async (format) => {
         const ranges = getDateRanges(_currentTimeFilter, _customDateFrom, _customDateTo);
-        const kpis = calculateKPIs(ranges.current.from, ranges.current.to);
+        const kpis = await calculateKPIs(ranges.current.from, ranges.current.to);
 
         if (format === 'csv') {
             let csv = "\uFEFF"; // BOM for Excel CID
@@ -14925,7 +14067,7 @@ In a production system, this would show the actual file contents.
     // ========== PHASE: MARKETING MANAGER LISTS ==========
     let _currentMarketingListTab = 'products'; // 'products', 'events', 'promotions'
 
-    const showMarketingListsView = (container) => {
+    const showMarketingListsView = async (container) => {
         container.innerHTML = `
             <div class="marketing-lists-view" style="padding: 24px;">
                 <div class="view-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
@@ -14934,7 +14076,7 @@ In a production system, this would show the actual file contents.
                         <p class="text-muted">Manage master data for products, events, and monthly promotions.</p>
                     </div>
                     <div class="header-actions">
-                        <button class="btn primary" onclick="app.openMarketingListAddModal()">
+                        <button class="btn primary" onclick="app.await openMarketingListAddModal()">
                             <i class="fas fa-plus"></i> New ${_currentMarketingListTab.charAt(0).toUpperCase() + _currentMarketingListTab.slice(1, -1)}
                         </button>
                     </div>
@@ -14942,37 +14084,37 @@ In a production system, this would show the actual file contents.
 
                 <div class="tabs-container" style="margin-bottom: 20px; border-bottom: 1px solid var(--gray-200); display: flex; gap: 20px;">
                     <div class="tab-item ${_currentMarketingListTab === 'products' ? 'active' : ''}" 
-                         onclick="app.switchMarketingListTab('products')" 
+                         onclick="app.await switchMarketingListTab('products')" 
                          style="padding: 10px 16px; cursor: pointer; border-bottom: 2px solid ${_currentMarketingListTab === 'products' ? 'var(--primary-600)' : 'transparent'}; color: ${_currentMarketingListTab === 'products' ? 'var(--primary-600)' : 'var(--gray-600)'}; font-weight: 500;">
                         Products
                     </div>
                     <div class="tab-item ${_currentMarketingListTab === 'events' ? 'active' : ''}" 
-                         onclick="app.switchMarketingListTab('events')" 
+                         onclick="app.await switchMarketingListTab('events')" 
                          style="padding: 10px 16px; cursor: pointer; border-bottom: 2px solid ${_currentMarketingListTab === 'events' ? 'var(--primary-600)' : 'transparent'}; color: ${_currentMarketingListTab === 'events' ? 'var(--primary-600)' : 'var(--gray-600)'}; font-weight: 500;">
                         Events
                     </div>
                     <div class="tab-item ${_currentMarketingListTab === 'promotions' ? 'active' : ''}" 
-                         onclick="app.switchMarketingListTab('promotions')" 
+                         onclick="app.await switchMarketingListTab('promotions')" 
                          style="padding: 10px 16px; cursor: pointer; border-bottom: 2px solid ${_currentMarketingListTab === 'promotions' ? 'var(--primary-600)' : 'transparent'}; color: ${_currentMarketingListTab === 'promotions' ? 'var(--primary-600)' : 'var(--gray-600)'}; font-weight: 500;">
                         Promotions
                     </div>
                 </div>
 
                 <div id="marketing-list-content">
-                    ${renderMarketingListTable()}
+                    ${await renderMarketingListTable()}
                 </div>
             </div>
         `;
     };
 
-    const switchMarketingListTab = (tab) => {
+    const switchMarketingListTab = async (tab) => {
         _currentMarketingListTab = tab;
         const viewport = document.getElementById('content-viewport');
-        showMarketingListsView(viewport);
+        await showMarketingListsView(viewport);
     };
 
-    const renderMarketingListTable = () => {
-        const data = DataStore.getAll(_currentMarketingListTab);
+    const renderMarketingListTable = async () => {
+        const data = await DataStore.getAll(_currentMarketingListTab);
 
         if (_currentMarketingListTab === 'products') {
             return `
@@ -14998,8 +14140,8 @@ In a production system, this would show the actual file contents.
                                     </span>
                                 </td>
                                 <td>
-                                    <button class="btn-icon" onclick="app.openMarketingListEditModal('${item.id}')" title="Edit"><i class="fas fa-pencil-alt"></i></button>
-                                    <button class="btn-icon text-danger" onclick="app.deleteMarketingListItem('${item.id}')" title="Delete"><i class="fas fa-trash-alt"></i></button>
+                                    <button class="btn-icon" onclick="app.await openMarketingListEditModal('${item.id}')" title="Edit"><i class="fas fa-pencil-alt"></i></button>
+                                    <button class="btn-icon text-danger" onclick="app.await deleteMarketingListItem('${item.id}')" title="Delete"><i class="fas fa-trash-alt"></i></button>
                                 </td>
                             </tr>
                         `).join('')}
@@ -15032,8 +14174,8 @@ In a production system, this would show the actual file contents.
                                     </span>
                                 </td>
                                 <td>
-                                    <button class="btn-icon" onclick="app.openMarketingListEditModal('${item.id}')" title="Edit"><i class="fas fa-pencil-alt"></i></button>
-                                    <button class="btn-icon text-danger" onclick="app.deleteMarketingListItem('${item.id}')" title="Delete"><i class="fas fa-trash-alt"></i></button>
+                                    <button class="btn-icon" onclick="app.await openMarketingListEditModal('${item.id}')" title="Edit"><i class="fas fa-pencil-alt"></i></button>
+                                    <button class="btn-icon text-danger" onclick="app.await deleteMarketingListItem('${item.id}')" title="Delete"><i class="fas fa-trash-alt"></i></button>
                                 </td>
                             </tr>
                         `).join('')}
@@ -15064,8 +14206,8 @@ In a production system, this would show the actual file contents.
                                     </span>
                                 </td>
                                 <td>
-                                    <button class="btn-icon" onclick="app.openMarketingListEditModal('${item.id}')" title="Edit"><i class="fas fa-pencil-alt"></i></button>
-                                    <button class="btn-icon text-danger" onclick="app.deleteMarketingListItem('${item.id}')" title="Delete"><i class="fas fa-trash-alt"></i></button>
+                                    <button class="btn-icon" onclick="app.await openMarketingListEditModal('${item.id}')" title="Edit"><i class="fas fa-pencil-alt"></i></button>
+                                    <button class="btn-icon text-danger" onclick="app.await deleteMarketingListItem('${item.id}')" title="Delete"><i class="fas fa-trash-alt"></i></button>
                                 </td>
                             </tr>
                         `).join('')}
@@ -15075,7 +14217,7 @@ In a production system, this would show the actual file contents.
         }
     };
 
-    const openMarketingListAddModal = () => {
+    const openMarketingListAddModal = async () => {
         let content = '';
         const type = _currentMarketingListTab;
 
@@ -15110,12 +14252,12 @@ In a production system, this would show the actual file contents.
 
         UI.showModal('Add New ' + type.slice(0, -1), content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save', type: 'primary', action: 'app.saveMarketingListItem()' }
+            { label: 'Save', type: 'primary', action: 'await app.await saveMarketingListItem()' }
         ]);
     };
 
-    const openMarketingListEditModal = (id) => {
-        const item = DataStore.getById(_currentMarketingListTab, id);
+    const openMarketingListEditModal = async (id) => {
+        const item = await DataStore.getById(_currentMarketingListTab, id);
         if (!item) return;
 
         let content = '';
@@ -15152,11 +14294,11 @@ In a production system, this would show the actual file contents.
 
         UI.showModal('Edit ' + type.slice(0, -1), content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save Changes', type: 'primary', action: `app.saveMarketingListItem('${id}')` }
+            { label: 'Save Changes', type: 'primary', action: `await app.await saveMarketingListItem('${id}')` }
         ]);
     };
 
-    const saveMarketingListItem = (id = null) => {
+    const saveMarketingListItem = async (id = null) => {
         const type = _currentMarketingListTab;
         let data = {
             is_active: document.getElementById('mkt-active').checked,
@@ -15187,32 +14329,32 @@ In a production system, this would show the actual file contents.
         }
 
         if (id) {
-            DataStore.update(type, id, data);
+            await DataStore.update(type, id, data);
             UI.toast.success('Record updated successfully');
         } else {
             data.created_by = _currentUser ? _currentUser.id : null;
-            DataStore.create(type, data);
+            await DataStore.create(type, data);
             UI.toast.success('Record added successfully');
         }
 
         UI.hideModal();
         const viewport = document.getElementById('content-viewport');
-        showMarketingListsView(viewport);
+        await showMarketingListsView(viewport);
     };
 
-    const deleteMarketingListItem = (id) => {
+    const deleteMarketingListItem = async (id) => {
         if (confirm('Are you sure you want to delete this record? This action cannot be undone.')) {
-            DataStore.delete(_currentMarketingListTab, id);
+            await DataStore.delete(_currentMarketingListTab, id);
             UI.toast.success('Record deleted');
             const viewport = document.getElementById('content-viewport');
-            showMarketingListsView(viewport);
+            await showMarketingListsView(viewport);
         }
     };
 
 
     // ========== PHASE 12: MARKETING AUTOMATION ==========
 
-    const showMarketingAutomationView = (container) => {
+    const showMarketingAutomationView = async (container) => {
         container.innerHTML = `
             <div class="marketing-view">
                 <div class="marketing-header">
@@ -15221,13 +14363,13 @@ In a production system, this would show the actual file contents.
                         <p>WhatsApp Focus - Create templates and manage campaigns</p>
                     </div>
                     <div class="marketing-header-actions">
-                        <button class="btn primary" onclick="app.openCreateTemplateModal()">
+                        <button class="btn primary" onclick="app.await openCreateTemplateModal()">
                             <i class="fas fa-plus"></i> Create Template
                         </button>
-                        <button class="btn secondary" onclick="app.openCreateCampaignModal()">
+                        <button class="btn secondary" onclick="app.await openCreateCampaignModal()">
                             <i class="fas fa-bullhorn"></i> New Campaign
                         </button>
-                        <button class="btn secondary" onclick="app.switchMarketingTab('analytics')">
+                        <button class="btn secondary" onclick="app.await switchMarketingTab('analytics')">
                             <i class="fas fa-chart-bar"></i> Analytics
                         </button>
                         ${(isManagement(_currentUser) || isSystemAdmin(_currentUser)) ? `
@@ -15239,7 +14381,7 @@ In a production system, this would show the actual file contents.
                 </div>
                 
                 <div class="marketing-tabs">
-                    <button class="marketing-tab ${_currentMarketingTab === 'templates' ? 'active' : ''}" onclick="app.switchMarketingTab('templates')">
+                    <button class="marketing-tab ${_currentMarketingTab === 'templates' ? 'active' : ''}" onclick="app.await switchMarketingTab('templates')">
                         <i class="fas fa-layer-group"></i> Message Templates
                     </button>
                     <button class="marketing-tab ${_currentMarketingTab === 'campaigns' ? 'active' : ''}" onclick="app.switchMarketingTab('campaigns')">
@@ -15259,17 +14401,17 @@ In a production system, this would show the actual file contents.
                 </div>
                 
                 <div id="marketing-tab-content" class="marketing-tab-content">
-                    ${renderMarketingTabContent()}
+                    ${await renderMarketingTabContent()}
                 </div>
             </div>
         `;
     };
 
-    const switchMarketingTab = (tab) => {
+    const switchMarketingTab = async (tab) => {
         _currentMarketingTab = tab;
         const container = document.getElementById('marketing-tab-content');
         if (container) {
-            container.innerHTML = renderMarketingTabContent();
+            container.innerHTML = await renderMarketingTabContent();
         }
 
         // Update active tab styling
@@ -15284,32 +14426,32 @@ In a production system, this would show the actual file contents.
         });
 
         if (tab === 'analytics') {
-            refreshAnalytics();
+            await refreshAnalytics();
         }
     };
 
-    const renderMarketingTabContent = () => {
+    const renderMarketingTabContent = async () => {
         if (_currentMarketingTab === 'templates') {
-            return renderTemplatesTab();
+            return await renderTemplatesTab();
         } else if (_currentMarketingTab === 'campaigns') {
-            return renderCampaignsTab();
+            return await renderCampaignsTab();
         } else if (_currentMarketingTab === 'analytics') {
-            return renderAnalyticsTab();
+            return await renderAnalyticsTab();
         } else if (_currentMarketingTab === 'products') {
-            return renderProductsTab();
+            return await renderProductsTab();
         } else if (_currentMarketingTab === 'packages') {
-            return renderPackagesTab();
+            return await renderPackagesTab();
         }
     };
 
     // ========== PRODUCTS TAB ==========
-    const renderProductsTab = () => {
-        const products = DataStore.getAll('products');
+    const renderProductsTab = async () => {
+        const products =await  await DataStore.getAll('products');
         return `
             <div class="products-layout" style="padding: 24px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                     <h3>Product & Service Directory</h3>
-                    <button class="btn primary" onclick="app.openAddProductModal()">+ Add New Product</button>
+                    <button class="btn primary" onclick="app.await openAddProductModal()">+ Add New Product</button>
                 </div>
                 <table class="data-table" style="width: 100%; border-collapse: collapse;">
                     <thead>
@@ -15329,8 +14471,8 @@ In a production system, this would show the actual file contents.
                                     <span class="status-badge ${p.is_active !== false ? 'status-active' : 'status-inactive'}">${p.is_active !== false ? 'Active' : 'Inactive'}</span>
                                 </td>
                                 <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">
-                                    <button class="btn btn-sm secondary" onclick="app.openAddProductModal(${p.id})">Edit</button>
-                                    <button class="btn btn-sm ${p.is_active !== false ? 'danger' : 'primary'}" onclick="app.toggleProductStatus(${p.id}, ${p.is_active !== false})">
+                                    <button class="btn btn-sm secondary" onclick="app.await openAddProductModal(${p.id})">Edit</button>
+                                    <button class="btn btn-sm ${p.is_active !== false ? 'danger' : 'primary'}" onclick="app.await toggleProductStatus(${p.id}, ${p.is_active !== false})">
                                         ${p.is_active !== false ? 'Deactivate' : 'Activate'}
                                     </button>
                                 </td>
@@ -15343,9 +14485,9 @@ In a production system, this would show the actual file contents.
     `;
     };
 
-    const openAddProductModal = (id = null) => {
+    const openAddProductModal = async (id = null) => {
         let p = { name: '', category: '', is_active: true };
-        if (id) p = DataStore.getById('products', id);
+        if (id) p = await DataStore.getById('products', id);
 
         const content = `
             <div class="form-group">
@@ -15359,11 +14501,11 @@ In a production system, this would show the actual file contents.
 `;
         UI.showModal(id ? 'Edit Product' : 'Add Product', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save', type: 'primary', action: `app.saveProduct(${id || 'null'})` }
+            { label: 'Save', type: 'primary', action: `await app.await saveProduct(${id || 'null'})` }
         ]);
     };
 
-    const saveProduct = (id) => {
+    const saveProduct = async (id) => {
         const name = document.getElementById('prod-name').value.trim();
         const category = document.getElementById('prod-category').value.trim();
         if (!name) {
@@ -15372,25 +14514,25 @@ In a production system, this would show the actual file contents.
         }
 
         if (id) {
-            DataStore.update('products', id, { name, category });
+            await DataStore.update('products', id, { name, category });
             UI.toast.success("Product updated");
         } else {
-            DataStore.create('products', { name, category, is_active: true });
+            await DataStore.create('products', { name, category, is_active: true });
             UI.toast.success("Product added");
         }
         UI.hideModal();
-        if (_currentMarketingTab === 'products') document.getElementById('marketing-tab-content').innerHTML = renderProductsTab();
+        if (_currentMarketingTab === 'products') document.getElementById('marketing-tab-content').innerHTML = await renderProductsTab();
     };
 
-    const toggleProductStatus = (id, currentStatus) => {
-        DataStore.update('products', id, { is_active: !currentStatus });
+    const toggleProductStatus = async (id, currentStatus) => {
+        await DataStore.update('products', id, { is_active: !currentStatus });
         UI.toast.success("Product status updated");
-        if (_currentMarketingTab === 'products') document.getElementById('marketing-tab-content').innerHTML = renderProductsTab();
+        if (_currentMarketingTab === 'products') document.getElementById('marketing-tab-content').innerHTML = await renderProductsTab();
     };
 
     // ========== PROMOTION PACKAGES TAB ==========
-    const renderPackagesTab = () => {
-        const packages = DataStore.getAll('promotions');
+    const renderPackagesTab = async () => {
+        const packages = await DataStore.getAll('promotions');
         return `
             <div class="packages-layout" style="padding: 24px;">
                 <div class="packages-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
@@ -15398,15 +14540,15 @@ In a production system, this would show the actual file contents.
                         <h3>Promotion Packages</h3>
                         <p class="text-muted">Manage bundled offers and track customer purchases</p>
                     </div>
-                    <button class="btn primary" onclick="app.openCreatePackageModal()">+ New Package</button>
+                    <button class="btn primary" onclick="app.await openCreatePackageModal()">+ New Package</button>
                 </div>
 
                 <div class="packages-filters" style="display: flex; gap: 15px; margin-bottom: 20px;">
                     <div class="search-box" style="position: relative; flex: 1;">
-                        <i class="fas fa-search" style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--gray-400);"></i>
-                        <input type="text" id="package-search" class="form-control" placeholder="Search by package name or product..." style="padding-left: 35px;" onkeyup="app.filterPackages()">
+                        <i class="fas fa-search" style="position: absolute; left: 12px; top: 50%; transform: await translateY(-50%); color: var(--gray-400);"></i>
+                        <input type="text" id="package-search" class="form-control" placeholder="Search by package name or product..." style="padding-left: 35px;" onkeyup="app.await filterPackages()">
                     </div>
-                    <select id="package-status-filter" class="form-control" style="width: 150px;" onchange="app.filterPackages()">
+                    <select id="package-status-filter" class="form-control" style="width: 150px;" onchange="app.await filterPackages()">
                         <option value="all">All Status</option>
                         <option value="active">Active</option>
                         <option value="inactive">Inactive</option>
@@ -15425,7 +14567,7 @@ In a production system, this would show the actual file contents.
                         </tr>
                     </thead>
                     <tbody id="packages-table-body">
-                        ${packages.map(p => renderPackageRow(p)).join('')}
+                        ${packages.map(async p => await renderPackageRow(p)).join('')}
                         ${packages.length === 0 ? '<tr><td colspan="6" style="padding: 40px; text-align: center; color: var(--gray-500);">No promotion packages found. Click "+ New Package" to create one.</td></tr>' : ''}
                     </tbody>
                 </table>
@@ -15433,9 +14575,9 @@ In a production system, this would show the actual file contents.
         `;
     };
 
-    const renderPackageRow = (p) => {
+    const renderPackageRow = async (p) => {
         const productNames = (p.product_ids || []).map(id => {
-            const prod = DataStore.getById('products', id);
+            const prod = await DataStore.getById('products', id);
             return prod ? prod.name : 'Unknown Product';
         }).join(', ');
 
@@ -15444,7 +14586,7 @@ In a production system, this would show the actual file contents.
         return `
             <tr>
                 <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">
-                    <a href="javascript:void(0)" onclick="app.viewPackageCustomers(${p.id})"><strong>${p.package_name || p.name}</strong></a>
+                    <a href="javascript:async void(0)" onclick="app.await viewPackageCustomers(${p.id})"><strong>${p.package_name || p.name}</strong></a>
                 </td>
                 <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);" title="${productNames}">${abbreviatedProducts}</td>
                 <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">RM ${UI.formatNumber(p.price)}</td>
@@ -15458,24 +14600,24 @@ In a production system, this would show the actual file contents.
                 </td>
                 <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">
                     <div class="table-actions">
-                        <button class="btn-icon" onclick="app.openCreatePackageModal(${p.id})" title="Edit"><i class="fas fa-edit"></i></button>
-                        <button class="btn-icon" onclick="app.viewPackageCustomers(${p.id})" title="View Customers"><i class="fas fa-users"></i></button>
-                        <button class="btn-icon text-danger" onclick="app.deletePackage(${p.id})" title="Delete"><i class="fas fa-trash"></i></button>
+                        <button class="btn-icon" onclick="app.await openCreatePackageModal(${p.id})" title="Edit"><i class="fas fa-edit"></i></button>
+                        <button class="btn-icon" onclick="app.await viewPackageCustomers(${p.id})" title="View Customers"><i class="fas fa-users"></i></button>
+                        <button class="btn-icon text-danger" onclick="app.await deletePackage(${p.id})" title="Delete"><i class="fas fa-trash"></i></button>
                     </div>
                 </td>
             </tr>
         `;
     };
 
-    const filterPackages = () => {
+    const filterPackages = async () => {
         const search = document.getElementById('package-search')?.value.toLowerCase() || '';
         const status = document.getElementById('package-status-filter')?.value || 'all';
 
-        const packages = DataStore.getAll('promotions');
+        const packages = await DataStore.getAll('promotions');
         const filtered = packages.filter(p => {
             const matchesSearch = (p.package_name || p.name || '').toLowerCase().includes(search) ||
                 (p.product_ids || []).some(id => {
-                    const prod = DataStore.getById('products', id);
+                    const prod = await DataStore.getById('products', id);
                     return prod && (prod.name || '').toLowerCase().includes(search);
                 });
             const matchesStatus = status === 'all' || (status === 'active' ? p.is_active : !p.is_active);
@@ -15484,14 +14626,14 @@ In a production system, this would show the actual file contents.
 
         const tbody = document.getElementById('packages-table-body');
         if (tbody) {
-            tbody.innerHTML = filtered.map(p => renderPackageRow(p)).join('') +
+            tbody.innerHTML = filtered.map(async p => await renderPackageRow(p)).join('') +
                 (filtered.length === 0 ? '<tr><td colspan="6" style="padding: 40px; text-align: center; color: var(--gray-500);">No matching packages found.</td></tr>' : '');
         }
     };
 
-    const openCreatePackageModal = (id = null) => {
+    const openCreatePackageModal = async (id = null) => {
         const isEdit = !!id;
-        const pkg = isEdit ? DataStore.getById('promotions', id) : {
+        const pkg = isEdit ? await DataStore.getById('promotions', id) : {
             package_name: '',
             product_ids: [],
             price: 0,
@@ -15501,7 +14643,7 @@ In a production system, this would show the actual file contents.
             is_active: true
         };
 
-        const allProducts = DataStore.getAll('products').filter(p => p.is_active !== false);
+        const allProducts =await  (await DataStore.getAll('products')).filter(p => p.is_active !== false);
         const paymentOptions = ['Cash', 'Credit Card', 'Bank Transfer', 'EPP', 'POP', 'Cheque'];
 
         const content = `
@@ -15553,11 +14695,11 @@ In a production system, this would show the actual file contents.
 
         UI.showModal(isEdit ? 'Edit Promotion Package' : 'Create Promotion Package', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: isEdit ? 'Update Package' : 'Create Package', type: 'primary', action: `app.savePackage(${id || 'null'})` }
+            { label: isEdit ? 'Update Package' : 'Create Package', type: 'primary', action: `await app.await savePackage(${id || 'null'})` }
         ]);
     };
 
-    const savePackage = (id) => {
+    const savePackage = async (id) => {
         const name = document.getElementById('pkg-name').value.trim();
         const price = parseFloat(document.getElementById('pkg-price').value);
         const productIds = Array.from(document.querySelectorAll('input[name="pkg-products"]:checked')).map(i => parseInt(i.value));
@@ -15584,41 +14726,41 @@ In a production system, this would show the actual file contents.
         };
 
         if (id) {
-            DataStore.update('promotions', id, data);
+            await DataStore.update('promotions', id, data);
             UI.toast.success("Package updated successfully");
         } else {
             data.created_by = _currentUser ? _currentUser.id : null;
             data.created_at = new Date().toISOString();
-            DataStore.create('promotions', data);
+            await DataStore.create('promotions', data);
             UI.toast.success("Package created successfully");
         }
 
         UI.hideModal();
-        if (_currentMarketingTab === 'packages') app.switchMarketingTab('packages');
+        if (_currentMarketingTab === 'packages') await app.await switchMarketingTab('packages');
     };
 
-    const deletePackage = (id) => {
+    const deletePackage = async (id) => {
         if (confirm("Are you sure you want to delete this promotion package? This action cannot be undone.")) {
-            DataStore.delete('promotions', id);
+            await DataStore.delete('promotions', id);
             UI.toast.success("Package deleted");
-            if (_currentMarketingTab === 'packages') app.switchMarketingTab('packages');
+            if (_currentMarketingTab === 'packages') await app.await switchMarketingTab('packages');
         }
     };
 
-    const viewPackageCustomers = (packageId) => {
-        const pkg = DataStore.getById('promotions', packageId);
+    const viewPackageCustomers = async (packageId) => {
+        const pkg = await DataStore.getById('promotions', packageId);
         if (!pkg) return;
 
-        const purchases = DataStore.getAll('purchases').filter(p => p.package_id == packageId);
+        const purchases =await  (await DataStore.getAll('purchases')).filter(p => p.package_id == packageId);
 
         // Fallback: match by product name if package_id is not set
         if (purchases.length === 0) {
             const productNames = pkg.product_ids.map(id => {
-                const prod = DataStore.getById('products', id);
+                const prod = await DataStore.getById('products', id);
                 return prod ? prod.name : null;
             }).filter(n => n);
 
-            const allPurchases = DataStore.getAll('purchases');
+            const allPurchases = await DataStore.getAll('purchases');
             allPurchases.forEach(p => {
                 if (!p.package_id && productNames.includes(p.item)) {
                     purchases.push(p);
@@ -15644,11 +14786,11 @@ In a production system, this would show the actual file contents.
                     </thead>
                     <tbody>
                         ${purchases.map(p => {
-            const customer = DataStore.getById('customers', p.customer_id) || DataStore.getById('prospects', p.customer_id);
+            const customer = await DataStore.getById('customers', p.customer_id) || await DataStore.getById('prospects', p.customer_id);
             return `
                                 <tr>
                                     <td style="padding: 10px; border-bottom: 1px solid var(--gray-200);">
-                                        ${customer ? `<a href="javascript:void(0)" onclick="UI.hideModal(); app.showProfile(${customer.id}, '${customer.is_customer ? 'customer' : 'prospect'}')">${customer.full_name || customer.name}</a>` : 'Deleted Member'}
+                                        ${customer ? `<a href="javascript:await void(0)" onclick="UI.hideModal(); app.showProfile(${customer.id}, '${customer.is_customer ? 'customer' : 'prospect'}')">${customer.full_name || customer.name}</a>` : 'Deleted Member'}
                                     </td>
                                     <td style="padding: 10px; border-bottom: 1px solid var(--gray-200);">${UI.formatDate(p.date)}</td>
                                     <td style="padding: 10px; border-bottom: 1px solid var(--gray-200);">RM ${UI.formatNumber(p.amount)}</td>
@@ -15673,18 +14815,18 @@ In a production system, this would show the actual file contents.
 
     // ========== TEMPLATES TAB ==========
 
-    const renderTemplatesTab = () => {
-        const templates = DataStore.getAll('whatsapp_templates');
+    const renderTemplatesTab = async () => {
+        const templates = await DataStore.getAll('whatsapp_templates');
 
         return `
             <div class="templates-layout">
                 <div class="templates-list">
                     <div class="templates-search">
                         <i class="fas fa-search"></i>
-                        <input type="text" id="template-search" placeholder="Search templates..." onkeyup="app.searchTemplates()">
+                        <input type="text" id="template-search" placeholder="Search templates..." onkeyup="app.await searchTemplates()">
                     </div>
                     <div class="templates-grid" id="templates-grid">
-                        ${templates.length > 0 ? templates.map(t => renderTemplateCard(t)).join('') : renderSampleTemplates()}
+                        ${templates.length > 0 ? templates.map(async t => await renderTemplateCard(t)).join('') : await renderSampleTemplates()}
                     </div>
                 </div>
                 <div class="template-preview-panel">
@@ -15721,16 +14863,16 @@ In a production system, this would show the actual file contents.
         `;
     };
 
-    const renderSampleTemplates = () => {
+    const renderSampleTemplates = async () => {
         // Fallback or demo templates if none in store
         const sampleTemplates = [
             { id: 1, template_name: 'Happy Birthday Wishes', category: 'Birthday', content: 'Hi {{name}}, wishing you a very happy birthday...', variables: ['name', 'zodiac'] },
             { id: 2, template_name: 'Post-Consultation Thank You', category: 'Follow-up', content: 'Dear {{name}}, it was a pleasure meeting you...', variables: ['name', 'agent'] }
         ];
-        return sampleTemplates.map(t => renderTemplateCard(t)).join('');
+        return sampleTemplates.map(async t => await renderTemplateCard(t)).join('');
     };
 
-    const renderTemplateCard = (template) => {
+    const renderTemplateCard = async (template) => {
         const categoryColors = {
             'Birthday': 'badge-blue',
             'Follow-up': 'badge-orange',
@@ -15744,13 +14886,13 @@ In a production system, this would show the actual file contents.
         const colorClass = categoryColors[template.category] || 'badge-gray';
 
         return `
-            <div class="template-card" onclick="app.previewTemplate(${template.id})">
+            <div class="template-card" onclick="app.await previewTemplate(${template.id})">
                 <div class="template-card-header">
                     <span class="template-badge ${colorClass}">${template.category}</span>
                     <div class="template-card-actions">
-                        <button class="btn-icon" onclick="event.stopPropagation(); app.editTemplate(${template.id})" title="Edit"><i class="fas fa-edit"></i></button>
-                        <button class="btn-icon" onclick="event.stopPropagation(); app.copyTemplate(${template.id})" title="Copy"><i class="fas fa-copy"></i></button>
-                        <button class="btn-icon" onclick="event.stopPropagation(); app.deleteTemplate(${template.id})" title="Delete"><i class="fas fa-trash"></i></button>
+                        <button class="btn-icon" onclick="event.stopPropagation(); app.await editTemplate(${template.id})" title="Edit"><i class="fas fa-edit"></i></button>
+                        <button class="btn-icon" onclick="event.stopPropagation(); app.await copyTemplate(${template.id})" title="Copy"><i class="fas fa-copy"></i></button>
+                        <button class="btn-icon" onclick="event.stopPropagation(); app.await deleteTemplate(${template.id})" title="Delete"><i class="fas fa-trash"></i></button>
                     </div>
                 </div>
                 <h4 class="template-title">${template.template_name}</h4>
@@ -15762,9 +14904,9 @@ In a production system, this would show the actual file contents.
         `;
     };
 
-    const openCreateTemplateModal = (templateId = null) => {
+    const openCreateTemplateModal = async (templateId = null) => {
         const isEdit = !!templateId;
-        const template = isEdit ? DataStore.getById('whatsapp_templates', templateId) : null;
+        const template = isEdit ? await DataStore.getById('whatsapp_templates', templateId) : null;
 
         const content = `
             <div class="template-modal">
@@ -15822,7 +14964,7 @@ In a production system, this would show the actual file contents.
 
         UI.showModal(isEdit ? 'Edit Template' : 'Create WhatsApp Template', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: isEdit ? 'Update Template' : 'Save Template', type: 'primary', action: `app.saveTemplate(${isEdit ? templateId : 'null'})` }
+            { label: isEdit ? 'Update Template' : 'Save Template', type: 'primary', action: `await app.await saveTemplate(${isEdit ? templateId : 'null'})` }
         ]);
     };
 
@@ -15860,7 +15002,7 @@ In a production system, this would show the actual file contents.
         `).join('');
     };
 
-    const saveTemplate = (templateId = null) => {
+    const saveTemplate = async (templateId = null) => {
         const name = document.getElementById('template-name')?.value;
         const category = document.getElementById('template-category')?.value;
         const content = document.getElementById('template-content')?.value;
@@ -15902,28 +15044,28 @@ In a production system, this would show the actual file contents.
         };
 
         if (templateId) {
-            DataStore.update('whatsapp_templates', templateId, template);
+            await DataStore.update('whatsapp_templates', templateId, template);
             UI.toast.success('Template updated successfully');
         } else {
-            DataStore.create('whatsapp_templates', template);
+            await DataStore.create('whatsapp_templates', template);
             UI.toast.success('Template created successfully');
         }
 
         UI.hideModal();
-        refreshTemplatesTab();
+        await refreshTemplatesTab();
     };
 
-    const refreshTemplatesTab = () => {
+    const refreshTemplatesTab = async () => {
         if (_currentMarketingTab === 'templates') {
             const container = document.getElementById('marketing-tab-content');
             if (container) {
-                container.innerHTML = renderTemplatesTab();
+                container.innerHTML = await renderTemplatesTab();
             }
         }
     };
 
-    const previewTemplate = (templateId) => {
-        const template = DataStore.getById('whatsapp_templates', templateId);
+    const previewTemplate = async (templateId) => {
+        const template = await DataStore.getById('whatsapp_templates', templateId);
         if (!template) return;
 
         const previewData = {
@@ -15990,38 +15132,38 @@ In a production system, this would show the actual file contents.
         }
     };
 
-    const searchTemplates = () => {
+    const searchTemplates = async () => {
         const search = document.getElementById('template-search').value.toLowerCase();
-        const templates = DataStore.getAll('whatsapp_templates');
+        const templates =await  await DataStore.getAll('whatsapp_templates');
         const filtered = templates.filter(t =>
             t.template_name.toLowerCase().includes(search) ||
             t.category.toLowerCase().includes(search)
         );
         const grid = document.getElementById('templates-grid');
-        if (grid) { grid.innerHTML = filtered.map(t => renderTemplateCard(t)).join(''); }
+        if (grid) { grid.innerHTML = filtered.map(async t => await renderTemplateCard(t)).join(''); }
     };
 
-    const editTemplate = (id) => openCreateTemplateModal(id);
-    const copyTemplate = (id) => {
-        const t = DataStore.getById('whatsapp_templates', id);
+    const editTemplate = async (id) => await openCreateTemplateModal(id);
+    const copyTemplate = async (id) => {
+        const t = await DataStore.getById('whatsapp_templates', id);
         if (t) {
             const copy = { ...t, id: undefined, template_name: t.template_name + ' (Copy)' };
-            DataStore.create('whatsapp_templates', copy);
-            refreshTemplatesTab();
+            await DataStore.create('whatsapp_templates', copy);
+            await refreshTemplatesTab();
         }
     };
-    const deleteTemplate = (id) => {
+    const deleteTemplate = async (id) => {
         if (confirm('Delete this template?')) {
-            DataStore.delete('whatsapp_templates', id);
-            refreshTemplatesTab();
+            await DataStore.delete('whatsapp_templates', id);
+            await refreshTemplatesTab();
         }
     };
-    const useTemplate = (id) => {
+    const useTemplate = async (id) => {
         _currentMarketingTab = 'campaigns';
         const viewport = document.getElementById('content-viewport');
-        showMarketingAutomationView(viewport);
-        openCreateCampaignModal();
-        setTimeout(() => {
+        await showMarketingAutomationView(viewport);
+        await openCreateCampaignModal();
+        (() => {
             const sel = document.getElementById('campaign-template');
             if (sel) sel.value = id;
         }, 100);
@@ -16029,8 +15171,8 @@ In a production system, this would show the actual file contents.
 
     // ========== CAMPAIGNS TAB ==========
 
-    const renderCampaignsTab = () => {
-        const campaigns = DataStore.getAll('whatsapp_campaigns');
+    const renderCampaignsTab = async () => {
+        const campaigns =await  await DataStore.getAll('whatsapp_campaigns');
 
         return `
             <div class="campaigns-filters">
@@ -16068,20 +15210,20 @@ In a production system, this would show the actual file contents.
                 </tr>
             </thead>
             <tbody id="campaigns-list-body">
-                ${campaigns.length > 0 ? campaigns.map(c => renderCampaignRow(c)).join('') : '<tr><td colspan="7" style="text-align:center; padding:40px;">No campaigns found. Click "New Campaign" to start.</td></tr>'}
+                ${campaigns.length > 0 ? campaigns.map(async c => await renderCampaignRow(c)).join('') : '<tr><td colspan="7" style="text-align:center; padding:40px;">No campaigns found. Click "New Campaign" to start.</td></tr>'}
             </tbody>
         </table>
     </div>
 `;
     };
 
-    const renderCampaignRow = (campaign) => {
-        const template = DataStore.getById('whatsapp_templates', campaign.template_id);
+    const renderCampaignRow = async (campaign) => {
+        const template = await DataStore.getById('whatsapp_templates', campaign.template_id);
         const openRate = campaign.sent_count > 0 ? Math.round((campaign.opened_count / campaign.sent_count) * 100) : 0;
         const responseRate = campaign.sent_count > 0 ? Math.round((campaign.replied_count / campaign.sent_count) * 100) : 0;
 
         return `
-            <tr onclick="app.viewCampaignDetails(${campaign.id})">
+            <tr onclick="app.await viewCampaignDetails(${campaign.id})">
                 <td>
                     <strong>${campaign.campaign_name}</strong><br>
                     <small class="text-muted">${template?.template_name || 'No Template'}</small>
@@ -16098,20 +15240,20 @@ In a production system, this would show the actual file contents.
                 <td>${responseRate}%</td>
                 <td>
                     <div class="table-actions">
-                        ${campaign.status === 'draft' ? `<button class="btn-icon" onclick="event.stopPropagation(); app.editCampaign(${campaign.id})" title="Edit"><i class="fas fa-edit"></i></button>` : ''}
-                        ${campaign.status === 'active' ? `<button class="btn-icon" onclick="event.stopPropagation(); app.pauseCampaign(${campaign.id})" title="Pause"><i class="fas fa-pause"></i></button>` : ''}
-                        ${campaign.status === 'paused' ? `<button class="btn-icon" onclick="event.stopPropagation(); app.resumeCampaign(${campaign.id})" title="Resume"><i class="fas fa-play"></i></button>` : ''}
-                        <button class="btn-icon" onclick="event.stopPropagation(); app.duplicateCampaign(${campaign.id})" title="Duplicate"><i class="fas fa-copy"></i></button>
-                        <button class="btn-icon" onclick="event.stopPropagation(); app.deleteCampaign(${campaign.id})" title="Delete"><i class="fas fa-trash"></i></button>
+                        ${campaign.status === 'draft' ? `<button class="btn-icon" onclick="event.stopPropagation(); app.await editCampaign(${campaign.id})" title="Edit"><i class="fas fa-edit"></i></button>` : ''}
+                        ${campaign.status === 'active' ? `<button class="btn-icon" onclick="event.stopPropagation(); app.await pauseCampaign(${campaign.id})" title="Pause"><i class="fas fa-pause"></i></button>` : ''}
+                        ${campaign.status === 'paused' ? `<button class="btn-icon" onclick="event.stopPropagation(); app.await resumeCampaign(${campaign.id})" title="Resume"><i class="fas fa-play"></i></button>` : ''}
+                        <button class="btn-icon" onclick="event.stopPropagation(); app.await duplicateCampaign(${campaign.id})" title="Duplicate"><i class="fas fa-copy"></i></button>
+                        <button class="btn-icon" onclick="event.stopPropagation(); app.await deleteCampaign(${campaign.id})" title="Delete"><i class="fas fa-trash"></i></button>
                     </div>
                 </td>
             </tr>
         `;
     };
 
-    const openCreateCampaignModal = (campaignId = null) => {
+    const openCreateCampaignModal = async (campaignId = null) => {
         const isEdit = !!campaignId;
-        const campaign = isEdit ? DataStore.getById('whatsapp_campaigns', campaignId) : null;
+        const campaign = isEdit ? await DataStore.getById('whatsapp_campaigns', campaignId) : null;
 
         const content = `
             <div class="campaign-modal">
@@ -16146,8 +15288,8 @@ In a production system, this would show the actual file contents.
                 <div class="step-navigation">
                     <span class="step-indicator">Step 1 of 4</span>
                     <div class="step-buttons">
-                        <button class="btn secondary" id="btn-prev" style="display:none;" onclick="app.prevCampaignStep()">Previous</button>
-                        <button class="btn primary" id="btn-next" onclick="app.nextCampaignStep()">Next</button>
+                        <button class="btn secondary" id="btn-prev" style="display:none;" onclick="app.await prevCampaignStep()">Previous</button>
+                        <button class="btn primary" id="btn-next" onclick="app.await nextCampaignStep()">Next</button>
                     </div>
                 </div>
             </div>
@@ -16155,7 +15297,7 @@ In a production system, this would show the actual file contents.
 
         UI.showModal(isEdit ? 'Edit Campaign' : 'Create WhatsApp Campaign', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save as Draft', type: 'secondary', action: 'app.saveCampaignDraft()' }
+            { label: 'Save as Draft', type: 'secondary', action: 'await app.await saveCampaignDraft()' }
         ]);
 
         _currentCampaignStep = 1;
@@ -16172,7 +15314,7 @@ In a production system, this would show the actual file contents.
     let _currentCampaignStep = 1;
     let _campaignData = {};
 
-    const nextCampaignStep = () => {
+    const nextCampaignStep = async () => {
         if (_currentCampaignStep === 1) {
             _campaignData.campaign_name = document.getElementById('campaign-name').value;
             _campaignData.description = document.getElementById('campaign-description').value;
@@ -16207,15 +15349,15 @@ In a production system, this would show the actual file contents.
         }
 
         _currentCampaignStep++;
-        renderCampaignStep();
+        await renderCampaignStep();
     };
 
-    const prevCampaignStep = () => {
+    const prevCampaignStep = async () => {
         _currentCampaignStep--;
-        renderCampaignStep();
+        await renderCampaignStep();
     };
 
-    const renderCampaignStep = () => {
+    const renderCampaignStep = async () => {
         const container = document.getElementById('campaign-wizard-content');
         const indicator = document.querySelector('.step-indicator');
         const btnPrev = document.getElementById('btn-prev');
@@ -16230,9 +15372,9 @@ In a production system, this would show the actual file contents.
         btnPrev.style.display = _currentCampaignStep > 1 ? 'block' : 'none';
         btnNext.textContent = _currentCampaignStep === 4 ? 'Launch Campaign' : 'Next';
         if (_currentCampaignStep === 4) {
-            btnNext.onclick = () => app.saveCampaign();
+            btnNext.onclick = async () => await app.await saveCampaign();
         } else {
-            btnNext.onclick = () => app.nextCampaignStep();
+            btnNext.onclick = async () => await app.await nextCampaignStep();
         }
 
         if (_currentMarketingTab === 'analytics') {
@@ -16253,7 +15395,7 @@ In a production system, this would show the actual file contents.
                 </div>
             `;
         } else if (_currentCampaignStep === 2) {
-            const templates = DataStore.getAll('whatsapp_templates');
+            const templates = await DataStore.getAll('whatsapp_templates');
             container.innerHTML = `
                 <div class="campaign-step" id="step-2">
                     <div class="templates-grid small">
@@ -16271,8 +15413,8 @@ In a production system, this would show the actual file contents.
                 </div>
             `;
         } else if (_currentCampaignStep === 3) {
-            const tags = DataStore.getAll('tags');
-            const agents = DataStore.getAll('users').filter(isAgent);
+            const tags = await DataStore.getAll('tags');
+            const agents = (await DataStore.getAll('users')).filter(isAgent);
 
             container.innerHTML = `
                 <div class="campaign-step" id="step-3">
@@ -16300,7 +15442,7 @@ In a production system, this would show the actual file contents.
                     </div>
                 </div>
             `;
-            setTimeout(calculateAudienceSize, 200);
+            (calculateAudienceSize, 200);
         } else if (_currentCampaignStep === 4) {
             container.innerHTML = `
                 <div class="campaign-step" id="step-4">
@@ -16322,12 +15464,12 @@ In a production system, this would show the actual file contents.
                     <div class="campaign-summary-box" style="background:var(--gray-50); padding:16px; border-radius:8px; margin-top:20px;">
                         <h5>Campaign Summary</h5>
                         <p><strong>Name:</strong> ${_campaignData.campaign_name}</p>
-                        <p><strong>Template:</strong> ${DataStore.getById('whatsapp_templates', _campaignData.template_id)?.template_name}</p>
+                        <p><strong>Template:</strong> ${await DataStore.getById('whatsapp_templates', _campaignData.template_id)?.template_name}</p>
                         <p><strong>Estimated Audience:</strong> <span id="final-audience-size">...</span></p>
                     </div>
                 </div>
             `;
-            setTimeout(() => {
+            (() => {
                 const size = document.getElementById('audience-size-preview')?.getAttribute('data-size') || '85';
                 const el = document.getElementById('final-audience-size');
                 if (el) el.textContent = size + ' recipients';
@@ -16335,14 +15477,14 @@ In a production system, this would show the actual file contents.
         }
     };
 
-    const calculateAudienceSize = () => {
+    const calculateAudienceSize = async () => {
         const config = {
             segments: Array.from(document.querySelectorAll('input[name="segment"]:checked')).map(i => i.value),
             tags: Array.from(document.querySelectorAll('input[name="audience-tag"]:checked')).map(i => parseInt(i.value)),
             agents: Array.from(document.querySelectorAll('input[name="agent-filter"]:checked')).map(i => parseInt(i.value))
         };
 
-        let prospects = getVisibleProspects();
+        let prospects = await getVisibleProspects();
 
         // Logical OR between different criteria types (Segment OR Tag OR Agent)
         // But internal criteria is usually AND (though Segment is often OR between items)
@@ -16403,16 +15545,16 @@ In a production system, this would show the actual file contents.
         return uniqueRecipients;
     };
 
-    const saveCampaignDraft = () => {
+    const saveCampaignDraft = async () => {
         _campaignData.campaign_name = document.getElementById('campaign-name')?.value || 'Untitled Campaign';
         _campaignData.status = 'draft';
-        DataStore.create('whatsapp_campaigns', _campaignData);
+        await DataStore.create('whatsapp_campaigns', _campaignData);
         UI.toast.success('Campaign saved as draft');
         UI.hideModal();
-        refreshCampaignsTab();
+        await refreshCampaignsTab();
     };
 
-    const saveCampaign = () => {
+    const saveCampaign = async () => {
         _campaignData.status = 'scheduled';
         const launchType = document.querySelector('input[name="launch-type"]:checked')?.value;
         if (launchType === 'now') {
@@ -16427,7 +15569,7 @@ In a production system, this would show the actual file contents.
             _campaignData.scheduled_date = time;
         }
 
-        const recipients = calculateAudienceSize();
+        const recipients = await calculateAudienceSize();
         _campaignData.total_recipients = recipients.length;
         _campaignData.sent_count = 0;
         _campaignData.delivered_count = 0;
@@ -16438,11 +15580,11 @@ In a production system, this would show the actual file contents.
         _campaignData.created_by = _currentUser ? _currentUser.id : 5;
         _campaignData.created_at = new Date().toISOString();
 
-        const campaign = DataStore.create('whatsapp_campaigns', _campaignData);
+        const campaign = await DataStore.create('whatsapp_campaigns', _campaignData);
 
         // Create initial message tracking for each recipient
-        recipients.forEach(rpId => {
-            DataStore.create('campaign_messages', {
+        for (const rpId of recipients) {
+            await DataStore.create('campaign_messages', {
                 campaign_id: campaign.id,
                 prospect_id: rpId,
                 status: launchType === 'now' ? 'queued' : 'scheduled',
@@ -16453,26 +15595,26 @@ In a production system, this would show the actual file contents.
                 last_error: null,
                 retry_count: 0
             });
-        });
+        }
 
         if (launchType === 'now') {
-            simulateCampaignSending(campaign.id);
+            await simulateCampaignSending(campaign.id);
         }
 
         UI.toast.success(launchType === 'now' ? 'Campaign launched successfully!' : 'Campaign scheduled successfully!');
         UI.hideModal();
-        refreshCampaignsTab();
+        await refreshCampaignsTab();
     };
 
-    const simulateCampaignSending = (campaignId) => {
-        const messages = DataStore.getAll('campaign_messages').filter(m => m.campaign_id === campaignId);
+    const simulateCampaignSending = async (campaignId) => {
+        const messages = (await DataStore.getAll('campaign_messages')).filter(m => m.campaign_id === campaignId);
         let sent = 0;
 
-        const interval = setInterval(() => {
+        const interval = async (() => {
             if (sent >= messages.length) {
                 clearInterval(interval);
-                DataStore.update('whatsapp_campaigns', campaignId, { status: 'completed', completed_date: new Date().toISOString() });
-                refreshCampaignsTab();
+                await DataStore.update('whatsapp_campaigns', campaignId, { status: 'completed', completed_date: new Date().toISOString() });
+                await refreshCampaignsTab();
                 return;
             }
 
@@ -16483,37 +15625,37 @@ In a production system, this would show the actual file contents.
             if (statusRoll > 0.4) status = 'opened';
             if (statusRoll > 0.8) status = 'replied';
 
-            DataStore.update('campaign_messages', msg.id, {
+            await DataStore.update('campaign_messages', msg.id, {
                 status: status,
                 sent_at: new Date().toISOString()
             });
 
             // Update campaign stats
-            const campaign = DataStore.getById('whatsapp_campaigns', campaignId);
+            const campaign = await DataStore.getById('whatsapp_campaigns', campaignId);
             const updates = { sent_count: (campaign.sent_count || 0) + 1 };
             if (['delivered', 'opened', 'replied'].includes(status)) updates.delivered_count = (campaign.delivered_count || 0) + 1;
             if (['opened', 'replied'].includes(status)) updates.opened_count = (campaign.opened_count || 0) + 1;
             if (status === 'replied') updates.replied_count = (campaign.replied_count || 0) + 1;
 
-            DataStore.update('whatsapp_campaigns', campaignId, updates);
+            await DataStore.update('whatsapp_campaigns', campaignId, updates);
             sent++;
         }, 500);
     };
 
-    const refreshCampaignsTab = () => {
+    const refreshCampaignsTab = async () => {
         if (_currentMarketingTab === 'campaigns') {
             const container = document.getElementById('marketing-tab-content');
             if (container) {
-                container.innerHTML = renderCampaignsTab();
+                container.innerHTML = await renderCampaignsTab();
             }
         }
     };
 
-    const filterCampaigns = () => {
+    const filterCampaigns = async () => {
         const status = document.getElementById('campaign-status-filter').value;
         const sort = document.getElementById('campaign-sort').value;
 
-        let campaigns = DataStore.getAll('whatsapp_campaigns');
+        let campaigns = await DataStore.getAll('whatsapp_campaigns');
 
         if (status !== 'all') {
             campaigns = campaigns.filter(c => c.status === status);
@@ -16529,27 +15671,27 @@ In a production system, this would show the actual file contents.
 
         const body = document.getElementById('campaigns-list-body');
         if (body) {
-            body.innerHTML = campaigns.length > 0 ? campaigns.map(c => renderCampaignRow(c)).join('') : '<tr><td colspan="7" style="text-align:center; padding:40px;">No campaigns found.</td></tr>';
+            body.innerHTML = campaigns.length > 0 ? campaigns.map(async c => await renderCampaignRow(c)).join('') : '<tr><td colspan="7" style="text-align:center; padding:40px;">No campaigns found.</td></tr>';
         }
     };
 
-    const editCampaign = (id) => openCreateCampaignModal(id);
-    const pauseCampaign = (id) => {
-        DataStore.update('whatsapp_campaigns', id, { status: 'paused' });
-        refreshCampaignsTab();
+    const editCampaign = async (id) => await openCreateCampaignModal(id);
+    const pauseCampaign = async (id) => {
+        await DataStore.update('whatsapp_campaigns', id, { status: 'paused' });
+        await refreshCampaignsTab();
     };
-    const resumeCampaign = (id) => {
-        DataStore.update('whatsapp_campaigns', id, { status: 'active' });
-        refreshCampaignsTab();
+    const resumeCampaign = async (id) => {
+        await DataStore.update('whatsapp_campaigns', id, { status: 'active' });
+        await refreshCampaignsTab();
     };
-    const cancelCampaign = (id) => {
+    const cancelCampaign = async (id) => {
         if (confirm('Cancel this campaign? Active messages will stop.')) {
-            DataStore.update('whatsapp_campaigns', id, { status: 'cancelled' });
-            refreshCampaignsTab();
+            await DataStore.update('whatsapp_campaigns', id, { status: 'cancelled' });
+            await refreshCampaignsTab();
         }
     };
-    const duplicateCampaign = (id) => {
-        const c = DataStore.getById('whatsapp_campaigns', id);
+    const duplicateCampaign = async (id) => {
+        const c = await DataStore.getById('whatsapp_campaigns', id);
         if (c) {
             const copy = {
                 ...c,
@@ -16558,24 +15700,24 @@ In a production system, this would show the actual file contents.
                 status: 'draft',
                 sent_count: 0, delivered_count: 0, opened_count: 0, replied_count: 0
             };
-            DataStore.create('whatsapp_campaigns', copy);
-            refreshCampaignsTab();
+            await DataStore.create('whatsapp_campaigns', copy);
+            await refreshCampaignsTab();
         }
     };
-    const deleteCampaign = (id) => {
+    const deleteCampaign = async (id) => {
         if (confirm('Delete this campaign and all its tracking data?')) {
-            DataStore.delete('whatsapp_campaigns', id);
+            await DataStore.delete('whatsapp_campaigns', id);
             // Delete messages
-            const messages = DataStore.getAll('campaign_messages').filter(m => m.campaign_id === id);
-            messages.forEach(m => DataStore.delete('campaign_messages', m.id));
-            refreshCampaignsTab();
+            const messages = (await DataStore.getAll('campaign_messages')).filter(m => m.campaign_id === id);
+            messages.forEach(async m => await DataStore.delete('campaign_messages', m.id));
+            await refreshCampaignsTab();
         }
     };
 
     // ========== ANALYTICS TAB ==========
 
-    const renderAnalyticsTab = () => {
-        const analytics = getRealAnalyticsData();
+    const renderAnalyticsTab = async () => {
+        const analytics = await getRealAnalyticsData();
         return `
             <div class="analytics-stats-grid">
                 <div class="analytics-card">
@@ -16650,14 +15792,14 @@ In a production system, this would show the actual file contents.
                             `).join('')}
                         </tbody>
                     </table>
-                    <button class="btn-sm secondary" style="width:100%; margin-top:12px;" onclick="app.exportAnalyticsReport()">Export Detailed Report</button>
+                    <button class="btn-sm secondary" style="width:100%; margin-top:12px;" onclick="app.await exportAnalyticsReport()">Export Detailed Report</button>
                 </div>
             </div>
 `;
     };
 
-    const getRealAnalyticsData = () => {
-        const campaigns = DataStore.getAll('whatsapp_campaigns').filter(c => c.status === 'completed' || c.status === 'active');
+    const getRealAnalyticsData = async () => {
+        const campaigns = (await DataStore.getAll('whatsapp_campaigns')).filter(c => c.status === 'completed' || c.status === 'active');
 
         const totalCampaigns = campaigns.length;
         let totalSent = 0;
@@ -16688,8 +15830,8 @@ In a production system, this would show the actual file contents.
         };
     };
 
-    const initMarketingCharts = () => {
-        const campaigns = DataStore.getAll('whatsapp_campaigns').filter(c => c.status === 'completed' || c.status === 'active').slice(-5);
+    const initMarketingCharts = async () => {
+        const campaigns = (await DataStore.getAll('whatsapp_campaigns')).filter(c => c.status === 'completed' || c.status === 'active').slice(-5);
 
         // Message Volume Chart
         const volumeCtx = document.getElementById('message-volume-chart')?.getContext('2d');
@@ -16745,12 +15887,12 @@ In a production system, this would show the actual file contents.
         }
     };
 
-    const refreshAnalytics = () => {
-        setTimeout(initMarketingCharts, 100);
+    const refreshAnalytics = async () => {
+        (initMarketingCharts, 100);
     };
 
-    const exportAnalyticsReport = () => {
-        const data = getRealAnalyticsData();
+    const exportAnalyticsReport = async () => {
+        const data = await getRealAnalyticsData();
         let csv = "Metric,Value\n";
         csv += `Total Campaigns, ${data.totalCampaigns} \n`;
         csv += `Avg Open Rate, ${data.avgOpenRate}%\n`;
@@ -16758,7 +15900,7 @@ In a production system, this would show the actual file contents.
         csv += `Avg Conversion Rate, ${data.avgConversionRate}%\n\n`;
         csv += "Campaign Name,Sent,Opened,Replied,Converted\n";
 
-        const campaigns = DataStore.getAll('whatsapp_campaigns');
+        const campaigns = await DataStore.getAll('whatsapp_campaigns');
         campaigns.forEach(c => {
             csv += `${c.campaign_name},${c.sent_count},${c.opened_count},${c.replied_count},${c.converted_count} \n`;
         });
@@ -16776,12 +15918,12 @@ In a production system, this would show the actual file contents.
 
     // ========== CAMPAIGN DETAILS VIEW ==========
 
-    const viewCampaignDetails = (campaignId) => {
-        const campaign = DataStore.getById('whatsapp_campaigns', campaignId);
+    const viewCampaignDetails = async (campaignId) => {
+        const campaign = await DataStore.getById('whatsapp_campaigns', campaignId);
         if (!campaign) return;
 
-        const template = DataStore.getById('whatsapp_templates', campaign.template_id);
-        const messages = DataStore.getAll('campaign_messages').filter(m => m.campaign_id === campaignId);
+        const template = await DataStore.getById('whatsapp_templates', campaign.template_id);
+        const messages = (await DataStore.getAll('campaign_messages')).filter(m => m.campaign_id === campaignId);
 
         // Calculate metrics
         const sent = messages.filter(m => ['sent', 'delivered', 'opened', 'replied'].includes(m.status)).length;
@@ -16808,9 +15950,9 @@ In a production system, this would show the actual file contents.
                         </div>
                     </div>
                     <div class="campaign-actions">
-                        <button class="btn secondary" onclick="app.duplicateCampaign(${campaignId})"><i class="fas fa-copy"></i> Duplicate</button>
-                        <button class="btn secondary" onclick="app.exportCampaignReport(${campaignId})"><i class="fas fa-download"></i> Export Report</button>
-                        ${campaign.status === 'active' ? `<button class="btn warning" onclick="app.pauseCampaign(${campaignId})"><i class="fas fa-pause"></i> Pause</button>` : ''}
+                        <button class="btn secondary" onclick="app.await duplicateCampaign(${campaignId})"><i class="fas fa-copy"></i> Duplicate</button>
+                        <button class="btn secondary" onclick="app.await exportCampaignReport(${campaignId})"><i class="fas fa-download"></i> Export Report</button>
+                        ${campaign.status === 'active' ? `<button class="btn warning" onclick="app.await pauseCampaign(${campaignId})"><i class="fas fa-pause"></i> Pause</button>` : ''}
                     </div>
                 </div>
 
@@ -16854,7 +15996,7 @@ In a production system, this would show the actual file contents.
                                 <div class="timeline-item">
                                     <div class="timeline-time">${UI.formatDate(m.sent_at || m.created_at)}</div>
                                     <div class="timeline-event">
-                                        <strong>${getEntityName('prospects', m.prospect_id)}</strong>
+                                        <strong>${await getEntityName('prospects', m.prospect_id)}</strong>
                                         <span class="status-badge status-${m.status}">${m.status}</span>
                                     </div>
                                 </div>
@@ -16866,8 +16008,8 @@ In a production system, this would show the actual file contents.
                         <div class="recipient-header">
                             <h3><i class="fas fa-users"></i> Recipient List</h3>
                             <div class="recipient-filters">
-                                <input type="text" id="recipient-search" placeholder="Search recipients..." onkeyup="app.filterRecipients(${campaignId})">
-                                <select id="recipient-status-filter" onchange="app.filterRecipients(${campaignId})">
+                                <input type="text" id="recipient-search" placeholder="Search recipients..." onkeyup="app.await filterRecipients(${campaignId})">
+                                <select id="recipient-status-filter" onchange="app.await filterRecipients(${campaignId})">
                                     <option value="all">All Status</option>
                                     <option value="sent">Sent</option>
                                     <option value="delivered">Delivered</option>
@@ -16889,7 +16031,7 @@ In a production system, this would show the actual file contents.
                                     </tr>
                                 </thead>
                                 <tbody id="recipient-list-body">
-                                    ${messages.map(m => renderRecipientRow(m)).join('')}
+                                    ${messages.map(async m => await renderRecipientRow(m)).join('')}
                                 </tbody>
                             </table>
                         </div>
@@ -16903,8 +16045,8 @@ In a production system, this would show the actual file contents.
         ]);
     };
 
-    const renderRecipientRow = (msg) => {
-        const prospect = DataStore.getById('prospects', msg.prospect_id);
+    const renderRecipientRow = async (msg) => {
+        const prospect = await DataStore.getById('prospects', msg.prospect_id);
         return `
             <tr>
                 <td><strong>${prospect?.full_name || 'Unknown'}</strong></td>
@@ -16912,20 +16054,20 @@ In a production system, this would show the actual file contents.
                 <td><span class="status-badge status-${msg.status}">${msg.status}</span></td>
                 <td>${msg.sent_at ? UI.formatDate(msg.sent_at) : '-'}</td>
                 <td>
-                    <button class="btn-sm secondary" onclick="app.viewRecipientHistory(${msg.id})">History</button>
-                    ${msg.status === 'failed' ? `<button class="btn-sm primary" onclick="app.retryMessage(${msg.id})">Retry</button>` : ''}
+                    <button class="btn-sm secondary" onclick="app.await viewRecipientHistory(${msg.id})">History</button>
+                    ${msg.status === 'failed' ? `<button class="btn-sm primary" onclick="app.await retryMessage(${msg.id})">Retry</button>` : ''}
                 </td>
             </tr>
         `;
     };
 
-    const filterRecipients = (campaignId) => {
+    const filterRecipients = async (campaignId) => {
         const search = document.getElementById('recipient-search').value.toLowerCase();
         const status = document.getElementById('recipient-status-filter').value;
-        const messages = DataStore.getAll('campaign_messages').filter(m => m.campaign_id === campaignId);
+        const messages = (await DataStore.getAll('campaign_messages')).filter(m => m.campaign_id === campaignId);
 
         const filtered = messages.filter(m => {
-            const prospect = DataStore.getById('prospects', m.prospect_id);
+            const prospect = await DataStore.getById('prospects', m.prospect_id);
             const nameMatch = prospect?.full_name?.toLowerCase().includes(search);
             const statusMatch = status === 'all' || m.status === status;
             return nameMatch && statusMatch;
@@ -16933,14 +16075,14 @@ In a production system, this would show the actual file contents.
 
         const body = document.getElementById('recipient-list-body');
         if (body) {
-            body.innerHTML = filtered.map(m => renderRecipientRow(m)).join('');
+            body.innerHTML = filtered.map(async m => await renderRecipientRow(m)).join('');
         }
     };
 
-    const viewRecipientHistory = (messageId) => {
-        const msg = DataStore.getById('campaign_messages', messageId);
+    const viewRecipientHistory = async (messageId) => {
+        const msg = await DataStore.getById('campaign_messages', messageId);
         if (!msg) return;
-        const prospect = DataStore.getById('prospects', msg.prospect_id);
+        const prospect = await DataStore.getById('prospects', msg.prospect_id);
 
         const content = `
             <div class="recipient-history">
@@ -16973,28 +16115,28 @@ In a production system, this would show the actual file contents.
     `;
 
         UI.showModal('Recipient History', content, [
-            { label: 'Back', type: 'secondary', action: `app.viewCampaignDetails(${msg.campaign_id})` }
+            { label: 'Back', type: 'secondary', action: `await app.await viewCampaignDetails(${msg.campaign_id})` }
         ]);
     };
 
-    const retryMessage = (messageId) => {
-        const msg = DataStore.getById('campaign_messages', messageId);
+    const retryMessage = async (messageId) => {
+        const msg = await DataStore.getById('campaign_messages', messageId);
         if (msg) {
-            DataStore.update('campaign_messages', messageId, { status: 'queued', retry_count: (msg.retry_count || 0) + 1 });
+            await DataStore.update('campaign_messages', messageId, { status: 'queued', retry_count: (msg.retry_count || 0) + 1 });
             UI.toast.success('Message queued for retry');
-            app.viewCampaignDetails(msg.campaign_id);
+            await app.await viewCampaignDetails(msg.campaign_id);
         }
     };
 
-    const exportCampaignReport = (campaignId) => {
-        const campaign = DataStore.getById('whatsapp_campaigns', campaignId);
-        const messages = DataStore.getAll('campaign_messages').filter(m => m.campaign_id === campaignId);
+    const exportCampaignReport = async (campaignId) => {
+        const campaign = await DataStore.getById('whatsapp_campaigns', campaignId);
+        const messages = (await DataStore.getAll('campaign_messages')).filter(m => m.campaign_id === campaignId);
 
         let csv = "Recipient,Phone,Status,SentAt,DeliveredAt,OpenedAt,RepliedAt\n";
-        messages.forEach(m => {
-            const p = DataStore.getById('prospects', m.prospect_id);
+        for (const m of messages) {
+            const p = await DataStore.getById('prospects', m.prospect_id);
             csv += `"${p?.full_name || 'Unknown'}", "${p?.phone || ''}", ${m.status}, "${m.sent_at || ''}", "${m.delivered_at || ''}", "${m.opened_at || ''}", "${m.replied_at || ''}"\n`;
-        });
+        }
 
         const blob = new Blob([csv], { type: 'text/csv' });
         const url = window.URL.createObjectURL(blob);
@@ -17007,8 +16149,8 @@ In a production system, this would show the actual file contents.
         UI.toast.success('Campaign report exported');
     };
 
-    const getEntityName = (table, id) => {
-        const item = DataStore.getById(table, id);
+    const getEntityName = async (table, id) => {
+        const item = await DataStore.getById(table, id);
         if (!item) return 'Unknown';
         if (table === 'users' || table === 'agents') return item.full_name || item.username;
         if (table === 'prospects' || table === 'customers') return item.full_name;
@@ -17034,17 +16176,17 @@ In a production system, this would show the actual file contents.
         return `RM ${val.toLocaleString()} `;
     };
 
-    const expireOldOverrides = () => {
-        const overrides = DataStore.getAll('manual_overrides');
+    const expireOldOverrides = async () => {
+        const overrides = await DataStore.getAll('manual_overrides');
         const now = new Date();
         let expiredCount = 0;
 
-        overrides.forEach(o => {
+        for (const o of overrides) {
             if (o.status === 'active' && o.expires_at && new Date(o.expires_at) < now) {
-                DataStore.update('manual_overrides', o.id, { status: 'expired' });
+                await DataStore.update('manual_overrides', o.id, { status: 'expired' });
                 expiredCount++;
             }
-        });
+        }
 
         if (expiredCount > 0) {
             console.log(`${expiredCount} manual overrides have expired.`);
@@ -17052,29 +16194,29 @@ In a production system, this would show the actual file contents.
     };
 
     // ========== MISSING STUB FUNCTIONS (confirm variants not defined elsewhere) ==========
-    const confirmRenameFolder = (folderId) => {
+    const confirmRenameFolder = async (folderId) => {
         const name = document.getElementById('rename-folder-input')?.value;
         if (!name) return;
-        DataStore.update('folders', folderId, { name, updated_at: new Date().toISOString() });
+        await DataStore.update('folders', folderId, { name, updated_at: new Date().toISOString() });
         UI.hideModal(); UI.toast.success('Folder renamed');
-        if (typeof renderFolderTree === 'function') renderFolderTree();
-        if (typeof loadFolderContents === 'function') loadFolderContents();
+        if (typeof renderFolderTree === 'function') await renderFolderTree();
+        if (typeof loadFolderContents === 'function') await loadFolderContents();
     };
-    const confirmDeleteFolder = (folderId) => {
-        DataStore.delete('folders', folderId);
+    const confirmDeleteFolder = async (folderId) => {
+        await DataStore.delete('folders', folderId);
         UI.hideModal(); UI.toast.success('Folder deleted');
-        if (typeof renderFolderTree === 'function') renderFolderTree();
-        if (typeof loadFolderContents === 'function') loadFolderContents();
+        if (typeof renderFolderTree === 'function') await renderFolderTree();
+        if (typeof loadFolderContents === 'function') await loadFolderContents();
     };
     const batchMove = () => UI.toast.info('Batch move coming soon');
     const batchShare = () => UI.toast.info('Batch share coming soon');
     const batchDownload = () => UI.toast.info('Batch download coming soon');
-    const toggleUserMenu = () => {
-        const currentUser = _currentUser || Auth.getCurrentUser();
+    const toggleUserMenu = async () => {
+        const currentUser = _currentUser || await Auth.getCurrentUser();
 
         if (!currentUser) {
             // Guest mode - show demo users
-            const users = DataStore.getAll('users') || [];
+            const users = await DataStore.getAll('users') || [];
             // Filter for demo users
             const demoUsers = users.slice(0, 8); // Just show first 8 as demo
 
@@ -17083,7 +16225,7 @@ In a production system, this would show the actual file contents.
                     <p style="margin-bottom: 20px; color: var(--gray-600); font-size: 14px;">Log in as a demo user to access CRM features:</p>
                     <div class="demo-users-list" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
                         ${demoUsers.map(u => `
-                            <div class="demo-user-item" onclick="app.loginAs('${u.id}')" style="padding: 12px; border: 1px solid var(--gray-200); border-radius: 8px; cursor: pointer; transition: all 0.2s; background: white; text-align: left;">
+                            <div class="demo-user-item" onclick="app.await loginAs('${u.id}')" style="padding: 12px; border: 1px solid var(--gray-200); border-radius: 8px; cursor: pointer; transition: all 0.2s; background: white; text-align: left;">
                                 <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
                                     <div class="avatar-sm" style="width: 28px; height: 28px; background: var(--primary-color); color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 11px;">
                                         ${(u.full_name || 'U').split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2)}
@@ -17112,7 +16254,7 @@ In a production system, this would show the actual file contents.
                     <p style="color: var(--gray-500); text-transform: capitalize; margin-bottom: 32px; font-weight: 500;">${currentUser.role}</p>
                     
                     <div style="border-top: 1px solid var(--gray-100); padding-top: 20px;">
-                        <button class="btn danger" onclick="app.logout()" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 10px; padding: 14px; font-weight: 600;">
+                        <button class="btn danger" onclick="app.await logout()" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 10px; padding: 14px; font-weight: 600;">
                             <i class="fas fa-sign-out-alt"></i> LOGOUT FROM SYSTEM
                         </button>
                     </div>
@@ -17125,13 +16267,13 @@ In a production system, this would show the actual file contents.
         }
     };
 
-    const loginAs = (userId) => {
-        const user = DataStore.getById('users', userId);
+    const loginAs = async (userId) => {
+        const user = await DataStore.getById('users', userId);
         if (user) {
-            Auth.setUser(user);
+            // Auth.setUser removed – Supabase manages session; _currentUser set directly below
             _currentUser = user;
             updateUserDisplay();
-            navigateTo(_currentView || 'calendar');
+            await navigateTo(_currentView || 'calendar');
             UI.hideModal();
             UI.toast.success(`Welcome back, ${user.full_name} !`);
         } else {
@@ -17146,7 +16288,7 @@ In a production system, this would show the actual file contents.
     let _currentImportStep = 1;
     let _importData = { file: null, fileName: null, fileSize: null, rows: 0, headers: ['Full Name', 'Phone Number', 'Email', 'IC Number', 'Date of Birth', 'Occupation', 'Income Range', 'Address', 'City', 'State', 'Postal Code', 'Ming Gua'], data: [], importType: 'prospects', mapping: {}, validation: { valid: 0, warnings: 0, errors: 0 }, duplicates: { total: 0 }, assignment: { assignTo: 'myself' } };
 
-    const showImportDashboard = (container) => {
+    const showImportDashboard = async (container) => {
         container.innerHTML = `
             <div class="import-view">
                 <div class="import-header">
@@ -17165,7 +16307,7 @@ In a production system, this would show the actual file contents.
                     <div class="imports-table-container">
                         <table class="imports-table">
                             <thead><tr><th>File Name</th><th>Type</th><th>Records</th><th>Success %</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead>
-                            <tbody id="imports-table-body">${renderRecentImports()}</tbody>
+                            <tbody id="imports-table-body">${await renderRecentImports()}</tbody>
                         </table>
                     </div>
                 </div>
@@ -17173,19 +16315,19 @@ In a production system, this would show the actual file contents.
     `;
     };
 
-    const renderRecentImports = () => {
-        const imports = DataStore.getAll('import_jobs').sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 10);
+    const renderRecentImports = async () => {
+        const imports = (await DataStore.getAll('import_jobs')).sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 10);
         if (imports.length === 0) return `<tr><td colspan="7" style="text-align:center;padding:40px;"><i class="fas fa-cloud-upload-alt" style="font-size:48px;color:var(--gray-300);display:block;margin-bottom:16px;"></i><h3>No imports yet</h3><p>Click "IMPORT NEW DATA" to start your first import</p></td></tr>`;
         return imports.map(imp => {
             const pct = imp.total_rows > 0 ? Math.round((imp.valid_rows / imp.total_rows) * 100) : 0;
-            return `<tr><td><strong>${imp.file_name}</strong></td><td>${imp.import_type}</td><td>${imp.total_rows} (${imp.created_records} new)</td><td>${pct}%</td><td><span class="import-status status-${imp.status}">${imp.status.toUpperCase()}</span></td><td>${UI.formatDate(imp.created_at)}</td><td><button class="btn-icon" onclick="app.viewImportDetails(${imp.id})" title="View"><i class="fas fa-eye"></i></button><button class="btn-icon" onclick="app.downloadImportLog(${imp.id})" title="Download Log"><i class="fas fa-download"></i></button></td></tr>`;
+            return `<tr><td><strong>${imp.file_name}</strong></td><td>${imp.import_type}</td><td>${imp.total_rows} (${imp.created_records} new)</td><td>${pct}%</td><td><span class="import-status status-${imp.status}">${imp.status.toUpperCase()}</span></td><td>${UI.formatDate(imp.created_at)}</td><td><button class="btn-icon" onclick="app.await viewImportDetails(${imp.id})" title="View"><i class="fas fa-eye"></i></button><button class="btn-icon" onclick="app.downloadImportLog(${imp.id})" title="Download Log"><i class="fas fa-download"></i></button></td></tr>`;
         }).join('');
     };
 
-    const openImportWizard = () => {
+    const openImportWizard = async () => {
         _currentImportStep = 1;
         _importData = { file: null, fileName: null, fileSize: null, rows: 0, headers: ['Full Name', 'Phone Number', 'Email', 'IC Number', 'Date of Birth', 'Occupation', 'Income Range', 'Address', 'City', 'State', 'Postal Code', 'Ming Gua'], data: [], importType: 'prospects', mapping: {}, validation: { valid: 0, warnings: 0, errors: 0 }, duplicates: { total: 0 }, assignment: { assignTo: 'myself' } };
-        renderImportStep(1);
+        await renderImportStep(1);
     };
 
     const getWizardStepsHtml = (active) => {
@@ -17198,29 +16340,29 @@ In a production system, this would show the actual file contents.
         if (overlay) { const box = overlay.querySelector('.modal-box'); if (box) box.innerHTML = content; }
     };
 
-    const renderImportStep = (step) => {
+    const renderImportStep = async (step) => {
         _currentImportStep = step;
         let content = '';
-        if (step === 1) content = getStep1Html();
-        else if (step === 2) content = getStep2Html();
-        else if (step === 3) content = getStep3Html();
-        else if (step === 4) content = getStep4Html();
-        else if (step === 5) content = getStep5Html();
+        if (step === 1) content = await getStep1Html();
+        else if (step === 2) content = await getStep2Html();
+        else if (step === 3) content = await getStep3Html();
+        else if (step === 4) content = await getStep4Html();
+        else if (step === 5) content = await getStep5Html();
         if (step === 1) UI.showModal('Excel Import Wizard', content, []);
         else updateWizardModal(content);
     };
 
-    const getStep1Html = () => `
+    const getStep1Html = async () => `
             <div class="import-wizard">
                 ${getWizardStepsHtml(1)}
                 <div class="step-content">
                     <h3>Step 1: Upload File</h3>
-                    <div class="upload-area-large" id="import-dropzone" ondragover="event.preventDefault()" ondrop="app.handleImportFileDrop(event)">
+                    <div class="upload-area-large" id="import-dropzone" ondragover="event.preventDefault()" ondrop="app.await handleImportFileDrop(event)">
                         <i class="fas fa-cloud-upload-alt"></i>
                         <h4>Click or Drag Excel file to upload</h4>
                         <p>Supported formats: .xlsx, .xls, .csv</p>
                         <p class="file-limit">Max file size: 10MB</p>
-                        <input type="file" id="import-file-input" accept=".xlsx,.xls,.csv" style="display:none" onchange="app.handleImportFileSelect(event)">
+                        <input type="file" id="import-file-input" accept=".xlsx,.xls,.csv" style="display:none" onchange="app.await handleImportFileSelect(event)">
                         <button class="btn primary" onclick="document.getElementById('import-file-input').click()">Browse Files</button>
                     </div>
                     <div id="file-info" style="display:none;margin-top:20px;"></div>
@@ -17228,12 +16370,12 @@ In a production system, this would show the actual file contents.
                 </div>
                 <div class="wizard-footer">
                     <button class="btn secondary" onclick="UI.hideModal()">Cancel</button>
-                    <button class="btn primary" id="step1-next" onclick="app.importNextStep()" disabled>Next: Field Mapping</button>
+                    <button class="btn primary" id="step1-next" onclick="app.await importNextStep()" disabled>Next: Field Mapping</button>
                 </div>
             </div>
         `;
 
-    const getStep2Html = () => `
+    const getStep2Html = async () => `
             <div class="import-wizard">
                 ${getWizardStepsHtml(2)}
                 <div class="step-content">
@@ -17253,13 +16395,13 @@ In a production system, this would show the actual file contents.
                     </div>
                 </div>
                 <div class="wizard-footer">
-                    <button class="btn secondary" onclick="app.importPrevStep()">Back</button>
-                    <button class="btn primary" onclick="app.importNextStep()">Next: Validation</button>
+                    <button class="btn secondary" onclick="app.await importPrevStep()">Back</button>
+                    <button class="btn primary" onclick="app.await importNextStep()">Next: Validation</button>
                 </div>
             </div>
         `;
 
-    const getStep3Html = () => `
+    const getStep3Html = async () => `
             <div class="import-wizard">
                 ${getWizardStepsHtml(3)}
                 <div class="step-content">
@@ -17295,13 +16437,13 @@ In a production system, this would show the actual file contents.
                     </div>
                 </div>
                 <div class="wizard-footer">
-                    <button class="btn secondary" onclick="app.importPrevStep()">Back</button>
-                    <button class="btn primary" onclick="app.importNextStep()">Next: Duplicate Handling</button>
+                    <button class="btn secondary" onclick="app.await importPrevStep()">Back</button>
+                    <button class="btn primary" onclick="app.await importNextStep()">Next: Duplicate Handling</button>
                 </div>
             </div>
         `;
 
-    const getStep4Html = () => `
+    const getStep4Html = async () => `
             <div class="import-wizard">
                 ${getWizardStepsHtml(4)}
                 <div class="step-content">
@@ -17329,12 +16471,12 @@ In a production system, this would show the actual file contents.
                 </div>
                 <div class="wizard-footer">
                     <button class="btn secondary" onclick="app.importPrevStep()">Back</button>
-                    <button class="btn primary" onclick="app.importNextStep()">Next: Import</button>
+                    <button class="btn primary" onclick="app.await importNextStep()">Next: Import</button>
                 </div>
             </div>
         `;
 
-    const getStep5Html = () => `
+    const getStep5Html = async () => `
             <div class="import-wizard">
                 ${getWizardStepsHtml(5)}
                 <div class="step-content">
@@ -17366,8 +16508,8 @@ In a production system, this would show the actual file contents.
                     </div>
                 </div>
                 <div class="wizard-footer">
-                    <button class="btn secondary" onclick="app.importPrevStep()">Back</button>
-                    <button class="btn primary" id="start-import-btn" onclick="app.startImport()"><i class="fas fa-play"></i> START IMPORT</button>
+                    <button class="btn secondary" onclick="app.await importPrevStep()">Back</button>
+                    <button class="btn primary" id="start-import-btn" onclick="app.await startImport()"><i class="fas fa-play"></i> START IMPORT</button>
                 </div>
             </div>
         `;
@@ -17412,13 +16554,13 @@ In a production system, this would show the actual file contents.
         return '';
     };
 
-    const handleImportFileDrop = (event) => { event.preventDefault(); const files = event.dataTransfer.files; if (files.length > 0) processImportFile(files[0]); };
-    const handleImportFileSelect = (event) => { const files = event.target.files; if (files.length > 0) processImportFile(files[0]); };
+    const handleImportFileDrop = async (event) => { event.preventDefault(); const files = event.dataTransfer.files; if (files.length > 0) await processImportFile(files[0]); };
+    const handleImportFileSelect = async (event) => { const files = event.target.files; if (files.length > 0) await processImportFile(files[0]); };
 
-    const processImportFile = (file) => {
+    const processImportFile = async (file) => {
         if (file.size > 10 * 1024 * 1024) { UI.toast.error('File size exceeds 10MB limit'); return; }
         _importData.file = file; _importData.fileName = file.name; _importData.fileSize = file.size;
-        setTimeout(() => {
+        (() => {
             _importData.rows = 250;
             const fi = document.getElementById('file-info');
             if (fi) {
@@ -17429,36 +16571,36 @@ In a production system, this would show the actual file contents.
         }, 400);
     };
 
-    const importNextStep = () => { if (_currentImportStep < 5) renderImportStep(_currentImportStep + 1); };
-    const importPrevStep = () => { if (_currentImportStep > 1) renderImportStep(_currentImportStep - 1); };
+    const importNextStep = async () => { if (_currentImportStep < 5) await renderImportStep(_currentImportStep + 1); };
+    const importPrevStep = async () => { if (_currentImportStep > 1) await renderImportStep(_currentImportStep - 1); };
     const updateImportType = (type) => { _importData.importType = type; };
     const autoMapFields = () => UI.toast.success('Fields auto-mapped based on column names');
     const clearMapping = () => { document.querySelectorAll('.mapping-select').forEach(s => s.value = ''); UI.toast.info('Mapping cleared'); };
     const clearMappingField = (idx) => { const s = document.querySelector(`.mapping-select[data-col="${idx}"]`); if (s) s.value = ''; };
     const downloadErrorReport = () => UI.toast.success('Error report downloaded');
 
-    const startImport = () => {
+    const startImport = async () => {
         document.getElementById('progress-area').style.display = 'block';
         document.getElementById('start-import-btn').disabled = true;
         let progress = 0;
-        const iv = setInterval(() => {
+        const iv = async (() => {
             progress += 5;
             const bar = document.getElementById('progress-bar'); if (bar) { bar.style.width = progress + '%'; bar.textContent = progress + '%'; }
             const st = document.getElementById('progress-status'); if (st) st.textContent = `Processing ${Math.floor(progress * 2.5)}/250 records...`;
             if (progress >= 100) {
                 clearInterval(iv);
-                setTimeout(() => {
+                (() => {
                     UI.hideModal();
                     UI.toast.success('Import completed! 217 new records created.');
-                    DataStore.create('import_jobs', { file_name: _importData.fileName || 'import.xlsx', import_type: _importData.importType, total_rows: 250, valid_rows: 235, error_rows: 15, created_records: 217, updated_records: 18, skipped_records: 15, status: 'completed', mapping_config: {}, duplicate_handling: document.querySelector('input[name="duplicate-action"]:checked')?.value || 'skip', assignment_config: { assignTo: document.querySelector('input[name="assign-to"]:checked')?.value || 'myself' }, created_by: _currentUser?.id, created_at: new Date().toISOString(), completed_at: new Date().toISOString() });
-                    const vp = document.getElementById('content-viewport'); if (vp) showImportDashboard(vp);
+                    await DataStore.create('import_jobs', { file_name: _importData.fileName || 'import.xlsx', import_type: _importData.importType, total_rows: 250, valid_rows: 235, error_rows: 15, created_records: 217, updated_records: 18, skipped_records: 15, status: 'completed', mapping_config: {}, duplicate_handling: document.querySelector('input[name="duplicate-action"]:checked')?.value || 'skip', assignment_config: { assignTo: document.querySelector('input[name="assign-to"]:checked')?.value || 'myself' }, created_by: _currentUser?.id, created_at: new Date().toISOString(), completed_at: new Date().toISOString() });
+                    const vp = document.getElementById('content-viewport'); if (vp) await showImportDashboard(vp);
                 }, 500);
             }
         }, 150);
     };
 
-    const viewImportDetails = (id) => {
-        const job = DataStore.getById('import_jobs', id);
+    const viewImportDetails = async (id) => {
+        const job = await DataStore.getById('import_jobs', id);
         if (!job) return;
         const content = `<div><div style="background:var(--gray-50);padding:16px;border-radius:8px;margin-bottom:16px"><div><strong>File:</strong> ${job.file_name}</div><div><strong>Type:</strong> ${job.import_type}</div><div><strong>Status:</strong> ${job.status}</div><div><strong>Date:</strong> ${UI.formatDate(job.created_at)}</div></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"><div><strong>Total rows:</strong> ${job.total_rows}</div><div><strong>Valid rows:</strong> ${job.valid_rows}</div><div><strong>New records:</strong> ${job.created_records}</div><div><strong>Updated:</strong> ${job.updated_records}</div><div><strong>Skipped:</strong> ${job.skipped_records}</div><div><strong>Errors:</strong> ${job.error_rows}</div></div></div>`;
         UI.showModal(`Import Details: ${job.file_name}`, content, [{ label: 'Close', type: 'primary', action: 'UI.hideModal()' }]);
@@ -17487,17 +16629,17 @@ In a production system, this would show the actual file contents.
         UI.toast.success(`${type} template downloaded`);
     };
 
-    const showImportHistory = () => {
-        const jobs = DataStore.getAll('import_jobs').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    const showImportHistory = async () => {
+        const jobs = (await DataStore.getAll('import_jobs')).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
         const rows = jobs.length === 0 ? '<tr><td colspan="6" style="text-align:center;padding:20px">No import history</td></tr>' :
-            jobs.map(j => `<tr><td>${j.file_name}</td><td>${j.import_type}</td><td>${j.total_rows}</td><td><span class="import-status status-${j.status}">${j.status.toUpperCase()}</span></td><td>${UI.formatDate(j.created_at)}</td><td><button class="btn-icon" onclick="app.viewImportDetails(${j.id})"><i class="fas fa-eye"></i></button></td></tr>`).join('');
+            jobs.map(j => `<tr><td>${j.file_name}</td><td>${j.import_type}</td><td>${j.total_rows}</td><td><span class="import-status status-${j.status}">${j.status.toUpperCase()}</span></td><td>${UI.formatDate(j.created_at)}</td><td><button class="btn-icon" onclick="app.await viewImportDetails(${j.id})"><i class="fas fa-eye"></i></button></td></tr>`).join('');
         const content = `<table style="width:100%;border-collapse:collapse"><thead><tr style="background:var(--gray-50)"><th style="padding:10px;text-align:left">File</th><th style="padding:10px;text-align:left">Type</th><th style="padding:10px;text-align:left">Records</th><th style="padding:10px;text-align:left">Status</th><th style="padding:10px;text-align:left">Date</th><th style="padding:10px;text-align:left">Actions</th></tr></thead><tbody>${rows}</tbody></table>`;
         UI.showModal('Import History', content, [{ label: 'Close', type: 'primary', action: 'UI.hideModal()' }]);
     };
 
     // ========== PHASE 13: FOLLOW-UP MONITORING & REASSIGNMENT ==========
 
-    const showProtectionMonitoringView = (container) => {
+    const showProtectionMonitoringView = async (container) => {
         container.innerHTML = `
             <div class="protection-view">
                 <div class="protection-header">
@@ -17506,7 +16648,7 @@ In a production system, this would show the actual file contents.
                         <button class="btn secondary" onclick="app.refreshFollowupStats()"><i class="fas fa-sync-alt"></i> Refresh Stats</button>
                         <button class="btn secondary" onclick="app.exportFollowupReport()"><i class="fas fa-download"></i> Export Report</button>
                         <button class="btn secondary" onclick="app.configureAlerts()"><i class="fas fa-bell"></i> Configure Alerts</button>
-                        <button class="btn primary" onclick="app.navigateTo('import')"><i class="fas fa-upload"></i> Bulk Import</button>
+                        <button class="btn primary" onclick="app.await navigateTo('import')"><i class="fas fa-upload"></i> Bulk Import</button>
                     </div>
                 </div>
                 <div class="team-summary-cards">${renderTeamSummaryCards()}</div>
@@ -17515,7 +16657,7 @@ In a production system, this would show the actual file contents.
                     <div class="agent-table-container">
                         <table class="agent-performance-table">
                             <thead><tr><th>Agent</th><th>Team</th><th>Assigned</th><th>Followed up (7d)</th><th>Rate</th><th>Inactive (3-7d)</th><th>Inactive (8-14d)</th><th>Inactive (15d+)</th><th>Actions</th></tr></thead>
-                            <tbody>${renderAgentPerformanceRows()}</tbody>
+                            <tbody>${await renderAgentPerformanceRows()}</tbody>
                         </table>
                     </div>
                 </div>
@@ -17524,13 +16666,13 @@ In a production system, this would show the actual file contents.
                     <div class="inactive-table-container">
                         <table class="inactive-table">
                             <thead><tr><th>Prospect</th><th>Agent</th><th>Days Inactive</th><th>Score</th><th>Protection Deadline</th><th>Status</th><th>Actions</th></tr></thead>
-                            <tbody>${renderInactiveProspectsRows()}</tbody>
+                            <tbody>${await renderInactiveProspectsRows()}</tbody>
                         </table>
                     </div>
                 </div>
                 <div class="agent-performance" style="margin-top:24px">
                     <h3>Reassignment History</h3>
-                    <div class="agent-table-container">${renderReassignmentHistory()}</div>
+                    <div class="agent-table-container">${await renderReassignmentHistory()}</div>
                 </div>
             </div>`;
     };
@@ -17545,7 +16687,7 @@ In a production system, this would show the actual file contents.
         return teams.map(t => `<div class="summary-card ${t.color}"><h4>${t.name}</h4><div class="summary-stats"><div><span class="stat-label">Active:</span><span class="stat-value">${t.active}</span></div><div><span class="stat-label">Attention:</span><span class="stat-value warning">${t.attention}</span></div><div><span class="stat-label">Inactive:</span><span class="stat-value danger">${t.inactive}</span></div><div><span class="stat-label">Critical:</span><span class="stat-value danger">${t.critical}</span></div></div></div>`).join('');
     };
 
-    const renderAgentPerformanceRows = () => {
+    const renderAgentPerformanceRows = async () => {
         const agents = [
             { name: 'Michelle Tan', team: 'A', assigned: 52, followed: 48, i37: 2, i814: 2, i15: 0 },
             { name: 'Ah Seng', team: 'A', assigned: 50, followed: 31, i37: 8, i814: 6, i15: 5 },
@@ -17556,11 +16698,11 @@ In a production system, this would show the actual file contents.
         return agents.map(a => {
             const rate = Math.round((a.followed / a.assigned) * 100);
             const cls = rate < 70 ? 'rate-bad' : rate < 90 ? 'rate-warning' : 'rate-good';
-            return `<tr><td><strong>${a.name}</strong></td><td>Team ${a.team}</td><td>${a.assigned}</td><td>${a.followed}</td><td><span class="rate-badge ${cls}">${rate}%</span></td><td>${a.i37}</td><td>${a.i814}</td><td>${a.i15}</td><td><button class="btn-icon" onclick="app.viewAgentDetails('${a.name}')" title="View"><i class="fas fa-eye"></i></button><button class="btn-icon" onclick="app.openReassignModal('${a.name}')" title="Reassign"><i class="fas fa-exchange-alt"></i></button><button class="btn-icon" onclick="app.bulkReassign('${a.name}')" title="Bulk Reassign"><i class="fas fa-users"></i></button></td></tr>`;
+            return `<tr><td><strong>${a.name}</strong></td><td>Team ${a.team}</td><td>${a.assigned}</td><td>${a.followed}</td><td><span class="rate-badge ${cls}">${rate}%</span></td><td>${a.i37}</td><td>${a.i814}</td><td>${a.i15}</td><td><button class="btn-icon" onclick="app.viewAgentDetails('${a.name}')" title="View"><i class="fas fa-eye"></i></button><button class="btn-icon" onclick="app.await openReassignModal('${a.name}')" title="Reassign"><i class="fas fa-exchange-alt"></i></button><button class="btn-icon" onclick="app.bulkReassign('${a.name}')" title="Bulk Reassign"><i class="fas fa-users"></i></button></td></tr>`;
         }).join('');
     };
 
-    const renderInactiveProspectsRows = () => {
+    const renderInactiveProspectsRows = async () => {
         const prospects = [
             { name: 'Tan Mei Ling', agent: 'Raj Kumar', days: 14, score: 620, deadline: '17 Mar 2026', status: 'critical' },
             { name: 'Kok Leong', agent: 'Raj Kumar', days: 16, score: 550, deadline: '15 Mar 2026', status: 'critical' },
@@ -17568,17 +16710,17 @@ In a production system, this would show the actual file contents.
             { name: 'Wong Chee Meng', agent: 'Ah Seng', days: 9, score: 590, deadline: '25 Mar 2026', status: 'warning' },
             { name: 'Lim Siew Ling', agent: 'Mei Ling', days: 8, score: 710, deadline: '22 Mar 2026', status: 'warning' }
         ];
-        return prospects.map(p => `<tr><td><strong>${p.name}</strong></td><td>${p.agent}</td><td class="${p.days > 14 ? 'critical' : 'warning'}">${p.days} days</td><td>${p.score}</td><td>${p.deadline}</td><td><span class="status-badge status-${p.status}">${p.status === 'critical' ? '🔴 Critical' : '🟡 Warning'}</span></td><td><button class="btn-icon" onclick="app.openReassignModal('${p.name}')"><i class="fas fa-exchange-alt"></i></button><button class="btn-icon" onclick="app.contactProspect('${p.name}')"><i class="fas fa-phone"></i></button></td></tr>`).join('');
+        return prospects.map(p => `<tr><td><strong>${p.name}</strong></td><td>${p.agent}</td><td class="${p.days > 14 ? 'critical' : 'warning'}">${p.days} days</td><td>${p.score}</td><td>${p.deadline}</td><td><span class="status-badge status-${p.status}">${p.status === 'critical' ? '🔴 Critical' : '🟡 Warning'}</span></td><td><button class="btn-icon" onclick="app.await openReassignModal('${p.name}')"><i class="fas fa-exchange-alt"></i></button><button class="btn-icon" onclick="app.await contactProspect('${p.name}')"><i class="fas fa-phone"></i></button></td></tr>`).join('');
     };
 
-    const renderReassignmentHistory = () => {
-        const history = DataStore.getAll('reassignment_history').sort((a, b) => new Date(b.reassignment_date) - new Date(a.reassignment_date));
+    const renderReassignmentHistory = async () => {
+        const history = (await DataStore.getAll('reassignment_history')).sort((a, b) => new Date(b.reassignment_date) - new Date(a.reassignment_date));
         if (history.length === 0) return '<p style="padding:16px;color:var(--gray-500)">No reassignment history yet.</p>';
-        const getAgentNameById = (id) => { const u = DataStore.getById('users', id); return u?.full_name || `Agent #${id}`; };
-        return `<table class="agent-performance-table"><thead><tr><th>Date</th><th>Prospect ID</th><th>From Agent</th><th>To Agent</th><th>Reason</th><th>By</th></tr></thead><tbody>${history.map(r => `<tr><td>${UI.formatDate(r.reassignment_date)}</td><td>#${r.prospect_id}</td><td>${getAgentNameById(r.from_agent_id)}</td><td>${getAgentNameById(r.to_agent_id)}</td><td>${r.reassignment_reason}</td><td>${getAgentNameById(r.reassigned_by)}</td></tr>`).join('')}</tbody></table>`;
+        const getAgentNameById = async (id) => { const u = await DataStore.getById('users', id); return u?.full_name || `Agent #${id}`; };
+        return `<table class="agent-performance-table"><thead><tr><th>Date</th><th>Prospect ID</th><th>From Agent</th><th>To Agent</th><th>Reason</th><th>By</th></tr></thead><tbody>${history.map(r => `<tr><td>${UI.formatDate(r.reassignment_date)}</td><td>#${r.prospect_id}</td><td>${await getAgentNameById(r.from_agent_id)}</td><td>${await getAgentNameById(r.to_agent_id)}</td><td>${r.reassignment_reason}</td><td>${await getAgentNameById(r.reassigned_by)}</td></tr>`).join('')}</tbody></table>`;
     };
 
-    const openReassignModal = (prospectName) => {
+    const openReassignModal = async (prospectName) => {
         const content = `
             <div class="reassign-modal">
                 <div class="current-info">
@@ -17618,12 +16760,12 @@ In a production system, this would show the actual file contents.
             </div>`;
         UI.showModal(`Reassign Prospect: ${prospectName}`, content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'CONFIRM REASSIGNMENT', type: 'primary', action: 'app.confirmReassignment()' }
+            { label: 'CONFIRM REASSIGNMENT', type: 'primary', action: 'await app.confirmReassignment()' }
         ]);
     };
 
-    const confirmReassignment = () => {
-        DataStore.create('reassignment_history', { prospect_id: Date.now(), from_agent_id: 8, to_agent_id: 6, reassigned_by: _currentUser?.id || 5, reassignment_date: new Date().toISOString(), reassignment_reason: document.querySelector('input[name="reassign-reason"]:checked')?.value || 'inactive', reason_notes: document.getElementById('reassign-justification')?.value || '', days_inactive: 14, protection_deadline: '2026-03-17', created_at: new Date().toISOString() });
+    const confirmReassignment = async () => {
+        await DataStore.create('reassignment_history', { prospect_id: Date.now(), from_agent_id: 8, to_agent_id: 6, reassigned_by: _currentUser?.id || 5, reassignment_date: new Date().toISOString(), reassignment_reason: document.querySelector('input[name="reassign-reason"]:checked')?.value || 'inactive', reason_notes: document.getElementById('reassign-justification')?.value || '', days_inactive: 14, protection_deadline: '2026-03-17', created_at: new Date().toISOString() });
         UI.hideModal(); UI.toast.success('Prospect reassigned successfully');
     };
 
@@ -17660,36 +16802,40 @@ In a production system, this would show the actual file contents.
     const exportFollowupReport = () => UI.toast.success('Follow-up report exported');
     const configureAlerts = () => UI.toast.info('Alert configuration coming soon');
     const viewAgentDetails = (name) => UI.toast.info(`Viewing details for ${name}`);
-    const contactProspect = (name) => { openActivityModal(); };
+    const contactProspect = async (name) => { await openActivityModal(); };
 
     // Phase 13: seed demo data
-    const initImportDemoData = () => {
+    const initImportDemoData = async () => {
         // NEW: Clear only demo data if requested
         if (window.location.search.includes('resetDemo=true')) {
             ['import_jobs', 'reassignment_history'].forEach(table => {
-                const all = DataStore.getAll(table);
+                const all = await DataStore.getAll(table);
                 const nonDemo = all.filter(item => !item.is_demo);
                 localStorage.setItem(`fs_crm_${table}`, JSON.stringify(nonDemo));
             });
             UI.toast.info('Demo data cleared.');
         }
 
-        if (DataStore.getAll('import_jobs').length === 0) {
+        if (await DataStore.getAll('import_jobs').length === 0) {
             const jobs = [
                 { id: 9001, is_demo: true, file_name: 'leads_march_2026.xlsx', import_type: 'prospects', total_rows: 250, valid_rows: 235, error_rows: 15, created_records: 217, updated_records: 18, skipped_records: 15, status: 'completed', mapping_config: {}, duplicate_handling: 'skip', assignment_config: { assignTo: 'myself' }, created_by: 5, created_at: '2026-03-05T14:30:00Z', completed_at: '2026-03-05T14:32:35Z' },
                 { id: 9002, is_demo: true, file_name: 'customers_feb.xlsx', import_type: 'customers', total_rows: 128, valid_rows: 122, error_rows: 6, created_records: 115, updated_records: 7, skipped_records: 6, status: 'completed', mapping_config: {}, duplicate_handling: 'update', assignment_config: { assignTo: 'team' }, created_by: 5, created_at: '2026-02-28T10:15:00Z', completed_at: '2026-02-28T10:17:22Z' },
                 { id: 9003, is_demo: true, file_name: 'agents_2026.xlsx', import_type: 'agents', total_rows: 15, valid_rows: 15, error_rows: 0, created_records: 15, updated_records: 0, skipped_records: 0, status: 'completed', mapping_config: {}, duplicate_handling: 'skip', assignment_config: {}, created_by: 1, created_at: '2026-02-15T09:00:00Z', completed_at: '2026-02-15T09:01:00Z' },
                 { id: 9004, is_demo: true, file_name: 'product_catalog.xlsx', import_type: 'products', total_rows: 45, valid_rows: 0, error_rows: 45, created_records: 0, updated_records: 0, skipped_records: 0, status: 'failed', mapping_config: {}, duplicate_handling: 'skip', assignment_config: {}, created_by: 5, created_at: '2026-02-10T09:45:00Z', completed_at: '2026-02-10T09:45:30Z' }
             ];
-            jobs.forEach(j => DataStore.create('import_jobs', j));
+            for (const j of jobs) {
+                await DataStore.create('import_jobs', j);
+            }
         }
-        if (DataStore.getAll('reassignment_history').length === 0) {
+        if (await DataStore.getAll('reassignment_history').length === 0) {
             const reassignments = [
                 { id: 8001, is_demo: true, prospect_id: 101, from_agent_id: 8, to_agent_id: 6, reassigned_by: 5, reassignment_date: '2026-03-06T10:23:00Z', reassignment_reason: 'inactive', reason_notes: 'Raj Kumar unresponsive', days_inactive: 14, protection_deadline: '2026-03-17', created_at: '2026-03-06T10:23:00Z' },
                 { id: 8002, is_demo: true, prospect_id: 102, from_agent_id: 8, to_agent_id: 5, reassigned_by: 5, reassignment_date: '2026-03-05T15:45:00Z', reassignment_reason: 'inactive', reason_notes: 'High score prospect', days_inactive: 16, protection_deadline: '2026-03-15', created_at: '2026-03-05T15:45:00Z' },
                 { id: 8003, is_demo: true, prospect_id: 103, from_agent_id: 6, to_agent_id: 7, reassigned_by: 3, reassignment_date: '2026-03-04T09:30:00Z', reassignment_reason: 'workload', reason_notes: 'Balancing workload', days_inactive: 12, protection_deadline: '2026-03-20', created_at: '2026-03-04T09:30:00Z' }
             ];
-            reassignments.forEach(r => DataStore.create('reassignment_history', r));
+            for (const r of reassignments) {
+                await DataStore.create('reassignment_history', r);
+            }
         }
     };
 
@@ -17702,7 +16848,7 @@ In a production system, this would show the actual file contents.
 
             // 1. Initialize Offline Storage & Sync
             if (typeof SyncManager !== 'undefined') {
-                await SyncManager.init();
+                await SyncManager.await init();
             }
 
             // 2. Setup Push Notifications
@@ -17745,21 +16891,21 @@ In a production system, this would show the actual file contents.
         }
     };
 
-    const refreshPipelineCalculations = () => {
+    const refreshPipelineCalculations = async () => {
         UI.toast.info('Recalculating pipeline...');
-        setTimeout(() => {
-            refreshPipeline();
+        (() => {
+            await refreshPipeline();
         }, 500);
     };
 
-    const filterPipeline = () => {
+    const filterPipeline = async () => {
         // Redraw with current filter value
-        refreshPipeline();
+        await refreshPipeline();
     };
 
-    const saveFocusOrder = () => {
+    const saveFocusOrder = async () => {
         // Placeholder for compatibility if called from HTML
-        saveManualOrder();
+        await saveManualOrder();
     };
 
     const showAddToFocusModal = () => {
@@ -17873,7 +17019,7 @@ In a production system, this would show the actual file contents.
         switchCustomerTab,
         showCustomersView,
         showCustomerDetail,
-        hideCustomerDetail: () => navigateTo('prospects'),
+        hideCustomerDetail: async () => await navigateTo('prospects'),
         renderCustomersTable,
         openAddCustomerModal,
         saveCustomer,
@@ -18049,7 +17195,7 @@ In a production system, this would show the actual file contents.
         insertVariable,
         addButtonField,
         searchTemplates,
-        editTemplate: (id) => openCreateTemplateModal(id),
+        editTemplate: async (id) => await openCreateTemplateModal(id),
         copyTemplate,
         deleteTemplate,
         useTemplate,
@@ -18065,7 +17211,7 @@ In a production system, this would show the actual file contents.
         simulateCampaignSending,
         refreshCampaignsTab,
         filterCampaigns,
-        editCampaign: (id) => openCreateCampaignModal(id),
+        editCampaign: async (id) => await openCreateCampaignModal(id),
         pauseCampaign,
         resumeCampaign,
         cancelCampaign,
@@ -18243,37 +17389,37 @@ In a production system, this would show the actual file contents.
 
                 switch (view) {
                     case 'month':
-                        if (typeof renderCalendar === 'function') renderCalendar();
+                        if (typeof renderCalendar === 'function') await renderCalendar();
                         break;
                     case 'week':
-                        if (typeof renderWeekView === 'function') renderWeekView();
+                        if (typeof renderWeekView === 'function') await renderWeekView();
                         break;
                     case 'day':
-                        if (typeof renderTodayActivities === 'function') renderTodayActivities();
+                        if (typeof renderTodayActivities === 'function') await renderTodayActivities();
                         break;
                     case 'prospects':
-                        if (typeof showProspectsView === 'function') showProspectsView(viewport);
+                        if (typeof showProspectsView === 'function') await showProspectsView(viewport);
                         break;
                     case 'pipeline':
-                        if (typeof showPipelineView === 'function') showPipelineView(viewport);
+                        if (typeof showPipelineView === 'function') await showPipelineView(viewport);
                         break;
                     case 'reports':
-                        if (typeof refreshKPIDashboard === 'function') refreshKPIDashboard();
+                        if (typeof refreshKPIDashboard === 'function') await refreshKPIDashboard();
                         break;
                     case 'protection':
-                        if (typeof showProtectionMonitoringView === 'function') showProtectionMonitoringView(viewport);
+                        if (typeof showProtectionMonitoringView === 'function') await showProtectionMonitoringView(viewport);
                         break;
                     case 'agents':
-                        if (typeof showAgentsView === 'function') showAgentsView(viewport);
+                        if (typeof showAgentsView === 'function') await showAgentsView(viewport);
                         break;
                     case 'referrals':
-                        if (typeof showReferralsView === 'function') showReferralsView(viewport);
+                        if (typeof showReferralsView === 'function') await showReferralsView(viewport);
                         break;
                     case 'cases':
-                        if (typeof showCasesView === 'function') showCasesView(viewport);
+                        if (typeof showCasesView === 'function') await showCasesView(viewport);
                         break;
                     case 'promotions':
-                        if (typeof showMarketingAutomationView === 'function') showMarketingAutomationView(viewport);
+                        if (typeof showMarketingAutomationView === 'function') await showMarketingAutomationView(viewport);
                         break;
                     default:
                         console.log(`No specific refresh logic configured for ${view}`);
@@ -18346,36 +17492,36 @@ Object.assign(window.app, appLogic);
 
 
 // ========== SECURITY INITIALIZATION ==========
-const initSecurity = () => {
+const initSecurity = async () => {
     console.log('Initializing security features...');
-    if (typeof window.app.checkForSecurityIncidents !== 'undefined') window.app.checkForSecurityIncidents();
+    if (typeof window.app.checkForSecurityIncidents !== 'undefined') window.app.await checkForSecurityIncidents();
     if (typeof window.app.monitorLoginAttempts !== 'undefined') window.app.monitorLoginAttempts();
-    if (typeof window.app.initSessionTimeout !== 'undefined') window.app.initSessionTimeout();
-    if (typeof window.app.checkExpiredConsents !== 'undefined') window.app.checkExpiredConsents();
-    if (typeof window.app.scheduleRetentionJobs !== 'undefined') window.app.scheduleRetentionJobs();
+    if (typeof window.app.initSessionTimeout !== 'undefined') window.app.await initSessionTimeout();
+    if (typeof window.app.checkExpiredConsents !== 'undefined') window.app.await checkExpiredConsents();
+    if (typeof window.app.scheduleRetentionJobs !== 'undefined') window.app.await scheduleRetentionJobs();
     console.log('Security features initialized');
 };
 
 let sessionTimeoutTimer;
-const initSessionTimeout = () => {
+const initSessionTimeout = async () => {
     const timeoutMinutes = parseInt(localStorage.getItem('session_timeout') || '30');
-    const resetTimeout = () => {
+    const resetTimeout = async () => {
         clearTimeout(sessionTimeoutTimer);
-        sessionTimeoutTimer = setTimeout(window.app.logoutDueToInactivity, timeoutMinutes * 60 * 1000);
+        sessionTimeoutTimer = (window.app.logoutDueToInactivity, timeoutMinutes * 60 * 1000);
     };
     ['click', 'mousemove', 'keypress', 'scroll', 'touchstart'].forEach(event => {
         document.addEventListener(event, resetTimeout);
     });
-    resetTimeout();
+    await resetTimeout();
 };
 
-const logoutDueToInactivity = () => {
+const logoutDueToInactivity = async () => {
     if (window.UI && window.UI.toast) window.UI.toast.warning('Session expired due to inactivity');
     if (typeof AuditLogger !== 'undefined') AuditLogger.warn("AUTH", "LOGOUT", { reason: 'session_timeout' });
     if (typeof window.app.logout === 'function') {
-        window.app.logout();
+        window.app.await logout();
     } else if (typeof Auth !== 'undefined') {
-        Auth.logout();
+        await Auth.await logout();
         window.location.reload();
     }
 };
@@ -18390,33 +17536,33 @@ const monitorLoginAttempts = () => {
     localStorage.setItem('login_attempts', JSON.stringify(failedAttempts));
 };
 
-const checkForSecurityIncidents = () => {
+const checkForSecurityIncidents = async () => {
     if (!window.DataStore) return;
-    const incidents = DataStore.getAll('security_incidents').filter(i => i.status === 'new' && !i.acknowledged);
+    const incidents = (await DataStore.getAll('security_incidents')).filter(i => i.status === 'new' && !i.acknowledged);
     if (incidents.length > 0) {
         const critical = incidents.filter(i => i.severity === 'critical');
         if (critical.length > 0) {
             if (window.UI && window.UI.toast) window.UI.toast.error(`${critical.length} critical security incidents require attention`, 0);
-            window.app.addSecurityAlertIcon();
+            window.app.await addSecurityAlertIcon();
         }
     }
 };
 
-const addSecurityAlertIcon = () => {
+const addSecurityAlertIcon = async () => {
     const header = document.querySelector('.top-bar .bar-right');
     if (header && !document.querySelector('.security-alert')) {
         const alert = document.createElement('div');
         alert.className = 'security-alert';
         alert.innerHTML = '<i class="fas fa-exclamation-triangle" style="color:red; cursor:pointer; font-size:20px; margin-right:15px;"></i>';
         alert.title = 'Security incidents require attention';
-        alert.onclick = () => window.app.showSecurityDashboard();
+        alert.onclick = () => window.app.await showSecurityDashboard();
         header.insertBefore(alert, header.firstChild);
     }
 };
 
-const checkExpiredConsents = () => {
+const checkExpiredConsents = async () => {
     if (!window.DataStore || typeof ConsentManager === 'undefined') return;
-    const users = DataStore.getAll('users');
+    const users = await DataStore.getAll('users');
     const now = new Date();
     users.forEach(user => {
         if (user.consent_preferences) {
@@ -18429,7 +17575,7 @@ const checkExpiredConsents = () => {
     });
 };
 
-const scheduleRetentionJobs = () => {
+const scheduleRetentionJobs = async () => {
     if (typeof RetentionPolicy === 'undefined') return;
     const runRetention = () => {
         const lastRun = localStorage.getItem('last_retention_run');
@@ -18439,11 +17585,11 @@ const scheduleRetentionJobs = () => {
         }
     };
     runRetention();
-    setInterval(runRetention, 24 * 60 * 60 * 1000);
+    (runRetention, 24 * 60 * 60 * 1000);
 };
 
-const showSecurityDashboard = () => {
-    const incidents = DataStore.getAll('security_incidents') || [];
+const showSecurityDashboard = async () => {
+    const incidents = await DataStore.getAll('security_incidents') || [];
 
     let content = `
         <div class="security-dashboard">
@@ -18472,8 +17618,8 @@ const showSecurityDashboard = () => {
     if (view) view.innerHTML = content;
 };
 
-const showAuditLogs = () => {
-    const logs = (DataStore.getAll('audit_logs') || [])
+const showAuditLogs = async () => {
+    const logs = (await DataStore.getAll('audit_logs') || [])
         .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
         .slice(0, 50);
 
@@ -18566,8 +17712,9 @@ Object.assign(window.app, {
 
 // ========== PHASE 20: SYSTEM ADMINISTRATION & DEPLOYMENT ==========
 
-const showAdminDashboard = () => {
-    if (!Auth.getCurrentUser() || Auth.getCurrentUser().role !== 'admin') {
+const showAdminDashboard = async () => {
+    const _adminCheckUser = await Auth.getCurrentUser();
+    if (!_adminCheckUser || _adminCheckUser.role !== 'admin') {
         if (window.UI) window.UI.toast.error("Access Denied. Admins only.");
         return;
     }
@@ -18595,7 +17742,7 @@ const showAdminDashboard = () => {
                     <div class="kpi-title" style="color: var(--gray-600); font-size: 14px; margin-bottom: 8px;">Active Tenants</div>
                     <div class="kpi-value" style="font-size: 24px; font-weight: bold; color: var(--gray-900);">${activeTenants} / ${tenants.length}</div>
                 </div>
-                <div class="kpi-card" style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); cursor: pointer;" onclick="app.showDeploymentCenter()">
+                <div class="kpi-card" style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); cursor: pointer;" onclick="app.await showDeploymentCenter()">
                     <div class="kpi-title" style="color: var(--gray-600); font-size: 14px; margin-bottom: 8px;">System Version</div>
                     <div class="kpi-value" style="font-size: 24px; font-weight: bold; color: var(--gray-900);">
                         ${updates && updates.hasUpdate ? '<span style="color: var(--warning-color); font-size:16px;">Update Available</span>' : 'Up to Date'}
@@ -18605,37 +17752,37 @@ const showAdminDashboard = () => {
 
             <div class="admin-modules-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;">
                 
-                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="app.showTenantManagement()" onmouseover="this.style.transform='translateY(-5px)'" onmouseout="this.style.transform='translateY(0)'">
+                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="app.showTenantManagement()" onmouseover="this.style.transform='await translateY(-5px)'" onmouseout="this.style.transform='await translateY(0)'">
                     <i class="fas fa-building" style="font-size: 40px; color: var(--primary-color); margin-bottom: 16px;"></i>
                     <h3>Tenant Management</h3>
                     <p style="color: var(--gray-600); font-size: 14px; margin-top: 8px;">Manage multi-tenant architecture, provision new tenants, and monitor usage.</p>
                 </div>
 
-                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="app.showSystemHealth()" onmouseover="this.style.transform='translateY(-5px)'" onmouseout="this.style.transform='translateY(0)'">
+                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="app.showSystemHealth()" onmouseover="this.style.transform='await translateY(-5px)'" onmouseout="this.style.transform='await translateY(0)'">
                     <i class="fas fa-heartbeat" style="font-size: 40px; color: var(--success-color); margin-bottom: 16px;"></i>
                     <h3>System Health</h3>
                     <p style="color: var(--gray-600); font-size: 14px; margin-top: 8px;">Monitor database, API, storage, and external service connectivity.</p>
                 </div>
 
-                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="app.showBackupManager()" onmouseover="this.style.transform='translateY(-5px)'" onmouseout="this.style.transform='translateY(0)'">
+                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="app.showBackupManager()" onmouseover="this.style.transform='await translateY(-5px)'" onmouseout="this.style.transform='await translateY(0)'">
                     <i class="fas fa-database" style="font-size: 40px; color: var(--secondary-color); margin-bottom: 16px;"></i>
                     <h3>Backup & Restore</h3>
                     <p style="color: var(--gray-600); font-size: 14px; margin-top: 8px;">Configure automated backups, manage snapshots, and perform data restoration.</p>
                 </div>
 
-                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="app.showPerformanceMonitor()" onmouseover="this.style.transform='translateY(-5px)'" onmouseout="this.style.transform='translateY(0)'">
+                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="app.showPerformanceMonitor()" onmouseover="this.style.transform='await translateY(-5px)'" onmouseout="this.style.transform='await translateY(0)'">
                     <i class="fas fa-tachometer-alt" style="font-size: 40px; color: var(--warning-color); margin-bottom: 16px;"></i>
                     <h3>Performance Monitor</h3>
                     <p style="color: var(--gray-600); font-size: 14px; margin-top: 8px;">Track query execution times, memory usage, and application delays.</p>
                 </div>
 
-                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="app.showDeploymentCenter()" onmouseover="this.style.transform='translateY(-5px)'" onmouseout="this.style.transform='translateY(0)'">
+                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="app.showDeploymentCenter()" onmouseover="this.style.transform='await translateY(-5px)'" onmouseout="this.style.transform='await translateY(0)'">
                     <i class="fas fa-rocket" style="font-size: 40px; color: #8b5cf6; margin-bottom: 16px;"></i>
                     <h3>Deployment Center</h3>
                     <p style="color: var(--gray-600); font-size: 14px; margin-top: 8px;">Manage CI/CD pipelines, rollouts to different environments, and zero-downtime updates.</p>
                 </div>
 
-                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="app.showSystemLogs()" onmouseover="this.style.transform='translateY(-5px)'" onmouseout="this.style.transform='translateY(0)'">
+                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="app.showSystemLogs()" onmouseover="this.style.transform='await translateY(-5px)'" onmouseout="this.style.transform='async translateY(0)'">
                     <i class="fas fa-terminal" style="font-size: 40px; color: var(--gray-800); margin-bottom: 16px;"></i>
                     <h3>System Logs</h3>
                     <p style="color: var(--gray-600); font-size: 14px; margin-top: 8px;">View consolidated application, database, and system error logs.</p>
@@ -18773,7 +17920,7 @@ const showSystemHealth = () => {
     if (view) view.innerHTML = content;
 };
 
-const showBackupManager = () => {
+const showBackupManager = async () => {
     let backups = typeof BackupManager !== 'undefined' ? BackupManager.listBackups() : [];
     let content = `
         <div class="backup-manager" style="padding: 24px;">
@@ -18781,7 +17928,7 @@ const showBackupManager = () => {
                 <h2>Backup & Restore</h2>
                 <div>
                     <button class="btn secondary" onclick="app.createBackup('INCREMENTAL')">Incremental Backup</button>
-                    <button class="btn primary" onclick="app.createBackup('FULL')"><i class="fas fa-save"></i> Full Backup</button>
+                    <button class="btn primary" onclick="app.await createBackup('FULL')"><i class="fas fa-save"></i> Full Backup</button>
                 </div>
             </div>
             <div class="data-table-container">
@@ -18818,11 +17965,11 @@ const showBackupManager = () => {
     if (view) view.innerHTML = content;
 };
 
-const createBackup = (type) => {
+const createBackup = async (type) => {
     if (typeof BackupManager !== 'undefined') {
-        const id = BackupManager.createBackup(type);
+        const id = await BackupManager.await createBackup(type);
         if (window.UI) UI.toast.success(`Backup ${id} initiated successfully`);
-        setTimeout(showBackupManager, 1000); // Refresh view after a simulated delay
+        (showBackupManager, 1000); // Refresh view after a simulated delay
     }
 };
 
@@ -18835,7 +17982,7 @@ const restoreBackup = (id) => {
     }
 };
 
-const showPerformanceMonitor = () => {
+const showPerformanceMonitor = async () => {
     if (window.UI) window.UI.toast.info("Generating performance metrics report...");
     let content = `
         <div class="performance-monitor" style="padding: 24px;">
@@ -18850,7 +17997,7 @@ const showPerformanceMonitor = () => {
     if (view) {
         view.innerHTML = content;
         // Mock chart
-        setTimeout(() => {
+        (() => {
             const ctx = document.getElementById('performanceChart');
             if (ctx && window.Chart) {
                 new Chart(ctx, {
@@ -18865,13 +18012,13 @@ const showPerformanceMonitor = () => {
     }
 };
 
-const showDeploymentCenter = () => {
+const showDeploymentCenter = async () => {
     const history = typeof DeploymentManager !== 'undefined' ? DeploymentManager.getDeploymentHistory() : [];
     let content = `
         <div class="deployment-center" style="padding: 24px;">
             <div class="header-actions" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
                 <h2>Deployment Center</h2>
-                <button class="btn primary" onclick="app.executeDeployment()"><i class="fas fa-rocket"></i> Deploy New Version</button>
+                <button class="btn primary" onclick="app.await executeDeployment()"><i class="fas fa-rocket"></i> Deploy New Version</button>
             </div>
             
             <div class="data-table-container">
@@ -18893,7 +18040,7 @@ const showDeploymentCenter = () => {
                                 <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);"><span class="status-badge status-${d.status.toLowerCase()}">${d.status}</span></td>
                                 <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">${new Date(d.deployed_at).toLocaleString()}</td>
                                 <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">
-                                    ${d.status === 'COMPLETED' ? `<button class="btn btn-sm warning" onclick="app.rollbackDeployment('${d.version}')">Rollback</button>` : '-'}
+                                    ${d.status === 'COMPLETED' ? `<button class="btn btn-sm warning" onclick="app.await rollbackDeployment('${d.version}')">Rollback</button>` : '-'}
                                 </td>
                             </tr>
                         `).join('') : '<tr><td colspan="5" style="padding: 16px; text-align: center;">No deployment history.</td></tr>'}
@@ -18906,21 +18053,21 @@ const showDeploymentCenter = () => {
     if (view) view.innerHTML = content;
 };
 
-const executeDeployment = () => {
+const executeDeployment = async () => {
     if (typeof DeploymentManager !== 'undefined') {
         const version = 'v' + (8.7 + Math.random() * 0.1).toFixed(2);
         DeploymentManager.createDeployment(version, 'PRODUCTION', { 'feature_x': true });
         if (window.UI) UI.toast.success(`Deployment ${version} started`);
-        setTimeout(showDeploymentCenter, 1000);
+        (showDeploymentCenter, 1000);
     }
 };
 
-const rollbackDeployment = (version) => {
+const rollbackDeployment = async (version) => {
     if (confirm(`Are you sure you want to rollback from ${version}?`)) {
         if (typeof DeploymentManager !== 'undefined') {
-            DeploymentManager.rollbackDeployment(version);
+            await DeploymentManager.await rollbackDeployment(version);
             if (window.UI) UI.toast.success('Rollback initiated');
-            setTimeout(showDeploymentCenter, 1000);
+            (showDeploymentCenter, 1000);
         }
     }
 };
@@ -18948,29 +18095,29 @@ Object.assign(window.app, {
     executeDeployment,
     rollbackDeployment,
     showSystemLogs,
-    viewEntityDetail: (entity, id) => {
+    viewEntityDetail: async (entity, id) => {
         if (typeof hideSearchPanel !== 'undefined') hideSearchPanel();
         switch (entity) {
-            case 'prospects': if (typeof showProspectDetail !== 'undefined') showProspectDetail(id); break;
-            case 'customers': if (typeof showCustomerDetail !== 'undefined') showCustomerDetail(id); break;
-            case 'agents': if (typeof showAgentDetail !== 'undefined') showAgentDetail(id); break;
+            case 'prospects': if (typeof showProspectDetail !== 'undefined') await showProspectDetail(id); break;
+            case 'customers': if (typeof showCustomerDetail !== 'undefined') await showCustomerDetail(id); break;
+            case 'agents': if (typeof showAgentDetail !== 'undefined') await showAgentDetail(id); break;
             default: console.warn('Unknown entity type:', entity);
         }
     },
     // Provide mocks for some inline UI handlers to avoid errors if they don't exist
-    suspendTenant: (id) => { if (window.UI) window.UI.toast.info("Tenant suspended state toggled."); setTimeout(showTenantManagement, 500); },
+    suspendTenant: (id) => { if (window.UI) window.UI.toast.info("Tenant suspended state toggled."); await setTimeout(showTenantManagement, 500); },
     viewTenantDetails: (id) => { if (window.UI) window.UI.toast.info("Viewing details for " + id); }
 });
 
 // Initialize application when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
     console.log("Script end reached. Scheduling init...");
-setTimeout(() => {
-    if (window.app && window.app.init) {
-        console.log("Triggering window.app.init()");
-        window.app.init();
-    }
-}, 100);
-    if (window.app && window.app.initSecurity) window.app.initSecurity();
+    await async setTimeout(() => {
+        if (window.app && window.app.init) {
+            console.log("Triggering window.app.await init()");
+            window.app.await init();
+        }
+    }, 100);
+    if (window.app && window.app.initSecurity) window.app.await initSecurity();
     if (window.app && window.app.initSync) window.app.initSync();
 });

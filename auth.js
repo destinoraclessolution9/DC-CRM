@@ -1,44 +1,30 @@
 /**
- * Feng Shui CRM V8.7 - Auth Layer
+ * Feng Shui CRM V8.7 - Auth Layer (Supabase)
  */
-// auth.js
 const Auth = (() => {
-    const SESSION_KEY = 'fs_crm_session';
+    const supabase = window.supabase;
 
-    const getCurrentUser = () => {
+    const getCurrentUser = async () => {
         try {
-            const data = localStorage.getItem(SESSION_KEY);
-            return data ? JSON.parse(data) : null;
+            const { data: { user }, error } = await supabase.auth.getUser();
+            if (error) throw error;
+            return user;
         } catch (e) {
+            console.warn('Auth: getCurrentUser failed', e);
             return null;
         }
     };
 
-    const setUser = (user) => {
-        try {
-            localStorage.setItem(SESSION_KEY, JSON.stringify(user));
-        } catch (e) {
-            console.warn('Auth: localStorage save blocked');
-        }
+    const login = async (email, password) => {
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+        return data.user;
     };
 
-    const logout = () => {
-        try {
-            localStorage.removeItem(SESSION_KEY);
-        } catch (e) {
-            console.warn('Auth: localStorage remove blocked');
-        }
+    const logout = async () => {
+        const { error } = await supabase.auth.signOut();
+        if (error) throw error;
     };
 
-    const login = (userId) => {
-        const user = DataStore.getById('users', userId);
-        if (user) {
-            setUser(user);
-            return user;
-        }
-        return null;
-    };
-
-    return { getCurrentUser, setUser, logout, login };
+    return { getCurrentUser, login, logout };
 })();
-

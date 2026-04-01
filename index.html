@@ -20,12 +20,11 @@
                 <h2 style="margin-top: 12px; font-size: 22px; font-weight: 700;">FENG SHUI CRM</h2>
             </div>
             <div class="login-form">
-                <select id="login-user-select" class="form-control" style="margin-bottom: 16px;">
-                    <!-- populated by JavaScript -->
-                </select>
-                <button class="btn primary" style="width: 100%;" onclick="app.login()">Login</button>
+                <input type="email" id="loginEmail" class="form-control" placeholder="Email" required style="margin-bottom: 12px;">
+                <input type="password" id="loginPassword" class="form-control" placeholder="Password" required style="margin-bottom: 16px;">
+                <button id="loginBtn" class="btn primary" style="width: 100%;">Login</button>
             </div>
-            <p class="login-hint">Select a demo user to continue</p>
+            <p class="login-hint">Enter your email and password to continue</p>
         </div>
     </div>
     <div class="app-shell" id="app-shell" style="display: none;">
@@ -174,6 +173,9 @@
     </div>
 
     <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="supabase-client.js"></script>
+
     <!-- Local lunar calendar library (loaded before script.js) -->
     <script src="lunar-calendar.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
