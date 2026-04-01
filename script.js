@@ -1,6 +1,5 @@
 // Ensure app object exists globally - MUST BE FIRST LINE
 window.app = window.app || {};
-(async function() {
 console.log("!!! ANTIGRAVITY v2 LOADED !!!");
 
 // Add initialization flag
@@ -9,7 +8,6 @@ window.app.ready = false;
 window.onerror = (msg, url, line) => {
     console.error(`GLOBAL ERROR: ${msg} at ${url}:${line}`);
 };
-
 
 const appLogic = (() => {
     let _currentView = 'dashboard';
@@ -136,7 +134,7 @@ const appLogic = (() => {
         if (_currentUser && (isSystemAdmin(_currentUser) || isMarketingManager(_currentUser) || _currentUser.role === 'admin')) {
             return await DataStore.getAll('customers');
         }
-        return (await DataStore.getAll('customers')).filter(c => c.agent_id === _currentUser?.id);
+        return await DataStore.getAll('customers').filter(c => c.agent_id === _currentUser?.id);
     };
 
     // For activities: visible if current user is lead, co-agent, or the activity is 'open', or if the lead agent is within visible users.
@@ -155,8 +153,7 @@ const appLogic = (() => {
 
     const getVisibleActivities = async () => {
         const all = await DataStore.getAll('activities');
-        const visibility = await Promise.all(all.map(a => canViewActivity(a)));
-        return all.filter((_, i) => visibility[i]);
+        return all.filter(async a => await canViewActivity(a));
     };
 
     // Check edit permission: super_admin, marketing_manager, manager can edit anything;
@@ -178,12 +175,12 @@ const appLogic = (() => {
     // Similar for customers, activities, etc. – you can add as needed.
 
     const canViewNode = async (personId, personType) => {
-    if (personType === 'prospect') {
-        return await canViewProspect({ id: personId });
-    } else if (personType === 'customer') {
-        return await canViewCustomer({ id: personId });
-    }
-    return false;
+        if (personType === 'prospect') {
+            return await canViewProspect({ id: personId });
+        } else if (personType === 'customer') {
+            return await canViewCustomer({ id: personId });
+        }
+        return false;
     };
 
     // ========== HELPER FUNCTIONS ==========
@@ -232,16 +229,16 @@ const appLogic = (() => {
         // Fallback: return a simple error message (but conversion should work now)
         return 'Conversion failed';
     };
-	const escapeHtml = (unsafe) => {
-    if (!unsafe || typeof unsafe !== 'string') return unsafe || '';
-    return unsafe
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
-};
-    
+
+    const escapeHtml = async (unsafe) => {
+        if (!unsafe || typeof unsafe !== 'string') return unsafe || '';
+        return unsafe
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    };
 
     const FILE_ICONS = {
         // Documents
@@ -451,16 +448,16 @@ const appLogic = (() => {
                 <div class="search-presets">
                     <h3>Quick Presets</h3>
                     <div class="preset-buttons">
-                        <button class="preset-btn" onclick="app. loadPreset('agent-monthly')">Agent Monthly Report</button>
-                        <button class="preset-btn" onclick="app. loadPreset('high-score')">High Score Prospects</button>
-                        <button class="preset-btn" onclick="app. loadPreset('recent-activities')">Recent Activities</button>
-                        <button class="preset-btn" onclick="app. loadPreset('cai-ku-not-purchased')">CAI KU Painting Not Purchased</button>
+                        <button class="preset-btn" onclick="await app.loadPreset('agent-monthly')">Agent Monthly Report</button>
+                        <button class="preset-btn" onclick="await app.loadPreset('high-score')">High Score Prospects</button>
+                        <button class="preset-btn" onclick="await app.loadPreset('recent-activities')">Recent Activities</button>
+                        <button class="preset-btn" onclick="await app.loadPreset('cai-ku-not-purchased')">CAI KU Painting Not Purchased</button>
                     </div>
                 </div>
                 
                 <div class="search-entity-selector">
                     <label>Search in:</label>
-                    <select id="search-entity" onchange="app. updateFilterSections()">
+                    <select id="search-entity" onchange="await app.updateFilterSections()">
                         <option value="agents">Agents</option>
                         <option value="prospects" selected>Prospects</option>
                         <option value="customers">Customers</option>
@@ -501,13 +498,13 @@ const appLogic = (() => {
                 </div>
                 
                 <div class="search-actions">
-                    <button class="btn primary" onclick="app. async executeSearch()">
+                    <button class="btn primary" onclick="await app.executeSearch()">
                         <i class="fas fa-search"></i> Apply Filters
                     </button>
                     <button class="btn secondary" onclick="app.clearAllFilters()">
                         <i class="fas fa-times"></i> Clear All
                     </button>
-                    <button class="btn secondary" onclick="app. async openSaveSearchModal()">
+                    <button class="btn secondary" onclick="await app.openSaveSearchModal()">
                         <i class="fas fa-save"></i> Save Search
                     </button>
                     <button class="btn secondary" onclick="app.exportResults('csv')">
@@ -682,14 +679,14 @@ const appLogic = (() => {
                     <label>Has Purchased</label>
                     <select id="filter-prospect-has-purchased" class="form-control">
                         <option value="">Select Product</option>
-                        ${(await DataStore.getAll('products')).filter(p => p.is_active !== false).map(p => `<option value="${p.name}">${p.name}</option>`).join('')}
+                        ${await DataStore.getAll('products').filter(p => p.is_active !== false).map(p => `<option value="${p.name}">${p.name}</option>`).join('')}
                     </select>
                 </div>
                 <div class="filter-group">
                     <label>Has Not Purchased</label>
                     <select id="filter-prospect-not-purchased" class="form-control">
                         <option value="">Select Product</option>
-                        ${(await DataStore.getAll('products')).filter(p => p.is_active !== false).map(p => `<option value="${p.name}">${p.name}</option>`).join('')}
+                        ${await DataStore.getAll('products').filter(p => p.is_active !== false).map(p => `<option value="${p.name}">${p.name}</option>`).join('')}
                     </select>
                 </div>
             </div>
@@ -1029,12 +1026,12 @@ const appLogic = (() => {
         _totalResults = results.length;
         _currentPage = 1;
 
-        await renderSearchResults();
+        renderSearchResults();
         addToSearchHistory(filters);
     };
 
     const performAgentSearch = async (filters) => {
-        let items = (await DataStore.getAll('users')).filter(u => isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'));
+        let items = await DataStore.getAll('users').filter(u => isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'));
 
         // Basic filters
         if (filters.basic.name) {
@@ -1067,13 +1064,11 @@ const appLogic = (() => {
         }
         if (filters.basic['has-purchased']) {
             const product = filters.basic['has-purchased'];
-            const hasPurchased = await Promise.all(items.map(i => hasProspectPurchasedProduct(i.id, product)));
-            items = items.filter((_, idx) => hasPurchased[idx]);
+            items = items.filter(async i => await hasProspectPurchasedProduct(i.id, product));
         }
         if (filters.basic['not-purchased']) {
             const product = filters.basic['not-purchased'];
-            const notPurchased = await Promise.all(items.map(i => hasProspectPurchasedProduct(i.id, product)));
-            items = items.filter((_, idx) => !notPurchased[idx]);
+            items = items.filter(async i => !await hasProspectPurchasedProduct(i.id, product));
         }
 
         if (filters.basic.keyword) {
@@ -1233,7 +1228,7 @@ const appLogic = (() => {
     };
 
     // Section 10.9: Results Rendering
-    const renderSearchResults = async () => {
+    const renderSearchResults = () => {
         const container = document.getElementById('search-results');
         if (!container) return;
 
@@ -1258,10 +1253,10 @@ const appLogic = (() => {
                     </tr>
                 </thead>
                 <tbody>
-                    ${(await Promise.all(pageItems.map(async item => {
+                    ${pageItems.map(item => {
             let agentName = '-';
             if (item.lead_agent_id || item.responsible_agent_id) {
-                const agent = await DataStore.getById('users', item.lead_agent_id || item.responsible_agent_id);
+                const agent = DataStore.getById('users', item.lead_agent_id || item.responsible_agent_id);
                 if (agent) agentName = agent.full_name;
             }
 
@@ -1283,16 +1278,16 @@ const appLogic = (() => {
                             </td>
                         </tr>
                         `;
-        }))).join('')}
+        }).join('')}
                 </tbody>
             </table>
         `;
 
         container.innerHTML = html;
-        await renderPagination();
+        renderPagination();
     };
 
-    const renderPagination = async () => {
+    const renderPagination = () => {
         const container = document.getElementById('search-pagination');
         if (!container) return;
 
@@ -1304,16 +1299,16 @@ const appLogic = (() => {
 
         container.innerHTML = `
             <div class="pagination-controls">
-                <button ${_currentPage === 1 ? 'disabled' : ''} onclick="app. goToPage(${_currentPage - 1})">Prev</button>
+                <button ${_currentPage === 1 ? 'disabled' : ''} onclick="app.goToPage(${_currentPage - 1})">Prev</button>
                 <span>Page ${_currentPage} of ${totalPages}</span>
-                <button ${_currentPage === totalPages ? 'disabled' : ''} onclick="app. goToPage(${_currentPage + 1})">Next</button>
+                <button ${_currentPage === totalPages ? 'disabled' : ''} onclick="app.goToPage(${_currentPage + 1})">Next</button>
             </div>
         `;
     };
 
-    const goToPage = async (page) => {
+    const goToPage = (page) => {
         _currentPage = page;
-        await renderSearchResults();
+        renderSearchResults();
     };
 
     // Section 10.10: Saved Searches & History
@@ -1329,12 +1324,12 @@ const appLogic = (() => {
 
         container.innerHTML = searches.map(s => `
             <div class="saved-search-item">
-                <div class="saved-search-info" onclick="app. loadSavedSearch(${s.id})">
+                <div class="saved-search-info" onclick="await app.loadSavedSearch(${s.id})">
                     <i class="fas fa-bookmark"></i>
                     <span>${s.search_name}</span>
                     <small>${s.entity}</small>
                 </div>
-                <button class="btn-icon" onclick="app. deleteSavedSearch(${s.id})">
+                <button class="btn-icon" onclick="await app.deleteSavedSearch(${s.id})">
                     <i class="fas fa-trash"></i>
                 </button>
             </div>
@@ -1364,7 +1359,7 @@ const appLogic = (() => {
     };
 
     const loadSavedSearch = async (id) => {
-        const search = await DataStore.getById('saved_searches', id);
+        const search = DataStore.getById('saved_searches', id);
         if (!search) return;
 
         UI.toast.info(`Loading search: ${search.search_name}`);
@@ -1475,10 +1470,10 @@ const appLogic = (() => {
                         <p>Manage, organize, and share your documents</p>
                     </div>
                     <div class="dms-actions">
-                        <button class="btn primary" onclick="app. async openUploadModal()">
+                        <button class="btn primary" onclick="await app.openUploadModal()">
                             <i class="fas fa-upload"></i> Upload File
                         </button>
-                        <button class="btn secondary" onclick="app. async openNewFolderModal()">
+                        <button class="btn secondary" onclick="await app.openNewFolderModal()">
                             <i class="fas fa-folder-plus"></i> New Folder
                         </button>
                     </div>
@@ -1488,7 +1483,7 @@ const appLogic = (() => {
                     <div class="folder-sidebar">
                         <div class="sidebar-header">
                             <h3>Folders</h3>
-                            <button class="btn-icon" onclick="app. async refreshFolderTree()" title="Refresh">
+                            <button class="btn-icon" onclick="await app.refreshFolderTree()" title="Refresh">
                                 <i class="fas fa-sync-alt"></i>
                             </button>
                         </div>
@@ -1502,17 +1497,17 @@ const appLogic = (() => {
                             <div class="explorer-controls">
                                 <div class="search-filter-bar">
                                     <i class="fas fa-search"></i>
-                                    <input type="text" id="file-search" placeholder="Search files..." onkeyup="app. async searchFiles(this.value)">
-                                    <select id="file-sort" class="form-control" onchange="app. async sortFiles(this.value)">
+                                    <input type="text" id="file-search" placeholder="Search files..." onkeyup="await app.searchFiles(this.value)">
+                                    <select id="file-sort" class="form-control" onchange="await app.sortFiles(this.value)">
                                         <option value="name">Sort by Name</option>
                                         <option value="date">Sort by Date</option>
                                         <option value="size">Sort by Size</option>
                                     </select>
                                     <div class="view-toggle">
-                                        <button class="btn-icon ${_viewMode === 'list' ? 'active' : ''}" onclick="app. async setViewMode('list')">
+                                        <button class="btn-icon ${_viewMode === 'list' ? 'active' : ''}" onclick="await app.setViewMode('list')">
                                             <i class="fas fa-list"></i>
                                         </button>
-                                        <button class="btn-icon ${_viewMode === 'grid' ? 'active' : ''}" onclick="app. setViewMode('grid')">
+                                        <button class="btn-icon ${_viewMode === 'grid' ? 'active' : ''}" onclick="await app.setViewMode('grid')">
                                             <i class="fas fa-th-large"></i>
                                         </button>
                                     </div>
@@ -1521,9 +1516,9 @@ const appLogic = (() => {
                             </div>
                             
                             <div class="special-filters" style="margin-top: 15px; display: flex; gap: 10px;">
-                                <button class="btn link-btn" onclick="app. async showRecentFiles()"><i class="fas fa-clock"></i> Recent</button>
-                                <button class="btn link-btn" onclick="app. async showAllFiles()"><i class="fas fa-copy"></i> All Files</button>
-                                <button class="btn link-btn" onclick="app. async showStarredFiles()"><i class="fas fa-star"></i> Starred</button>
+                                <button class="btn link-btn" onclick="await app.showRecentFiles()"><i class="fas fa-clock"></i> Recent</button>
+                                <button class="btn link-btn" onclick="await app.showAllFiles()"><i class="fas fa-copy"></i> All Files</button>
+                                <button class="btn link-btn" onclick="await app.showStarredFiles()"><i class="fas fa-star"></i> Starred</button>
                             </div>
                         </div>
                         
@@ -1545,7 +1540,7 @@ const appLogic = (() => {
             .filter(f => f.parent_id === parentId)
             .sort((a, b) => a.name.localeCompare(b.name));
 
-        for (const folder of folders) {
+        folders.forEach(async folder => {
             const hasChildren = (await DataStore.getAll('folders')).some(f => f.parent_id === folder.id);
             const isActive = _currentFolder === folder.id;
 
@@ -1554,32 +1549,32 @@ const appLogic = (() => {
             div.style.paddingLeft = `${level * 20 + 10}px`;
 
             div.innerHTML = `
-                <div class="folder-content" onclick="app. navigateToFolder(${folder.id})" 
+                <div class="folder-content" onclick="await app.navigateToFolder(${folder.id})" 
                      ondragover="event.preventDefault(); this.parentElement.classList.add('drag-over')"
                      ondragleave="this.parentElement.classList.remove('drag-over')"
-                     ondrop="app. handleDropOnFolder(event, ${folder.id})">
+                     ondrop="await app.handleDropOnFolder(event, ${folder.id})">
                     <i class="fas fa-folder" style="color: ${folder.color || '#f59e0b'}"></i>
                     <span class="folder-name">${folder.name}</span>
                 </div>
                 <div class="folder-actions">
-                    <button class="btn-icon" onclick="app. renameFolder(${folder.id}); event.stopPropagation()"><i class="fas fa-edit"></i></button>
-                    <button class="btn-icon" onclick="app. deleteFolder(${folder.id}); event.stopPropagation()"><i class="fas fa-trash"></i></button>
+                    <button class="btn-icon" onclick="await app.renameFolder(${folder.id}); event.stopPropagation()"><i class="fas fa-edit"></i></button>
+                    <button class="btn-icon" onclick="await app.deleteFolder(${folder.id}); event.stopPropagation()"><i class="fas fa-trash"></i></button>
                 </div>
             `;
             treeContainer.appendChild(div);
             if (hasChildren) await renderFolderTree(folder.id, level + 1, treeContainer);
-        }
+        });
     };
 
     const renderBreadcrumb = async () => {
         const container = document.getElementById('breadcrumb');
         if (!container) return;
         const path = [];
-        let curr = _currentFolder ? await DataStore.getById('folders', _currentFolder) : null;
-        while (curr) { path.unshift(curr); curr = curr.parent_id ? await DataStore.getById('folders', curr.parent_id) : null; }
+        let curr = _currentFolder ? DataStore.getById('folders', _currentFolder) : null;
+        while (curr) { path.unshift(curr); curr = curr.parent_id ? DataStore.getById('folders', curr.parent_id) : null; }
 
-        let html = '<span class="breadcrumb-item" onclick="app. navigateToFolder(null)">Root</span>';
-        for (const f of path) { html += `<span class="breadcrumb-separator">/</span><span class="breadcrumb-item" onclick="app. navigateToFolder(${f.id})">${f.name}</span>`; }
+        let html = '<span class="breadcrumb-item" onclick="await app.navigateToFolder(null)">Root</span>';
+        path.forEach(f => { html += `<span class="breadcrumb-separator">/</span><span class="breadcrumb-item" onclick="await app.navigateToFolder(${f.id})">${f.name}</span>`; });
         container.innerHTML = html;
     };
 
@@ -1593,7 +1588,7 @@ const appLogic = (() => {
         UI.showModal('New Folder', `
             <div class="form-group"><label>Folder Name</label><input type="text" id="new-folder-name" class="form-control" placeholder="Enter name..."></div>
             <div class="form-group"><label>Label Color</label><input type="color" id="new-folder-color" class="form-control" value="#f59e0b"></div>
-        `, [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Create', type: 'primary', action: 'await app. createFolder()' }]);
+        `, [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Create', type: 'primary', action: 'await app.createFolder()' }]);
     };
 
     const createFolder = async () => {
@@ -1604,9 +1599,9 @@ const appLogic = (() => {
     };
 
     const renameFolder = async (id) => {
-        const folder = await DataStore.getById('folders', id);
+        const folder = DataStore.getById('folders', id);
         UI.showModal('Rename Folder', `<div class="form-group"><label>New Name</label><input type="text" id="rename-folder-input" class="form-control" value="${folder.name}"></div>`,
-            [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Rename', type: 'primary', action: `await app. confirmRenameFolder(${id})` }]);
+            [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Rename', type: 'primary', action: `await app.confirmRenameFolder(${id})` }]);
     };
     window.app.confirmRenameFolder = async (id) => {
         const name = document.getElementById('rename-folder-input')?.value;
@@ -1615,23 +1610,23 @@ const appLogic = (() => {
     };
 
     const deleteFolder = async (id) => {
-        const hasSub =(await DataStore.getAll('folders')).some(f => f.parent_id === id);
-        const hasFiles = (await DataStore.getAll('documents')).some(d => d.folder_id === id);
+        const hasSub =await DataStore.getAll('folders').some(f => f.parent_id === id);
+        const hasFiles = await DataStore.getAll('documents').some(d => d.folder_id === id);
         if (hasSub || hasFiles) return UI.toast.error('Cannot delete: Folder is not empty');
-        UI.showModal('Delete Folder', '<p>Are you sure?</p>', [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Delete', type: 'primary', action: `await app. confirmDeleteFolder(${id})` }]);
+        UI.showModal('Delete Folder', '<p>Are you sure?</p>', [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Delete', type: 'primary', action: `await app.confirmDeleteFolder(${id})` }]);
     };
     window.app.confirmDeleteFolder = async (id) => { await DataStore.delete('folders', id); UI.hideModal(); if (_currentFolder === id) _currentFolder = null; await renderFolderTree(); await loadFolderContents(); };
 
     const showRecentFiles = async () => {
-        const allFiles = (await DataStore.getAll('documents')).sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at));
+        const allFiles = await DataStore.getAll('documents').sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at));
         await renderFileListView(allFiles.slice(0, 20)); // Show top 20
         _currentFolder = 'recent'; await renderBreadcrumb();
     };
 
     const showAllFiles = async () => { await renderFileListView(await DataStore.getAll('documents')); _currentFolder = 'all'; await renderBreadcrumb(); };
-    const showStarredFiles = async () => { await renderFileListView((await DataStore.getAll('documents')).filter(d => d.is_starred)); _currentFolder = 'starred'; await renderBreadcrumb(); };
+    const showStarredFiles = async () => { await renderFileListView(await DataStore.getAll('documents').filter(d => d.is_starred)); _currentFolder = 'starred'; await renderBreadcrumb(); };
 
-    const toggleStar = async (id) => { const f = await DataStore.getById('documents', id); await DataStore.update('documents', id, { is_starred: !f.is_starred }); await loadFolderContents(); };
+    const toggleStar = async (id) => { const f = DataStore.getById('documents', id); await DataStore.update('documents', id, { is_starred: !f.is_starred }); await loadFolderContents(); };
 
     const downloadFile = (id) => { UI.toast.info('Starting download...'); /* Implementation depends on environment */ };
 
@@ -1644,77 +1639,72 @@ const appLogic = (() => {
     };
 
     const showVersionHistory = async (fileId) => {
-        const file = await DataStore.getById('documents', fileId);
-        const versions = (await DataStore.getAll('document_versions')).filter(v => v.document_id === fileId).sort((a, b) => b.version_number - a.version_number);
+        const file = DataStore.getById('documents', fileId);
+        const versions = await DataStore.getAll('document_versions').filter(v => v.document_id === fileId).sort((a, b) => b.version_number - a.version_number);
         const content = `
             <div class="version-history">
                 <div class="version-header"><h3>Version History: ${file.filename}</h3><p>Current: v${file.current_version || 1}</p></div>
                 <table class="version-table">
                     <thead><tr><th>Version</th><th>Date</th><th>Size</th><th>By</th><th>Notes</th><th>Actions</th></tr></thead>
                     <tbody>
-                        ${(await Promise.all(versions.map(async v => `
+                        ${versions.map(v => `
                             <tr class="${v.version_number === file.current_version ? 'current-version' : ''}">
                                 <td>v${v.version_number}</td>
                                 <td>${new Date(v.created_at).toLocaleString()}</td>
                                 <td>${formatFileSize(v.size)}</td>
-                                <td>${(await DataStore.getById('users', v.created_by))?.full_name || 'System'}</td>
+                                <td>${DataStore.getById('users', v.created_by)?.full_name || 'System'}</td>
                                 <td>${v.change_note || '-'}</td>
                                 <td>
                                     <button class="btn-icon" onclick="app.downloadVersion(${v.id})"><i class="fas fa-download"></i></button>
-                                    <button class="btn-icon" onclick="app. restoreVersion(${v.id})"><i class="fas fa-undo"></i></button>
+                                    <button class="btn-icon" onclick="await app.restoreVersion(${v.id})"><i class="fas fa-undo"></i></button>
                                 </td>
                             </tr>
-                        `))).join('')}
+                        `).join('')}
                     </tbody>
                 </table>
-                ${versions.length >= 2 ? `<div class="compare-row"><button class="btn secondary" onclick="app. showCompareTool(${fileId})">Compare Versions</button></div>` : ''}
+                ${versions.length >= 2 ? `<div class="compare-row"><button class="btn secondary" onclick="await app.showCompareTool(${fileId})">Compare Versions</button></div>` : ''}
             </div>
         `;
         UI.showModal('Version History', content, [{ label: 'Close', type: 'primary', action: 'UI.hideModal()' }]);
     };
 
     const showCompareTool = async (fileId) => {
-        const versions = (await DataStore.getAll('document_versions')).filter(v => v.document_id === fileId);
+        const versions = await DataStore.getAll('document_versions').filter(v => v.document_id === fileId);
         UI.showModal('Compare Versions', `
             <div class="compare-setup">
                 <select id="v1" class="form-control">${versions.map(v => `<option value="${v.id}">Version ${v.version_number}</option>`).join('')}</select>
                 <span>vs</span>
                 <select id="v2" class="form-control">${versions.map(v => `<option value="${v.id}">Version ${v.version_number}</option>`).join('')}</select>
             </div>
-        `, [{ label: 'Compare', type: 'primary', action: `app. compareVersions(${fileId})` }]);
+        `, [{ label: 'Compare', type: 'primary', action: `app.compareVersions(${fileId})` }]);
     };
 
-    const compareVersions = async (fileId) => {
-        const v1 = await DataStore.getById('document_versions', parseInt(document.getElementById('v1').value));
-        const v2 = await DataStore.getById('document_versions', parseInt(document.getElementById('v2').value));
+    const compareVersions = (fileId) => {
+        const v1 = DataStore.getById('document_versions', parseInt(document.getElementById('v1').value));
+        const v2 = DataStore.getById('document_versions', parseInt(document.getElementById('v2').value));
         UI.showModal('Comparison', `<div class="diff-view"><pre>${v1.data || ''}</pre><pre>${v2.data || ''}</pre></div>`, [{ label: 'Close', type: 'primary', action: 'UI.hideModal()' }]);
     };
 
     const downloadVersion = (versionId) => { UI.toast.info(`Downloading version ${versionId}...`); };
     const restoreVersion = async (versionId) => {
-        const ver = await DataStore.getById('document_versions', versionId);
+        const ver = DataStore.getById('document_versions', versionId);
         await DataStore.update('documents', ver.document_id, { current_version: ver.version_number, updatedAt: new Date().toISOString() });
         UI.toast.success(`Restored to version ${ver.version_number}`); UI.hideModal(); await loadFolderContents();
     };
 
     const openShareModal = async (fileId) => {
-        const file = await DataStore.getById('documents', fileId);
-        const users = (await DataStore.getAll('users')).filter(u => u.id !== _currentUser?.id);
-        const shares = (await DataStore.getAll('document_shares')).filter(s => s.document_id === fileId);
-        const shareItems = await Promise.all(shares.map(async s => {
-            const user = await DataStore.getById('users', s.shared_with);
-            return `<div class="share-item">${user?.full_name || 'Unknown'} (${s.permission}) <button onclick="app. removeShare(${s.id})">x</button></div>`;
-        }));
-
+        const file = DataStore.getById('documents', fileId);
+        const users = await DataStore.getAll('users').filter(u => u.id !== _currentUser?.id);
+        const shares = await DataStore.getAll('document_shares').filter(s => s.document_id === fileId);
         const content = `
             <div class="share-modal">
                 <h3>Share: ${file.filename}</h3>
                 <div class="share-form">
                     <select id="share-user" class="form-control"><option value="">Select User...</option>${users.map(u => `<option value="${u.id}">${u.full_name}</option>`).join('')}</select>
-                    <button class="btn primary" onclick="app. createShare(${fileId})">Add Share</button>
+                    <button class="btn primary" onclick="await app.createShare(${fileId})">Add Share</button>
                 </div>
                 <div class="share-list">
-                    ${shareItems.join('')}
+                    ${shares.map(s => `<div class="share-item">${DataStore.getById('users', s.shared_with)?.full_name} (${s.permission}) <button onclick="app.removeShare(${s.id})">x</button></div>`).join('')}
                 </div>
             </div>
         `;
@@ -1728,20 +1718,17 @@ const appLogic = (() => {
         await openShareModal(fileId);
     };
 
-    const removeShare = async (id) => { await DataStore.delete('document_shares', id); UI.toast.success('Share removed'); UI.hideModal(); };
+    const removeShare = (id) => { await DataStore.delete('document_shares', id); UI.toast.success('Share removed'); UI.hideModal(); };
 
     const initDefaultFolders = async () => {
-        const existing = await DataStore.getAll('folders');
-        if (!existing || existing.length === 0) {
+        if (await DataStore.getAll('folders').length === 0) {
             const defaults = [
                 { id: 1, name: 'Company Policies', color: '#3b82f6', parent_id: null },
                 { id: 2, name: 'Customer Documents', color: '#10b981', parent_id: null },
                 { id: 3, name: 'Agent Agreements', color: '#f59e0b', parent_id: null },
                 { id: 4, name: 'Marketing Materials', color: '#ef4444', parent_id: null }
             ];
-            for (const f of defaults) {
-                await DataStore.create('folders', f);
-            }
+            defaults.forEach(async f => await DataStore.create('folders', f));
         }
     };
 
@@ -1825,7 +1812,7 @@ const appLogic = (() => {
                     <i class="fas fa-folder-open fa-5x"></i>
                     <h3>This folder is empty</h3>
                     <p>Upload files or create a new folder to get started</p>
-                    <button class="btn primary" onclick="app. openUploadModal()">
+                    <button class="btn primary" onclick="await app.openUploadModal()">
                         <i class="fas fa-upload"></i> Upload Files
                     </button>
                 </div>
@@ -1838,16 +1825,16 @@ const appLogic = (() => {
                 <thead>
                     <tr>
                         <th style="width: 30px;">
-                            <input type="checkbox" onchange="app. async selectAllFiles()" 
+                            <input type="checkbox" onchange="await app.selectAllFiles()" 
                                    ${_selectedFiles.length === files.length && files.length > 0 ? 'checked' : ''}>
                         </th>
-                        <th onclick="app. sortFiles('name')" style="cursor: pointer;">
+                        <th onclick="await app.sortFiles('name')" style="cursor: pointer;">
                             Name ${_fileSortBy === 'name' ? (_fileSortDirection === 'asc' ? '↑' : '↓') : ''}
                         </th>
-                        <th onclick="app. sortFiles('date')" style="cursor: pointer;">
+                        <th onclick="await app.sortFiles('date')" style="cursor: pointer;">
                             Modified ${_fileSortBy === 'date' ? (_fileSortDirection === 'asc' ? '↑' : '↓') : ''}
                         </th>
-                        <th onclick="app. sortFiles('size')" style="cursor: pointer;">
+                        <th onclick="await app.sortFiles('size')" style="cursor: pointer;">
                             Size ${_fileSortBy === 'size' ? (_fileSortDirection === 'asc' ? '↑' : '↓') : ''}
                         </th>
                         <th>Actions</th>
@@ -1861,10 +1848,10 @@ const appLogic = (() => {
                             ondragstart="app.handleFileDragStart(event, ${file.id})"
                             ondragend="app.handleFileDragEnd(event)">
                             <td onclick="event.stopPropagation()">
-                                <input type="checkbox" onchange="app. toggleFileSelection(${file.id})" 
+                                <input type="checkbox" onchange="await app.toggleFileSelection(${file.id})" 
                                        ${_selectedFiles.includes(file.id) ? 'checked' : ''}>
                             </td>
-                            <td ondblclick="app. previewFile(${file.id})">
+                            <td ondblclick="await app.previewFile(${file.id})">
                                 <i class="fas ${getFileIcon(file.filename)} file-icon"></i>
                                 <span class="file-name">${file.filename}</span>
                                 ${file.is_starred ? '<i class="fas fa-star starred"></i>' : ''}
@@ -1873,22 +1860,22 @@ const appLogic = (() => {
                             <td>${(file.size > 1048576 ? (file.size / 1048576).toFixed(1) + " MB" : (file.size / 1024).toFixed(0) + " KB")}</td>
                             <td>
                                 <div class="action-buttons" style="display: flex; gap: 4px;">
-                                    <button class="btn-icon" onclick="app. previewFile(${file.id}); event.stopPropagation();" title="Preview">
+                                    <button class="btn-icon" onclick="await app.previewFile(${file.id}); event.stopPropagation();" title="Preview">
                                         <i class="fas fa-eye"></i>
                                     </button>
                                     <button class="btn-icon" onclick="app.downloadFile(${file.id}); event.stopPropagation();" title="Download">
                                         <i class="fas fa-download"></i>
                                     </button>
-                                    <button class="btn-icon" onclick="app. showVersionHistory(${file.id}); event.stopPropagation();" title="Versions">
+                                    <button class="btn-icon" onclick="await app.showVersionHistory(${file.id}); event.stopPropagation();" title="Versions">
                                         <i class="fas fa-history"></i>
                                     </button>
-                                    <button class="btn-icon" onclick="app. openShareModal(${file.id}); event.stopPropagation();" title="Share">
+                                    <button class="btn-icon" onclick="await app.openShareModal(${file.id}); event.stopPropagation();" title="Share">
                                         <i class="fas fa-share-alt"></i>
                                     </button>
-                                    <button class="btn-icon" onclick="app. showFileMetadata(${file.id}); event.stopPropagation();" title="Info">
+                                    <button class="btn-icon" onclick="await app.showFileMetadata(${file.id}); event.stopPropagation();" title="Info">
                                         <i class="fas fa-info-circle"></i>
                                     </button>
-                                    <button class="btn-icon" onclick="app. toggleStar(${file.id}); event.stopPropagation();" title="Star">
+                                    <button class="btn-icon" onclick="await app.toggleStar(${file.id}); event.stopPropagation();" title="Star">
                                         <i class="fas fa-star${file.is_starred ? '' : '-o'}"></i>
                                     </button>
                                     <button class="btn-icon" onclick="app.deleteFile(${file.id}); event.stopPropagation();" title="Delete">
@@ -1914,7 +1901,7 @@ const appLogic = (() => {
                     <i class="fas fa-folder-open fa-5x"></i>
                     <h3>This folder is empty</h3>
                     <p>Upload files or create a new folder to get started</p>
-                    <button class="btn primary" onclick="app. async openUploadModal()">
+                    <button class="btn primary" onclick="await app.openUploadModal()">
                         <i class="fas fa-upload"></i> Upload Files
                     </button>
                 </div>
@@ -1924,7 +1911,7 @@ const appLogic = (() => {
 
         let html = '<div class="file-grid">';
 
-        for (const file of files) {
+        files.forEach(file => {
             html += `
                 <div class="file-card ${_selectedFiles.includes(file.id) ? 'selected' : ''}" 
                      data-id="${file.id}"
@@ -1932,14 +1919,14 @@ const appLogic = (() => {
                      ondragstart="app.handleFileDragStart(event, ${file.id})"
                      ondragend="app.handleFileDragEnd(event)">
                     <div class="file-card-header">
-                        <input type="checkbox" onchange="app. toggleFileSelection(${file.id})" 
+                        <input type="checkbox" onchange="await app.toggleFileSelection(${file.id})" 
                                ${_selectedFiles.includes(file.id) ? 'checked' : ''} 
                                onclick="event.stopPropagation()">
-                        <button class="btn-icon" onclick="app. toggleStar(${file.id}); event.stopPropagation();" title="Star">
+                        <button class="btn-icon" onclick="await app.toggleStar(${file.id}); event.stopPropagation();" title="Star">
                             <i class="fas fa-star${file.is_starred ? '' : '-o'}"></i>
                         </button>
                     </div>
-                    <div class="file-card-icon" ondblclick="app. previewFile(${file.id})">
+                    <div class="file-card-icon" ondblclick="await app.previewFile(${file.id})">
                         <i class="fas ${getFileIcon(file.filename)} fa-4x"></i>
                     </div>
                     <div class="file-card-name" title="${file.filename}">${truncateFilename(file.filename, 20)}</div>
@@ -1948,22 +1935,22 @@ const appLogic = (() => {
                         <span>${new Date(file.updated_at || file.created_at).toLocaleDateString()}</span>
                     </div>
                     <div class="file-card-actions">
-                        <button class="btn-icon" onclick="app. previewFile(${file.id}); event.stopPropagation();" title="Preview">
+                        <button class="btn-icon" onclick="await app.previewFile(${file.id}); event.stopPropagation();" title="Preview">
                             <i class="fas fa-eye"></i>
                         </button>
                         <button class="btn-icon" onclick="app.downloadFile(${file.id}); event.stopPropagation();" title="Download">
                             <i class="fas fa-download"></i>
                         </button>
-                        <button class="btn-icon" onclick="app. showVersionHistory(${file.id}); event.stopPropagation();" title="Versions">
+                        <button class="btn-icon" onclick="await app.showVersionHistory(${file.id}); event.stopPropagation();" title="Versions">
                             <i class="fas fa-history"></i>
                         </button>
-                        <button class="btn-icon" onclick="app. openShareModal(${file.id}); event.stopPropagation();" title="Share">
+                        <button class="btn-icon" onclick="await app.openShareModal(${file.id}); event.stopPropagation();" title="Share">
                             <i class="fas fa-share-alt"></i>
                         </button>
                     </div>
                 </div>
             `;
-        }
+        });
 
         html += '</div>';
         container.innerHTML = html;
@@ -2000,10 +1987,10 @@ const appLogic = (() => {
                 <button class="btn-icon" onclick="app.moveSelected()" title="Move Selected">
                     <i class="fas fa-cut"></i>
                 </button>
-                <button class="btn-icon" onclick="app. deleteSelected()" title="Delete Selected">
+                <button class="btn-icon" onclick="await app.deleteSelected()" title="Delete Selected">
                     <i class="fas fa-trash"></i>
                 </button>
-                <button class="btn-icon" onclick="app. deselectAll()" title="Clear Selection">
+                <button class="btn-icon" onclick="await app.deselectAll()" title="Clear Selection">
                     <i class="fas fa-times"></i>
                 </button>
             </div>
@@ -2039,15 +2026,15 @@ const appLogic = (() => {
     <p class="text-error">This action cannot be undone.</p>`,
             [
                 { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-                { label: 'Delete', type: 'primary', action: 'await app. async confirmDeleteSelected()' }
+                { label: 'Delete', type: 'primary', action: 'await app.confirmDeleteSelected()' }
             ]
         );
     };
 
     const confirmDeleteSelected = async () => {
-        for (const fileId of _selectedFiles) {
+        _selectedFiles.forEach(fileId => {
             await DataStore.delete('documents', fileId);
-        }
+        });
         _selectedFiles = [];
         await loadFolderContents();
         UI.hideModal();
@@ -2103,7 +2090,7 @@ const appLogic = (() => {
             { label: 'Upload', type: 'primary', action: 'app.uploadFiles()' }
         ]);
 
-        await setTimeout(initUploadDragDrop, 100);
+        setTimeout(initUploadDragDrop, 100);
     };
 
     const initUploadDragDrop = () => {
@@ -2152,7 +2139,7 @@ const appLogic = (() => {
         list.innerHTML = html;
     };
 
-    const uploadFiles = async () => {
+    const uploadFiles = () => {
         const files = window._pendingUploads || [];
         if (files.length === 0) {
             UI.toast.error('No files selected');
@@ -2165,9 +2152,9 @@ const appLogic = (() => {
         let uploaded = 0;
         const total = files.length;
 
-        // Simulate async upload (in production, actually upload)
-        for (const [index, file] of files.entries()) {
-            await new Promise(resolve => setTimeout(async () => {
+        // Simulate upload (in production, actually upload)
+        files.forEach((file, index) => {
+            setTimeout(async () => {
                 // Create document record
                 const newDoc = {
                     id: Date.now() + index,
@@ -2198,13 +2185,12 @@ const appLogic = (() => {
                         await loadFolderContents();
                     }, 500);
                 }
-                resolve();
-            }, index * 300)); // Stagger for demo effect
-        }
+            }, index * 300); // Stagger for demo effect
+        });
     };
 
     const previewFile = async (fileId) => {
-        const file = await DataStore.getById('documents', fileId);
+        const file = DataStore.getById('documents', fileId);
         if (!file) return;
 
         const filename = file.filename;
@@ -2255,17 +2241,17 @@ In a production system, this would show the actual file contents.
 
         UI.showModal(`Preview: ${file.filename}`, previewContent, [
             { label: 'Download', type: 'secondary', action: `app.downloadFile(${fileId})` },
-            { label: 'Share', type: 'secondary', action: `await app. openShareModal(${fileId})` },
+            { label: 'Share', type: 'secondary', action: `await app.openShareModal(${fileId})` },
             { label: 'Close', type: 'primary', action: 'UI.hideModal()' }
         ], 'fullscreen');
     };
 
     const showFileMetadata = async (fileId) => {
-        const file = await DataStore.getById('documents', fileId);
+        const file = DataStore.getById('documents', fileId);
         if (!file) return;
 
-        const creator = file.created_by ? await DataStore.getById('users', file.created_by) : null;
-        const versions = (await DataStore.getAll('document_versions')).filter(v => v.document_id === fileId);
+        const creator = file.created_by ? DataStore.getById('users', file.created_by) : null;
+        const versions = await DataStore.getAll('document_versions').filter(v => v.document_id === fileId);
 
         const content = `
             <div class="file-metadata">
@@ -2286,7 +2272,7 @@ In a production system, this would show the actual file contents.
                         </div>
                         <div class="metadata-row">
                             <span class="metadata-label">Location:</span>
-                            <span class="metadata-value">${await getFolderPath(file.folder_id)}</span>
+                            <span class="metadata-value">${getFolderPath(file.folder_id)}</span>
                         </div>
                     </div>
                 </div>
@@ -2337,23 +2323,23 @@ In a production system, this would show the actual file contents.
         `;
 
         UI.showModal('File Information', content, [
-            { label: 'Edit Description', type: 'secondary', action: `await app. editFileDescription(${fileId})` },
+            { label: 'Edit Description', type: 'secondary', action: `await app.editFileDescription(${fileId})` },
             { label: 'Close', type: 'primary', action: 'UI.hideModal()' }
         ]);
     };
 
-    const getFolderPath = async (folderId) => {
+    const getFolderPath = (folderId) => {
         if (!folderId) return 'Root';
         const path = [];
-        let current = await DataStore.getById('folders', folderId);
-        while (current) { path.unshift(current.name); current = current.parent_id ? await DataStore.getById('folders', current.parent_id) : null; }
+        let current = DataStore.getById('folders', folderId);
+        while (current) { path.unshift(current.name); current = current.parent_id ? DataStore.getById('folders', current.parent_id) : null; }
         return path.join(' / ');
     };
 
     const editFileDescription = async (fileId) => {
-        const file = await DataStore.getById('documents', fileId);
+        const file = DataStore.getById('documents', fileId);
         UI.showModal('Edit Description', `<div class="form-group"><label>Description</label><textarea id="edit-file-desc" class="form-control" rows="4">${file.description || ''}</textarea></div>`,
-            [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Save', type: 'primary', action: `await app. saveFileDescription(${fileId})` }]);
+            [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Save', type: 'primary', action: `await app.saveFileDescription(${fileId})` }]);
     };
 
     const saveFileDescription = async (fileId) => {
@@ -2425,7 +2411,7 @@ In a production system, this would show the actual file contents.
                 </div>
 
                 <div class="recorder-controls">
-                    <button class="btn primary btn-large" id="voice-record-btn" onclick="app. startRecording()">
+                    <button class="btn primary btn-large" id="voice-record-btn" onclick="await app.startRecording()">
                         <i class="fas fa-circle" style="color:#ef4444;"></i> RECORD
                     </button>
                     <button class="btn error btn-large" id="voice-stop-btn" style="display:none;" onclick="app.stopRecording()">
@@ -2444,7 +2430,7 @@ In a production system, this would show the actual file contents.
                 </div>
 
                 <div class="recorder-actions" id="voice-recorder-actions" style="display:none;">
-                    <button class="btn primary" onclick="app. saveTranscription()">
+                    <button class="btn primary" onclick="await app.saveTranscription()">
                         <i class="fas fa-save"></i> Save Text
                     </button>
                     <button class="btn secondary" onclick="app.editTranscription()">
@@ -2710,19 +2696,19 @@ In a production system, this would show the actual file contents.
         bottomNav.className = 'mobile-bottom-nav';
         bottomNav.id = 'mobile-bottom-nav';
         bottomNav.innerHTML = `
-            <div class="mobile-nav-item" onclick="app. navigateTo('calendar')">
+            <div class="mobile-nav-item" onclick="await app.navigateTo('calendar')">
                 <i class="fas fa-calendar-alt"></i>
                 <span>Calendar</span>
             </div>
-            <div class="mobile-nav-item" onclick="app. navigateTo('prospects')">
+            <div class="mobile-nav-item" onclick="await app.navigateTo('prospects')">
                 <i class="fas fa-users"></i>
                 <span>Prospects</span>
             </div>
-            <div class="mobile-nav-item" onclick="app. navigateTo('pipeline')">
+            <div class="mobile-nav-item" onclick="await app.navigateTo('pipeline')">
                 <i class="fas fa-chart-line"></i>
                 <span>Pipeline</span>
             </div>
-            <div class="mobile-nav-item" onclick="app. async showMobileMenu()">
+            <div class="mobile-nav-item" onclick="await app.showMobileMenu()">
                 <i class="fas fa-ellipsis-h"></i>
                 <span>More</span>
             </div>
@@ -2743,7 +2729,7 @@ In a production system, this would show the actual file contents.
         const content = `
             <div class="mobile-menu">
                 ${menuItems.map(item => `
-                    <div class="mobile-menu-item" onclick="app. navigateTo('${item.view}'); UI.hideModal()">
+                    <div class="mobile-menu-item" onclick="await app.navigateTo('${item.view}'); UI.hideModal()">
                         <i class="${item.icon}"></i>
                         <span>${item.label}</span>
                     </div>
@@ -2792,12 +2778,12 @@ In a production system, this would show the actual file contents.
             }
         }, { passive: true });
 
-	content.addEventListener('touchend', async (e) => {
+        content.addEventListener('touchend', (e) => {
             if (!startY) return;
             const diff = e.changedTouches[0].clientY - startY;
             if (diff > 80) {
                 refreshEl.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i> Refreshing...';
-                await setTimeout(async () => {
+                setTimeout(async () => {
                     await navigateTo(_currentView || 'calendar');
                     refreshEl.classList.remove('show');
                     refreshEl.innerHTML = '<i class="fas fa-arrow-down"></i> Pull to refresh';
@@ -2900,7 +2886,7 @@ In a production system, this would show the actual file contents.
         return { ...data, id: 'offline-' + Date.now(), offline: true };
     };
 
-    const offlineUpdate = async (tableName, id, data) => {
+    const offlineUpdate = (tableName, id, data) => {
         if (_isOnline) return await DataStore.update(tableName, id, data);
         addToOfflineQueue('update_' + tableName, { ...data, id });
         return { ...data, id, offline: true };
@@ -2918,7 +2904,7 @@ In a production system, this would show the actual file contents.
         }
 
         async createEvent(activity) {
-            const token = await this. getAccessToken();
+            const token = await this.getAccessToken();
             if (!token) return null;
 
             const event = {
@@ -2956,7 +2942,7 @@ In a production system, this would show the actual file contents.
         }
 
         async updateEvent(activity, googleEventId) {
-            const token = await this. getAccessToken();
+            const token = await this.getAccessToken();
             if (!token) return false;
 
             try {
@@ -2970,7 +2956,7 @@ In a production system, this would show the actual file contents.
         }
 
         async deleteEvent(googleEventId) {
-            const token = await this. getAccessToken();
+            const token = await this.getAccessToken();
             if (!token) return false;
 
             try {
@@ -2984,7 +2970,7 @@ In a production system, this would show the actual file contents.
         }
 
         async listEvents(timeMin, timeMax) {
-            const token = await this. getAccessToken();
+            const token = await this.getAccessToken();
             if (!token) return [];
 
             try {
@@ -3020,17 +3006,17 @@ In a production system, this would show the actual file contents.
 
                     if (this.needsSync(activity, syncRecord)) {
                         if (activity.status === 'cancelled' && syncRecord?.google_event_id) {
-                            await this.googleCalendar. deleteEvent(syncRecord.google_event_id);
+                            await this.googleCalendar.deleteEvent(syncRecord.google_event_id);
                             this.removeSyncRecord(activity.id);
                             deleted++;
                         } else if (syncRecord?.google_event_id) {
-                            await this.googleCalendar. updateEvent(activity, syncRecord.google_event_id);
-                            await this. updateSyncRecord(activity.id, syncRecord.google_event_id);
+                            await this.googleCalendar.updateEvent(activity, syncRecord.google_event_id);
+                            await this.updateSyncRecord(activity.id, syncRecord.google_event_id);
                             updated++;
                         } else {
-                            const googleEventId = await this.googleCalendar. createEvent(activity);
+                            const googleEventId = await this.googleCalendar.createEvent(activity);
                             if (googleEventId) {
-                                await this. addSyncRecord(activity.id, googleEventId);
+                                await this.addSyncRecord(activity.id, googleEventId);
                                 created++;
                             }
                         }
@@ -3168,7 +3154,7 @@ In a production system, this would show the actual file contents.
                         <h1>Integration Hub</h1>
                         <p>Connect your CRM with external services</p>
                     </div>
-                    <button class="btn secondary" onclick="app. navigateTo('settings')">
+                    <button class="btn secondary" onclick="await app.navigateTo('settings')">
                         <i class="fas fa-arrow-left"></i> Back to Settings
                     </button>
                 </div>
@@ -3200,7 +3186,7 @@ In a production system, this would show the actual file contents.
         };
 
         return `
-            <div class="integration-card" onclick="app. showIntegrationDetails('${id}')">
+            <div class="integration-card" onclick="await app.showIntegrationDetails('${id}')">
                 <div class="integration-icon ${type}">
                     <i class="${statusIcons[type] || 'fas fa-plug'}"></i>
                 </div>
@@ -3212,7 +3198,7 @@ In a production system, this would show the actual file contents.
                     </div>
                 </div>
                 <div class="integration-action">
-                    <button class="btn ${status === 'connected' ? 'secondary' : 'primary'}" onclick="event.stopPropagation(); id === 'whatsapp' ? await app. showWhatsAppIntegration() : app. showIntegrationDetails('${id}')">
+                    <button class="btn ${status === 'connected' ? 'secondary' : 'primary'}" onclick="event.stopPropagation(); id === 'whatsapp' ? await app.showWhatsAppIntegration() : await app.showIntegrationDetails('${id}')">
                         ${status === 'connected' ? 'Configure' : 'Connect'}
                     </button>
                 </div>
@@ -3258,7 +3244,7 @@ In a production system, this would show the actual file contents.
         viewport.innerHTML = `
             <div class="integration-detail">
                 <div class="detail-header">
-                    <button class="btn secondary" onclick="app. showIntegrationHub(document.getElementById('content-viewport'))">
+                    <button class="btn secondary" onclick="await app.showIntegrationHub(document.getElementById('content-viewport'))">
                         <i class="fas fa-arrow-left"></i> Back to Integrations
                     </button>
                     <h1>Google Calendar Integration</h1>
@@ -3276,7 +3262,7 @@ In a production system, this would show the actual file contents.
                         `}
                     </div>
                     ${!isConnected ? `
-                        <button class="btn primary btn-large" onclick="app. async initiateGoogleOAuth()">
+                        <button class="btn primary btn-large" onclick="await app.initiateGoogleOAuth()">
                             <i class="fas fa-google"></i> Connect with Google
                         </button>
                     ` : ''}
@@ -3341,10 +3327,10 @@ In a production system, this would show the actual file contents.
                         </div>
                         
                         <div class="settings-actions">
-                            <button class="btn primary" onclick="app. async saveGoogleSettings()">Save Settings</button>
-                            <button class="btn secondary" onclick="app. async syncGoogleCalendar()">Sync Now</button>
-                            <button class="btn secondary" onclick="app. async viewSyncHistory()">View Sync History</button>
-                            <button class="btn error" onclick="app. disconnectGoogle()">Disconnect</button>
+                            <button class="btn primary" onclick="await app.saveGoogleSettings()">Save Settings</button>
+                            <button class="btn secondary" onclick="await app.syncGoogleCalendar()">Sync Now</button>
+                            <button class="btn secondary" onclick="await app.viewSyncHistory()">View Sync History</button>
+                            <button class="btn error" onclick="await app.disconnectGoogle()">Disconnect</button>
                         </div>
                     </div>
                 ` : ''}
@@ -3390,13 +3376,13 @@ In a production system, this would show the actual file contents.
             </div>
         `, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Simulate Connection', type: 'primary', action: 'await app. simulateGoogleConnection()' }
+            { label: 'Simulate Connection', type: 'primary', action: 'await app.simulateGoogleConnection()' }
         ]);
     };
 
     const simulateGoogleConnection = async () => {
         UI.hideModal();
-        let integration = (await DataStore.getAll('integrations')).find(i => i.provider === 'google');
+        let integration = await DataStore.getAll('integrations').find(i => i.provider === 'google');
         if (!integration) {
             integration = await DataStore.create('integrations', {
                 integration_name: 'Google Calendar',
@@ -3470,8 +3456,8 @@ In a production system, this would show the actual file contents.
 
         UI.toast.info('Starting Google Calendar sync...');
 
-        await _syncManager. syncCRMtoGoogle();
-        await _syncManager. syncGoogleToCRM();
+        await _syncManager.syncCRMtoGoogle();
+        await _syncManager.syncGoogleToCRM();
 
         const connection = await getGoogleConnection();
         if (connection) {
@@ -3483,7 +3469,7 @@ In a production system, this would show the actual file contents.
     };
 
     const viewSyncHistory = async () => {
-        const syncHistory = (await DataStore.getAll('sync_history')).filter(
+        const syncHistory = await DataStore.getAll('sync_history').filter(
             h => h.user_id === (_currentUser?.id || 1)
         ).sort((a, b) => new Date(b.synced_at) - new Date(a.synced_at));
 
@@ -3495,7 +3481,7 @@ In a production system, this would show the actual file contents.
                         <option value="30">Last 30 days</option>
                         <option value="90">Last 90 days</option>
                     </select>
-                    <button class="btn secondary" onclick="app. refreshSyncHistory()">Apply</button>
+                    <button class="btn secondary" onclick="await app.refreshSyncHistory()">Apply</button>
                 </div>
                 
                 <table class="history-table" style="width:100%;border-collapse:collapse;margin-bottom:16px;">
@@ -3522,8 +3508,8 @@ In a production system, this would show the actual file contents.
                 </tr>
             `;
         } else {
-            for (const [index, item] of syncHistory.slice(0, 10).entries()) {
-                const activity = await DataStore.getById('activities', item.activity_id);
+            syncHistory.slice(0, 10).forEach((item, index) => {
+                const activity = DataStore.getById('activities', item.activity_id);
                 const directionIcon = item.direction === 'crm_to_google' ? '→' : '←';
                 const statusIcon = item.status === 'success' ? '✓' : item.status === 'conflict' ? '⚠' : '✗';
                 const statusColor = item.status === 'success' ? '#10b981' : item.status === 'conflict' ? '#f59e0b' : '#ef4444';
@@ -3537,7 +3523,7 @@ In a production system, this would show the actual file contents.
                         <td style="padding:12px;">${new Date(item.synced_at).toLocaleTimeString()}</td>
                     </tr>
                 `;
-            }
+            });
         }
 
         tableHtml += `
@@ -3546,7 +3532,7 @@ In a production system, this would show the actual file contents.
                 
                 <div class="history-actions" style="display:flex;gap:12px;justify-content:flex-end;">
                     <button class="btn secondary" onclick="app.exportSyncHistory()">Export Log</button>
-                    <button class="btn secondary" onclick="app. clearSyncHistory()">Clear History</button>
+                    <button class="btn secondary" onclick="await app.clearSyncHistory()">Clear History</button>
                 </div>
             </div>
         `;
@@ -3558,7 +3544,7 @@ In a production system, this would show the actual file contents.
 
     const exportSyncHistory = () => { UI.toast.info('Exporting sync history...'); };
     const clearSyncHistory = async () => {
-        const logs =await  (await DataStore.getAll('sync_history')).filter(h => h.user_id !== (_currentUser?.id || 1));
+        const logs =await  DataStore.getAll('sync_history').filter(h => h.user_id !== (_currentUser?.id || 1));
         localStorage.setItem('fs_crm_sync_history', JSON.stringify(logs));
         UI.toast.success('Sync history cleared');
         await viewSyncHistory();
@@ -3572,7 +3558,7 @@ In a production system, this would show the actual file contents.
             <p class="warning-text" style="color:var(--error);font-weight:600;">Your existing activities will remain in both systems.</p>
         `, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Disconnect', type: 'error', action: 'await app. confirmDisconnectGoogle()' }
+            { label: 'Disconnect', type: 'error', action: 'await app.confirmDisconnectGoogle()' }
         ]);
     };
 
@@ -3589,8 +3575,8 @@ In a production system, this would show the actual file contents.
         await showGoogleCalendarIntegration();
     };
 
-    const resolveConflict = async (choice, activityId, eventId) => {
-        if (_syncManager) _syncManager. resolveConflict(choice, activityId, eventId);
+    const resolveConflict = (choice, activityId, eventId) => {
+        if (_syncManager) _syncManager.resolveConflict(choice, activityId, eventId);
     };
 
     // Hook into activity CRUD for auto-sync
@@ -3601,10 +3587,10 @@ In a production system, this would show the actual file contents.
     DataStore.create = async function (tableName, data) {
         const result = await originalCreateActivity.call(this, tableName, data);
         if (tableName === 'activities' && _syncManager) {
-            await setTimeout(async () => {
+            setTimeout(async () => {
                 const connection = await getGoogleConnection();
                 if (connection && connection.sync_settings?.syncTypes[data.activity_type?.toLowerCase()]) {
-                    await _syncManager. syncCRMtoGoogle().catch(console.error);
+                    await _syncManager.syncCRMtoGoogle().catch(console.error);
                 }
             }, 1000);
         }
@@ -3614,11 +3600,11 @@ In a production system, this would show the actual file contents.
     DataStore.update = async function (tableName, id, data) {
         const result = await originalUpdateActivity.call(this, tableName, id, data);
         if (tableName === 'activities' && _syncManager) {
-            await setTimeout(async () => {
+            setTimeout(async () => {
                 const connection = await getGoogleConnection();
-                const activity = await DataStore.getById('activities', id);
+                const activity = DataStore.getById('activities', id);
                 if (connection && activity && connection.sync_settings?.syncTypes[activity.activity_type?.toLowerCase()]) {
-                    await _syncManager. syncCRMtoGoogle().catch(console.error);
+                    await _syncManager.syncCRMtoGoogle().catch(console.error);
                 }
             }, 1000);
         }
@@ -3628,10 +3614,10 @@ In a production system, this would show the actual file contents.
     DataStore.delete = async function (tableName, id) {
         const result = await originalDeleteActivity.call(this, tableName, id);
         if (tableName === 'activities' && _syncManager) {
-            await setTimeout(async () => {
+            setTimeout(async () => {
                 const connection = await getGoogleConnection();
                 if (connection) {
-                    await _syncManager. syncCRMtoGoogle().catch(console.error);
+                    await _syncManager.syncCRMtoGoogle().catch(console.error);
                 }
             }, 1000);
         }
@@ -3674,7 +3660,7 @@ In a production system, this would show the actual file contents.
         const content = `
             <div class="whatsapp-integration">
                 <div class="detail-header" style="margin-bottom: 24px; display: flex; align-items: center; gap: 16px;">
-                    <button class="btn secondary" onclick="app. showIntegrationHub(document.getElementById('content-viewport'))">
+                    <button class="btn secondary" onclick="await app.showIntegrationHub(document.getElementById('content-viewport'))">
                         <i class="fas fa-arrow-left"></i> Back to Integrations
                     </button>
                     <h1 style="margin: 0; font-size: 24px;">WhatsApp Business Integration</h1>
@@ -3715,7 +3701,7 @@ In a production system, this would show the actual file contents.
                         <label>Access Token</label>
                         <div class="token-input">
                             <input type="password" id="access-token" class="form-control" value="${connection?.access_token ? '••••••••' : ''}" placeholder="Enter access token">
-                            <button class="btn secondary" onclick="app. testWhatsAppConnection()">Test Connection</button>
+                            <button class="btn secondary" onclick="await app.testWhatsAppConnection()">Test Connection</button>
                         </div>
                     </div>
                     
@@ -3733,7 +3719,7 @@ In a production system, this would show the actual file contents.
                         <label>Verification Token</label>
                         <div class="token-input">
                             <input type="password" id="verify-token" class="form-control" value="${connection?.verify_token || ''}" placeholder="Enter verification token">
-                            <button class="btn secondary" onclick="app. verifyWebhook()">Verify</button>
+                            <button class="btn secondary" onclick="await app.verifyWebhook()">Verify</button>
                         </div>
                     </div>
                     
@@ -3744,10 +3730,10 @@ In a production system, this would show the actual file contents.
                 </div>
                 
                 <div class="form-actions">
-                    <button class="btn primary" onclick="app. saveWhatsAppConnection()">Save Connection</button>
+                    <button class="btn primary" onclick="await app.saveWhatsAppConnection()">Save Connection</button>
                     ${isConnected ? `
-                        <button class="btn secondary" onclick="app. testWhatsAppConnection()">Test Connection</button>
-                        <button class="btn error" onclick="app. disconnectWhatsApp()">Disconnect</button>
+                        <button class="btn secondary" onclick="await app.testWhatsAppConnection()">Test Connection</button>
+                        <button class="btn error" onclick="await app.disconnectWhatsApp()">Disconnect</button>
                     ` : ''}
                 </div>
             </div>
@@ -3775,7 +3761,7 @@ In a production system, this would show the actual file contents.
             return;
         }
 
-        let integration = (await DataStore.getAll('integrations')).find(i => i.provider === 'whatsapp');
+        let integration = await DataStore.getAll('integrations').find(i => i.provider === 'whatsapp');
         if (!integration) {
             integration = await DataStore.create('integrations', {
                 integration_name: 'WhatsApp Business',
@@ -3845,7 +3831,7 @@ In a production system, this would show the actual file contents.
             <p>This will stop all messaging and template sync.</p>
         `, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Disconnect', type: 'error', action: 'await app. async confirmDisconnectWhatsApp()' }
+            { label: 'Disconnect', type: 'error', action: 'await app.confirmDisconnectWhatsApp()' }
         ]);
     };
 
@@ -3864,8 +3850,8 @@ In a production system, this would show the actual file contents.
 
     const openSendWhatsAppModal = async (entityType, entityId) => {
         const entity = entityType === 'prospect'
-            ? await DataStore.getById('prospects', entityId)
-            : await DataStore.getById('customers', entityId);
+            ? DataStore.getById('prospects', entityId)
+            : DataStore.getById('customers', entityId);
         if (!entity) return;
 
         // Create demo templates if empty
@@ -3892,7 +3878,7 @@ In a production system, this would show the actual file contents.
                 <div id="template-section">
                     <div class="form-group">
                         <label>Template</label>
-                        <select id="template-select" class="form-control" onchange="app. previewTemplate()">
+                        <select id="template-select" class="form-control" onchange="app.previewTemplate()">
                             <option value="">Select a template</option>
                             ${templates.map(t => `<option value="${t.id}">${t.template_name}</option>`).join('')}
                         </select>
@@ -3914,7 +3900,7 @@ In a production system, this would show the actual file contents.
         `;
         UI.showModal('Send WhatsApp Message', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Send', type: 'primary', action: `app. sendWhatsApp('${entityType}', ${entityId})` }
+            { label: 'Send', type: 'primary', action: `app.sendWhatsApp('${entityType}', ${entityId})` }
         ]);
         window._currentWhatsAppEntity = { type: entityType, id: entityId, phone: entity.phone };
     };
@@ -3932,8 +3918,8 @@ In a production system, this would show the actual file contents.
         if (isTemplate) {
             const templateId = document.getElementById('template-select')?.value;
             if (!templateId) { UI.toast.error('Please select a template'); return; }
-            const template = await DataStore.getById('whatsapp_templates', parseInt(templateId));
-            await setTimeout(async () => {
+            const template = DataStore.getById('whatsapp_templates', parseInt(templateId));
+            setTimeout(async () => {
                 await DataStore.create('whatsapp_messages', {
                     id: 'wamid_' + Date.now(),
                     entity_type: entityType,
@@ -3947,13 +3933,13 @@ In a production system, this would show the actual file contents.
                 });
                 UI.hideModal();
                 UI.toast.success('Message sent successfully');
-                if (entityType === 'prospect') await app. showProspectDetail(entityId);
-                else await app. showCustomerDetail(entityId);
+                if (entityType === 'prospect') await app.showProspectDetail(entityId);
+                else await app.showCustomerDetail(entityId);
             }, 800);
         } else {
             const message = document.getElementById('free-message')?.value;
             if (!message) { UI.toast.error('Please enter a message'); return; }
-            await setTimeout(async () => {
+            setTimeout(async () => {
                 await DataStore.create('whatsapp_messages', {
                     id: 'wamid_' + Date.now(),
                     entity_type: entityType,
@@ -3966,8 +3952,8 @@ In a production system, this would show the actual file contents.
                 });
                 UI.hideModal();
                 UI.toast.success('Message sent successfully');
-                if (entityType === 'prospect') await app. showProspectDetail(entityId);
-                else await app. showCustomerDetail(entityId);
+                if (entityType === 'prospect') await app.showProspectDetail(entityId);
+                else await app.showCustomerDetail(entityId);
             }, 800);
         }
     };
@@ -4003,7 +3989,7 @@ In a production system, this would show the actual file contents.
                                 ${msg.status === 'sent' ? '✓ Sent' : msg.status === 'delivered' ? '✓✓ Delivered' : msg.status === 'read' ? '👁️ Read' : '❌ Failed'}
                             </span>
                             <div class="message-actions">
-                                <button class="btn-icon" onclick="app. viewMessageDetails('${msg.id}')"><i class="fas fa-eye"></i></button>
+                                <button class="btn-icon" onclick="await app.viewMessageDetails('${msg.id}')"><i class="fas fa-eye"></i></button>
                                 <button class="btn-icon" onclick="app.todo('Resend Message')"><i class="fas fa-redo"></i></button>
                             </div>
                         </div>
@@ -4015,7 +4001,7 @@ In a production system, this would show the actual file contents.
 
     const addWhatsAppButtonToProfile = async (entityType, entityId) => {
         const headers = document.querySelectorAll('.header-actions');
-        for (const header of headers) {
+        headers.forEach(header => {
             // Prevent duplicate buttons
             if (!header.querySelector('.btn-whatsapp-add')) {
                 const button = document.createElement('button');
@@ -4024,11 +4010,11 @@ In a production system, this would show the actual file contents.
                 button.onclick = async () => await openSendWhatsAppModal(entityType, entityId);
                 header.insertBefore(button, header.lastElementChild);
             }
-        }
+        });
     };
 
     const viewMessageDetails = async (messageId) => {
-        const message = (await DataStore.getAll('whatsapp_messages')).find(m => m.id === messageId);
+        const message = await DataStore.getAll('whatsapp_messages').find(m => m.id === messageId);
         if (!message) return;
         const content = `
             <div class="message-details">
@@ -4081,7 +4067,7 @@ In a production system, this would show the actual file contents.
         await ensureAIModelsExist();
 
         // Run initial predictions
-        await setTimeout(async () => {
+        (() => {
             await batchUpdateLeadScores();
             await batchUpdateChurnRisks();
         }, 2000);
@@ -4150,9 +4136,9 @@ In a production system, this would show the actual file contents.
                 }
             ];
 
-            for (const model of defaultModels) {
+            defaultModels.forEach(model => {
                 await DataStore.create('ai_models', model);
-            }
+            });
 
             console.log('Default AI models created');
         }
@@ -4187,25 +4173,25 @@ In a production system, this would show the actual file contents.
                 </div>
                 
                 <div class="insights-grid">
-                    <div class="insight-card" onclick="app. showLeadScoring()">
+                    <div class="insight-card" onclick="await app.showLeadScoring()">
                         <i class="fas fa-chart-line"></i>
                         <h4>Lead Scoring</h4>
                         <p>156 leads> 80 score</p>
                         <span class="trend up">+34 this week</span>
                     </div>
-                    <div class="insight-card" onclick="app. showSalesForecast()">
+                    <div class="insight-card" onclick="await app.showSalesForecast()">
                         <i class="fas fa-dollar-sign"></i>
                         <h4>Sales Forecast</h4>
                         <p>$2.4M next 30 days</p>
                         <span class="trend down">-12% vs last month</span>
                     </div>
-                    <div class="insight-card" onclick="app. showChurnRiskAnalysis()">
+                    <div class="insight-card" onclick="await app.showChurnRiskAnalysis()">
                         <i class="fas fa-exclamation-triangle"></i>
                         <h4>Churn Risk</h4>
                         <p>23 customers at risk</p>
                         <span class="trend up warning">+15% increase</span>
                     </div>
-                    <div class="insight-card" onclick="app. showPerformanceInsights()">
+                    <div class="insight-card" onclick="await app.showPerformanceInsights()">
                         <i class="fas fa-users"></i>
                         <h4>Team Insights</h4>
                         <p>8 recommendations</p>
@@ -4341,14 +4327,13 @@ In a production system, this would show the actual file contents.
         const predictions = [];
 
         // Add top lead scores
-        const allLeadScores = await DataStore.getAll('lead_scores');
-        const leadScores = (allLeadScores || [])
+        const leadScores = await DataStore.getAll('lead_scores')
             .filter(l => l.prospect_id)
             .sort((a, b) => b.overall_score - a.overall_score)
             .slice(0, 3);
 
-        for (const score of leadScores) {
-            const prospect = await DataStore.getById('prospects', score.prospect_id);
+        leadScores.forEach(score => {
+            const prospect = DataStore.getById('prospects', score.prospect_id);
             if (prospect) {
                 predictions.push({
                     name: prospect.full_name,
@@ -4359,16 +4344,15 @@ In a production system, this would show the actual file contents.
                     icon: '🔥'
                 });
             }
-        }
+        });
 
         // Add top churn risks
-        const allChurnRisks = await DataStore.getAll('churn_risk');
-        const churnRisks = (allChurnRisks || [])
+        const churnRisks = await DataStore.getAll('churn_risk')
             .sort((a, b) => b.risk_score - a.risk_score)
             .slice(0, 2);
 
-        for (const risk of churnRisks) {
-            const customer = await DataStore.getById('customers', risk.customer_id);
+        churnRisks.forEach(risk => {
+            const customer = DataStore.getById('customers', risk.customer_id);
             if (customer) {
                 predictions.push({
                     name: customer.full_name,
@@ -4379,7 +4363,7 @@ In a production system, this would show the actual file contents.
                     icon: '⚠️'
                 });
             }
-        }
+        });
 
         // Sort by score descending
         predictions.sort((a, b) => b.score - a.score);
@@ -4405,20 +4389,18 @@ In a production system, this would show the actual file contents.
     // Show Lead Scoring Interface
     const showLeadScoring = async () => {
         // Get active model
-        const allModels = await DataStore.getAll('ai_models');
-        const model = (allModels || []).find(m => m.model_name === 'lead_scoring' && m.is_active);
+        const model = await DataStore.getAll('ai_models').find(m => m.model_name === 'lead_scoring' && m.is_active);
 
         // Get recent lead scores
-        const allLeadScores = await DataStore.getAll('lead_scores');
-        const leadScores = (allLeadScores || [])
+        const leadScores = await DataStore.getAll('lead_scores')
             .filter(l => l.prospect_id)
             .sort((a, b) => new Date(b.score_date) - new Date(a.score_date))
             .slice(0, 10);
 
         let scoresHTML = '';
-        for (const score of leadScores) {
-            const prospect = await DataStore.getById('prospects', score.prospect_id);
-            if (!prospect) continue;
+        leadScores.forEach(score => {
+            const prospect = DataStore.getById('prospects', score.prospect_id);
+            if (!prospect) return;
 
             const trendIcon = score.trend === 'up' ? '⬆️' : score.trend === 'down' ? '⬇️' : '➡️';
             const scoreClass = score.overall_score >= 80 ? 'high' : score.overall_score >= 60 ? 'medium' : 'low';
@@ -4433,7 +4415,7 @@ In a production system, this would show the actual file contents.
                     <td><button class="btn-icon" onclick="app.viewLeadDetails(${prospect.id})"><i class="fas fa-eye"></i></button></td>
                 </tr>
             `;
-        }
+        });
 
         const content = `
             <div class="lead-scoring-dashboard">
@@ -4441,7 +4423,7 @@ In a production system, this would show the actual file contents.
                     <h3>AI Lead Scoring</h3>
                     <div>
                         <span class="model-badge">Model v${model?.model_version || '1.0'} • Accuracy: ${model?.accuracy || 87.5}%</span>
-                        <button class="btn secondary" onclick="app. retrainAIModels()">
+                        <button class="btn secondary" onclick="app.retrainAIModels()">
                             <i class="fas fa-sync-alt"></i> Retrain
                         </button>
                     </div>
@@ -4548,7 +4530,7 @@ In a production system, this would show the actual file contents.
 
     // Predict lead score for a prospect
     const predictLeadScore = async (prospectId) => {
-        const prospect = await DataStore.getById('prospects', prospectId);
+        const prospect = DataStore.getById('prospects', prospectId);
         if (!prospect) return null;
 
         // Get activities for this prospect
@@ -4656,12 +4638,11 @@ In a production system, this would show the actual file contents.
 
     // Batch update all lead scores
     const batchUpdateLeadScores = async () => {
-        const allProspects = await DataStore.getAll('prospects');
-        const prospects = (allProspects || []).filter(p => p.status === 'active');
+        const prospects = await DataStore.getAll('prospects').filter(p => p.status === 'active');
 
-        for (const prospect of prospects) {
+        prospects.forEach(prospect => {
             await predictLeadScore(prospect.id);
-        }
+        });
 
         console.log(`Updated scores for ${prospects.length} prospects`);
         UI.toast.success(`Updated scores for ${prospects.length} prospects`);
@@ -4797,7 +4778,7 @@ In a production system, this would show the actual file contents.
         const transactions = await DataStore.getAll('transactions');
 
         // Get pipeline deals
-        const prospects = (await DataStore.getAll('prospects')).filter(p => p.status === 'active');
+        const prospects = await DataStore.getAll('prospects').filter(p => p.status === 'active');
 
         // Simple forecast calculation
         const historicalAvg = transactions.length > 0
@@ -4893,8 +4874,7 @@ In a production system, this would show the actual file contents.
     // Show Churn Risk Analysis
     const showChurnRiskAnalysis = async () => {
         // Get all churn risks
-        const allChurnRisks = await DataStore.getAll('churn_risk');
-        const churnRisks = (allChurnRisks || [])
+        const churnRisks = await DataStore.getAll('churn_risk')
             .sort((a, b) => b.risk_score - a.risk_score);
 
         const highRisk = churnRisks.filter(c => c.risk_level === 'high').length;
@@ -4903,10 +4883,9 @@ In a production system, this would show the actual file contents.
         const total = churnRisks.length || 1; // avoid div by 0
 
         let risksHTML = '';
-        const topRisks = churnRisks.slice(0, 5);
-        for (const risk of topRisks) {
-            const customer = await DataStore.getById('customers', risk.customer_id);
-            if (!customer) continue;
+        churnRisks.slice(0, 5).forEach(risk => {
+            const customer = DataStore.getById('customers', risk.customer_id);
+            if (!customer) return;
 
             const riskClass = risk.risk_level === 'high' ? 'high' : risk.risk_level === 'medium' ? 'medium' : 'low';
             const factors = risk.factors || {};
@@ -4925,7 +4904,7 @@ In a production system, this would show the actual file contents.
                     <td><button class="btn-link" onclick="app.contactAtRiskCustomer(${customer.id})">Contact</button></td>
                 </tr>
             `;
-        }
+        });
 
         const content = `
             <div class="churn-dashboard">
@@ -5015,7 +4994,7 @@ In a production system, this would show the actual file contents.
 
     // Calculate churn risk for a customer
     const calculateChurnRisk = async (customerId) => {
-        const customer = await DataStore.getById('customers', customerId);
+        const customer = DataStore.getById('customers', customerId);
         if (!customer) return null;
 
         // Get customer activities
@@ -5127,12 +5106,11 @@ In a production system, this would show the actual file contents.
 
     // Batch update all churn risks
     const batchUpdateChurnRisks = async () => {
-        const allCustomers = await DataStore.getAll('customers');
-        const customers = (allCustomers || []).filter(c => c.status === 'active');
+        const customers = await DataStore.getAll('customers').filter(c => c.status === 'active');
 
-        for (const customer of customers) {
+        customers.forEach(customer => {
             await calculateChurnRisk(customer.id);
-        }
+        });
 
         console.log(`Updated churn risks for ${customers.length} customers`);
         UI.toast.success(`Updated churn risks for ${customers.length} customers`);
@@ -5140,11 +5118,10 @@ In a production system, this would show the actual file contents.
 
     // Show Performance Insights
     const showPerformanceInsights = async () => {
-        const allAgents = await DataStore.getAll('users');
-        const agents = (allAgents || []).filter(isAgent);
+        const agents = await DataStore.getAll('users').filter(isAgent);
 
         let insightsHTML = '';
-        for (const agent of agents) {
+        agents.forEach(agent => {
             const insights = await generateAgentInsights(agent.id);
 
             if (insights) {
@@ -5168,7 +5145,7 @@ In a production system, this would show the actual file contents.
                     </tr>
                 `;
             }
-        }
+        });
 
         const content = `
             <div class="performance-dashboard">
@@ -5315,7 +5292,7 @@ In a production system, this would show the actual file contents.
     };
 
     // AI Model Management
-    const retrainAIModels = async () => {
+    const retrainAIModels = () => {
         UI.showModal('Retrain AI Models', `
             <div class="retrain-models">
                 <p>This will retrain all AI models with the latest data.</p>
@@ -5335,17 +5312,17 @@ In a production system, this would show the actual file contents.
             </div>
         `, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Start Training', type: 'primary', action: 'app. startModelTraining()' }
+            { label: 'Start Training', type: 'primary', action: 'app.startModelTraining()' }
         ]);
     };
 
-    const startModelTraining = async () => {
+    const startModelTraining = () => {
         UI.hideModal();
         UI.toast.info('AI model training started...');
 
         // Simulate training progress
         let progress = 0;
-        const interval = await setInterval(async () => {
+        const interval = (() => {
             progress += 10;
             UI.toast.info(`Training progress: ${progress}%`);
 
@@ -5353,8 +5330,8 @@ In a production system, this would show the actual file contents.
                 clearInterval(interval);
 
                 // Update model versions and accuracy
-                const models = Object.values(await DataStore.getAll('ai_models') || {});
-                for (const model of models) {
+                const models = await DataStore.getAll('ai_models');
+                models.forEach(model => {
                     model.model_version = '1.1.0';
                     model.accuracy += Math.random() * 3 - 1; // Random change
                     model.trained_at = new Date().toISOString();
@@ -5362,7 +5339,7 @@ In a production system, this would show the actual file contents.
                     model.updated_at = new Date().toISOString();
 
                     await DataStore.update('ai_models', model.id, model);
-                }
+                });
 
                 UI.toast.success('AI models trained successfully! Accuracy improved.');
             }
@@ -5455,34 +5432,13 @@ In a production system, this would show the actual file contents.
         });
     }
 
-// Simple Auth wrapper using Supabase
-const Auth = {
-    async login(email, password) {
-        const { data, error } = await window.supabase.auth.signInWithPassword({
-            email,
-            password
-        });
-        if (error) throw error;
-        return data.user;
-    },
-    async logout() {
-        const { error } = await window.supabase.auth.signOut();
-        if (error) throw error;
-    },
-    async getCurrentUser() {
-        const { data: { user }, error } = await window.supabase.auth.getUser();
-        if (error) throw error;
-        return user;
-    }
-};
-
     async function login() {
         // Login is now handled by the #loginBtn Supabase click handler
-        console.warn('app. login() called – use the loginBtn form instead');
+        console.warn('app.login() called – use the loginBtn form instead');
     }
 
     async function logout() {
-        await Auth. logout();
+        await Auth.logout();
         _currentUser = null;
         document.getElementById('app-shell').style.display = 'none';
         document.getElementById('login-container').style.display = 'flex';
@@ -5492,51 +5448,39 @@ const Auth = {
         _wireLoginBtn();
     }
 
-function _wireLoginBtn() {
-    const btn = document.getElementById('loginBtn');
-    if (!btn || btn._supabaseSetup) return;
-    btn._supabaseSetup = true;
-    btn.onclick = async () => {
-        const email = document.getElementById('loginEmail')?.value?.trim();
-        const password = document.getElementById('loginPassword')?.value;
-        if (!email || !password) {
-            alert('Please enter email and password');
-            return;
-        }
-        try {
-            btn.disabled = true;
-            btn.textContent = 'Logging in...';
-            const user = await Auth.login(email, password);
-            const { data: profile, error: profileError } = await window.supabase
-                .from('users')
-                .select('*')
-                .eq('email', user.email)
-                .single();
-            if (profileError || !profile) {
-                throw new Error('User profile not found. Contact admin.');
+    function _wireLoginBtn() {
+        const btn = document.getElementById('loginBtn');
+        if (!btn || btn._supabaseSetup) return;
+        btn._supabaseSetup = true;
+        btn.onclick = async () => {
+            const email = document.getElementById('loginEmail')?.value?.trim();
+            const password = document.getElementById('loginPassword')?.value;
+            if (!email || !password) {
+                alert('Please enter email and password');
+                return;
             }
-            _currentUser = profile;
-            document.getElementById('login-container').style.display = 'none';
-            document.getElementById('app-shell').style.display = 'block';
-            updateUserDisplay();
-            updateNavVisibility();
-            UI.toast.success(`Welcome ${profile.full_name}!`);
-            await navigateTo('calendar');
-        } catch (err) {
-            console.error('Login error:', err);
-            alert('Login failed: ' + err.message);
-        } finally {
-            btn.disabled = false;
-            btn.textContent = 'Login';
-        }
-    };
-    // ← the problematic line was here, remove it
-}
+            try {
+                btn.disabled = true;
+                btn.textContent = 'Logging in...';
+                const user = await Auth.login(email, password);
+                _currentUser = user;
+                document.getElementById('login-container').style.display = 'none';
+                document.getElementById('app-shell').style.display = 'block';
+                updateUserDisplay();
+                updateNavVisibility();
+                UI.toast.success('Welcome!');
+                await navigateTo('calendar');
+            } catch (err) {
+                alert('Login failed: ' + err.message);
+                btn.disabled = false;
+                btn.textContent = 'Login';
+            }
+        };
+    }
 
     // ==================== INIT ====================
 
     const init = async () => {
-        await DataStore.init();
         console.log('App initializing...');
 
         try {
@@ -5602,7 +5546,7 @@ function _wireLoginBtn() {
             }
 
             // Phase 5 Agent Table Event Delegation
-            document.addEventListener('click', async (e) => {
+            document.addEventListener('click', (e) => {
                 // Edit button handler
                 const editBtn = e.target.closest('.edit-agent-btn');
                 if (editBtn) {
@@ -5618,7 +5562,7 @@ function _wireLoginBtn() {
                 if (viewBtn) {
                     e.stopPropagation();
                     const agentId = viewBtn.dataset.agentId;
-                    await app. showAgentDetail(agentId);
+                    await app.showAgentDetail(agentId);
                     return;
                 }
 
@@ -5626,7 +5570,7 @@ function _wireLoginBtn() {
                 const row = e.target.closest('.agent-row');
                 if (row && !e.target.closest('.btn-icon')) {
                     const agentId = row.dataset.agentId;
-                    await app. showAgentDetail(agentId);
+                    await app.showAgentDetail(agentId);
                 }
             });
 
@@ -5644,7 +5588,7 @@ function _wireLoginBtn() {
     };
 
     const openAddNameModal = async (prospectId, nameId = null) => {
-        const nameData = nameId ? await DataStore.getById('names', nameId) : null;
+        const nameData = nameId ? DataStore.getById('names', nameId) : null;
         const isEdit = !!nameData;
 
         const content = `
@@ -5679,7 +5623,7 @@ function _wireLoginBtn() {
 
         UI.showModal(isEdit ? 'Edit Name' : 'Add Name', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save', type: 'primary', action: `await app. saveName(${prospectId})` }
+            { label: 'Save', type: 'primary', action: `await app.saveName(${prospectId})` }
         ]);
     };
 
@@ -5708,13 +5652,13 @@ function _wireLoginBtn() {
         }
 
         UI.hideModal();
-        await app. showProspectDetail(prospectId); // Refresh detail view
+        await app.showProspectDetail(prospectId); // Refresh detail view
     };
 
     const deleteName = async (prospectId, nameId) => {
         UI.showModal('Confirm Delete', 'Are you sure you want to delete this name?', [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Delete', type: 'primary', action: `await app. confirmDeleteName(${prospectId}, ${nameId})` }
+            { label: 'Delete', type: 'primary', action: `await app.confirmDeleteName(${prospectId}, ${nameId})` }
         ]);
     };
 
@@ -5722,57 +5666,79 @@ function _wireLoginBtn() {
         await DataStore.delete('names', nameId);
         UI.hideModal();
         UI.toast.success('Name deleted');
-        await app. showProspectDetail(prospectId);
+        await app.showProspectDetail(prospectId);
     };
 
 
     const initDemoData = async () => {
-        console.log('Checking for demo data seeding...');
+        if (await DataStore.getAll('users').length === 0) {
+            console.log('Loading demo data...');
 
-        // 1. Roles
-        const roles = await DataStore.getAll('roles');
-        if (roles.length === 0) {
-            console.log('Seeding roles...');
-            const defaultRoles = USER_ROLES.map(r => ({ role_name: r, permissions: { all: true } }));
-            defaultRoles.push(
+            // Roles
+            const roles = USER_ROLES.map(r => ({ role_name: r, permissions: { all: true } }));
+            // Add legacy roles for compatibility
+            roles.push(
                 { role_name: 'super_admin', permissions: { all: true } },
                 { role_name: 'marketing_manager', permissions: { 'view-dashboard': true, 'manage-promotions': true, 'view-reports': true } },
                 { role_name: 'team_leader', permissions: { 'view-dashboard': true, 'view-team-data': true } },
                 { role_name: 'consultant', permissions: { 'view-dashboard': true, 'manage-self-prospects': true } }
             );
-            for (const r of defaultRoles) {
-                await DataStore.create('roles', r);
-            }
-        }
+            roles.forEach(async r => await DataStore.create('roles', r));
 
-        // 2. Users
-        const users = await DataStore.getAll('users');
-        if (users.length === 0) {
-            console.log('Seeding users...');
-            const demoUsers = [
+            // Teams
+            const teamA = await DataStore.create('teams', { team_name: 'Team A' });
+
+            // Users/Agents
+            const users = [
                 { id: 1, username: 'admin', password: 'admin123', full_name: 'System Admin', role: 'Level 1 super admin' },
                 { id: 2, username: 'marketing', password: 'mkt123', full_name: 'Marketing Manager', role: 'Level 2 Marketing Manager' },
-                { id: 3, username: 'teamlead', password: 'tl123', full_name: 'Team Leader', role: 'Level 7 Team Leader', team_id: 1, reporting_to: 10 },
-                { id: 4, username: 'consultant', password: 'cons123', full_name: 'Consultant', role: 'Level 12 Agent', team_id: 1 },
-                { id: 5, username: 'michelle', password: 'michelle123', full_name: 'Michelle Tan', role: 'Level 9 Senior Consultant', team_id: 1, reporting_to: 3 },
-                { id: 10, username: 'manager', password: 'manager123', full_name: 'Manager', role: 'Level 8 Consultant Manager', team_id: 1, reporting_to: null }
+                { id: 3, username: 'teamlead', password: 'tl123', full_name: 'Team Leader', role: 'Level 7 Team Leader', team_id: teamA.id, reporting_to: 10 },
+                { id: 4, username: 'consultant', password: 'cons123', full_name: 'Consultant', role: 'Level 12 Agent', team_id: teamA.id },
+                { id: 5, username: 'michelle', password: 'michelle123', full_name: 'Michelle Tan', role: 'Level 9 Senior Consultant', team_id: teamA.id, reporting_to: 3 },
+                { id: 6, username: 'ahseng', password: 'ahseng123', full_name: 'Ah Seng', role: 'Level 13 Junior Agent', team_id: teamA.id, reporting_to: 3 },
+                { id: 7, username: 'meiling', password: 'meiling123', full_name: 'Mei Ling', role: 'Level 13 Junior Agent', team_id: teamA.id, reporting_to: 3 },
+                { id: 8, username: 'raj', password: 'raj123', full_name: 'Raj Kumar', role: 'Level 13 Junior Agent', team_id: teamA.id, reporting_to: 3 },
+                { id: 10, username: 'manager', password: 'manager123', full_name: 'Manager', role: 'Level 8 Consultant Manager', team_id: teamA.id, reporting_to: null },
+                { id: 11, username: 'admin_lvl1', password: '123', full_name: 'Level 1 Admin', role: 'Level 1 super admin' },
+                { id: 12, username: 'mkt_lvl3', password: '123', full_name: 'Level 3 Marketing', role: 'Level 3 Marketing Admin' },
+                { id: 13, username: 'teacher_lvl4', password: '123', full_name: 'Level 4 Teacher', role: 'Level 4 Teacher' },
+                { id: 14, username: 'agent_lvl13', password: '123', full_name: 'Level 13 Agent', role: 'Level 13 Junior Agent' }
             ];
-            for (const u of demoUsers) {
-                await DataStore.create('users', u);
-            }
-        }
+            users.forEach(async u => await DataStore.create('users', u));
 
-        // 3. Prospects
-        const prospects = await DataStore.getAll('prospects');
-        if (prospects.length === 0) {
-            console.log('Seeding prospects...');
-            const demoProspects = [
+
+            // Tags
+            const tags = [
+                { id: 1, name: 'Career Focused', color: 'blue' },
+                { id: 2, name: 'MG4', color: 'purple' },
+                { id: 3, name: 'Referred By Customer', color: 'green' },
+                { id: 4, name: 'High Score', color: 'orange' },
+                { id: 5, name: 'Business Owner', color: 'teal' },
+                { id: 6, name: 'Event Attendee', color: 'gray' }
+            ];
+            tags.forEach(async t => await DataStore.create('tags', t));
+
+            // Prospects
+            const prospects = [
                 {
                     id: 1,
                     full_name: 'Tan Ah Kow',
                     phone: '012-3456789',
+                    ic_number: '901212-10-1234',
+                    date_of_birth: '1990-12-12',
                     score: 850,
                     responsible_agent_id: 5,
+                    title: 'Mr.',
+                    gender: 'Male',
+                    nationality: 'Malaysian',
+                    email: 'tan.ah.kow@email.com',
+                    occupation: 'Business Owner - Construction',
+                    company_name: 'Ah Kow Construction Sdn Bhd',
+                    income_range: 'RM 15,000 - RM 20,000',
+                    address: '123, Jalan SS2, Petaling Jaya, Selangor',
+                    cps_agent_id: 5,
+                    cps_assignment_date: '2026-02-15',
+                    protection_deadline: '2026-03-17',
                     ming_gua: 'MG4',
                     element: 'Wood'
                 },
@@ -5784,18 +5750,57 @@ function _wireLoginBtn() {
                     responsible_agent_id: 6,
                     protection_deadline: '2026-03-20',
                     ming_gua: 'MG2'
+                },
+                {
+                    id: 3,
+                    full_name: 'Lee Meng Hui',
+                    phone: '011-2223334',
+                    score: 680,
+                    responsible_agent_id: 5,
+                    protection_deadline: '2026-03-25',
+                    ming_gua: 'MG5'
+                },
+                {
+                    id: 4,
+                    full_name: 'Lim Ah Boy',
+                    phone: '017-5556667',
+                    score: 620,
+                    responsible_agent_id: 7,
+                    protection_deadline: '2026-03-15',
+                    ming_gua: 'MG7'
+                },
+                {
+                    id: 5,
+                    full_name: 'Siti Aminah',
+                    phone: '019-9990001',
+                    score: 580,
+                    responsible_agent_id: 8,
+                    protection_deadline: '2026-03-10',
+                    ming_gua: 'MG3'
                 }
             ];
-            for (const p of demoProspects) {
-                await DataStore.create('prospects', p);
-            }
-        }
+            prospects.forEach(async p => await DataStore.create('prospects', p));
 
-        // 4. Activities
-        const activities = await DataStore.getAll('activities');
-        if (activities.length === 0) {
-            console.log('Seeding activities...');
-            const demoActivities = [
+            // Entity Tags for Tan Ah Kow
+            const entityTags = [
+                { entity_type: 'prospect', entity_id: 1, tag_id: 1 },
+                { entity_type: 'prospect', entity_id: 1, tag_id: 2 },
+                { entity_type: 'prospect', entity_id: 1, tag_id: 3 },
+                { entity_type: 'prospect', entity_id: 1, tag_id: 4 },
+                { entity_type: 'prospect', entity_id: 1, tag_id: 5 },
+                { entity_type: 'prospect', entity_id: 1, tag_id: 6 }
+            ];
+            entityTags.forEach(async et => await DataStore.create('entity_tags', et));
+
+            // Proposed Solutions for Tan Ah Kow
+            const solutions = [
+                { prospect_id: 1, solution: 'PR4 Power Ring', proposed_date: '2026-03-04', status: 'Proposed', notes: '' },
+                { prospect_id: 1, solution: 'Office Audit', proposed_date: '2026-03-04', status: 'Proposed', notes: '' }
+            ];
+            solutions.forEach(async s => await DataStore.create('proposed_solutions', s));
+
+            // Activities - FIXED with proper end_time for all
+            const activities = [
                 {
                     activity_type: 'CPS',
                     activity_title: 'Initial Consultation',
@@ -5804,6 +5809,7 @@ function _wireLoginBtn() {
                     end_time: '10:00',
                     prospect_id: 1,
                     lead_agent_id: 5,
+                    co_agents: [{ id: 6, name: 'Ah Seng', role: 'Supporting' }],
                     summary: 'Initial consultation scheduling'
                 },
                 {
@@ -5814,27 +5820,855 @@ function _wireLoginBtn() {
                     end_time: '12:00',
                     prospect_id: 2,
                     lead_agent_id: 6,
-                    summary: 'Discussed career advancement'
+                    co_agents: [{ id: 7, name: 'Mei Ling', role: 'Supporting' }, { id: 8, name: 'Raj', role: 'Observer' }],
+                    summary: 'Discussed career advancement and PR4 interest confirmed. Next Step: Send quote by 11 Mar'
+                },
+                {
+                    activity_type: 'FSA',
+                    activity_title: 'Feng Shui Analysis',
+                    activity_date: '2026-03-04',
+                    start_time: '14:00',
+                    end_time: '16:00',
+                    prospect_id: 4,
+                    lead_agent_id: 7,
+                    location_address: '123, Jalan SS2, PJ',
+                    summary: 'Site analysis for Lim Ah Boy'
+                },
+                {
+                    activity_type: 'EVENT',
+                    activity_title: 'Understanding Your Life Gua',
+                    activity_date: '2026-03-04',
+                    start_time: '18:00',
+                    end_time: '20:00',
+                    lead_agent_id: 8,
+                    score_value: 10,
+                    event_title: 'Understanding Your Life Gua',
+                    attendees: '12 Prospects + 4 Agents',
+                    summary: 'Public lecture on Feng Shui'
                 }
             ];
-            for (const ac of demoActivities) {
-                await DataStore.create('activities', ac);
+            activities.forEach(async ac => await DataStore.create('activities', ac));
+
+            // Notes for Tan Ah Kow
+            const notes = [
+                { prospect_id: 1, author: 'Michelle Tan', date: '2026-02-28', text: 'Wife also interested in relationship consultation. Should consider couple package.' },
+                { prospect_id: 1, author: 'Michelle Tan', date: '2026-03-02', text: 'Customer is knowledgeable about Feng Shui, already reads books on the subject.' },
+                { prospect_id: 1, author: 'Michelle Tan', date: '2026-03-04', text: 'Office facing North-West. Need compass reading for accurate assessment.' }
+            ];
+            notes.forEach(async n => await DataStore.create('notes', n));
+
+            // Names (Family/Referrals) for Tan Ah Kow
+            const names = [
+                { prospect_id: 1, relation: 'Spouse', full_name: 'Tan Ai Ling', date_of_birth: '1992-05-15', notes: 'Involved in decision making' },
+                { prospect_id: 1, relation: 'Child', full_name: 'Tan Wei Ming', date_of_birth: '2015-08-10', notes: '' },
+                { prospect_id: 1, relation: 'Child', full_name: 'Tan Wei Jie', date_of_birth: '2018-03-22', notes: '' },
+                { prospect_id: 1, relation: 'Parent', full_name: 'Tan Ah Hock', date_of_birth: '1960-06-05', notes: 'Lives with family' },
+                { prospect_id: 1, relation: 'Business Partner', full_name: 'Lee Meng Chew', date_of_birth: '', notes: 'Co-owner of construction company' }
+            ];
+            names.forEach(async n => await DataStore.create('names', n));
+
+            // Phase 6: Pipeline Demo Data
+            // Manual overrides
+            const overrides = [
+                {
+                    id: 1001,
+                    user_id: 5, // Michelle Tan
+                    prospect_id: 3, // Lee Meng Hui
+                    override_type: 'boost',
+                    system_rank: 3,
+                    new_priority: 1,
+                    reason_category: 'urgency',
+                    justification: 'CEO direct contact, board approved budget, wants to move quickly',
+                    status: 'active',
+                    created_at: '2026-03-03T10:30:00Z',
+                    expires_at: '2026-03-10T10:30:00Z'
+                },
+                {
+                    id: 1002,
+                    user_id: 5,
+                    prospect_id: 4, // Lim Ah Boy
+                    override_type: 'boost',
+                    system_rank: 5,
+                    new_priority: 3,
+                    reason_category: 'conversation',
+                    justification: 'High budget confirmed, ready to purchase within week',
+                    status: 'active',
+                    created_at: '2026-03-02T14:15:00Z',
+                    expires_at: '2026-03-09T14:15:00Z'
+                },
+                {
+                    id: 1003,
+                    user_id: 5,
+                    prospect_id: 2, // Ong Bee Ling
+                    override_type: 'demote',
+                    system_rank: 2,
+                    new_priority: 4,
+                    reason_category: 'urgency',
+                    justification: 'Less urgent than other opportunities',
+                    status: 'expired',
+                    created_at: '2026-03-01T09:00:00Z',
+                    expires_at: '2026-03-08T09:00:00Z'
+                }
+            ];
+            overrides.forEach(async o => await DataStore.create('manual_overrides', o));
+
+            // My potential list
+            const potentialList = [
+                {
+                    id: 2001,
+                    user_id: 5,
+                    prospect_id: 3,
+                    priority_order: 1,
+                    expected_close_date: '2026-03-15',
+                    estimated_value: 3200,
+                    status: 'active'
+                },
+                {
+                    id: 2002,
+                    user_id: 5,
+                    prospect_id: 1,
+                    priority_order: 2,
+                    expected_close_date: '2026-03-25',
+                    estimated_value: 2488,
+                    status: 'active'
+                },
+                {
+                    id: 2003,
+                    user_id: 5,
+                    prospect_id: 4,
+                    priority_order: 3,
+                    expected_close_date: '2026-03-20',
+                    estimated_value: 888,
+                    status: 'active'
+                },
+                {
+                    id: 2004,
+                    user_id: 5,
+                    prospect_id: 2,
+                    priority_order: 4,
+                    expected_close_date: '2026-03-18',
+                    estimated_value: 1288,
+                    status: 'active'
+                },
+                {
+                    id: 2005,
+                    user_id: 5,
+                    prospect_id: 5,
+                    priority_order: 5,
+                    expected_close_date: '2026-03-30',
+                    estimated_value: 588,
+                    status: 'active'
+                }
+            ];
+            potentialList.forEach(async p => await DataStore.create('my_potential_list', p));
+
+            UI.toast.success('Demo data loaded successfully.');
+        } else {
+            // Re-initialize activities to ensure no duplicates for Phase 7
+            const activities = [
+                {
+                    id: 101,
+                    activity_type: 'CPS',
+                    activity_title: 'Initial Consultation',
+                    activity_date: '2026-03-04',
+                    start_time: '09:00',
+                    end_time: '10:00',
+                    prospect_id: 1,
+                    lead_agent_id: 5,
+                    co_agents: [{ id: 6, name: 'Ah Seng', role: 'Supporting' }],
+                    summary: 'Initial consultation scheduling'
+                },
+                {
+                    id: 102,
+                    activity_type: 'FTF',
+                    activity_title: 'Face to Face Meeting',
+                    activity_date: '2026-03-04',
+                    start_time: '11:00',
+                    end_time: '12:00',
+                    prospect_id: 2,
+                    lead_agent_id: 6,
+                    co_agents: [{ id: 7, name: 'Mei Ling', role: 'Supporting' }, { id: 8, name: 'Raj', role: 'Observer' }],
+                    summary: 'Discussed career advancement and PR4 interest confirmed. Next Step: Send quote by 11 Mar'
+                },
+                {
+                    id: 103,
+                    activity_type: 'FSA',
+                    activity_title: 'Feng Shui Analysis',
+                    activity_date: '2026-03-04',
+                    start_time: '14:00',
+                    end_time: '16:00',
+                    prospect_id: 4,
+                    lead_agent_id: 7,
+                    location_address: '123, Jalan SS2, PJ',
+                    summary: 'Site analysis for Lim Ah Boy'
+                },
+                {
+                    id: 104,
+                    activity_type: 'EVENT',
+                    activity_title: 'Understanding Your Life Gua',
+                    activity_date: '2026-03-04',
+                    start_time: '18:00',
+                    end_time: '20:00',
+                    lead_agent_id: 8,
+                    score_value: 10,
+                    event_title: 'Understanding Your Life Gua',
+                    attendees: '12 Prospects + 4 Agents',
+                    summary: 'Public lecture on Feng Shui'
+                }
+            ];
+
+            // Clear existing and re-add
+            const existingActivities = await DataStore.getAll('activities');
+            existingActivities.forEach(a => await DataStore.delete('activities', a.id));
+            activities.forEach(async ac => await  DataStore.create('activities', ac));
+        }
+
+        // Additional Phase 4 Demo Data - Ensure it exists
+        if (await DataStore.getAll('customers').length === 0) {
+            // Customers
+            const customers = [
+                {
+                    id: 101,
+                    full_name: 'Ong Bee Ling',
+                    phone: '012-9876543',
+                    email: 'ong.beeling@email.com',
+                    ic_number: '850505-12-3456',
+                    date_of_birth: '1982-03-04',
+                    ming_gua: 'MG4',
+                    element: 'Wood',
+                    gender: 'Female',
+                    nationality: 'Malaysian',
+                    occupation: 'Retail Owner',
+                    company_name: 'Bee Ling Fashion Boutique',
+                    income: 'RM 8,000 - RM 12,000',
+                    address: '456, Jalan Ampang, Kuala Lumpur',
+                    converted_from_prospect_id: 2,
+                    conversion_date: '2026-02-20',
+                    conversion_amount: 2200,
+                    lifetime_value: 3152,
+                    bank_name: 'Maybank Berhad',
+                    bank_account_number: '5123-4567-8901',
+                    account_holder: 'Ong Bee Ling',
+                    payment_methods: 'Bank Transfer, Credit Card',
+                    responsible_agent_id: 6,
+                    status: 'active',
+                    customer_since: '2026-02-20'
+                }
+            ];
+            customers.forEach(async c => await DataStore.create('customers', c));
+
+            // Platform IDs
+            const platformIds = [
+                { id: 1001, customer_id: 101, platform: 'Bujishu', platform_id: 'BJ-87654321' },
+                { id: 1002, customer_id: 101, platform: 'Metapoint', platform_id: 'MP-12345678' },
+                { id: 1003, customer_id: 101, platform: 'Formula', platform_id: 'FM-55667788' },
+                { id: 1004, customer_id: 101, platform: 'Monalisa', platform_id: 'ML-99887766' },
+                { id: 1005, customer_id: 101, platform: 'Florida', platform_id: 'FL-11223344' },
+                { id: 1006, customer_id: 101, platform: 'Far Coffee', platform_id: 'FC-44332211' },
+                { id: 1007, customer_id: 101, platform: 'Patiseri', platform_id: 'PT-77889900' }
+            ];
+            platformIds.forEach(async p => await  DataStore.create('platform_ids', p));
+
+            // Purchases
+            const purchases = [
+                {
+                    id: 2001,
+                    customer_id: 101,
+                    date: '2026-02-20',
+                    invoice: 'INV-0032',
+                    item: 'PR3 Ring',
+                    amount: 888,
+                    status: 'COLLECTED',
+                    proof: 'image1.jpg'
+                },
+                {
+                    id: 2002,
+                    customer_id: 101,
+                    date: '2026-02-20',
+                    invoice: 'INV-0033',
+                    item: 'Career Consultation',
+                    amount: 588,
+                    status: 'N/A'
+                },
+                {
+                    id: 2003,
+                    customer_id: 101,
+                    date: '2026-03-01',
+                    invoice: 'INV-0041',
+                    item: 'Office Audit',
+                    amount: 388,
+                    status: 'COMPLETED',
+                    proof: 'report1.pdf'
+                },
+                {
+                    id: 2004,
+                    customer_id: 101,
+                    date: '2026-03-04',
+                    invoice: 'Q-0045',
+                    item: 'Harmony Painting',
+                    amount: 1288,
+                    status: 'PENDING'
+                }
+            ];
+            purchases.forEach(async p => await  DataStore.create('purchases', p));
+
+            // Referrals
+            const referrals = [
+                {
+                    id: 3001,
+                    referrer_customer_id: 101,
+                    referred_prospect_id: 1, // Tan Ah Kow
+                    relationship: 'Friend',
+                    date: '2026-02-15',
+                    status: 'Active',
+                    reward_status: 'Pending',
+                    referral_source: 'CPS',
+                    source_id: generateId()
+                },
+                {
+                    id: 3002,
+                    referrer_customer_id: 101,
+                    referred_prospect_id: 4, // Lim Ah Boy
+                    relationship: 'Cousin',
+                    date: '2026-02-20',
+                    status: 'Warm',
+                    reward_status: 'Pending',
+                    referral_source: 'EVENT',
+                    source_id: generateId()
+                },
+                {
+                    id: 3003,
+                    referrer_customer_id: 1, // Tan Ah Kow
+                    referred_prospect_id: 2, // Ong Bee Ling
+                    relationship: 'Colleague',
+                    date: '2026-03-01',
+                    status: 'Active',
+                    reward_status: 'None',
+                    referral_source: 'MANUAL',
+                    source_id: null
+                }
+            ];
+            referrals.forEach(async r => await DataStore.create('referrals', r));
+
+            // Add original_source to existing prospects
+            const p1 = DataStore.getById('prospects', 1);
+            if (p1 && !p1.original_source) await DataStore.update('prospects', 1, { original_source: 'CPS' });
+            const p4 = DataStore.getById('prospects', 4);
+            if (p4 && !p4.original_source) await DataStore.update('prospects', 4, { original_source: 'EVENT', source_id: 'EVT-001' });
+        }
+
+        // Phase 5 Agent Management Demo Data
+        if (await DataStore.getAll('agent_stats').length === 0) {
+            // Agents (users already exist, but need additional agent fields)
+            const teamA = await DataStore.query('teams', { team_name: 'Team A' })[0];
+
+            const agentUpdates = [
+                {
+                    id: 5, // Michelle Tan
+                    agent_code: 'AGN-2026-001',
+                    license_start: '2026-01-01',
+                    license_expiry: '2026-12-31',
+                    commission_rate: 30,
+                    monthly_target: 25000,
+                    team: 'Team A',
+                    reporting_to: null, // Team Leader
+                    join_date: '2026-01-01',
+                    probation_end: '2026-03-01',
+                    status: 'active',
+                    bank_name: 'Maybank Berhad',
+                    bank_account: '5123-1111-2222',
+                    business_address: '123, Jalan SS2, Petaling Jaya'
+                },
+                {
+                    id: 6, // Ah Seng
+                    agent_code: 'AGN-2026-002',
+                    license_start: '2026-01-15',
+                    license_expiry: '2026-12-31',
+                    commission_rate: 30,
+                    monthly_target: 20000,
+                    team: 'Team A',
+                    reporting_to: 5, // Michelle Tan
+                    join_date: '2026-01-15',
+                    probation_end: '2026-03-15',
+                    status: 'active',
+                    bank_name: 'Public Bank',
+                    bank_account: '3123-3333-4444',
+                    business_address: '456, Jalan Ampang, Kuala Lumpur'
+                },
+                {
+                    id: 7, // Mei Ling
+                    agent_code: 'AGN-2026-003',
+                    license_start: '2026-02-01',
+                    license_expiry: '2026-12-31',
+                    commission_rate: 30,
+                    monthly_target: 18000,
+                    team: 'Team A',
+                    reporting_to: 5,
+                    join_date: '2026-02-01',
+                    probation_end: '2026-04-01',
+                    status: 'probation',
+                    bank_name: 'CIMB Bank',
+                    bank_account: '1234-5678-9012',
+                    business_address: '789, Jalan Bukit Bintang, Kuala Lumpur'
+                },
+                {
+                    id: 8, // Raj Kumar
+                    agent_code: 'AGN-2026-004',
+                    license_start: '2026-02-15',
+                    license_expiry: '2026-12-31',
+                    commission_rate: 30,
+                    monthly_target: 20000,
+                    team: 'Team A',
+                    reporting_to: 5,
+                    join_date: '2026-02-15',
+                    probation_end: '2026-04-15',
+                    status: 'active',
+                    bank_name: 'Hong Leong Bank',
+                    bank_account: '5678-1234-5678',
+                    business_address: '321, Jalan Tun Razak, Kuala Lumpur'
+                }
+            ];
+
+            agentUpdates.forEach(update => {
+                const user = DataStore.getById('users', update.id);
+                if (user) {
+                    await DataStore.update('users', update.id, { ...user, ...update });
+                }
+            });
+
+            // Add Ong Bee Ling as new agent (converted from customer)
+            const ongBeeLingAgent = {
+                id: 9,
+                username: 'ong.beeling',
+                password: 'agent123',
+                full_name: 'Ong Bee Ling',
+                role: 'consultant',
+                team_id: teamA ? teamA.id : null,
+                agent_code: 'AGN-2026-034',
+                license_start: '2026-03-05',
+                license_expiry: '2027-03-04',
+                commission_rate: 30,
+                monthly_target: 20000,
+                team: 'Team A',
+                reporting_to: 5, // Michelle Tan
+                join_date: '2026-03-05',
+                probation_end: '2026-06-05',
+                status: 'active',
+                bank_name: 'Maybank Berhad',
+                bank_account: '5123-4567-8901',
+                business_address: '456, Jalan Ampang, Kuala Lumpur',
+                ic_number: '850505-12-3456',
+                phone: '012-9876543',
+                email: 'ong.beeling@fengshui.com',
+                date_of_birth: '1982-03-04',
+                gender: 'Female',
+                company_name: 'Bee Ling Fashion Boutique'
+            };
+
+            await DataStore.create('users', ongBeeLingAgent);
+
+            // Update customer to mark as converted to agent
+            const customer = DataStore.getById('customers', 101);
+            if (customer) {
+                await DataStore.update('customers', 101, {
+                    converted_to_agent: true,
+                    converted_to_agent_id: 9,
+                    agent_package_purchased: 'Premium Package',
+                    agent_package_amount: 5500,
+                    agent_purchase_date: '2026-03-05'
+                });
             }
+
+            // Add follow-up stats
+            const followupStats = [
+                {
+                    agent_id: 5,
+                    total_assigned: 52,
+                    followed_up_7d: 48,
+                    inactive_3_7d: 2,
+                    inactive_8_14d: 2,
+                    inactive_15d_plus: 0,
+                    followup_rate: 92
+                },
+                {
+                    agent_id: 6,
+                    total_assigned: 50,
+                    followed_up_7d: 31,
+                    inactive_3_7d: 8,
+                    inactive_8_14d: 6,
+                    inactive_15d_plus: 5,
+                    followup_rate: 62
+                }
+            ];
+            followupStats.forEach(async s => await  DataStore.create('agent_stats', s));
+
+            // Add current assignments
+            const assignments = [
+                { agent_id: 5, prospect_id: 1, status: 'Active', next_action: '2026-03-11' },
+                { agent_id: 5, prospect_id: 3, status: 'Warm', next_action: '2026-03-07' },
+                { agent_id: 5, prospect_id: 5, status: 'Cold', next_action: 'ASAP' },
+                { agent_id: 6, prospect_id: 2, status: 'Active', next_action: '2026-03-04' }
+            ];
+            assignments.forEach(async a => await DataStore.create('assignments', a));
+
+            // Add performance targets
+            const targets = [
+                { agent_id: 5, month: '2026-03', target_amount: 20000, current_amount: 12500, target_cps: 15, current_cps: 8, target_meetings: 20, current_meetings: 12, target_conversion: 25, current_conversion: 18 }
+            ];
+            targets.forEach(async t => await  DataStore.create('agent_targets', t));
         }
 
-        // 5. Projects & Tasks
-        const projects = await DataStore.getAll('projects');
-        if (projects.length === 0) {
-            await DataStore.create('projects', { name: 'Website Redesign', status: 'active' });
-            await DataStore.create('projects', { name: 'Mobile App', status: 'planning' });
+        // Phase 8 Event Demo Data
+        if (await DataStore.getAll('event_categories').length === 0) {
+            const eventCategories = [
+                { id: 1, category_name: 'Lecture', base_score: 10, score_multiplier: 1.0, color_code: '#3b82f6' },
+                { id: 2, category_name: 'Workshop', base_score: 15, score_multiplier: 1.2, color_code: '#f59e0b' },
+                { id: 3, category_name: 'Course', base_score: 20, score_multiplier: 1.5, color_code: '#10b981' },
+                { id: 4, category_name: 'Museum Tour', base_score: 12, score_multiplier: 1.0, color_code: '#8b5cf6' }
+            ];
+            eventCategories.forEach(async c => await DataStore.create('event_categories', c));
+
+            const events = [
+                {
+                    id: 101,
+                    event_title: 'Understanding Your Life Gua',
+                    event_category_id: 1,
+                    description: 'Learn about your Life Gua and how it affects your destiny',
+                    event_date: '2026-03-10',
+                    start_time: '18:00',
+                    end_time: '20:00',
+                    location: 'Feng Shui Center, Kuala Lumpur',
+                    event_type: 'public',
+                    capacity: 50,
+                    ticket_price: 50,
+                    base_score: 10,
+                    override_multiplier: false,
+                    custom_multiplier: 1.0,
+                    enable_friend_bonus: true,
+                    friend_points_per_friend: 10,
+                    max_friends: 3,
+                    enable_question_bonus: true,
+                    question_points_per_question: 5,
+                    enable_stay_bonus: true,
+                    stay_points: 5,
+                    enable_purchase_bonus: true,
+                    purchase_base_points: 15,
+                    purchase_points_per_100: 10,
+                    auto_tags: ['Event Attendee'],
+                    conditional_tags: { friend: 'Friend Bringer', question: 'Engaged Attendee', purchase: 'Event Buyer' },
+                    status: 'upcoming',
+                    registered_count: 45,
+                    attended_count: 0,
+                    created_by: 5,
+                    created_at: '2026-02-15T10:00:00Z'
+                },
+                {
+                    id: 102,
+                    event_title: 'Feng Shui Basics Course',
+                    event_category_id: 3,
+                    description: 'Comprehensive introduction to Feng Shui principles',
+                    event_date: '2026-03-15',
+                    start_time: '09:00',
+                    end_time: '17:00',
+                    location: 'Online via Zoom',
+                    event_type: 'public',
+                    capacity: 100,
+                    ticket_price: 120,
+                    base_score: 20,
+                    override_multiplier: false,
+                    custom_multiplier: 1.5,
+                    enable_friend_bonus: true,
+                    friend_points_per_friend: 10,
+                    max_friends: 3,
+                    enable_question_bonus: true,
+                    question_points_per_question: 5,
+                    max_questions: 3,
+                    enable_stay_bonus: true,
+                    stay_points: 5,
+                    enable_purchase_bonus: true,
+                    purchase_base_points: 15,
+                    purchase_points_per_100: 10,
+                    auto_tags: ['Event Attendee', 'Course Participant'],
+                    conditional_tags: { friend: 'Friend Bringer', question: 'Engaged Attendee', purchase: 'Event Buyer' },
+                    status: 'upcoming',
+                    registered_count: 28,
+                    attended_count: 0,
+                    created_by: 5,
+                    created_at: '2026-02-20T14:30:00Z'
+                },
+                {
+                    id: 103,
+                    event_title: 'Museum Tour',
+                    event_category_id: 4,
+                    description: 'Guided tour of the Asian Civilizations Museum',
+                    event_date: '2026-03-20',
+                    start_time: '10:00',
+                    end_time: '13:00',
+                    location: 'Asian Civilizations Museum',
+                    event_type: 'public',
+                    capacity: 40,
+                    ticket_price: 30,
+                    base_score: 12,
+                    override_multiplier: false,
+                    custom_multiplier: 1.0,
+                    enable_friend_bonus: true,
+                    friend_points_per_friend: 10,
+                    max_friends: 3,
+                    enable_question_bonus: true,
+                    question_points_per_question: 5,
+                    max_questions: 3,
+                    enable_stay_bonus: true,
+                    stay_points: 5,
+                    enable_purchase_bonus: false,
+                    auto_tags: ['Event Attendee'],
+                    conditional_tags: { friend: 'Friend Bringer', question: 'Engaged Attendee' },
+                    status: 'upcoming',
+                    registered_count: 35,
+                    attended_count: 0,
+                    created_by: 5,
+                    created_at: '2026-02-25T09:15:00Z'
+                }
+            ];
+            events.forEach(async e => await DataStore.create('events', e));
+
+            const registrations = [
+                {
+                    id: 1001,
+                    event_id: 101,
+                    attendee_type: 'prospect',
+                    prospect_id: 1,
+                    registered_by: 5,
+                    registered_at: '2026-02-20T11:30:00Z',
+                    checked_in: false,
+                    checked_in_at: null,
+                    brought_friends: 0,
+                    asked_questions: 0,
+                    stayed_till_end: false,
+                    made_purchase: false,
+                    purchase_amount: 0,
+                    points_awarded: 0,
+                    scoring_processed: false
+                },
+                {
+                    id: 1002,
+                    event_id: 101,
+                    attendee_type: 'prospect',
+                    prospect_id: 2,
+                    registered_by: 6,
+                    registered_at: '2026-02-21T14:20:00Z',
+                    checked_in: false,
+                    checked_in_at: null,
+                    brought_friends: 0,
+                    asked_questions: 0,
+                    stayed_till_end: false,
+                    made_purchase: false,
+                    purchase_amount: 0,
+                    points_awarded: 0,
+                    scoring_processed: false
+                }
+            ];
+            registrations.forEach(async r => await DataStore.create('event_registrations', r));
         }
 
-        const tasks = await DataStore.getAll('tasks');
-        if (tasks.length === 0) {
-            await DataStore.create('tasks', { title: 'Design mockups', project_id: 1, completed: false });
+        // Phase 9: Reporting & KPI Dashboard Demo Data
+        if (await DataStore.getAll('yearly_targets').length === 0) {
+            // Yearly Targets
+            const yearlyTargets = [
+                {
+                    id: 1,
+                    target_year: 2026,
+                    cps_count_target: 840,
+                    total_sales_target: 1680000,
+                    pop_case_count_target: 100,
+                    pop_sales_target: 250000,
+                    epp_case_count_target: 80,
+                    epp_sales_target: 200000,
+                    new_agents_target: 48,
+                    new_customers_target: 240,
+                    total_meetings_target: 1200,
+                    activity_headcount_target: 600,
+                    seasonal_weighting: { q1: 0.9, q2: 1.0, q3: 1.1, q4: 1.2 },
+                    created_by: 1,
+                    created_at: '2026-01-01T00:00:00Z'
+                }
+            ];
+            yearlyTargets.forEach(async t => await DataStore.create('yearly_targets', t));
+
+            // Quarterly Targets
+            const quarterlyTargets = [
+                { id: 1, yearly_target_id: 1, quarter: 1, year: 2026, cps_count_target: 180, total_sales_target: 360000, pop_case_count_target: 22, pop_sales_target: 55000, epp_case_count_target: 18, epp_sales_target: 45000, new_agents_target: 12, new_customers_target: 60, total_meetings_target: 280, activity_headcount_target: 140, seasonal_factor: 0.9 },
+                { id: 2, yearly_target_id: 1, quarter: 2, year: 2026, cps_count_target: 200, total_sales_target: 400000, pop_case_count_target: 24, pop_sales_target: 60000, epp_case_count_target: 20, epp_sales_target: 50000, new_agents_target: 12, new_customers_target: 60, total_meetings_target: 300, activity_headcount_target: 150, seasonal_factor: 1.0 },
+                { id: 3, yearly_target_id: 1, quarter: 3, year: 2026, cps_count_target: 220, total_sales_target: 440000, pop_case_count_target: 26, pop_sales_target: 65000, epp_case_count_target: 21, epp_sales_target: 52500, new_agents_target: 12, new_customers_target: 60, total_meetings_target: 310, activity_headcount_target: 155, seasonal_factor: 1.1 },
+                { id: 4, yearly_target_id: 1, quarter: 4, year: 2026, cps_count_target: 240, total_sales_target: 480000, pop_case_count_target: 28, pop_sales_target: 70000, epp_case_count_target: 21, epp_sales_target: 52500, new_agents_target: 12, new_customers_target: 60, total_meetings_target: 310, activity_headcount_target: 155, seasonal_factor: 1.2 }
+            ];
+            quarterlyTargets.forEach(async t => await DataStore.create('quarterly_targets', t));
+
+            // Monthly Targets (sample for Q1)
+            const monthlyTargets = [
+                { id: 1, quarterly_target_id: 1, month: 1, year: 2026, cps_count_target: 58, total_sales_target: 116000, working_days: 22 },
+                { id: 2, quarterly_target_id: 1, month: 2, year: 2026, cps_count_target: 60, total_sales_target: 120000, working_days: 20 },
+                { id: 3, quarterly_target_id: 1, month: 3, year: 2026, cps_count_target: 62, total_sales_target: 124000, working_days: 23 }
+            ];
+            monthlyTargets.forEach(async t => await DataStore.create('monthly_targets', t));
+
+            // Weekly Targets (sample for March)
+            const weeklyTargets = [
+                { id: 1, monthly_target_id: 3, week_number: 1, week_start_date: '2026-03-01', week_end_date: '2026-03-07', cps_count_target: 15, total_sales_target: 30000 },
+                { id: 2, monthly_target_id: 3, week_number: 2, week_start_date: '2026-03-08', week_end_date: '2026-03-14', cps_count_target: 16, total_sales_target: 32000 },
+                { id: 4, monthly_target_id: 3, week_number: 4, week_start_date: '2026-03-22', week_end_date: '2026-03-28', cps_count_target: 15, total_sales_target: 30000 }
+            ];
+            weeklyTargets.forEach(async t => await DataStore.create('weekly_targets', t));
         }
 
-        UI.toast.success('Check complete. Missing demo data seeded.');
+        // Phase 12: WhatsApp Marketing Demo Data
+        if (await DataStore.getAll('whatsapp_templates').length === 0) {
+            const templates = [
+                {
+                    id: 1,
+                    template_name: 'Happy Birthday Wishes',
+                    category: 'Birthday',
+                    content: 'Hi {{name}}, wishing you a very happy birthday! May the {{zodiac}} year bring you prosperity and success!',
+                    buttons: [{ text: 'Thank you!', type: 'quick_reply' }, { text: 'View Offers', type: 'url' }],
+                    variables: ['name', 'zodiac'],
+                    footer_text: 'Reply STOP to opt out',
+                    is_approved: true,
+                    status: 'active',
+                    created_by: 5,
+                    created_at: '2026-02-15T10:00:00Z'
+                },
+                {
+                    id: 2,
+                    template_name: 'PR4 Special Offer',
+                    category: 'Promotion',
+                    content: 'Hi {{name}}, special offer for you! Get 15% off on PR4 Power Ring this month. Use code: PR4{{offer}}',
+                    buttons: [{ text: 'I\'m interested', type: 'quick_reply' }, { text: 'Learn more', type: 'url' }],
+                    variables: ['name', 'offer'],
+                    footer_text: 'Reply STOP to opt out',
+                    is_approved: true,
+                    status: 'active',
+                    created_by: 5,
+                    created_at: '2026-02-20T14:30:00Z'
+                },
+                {
+                    id: 3,
+                    template_name: 'Event Invitation',
+                    category: 'Event',
+                    content: 'Join us for {{event_title}} on {{event_date}} at {{location}}. Limited seats available!',
+                    buttons: [{ text: 'Yes, I\'ll attend', type: 'quick_reply' }, { text: 'View details', type: 'url' }],
+                    variables: ['name', 'event_title', 'event_date', 'location'],
+                    footer_text: 'Reply STOP to opt out',
+                    is_approved: true,
+                    status: 'active',
+                    created_by: 5,
+                    created_at: '2026-02-25T09:15:00Z'
+                }
+            ];
+            templates.forEach(async t => await DataStore.create('whatsapp_templates', t));
+        }
+
+        if (await DataStore.getAll('whatsapp_campaigns').length === 0) {
+            const campaigns = [
+                {
+                    id: 1,
+                    campaign_name: 'March Birthday Blast',
+                    template_id: 1,
+                    status: 'scheduled',
+                    scheduled_date: '2026-03-10T09:00:00',
+                    audience_config: { segments: ['birthday-month'] },
+                    total_recipients: 45,
+                    sent_count: 45,
+                    delivered_count: 44,
+                    opened_count: 42,
+                    replied_count: 12,
+                    clicked_count: 8,
+                    converted_count: 5,
+                    created_by: 5,
+                    created_at: '2026-03-01T11:00:00Z'
+                },
+                {
+                    id: 2,
+                    campaign_name: 'PR4 Follow-up Campaign',
+                    template_id: 2,
+                    status: 'active',
+                    scheduled_date: '2026-03-05T14:00:00',
+                    audience_config: { segments: ['high-score'] },
+                    total_recipients: 120,
+                    sent_count: 120,
+                    delivered_count: 118,
+                    opened_count: 108,
+                    replied_count: 22,
+                    clicked_count: 15,
+                    converted_count: 8,
+                    created_by: 5,
+                    created_at: '2026-03-04T16:30:00Z'
+                },
+                {
+                    id: 3,
+                    campaign_name: 'Post-Event Thank You',
+                    template_id: 1,
+                    status: 'completed',
+                    scheduled_date: '2026-03-02T18:00:00',
+                    audience_config: { segments: ['event-attendees'] },
+                    total_recipients: 85,
+                    sent_count: 85,
+                    delivered_count: 85,
+                    opened_count: 82,
+                    replied_count: 15,
+                    clicked_count: 10,
+                    converted_count: 3,
+                    created_by: 5,
+                    created_at: '2026-03-01T10:00:00Z',
+                    completed_date: '2026-03-03T10:00:00Z'
+                }
+            ];
+            campaigns.forEach(async c => await DataStore.create('whatsapp_campaigns', c));
+        }
+
+        // Phase: Marketing Manager Listings - Seed Products
+        if (await DataStore.getAll('products').length === 0) {
+            const productNames = [
+                "PR1", "PR2", "PR3", "PR4", "PR5", "PR6", "PR7", "PR8", "PR9", "PRH",
+                "简易", "灵活", "专案", "商业", "润雷益德", "源禄晋富", "黄离元吉",
+                "曲全霍盈利生藏钜", "有无相生难易相成", "大满福", "三富天",
+                "富田盘2", "富田盘1", "天至喜4", "天至喜3", "天至喜2", "天至喜1",
+                "万富通", "长胜决", "宝王象3", "宝王象2", "宝王象1", "元极大通",
+                "上善若水", "云行雨施", "滴水兴波", "元亨利贞", "谦卑而光",
+                "长丰-顺利昭德雷风赫惠", "聚人曰财", "枢机富丽", "自天祐之吉无不利",
+                "厚德载物", "经传录", "圣智", "渊慧", "魁星踢斗独占鳌头", "文昌图",
+                "见龙在田", "终日乾乾夕惕若厉", "劳谦有终曲成万物", "天道酬勤",
+                "财库", "财托", "观象防危", "命卦紫兆", "星卦解运",
+                "生命蓝图3年", "生命蓝图5年", "择日生子", "新生儿取名", "个人测名"
+            ];
+            productNames.forEach(name => {
+                await DataStore.create('products', {
+                    name,
+                    price: 0,
+                    remarks: "",
+                    delivery_lead_time: "",
+                    is_active: true
+                });
+            });
+        }
+
+        // Phase: Marketing Manager Listings - Seed Events
+        if (await DataStore.getAll('events').length === 0) {
+            const eventTitles = [
+                "9-Stars", "Fengshui DIY", "Museum", "Sharing- PR", "Sharing- Calligraphy",
+                "Sharing - FengShui JY", "Sharing - FengShui Flexi", "Sharing - FengShui ZhuanAn",
+                "Huiji- JY", "Huiji- Flexi", "Huijio ZhuanAn", "Chuan Fu", "Boss Month Event",
+                "CNY Event", "Annual Prediction Talk", "Special Topic", "916 Event"
+            ];
+            eventTitles.forEach(title => {
+                await DataStore.create('events', {
+                    title,
+                    ticket_price: 0,
+                    duration: "",
+                    target_group: "",
+                    description: "",
+                    is_active: true
+                });
+            });
+        }
     };
 
     const updateUserDisplay = () => {
@@ -5932,10 +6766,10 @@ function _wireLoginBtn() {
                     <div class="ref-v2-actions">
                         <div class="search-box-v2">
                             <i class="fas fa-search"></i>
-                            <input type="text" id="tree-search-input" placeholder="Search person to view tree..." autocomplete="off" onkeyup="app. debounce(await app. searchTreePerson(this.value), 300)">
+                            <input type="text" id="tree-search-input" placeholder="Search person to view tree..." autocomplete="off" onkeyup="await app.debounce(await app.searchTreePerson(this.value), 300)">
                             <div id="tree-search-results" class="search-results-v2"></div>
                         </div>
-                        <button class="btn primary" onclick="app. openAddReferralModal()">
+                        <button class="btn primary" onclick="await app.openAddReferralModal()">
                             <i class="fas fa-plus"></i> Add Referral
                         </button>
                         <button class="btn secondary" onclick="app.refreshCurrentView()">
@@ -6074,9 +6908,9 @@ function _wireLoginBtn() {
             const lowerRoles = ['consultant', 'junior_consultant', 'senior_consultant', 'agent', 'junior_agent', 'senior_agent'];
             if (lowerRoles.includes(role)) {
                 // Show their own tree if they have any downline, else show placeholder
-                const rootPerson = await DataStore.getById('customers', user.id) || await DataStore.getById('prospects', user.id);
+                const rootPerson = DataStore.getById('customers', user.id) || DataStore.getById('prospects', user.id);
                 if (rootPerson) {
-                    await app. showReferralTree(rootPerson.id, rootPerson.id in await DataStore.getAll('customers') ? 'customer' : 'prospect');
+                    await app.showReferralTree(rootPerson.id, rootPerson.id in await DataStore.getAll('customers') ? 'customer' : 'prospect');
                 } else {
                     // Show placeholder – no data
                     const ph = document.getElementById('referral-tree-placeholder');
@@ -6129,14 +6963,13 @@ function _wireLoginBtn() {
             if (!r.referrer_id) return;
             grouped[r.referrer_id] = (grouped[r.referrer_id] || 0) + 1;
         });
-        const top3Promises = Object.entries(grouped)
+        const top3 = Object.entries(grouped)
             .sort((a, b) => b[1] - a[1])
             .slice(0, 3)
-            .map(async ([id, count]) => {
-                const person = await DataStore.getById('customers', id) || await DataStore.getById('prospects', id);
+            .map(([id, count]) => {
+                const person = DataStore.getById('customers', id) || DataStore.getById('prospects', id);
                 return { name: person?.full_name || `ID: ${id}`, count };
             });
-        const top3 = await Promise.all(top3Promises);
 
         container.innerHTML = `
             <div class="summary-table-v2">
@@ -6187,28 +7020,6 @@ function _wireLoginBtn() {
 
         const sorted = Object.values(grouped).sort((a, b) => b.count - a.count);
 
-        const leaderboardItems = await Promise.all(sorted.map(async (item, idx) => {
-            if (hiddenIds.includes(String(item.id))) return '';
-            const person = await DataStore.getById('customers', item.id) || await DataStore.getById('prospects', item.id);
-            if (!person) return '';
-            return `
-                <tr class="rank-${idx + 1}">
-                    <td class="rank-cell">${idx + 1}</td>
-                    <td class="name-cell" onclick="app. showReferralTree(${item.id}, '${item.type}')">
-                        ${person.full_name} ${item.type === 'customer' ? '<span class="badge" style="background:#dcfce7; color:#166534">C</span>' : ''}
-                    </td>
-                    <td>${item.count}</td>
-                    <td><span style="color:#10b981; font-weight:600">${item.converted}</span></td>
-                    <td>${UI.formatDate(item.latest)}</td>
-                    <td class="text-right">
-                        <button class="btn-icon" onclick="app. toggleHideReferrer('${item.id}')" title="Hide from leaderboard">
-                            <i class="far fa-eye-slash"></i>
-                        </button>
-                    </td>
-                </tr>
-            `;
-        }));
-
         container.innerHTML = `
             <div class="leaderboard-controls-v2">
                 <div style="display:flex; gap:12px; align-items:center;">
@@ -6217,7 +7028,7 @@ function _wireLoginBtn() {
                         <option>This Year</option>
                         <option>This Month</option>
                     </select>
-                    <button class="btn secondary btn-sm" onclick="app. resetHiddenReferrers()">Reset Hidden</button>
+                    <button class="btn secondary btn-sm" onclick="await app.resetHiddenReferrers()">Reset Hidden</button>
                 </div>
                 <div class="text-muted" font-size="12px">Showing top contributors</div>
             </div>
@@ -6233,7 +7044,27 @@ function _wireLoginBtn() {
                     </tr>
                 </thead>
                 <tbody>
-                    ${leaderboardItems.join('')}
+                    ${sorted.map((item, idx) => {
+                        if (hiddenIds.includes(String(item.id))) return '';
+                        const person = DataStore.getById('customers', item.id) || DataStore.getById('prospects', item.id);
+                        if (!person) return '';
+                        return `
+                            <tr class="rank-${idx + 1}">
+                                <td class="rank-cell">${idx + 1}</td>
+                                <td class="name-cell" onclick="await app.showReferralTree(${item.id}, '${item.type}')">
+                                    ${person.full_name} ${item.type === 'customer' ? '<span class="badge" style="background:#dcfce7; color:#166534">C</span>' : ''}
+                                </td>
+                                <td>${item.count}</td>
+                                <td><span style="color:#10b981; font-weight:600">${item.converted}</span></td>
+                                <td>${UI.formatDate(item.latest)}</td>
+                                <td class="text-right">
+                                    <button class="btn-icon" onclick="await app.toggleHideReferrer('${item.id}')" title="Hide from leaderboard">
+                                        <i class="far fa-eye-slash"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                        `;
+                    }).join('')}
                     ${sorted.length === 0 ? '<tr><td colspan="6" class="text-center p-4 text-muted">No referrer data found.</td></tr>' : ''}
                 </tbody>
             </table>
@@ -6288,7 +7119,7 @@ function _wireLoginBtn() {
 
         if (filtered.length > 0) {
             results.innerHTML = filtered.map(p => `
-                <div class="result-item-v2" onclick="app. showReferralTree(${p.id}, '${p.type}')">
+                <div class="result-item-v2" onclick="await app.showReferralTree(${p.id}, '${p.type}')">
                     <div style="background: ${p.type === 'customer' ? '#dcfce7' : '#f1f5f9'}; width:32px; height:32px; border-radius:50%; display:flex; align-items:center; justify-content:center;">
                         <i class="fas ${p.type === 'customer' ? 'fa-user-check' : 'fa-user'}" style="color:${p.type === 'customer' ? '#166534' : '#64748b'}; font-size:12px;"></i>
                     </div>
@@ -6322,7 +7153,7 @@ function _wireLoginBtn() {
     };
 
     const buildTreeData = async (rootId, rootType) => {
-        const person = await DataStore.getById(rootType === 'customer' ? 'customers' : 'prospects', rootId);
+        const person = DataStore.getById(rootType === 'customer' ? 'customers' : 'prospects', rootId);
         if (!person || !await canViewNode(rootId, rootType)) return null;
 
         const node = {
@@ -6338,20 +7169,20 @@ function _wireLoginBtn() {
         // Match by referrer_id (new format)
         const children = referrals.filter(r => String(r.referrer_id) === String(rootId));
 
-        for (const r of children) {
+        children.forEach(r => {
             const childNode = await buildTreeData(r.referred_prospect_id, 'prospect');
             if (childNode) {
                 childNode.referralSource = r.referral_source;
                 childNode.referralDate = r.created_at;
                 node.children.push(childNode);
             }
-        }
+        });
 
         return node;
     };
 
-    const getProspectColour = async (prospectId) => {
-        const prospect = await DataStore.getById('prospects', prospectId);
+    const getProspectColour = (prospectId) => {
+        const prospect = DataStore.getById('prospects', prospectId);
         if (!prospect) return "#cbd5e1"; // Gray default
         const status = prospect.pipeline_stage?.toLowerCase();
         
@@ -6367,11 +7198,11 @@ function _wireLoginBtn() {
     };
 
     const getCustomerBadge = async (customerId) => {
-        const customer = await DataStore.getById('customers', customerId);
+        const customer = DataStore.getById('customers', customerId);
         if (!customer) return null;
         
         // Logic for Hot/Cool badges
-        const purchases = (await DataStore.getAll('purchases')).filter(p => p.customer_id == customerId);
+        const purchases = await DataStore.getAll('purchases').filter(p => p.customer_id == customerId);
         if (purchases.length > 3) return { icon: "🔥", color: "#ef4444" }; // Hot
         if (customer.conversion_amount > 5000) return { icon: "💰", color: "#f59e0b" }; // VIP
         return null;
@@ -6403,16 +7234,6 @@ function _wireLoginBtn() {
         const root = d3.hierarchy(rootData);
         tree(root);
 
-        // Pre-compute fill colors for all nodes before rendering
-        const nodesData = root.descendants();
-        for (const d of nodesData) {
-            if (d.data.type === 'customer') {
-                d.fillColor = '#ffffff';
-            } else {
-                d.fillColor = await getProspectColour(d.data.id);
-            }
-        }
-
         // Links
         _treeSvg.selectAll(".link")
             .data(root.links())
@@ -6438,7 +7259,7 @@ function _wireLoginBtn() {
             .attr("x", -80)
             .attr("y", -22)
             .attr("rx", 6)
-            .attr("fill", d => d.fillColor)
+            .attr("fill", d => d.data.type === 'customer' ? '#ffffff' : getProspectColour(d.data.id))
             .attr("stroke", d => d.data.type === 'customer' ? '#0d9488' : 'none')
             .attr("stroke-width", 2)
             .style("filter", "drop-shadow(0 2px 4px rgba(0,0,0,0.05))");
@@ -6478,24 +7299,24 @@ function _wireLoginBtn() {
             .style("font-family", '"Font Awesome 5 Free"')
             .style("font-weight", "900")
             .text("\uf075") // fa-comment
-            .on("click", async (e, d) => {
+            .on("click", (e, d) => {
                 e.stopPropagation();
-                await app. openMemoModal(d.data.id, d.data.type);
+                await app.openMemoModal(d.data.id, d.data.type);
             });
 
         // Click async Handler (View Profile)
-        nodes.on("click", async (e, d) => {
+        nodes.on("click", (e, d) => {
             if (d.data.type === 'customer') {
-                await app. showCustomerDetail(d.data.id);
+                await app.showCustomerDetail(d.data.id);
             } else {
-                await app. showProspectDetail(d.data.id);
+                await app.showProspectDetail(d.data.id);
             }
         });
 
         // Expand/collapse on double-click
-        nodes.on("dblclick", async (e, d) => {
+        nodes.on("dblclick", (e, d) => {
             e.stopPropagation();
-            await app. showReferralTree(d.data.id, d.data.type);
+            await app.showReferralTree(d.data.id, d.data.type);
         });
 
         // Center the tree
@@ -6539,7 +7360,7 @@ function _wireLoginBtn() {
                 <div class="ref-form-step">
                     <label>1. Who is the Referrer?</label>
                     <div class="search-field">
-                        <input type="text" id="referrer-search" class="form-control" placeholder="Search customer or prospect..." onkeyup="app. searchReferrersForModal(this.value, 'referrer')">
+                        <input type="text" id="referrer-search" class="form-control" placeholder="Search customer or prospect..." onkeyup="await app.searchReferrersForModal(this.value, 'referrer')">
                         <div id="referrer-search-results" class="search-dropdown"></div>
                     </div>
                     <div id="selected-referrer-info" class="selected-entity-display"></div>
@@ -6549,8 +7370,8 @@ function _wireLoginBtn() {
                     <label>2. Who was Referred?</label>
                     <div class="search-field">
                         <div style="display:flex; gap:8px">
-                            <input type="text" id="referred-search" class="form-control" placeholder="Search existing prospect..." onkeyup="app. async searchReferrersForModal(this.value, 'referred')">
-                            <button class="btn secondary" onclick="app. openCreateProspectForReferral()"><i class="fas fa-user-plus"></i> New</button>
+                            <input type="text" id="referred-search" class="form-control" placeholder="Search existing prospect..." onkeyup="await app.searchReferrersForModal(this.value, 'referred')">
+                            <button class="btn secondary" onclick="await app.openCreateProspectForReferral()"><i class="fas fa-user-plus"></i> New</button>
                         </div>
                         <div id="referred-search-results" class="search-dropdown"></div>
                     </div>
@@ -6585,7 +7406,7 @@ function _wireLoginBtn() {
  
         UI.showModal("Add New Referral", content, [
             { label: "Cancel", type: "secondary", action: "UI.hideModal()" },
-            { label: "Create Referral", type: "primary", action: "await app. submitReferral()" }
+            { label: "Create Referral", type: "primary", action: "await app.submitReferral()" }
         ]);
     };
  
@@ -6607,7 +7428,7 @@ function _wireLoginBtn() {
  
         if (filtered.length > 0) {
             resultsDiv.innerHTML = filtered.map(p => `
-                <div class="result-item-v2" onclick="app. selectReferrerForModal(${p.id}, '${p.type}', '${modalType}')">
+                <div class="result-item-v2" onclick="app.selectReferrerForModal(${p.id}, '${p.type}', '${modalType}')">
                     <div style="flex-grow:1">
                         <strong>${p.full_name}</strong>
                         <div style="font-size:10px">${p.type.toUpperCase()}</div>
@@ -6621,8 +7442,8 @@ function _wireLoginBtn() {
         }
     };
  
-    const selectReferrerForModal = async (id, type, modalType) => {
-        const person = await DataStore.getById(type === 'customer' ? 'customers' : 'prospects', id);
+    const selectReferrerForModal = (id, type, modalType) => {
+        const person = DataStore.getById(type === 'customer' ? 'customers' : 'prospects', id);
         if (!person) return;
  
         if (modalType === 'referrer') _modalSelectedReferrer = { id, type, name: person.full_name };
@@ -6647,11 +7468,11 @@ function _wireLoginBtn() {
     };
  
     const openCreateProspectForReferral = async () => {
-        await app. openProspectModal();
+        await app.openProspectModal();
         // Listener for the custom event we added to saveProspect
-        const handler = async (e) => {
+        const handler = (e) => {
             const newProspect = e.detail;
-            await selectReferrerForModal(newProspect.id, 'prospect', 'referred');
+            selectReferrerForModal(newProspect.id, 'prospect', 'referred');
             document.removeEventListener('prospectCreated', handler);
         };
         document.addEventListener('prospectCreated', handler);
@@ -6687,8 +7508,7 @@ function _wireLoginBtn() {
     };
 
     const openMemoModal = async (id, type) => {
-        const notesArr = await DataStore.getAll('notes');
-        const notes = (notesArr || []).filter(n => n.entity_type === type && n.entity_id == id);
+        const notes = await DataStore.getAll('notes').filter(n => n.entity_type === type && n.entity_id == id);
         const latest = notes.sort((a,b) => new Date(b.created_at) - new Date(a.created_at))[0];
 
         const content = `
@@ -6697,7 +7517,7 @@ function _wireLoginBtn() {
                 <div style="background:#f1f5f9; padding:16px; border-radius:8px; margin:16px 0; border-left:4px solid #3b82f6">
                     ${latest ? latest.content : 'No memos found for this person.'}
                     <div style="font-size:11px; color:#64748b; margin-top:8px">
-                        ${latest ? 'Written by ' + ((await DataStore.getById('users', latest.created_by))?.full_name || 'Admin') + ' on ' + UI.formatDate(latest.created_at) : ''}
+                        ${latest ? 'Written by ' + (DataStore.getById('users', latest.created_by)?.full_name || 'Admin') + ' on ' + UI.formatDate(latest.created_at) : ''}
                     </div>
                 </div>
                 <button class="btn secondary btn-block" onclick="UI.hideModal(); app.show${type.charAt(0).toUpperCase() + type.slice(1)}Detail(${id})">View Full Profile</button>
@@ -6720,7 +7540,7 @@ function _wireLoginBtn() {
                         <h1>Case Studies Repository</h1>
                         <p>Document and share success stories, sales ideas, and closing strategies.</p>
                     </div>
-                    <button class="btn primary" onclick="app. async openCaseStudyModal()">
+                    <button class="btn primary" onclick="await app.openCaseStudyModal()">
                         <i class="fas fa-plus"></i> New Case Study
                     </button>
                 </div>
@@ -6728,26 +7548,26 @@ function _wireLoginBtn() {
                 <div class="filter-bar">
                     <div class="filter-group">
                         <i class="fas fa-search"></i>
-                        <input type="text" id="case-search" placeholder="Search title or prospect/customer..." value="${_caseFilters.search}" onkeyup="app. async handleCaseSearch(event)">
+                        <input type="text" id="case-search" placeholder="Search title or prospect/customer..." value="${_caseFilters.search}" onkeyup="await app.handleCaseSearch(event)">
                     </div>
                     <div class="filter-group">
                         <label>Product</label>
-                        <select id="case-product-filter" onchange="app. async handleCaseFilterChange()">
+                        <select id="case-product-filter" onchange="await app.handleCaseFilterChange()">
                             <option value="all">All Products</option>
-                            ${((await DataStore.getAll('products')) || []).filter(p => p.is_active !== false).map(p => `<option value="${p.name}" ${_caseFilters.product === p.name ? 'selected' : ''}>${p.name}</option>`).join('')}
+                            ${(await DataStore.getAll('products') || []).filter(p => p.is_active !== false).map(p => `<option value="${p.name}" ${_caseFilters.product === p.name ? 'selected' : ''}>${p.name}</option>`).join('')}
                         </select>
                     </div>
                     <div class="filter-group">
                         <label>From</label>
-                        <input type="date" id="case-date-from" value="${_caseFilters.from}" onchange="app. async handleCaseFilterChange()">
+                        <input type="date" id="case-date-from" value="${_caseFilters.from}" onchange="await app.handleCaseFilterChange()">
                     </div>
                     <div class="filter-group">
                         <label>To</label>
-                        <input type="date" id="case-date-to" value="${_caseFilters.to}" onchange="app. async handleCaseFilterChange()">
+                        <input type="date" id="case-date-to" value="${_caseFilters.to}" onchange="await app.handleCaseFilterChange()">
                     </div>
                     <div class="filter-group">
                         <label>Visibility</label>
-                        <select id="case-visibility-filter" onchange="app. async handleCaseFilterChange()">
+                        <select id="case-visibility-filter" onchange="await app.handleCaseFilterChange()">
                             <option value="all" ${_caseFilters.visibility === 'all' ? 'selected' : ''}>All</option>
                             <option value="public" ${_caseFilters.visibility === 'public' ? 'selected' : ''}>Public Only</option>
                             <option value="mine" ${_caseFilters.visibility === 'mine' ? 'selected' : ''}>My Cases</option>
@@ -6818,22 +7638,18 @@ function _wireLoginBtn() {
         // Apply Search/Filter logic
         if (_caseFilters.search) {
             const q = _caseFilters.search.toLowerCase();
-            const filteredCases = [];
-            for (const c of cases) {
+            cases = cases.filter(c => {
                 let nameMatch = false;
                 if (c.prospect_id) {
-                    const p = await DataStore.getById('prospects', c.prospect_id);
+                    const p = DataStore.getById('prospects', c.prospect_id);
                     if (p?.full_name?.toLowerCase().includes(q)) nameMatch = true;
                 }
                 if (c.customer_id) {
-                    const cust = await DataStore.getById('customers', c.customer_id);
+                    const cust = DataStore.getById('customers', c.customer_id);
                     if (cust?.full_name?.toLowerCase().includes(q)) nameMatch = true;
                 }
-                if (c.title.toLowerCase().includes(q) || nameMatch) {
-                    filteredCases.push(c);
-                }
-            }
-            cases = filteredCases;
+                return c.title.toLowerCase().includes(q) || nameMatch;
+            });
         }
 
         if (_caseFilters.product !== 'all') {
@@ -6855,24 +7671,24 @@ function _wireLoginBtn() {
         }
 
         emptyState.style.display = 'none';
-        const caseRows = await Promise.all(cases.map(async c => {
+        tbody.innerHTML = cases.map(c => {
             let entityName = '-';
             let entityLink = '#';
             if (c.customer_id) {
-                const cust = await DataStore.getById('customers', c.customer_id);
+                const cust = DataStore.getById('customers', c.customer_id);
                 entityName = cust ? `<i class="fas fa-user-check" title="Customer"></i> ${cust.full_name}` : 'Unknown Customer';
-                entityLink = `await app. showCustomerDetail(${c.customer_id})`;
+                entityLink = `await app.showCustomerDetail(${c.customer_id})`;
             } else if (c.prospect_id) {
-                const pros = await DataStore.getById('prospects', c.prospect_id);
+                const pros = DataStore.getById('prospects', c.prospect_id);
                 entityName = pros ? `<i class="fas fa-user" title="Prospect"></i> ${pros.full_name}` : 'Unknown Prospect';
-                entityLink = `await app. showProspectDetail(${c.prospect_id})`;
+                entityLink = `await app.showProspectDetail(${c.prospect_id})`;
             }
 
             const isOwner = c.created_by === currentUser?.id;
             const isAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || currentUser?.role?.includes('Level 3') || currentUser?.role?.includes('Level 7') || currentUser?.role === 'team_leader' || currentUser?.role === 'admin';
 
             return `
-                <tr class="clickable" onclick="app. showCaseStudyDetail(${c.id})">
+                <tr class="clickable" onclick="await app.showCaseStudyDetail(${c.id})">
                     <td>
                         <div class="case-title">
                             <strong>${c.title}</strong>
@@ -6885,21 +7701,20 @@ function _wireLoginBtn() {
                     <td>${c.closing_date || '-'}</td>
                     <td class="text-right">
                         <div class="actions">
-                            <button class="btn-icon" title="View" onclick="event.stopPropagation(); app. showCaseStudyDetail(${c.id})"><i class="fas fa-eye"></i></button>
+                            <button class="btn-icon" title="View" onclick="event.stopPropagation(); await app.showCaseStudyDetail(${c.id})"><i class="fas fa-eye"></i></button>
                             ${(isOwner || isAdmin) ? `
-                                <button class="btn-icon" title="Edit" onclick="event.stopPropagation(); app. openCaseStudyModal(${c.id})"><i class="fas fa-edit"></i></button>
-                                <button class="btn-icon text-danger" title="Delete" onclick="event.stopPropagation(); app. deleteCaseStudy(${c.id})"><i class="fas fa-trash"></i></button>
+                                <button class="btn-icon" title="Edit" onclick="event.stopPropagation(); await app.openCaseStudyModal(${c.id})"><i class="fas fa-edit"></i></button>
+                                <button class="btn-icon text-danger" title="Delete" onclick="event.stopPropagation(); await app.deleteCaseStudy(${c.id})"><i class="fas fa-trash"></i></button>
                             ` : ''}
                         </div>
                     </td>
                 </tr>
             `;
-        }));
-        tbody.innerHTML = caseRows.join('');
+        }).join('');
     };
 
     const showCaseStudyDetail = async (id) => {
-        const c = await DataStore.getById('case_studies', id);
+        const c = DataStore.getById('case_studies', id);
         if (!c) return;
 
         const viewport = document.getElementById('content-viewport');
@@ -6909,21 +7724,21 @@ function _wireLoginBtn() {
 
         let entityInfo = 'Generic Case Study';
         if (c.customer_id) {
-            const cust = await DataStore.getById('customers', c.customer_id);
+            const cust = DataStore.getById('customers', c.customer_id);
             entityInfo = cust ? `Customer: ${cust.full_name}` : 'Unknown Customer';
         } else if (c.prospect_id) {
-            const pros = await DataStore.getById('prospects', c.prospect_id);
+            const pros = DataStore.getById('prospects', c.prospect_id);
             entityInfo = pros ? `Prospect: ${pros.full_name}` : 'Unknown Prospect';
         }
 
-        const creator = await DataStore.getById('users', c.created_by);
+        const creator = DataStore.getById('users', c.created_by);
         const creatorName = creator ? (creator.full_name || creator.username) : 'System';
 
         viewport.innerHTML = `
             <div class="case-detail-view">
                 <div class="detail-header">
                     <div class="header-left">
-                        <button class="btn-back" onclick="app. navigateTo('cases')"><i class="fas fa-arrow-left"></i> Back to List</button>
+                        <button class="btn-back" onclick="await app.navigateTo('cases')"><i class="fas fa-arrow-left"></i> Back to List</button>
                         <h1>${c.title}</h1>
                         <div class="case-meta-header">
                             <span><i class="fas fa-user-circle"></i> ${entityInfo}</span>
@@ -6934,11 +7749,11 @@ function _wireLoginBtn() {
                     </div>
                     <div class="header-actions">
                         ${(isOwner || isAdmin) ? `
-                            <button class="btn secondary" onclick="app. toggleCasePublic(${c.id})">
+                            <button class="btn secondary" onclick="await app.toggleCasePublic(${c.id})">
                                 <i class="fas ${c.is_public ? 'fa-lock' : 'fa-share'}"></i> ${c.is_public ? 'Make Private' : 'Share Publicly'}
                             </button>
-                            <button class="btn secondary" onclick="app. openCaseStudyModal(${c.id})"><i class="fas fa-edit"></i> Edit</button>
-                            <button class="btn-icon text-danger" onclick="app. deleteCaseStudy(${c.id})"><i class="fas fa-trash"></i></button>
+                            <button class="btn secondary" onclick="await app.openCaseStudyModal(${c.id})"><i class="fas fa-edit"></i> Edit</button>
+                            <button class="btn-icon text-danger" onclick="await app.deleteCaseStudy(${c.id})"><i class="fas fa-trash"></i></button>
                         ` : ''}
                         <button class="btn secondary" onclick="app.copyCaseLink(${c.id})"><i class="fas fa-link"></i> Copy Link</button>
                     </div>
@@ -6986,7 +7801,7 @@ function _wireLoginBtn() {
     };
 
     const toggleCasePublic = async (id) => {
-        const c = await DataStore.getById('case_studies', id);
+        const c = DataStore.getById('case_studies', id);
         if (!c) return;
         await DataStore.update('case_studies', id, { is_public: !c.is_public });
         UI.toast.success(`Case study is now ${!c.is_public ? 'public' : 'private'}.`);
@@ -7007,22 +7822,22 @@ function _wireLoginBtn() {
             if (_currentView === 'cases') {
                 await renderCasesList();
             } else {
-                await app. navigateTo('cases');
+                await app.navigateTo('cases');
             }
         }
     };
 
     const openCaseStudyModal = async (id = null) => {
-        const c = id ? await DataStore.getById('case_studies', id) : null;
+        const c = id ? DataStore.getById('case_studies', id) : null;
         const title = id ? 'Edit Case Study' : 'New Case Study';
 
         let entityName = '';
         if (c) {
             if (c.customer_id) {
-                const cust = await DataStore.getById('customers', c.customer_id);
+                const cust = DataStore.getById('customers', c.customer_id);
                 entityName = cust ? cust.full_name : '';
             } else if (c.prospect_id) {
-                const pros = await DataStore.getById('prospects', c.prospect_id);
+                const pros = DataStore.getById('prospects', c.prospect_id);
                 entityName = pros ? pros.full_name : '';
             }
         }
@@ -7045,7 +7860,7 @@ function _wireLoginBtn() {
                         <div class="form-group half">
                             <label>Link Prospect/Customer</label>
                             <div class="search-select-container">
-                                <input type="text" id="case-entity-search" class="form-control" placeholder="Type name..." value="${entityName}" onkeyup="app. async searchCaseEntities(this.value)">
+                                <input type="text" id="case-entity-search" class="form-control" placeholder="Type name..." value="${entityName}" onkeyup="await app.searchCaseEntities(this.value)">
                                 <div id="case-entity-results" class="search-results-dropdown"></div>
                                 <input type="hidden" id="case-prospect-id" value="${c ? (c.prospect_id || '') : ''}">
                                 <input type="hidden" id="case-customer-id" value="${c ? (c.customer_id || '') : ''}">
@@ -7055,7 +7870,7 @@ function _wireLoginBtn() {
                             <label>Product</label>
                             <select id="case-product" class="form-control">
                                 <option value="">Select Product...</option>
-                                ${((await DataStore.getAll('products')) || []).map(p => `<option value="${p.name}" ${c && c.product === p.name ? 'selected' : ''}>${p.name}</option>`).join('')}
+                                ${(await DataStore.getAll('products') || []).map(p => `<option value="${p.name}" ${c && c.product === p.name ? 'selected' : ''}>${p.name}</option>`).join('')}
                             </select>
                         </div>
                     </div>
@@ -7109,7 +7924,7 @@ function _wireLoginBtn() {
 
         UI.modal.show(title, modalHtml, [
             { text: 'Cancel', class: 'secondary', onclick: 'UI.modal.hide()' },
-            { text: id ? 'Update Case' : 'Save Case Study', class: 'primary', onclick: `await app. saveCaseStudy(${id || 'null'})` }
+            { text: id ? 'Update Case' : 'Save Case Study', class: 'primary', onclick: `await app.saveCaseStudy(${id || 'null'})` }
         ]);
     };
 
@@ -7128,10 +7943,8 @@ function _wireLoginBtn() {
             return;
         }
 
-        const allP = await DataStore.getAll('prospects');
-        const prospects = (allP || []).filter(p => p.full_name?.toLowerCase().includes(query.toLowerCase()));
-        const allC = await DataStore.getAll('customers');
-        const customers = (allC || []).filter(c => c.full_name?.toLowerCase().includes(query.toLowerCase()));
+        const prospects = await DataStore.getAll('prospects').filter(p => p.full_name?.toLowerCase().includes(query.toLowerCase()));
+        const customers = await DataStore.getAll('customers').filter(c => c.full_name?.toLowerCase().includes(query.toLowerCase()));
 
         let html = '';
         if (prospects.length > 0) {
@@ -7210,21 +8023,21 @@ function _wireLoginBtn() {
                     <div class="calendar-title-nav">
                         <h2 id="calendar-month-title">Month Year</h2>
                         <div class="nav-arrows">
-                            <button class="btn-nav" onclick="app. async goToPrevious()"><i class="fas fa-chevron-left"></i></button>
-                            <button class="btn-nav" onclick="app. async goToNext()"><i class="fas fa-chevron-right"></i></button>
+                            <button class="btn-nav" onclick="await app.goToPrevious()"><i class="fas fa-chevron-left"></i></button>
+                            <button class="btn-nav" onclick="await app.goToNext()"><i class="fas fa-chevron-right"></i></button>
                         </div>
-                        <button class="btn secondary btn-sm" onclick="app. async goToToday()">Today</button>
+                        <button class="btn secondary btn-sm" onclick="await app.goToToday()">Today</button>
                     </div>
                     <div class="calendar-controls">
                         <div class="view-toggles">
-                            <!-- <button class="btn-toggle" onclick="app. async switchView('day')">Day</button> -->
-                            <!-- <button class="btn-toggle" onclick="app. async switchView('week')">Week</button> -->
-                            <button class="btn-toggle active" onclick="app. async switchView('month')">Month</button>
+                            <!-- <button class="btn-toggle" onclick="await app.switchView('day')">Day</button> -->
+                            <!-- <button class="btn-toggle" onclick="await app.switchView('week')">Week</button> -->
+                            <button class="btn-toggle active" onclick="await app.switchView('month')">Month</button>
                         </div>
-                        <button class="btn secondary" onclick="app. openCalendarFilterModal()">
+                        <button class="btn secondary" onclick="await app.openCalendarFilterModal()">
                             Filter <i class="fas fa-chevron-down" style="font-size: 10px; margin-left: 4px;"></i>
                         </button>
-                        <button class="btn-quick-add" onclick="app. openActivityModal()" style="margin-left: 10px;">
+                        <button class="btn-quick-add" onclick="await app.openActivityModal()" style="margin-left: 10px;">
                             <i class="fas fa-plus"></i> Quick Add Activity
                         </button>
                     </div>
@@ -7302,9 +8115,8 @@ function _wireLoginBtn() {
 
         let activities = await DataStore.getAll('activities');
 
-        // Apply visibility filters using the same logic as await async getVisibleActivities()
-        const calVisibility = await Promise.all(activities.map(a => canViewActivity(a)));
-        activities = activities.filter((_, i) => calVisibility[i]);
+        // Apply visibility filters using the same logic as await getVisibleActivities()
+        activities = activities.filter(a => canViewActivity(a));
 
         // Apply filters if any
         if (_filters.agent && _filters.agent !== 'all') {
@@ -7331,20 +8143,20 @@ function _wireLoginBtn() {
             let activityHtml = '';
             const seenIds = new Set();
 
-            for (const a of dayActivities) {
+            dayActivities.forEach(a => {
                 if (!seenIds.has(a.id)) {
                     seenIds.add(a.id);
-                    const prospect = a.prospect_id ? await DataStore.getById('prospects', a.prospect_id) : null;
-                    const customer = a.customer_id ? await DataStore.getById('customers', a.customer_id) : null;
+                    const prospect = a.prospect_id ? DataStore.getById('prospects', a.prospect_id) : null;
+                    const customer = a.customer_id ? DataStore.getById('customers', a.customer_id) : null;
                     const entityName = prospect ? prospect.full_name : (customer ? customer.full_name : (a.activity_title || a.customer_name || 'Event'));
 
                     if (entityName) {
-                        const agent = a.lead_agent_id ? await DataStore.getById('users', a.lead_agent_id) : null;
+                        const agent = a.lead_agent_id ? DataStore.getById('users', a.lead_agent_id) : null;
                         const agentName = agent ? agent.full_name : 'No Agent';
 
                         activityHtml += `
                             <div class="calendar-appointment ${a.activity_type.toLowerCase()} ${a.closing_amount ? 'closed-case' : ''}" 
-                                onclick="app. viewActivityDetails(${a.id})">
+                                onclick="await app.viewActivityDetails(${a.id})">
                                 <div class="appointment-time">${a.start_time || '00:00'} - ${a.end_time || '00:00'}</div>
                                 <div class="appointment-agent">👤 ${agentName} ${a.co_agents && a.co_agents.length > 0 ? '<small>+1</small>' : ''}</div>
                                 <div class="appointment-customer">📋 ${entityName}</div>
@@ -7360,7 +8172,7 @@ function _wireLoginBtn() {
                         `;
                     }
                 }
-            }
+            });
 
             html += `
                 <div class="calendar-cell ${isToday ? 'today' : ''}">
@@ -7393,7 +8205,7 @@ function _wireLoginBtn() {
     };
 
     const openCalendarFilterModal = async () => {
-        const agents = (await DataStore.getAll('users')).filter(u => isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'));
+        const agents = await DataStore.getAll('users').filter(u => isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'));
         const types = ['CPS', 'FTF', 'FSA', 'EVENT', 'CALL', 'EMAIL', 'WHATSAPP'];
 
         const content = `
@@ -7436,8 +8248,8 @@ function _wireLoginBtn() {
             `;
 
         UI.showModal('Calendar Filters', content, [
-            { label: 'Clear Filters', type: 'secondary', action: 'await app. clearCalendarFilters()' },
-            { label: 'Apply', type: 'primary', action: 'await app. applyCalendarFilters()' }
+            { label: 'Clear Filters', type: 'secondary', action: 'await app.clearCalendarFilters()' },
+            { label: 'Apply', type: 'primary', action: 'await app.applyCalendarFilters()' }
         ]);
     };
 
@@ -7520,10 +8332,10 @@ function _wireLoginBtn() {
                     <tbody>
             `;
 
-        for (const a of activities) {
-            const agent = await DataStore.getById('users', a.lead_agent_id) || { full_name: 'Unknown Agent' };
-            const prospect = a.prospect_id ? await DataStore.getById('prospects', a.prospect_id) : null;
-            const customer = a.customer_id ? await DataStore.getById('customers', a.customer_id) : null;
+        activities.forEach(a => {
+            const agent = DataStore.getById('users', a.lead_agent_id) || { full_name: 'Unknown Agent' };
+            const prospect = a.prospect_id ? DataStore.getById('prospects', a.prospect_id) : null;
+            const customer = a.customer_id ? DataStore.getById('customers', a.customer_id) : null;
             const entityName = prospect ? prospect.full_name : (customer ? customer.full_name : (a.customer_name || 'N/A'));
 
             html += `
@@ -7536,15 +8348,15 @@ function _wireLoginBtn() {
                             ${a.closing_amount ? '<br><small style="color:green;">Closed</small>' : ''}
                         </td>
                         <td>
-                            <button class="btn btn-sm secondary" onclick="app. viewActivityDetails(${a.id})">View</button>
-                            <button class="btn btn-sm secondary" onclick="app. postMeetupNotes(${a.id})">post MtUp</button>
-                            <button class="btn btn-sm secondary" onclick="app. editActivity(${a.id})">Edit</button>
-                            <button class="btn btn-sm secondary" onclick="app. rescheduleActivity(${a.id})">Reschedule</button>
-                            <button class="btn btn-sm secondary" onclick="app. addCoAgentToActivity(${a.id})">+ Add co</button>
+                            <button class="btn btn-sm secondary" onclick="await app.viewActivityDetails(${a.id})">View</button>
+                            <button class="btn btn-sm secondary" onclick="await app.postMeetupNotes(${a.id})">post MtUp</button>
+                            <button class="btn btn-sm secondary" onclick="await app.editActivity(${a.id})">Edit</button>
+                            <button class="btn btn-sm secondary" onclick="await app.rescheduleActivity(${a.id})">Reschedule</button>
+                            <button class="btn btn-sm secondary" onclick="await app.addCoAgentToActivity(${a.id})">+ Add co</button>
                         </td>
                     </tr>
                 `;
-        }
+        });
 
         html += `
                     </tbody>
@@ -7560,7 +8372,7 @@ function _wireLoginBtn() {
         if (!todayList || !upcomingList) return;
 
         const today = new Date();
-        const mmdd = (d) => `${(d.getMonth() + 1).toString().padStart(2, '0')}-${d.getDate().toString().padStart(2, '0')}`;
+        const mmdd = (d) => `${(d.getMonth() + 1).toString().padStart(2, '0')} -${d.getDate().toString().padStart(2, '0')} `;
         const todayStr = mmdd(today);
 
         // Get tomorrow and day after
@@ -7573,25 +8385,23 @@ function _wireLoginBtn() {
         const customers = await DataStore.getAll('customers');
         const all = [...prospects, ...customers];
 
-        const getBdayInfo = async (p) => {
-            const agent = await DataStore.getById('users', p.responsible_agent_id || p.lead_agent_id);
+        const getBdayInfo = (p) => {
+            const agent = DataStore.getById('users', p.responsible_agent_id || p.lead_agent_id);
             return {
                 name: p.full_name,
-                info: `Agent: ${agent?.full_name || 'Michelle Tan'} · ${p.customer_since ? 'Customer' : 'Prospect'}`,
+                info: `Agent: ${agent?.full_name || 'Michelle Tan'} · ${p.customer_since ? 'Customer' : 'Prospect'} `,
                 dob: p.date_of_birth ? p.date_of_birth.substring(5) : '' // MM-DD
             };
         };
 
-        const todayBdays = await Promise.all(all.filter(p => p.date_of_birth && p.date_of_birth.substring(5) === todayStr).map(getBdayInfo));
-        const upcomingBdays = await Promise.all(all.filter(p => p.date_of_birth && (p.date_of_birth.substring(5) === tomorrowStr || p.date_of_birth.substring(5) === day2Str))
-            .map(async p => {
-                const info = await getBdayInfo(p);
+        const todayBdays = all.filter(p => p.date_of_birth && p.date_of_birth.substring(5) === todayStr).map(getBdayInfo);
+        const upcomingBdays = all.filter(p => p.date_of_birth && (p.date_of_birth.substring(5) === tomorrowStr || p.date_of_birth.substring(5) === day2Str))
+            .map(p => {
+                const info = getBdayInfo(p);
                 const isTomorrow = p.date_of_birth.substring(5) === tomorrowStr;
-                info.info += ` · ${isTomorrow ? 'Tomorrow' : 'In 2 days'}`;
+                info.info += ` · ${isTomorrow ? 'Tomorrow' : 'In 2 days'} `;
                 return info;
-            }));
-        
-        console.log("Birthday Data:", todayBdays, upcomingBdays);
+            });
 
         const renderBday = (data) => {
             if (data.length === 0) return '<div class="text-muted" style="padding:10px; font-size:12px;">No birthdays found.</div>';
@@ -7737,17 +8547,17 @@ function _wireLoginBtn() {
                 );
 
                 html += '<div class="week-hour-cell">';
-                for (const a of dayActivities) {
-                    const prospect = a.prospect_id ? await DataStore.getById('prospects', a.prospect_id) : null;
-                    const customer = a.customer_id ? await DataStore.getById('customers', a.customer_id) : null;
+                dayActivities.forEach(a => {
+                    const prospect = a.prospect_id ? DataStore.getById('prospects', a.prospect_id) : null;
+                    const customer = a.customer_id ? DataStore.getById('customers', a.customer_id) : null;
                     const name = prospect?.full_name || customer?.full_name || 'Activity';
 
                     html += `
-    <div class="week-activity ${a.activity_type.toLowerCase()}" onclick="app. viewActivityDetails(${a.id})">
+    <div class="week-activity ${a.activity_type.toLowerCase()}" onclick="await app.viewActivityDetails(${a.id})">
         ${a.start_time} ${name}
     </div>
     `;
-                }
+                });
                 html += '</div>';
             }
             html += '</div>';
@@ -7760,7 +8570,7 @@ function _wireLoginBtn() {
     const renderDayView = async () => {
         const grid = document.getElementById('calendar-grid');
         const todayStr = _currentDate.toISOString().split('T')[0];
-        const dayActivities = (await DataStore.getAll('activities')).filter(a => a.activity_date === todayStr);
+        const dayActivities = await DataStore.getAll('activities').filter(a => a.activity_date === todayStr);
 
         // Calculate summary stats
         const totalMeetings = dayActivities.filter(a => a.activity_type === 'FTF').length;
@@ -7770,7 +8580,7 @@ function _wireLoginBtn() {
         html += `
                 <div class="day-header">
                     <h2>${_currentDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</h2>
-                    <button class="btn primary btn-sm" onclick="app. openActivityModal('${todayStr}')">
+                    <button class="btn primary btn-sm" onclick="await app.openActivityModal('${todayStr}')">
                         <i class="fas fa-plus"></i> Add Activity
                     </button>
                 </div>
@@ -7804,20 +8614,20 @@ function _wireLoginBtn() {
                     <div class="timeline-slot">
             `;
 
-            for (const a of hourActivities) {
-                const prospect = a.prospect_id ? await DataStore.getById('prospects', a.prospect_id) : null;
-                const customer = a.customer_id ? await DataStore.getById('customers', a.customer_id) : null;
+            hourActivities.forEach(a => {
+                const prospect = a.prospect_id ? DataStore.getById('prospects', a.prospect_id) : null;
+                const customer = a.customer_id ? DataStore.getById('customers', a.customer_id) : null;
                 const name = prospect?.full_name || customer?.full_name || '';
-                const agent = await DataStore.getById('users', a.lead_agent_id);
+                const agent = DataStore.getById('users', a.lead_agent_id);
 
                 html += `
-                    <div class="timeline-activity ${a.activity_type.toLowerCase()}" onclick="app. viewActivityDetails(${a.id})">
+                    <div class="timeline-activity ${a.activity_type.toLowerCase()}" onclick="await app.viewActivityDetails(${a.id})">
                         <div class="activity-time">${a.start_time} - ${a.end_time || '?'}</div>
                         <div class="activity-title"><strong>${a.activity_title || a.activity_type}</strong> ${name}</div>
                         <div class="activity-agent">Agent: ${agent?.full_name || 'Unknown'}</div>
                     </div>
                 `;
-            }
+            });
 
             html += '</div></div>';
         }
@@ -7829,30 +8639,22 @@ function _wireLoginBtn() {
     const generateDayHours = async () => {
         let hoursHtml = '';
         const todayStr = _currentDate.toISOString().split('T')[0];
-        const dayActs = (await DataStore.getAll('activities')).filter(a => a.activity_date === todayStr);
+        const dayActs = await DataStore.getAll('activities').filter(a => a.activity_date === todayStr);
 
         for (let i = 8; i <= 20; i++) {
             const hourStr = `${i.toString().padStart(2, '0')}:00`;
             const actsAtHour = dayActs.filter(a => a.start_time.startsWith(i.toString().padStart(2, '0')));
 
-            const hourContent = await Promise.all(actsAtHour.map(async a => {
-                let prospectInfo = '';
-                if (a.prospect_id) {
-                    const p = await DataStore.getById('prospects', a.prospect_id);
-                    if (p) prospectInfo = `(${p.full_name})`;
-                }
-                return `
-                    <div class="day-act-item">
-                        <strong>${a.activity_type}</strong>: ${a.activity_title} ${prospectInfo}
-                    </div>
-                `;
-            }));
-
             hoursHtml += `
                 <div class="day-view-hour">
                     <div class="hour-label">${hourStr}</div>
                     <div class="hour-content">
-                        ${hourContent.join('')}
+                        ${actsAtHour.map(a => `
+                            <div class="day-act-item">
+                                <strong>${a.activity_type}</strong>: ${a.activity_title}
+                                ${a.prospect_id ? `(${DataStore.getById('prospects', a.prospect_id)?.full_name})` : ''}
+                            </div>
+                        `).join('')}
                     </div>
                 </div>
             `;
@@ -7906,8 +8708,8 @@ function _wireLoginBtn() {
 
         UI.showModal('Filter Calendar', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Apply Filters', type: 'primary', action: 'await app. applyFilters()' },
-            { label: 'Clear Filters', type: 'secondary', action: 'await app. clearFilters()' }
+            { label: 'Apply Filters', type: 'primary', action: 'await app.applyFilters()' },
+            { label: 'Clear Filters', type: 'secondary', action: 'await app.clearFilters()' }
         ]);
     };
 
@@ -7940,25 +8742,25 @@ function _wireLoginBtn() {
     };
 
     const viewActivityDetails = async (activityId) => {
-        const activity = await DataStore.getById('activities', activityId);
+        const activity = DataStore.getById('activities', activityId);
         if (!activity) return;
 
-        const prospect = activity.prospect_id ? await DataStore.getById('prospects', activity.prospect_id) : null;
-        const customer = activity.customer_id ? await DataStore.getById('customers', activity.customer_id) : null;
+        const prospect = activity.prospect_id ? DataStore.getById('prospects', activity.prospect_id) : null;
+        const customer = activity.customer_id ? DataStore.getById('customers', activity.customer_id) : null;
         const entityName = prospect?.full_name || customer?.full_name || 'Unknown';
 
         let attendeeHtml = '';
         if (activity.activity_type === 'EVENT' && activity.event_id) {
-            const attendees = (await DataStore.getAll('event_attendees')).filter(a => a.event_id === activity.event_id);
+            const attendees = await DataStore.getAll('event_attendees').filter(a => a.event_id === activity.event_id);
             if (attendees.length > 0) {
                 const prospects = await DataStore.getAll('prospects');
                 const customers = await DataStore.getAll('customers');
                 const all = [...prospects, ...customers];
 
-                const renderedRows = await Promise.all(attendees.map(async att => {
+                let rows = attendees.map(att => {
                     const person = all.find(p => p.id === att.entity_id);
                     const name = person ? person.full_name : 'Unknown';
-                    const agent = await DataStore.getById('users', att.added_by_agent_id);
+                    const agent = DataStore.getById('users', att.added_by_agent_id);
                     const agentName = agent ? agent.full_name : 'Unknown';
                     return `
                         <div class="info-row" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #eee; padding-bottom:5px; margin-bottom:5px;">
@@ -7968,14 +8770,13 @@ function _wireLoginBtn() {
                                 <div style="font-size:11px; color:gray;">Added by: ${agentName}</div>
                             </div>
                             <div style="display:flex; gap:8px; align-items:center;">
-                                <button class="btn btn-sm secondary" title="Outcome" onclick="app. openAttendeeOutcomeModal(${att.entity_id}, '${att.attendee_type}', ${activity.id})">📝 Outcome</button>
-                                <button class="btn btn-sm secondary" title="Notes" onclick="app. openAttendeeNotesModal(${att.entity_id}, '${att.attendee_type}', ${activity.id})">📋 Notes</button>
-                                <button class="btn btn-sm secondary" onclick="app. postEventFollowUp(${activity.event_id}, ${att.entity_id})">Follow-up</button>
+                                <button class="btn btn-sm secondary" title="Outcome" onclick="await app.openAttendeeOutcomeModal(${att.entity_id}, '${att.attendee_type}', ${activity.id})">📝 Outcome</button>
+                                <button class="btn btn-sm secondary" title="Notes" onclick="await app.openAttendeeNotesModal(${att.entity_id}, '${att.attendee_type}', ${activity.id})">📋 Notes</button>
+                                <button class="btn btn-sm secondary" onclick="await app.postEventFollowUp(${activity.event_id}, ${att.entity_id})">Follow-up</button>
                             </div>
                         </div>
                     `;
-                }));
-                const rows = renderedRows.join('');
+                }).join('');
 
                 attendeeHtml = `
                     <div class="detail-section">
@@ -8008,7 +8809,7 @@ function _wireLoginBtn() {
                 
                 <div class="detail-section">
                     <h4>Agents</h4>
-                    <div class="info-row"><span class="info-label">Lead:</span> <span>${await getAgentName(activity.lead_agent_id)}</span></div>
+                    <div class="info-row"><span class="info-label">Lead:</span> <span>${getAgentName(activity.lead_agent_id)}</span></div>
                     ${activity.co_agents?.length ? `
                         <div class="info-row"><span class="info-label">Co-Agents:</span> 
                             <span>${activity.co_agents.map(a => a.name).join(', ')}</span>
@@ -8021,25 +8822,25 @@ function _wireLoginBtn() {
 
         const modalActions = [
             { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Mark Complete', type: 'secondary', action: `await app. markActivityComplete(${activityId})` },
-            { label: 'Edit', type: 'secondary', action: `await app. editActivity(${activityId})` }
+            { label: 'Mark Complete', type: 'secondary', action: `await app.markActivityComplete(${activityId})` },
+            { label: 'Edit', type: 'secondary', action: `await app.editActivity(${activityId})` }
         ];
 
         if (activity.prospect_id) {
             modalActions.push({
                 label: 'Complete Prospect Profile',
                 type: 'secondary',
-                action: `UI.hideModal(); await app. showProspectDetail(${activity.prospect_id})`
+                action: `UI.hideModal(); await app.showProspectDetail(${activity.prospect_id})`
             });
         }
 
-        modalActions.push({ label: 'Delete', type: 'primary', action: `await app. deleteActivity(${activityId})` });
+        modalActions.push({ label: 'Delete', type: 'primary', action: `await app.deleteActivity(${activityId})` });
 
         UI.showModal('Activity Details', content, modalActions);
     };
 
     const editActivity = async (activityId) => {
-        const activity = await DataStore.getById('activities', activityId);
+        const activity = DataStore.getById('activities', activityId);
         if (!activity) return;
         UI.hideModal(); // close any open modal
         await openActivityModal(null, null, activity);
@@ -8050,7 +8851,7 @@ function _wireLoginBtn() {
             '<p>Are you sure you want to delete this activity? This action cannot be undone.</p>',
             [
                 { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-                { label: 'Delete', type: 'primary', action: `await app. confirmDeleteActivity(${activityId})` }
+                { label: 'Delete', type: 'primary', action: `await app.confirmDeleteActivity(${activityId})` }
             ]
         );
     };
@@ -8066,7 +8867,7 @@ function _wireLoginBtn() {
     };
 
     const markActivityComplete = async (activityId) => {
-        const activity = await DataStore.getById('activities', activityId);
+        const activity = DataStore.getById('activities', activityId);
         if (!activity) return;
 
         activity.status = 'completed';
@@ -8081,38 +8882,38 @@ function _wireLoginBtn() {
     };
 
     const postMeetupNotes = async (activityId) => {
-        await app. editActivity(activityId);
+        await app.editActivity(activityId);
         (() => {
             document.getElementById('note-key-points')?.focus();
         }, 350);
     };
 
     const rescheduleActivity = async (activityId) => {
-        await app. editActivity(activityId);
-        setTimeout(() => {
+        await app.editActivity(activityId);
+        (() => {
             const dateEl = document.getElementById('activity-date');
             if (dateEl) {
                 dateEl.focus();
                 dateEl.style.boxShadow = '0 0 0 2px var(--primary-color)';
-                setTimeout(() => { dateEl.style.boxShadow = ''; }, 2000);
+                (() => dateEl.style.boxShadow = '', 2000);
             }
         }, 350);
     };
 
     const postEventFollowUp = async (eventId, entityId) => {
         UI.hideModal();
-        const ev = await DataStore.getById('events', eventId);
-        await app. openActivityModal();
-        setTimeout(async () => {
-            const all = [...await DataStore.getAll('prospects'), ...await DataStore.getAll('customers')];
+        const ev = DataStore.getById('events', eventId);
+        await app.openActivityModal();
+        (() => {
+            const all = [...DataStore.getAll('prospects'), ...DataStore.getAll('customers')];
             const p = all.find(x => x.id === entityId);
-            if (p) app. selectEntity(entityId, p.is_customer ? 'customer' : 'prospect');
+            if (p) app.selectEntity(entityId, p.is_customer ? 'customer' : 'prospect');
 
             const typeEl = document.getElementById('modal-activity-type');
             if (typeEl) {
                 typeEl.value = 'CALL';
-                await app. updateActivityForm();
-                setTimeout(() => {
+                await app.updateActivityForm();
+                (() => {
                     const titleEl = document.getElementById('meeting-title');
                     if (titleEl && ev) titleEl.value = `Follow-up from ${ev.title}`;
                     document.getElementById('note-key-points')?.focus();
@@ -8123,10 +8924,10 @@ function _wireLoginBtn() {
 
     const openAttendeeOutcomeModal = async (attendeeId, attendeeType, activityId) => {
         const attendee = attendeeType === 'agent'
-            ? await DataStore.getById('users', attendeeId)
-            : (attendeeType === 'prospect' ? await DataStore.getById('prospects', attendeeId) : await DataStore.getById('customers', attendeeId));
+            ? DataStore.getById('users', attendeeId)
+            : (attendeeType === 'prospect' ? DataStore.getById('prospects', attendeeId) : DataStore.getById('customers', attendeeId));
 
-        const existingNote =(await DataStore.getAll('notes')).find(n => n.activity_id === activityId && n.note_type === 'outcome' &&
+        const existingNote =await DataStore.getAll('notes').find(n => n.activity_id === activityId && n.note_type === 'outcome' &&
             ((attendeeType === 'agent' && n.agent_id === attendeeId) ||
                 (attendeeType === 'prospect' && n.prospect_id === attendeeId) ||
                 (attendeeType === 'customer' && n.customer_id === attendeeId)));
@@ -8140,16 +8941,16 @@ function _wireLoginBtn() {
 
         UI.showModal('Meeting Outcome', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save Outcome', type: 'primary', action: `await app. saveAttendeeNote(${attendeeId}, '${attendeeType}', ${activityId}, 'outcome')` }
+            { label: 'Save Outcome', type: 'primary', action: `await app.saveAttendeeNote(${attendeeId}, '${attendeeType}', ${activityId}, 'outcome')` }
         ]);
     };
 
     const openAttendeeNotesModal = async (attendeeId, attendeeType, activityId) => {
         const attendee = attendeeType === 'agent'
-            ? await DataStore.getById('users', attendeeId)
-            : (attendeeType === 'prospect' ? await DataStore.getById('prospects', attendeeId) : await DataStore.getById('customers', attendeeId));
+            ? DataStore.getById('users', attendeeId)
+            : (attendeeType === 'prospect' ? DataStore.getById('prospects', attendeeId) : DataStore.getById('customers', attendeeId));
 
-        const existingNote = (await DataStore.getAll('notes')).find(n => n.activity_id === activityId && n.note_type === 'post_meetup' &&
+        const existingNote = await DataStore.getAll('notes').find(n => n.activity_id === activityId && n.note_type === 'post_meetup' &&
             ((attendeeType === 'agent' && n.agent_id === attendeeId) ||
                 (attendeeType === 'prospect' && n.prospect_id === attendeeId) ||
                 (attendeeType === 'customer' && n.customer_id === attendeeId)));
@@ -8163,7 +8964,7 @@ function _wireLoginBtn() {
 
         UI.showModal('Post-Meetup Notes', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save Notes', type: 'primary', action: `await app. saveAttendeeNote(${attendeeId}, '${attendeeType}', ${activityId}, 'post_meetup')` }
+            { label: 'Save Notes', type: 'primary', action: `await app.saveAttendeeNote(${attendeeId}, '${attendeeType}', ${activityId}, 'post_meetup')` }
         ]);
     };
 
@@ -8190,7 +8991,7 @@ function _wireLoginBtn() {
         else if (attendeeType === 'customer') noteData.customer_id = attendeeId;
 
         // Check if note already exists to update
-        const existingNote = (await DataStore.getAll('notes')).find(n => n.activity_id === activityId && n.note_type === noteType &&
+        const existingNote = await DataStore.getAll('notes').find(n => n.activity_id === activityId && n.note_type === noteType &&
             ((attendeeType === 'agent' && n.agent_id === attendeeId) ||
                 (attendeeType === 'prospect' && n.prospect_id === attendeeId) ||
                 (attendeeType === 'customer' && n.customer_id === attendeeId)));
@@ -8208,7 +9009,7 @@ function _wireLoginBtn() {
     };
 
     const addCoAgentToActivity = async (activityId) => {
-        await app. editActivity(activityId);
+        await app.editActivity(activityId);
         (() => {
             const coSectionStr = document.getElementById('co-agent-section')?.style.display;
             if (coSectionStr === 'none' || !coSectionStr) {
@@ -8218,8 +9019,8 @@ function _wireLoginBtn() {
         }, 350);
     };
 
-    const getAgentName = async (agentId) => {
-        const agent = await DataStore.getById('users', agentId);
+    const getAgentName = (agentId) => {
+        const agent = DataStore.getById('users', agentId);
         return agent?.full_name || 'Unknown';
     };
 
@@ -8239,7 +9040,7 @@ function _wireLoginBtn() {
             <div class="activity-modal-form">
                 <div class="form-group">
                     <label>Activity Type <span class="required">*</span></label>
-                    <select id="modal-activity-type" class="form-control" onchange="app. updateActivityForm()">
+                    <select id="modal-activity-type" class="form-control" onchange="await app.updateActivityForm()">
                         <option value="CPS">🟢 CPS - Consultation/Planning Session</option>
                         <option value="FTF">🔵 FTF - Face to Face Meeting</option>
                         <option value="FSA">🟠 FSA - Feng Shui Analysis</option>
@@ -8273,8 +9074,8 @@ function _wireLoginBtn() {
                     <div class="form-group">
                         <label>Search and Add Co-Agents</label>
                         <div class="co-agent-search" style="display:flex; gap:8px;">
-                            <input type="text" id="co-agent-search-input" class="form-control" placeholder="Type agent name..." onkeyup="app. async searchAgents()">
-                            <button class="btn secondary btn-sm" onclick="app. searchAgents()">Search</button>
+                            <input type="text" id="co-agent-search-input" class="form-control" placeholder="Type agent name..." onkeyup="await app.searchAgents()">
+                            <button class="btn secondary btn-sm" onclick="await app.searchAgents()">Search</button>
                         </div>
                         <div id="agent-search-results" class="search-results-dropdown"></div>
                     </div>
@@ -8321,7 +9122,7 @@ function _wireLoginBtn() {
                         <div class="form-group">
                             <label>Product/Service Sold</label>
                             <select id="solution-sold" class="form-control">
-                                ${(await DataStore.getAll('products')).filter(p => p.is_active !== false).map(p => `<option value="${p.name}">${p.name}</option>`).join('') || '<option value="">No products available</option>'}
+                                ${await DataStore.getAll('products').filter(p => p.is_active !== false).map(p => `<option value="${p.name}">${p.name}</option>`).join('') || '<option value="">No products available</option>'}
                             </select>
                         </div>
                         <div class="form-row">
@@ -8410,35 +9211,35 @@ function _wireLoginBtn() {
                         <label>Key Points Discussed:</label>
                         <div style="display:flex; gap:8px;">
                             <textarea id="note-key-points" class="form-control" rows="2" placeholder="Main discussion points..."></textarea>
-                            <button class="btn-icon" onclick="app. openVoiceRecorder('note-key-points', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+                            <button class="btn-icon" onclick="await app.openVoiceRecorder('note-key-points', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
                         </div>
                     </div>
                     <div class="form-group">
                         <label>Outcome:</label>
                         <div style="display:flex; gap:8px;">
                             <textarea id="note-outcome" class="form-control" rows="2" placeholder="What was the result?"></textarea>
-                            <button class="btn-icon" onclick="app. openVoiceRecorder('note-outcome', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+                            <button class="btn-icon" onclick="await app.openVoiceRecorder('note-outcome', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
                         </div>
                     </div>
                     <div class="form-group">
                         <label>Next Steps:</label>
                         <div style="display:flex; gap:8px;">
                             <textarea id="note-next-steps" class="form-control" rows="2" placeholder="Action items..."></textarea>
-                            <button class="btn-icon" onclick="app. openVoiceRecorder('note-next-steps', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+                            <button class="btn-icon" onclick="await app.openVoiceRecorder('note-next-steps', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
                         </div>
                     </div>
                     <div class="form-group">
                         <label>Customer Needs/Interests:</label>
                         <div style="display:flex; gap:8px;">
                             <textarea id="note-needs" class="form-control" rows="2" placeholder="What are they looking for?"></textarea>
-                            <button class="btn-icon" onclick="app. openVoiceRecorder('note-needs', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+                            <button class="btn-icon" onclick="await app.openVoiceRecorder('note-needs', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
                         </div>
                     </div>
                     <div class="form-group">
                         <label>Pain Points:</label>
                         <div style="display:flex; gap:8px;">
                             <textarea id="note-pain-points" class="form-control" rows="2" placeholder="Dislikes or problems to solve..."></textarea>
-                            <button class="btn-icon" onclick="app. openVoiceRecorder('note-pain-points', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+                            <button class="btn-icon" onclick="await app.openVoiceRecorder('note-pain-points', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
                         </div>
                     </div>
                 </div>
@@ -8447,8 +9248,8 @@ function _wireLoginBtn() {
 
         UI.showModal('Quick Add Activity', modalContent, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save & Add Another', type: 'secondary', action: 'await app. async saveAndAddAnother()' },
-            { label: 'Save Activity', type: 'primary', action: 'await app. async saveActivity()' }
+            { label: 'Save & Add Another', type: 'secondary', action: 'await app.saveAndAddAnother()' },
+            { label: 'Save Activity', type: 'primary', action: 'await app.saveActivity()' }
         ]);
 
         await updateActivityForm();
@@ -8461,8 +9262,8 @@ function _wireLoginBtn() {
 
         // If prospectId is provided, pre-select it
         if (prospectId) {
-            setTimeout(async () => {
-                const prospect = await DataStore.getById('prospects', prospectId);
+            (() => {
+                const prospect = DataStore.getById('prospects', prospectId);
                 if (prospect) {
                     _selectedEntity = { id: prospectId, type: 'Prospect' };
                     const infoDiv = document.getElementById('selected-entity-info');
@@ -8500,13 +9301,9 @@ function _wireLoginBtn() {
         }
     };
 
-    // 3. Wait for the dynamic fields to be async injected (first wave)
-    setTimeout(async () => {
+    // 3. Wait for the dynamic fields to be injected (first wave)
+    (() => {
         // Common fields for all activity types
-        const setField = (id, val) => {
-            const el = document.getElementById(id);
-            if (el) el.value = val || '';
-        };
         setField('activity-date', activity.activity_date);
         setField('start-time', activity.start_time);
         setField('end-time', activity.end_time);
@@ -8520,13 +9317,13 @@ function _wireLoginBtn() {
         // 4. Restore selected entity (store in module variable)
         let entityRestored = false;
         if (activity.prospect_id) {
-            const prospect = await DataStore.getById('prospects', activity.prospect_id);
+            const prospect = DataStore.getById('prospects', activity.prospect_id);
             if (prospect) {
                 _selectedEntity = { id: prospect.id, type: 'Prospect' };
                 entityRestored = true;
             }
         } else if (activity.customer_id) {
-            const customer = await DataStore.getById('customers', activity.customer_id);
+            const customer = DataStore.getById('customers', activity.customer_id);
             if (customer) {
                 _selectedEntity = { id: customer.id, type: 'Customer' };
                 entityRestored = true;
@@ -8537,12 +9334,12 @@ function _wireLoginBtn() {
         if (entityRestored) {
             const badgeContainerId = 'selected-entity-info';
             let attempts = 0;
-            const badgeInterval = setInterval(async () => {
+            const badgeInterval = (() => {
                 const container = document.getElementById(badgeContainerId);
                 if (container) {
                     const entityName = _selectedEntity.type === 'Prospect'
-                        ? (await DataStore.getById('prospects', _selectedEntity.id))?.full_name
-                        : (await DataStore.getById('customers', _selectedEntity.id))?.full_name;
+                        ? DataStore.getById('prospects', _selectedEntity.id)?.full_name
+                        : DataStore.getById('customers', _selectedEntity.id)?.full_name;
                     if (entityName) {
                         container.innerHTML = `
                             <div class="selected-entity-badge">
@@ -8558,7 +9355,8 @@ function _wireLoginBtn() {
                 }
             }, 100);
         }
-        // 6. Type-specific fields
+
+        // 6. Type‑specific fields
         switch (activity.activity_type) {
             case 'FTF':
             case 'GR':
@@ -8569,48 +9367,53 @@ function _wireLoginBtn() {
                 setField('meeting-title', activity.activity_title || '');
                 break;
             case 'FSA':
-            case ' SITE':
+            case 'SITE':
                 if (activity.compass_needed) {
                     const chk = document.getElementById('compass-needed');
                     if (chk) chk.checked = true;
                 }
                 break;
+            // Add other types as needed (e.g., EVENT, AGENT_MEETING)
         }
 
-        // 7. Co-agents
+        // 7. Co‑agents
         _selectedCoAgents = activity.co_agents || [];
         if (typeof renderCoAgents === 'function') renderCoAgents();
 
-        // 8. If this is a CPS activity, poll for CPS-specific fields
+        // 8. If this is a CPS activity, poll for CPS‑specific fields
         if (activity.activity_type === 'CPS' && activity.prospect_id) {
-            const prospect = await DataStore.getById('prospects', activity.prospect_id);
-            if (prospect) {
-                let attempts = 0;
-                const cpsInterval = setInterval(() => {
-                    const cpsName = document.getElementById('cps-name');
-                    if (cpsName) {
-                        setField('cps-name', prospect.full_name);
-                        setField('cps-nickname', prospect.nickname);
-                        setField('cps-phone', prospect.phone);
-                        setField('cps-ic', prospect.ic_number);
-                        setField('cps-email', prospect.email);
-                        setField('cps-dob', prospect.date_of_birth);
-                        setField('cps-lunar', prospect.lunar_birth);
-                        setField('cps-gua', prospect.ming_gua);
-                        setField('cps-occupation', prospect.occupation);
-                        setField('cps-company', prospect.company_name);
-                        setField('cps-income', prospect.income_range);
-                        setField('cps-address', prospect.address);
-                        setField('cps-city', prospect.city);
-                        setField('cps-state', prospect.state);
-                        setField('cps-zip', prospect.postal_code);
-                        clearInterval(cpsInterval);
-                    } else if (++attempts >= 30) {
-                        console.warn('CPS fields did not appear after polling');
-                        clearInterval(cpsInterval);
-                    }
-                }, 100);
+            const prospect = DataStore.getById('prospects', activity.prospect_id);
+            if (!prospect) {
+                console.error('Prospect not found for ID:', activity.prospect_id);
+                return;
             }
+
+            let attempts = 0;
+            const cpsInterval = (() => {
+                const cpsName = document.getElementById('cps-name');
+                if (cpsName) {
+                    // CPS fields are present – populate all prospect fields
+                    setField('cps-name', prospect.full_name);
+                    setField('cps-nickname', prospect.nickname);
+                    setField('cps-phone', prospect.phone);
+                    setField('cps-ic', prospect.ic_number);
+                    setField('cps-email', prospect.email);
+                    setField('cps-dob', prospect.date_of_birth);
+                    setField('cps-lunar', prospect.lunar_birth);
+                    setField('cps-gua', prospect.ming_gua);
+                    setField('cps-occupation', prospect.occupation);
+                    setField('cps-company', prospect.company_name);
+                    setField('cps-income', prospect.income_range);
+                    setField('cps-address', prospect.address);
+                    setField('cps-city', prospect.city);
+                    setField('cps-state', prospect.state);
+                    setField('cps-zip', prospect.postal_code);
+                    clearInterval(cpsInterval);
+                } else if (++attempts >= 30) {
+                    console.warn('CPS fields did not appear after polling');
+                    clearInterval(cpsInterval);
+                }
+            }, 100);
         }
 
         // 9. Change the modal's save button to "Update Activity"
@@ -8623,7 +9426,7 @@ function _wireLoginBtn() {
 };
 
     const updateActivity = async (activityId) => {
-    const activity = await DataStore.getById('activities', activityId);
+    const activity = DataStore.getById('activities', activityId);
     if (!activity) return;
 
     const updatedData = {
@@ -8776,7 +9579,7 @@ function _wireLoginBtn() {
                             <div class="form-group half">
                                 <label>Referrer</label>
                                 <div class="search-with-results" style="position: relative;">
-                                    <input type="text" id="cps-referrer" class="form-control" placeholder="Search referrer..." onkeyup="app. searchReferrers()">
+                                    <input type="text" id="cps-referrer" class="form-control" placeholder="Search referrer..." onkeyup="await app.searchReferrers()">
                                     <div id="referrer-results" class="search-results-dropdown" style="display:none; position:absolute; z-index:1000; background:white; border:1px solid #ddd; width:100%;"></div>
                                 </div>
                                 <div id="selected-referrer-info" class="selected-entity-info" style="margin-top: 8px;"></div>
@@ -8832,9 +9635,9 @@ function _wireLoginBtn() {
                     </div>
                 `;
                 // Diagnostic: Ensure searchReferrers is bound
-                setTimeout(() => {
+                (() => {
                     const input = document.getElementById('cps-referrer');
-                    if (input) input.onkeyup = async () => await app.searchReferrersForModal(input.value, 'referrer');
+                    if (input) input.onkeyup = async () => await app.searchReferrers();
                 }, 100);
                 break;
 
@@ -8848,7 +9651,7 @@ function _wireLoginBtn() {
                         <h4>🔍 Select ${type === 'CALL' || type === 'WHATSAPP' ? 'Prospect/Customer' : 'Existing Prospect/Customer'}</h4>
                         <div class="form-group">
                             <div class="search-with-results">
-                                <input type="text" id="entity-search" class="form-control" placeholder="Type name, phone, or email..." onkeyup="app. searchEntities()">
+                                <input type="text" id="entity-search" class="form-control" placeholder="Type name, phone, or email..." onkeyup="await app.searchEntities()">
                                 <div id="search-results" class="search-results-dropdown"></div>
                             </div>
                         </div>
@@ -8868,7 +9671,7 @@ function _wireLoginBtn() {
                         <h4>🔍 Select Existing Prospect/Customer</h4>
                         <div class="form-group">
                             <div class="search-with-results">
-                                <input type="text" id="entity-search" class="form-control" placeholder="Type name, phone, or email..." onkeyup="app. searchEntities()">
+                                <input type="text" id="entity-search" class="form-control" placeholder="Type name, phone, or email..." onkeyup="await app.searchEntities()">
                                 <div id="search-results" class="search-results-dropdown"></div>
                             </div>
                         </div>
@@ -8917,7 +9720,7 @@ function _wireLoginBtn() {
                                 <label>Choose ${type.includes('AGENT') ? 'Meeting/Training' : 'Event'}</label>
                                 <select id="existing-event" class="form-control">
                                     <option value="">-- Select --</option>
-                                    ${(await DataStore.getAll('events')).filter(e => e.is_active !== false).map(e => `<option value="${e.id}">${e.title}</option>`).join('')}
+                                    ${await DataStore.getAll('events').filter(e => e.is_active !== false).map(e => `<option value="${e.id}">${e.title}</option>`).join('')}
                                 </select>
                             </div>
                         </div>
@@ -9020,7 +9823,7 @@ function _wireLoginBtn() {
                 }
 
                 if (isAgentRelevant) {
-                    const agents = (await DataStore.getAll('users')).filter(u =>
+                    const agents = await DataStore.getAll('users').filter(u =>
                         isAgent(u) &&
                         !_selectedAttendees.find(a => a.id === u.id && a.type === 'agent')
                     );
@@ -9115,9 +9918,9 @@ function _wireLoginBtn() {
                 return;
             }
 
-            const prospects = (await DataStore.getAll('prospects')).filter(p => !p.status || p.status === 'active');
-            const customers = (await DataStore.getAll('customers')).filter(c => !c.status || c.status === 'active');
-            const agents = (await DataStore.getAll('users')).filter(u => isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'));
+            const prospects = await DataStore.getAll('prospects').filter(p => !p.status || p.status === 'active');
+            const customers = await DataStore.getAll('customers').filter(c => !c.status || c.status === 'active');
+            const agents = await DataStore.getAll('users').filter(u => isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'));
 
             const all = [
                 ...prospects.map(p => ({ id: p.id, name: p.full_name, type: 'Prospect' })),
@@ -9182,7 +9985,7 @@ function _wireLoginBtn() {
 
         if (resultsDiv) {
             resultsDiv.innerHTML = matches.map(m => `
-                <div class="search-result-item" onclick="app. selectEntity(${m.id}, '${m.type}')">
+                <div class="search-result-item" onclick="app.selectEntity(${m.id}, '${m.type}')">
                     <strong>${m.full_name}</strong> (${m.type})
                 </div>
             `).join('') || '<div class="search-result-item">No results</div>';
@@ -9190,11 +9993,11 @@ function _wireLoginBtn() {
         }
     };
 
-    const selectEntity = async (id, type) => {
+    const selectEntity = (id, type) => {
         _selectedEntity = { id, type };
         const entity = type === 'Prospect'
-            ? await DataStore.getById('prospects', id)
-            : await DataStore.getById('customers', id);
+            ? DataStore.getById('prospects', id)
+            : DataStore.getById('customers', id);
 
         const infoDiv = document.getElementById('selected-entity-info');
         if (infoDiv) {
@@ -9222,7 +10025,7 @@ function _wireLoginBtn() {
         const resultsDiv = document.getElementById('agent-search-results');
         if (!term || term.length < 2) return;
 
-        const users = (await DataStore.getAll('users')).filter(isAgent);
+        const users = await DataStore.getAll('users').filter(isAgent);
         const matches = users.filter(u => u.full_name.toLowerCase().includes(term));
 
         if (resultsDiv) {
@@ -9329,9 +10132,9 @@ function _wireLoginBtn() {
                 const isDuplicate = all.find(p => p.phone === phone || normalize(p.full_name) === normName);
 
                 if (isDuplicate) {
-                    const agent = await DataStore.getById('users', isDuplicate.responsible_agent_id || isDuplicate.lead_agent_id) || { full_name: 'Unknown Agent' };
+                    const agent = DataStore.getById('users', isDuplicate.responsible_agent_id || isDuplicate.lead_agent_id) || { full_name: 'Unknown Agent' };
                     // Find last activity
-                    const activities = (await DataStore.getAll('activities')).filter(a => a.prospect_id === isDuplicate.id || a.customer_id === isDuplicate.id);
+                    const activities = await DataStore.getAll('activities').filter(a => a.prospect_id === isDuplicate.id || a.customer_id === isDuplicate.id);
                     activities.sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
                     const lastDate = activities.length > 0 ? activities[0].activity_date : 'N/A';
 
@@ -9339,7 +10142,7 @@ function _wireLoginBtn() {
 
                     UI.showModal('Potential Duplicate Found', `<p>${msg}</p>`, [
                         { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-                        { label: 'Continue', type: 'primary', action: `window._cpsDuplicateConfirmed = true; await app. saveActivity(${stayOpen})` }
+                        { label: 'Continue', type: 'primary', action: `window._cpsDuplicateConfirmed = true; await app.saveActivity(${stayOpen})` }
                     ]);
                     return;
                 }
@@ -9431,7 +10234,7 @@ function _wireLoginBtn() {
                     UI.toast.error('Please select an event.');
                     return;
                 }
-                const ev = await DataStore.getById('events', eventId);
+                const ev = DataStore.getById('events', eventId);
                 activity.activity_title = ev ? ev.title : 'Existing Event';
                 // Update visibility on existing event if needed (optional, keeping it simple for now)
             }
@@ -9445,7 +10248,7 @@ function _wireLoginBtn() {
             }
 
             // Save attendees
-            for (const att of _selectedAttendees) {
+            _selectedAttendees.forEach(att => {
                 await DataStore.create('event_attendees', {
                     event_id: parseInt(eventId),
                     attendee_id: att.id,
@@ -9453,7 +10256,7 @@ function _wireLoginBtn() {
                     attendance_status: att.status,
                     added_by_agent_id: 5 // Default Michelle Tan
                 });
-            }
+            });
         } else {
             if (!_selectedEntity) {
                 UI.toast.error('Please select a prospect or customer.');
@@ -9575,8 +10378,8 @@ function _wireLoginBtn() {
         container.innerHTML = `
             <div class="prospects-view">
                 <div class="tab-navigation">
-                    <button class="tab-btn active" onclick="app. async switchCustomerTab('prospects')">Prospects</button>
-                    <button class="tab-btn" onclick="app. async switchCustomerTab('customers')">Customers</button>
+                    <button class="tab-btn active" onclick="await app.switchCustomerTab('prospects')">Prospects</button>
+                    <button class="tab-btn" onclick="await app.switchCustomerTab('customers')">Customers</button>
                 </div>
 
                 <div id="prospects-tab-content">
@@ -9586,7 +10389,7 @@ function _wireLoginBtn() {
                             <p>Track and manage potential customers through the lifecycle.</p>
                         </div>
                         <div class="header-actions">
-                            <button class="btn secondary" onclick="app. openImportWizard()">
+                            <button class="btn secondary" onclick="await app.openImportWizard()">
                                 <i class="fas fa-file-import"></i> Bulk Import
                             </button>
                             <button class="btn primary" onclick="app.openAddProspectModal()">
@@ -9598,10 +10401,10 @@ function _wireLoginBtn() {
                 <div class="filter-bar">
                     <div class="search-group">
                         <i class="fas fa-search"></i>
-                        <input type="text" id="prospect-search" placeholder="Search by name, phone, email, or ID..." onkeyup="app. async filterProspects()">
+                        <input type="text" id="prospect-search" placeholder="Search by name, phone, email, or ID..." onkeyup="await app.filterProspects()">
                     </div>
                     <div class="filter-group">
-                        <select id="filter-score" onchange="app. async filterProspects()">
+                        <select id="filter-score" onchange="await app.filterProspects()">
                             <option value="">All Scores</option>
                             <option value="A+">Grade A+ (800-1000)</option>
                             <option value="A">Grade A (600-799)</option>
@@ -9609,7 +10412,7 @@ function _wireLoginBtn() {
                             <option value="C">Grade C (200-399)</option>
                             <option value="D">Grade D (0-199)</option>
                         </select>
-                        <select id="filter-gua" onchange="app. async filterProspects()">
+                        <select id="filter-gua" onchange="await app.filterProspects()">
                             <option value="">All Ming Gua</option>
                             <option value="MG1">MG1 (Kan)</option>
                             <option value="MG2">MG2 (Kun)</option>
@@ -9621,14 +10424,14 @@ function _wireLoginBtn() {
                             <option value="MG8">MG8 (Gen)</option>
                             <option value="MG9">MG9 (Li)</option>
                         </select>
-                        <select id="filter-status" onchange="app. async filterProspects()">
+                        <select id="filter-status" onchange="await app.filterProspects()">
                             <option value="">All Status</option>
                             <option value="active">Active</option>
                             <option value="attention">Needs Attention</option>
                             <option value="reassign">Reassignable</option>
                             <option value="critical">Critical</option>
                         </select>
-                        <button class="btn primary" onclick="app. async filterProspects()">Apply Filters</button>
+                        <button class="btn primary" onclick="await app.filterProspects()">Apply Filters</button>
                     </div>
                 </div>
 
@@ -9636,12 +10439,12 @@ function _wireLoginBtn() {
                     <table class="prospects-table" id="prospects-table">
                         <thead>
                             <tr>
-                                <th onclick="app. sortProspects('name')" style="cursor: pointer;">Name ${_sortField === 'name' ? (_sortDirection === 'asc' ? '↑' : '↓') : ''}</th>
-                                <th onclick="app. sortProspects('score')" style="cursor: pointer;">Score ${_sortField === 'score' ? (_sortDirection === 'asc' ? '↑' : '↓') : ''}</th>
+                                <th onclick="await app.sortProspects('name')" style="cursor: pointer;">Name ${_sortField === 'name' ? (_sortDirection === 'asc' ? '↑' : '↓') : ''}</th>
+                                <th onclick="await app.sortProspects('score')" style="cursor: pointer;">Score ${_sortField === 'score' ? (_sortDirection === 'asc' ? '↑' : '↓') : ''}</th>
                                 <th>Ming Gua</th>
                                 <th>Occupation/Company</th>
-                                <th onclick="app. sortProspects('activity')" style="cursor: pointer;">Last Activity ${_sortField === 'activity' ? (_sortDirection === 'asc' ? '↑' : '↓') : ''}</th>
-                                <th onclick="app. sortProspects('protection')" style="cursor: pointer;">Protection ${_sortField === 'protection' ? (_sortDirection === 'asc' ? '↑' : '↓') : ''}</th>
+                                <th onclick="await app.sortProspects('activity')" style="cursor: pointer;">Last Activity ${_sortField === 'activity' ? (_sortDirection === 'asc' ? '↑' : '↓') : ''}</th>
+                                <th onclick="await app.sortProspects('protection')" style="cursor: pointer;">Protection ${_sortField === 'protection' ? (_sortDirection === 'asc' ? '↑' : '↓') : ''}</th>
                                 <th>Actions</th>
                             </tr>
 
@@ -9688,7 +10491,7 @@ function _wireLoginBtn() {
                         <p>Manage converted customers and their lifecycle events. Customer records are permanent.</p>
                     </div>
                     <div class="header-actions">
-                        <button class="btn primary" onclick="app. openAddCustomerModal()">
+                        <button class="btn primary" onclick="await app.openAddCustomerModal()">
                             <i class="fas fa-plus"></i> Add Customer
                         </button>
                     </div>
@@ -9702,16 +10505,16 @@ function _wireLoginBtn() {
                 <div class="filter-bar">
                     <div class="search-group">
                         <i class="fas fa-search"></i>
-                        <input type="text" id="customer-search" placeholder="Search customers by name, phone, email, or ID" onkeyup="app. async filterCustomers()">
+                        <input type="text" id="customer-search" placeholder="Search customers by name, phone, email, or ID" onkeyup="await app.filterCustomers()">
                     </div>
                     <div class="filter-group">
-                        <select id="filter-customer-type" onchange="app. async filterCustomers()">
+                        <select id="filter-customer-type" onchange="await app.filterCustomers()">
                             <option value="">Customer Type: All</option>
                             <option value="Regular">Regular</option>
                             <option value="VIP">VIP</option>
                             <option value="Agent Eligible">Agent Eligible</option>
                         </select>
-                        <select id="filter-customer-gua" onchange="app. async filterCustomers()">
+                        <select id="filter-customer-gua" onchange="await app.filterCustomers()">
                             <option value="">Ming Gua: All</option>
                             <option value="MG1">MG1</option>
                             <option value="MG2">MG2</option>
@@ -9723,13 +10526,13 @@ function _wireLoginBtn() {
                             <option value="MG8">MG8</option>
                             <option value="MG9">MG9</option>
                         </select>
-                        <select id="filter-purchase-status" onchange="app. async filterCustomers()">
+                        <select id="filter-purchase-status" onchange="await app.filterCustomers()">
                             <option value="">Purchase Status: All</option>
                             <option value="30d">Purchased Last 30 Days</option>
                             <option value="90d">Purchased Last 90 Days</option>
                             <option value="no90d">No Purchase 90+ Days</option>
                         </select>
-                        <button class="btn primary" onclick="app. async filterCustomers()">Apply Filters</button>
+                        <button class="btn primary" onclick="await app.filterCustomers()">Apply Filters</button>
                     </div>
                 </div>
 
@@ -9767,14 +10570,14 @@ function _wireLoginBtn() {
         const purchaseFilter = document.getElementById('filter-purchase-status')?.value || '';
 
         let html = '';
-        for (const c of customers) {
+        customers.forEach(c => {
             if (searchQuery && !c.full_name.toLowerCase().includes(searchQuery) && !c.phone.includes(searchQuery)) return;
             if (guaFilter && c.ming_gua !== guaFilter) return;
             // Type and Purchase filters simplified for demo
             if (typeFilter === 'VIP' && c.lifetime_value < 5000) return;
 
             html += `
-                <tr onclick="app. showCustomerDetail(${c.id})">
+                <tr onclick="await app.showCustomerDetail(${c.id})">
                     <td><strong>${c.full_name}</strong></td>
                     <td>RM ${c.lifetime_value.toLocaleString()} <span style="color:var(--success); font-size:12px;"><i class="fas fa-caret-up"></i></span></td>
                     <td>${c.customer_since}</td>
@@ -9783,13 +10586,13 @@ function _wireLoginBtn() {
                     <td><span class="score-badge score-A+">${c.status.toUpperCase()}</span></td>
                     <td onclick="event.stopPropagation()">
                         <button class="btn-icon" title="Edit"><i class="fas fa-edit"></i></button>
-                        <button class="btn-icon" title="Add Purchase" onclick="app. openAddPurchaseModal(${c.id})"><i class="fas fa-shopping-cart"></i></button>
+                        <button class="btn-icon" title="Add Purchase" onclick="await app.openAddPurchaseModal(${c.id})"><i class="fas fa-shopping-cart"></i></button>
                         <button class="btn-icon" title="Referral" onclick="app.todo('Referral workflow')"><i class="fas fa-user-plus"></i></button>
-                        <button class="btn-icon" title="Recruit" onclick="app. openRecruitModal(${c.id})"><i class="fas fa-user-tie"></i></button>
+                        <button class="btn-icon" title="Recruit" onclick="app.openRecruitModal(${c.id})"><i class="fas fa-user-tie"></i></button>
                     </td>
                 </tr>
             `;
-        }
+        });
         tbody.innerHTML = html || '<tr><td colspan="7" style="text-align:center; padding:20px;">No customers found</td></tr>';
     };
 
@@ -9836,7 +10639,7 @@ function _wireLoginBtn() {
         let html = '';
         let visibleCount = 0;
 
-        for (const p of prospects) {
+        prospects.forEach(p => {
             // Search filter (Name, Phone, Email, ID)
             const matchesSearch = !searchQuery ||
                 p.full_name.toLowerCase().includes(searchQuery) ||
@@ -9873,7 +10676,7 @@ function _wireLoginBtn() {
             }
 
             html += `
-                <tr onclick="app. showProspectDetail(${p.id})">
+                <tr onclick="await app.showProspectDetail(${p.id})">
                     <td><strong>${p.full_name}</strong></td>
                     <td>
                         <span class="score-badge score-${grade.replace('+', '-plus')}">${p.score || 0} (${grade})</span>
@@ -9888,14 +10691,14 @@ function _wireLoginBtn() {
                         </div>
                     </td>
                     <td onclick="event.stopPropagation()">
-                        <button class="btn-icon" title="Edit" onclick="app. openProspectModal(${p.id})"><i class="fas fa-edit"></i></button>
-                        <button class="btn-icon" title="Add Activity" onclick="app. openActivityModal('', ${p.id})"><i class="fas fa-calendar-plus"></i></button>
-                        <button class="btn-icon" title="Convert to Customer" onclick="app. convertToCustomer(${p.id})"><i class="fas fa-user-check"></i></button>
+                        <button class="btn-icon" title="Edit" onclick="await app.openProspectModal(${p.id})"><i class="fas fa-edit"></i></button>
+                        <button class="btn-icon" title="Add Activity" onclick="await app.openActivityModal('', ${p.id})"><i class="fas fa-calendar-plus"></i></button>
+                        <button class="btn-icon" title="Convert to Customer" onclick="await app.convertToCustomer(${p.id})"><i class="fas fa-user-check"></i></button>
                     </td>
                 </tr>
             `;
             visibleCount++;
-        }
+        });
 
         if (visibleCount === 0) {
             html = '<tr><td colspan="7" style="text-align:center; padding:40px;">No prospects found. Click "Add Prospect" to create one.</td></tr>';
@@ -9930,7 +10733,7 @@ function _wireLoginBtn() {
 
     const openProspectModal = async (prospectId = null) => {
         if (prospectId) {
-            const prospect = await DataStore.getById('prospects', prospectId);
+            const prospect = DataStore.getById('prospects', prospectId);
             const currentUser = _currentUser || await Auth.getCurrentUser();
             const isAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || currentUser.role?.includes('Level 3') || currentUser.role?.includes('Level 7') || currentUser.role === 'team_leader';
             const isOwner = prospect.responsible_agent_id == currentUser.id;
@@ -9939,7 +10742,7 @@ function _wireLoginBtn() {
                 return;
             }
         }
-        const prospect = prospectId ? await DataStore.getById('prospects', prospectId) : null;
+        const prospect = prospectId ? DataStore.getById('prospects', prospectId) : null;
         const isEdit = !!prospect;
 
         const content = `
@@ -10123,7 +10926,7 @@ function _wireLoginBtn() {
 
         UI.showModal(isEdit ? 'Edit Prospect' : 'Add New Prospect', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: isEdit ? 'Update Prospect' : 'Create Prospect', type: 'primary', action: 'await app. saveProspect()' }
+            { label: isEdit ? 'Update Prospect' : 'Create Prospect', type: 'primary', action: 'await app.saveProspect()' }
         ]);
     };
 
@@ -10224,14 +11027,14 @@ function _wireLoginBtn() {
     };
 
     const showCustomerDetail = async (customerId) => {
-        const customer = await DataStore.getById('customers', customerId);
+        const customer = DataStore.getById('customers', customerId);
         if (!customer || !await canViewCustomer(customer)) {
             UI.toast.error('You do not have permission to view this customer.');
             await navigateTo('prospects');
             return;
         }
 
-        setTimeout(async () => {
+        (() => {
             await addWhatsAppButtonToProfile('customer', customerId);
         }, 100);
 
@@ -10256,11 +11059,11 @@ function _wireLoginBtn() {
                         </div>
                     </div>
                     <div class="header-actions">
-                        <button class="btn secondary" onclick="app. openProspectModal(${customer.id})"><i class="fas fa-edit"></i> Edit</button>
-                        <button class="btn secondary" onclick="app. openAddPurchaseModal(${customer.id})"><i class="fas fa-plus"></i> Add Purchase</button>
+                        <button class="btn secondary" onclick="await app.openProspectModal(${customer.id})"><i class="fas fa-edit"></i> Edit</button>
+                        <button class="btn secondary" onclick="await app.openAddPurchaseModal(${customer.id})"><i class="fas fa-plus"></i> Add Purchase</button>
                         <button class="btn secondary" onclick="app.todo('Refer a Friend')"><i class="fas fa-user-plus"></i> Refer a Friend</button>
-                        <button class="btn secondary" onclick="app. openSendWhatsAppModal('customer', ${customer.id})"><i class="fab fa-whatsapp"></i> WhatsApp</button>
-                        <button class="btn primary" style="background:#6b21a8;" onclick="app. openRecruitModal(${customer.id})"><i class="fas fa-user-tie"></i> Recruit as Agent</button>
+                        <button class="btn secondary" onclick="await app.openSendWhatsAppModal('customer', ${customer.id})"><i class="fab fa-whatsapp"></i> WhatsApp</button>
+                        <button class="btn primary" style="background:#6b21a8;" onclick="app.openRecruitModal(${customer.id})"><i class="fas fa-user-tie"></i> Recruit as Agent</button>
                     </div>
                 </div>
 
@@ -10271,12 +11074,12 @@ function _wireLoginBtn() {
                 <div class="profile-content-grid" style="display:grid; grid-template-columns: 1fr 300px; gap:24px;">
                     <div class="profile-main-column">
                         <div class="tab-navigation">
-                            <button class="profile-tab-btn active" onclick="app. switchProfileTab(this, 'basic', ${customer.id})">Basic & Info</button>
-                            <button class="profile-tab-btn" onclick="app. switchProfileTab(this, 'platforms', ${customer.id})">Platform IDs</button>
-                             <button class="profile-tab-btn" onclick="app. switchProfileTab(this, 'purchases', ${customer.id})">Purchase History</button>
-                            <button class="profile-tab-btn" onclick="app. switchProfileTab(this, 'activity', ${customer.id})">Activity History</button>
-                            <button class="profile-tab-btn" onclick="app. switchProfileTab(this, 'referrals', ${customer.id})">Referrals Made</button>
-                            <button class="profile-tab-btn" onclick="app. switchProfileTab(this, 'events', ${customer.id})">Events Attended</button>
+                            <button class="profile-tab-btn active" onclick="await app.switchProfileTab(this, 'basic', ${customer.id})">Basic & Info</button>
+                            <button class="profile-tab-btn" onclick="await app.switchProfileTab(this, 'platforms', ${customer.id})">Platform IDs</button>
+                             <button class="profile-tab-btn" onclick="await app.switchProfileTab(this, 'purchases', ${customer.id})">Purchase History</button>
+                            <button class="profile-tab-btn" onclick="await app.switchProfileTab(this, 'activity', ${customer.id})">Activity History</button>
+                            <button class="profile-tab-btn" onclick="await app.switchProfileTab(this, 'referrals', ${customer.id})">Referrals Made</button>
+                            <button class="profile-tab-btn" onclick="await app.switchProfileTab(this, 'events', ${customer.id})">Events Attended</button>
                         </div>
 
                         <div id="profile-tab-content" style="background:var(--white); padding:24px; border-radius:12px; border:1px solid var(--gray-200);">
@@ -10292,7 +11095,7 @@ function _wireLoginBtn() {
                 </div>
                 
                 <div style="margin-top:24px;">
-                    <button class="btn secondary" onclick="app. async navigateTo('prospects')"><i class="fas fa-arrow-left"></i> Back to List</button>
+                    <button class="btn secondary" onclick="await app.navigateTo('prospects')"><i class="fas fa-arrow-left"></i> Back to List</button>
                 </div>
             </div>
         `;
@@ -10318,11 +11121,11 @@ function _wireLoginBtn() {
 
         // Fill sections
         await renderBasicBankTab(customer, 'section-basic-bank');
-        await renderPlatformIdsTab(customer, 'section-platforms');
+        renderPlatformIdsTab(customer, 'section-platforms');
         await renderPurchaseHistoryTab(customer, 'section-purchases');
-        await renderReferralsTab(customer, 'section-referrals');
+        renderReferralsTab(customer, 'section-referrals');
         renderEventHistory(customer);
-        await renderAgentEligibility(customer);
+        renderAgentEligibility(customer);
         await renderCustomerTags(customer);
     };
 
@@ -10331,16 +11134,16 @@ function _wireLoginBtn() {
         if (btn) btn.classList.add('active');
 
         const customerId = cId || 101; // Mocking fallback
-        const customer = await DataStore.getById('customers', customerId);
+        const customer = DataStore.getById('customers', customerId);
         if (!customer) return;
 
         if (tabName === 'basic') await renderBasicBankTab(customer);
-        else if (tabName === 'platforms') await renderPlatformIdsTab(customer);
+        else if (tabName === 'platforms') renderPlatformIdsTab(customer);
         else if (tabName === 'purchases') await renderPurchaseHistoryTab(customer);
         else if (tabName === 'activity') await renderCustomerActivityTab(customer);
-        else if (tabName === 'referrals') await renderReferralsTab(customer);
+        else if (tabName === 'referrals') renderReferralsTab(customer);
         else if (tabName === 'events') {
-            const registrations = (await DataStore.getAll('event_registrations')).filter(
+            const registrations = await DataStore.getAll('event_registrations').filter(
                 r => r.attendee_type === 'customer' && r.attendee_id == customerId
             );
             let html = '<h4>Events Attended</h4>';
@@ -10348,10 +11151,10 @@ function _wireLoginBtn() {
                 html += '<p>No events attended.</p>';
             } else {
                 html += '<table class="events-table"><thead><tr><th>Event</th><th>Date</th><th>Status</th><th>Points</th></tr></thead><tbody>';
-                for (const r of registrations) {
-                    const event = await DataStore.getById('events', r.event_id);
+                registrations.forEach(r => {
+                    const event = DataStore.getById('events', r.event_id);
                     html += `<tr><td>${event?.title || 'Unknown'}</td><td>${r.event_date || '-'}</td><td>${r.attendance_status}</td><td>${r.points_awarded || 0}</td></tr>`;
-                }
+                });
                 html += '</tbody></table>';
             }
             document.getElementById('profile-tab-content').innerHTML = html;
@@ -10433,15 +11236,15 @@ function _wireLoginBtn() {
                 <div class="add-note-section">
                     <textarea id="customer-note-text" class="form-control" rows="3" placeholder="Add a new note..."></textarea>
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
-                        <button class="btn-icon" onclick="app. openVoiceRecorder('customer-note-text', 'customer', ${customer.id})" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
-                        <button class="btn primary btn-sm" onclick="app. addCustomerNote(${customer.id})">Add Note</button>
+                        <button class="btn-icon" onclick="await app.openVoiceRecorder('customer-note-text', 'customer', ${customer.id})" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+                        <button class="btn primary btn-sm" onclick="await app.addCustomerNote(${customer.id})">Add Note</button>
                     </div>
                 </div>
                 ${customerNotes.length > 0 ? customerNotes.map(n => `
                     <div class="notes-item" style="margin-top:10px;">
                         <div class="notes-header">
                             <span>${n.date} - ${n.author}${n.is_voice_note ? ' <i class="fas fa-microphone voice-note-icon" title="Voice note"></i>' : ''}</span>
-                            <button class="btn-icon" onclick="app. deleteCustomerNote(${customer.id}, ${n.id})"><i class="fas fa-trash"></i></button>
+                            <button class="btn-icon" onclick="await app.deleteCustomerNote(${customer.id}, ${n.id})"><i class="fas fa-trash"></i></button>
                         </div>
                         <div>"${n.text}"</div>
                     </div>
@@ -10450,7 +11253,7 @@ function _wireLoginBtn() {
         `);
     };
 
-    const renderPlatformIdsTab = async (customer, containerId = 'profile-tab-content') => {
+    const renderPlatformIdsTab = (customer, containerId = 'profile-tab-content') => {
         const platformData = await DataStore.query('platform_ids', { customer_id: customer.id });
         const internal = platformData.slice(0, 4);
         const external = platformData.slice(4);
@@ -10538,33 +11341,14 @@ function _wireLoginBtn() {
                 <div style="font-size:18px;">Lifetime Total: <span style="color:var(--primary);">RM ${(totalPaid + totalPending).toLocaleString()}</span></div>
             </div>
             <div style="margin-top:16px;">
-                <button class="btn primary" onclick="app. openAddPurchaseModal(${customer.id})">Add Purchase</button>
+                <button class="btn primary" onclick="await app.openAddPurchaseModal(${customer.id})">Add Purchase</button>
             </div>
         `;
     };
 
-    const renderReferralsTab = async (customer, containerId = 'profile-tab-content') => {
+    const renderReferralsTab = (customer, containerId = 'profile-tab-content') => {
         const refs = await DataStore.query('referrals', { referrer_customer_id: customer.id });
         const container = document.getElementById(containerId);
-
-        const rowsPromises = refs.map(async (r) => {
-            const prospect = await DataStore.getById('prospects', r.referred_prospect_id);
-            return `
-                <tr>
-                    <td><strong>${prospect?.full_name || 'N/A'}</strong></td>
-                    <td>${r.relationship}</td>
-                    <td>${r.date}</td>
-                    <td><span class="score-badge ${r.status === 'Active' ? 'score-A+' : 'score-A'}">${r.status}</span></td>
-                    <td>${r.reward_status}</td>
-                    <td>
-                        <button class="btn-sm secondary" onclick="app.todo('View Referral')">View</button>
-                        <button class="btn-sm secondary" onclick="app.todo('Update Referral')">Update</button>
-                    </td>
-                </tr>
-            `;
-        });
-
-        const rowsHtml = (await Promise.all(rowsPromises)).join('');
 
         container.innerHTML = `
             <table class="purchase-table">
@@ -10579,7 +11363,22 @@ function _wireLoginBtn() {
                     </tr>
                 </thead>
                 <tbody>
-                    ${rowsHtml}
+                    ${refs.map(r => {
+            const prospect = DataStore.getById('prospects', r.referred_prospect_id);
+            return `
+                        <tr>
+                            <td><strong>${prospect?.full_name || 'N/A'}</strong></td>
+                            <td>${r.relationship}</td>
+                            <td>${r.date}</td>
+                            <td><span class="score-badge ${r.status === 'Active' ? 'score-A+' : 'score-A'}">${r.status}</span></td>
+                            <td>${r.reward_status}</td>
+                            <td>
+                                <button class="btn-sm secondary" onclick="app.todo('View Referral')">View</button>
+                                <button class="btn-sm secondary" onclick="app.todo('Update Referral')">Update</button>
+                            </td>
+                        </tr>
+                        `;
+        }).join('')}
                 </tbody>
             </table>
             <div style="margin-top:16px;">
@@ -10607,7 +11406,7 @@ function _wireLoginBtn() {
         `;
     };
 
-    const renderAgentEligibility = async (customer) => {
+    const renderAgentEligibility = (customer) => {
         const container = document.getElementById('agent-eligibility-section');
         container.innerHTML = `
             <div class="eligibility-card">
@@ -10624,7 +11423,7 @@ function _wireLoginBtn() {
                     Recommendations: Active participant, makes referrals, good purchase history.
                 </div>
                 
-                <button class="btn primary" style="width:100%; background:#6b21a8; border:none;" onclick="app. openRecruitModal(${customer.id})">Offer Agent Package</button>
+                <button class="btn primary" style="width:100%; background:#6b21a8; border:none;" onclick="app.openRecruitModal(${customer.id})">Offer Agent Package</button>
             </div>
         `;
     };
@@ -10632,7 +11431,7 @@ function _wireLoginBtn() {
     const renderCustomerActivityTab = async (customer, containerId = 'profile-tab-content') => {
         const container = document.getElementById(containerId);
         // Combine activities linked to this customer OR original prospect
-        const activities = (await DataStore.getAll('activities')).filter(a =>
+        const activities = await DataStore.getAll('activities').filter(a =>
             a.customer_id == customer.id ||
             (customer.converted_from_prospect_id && a.prospect_id == customer.converted_from_prospect_id)
         ).sort((a, b) => new Date(b.date || b.created_at) - new Date(a.date || a.created_at));
@@ -10640,7 +11439,7 @@ function _wireLoginBtn() {
         container.innerHTML = `
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
                 <h4 style="font-size:16px; font-weight:600; color:var(--primary); margin:0;">Activity History</h4>
-                <button class="btn primary btn-sm" onclick="app. openActivityModal(null, 'customer', ${customer.id})">+ Log Activity</button>
+                <button class="btn primary btn-sm" onclick="await app.openActivityModal(null, 'customer', ${customer.id})">+ Log Activity</button>
             </div>
             ${activities.length > 0 ? `
                 <div class="activity-timeline">
@@ -10672,32 +11471,26 @@ function _wireLoginBtn() {
         const container = document.getElementById('customer-tags-section');
         const entityTags = await DataStore.query('entity_tags', { entity_type: 'customer', entity_id: customer.id });
 
-        let tagsHtml = '<p style="color:var(--gray-400); font-size:12px;">No tags yet.</p>';
-        if (entityTags.length > 0) {
-            const tagSpans = await Promise.all(entityTags.map(async (et) => {
-                const tag = await DataStore.getById('tags', et.tag_id);
-                return tag ? `
-                    <span class="score-badge" style="background:${tag.color || 'var(--primary)'}; color:white; display:flex; align-items:center; gap:4px; font-size:11px;">
-                        ${tag.name} <span style="cursor:pointer;" onclick="app. removeTagFromCustomer(${customer.id}, ${tag.id})">&times;</span>
-                    </span>
-                ` : '';
-            }));
-            tagsHtml = tagSpans.join('');
-        }
-
         container.innerHTML = `
             <div style="background:var(--white); padding:16px; border-radius:12px; border:1px solid var(--gray-200);">
                 <h4 style="font-size:13px; font-weight:700; color:var(--gray-500); margin-bottom:12px;">TAGS</h4>
                 <div style="display:flex; flex-wrap:wrap; gap:8px;">
-                    ${tagsHtml}
-                    <button class="btn-sm secondary" style="border-radius:20px; font-size:11px;" onclick="app. openAddTagModal(${customer.id}, 'customer')">+ Add Tag</button>
+                    ${entityTags.length > 0 ? entityTags.map(et => {
+            const tag = DataStore.getById('tags', et.tag_id);
+            return tag ? `
+                            <span class="score-badge" style="background:${tag.color || 'var(--primary)'}; color:white; display:flex; align-items:center; gap:4px; font-size:11px;">
+                                ${tag.name} <span style="cursor:pointer;" onclick="await app.removeTagFromCustomer(${customer.id}, ${tag.id})">&times;</span>
+                            </span>
+                        ` : '';
+        }).join('') : '<p style="color:var(--gray-400); font-size:12px;">No tags yet.</p>'}
+                    <button class="btn-sm secondary" style="border-radius:20px; font-size:11px;" onclick="await app.openAddTagModal(${customer.id}, 'customer')">+ Add Tag</button>
                 </div>
             </div>
         `;
     };
 
     const showProspectDetail = async (prospectId) => {
-        const prospect = await DataStore.getById('prospects', prospectId);
+        const prospect = DataStore.getById('prospects', prospectId);
         if (!prospect || !await canViewProspect(prospect)) {
             UI.toast.error('You do not have permission to view this prospect.');
             await navigateTo('prospects');
@@ -10720,7 +11513,7 @@ function _wireLoginBtn() {
         if (!container) return;
 
         const solutions = await DataStore.query('proposed_solutions', { prospect_id: prospectId });
-        const activities =await  (await DataStore.getAll('activities')).filter(a => a.prospect_id == prospectId);
+        const activities =await  DataStore.getAll('activities').filter(a => a.prospect_id == prospectId);
         const notes = await DataStore.query('notes', { prospect_id: prospectId });
         const names = await DataStore.query('names', { prospect_id: prospectId });
 
@@ -10729,13 +11522,13 @@ function _wireLoginBtn() {
         const statusColor = protectionStatus === 'normal' ? 'success' : protectionStatus === 'warning' ? 'secondary' : 'error';
         const statusLabel = protectionStatus === 'normal' ? 'Normal' : protectionStatus === 'warning' ? 'Expiring Soon' : 'Critical';
 
-        setTimeout(async () => {
+        (() => {
             await addWhatsAppButtonToProfile('prospect', prospectId);
         }, 100);
 
         container.innerHTML = `
             <div class="profile-view">
-                <button class="btn secondary btn-sm" onclick="app. showProspectsView(document.getElementById('content-viewport'))" style="margin-bottom: 20px;">
+                <button class="btn secondary btn-sm" onclick="await app.showProspectsView(document.getElementById('content-viewport'))" style="margin-bottom: 20px;">
                     <i class="fas fa-arrow-left"></i> Back to List
                 </button>
 
@@ -10750,8 +11543,8 @@ function _wireLoginBtn() {
                         </div>
                     </div>
                     <div class="profile-actions">
-                        <button class="btn secondary" onclick="app. editProspect(${prospect.id})"><i class="fas fa-edit"></i> Edit</button>
-                        <button class="btn primary" onclick="app. convertToCustomer(${prospect.id})"><i class="fas fa-user-check"></i> Convert</button>
+                        <button class="btn secondary" onclick="await app.editProspect(${prospect.id})"><i class="fas fa-edit"></i> Edit</button>
+                        <button class="btn primary" onclick="await app.convertToCustomer(${prospect.id})"><i class="fas fa-user-check"></i> Convert</button>
                     </div>
                 </div>
 
@@ -10760,7 +11553,7 @@ function _wireLoginBtn() {
                     <div class="profile-section" id="section-basic">
                         <h2>
                             <span><i class="fas fa-info-circle"></i> Basic Information</span>
-                            <button class="btn-section-edit" onclick="app. openProspectModal(${prospect.id})"><i class="fas fa-edit"></i> Edit</button>
+                            <button class="btn-section-edit" onclick="await app.openProspectModal(${prospect.id})"><i class="fas fa-edit"></i> Edit</button>
                         </h2>
                         <div class="detail-grid">
                             <div class="info-row"><div class="info-label">Title</div><div class="info-value">${prospect.title || '-'}</div></div>
@@ -10776,7 +11569,7 @@ function _wireLoginBtn() {
                     <div class="profile-section" id="section-personal">
                         <h2>
                             <span><i class="fas fa-user-shield"></i> Personal Details</span>
-                            <button class="btn-section-edit" onclick="app. openProspectModal(${prospect.id})"><i class="fas fa-edit"></i> Edit</button>
+                            <button class="btn-section-edit" onclick="await app.openProspectModal(${prospect.id})"><i class="fas fa-edit"></i> Edit</button>
                         </h2>
                         <div class="detail-grid">
                             <div class="info-row"><div class="info-label">Date of Birth</div><div class="info-value">${prospect.date_of_birth || '-'}</div></div>
@@ -10795,7 +11588,7 @@ function _wireLoginBtn() {
                         <h2>
                             <span><i class="fas fa-users"></i> Name List</span>
                             <span class="section-actions">
-                                <button class="btn primary btn-sm" onclick="app. openAddNameModal(${prospect.id})"><i class="fas fa-plus"></i> Add Name</button>
+                                <button class="btn primary btn-sm" onclick="await app.openAddNameModal(${prospect.id})"><i class="fas fa-plus"></i> Add Name</button>
                             </span>
                         </h2>
                         <table class="name-list-table">
@@ -10808,14 +11601,14 @@ function _wireLoginBtn() {
                                 </tr>
                             </thead>
                             <tbody>
-                                ${names.length > 0 ? names.map(n => `
+                                ${await DataStore.query('names', { prospect_id: prospect.id }).length > 0 ? await DataStore.query('names', { prospect_id: prospect.id }).map(n => `
                                     <tr>
                                         <td>${n.relation}</td>
                                         <td>${n.full_name}</td>
                                         <td>${n.date_of_birth || '-'}</td>
                                         <td>
-                                            <button class="btn-icon" onclick="app. openAddNameModal(${prospect.id}, ${n.id})"><i class="fas fa-edit"></i></button>
-                                            <button class="btn-icon" onclick="app. deleteName(${prospect.id}, ${n.id})"><i class="fas fa-trash"></i></button>
+                                            <button class="btn-icon" onclick="await app.openAddNameModal(${prospect.id}, ${n.id})"><i class="fas fa-edit"></i></button>
+                                            <button class="btn-icon" onclick="await app.deleteName(${prospect.id}, ${n.id})"><i class="fas fa-trash"></i></button>
                                         </td>
                                     </tr>
                                 `).join('') : '<tr><td colspan="4" style="text-align:center; padding:20px;">No names added.</td></tr>'}
@@ -10828,16 +11621,16 @@ function _wireLoginBtn() {
                         <h2>
                             <span><i class="fas fa-history"></i> Activity & Information</span>
                             <span class="section-actions">
-                                <button class="btn primary btn-sm" onclick="app. openActivityModal('', ${prospect.id})"><i class="fas fa-plus"></i> Add Activity</button>
+                                <button class="btn primary btn-sm" onclick="await app.openActivityModal('', ${prospect.id})"><i class="fas fa-plus"></i> Add Activity</button>
                             </span>
                         </h2>
                         <div class="profile-tabs" style="margin-bottom:15px; border-bottom:1px solid var(--gray-200);">
-                            <button class="profile-tab active" onclick="app. switchProspectTab('info', ${prospect.id}, this)">Info</button>
-                            <button class="profile-tab" onclick="app. switchProspectTab('personal', ${prospect.id}, this)">Personal</button>
-                            <button class="profile-tab" onclick="app. switchProspectTab('names', ${prospect.id}, this)">Names</button>
-                            <button class="profile-tab" onclick="app. switchProspectTab('activity', ${prospect.id}, this)">Activity</button>
-                            <button class="profile-tab" onclick="app. switchProspectTab('events', ${prospect.id}, this)">Events</button>
-                            <button class="profile-tab" onclick="app. switchProspectTab('notes', ${prospect.id}, this)">Notes</button>
+                            <button class="profile-tab active" onclick="await app.switchProspectTab('info', ${prospect.id}, this)">Info</button>
+                            <button class="profile-tab" onclick="await app.switchProspectTab('personal', ${prospect.id}, this)">Personal</button>
+                            <button class="profile-tab" onclick="await app.switchProspectTab('names', ${prospect.id}, this)">Names</button>
+                            <button class="profile-tab" onclick="await app.switchProspectTab('activity', ${prospect.id}, this)">Activity</button>
+                            <button class="profile-tab" onclick="await app.switchProspectTab('events', ${prospect.id}, this)">Events</button>
+                            <button class="profile-tab" onclick="await app.switchProspectTab('notes', ${prospect.id}, this)">Notes</button>
                         </div>
                         <div id="prospect-tab-content">
                             <!-- Populated by switchProspectTab -->
@@ -10861,7 +11654,7 @@ function _wireLoginBtn() {
                             <div class="fill" style="width: ${Math.min(100, (daysLeft / 30) * 100)}%; background: var(--${statusColor});"></div>
                         </div>
                         <div style="display: flex; gap: 12px; margin-top: 16px;">
-                            <button class="btn secondary btn-sm" onclick="app. extendProtection(${prospect.id})">Extend</button>
+                            <button class="btn secondary btn-sm" onclick="await app.extendProtection(${prospect.id})">Extend</button>
                             <button class="btn secondary btn-sm" onclick="app.transferProspect(${prospect.id})">Transfer</button>
                             <button class="btn secondary btn-sm" onclick="app.reassignProspect(${prospect.id})">Reassign</button>
                         </div>
@@ -10872,12 +11665,12 @@ function _wireLoginBtn() {
                         <h2>
                             <i class="fas fa-tags"></i> Tags
                             <span class="section-actions">
-                                <button class="btn primary btn-sm" onclick="app. openAddTagModal(${prospect.id})"><i class="fas fa-plus"></i></button>
+                                <button class="btn primary btn-sm" onclick="await app.openAddTagModal(${prospect.id})"><i class="fas fa-plus"></i></button>
                             </span>
                         </h2>
                         <div class="tags-container" id="prospect-tags-container">
                             ${prospect.tags && prospect.tags.length > 0 ? prospect.tags.map(t => `
-                                            <span class="tag ${t.color}">${t.name} <i class="fas fa-times remove" onclick="app. removeTagFromProspect(${prospect.id}, ${t.id})"></i></span>
+                                            <span class="tag ${t.color}">${t.name} <i class="fas fa-times remove" onclick="await app.removeTagFromProspect(${prospect.id}, ${t.id})"></i></span>
                                         `).join('') : '<span>No tags yet</span>'}
                         </div>
                     </div>
@@ -10899,7 +11692,7 @@ function _wireLoginBtn() {
             </div>
         `;
         // Load the default tab content
-        await app. switchProspectTab('info', prospectId, document.querySelector('.profile-tabs .profile-tab.active'));
+        await app.switchProspectTab('info', prospectId, document.querySelector('.profile-tabs .profile-tab.active'));
     };
 
     const switchProspectTab = async (tab, prospectId, btn) => {
@@ -10914,7 +11707,7 @@ function _wireLoginBtn() {
             btn.style.fontWeight = '600';
         }
 
-        const prospect = await DataStore.getById('prospects', prospectId);
+        const prospect = DataStore.getById('prospects', prospectId);
         const container = document.getElementById('prospect-tab-content');
         if (!container || !prospect) return;
 
@@ -10983,7 +11776,7 @@ function _wireLoginBtn() {
                     <h2>
                         <i class="fas fa-users"></i> Name List
                         <span class="section-actions">
-                            <button class="btn primary btn-sm" onclick="app. openAddNameModal(${prospect.id})"><i class="fas fa-plus"></i> Add Name</button>
+                            <button class="btn primary btn-sm" onclick="await app.openAddNameModal(${prospect.id})"><i class="fas fa-plus"></i> Add Name</button>
                         </span>
                     </h2>
                     <table class="name-list-table">
@@ -11005,7 +11798,7 @@ function _wireLoginBtn() {
                                     <td>${n.notes || '-'}</td>
                                     <td>
                                         <button class="btn-icon" onclick="app.todo('Edit name')"><i class="fas fa-edit"></i></button>
-                                        <button class="btn-icon" onclick="app. deleteName(${prospect.id}, ${n.id})"><i class="fas fa-trash"></i></button>
+                                        <button class="btn-icon" onclick="await app.deleteName(${prospect.id}, ${n.id})"><i class="fas fa-trash"></i></button>
                                     </td>
                                 </tr>
                             `).join('') : `
@@ -11017,13 +11810,13 @@ function _wireLoginBtn() {
     `;
         }
         else if (tab === 'activity') {
-            const activities =await  (await DataStore.getAll('activities')).filter(a => a.prospect_id == prospectId);
+            const activities =await  DataStore.getAll('activities').filter(a => a.prospect_id == prospectId);
             container.innerHTML = `
     <div class="profile-section">
                     <h2>
                         <i class="fas fa-history"></i> Activity History
                         <span class="section-actions">
-                            <button class="btn primary btn-sm" onclick="app. openActivityModal('', ${prospect.id})"><i class="fas fa-plus"></i> Add Activity</button>
+                            <button class="btn primary btn-sm" onclick="await app.openActivityModal('', ${prospect.id})"><i class="fas fa-plus"></i> Add Activity</button>
                         </span>
                     </h2>
                     <div class="history-timeline">
@@ -11034,7 +11827,7 @@ function _wireLoginBtn() {
                                     <h4>${a.activity_type} - ${a.activity_title || 'Meeting'}</h4>
                                     <p style="font-size:13px; color:var(--gray-500); margin-bottom:4px;">Agent: Michelle Tan ${a.score_value ? `| Score: +${a.score_value}` : ''}</p>
                                     <p style="font-size:14px; margin-bottom:8px;">${a.summary || a.location_address || ''}</p>
-                                    <button class="btn btn-sm secondary" onclick="app. viewActivityDetails(${a.id})">View Details</button>
+                                    <button class="btn btn-sm secondary" onclick="await app.viewActivityDetails(${a.id})">View Details</button>
                                 </div>
                             </div>
                         `).join('') : `
@@ -11052,15 +11845,15 @@ function _wireLoginBtn() {
                     <div class="add-note-section">
                         <textarea id="new-note-text" class="form-control" rows="3" placeholder="Add a new note..."></textarea>
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
-                            <button class="btn-icon" onclick="app. openVoiceRecorder('new-note-text', 'prospect', ${prospect.id})" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
-                            <button class="btn primary btn-sm" onclick="app. addNote(${prospect.id})">Add Note</button>
+                            <button class="btn-icon" onclick="await app.openVoiceRecorder('new-note-text', 'prospect', ${prospect.id})" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+                            <button class="btn primary btn-sm" onclick="await app.addNote(${prospect.id})">Add Note</button>
                         </div>
                     </div>
                     ${notes.length > 0 ? notes.map(n => `
                         <div class="notes-item">
                             <div class="notes-header">
                                 <span>${n.date} - ${n.author}${n.is_voice_note ? ' <i class="fas fa-microphone voice-note-icon" title="Voice note"></i>' : ''}</span>
-                                <button class="btn-icon" onclick="app. deleteNote(${prospect.id}, ${n.id})"><i class="fas fa-trash"></i></button>
+                                <button class="btn-icon" onclick="await app.deleteNote(${prospect.id}, ${n.id})"><i class="fas fa-trash"></i></button>
                             </div>
                             <div>"${n.text}"</div>
                         </div>
@@ -11080,7 +11873,7 @@ function _wireLoginBtn() {
 `;
         }
         else if (tab === 'events') {
-            const registrations =await  (await DataStore.getAll('event_registrations')).filter(
+            const registrations =await  DataStore.getAll('event_registrations').filter(
                 r => r.attendee_type === 'prospect' && r.attendee_id == prospectId
             );
             let html = '<h2>Events Attended</h2>';
@@ -11088,10 +11881,10 @@ function _wireLoginBtn() {
                 html += '<p>No events attended.</p>';
             } else {
                 html += '<table class="events-table"><thead><tr><th>Event</th><th>Date</th><th>Status</th><th>Points</th></tr></thead><tbody>';
-                for (const r of registrations) {
-                    const event = await DataStore.getById('events', r.event_id);
+                registrations.forEach(r => {
+                    const event = DataStore.getById('events', r.event_id);
                     html += `<tr><td>${event?.title || 'Unknown'}</td><td>${r.event_date || '-'}</td><td>${r.attendance_status}</td><td>${r.points_awarded || 0}</td></tr> `;
-                }
+                });
                 html += '</tbody></table>';
             }
             container.innerHTML = html;
@@ -11113,17 +11906,17 @@ function _wireLoginBtn() {
         });
         document.getElementById('new-note-text').value = '';
         UI.toast.success('Note added');
-        await app. switchProspectTab('notes', prospectId, document.querySelector('.profile-tab.active'));
+        await app.switchProspectTab('notes', prospectId, document.querySelector('.profile-tab.active'));
     };
 
-    
-const deleteNote = async (prospectId, noteId) => {
-    UI.confirm('Delete Note?', 'Are you sure you want to delete this note?', async () => {
-        await DataStore.delete('notes', noteId);
-        UI.toast.success('Note deleted');
-        await app. switchProspectTab('notes', prospectId, document.querySelector('.profile-tab.active'));
-    });
-};
+    const deleteNote = async (prospectId, noteId) => {
+        UI.confirm('Delete Note?', 'Are you sure you want to delete this note?', () => {
+            await DataStore.delete('notes', noteId);
+            UI.toast.success('Note deleted');
+            await app.switchProspectTab('notes', prospectId, document.querySelector('.profile-tab.active'));
+        });
+    };
+
 
     const openAddCustomerModal = async () => {
         const content = `
@@ -11150,7 +11943,7 @@ const deleteNote = async (prospectId, noteId) => {
 `;
         UI.showModal('Add New Customer (Legacy Import)', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Create Customer', type: 'primary', action: 'await app. saveCustomer()' }
+            { label: 'Create Customer', type: 'primary', action: 'await app.saveCustomer()' }
         ]);
     };
 
@@ -11173,7 +11966,7 @@ const deleteNote = async (prospectId, noteId) => {
     };
 
     const openAddPurchaseModal = async (customerId) => {
-        const customer = await DataStore.getById('customers', customerId);
+        const customer = DataStore.getById('customers', customerId);
         const content = `
     <div class="form-section">
                     <div class="form-group">
@@ -11231,7 +12024,7 @@ const deleteNote = async (prospectId, noteId) => {
     `;
         UI.showModal(`Add Purchase for ${customer.full_name}`, content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Add Purchase', type: 'primary', action: `await app. savePurchase(${customerId})` }
+            { label: 'Add Purchase', type: 'primary', action: `await app.savePurchase(${customerId})` }
         ]);
     };
 
@@ -11244,24 +12037,10 @@ const deleteNote = async (prospectId, noteId) => {
         // Match with promotion package if exists
         let packageId = null;
         const allPackages = await DataStore.getAll('promotion_packages');
-        
-let matchingPkg = null;
-for (const p of allPackages) {
-    if (!p.is_active) continue;
-    let found = false;
-    for (const pid of p.product_ids) {
-        const prod = await DataStore.getById('products', pid);
-        if (prod && prod.name === item) {
-            found = true;
-            break;
-        }
-    }
-    if (found) {
-        matchingPkg = p;
-        break;
-    }
-}
-
+        const matchingPkg = allPackages.find(p => p.is_active && p.product_ids.some(pid => {
+            const prod = DataStore.getById('products', pid);
+            return prod && prod.name === item;
+        }));
         if (matchingPkg) packageId = matchingPkg.id;
 
         const pur = {
@@ -11277,7 +12056,7 @@ for (const p of allPackages) {
         await DataStore.create('purchases', pur);
 
         // Update lifetime value
-        const customer = await DataStore.getById('customers', customerId);
+        const customer = DataStore.getById('customers', customerId);
         await DataStore.update('customers', customerId, { lifetime_value: (customer.lifetime_value || 0) + amt });
 
         UI.hideModal();
@@ -11286,8 +12065,8 @@ for (const p of allPackages) {
         else if (document.getElementById('customers-table-body')) await renderCustomersTable();
     };
 
-    const openRecruitModal = async (customerId) => {
-        const customer = await DataStore.getById('customers', customerId);
+    const openRecruitModal = (customerId) => {
+        const customer = DataStore.getById('customers', customerId);
         const content = `
     <div class="form-section">
                     <h4 style="margin-bottom:12px;">Package Selection</h4>
@@ -11328,7 +12107,7 @@ for (const p of allPackages) {
         UI.showModal('Delete Confirmation',
             '<p>Are you sure you want to delete this prospect? This action cannot be undone.</p>', [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Confirm Delete', type: 'primary', action: `await app. executeDelete(${id})` }
+            { label: 'Confirm Delete', type: 'primary', action: `await app.executeDelete(${id})` }
         ]
         );
     };
@@ -11381,7 +12160,7 @@ for (const p of allPackages) {
 
         UI.showModal('Add Tag', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Add Tag', type: 'primary', action: `await app. addTagToEntity(${entityId}, '${entityType}')` }
+            { label: 'Add Tag', type: 'primary', action: `await app.addTagToEntity(${entityId}, '${entityType}')` }
         ]);
     };
 
@@ -11413,9 +12192,9 @@ for (const p of allPackages) {
 
         UI.hideModal();
         if (entityType === 'prospect') {
-            await app. showProspectDetail(entityId);
+            await app.showProspectDetail(entityId);
         } else if (entityType === 'customer') {
-            await app. showCustomerDetail(entityId);
+            await app.showCustomerDetail(entityId);
         }
         UI.toast.success('Tag added');
     };
@@ -11428,7 +12207,7 @@ for (const p of allPackages) {
         });
         if (mappings.length > 0) {
             await DataStore.delete('entity_tags', mappings[0].id);
-            await app. showCustomerDetail(customerId);
+            await app.showCustomerDetail(customerId);
             UI.toast.success('Tag removed');
         }
     };
@@ -11441,62 +12220,58 @@ for (const p of allPackages) {
         });
         if (mappings.length > 0) {
             await DataStore.delete('entity_tags', mappings[0].id);
-            await app. showProspectDetail(prospectId);
+            await app.showProspectDetail(prospectId);
             UI.toast.success('Tag removed');
         }
     };
 
     // Solution Functions
-const openAddSolutionModal = async (prospectId) => {
-    const products = await DataStore.getAll('products');
-    const productOptions = products
-        .filter(p => p.is_active !== false)
-        .map(p => `<option value="${escapeHtml(p.name)}">${escapeHtml(p.name)}</option>`)
-        .join('');
+    const openAddSolutionModal = async (prospectId) => {
+        const content = `
+    <div class="form-group">
+                <label>Solution</label>
+                <select id="solution-name" class="form-control">
+                    <option value="PR4 Power Ring">PR4 Power Ring</option>
+                    <option value="PR3 Ring">PR3 Ring</option>
+                    <option value="PR5 Ring">PR5 Ring</option>
+                    <option value="Office Audit">Office Audit</option>
+                    <option value="Home Audit">Home Audit</option>
+                    <option value="Career Consultation">Career Consultation</option>
+                    <option value="Harmony Painting">Harmony Painting</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Proposed Date</label>
+                <input type="date" id="solution-date" class="form-control" value="${new Date().toISOString().split('T')[0]}">
+            </div>
+            <div class="form-group">
+                <label>Status</label>
+                <select id="solution-status" class="form-control">
+                    <option value="Proposed">Proposed</option>
+                    <option value="Approved">Approved</option>
+                    <option value="Rejected">Rejected</option>
+                    <option value="Purchased">Purchased</option>
+                </select>
+            </div>
+            <!-- Solution Proposed Dropdown -->
+            <div class="form-group">
+                <label>Solution Proposed</label>
+                <select name="activity-outcome" class="form-control">
+                    <option value="">-- Select Solution --</option>
+                    ${(DataStore.get('products') || []).map(p => `
+                        <option value="${await escapeHtml(p.name)}">${await escapeHtml(p.name)}</option>
+                    `).join('')}
+                    <option value="No Solution Needed">No Solution Needed</option>
+                    <option value="Follow-up Required">Follow-up Required</option>
+                </select>
+            </div>
+`;
 
-    const content = `
-        <div class="form-group">
-            <label>Solution</label>
-            <select id="solution-name" class="form-control">
-                <option value="PR4 Power Ring">PR4 Power Ring</option>
-                <option value="PR3 Ring">PR3 Ring</option>
-                <option value="PR5 Ring">PR5 Ring</option>
-                <option value="Office Audit">Office Audit</option>
-                <option value="Home Audit">Home Audit</option>
-                <option value="Career Consultation">Career Consultation</option>
-                <option value="Harmony Painting">Harmony Painting</option>
-            </select>
-        </div>
-        <div class="form-group">
-            <label>Proposed Date</label>
-            <input type="date" id="solution-date" class="form-control" value="${new Date().toISOString().split('T')[0]}">
-        </div>
-        <div class="form-group">
-            <label>Status</label>
-            <select id="solution-status" class="form-control">
-                <option value="Proposed">Proposed</option>
-                <option value="Approved">Approved</option>
-                <option value="Rejected">Rejected</option>
-                <option value="Purchased">Purchased</option>
-            </select>
-        </div>
-        <div class="form-group">
-            <label>Solution Proposed</label>
-            <select name="activity-outcome" class="form-control">
-                <option value="">-- Select Solution --</option>
-                ${productOptions}
-                <option value="No Solution Needed">No Solution Needed</option>
-                <option value="Follow-up Required">Follow-up Required</option>
-            </select>
-        </div>
-    `;
-
-    UI.showModal('Add Proposed Solution', content, [
-        { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-        { label: 'Save', type: 'primary', action: `await app. saveSolution(${prospectId})` }
-    ]);
-};
-
+        UI.showModal('Add Proposed Solution', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save', type: 'primary', action: `await app.saveSolution(${prospectId})` }
+        ]);
+    };
 
     const saveSolution = async (prospectId) => {
         const solution = document.getElementById('solution-name')?.value;
@@ -11518,13 +12293,13 @@ const openAddSolutionModal = async (prospectId) => {
         });
 
         UI.hideModal();
-        await app. showProspectDetail(prospectId);
+        await app.showProspectDetail(prospectId);
         UI.toast.success('Solution added');
     };
 
     // Name List Functions
     const confirmConvertToCustomer = async (prospectId, isManual = false) => {
-        const prospect = await DataStore.getById('prospects', prospectId);
+        const prospect = DataStore.getById('prospects', prospectId);
         if (!prospect) return;
 
         const amount = isManual
@@ -11568,7 +12343,7 @@ const openAddSolutionModal = async (prospectId) => {
 
         // Phase X: Create purchase record for conversion amount
         if (amount > 0) {
-           await  await DataStore.create('purchases', {
+           await  DataStore.create('purchases', {
                 customer_id: newCustomer.id,
                 date: customer.customer_since,
                 item: 'Conversion Package / First Deal',
@@ -11587,13 +12362,13 @@ const openAddSolutionModal = async (prospectId) => {
     };
 
     const extendProtection = async (prospectId) => {
-        const prospect = await DataStore.getById('prospects', prospectId);
+        const prospect = DataStore.getById('prospects', prospectId);
         if (!prospect) return;
         const currentDeadline = new Date(prospect.protection_deadline || Date.now());
         const newDeadline = new Date(currentDeadline.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
         await DataStore.update('prospects', prospectId, { protection_deadline: newDeadline });
         UI.toast.success('Protection extended by 30 days');
-        await app. showProspectDetail(prospectId);
+        await app.showProspectDetail(prospectId);
     };
 
     const transferProspect = (prospectId) => {
@@ -11606,7 +12381,7 @@ const openAddSolutionModal = async (prospectId) => {
 
 
     const convertToCustomer = async (prospectId) => {
-        const prospect = await DataStore.getById('prospects', prospectId);
+        const prospect = DataStore.getById('prospects', prospectId);
         if (!prospect) return;
 
         const totalPurchases = await DataStore.getAll('purchases')
@@ -11628,7 +12403,7 @@ const openAddSolutionModal = async (prospectId) => {
                  </div>`,
                 [
                     { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-                    { label: 'Convert Manually', type: 'primary', action: `await app. confirmConvertToCustomer(${prospectId}, true)` }
+                    { label: 'Convert Manually', type: 'primary', action: `await app.confirmConvertToCustomer(${prospectId}, true)` }
                 ]
             );
             return;
@@ -11650,7 +12425,7 @@ const openAddSolutionModal = async (prospectId) => {
 
         UI.showModal('Convert to Customer', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Convert', type: 'primary', action: `await app. confirmConvertToCustomer(${prospectId})` }
+            { label: 'Convert', type: 'primary', action: `await app.confirmConvertToCustomer(${prospectId})` }
         ]);
     };
 
@@ -11664,7 +12439,7 @@ const openAddSolutionModal = async (prospectId) => {
                         <p>Monitor agent performance, licenses, and assignments.</p>
                     </div>
                     <div class="header-actions">
-                        <button class="btn primary" onclick="app. openAddAgentModal()">
+                        <button class="btn primary" onclick="await app.openAddAgentModal()">
                             <i class="fas fa-plus"></i> Add Agent
                         </button>
                     </div>
@@ -11673,18 +12448,18 @@ const openAddSolutionModal = async (prospectId) => {
                 <div class="agent-filters">
                     <div class="search-group" style="flex:1; min-width:200px; display:flex; align-items:center; gap:8px; background:var(--gray-50); padding:8px 12px; border-radius:6px; border:1px solid var(--gray-200);">
                         <i class="fas fa-search" style="color:var(--gray-400);"></i>
-                        <input type="text" id="agent-search" placeholder="Search agents by name, code, or phone" onkeyup="app. filterAgents()" style="border:none; background:transparent; outline:none; width:100%;">
+                        <input type="text" id="agent-search" placeholder="Search agents by name, code, or phone" onkeyup="await app.filterAgents()" style="border:none; background:transparent; outline:none; width:100%;">
                     </div>
-                    <select id="filter-agent-team" onchange="app. filterAgents()" class="form-control" style="width:140px;">
+                    <select id="filter-agent-team" onchange="await app.filterAgents()" class="form-control" style="width:140px;">
                         <option value="">All Teams</option>
                         <option value="Team A">Team A</option>
                         <option value="Team B">Team B</option>
                     </select>
-                    <select id="filter-agent-role" onchange="app. filterAgents()" class="form-control" style="width:160px;">
+                    <select id="filter-agent-role" onchange="await app.filterAgents()" class="form-control" style="width:160px;">
                         <option value="">All Roles</option>
                         ${USER_ROLES.map(r => `<option value="${r}">${r}</option>`).join('')}
                     </select>
-                    <select id="filter-agent-status" onchange="app. filterAgents()" class="form-control" style="width:140px;">
+                    <select id="filter-agent-status" onchange="await app.filterAgents()" class="form-control" style="width:140px;">
                         <option value="">All Status</option>
                         <option value="active">Active</option>
                         <option value="probation">Probation</option>
@@ -11723,14 +12498,14 @@ const openAddSolutionModal = async (prospectId) => {
             return;
         }
 
-        const agents = (await DataStore.getAll('users')).filter(u => isAgent(u) || u.agent_code);
+        const agents = await DataStore.getAll('users').filter(u => isAgent(u) || u.agent_code);
         const searchQuery = document.getElementById('agent-search')?.value.toLowerCase() || '';
         const teamFilter = document.getElementById('filter-agent-team')?.value || '';
         const roleFilter = document.getElementById('filter-agent-role')?.value || '';
         const statusFilter = document.getElementById('filter-agent-status')?.value || '';
 
         let html = '';
-        for (const agent of agents) {
+        agents.forEach(agent => {
             if (searchQuery && !agent.full_name.toLowerCase().includes(searchQuery) && !agent.agent_code?.toLowerCase().includes(searchQuery)) return;
             if (teamFilter && agent.team !== teamFilter) return;
             if (roleFilter && agent.role !== roleFilter) return;
@@ -11762,7 +12537,7 @@ const openAddSolutionModal = async (prospectId) => {
                     </td>
                 </tr>
             `;
-        }
+        });
 
         tbody.innerHTML = '';
         tbody.insertAdjacentHTML('beforeend', html || '<tr><td colspan="7" style="text-align:center; padding:20px;">No agents found</td></tr>');
@@ -11771,7 +12546,7 @@ const openAddSolutionModal = async (prospectId) => {
     const filterAgents = async () => await renderAgentsTable();
 
     const showAgentDetail = async (agentId) => {
-        const agent = await DataStore.getById('users', agentId);
+        const agent = DataStore.getById('users', agentId);
         if (!agent) return;
 
         // --- NEW: define isAdminOrLead ---
@@ -11790,7 +12565,7 @@ const openAddSolutionModal = async (prospectId) => {
         viewport.innerHTML = `
     <div class="agent-profile-view">
                 <div class="header-actions" style="margin-bottom:16px;">
-                    <button class="btn secondary" onclick="app. navigateTo('agents')"><i class="fas fa-arrow-left"></i> Back to Agents</button>
+                    <button class="btn secondary" onclick="await app.navigateTo('agents')"><i class="fas fa-arrow-left"></i> Back to Agents</button>
                 </div>
 
                 <div class="profile-header" style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:24px;">
@@ -11838,7 +12613,7 @@ const openAddSolutionModal = async (prospectId) => {
                         </div>
                     </div>
                     <div class="license-actions">
-                        <button class="btn primary" onclick="app. renewLicense(${agent.id})" ${calculateDaysDiff(agent.license_expiry) > 60 ? 'disabled' : ''}>Renew Now</button>
+                        <button class="btn primary" onclick="await app.renewLicense(${agent.id})" ${calculateDaysDiff(agent.license_expiry) > 60 ? 'disabled' : ''}>Renew Now</button>
                         <button class="btn secondary" onclick="app.sendRenewalReminder(${agent.id})">Send Reminder</button>
                     </div>
                 </div>
@@ -11874,7 +12649,7 @@ const openAddSolutionModal = async (prospectId) => {
 
                     <div class="performance-card">
                         <h4><i class="fas fa-chart-line"></i> Follow-up Performance</h4>
-                        ${await renderFollowupStats(agent.id)}
+                        ${renderFollowupStats(agent.id)}
                     </div>
                 </div>
 
@@ -11885,7 +12660,7 @@ const openAddSolutionModal = async (prospectId) => {
                     </div>
                     <div class="performance-card">
                         <h4><i class="fas fa-bullseye"></i> Performance Targets (March)</h4>
-                        ${await renderPerformanceTargets(agent.id)}
+                        ${renderPerformanceTargets(agent.id)}
                     </div>
                 </div>
 
@@ -11917,31 +12692,18 @@ const openAddSolutionModal = async (prospectId) => {
                         <div class="add-note-section">
                             <textarea id="agent-note-text-${agent.id}" class="form-control" rows="3" placeholder="Add note about agent performance..."></textarea>
                             <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
-                                <button class="btn-icon" onclick="app. openVoiceRecorder('agent-note-text-${agent.id}', 'agent', ${agent.id})" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
-                                <button class="btn primary btn-sm" onclick="app. addAgentNote(${agent.id})">Add Note</button>
+                                <button class="btn-icon" onclick="await app.openVoiceRecorder('agent-note-text-${agent.id}', 'agent', ${agent.id})" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+                                <button class="btn primary btn-sm" onclick="await app.addAgentNote(${agent.id})">Add Note</button>
                             </div>
                         </div>
                         <div id="agent-notes-list-${agent.id}" style="margin-top:12px;">
-                            ${setTimeout(() => {
-                const agentNotes = await DataStore.query('notes', { agent_id: agent.id });
-                if (!agentNotes.length) return '<p style="color:var(--gray-400); font-size:13px;">No notes yet.</p>';
-                return agentNotes.map(n => `
-                                    <div class="notes-item" style="margin-top:8px;">
-                                        <div class="notes-header">
-                                            <span>${n.date} - ${n.author}${n.is_voice_note ? ' <i class="fas fa-microphone voice-note-icon" title="Voice note"></i>' : ''}</span>
-                                            <button class="btn-icon" onclick="app. deleteAgentNote(${agent.id}, ${n.id})"><i class="fas fa-trash"></i></button>
-                                        </div>
-                                        <div>"${n.text}"</div>
-                                    </div>
-                                `).join('');
-            })()}
+                            <p style="color:var(--gray-400); font-size:13px;">Loading notes...</p>
                         </div>
                     </div>
                 </div>
             </div>
-    `;
+        loadAgentNotes(agent.id);
     };
-
     const renderCustomerHistory = async (agentId) => {
         const customers = await getVisibleCustomers().filter(c => c.responsible_agent_id === agentId);
         if (customers.length === 0) return '<p>No converted customers yet.</p>';
@@ -11949,7 +12711,7 @@ const openAddSolutionModal = async (prospectId) => {
         return `
     <div class="assignments-list">
         ${customers.map(c => `
-                    <div class="assignment-item" onclick="app. showCustomerDetail(${c.id})">
+                    <div class="assignment-item" onclick="await app.showCustomerDetail(${c.id})">
                         <div>
                             <div class="assignment-prospect">${c.full_name}</div>
                             <div class="next-action">Customer Since: ${c.customer_since}</div>
@@ -11985,12 +12747,12 @@ const openAddSolutionModal = async (prospectId) => {
 
         UI.showModal('License Renewal', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Purchase Package', type: 'primary', action: `await app. executeRenewal(${agentId})` }
+            { label: 'Purchase Package', type: 'primary', action: `await app.executeRenewal(${agentId})` }
         ]);
     };
 
     const executeRenewal = async (agentId) => {
-        const agent = await DataStore.getById('users', agentId);
+        const agent = DataStore.getById('users', agentId);
         if (agent) {
             await DataStore.update('users', agentId, {
                 renewal_status: 'PENDING_REVIEW',
@@ -12011,7 +12773,7 @@ const openAddSolutionModal = async (prospectId) => {
         return Math.ceil(diff / (1000 * 60 * 60 * 24));
     };
 
-    const renderFollowupStats = async (agentId) => {
+    const renderFollowupStats = (agentId) => {
         const stats = await DataStore.query('agent_stats', { agent_id: agentId })[0];
         if (!stats) return '<p>No performance data available.</p>';
 
@@ -12052,9 +12814,9 @@ const openAddSolutionModal = async (prospectId) => {
         return `
     <div class="assignments-list">
         ${assignments.map(a => {
-            const p = await DataStore.getById('prospects', a.prospect_id);
+            const p = DataStore.getById('prospects', a.prospect_id);
             return `
-                    <div class="assignment-item" onclick="app. showProspectDetail(${a.prospect_id})">
+                    <div class="assignment-item" onclick="await app.showProspectDetail(${a.prospect_id})">
                         <div>
                             <div class="assignment-prospect">${p.full_name}</div>
                             <div class="next-action">Next: ${a.next_action}</div>
@@ -12069,7 +12831,7 @@ const openAddSolutionModal = async (prospectId) => {
     `;
     };
 
-    const renderPerformanceTargets = async (agentId) => {
+    const renderPerformanceTargets = (agentId) => {
         const target = await DataStore.query('agent_targets', { agent_id: agentId })[0];
         if (!target) return '<p>No targets set for this month.</p>';
 
@@ -12171,7 +12933,7 @@ const openAddSolutionModal = async (prospectId) => {
 
         UI.showModal('Add New Agent', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Create Agent Account', type: 'primary', action: 'await app. saveAgent()' }
+            { label: 'Create Agent Account', type: 'primary', action: 'await app.saveAgent()' }
         ]);
     };
 
@@ -12221,7 +12983,7 @@ const openAddSolutionModal = async (prospectId) => {
 `;
         UI.showModal('Update Agent Targets', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save Targets', type: 'primary', action: `await app. saveAgentTargets(${agentId})` }
+            { label: 'Save Targets', type: 'primary', action: `await app.saveAgentTargets(${agentId})` }
         ]);
     };
 
@@ -12258,7 +13020,7 @@ const openAddSolutionModal = async (prospectId) => {
     const assignProspectToAgent = async (prospectId, agentId) => {
         await DataStore.update('prospects', prospectId, { responsible_agent_id: agentId });
         UI.toast.success('Prospect reassigned');
-        await app. showProspectDetail(prospectId);
+        await app.showProspectDetail(prospectId);
     };
 
     const sendRenewalReminder = (agentId) => {
@@ -12327,7 +13089,7 @@ const openAddSolutionModal = async (prospectId) => {
         return { percentage, label, badges };
     };
 
-    const getProposedProduct = async (prospectId) => {
+    const getProposedProduct = (prospectId) => {
         const solutions = await DataStore.query('proposed_solutions', { prospect_id: prospectId });
         if (solutions.length > 0) {
             return {
@@ -12338,12 +13100,12 @@ const openAddSolutionModal = async (prospectId) => {
         return { name: 'General Interest', amount: 0 };
     };
 
-    const getNoteCount = async (prospectId) => {
+    const getNoteCount = (prospectId) => {
         return await DataStore.query('notes', { prospect_id: prospectId }).length +
             await DataStore.query('activities', { prospect_id: prospectId }).length;
     };
 
-    const getProspectOutcome = async (prospect) => {
+    const getProspectOutcome = (prospect) => {
         if (prospect.status === 'converted') return 'Won';
         if (prospect.status === 'lost') return 'Lost';
 
@@ -12361,7 +13123,7 @@ const openAddSolutionModal = async (prospectId) => {
         const userId = _currentUser?.id || 5;
         const allActivities = await getVisibleActivities();
         let prospects = await getVisibleProspects();
-        const agents = (await DataStore.getAll('users')).filter(u => isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'));
+        const agents = await DataStore.getAll('users').filter(u => isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'));
 
         // --- NEW: Apply Filters ---
         if (_pipelineAgentFilter !== 'all') {
@@ -12391,11 +13153,11 @@ const openAddSolutionModal = async (prospectId) => {
         </div>
         <div class="header-actions" style="display: flex; gap: 12px; align-items: center;">
             <div class="filter-group" style="display: flex; gap: 8px;">
-                <select class="form-control" style="width: 160px; height: 38px;" onchange="app. setPipelineFilter('agent', this.value)">
+                <select class="form-control" style="width: 160px; height: 38px;" onchange="await app.setPipelineFilter('agent', this.value)">
                     <option value="all">All Agents</option>
                     ${agents.map(a => `<option value="${a.id}" ${_pipelineAgentFilter == a.id ? 'selected' : ''}>${a.full_name}</option>`).join('')}
                 </select>
-                <select class="form-control" style="width: 140px; height: 38px;" onchange="app. async setPipelineFilter('status', this.value)">
+                <select class="form-control" style="width: 140px; height: 38px;" onchange="await app.setPipelineFilter('status', this.value)">
                     <option value="all">All Status</option>
                     <option value="prospect" ${_pipelineStatusFilter === 'prospect' ? 'selected' : ''}>Prospect</option>
                     <option value="active" ${_pipelineStatusFilter === 'active' ? 'selected' : ''}>Active</option>
@@ -12404,10 +13166,10 @@ const openAddSolutionModal = async (prospectId) => {
                     <option value="converted" ${_pipelineStatusFilter === 'converted' ? 'selected' : ''}>Converted</option>
                 </select>
             </div>
-            <button class="btn secondary" onclick="app. async refreshPipeline()">
+            <button class="btn secondary" onclick="await app.refreshPipeline()">
                 <i class="fas fa-sync-alt"></i> Refresh
             </button>
-            <button class="btn primary" onclick="app. openPipelineConfigModal()">
+            <button class="btn primary" onclick="await app.openPipelineConfigModal()">
                 <i class="fas fa-cog"></i> Configure Rules
             </button>
         </div>
@@ -12420,7 +13182,7 @@ const openAddSolutionModal = async (prospectId) => {
                 <h2 style="font-size: 18px; font-weight: 600; margin: 0;">🔥 MONTH FOCUS - My Priority List</h2>
                 <span style="background: #F3F4F6; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600;" id="focus-count">${focusList.length} prospects</span>
             </div>
-            <button class="btn-icon" onclick="app. saveManualOrder()" title="Save Order">
+            <button class="btn-icon" onclick="await app.saveManualOrder()" title="Save Order">
                 <i class="fas fa-save"></i>
             </button>
         </div>
@@ -12444,7 +13206,7 @@ const openAddSolutionModal = async (prospectId) => {
                     </tr>
                 </thead>
                 <tbody id="focus-list-body">
-                    ${(await Promise.all(focusList.map(async (rec, idx) => await renderFocusRow(rec, idx, allActivities)))).join('')}
+                    ${focusList.map((rec, idx) => renderFocusRow(rec, idx, allActivities)).join('')}
                     ${focusList.length === 0 ? '<tr><td colspan="7" style="padding: 32px; text-align: center; color: #9CA3AF;">No prospects in your focus list yet.</td></tr>' : ''}
                 </tbody>
             </table>
@@ -12475,7 +13237,7 @@ const openAddSolutionModal = async (prospectId) => {
                     </tr>
                 </thead>
                 <tbody id="pipeline-list-body">
-                    ${(await Promise.all(systemProspects.map(async p => await renderSystemRow(p, allActivities)))).join('')}
+                    ${systemProspects.map(p => renderSystemRow(p, allActivities)).join('')}
                     ${systemProspects.length === 0 ? '<tr><td colspan="7" style="padding: 32px; text-align: center; color: #9CA3AF;">No active prospects found.</td></tr>' : ''}
                 </tbody>
             </table>
@@ -12486,13 +13248,13 @@ const openAddSolutionModal = async (prospectId) => {
     };
 
     const renderFocusRow = async (rec, idx, allActivities) => {
-        const prospect = await DataStore.getById('prospects', rec.prospect_id);
+        const prospect = DataStore.getById('prospects', rec.prospect_id);
         if (!prospect) return '';
 
         const readiness = calculateReadiness(prospect, allActivities);
-        const productInfo = await getProposedProduct(prospect.id);
-        const noteCount = await getNoteCount(prospect.id);
-        const outcome = await getProspectOutcome(prospect);
+        const productInfo = getProposedProduct(prospect.id);
+        const noteCount = getNoteCount(prospect.id);
+        const outcome = getProspectOutcome(prospect);
 
         const readinessColor = readiness.label === 'HOT' ? '#DC2626' : (readiness.label === 'WARM' ? '#F59E0B' : '#6B7280');
 
@@ -12506,7 +13268,7 @@ const openAddSolutionModal = async (prospectId) => {
                     <div style="font-size: 12px; color: #6B7280; margin-top: 2px;">Created: ${prospect.created_at || 'N/A'}</div>
                 </td>
                 <td style="padding: 16px;">
-                    <div style="font-size: 13px;">${await escapeHtml(await DataStore.getById('users', prospect.responsible_agent_id)?.full_name || 'Unassigned')}</div>
+                    <div style="font-size: 13px;">${await escapeHtml(DataStore.getById('users', prospect.responsible_agent_id)?.full_name || 'Unassigned')}</div>
                 </td>
                 <td style="padding: 16px;">
                     <div style="font-weight: 500;">${await escapeHtml(productInfo.name)}</div>
@@ -12525,14 +13287,14 @@ const openAddSolutionModal = async (prospectId) => {
                 </td>
                 <td style="padding: 16px;">
                     <div style="display: flex; align-items: center; gap: 8px;">
-                        <button class="btn-icon" onclick="event.stopPropagation(); app. showProspectMenu(${prospect.id})" title="Options">
+                        <button class="btn-icon" onclick="event.stopPropagation(); await app.showProspectMenu(${prospect.id})" title="Options">
                             <i class="fas fa-ellipsis-v"></i>
                         </button>
-                        <button class="btn-icon" onclick="event.stopPropagation(); app. showComments(${prospect.id})" style="position: relative;" title="Comments">
+                        <button class="btn-icon" onclick="event.stopPropagation(); await app.showComments(${prospect.id})" style="position: relative;" title="Comments">
                             <i class="fas fa-comment"></i>
                             <span style="position: absolute; top: -5px; right: -5px; background: #EF4444; color: white; border-radius: 50%; width: 16px; height: 16px; font-size: 10px; display: flex; align-items: center; justify-content: center;">${noteCount}</span>
                         </button>
-                        <button class="btn-icon text-danger" onclick="event.stopPropagation(); app. removeFromFocusList(${rec.id})" title="Remove from Focus">
+                        <button class="btn-icon text-danger" onclick="event.stopPropagation(); await app.removeFromFocusList(${rec.id})" title="Remove from Focus">
                             <i class="fas fa-trash-alt"></i>
                         </button>
                     </div>
@@ -12543,34 +13305,26 @@ const openAddSolutionModal = async (prospectId) => {
 
     const renderSystemRow = async (prospect, allActivities) => {
         const readiness = calculateReadiness(prospect, allActivities);
-        const productInfo = await getProposedProduct(prospect.id);
-        const noteCount = await getNoteCount(prospect.id);
-        const outcome = await getProspectOutcome(prospect);
+        const productInfo = getProposedProduct(prospect.id);
+        const noteCount = getNoteCount(prospect.id);
+        const outcome = getProspectOutcome(prospect);
 
         const readinessColor = readiness.label === 'HOT' ? '#DC2626' : (readiness.label === 'WARM' ? '#F59E0B' : '#6B7280');
-
-        const prospectName = await escapeHtml(prospect.name);
-        const agentUser = await DataStore.getById('users', prospect.responsible_agent_id);
-        const agentName = await escapeHtml(agentUser?.full_name || 'Unassigned');
-        const productNameHtml = await escapeHtml(productInfo.name);
-        const tagsHtml = prospect.tags
-            ? (await Promise.all(prospect.tags.split(',').map(async t => `<span style="background: #FEF3C7; color: #92400E; padding: 2px 6px; border-radius: 4px; font-size: 10px;">${await escapeHtml(t.trim())}</span>`))).join('')
-            : '';
 
         return `
             <tr class="pipeline-row" data-prospect-id="${prospect.id}" style="border-bottom: 1px solid #F3F4F6;">
                 <td style="padding: 16px;">
-                    <div style="font-weight: 600; color: #111827;">${prospectName}</div>
+                    <div style="font-weight: 600; color: #111827;">${await escapeHtml(prospect.name)}</div>
                     <div style="display: flex; align-items: center; gap: 4px; margin-top: 4px;">
                         <span style="font-size: 12px; color: #F59E0B;">⭐ ${prospect.score || 0}</span>
-                        ${tagsHtml}
+                        ${prospect.tags ? prospect.tags.split(',').map(t => `<span style="background: #FEF3C7; color: #92400E; padding: 2px 6px; border-radius: 4px; font-size: 10px;">${await escapeHtml(t.trim())}</span>`).join('') : ''}
                     </div>
                 </td>
                 <td style="padding: 16px;">
-                    <div style="font-size: 13px;">${agentName}</div>
+                    <div style="font-size: 13px;">${await escapeHtml(DataStore.getById('users', prospect.responsible_agent_id)?.full_name || 'Unassigned')}</div>
                 </td>
                 <td style="padding: 16px;">
-                    <div style="font-weight: 500;">${productNameHtml}</div>
+                    <div style="font-weight: 500;">${await escapeHtml(productInfo.name)}</div>
                 </td>
                 <td style="padding: 16px; font-weight: 600; color: #059669;">RM ${productInfo.amount.toLocaleString()}</td>
                 <td style="padding: 16px;">
@@ -12598,13 +13352,13 @@ const openAddSolutionModal = async (prospectId) => {
                 </td>
                 <td style="padding: 16px;">
                     <div style="display: flex; align-items: center; gap: 8px;">
-                        <button class="btn secondary btn-sm" style="padding: 4px 12px; font-size: 12px;" onclick="app. addToFocusList(${prospect.id})">
+                        <button class="btn secondary btn-sm" style="padding: 4px 12px; font-size: 12px;" onclick="await app.addToFocusList(${prospect.id})">
                             <i class="fas fa-plus"></i> Add to Focus
                         </button>
-                        <button class="btn-icon" onclick="event.stopPropagation(); app. showProspectMenu(${prospect.id})" title="Options">
+                        <button class="btn-icon" onclick="event.stopPropagation(); await app.showProspectMenu(${prospect.id})" title="Options">
                             <i class="fas fa-ellipsis-v"></i>
                         </button>
-                        <button class="btn-icon" onclick="event.stopPropagation(); app. showComments(${prospect.id})" style="position: relative;" title="Comments">
+                        <button class="btn-icon" onclick="event.stopPropagation(); await app.showComments(${prospect.id})" style="position: relative;" title="Comments">
                             <i class="fas fa-comment"></i>
                             <span style="position: absolute; top: -5px; right: -5px; background: #3B82F6; color: white; border-radius: 50%; width: 16px; height: 16px; font-size: 10px; display: flex; align-items: center; justify-content: center;">${noteCount}</span>
                         </button>
@@ -12642,7 +13396,7 @@ const openAddSolutionModal = async (prospectId) => {
     };
 
     const removeFromFocusList = async (listItemId) => {
-        const item = await DataStore.getById('my_potential_list', listItemId);
+        const item = DataStore.getById('my_potential_list', listItemId);
         if (!item) return;
 
         const userId = item.user_id;
@@ -12652,9 +13406,9 @@ const openAddSolutionModal = async (prospectId) => {
         const remaining = await DataStore.query('my_potential_list', { user_id: userId })
             .sort((a, b) => a.priority_order - b.priority_order);
 
-        for (const [idx, rec] of remaining.entries()) {
+        remaining.forEach((rec, idx) => {
             await DataStore.update('my_potential_list', rec.id, { priority_order: idx + 1 });
-        }
+        });
 
         UI.toast.info('Removed from Focus List');
         await refreshPipeline();
@@ -12722,7 +13476,7 @@ const openAddSolutionModal = async (prospectId) => {
 
         UI.showModal('Configure Pipeline Rules', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save Configuration', type: 'primary', action: 'await app. savePipelineConfig()' }
+            { label: 'Save Configuration', type: 'primary', action: 'await app.savePipelineConfig()' }
         ]);
     };
 
@@ -12760,14 +13514,14 @@ const openAddSolutionModal = async (prospectId) => {
 
     const showProspectMenu = async (prospectId) => {
         if (typeof app.showProspectDetail === 'function') {
-            await app. showProspectDetail(prospectId);
+            await app.showProspectDetail(prospectId);
         } else {
             UI.toast.info(`Viewing profile for prospect ID: ${prospectId} `);
         }
     };
 
     const showComments = async (prospectId) => {
-        const prospect = await DataStore.getById('prospects', prospectId);
+        const prospect = DataStore.getById('prospects', prospectId);
         const notes = await DataStore.query('notes', { prospect_id: prospectId })
             .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
         const activities = await DataStore.query('activities', { prospect_id: prospectId })
@@ -12778,7 +13532,7 @@ const openAddSolutionModal = async (prospectId) => {
                 <div style="background: #F9FAFB; padding: 12px; border-radius: 8px; margin-bottom: 16px;">
                     <textarea id="new-note-content" class="form-control" placeholder="Add a new comment/note..." style="min-height: 80px;"></textarea>
                     <div style="display: flex; justify-content: flex-end; margin-top: 8px;">
-                        <button class="btn primary btn-sm" onclick="app. addPipelineNote(${prospectId})">Add Note</button>
+                        <button class="btn primary btn-sm" onclick="await app.addPipelineNote(${prospectId})">Add Note</button>
                     </div>
                 </div>
 
@@ -12857,7 +13611,7 @@ const openAddSolutionModal = async (prospectId) => {
     const handleStageDrop = async (e, stageId) => {
         e.preventDefault();
         const prospectId = e.dataTransfer.getData('text/plain');
-        const prospect = await DataStore.getById('prospects', parseInt(prospectId));
+        const prospect = DataStore.getById('prospects', parseInt(prospectId));
 
         if (!prospect) return;
 
@@ -12878,7 +13632,7 @@ const openAddSolutionModal = async (prospectId) => {
                  </div>`,
                 [
                     { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-                    { label: 'Close Won', type: 'primary', action: `await app. closeDealWon(${prospect.id})` }
+                    { label: 'Close Won', type: 'primary', action: `await app.closeDealWon(${prospect.id})` }
                 ]
             );
         }
@@ -12903,7 +13657,7 @@ const openAddSolutionModal = async (prospectId) => {
                  </div>`,
                 [
                     { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-                    { label: 'Close Lost', type: 'primary', action: `await app. closeDealLost(${prospect.id})` }
+                    { label: 'Close Lost', type: 'primary', action: `await app.closeDealLost(${prospect.id})` }
                 ]
             );
         }
@@ -12927,7 +13681,7 @@ const openAddSolutionModal = async (prospectId) => {
     };
 
     const closeDealWon = async (prospectId) => {
-        const prospect = await DataStore.getById('prospects', prospectId);
+        const prospect = DataStore.getById('prospects', prospectId);
         const amount = parseFloat(document.getElementById('deal-amount')?.value || prospect.deal_value || 5000);
         const closeDate = document.getElementById('close-date')?.value || new Date().toISOString().split('T')[0];
 
@@ -12980,7 +13734,7 @@ const openAddSolutionModal = async (prospectId) => {
     };
 
     const closeDealLost = async (prospectId) => {
-        const prospect = await DataStore.getById('prospects', prospectId);
+        const prospect = DataStore.getById('prospects', prospectId);
         const reason = document.getElementById('lost-reason')?.value || 'Not specified';
         const notes = document.getElementById('lost-notes')?.value || '';
 
@@ -13033,7 +13787,7 @@ const openAddSolutionModal = async (prospectId) => {
         const userId = _currentUser?.id || 5;
         const potentialRecords = await DataStore.query('my_potential_list', { user_id: userId })
             .filter(rec => {
-                const p = await DataStore.getById('prospects', rec.prospect_id);
+                const p = DataStore.getById('prospects', rec.prospect_id);
                 return p && p.status !== 'converted' && p.status !== 'lost';
             })
             .sort((a, b) => a.priority_order - b.priority_order);
@@ -13076,9 +13830,9 @@ const openAddSolutionModal = async (prospectId) => {
         list.splice(targetIndex, 0, removed);
 
         // Update priority_order and PERSIST
-        for (const [idx, item] of list.entries()) {
+        list.forEach((item, idx) => {
             await DataStore.update('my_potential_list', item.id, { priority_order: idx + 1 });
-        }
+        });
 
         UI.toast.info('Order rearranged.');
         await refreshPipeline();
@@ -13090,7 +13844,7 @@ const openAddSolutionModal = async (prospectId) => {
         await refreshPipeline();
     };
 
-    const renderRecentOverrides = async () => {
+    const renderRecentOverrides = () => {
         const container = document.getElementById('recent-overrides-table');
         if (!container) return;
 
@@ -13116,7 +13870,7 @@ const openAddSolutionModal = async (prospectId) => {
                 </thead>
                 <tbody>
                     ${overrides.map(o => {
-            const prospect = await DataStore.getById('prospects', o.prospect_id);
+            const prospect = DataStore.getById('prospects', o.prospect_id);
             const date = new Date(o.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
             return `
                             <tr>
@@ -13169,7 +13923,7 @@ const openAddSolutionModal = async (prospectId) => {
 
         UI.showModal('Boost Opportunity', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Confirm Boost', type: 'primary', action: 'await app. submitBoost()' }
+            { label: 'Confirm Boost', type: 'primary', action: 'await app.submitBoost()' }
         ]);
     };
 
@@ -13192,12 +13946,12 @@ const openAddSolutionModal = async (prospectId) => {
 
         // Move to Rank 1 (priority_order = 1)
         // Shift others down
-        for (const item of manualList) {
+        manualList.forEach(item => {
             if (item.priority_order < oldRank) {
                 item.priority_order += 1;
                 await DataStore.update('my_potential_list', item.id, { priority_order: item.priority_order });
             }
-        }
+        });
         await DataStore.update('my_potential_list', currentItem.id, { priority_order: 1 });
 
         // Log override
@@ -13216,7 +13970,7 @@ const openAddSolutionModal = async (prospectId) => {
 
         UI.hideModal();
         await renderManualPriority();
-        await renderRecentOverrides();
+        renderRecentOverrides();
         UI.toast.success('Opportunity boosted to priority #1.');
     };
 
@@ -13257,18 +14011,17 @@ const openAddSolutionModal = async (prospectId) => {
             { label: 'Close', type: 'secondary', action: 'UI.hideModal()' }
         ]);
 
-        await loadOverrideHistory();
+        loadOverrideHistory();
 
-        // Add event listeners for async filters
-        setTimeout(() => {
+        // Add event listeners for filters
+        (() => {
             ['hist-type', 'hist-status'].forEach(id => {
-                const el = document.getElementById(id);
-                if (el) el.addEventListener('change', async () => await loadOverrideHistory());
+                document.getElementById(id).addEventListener('change', () => loadOverrideHistory());
             });
         }, 100);
     };
 
-    const loadOverrideHistory = async () => {
+    const loadOverrideHistory = () => {
         const type = document.getElementById('hist-type').value;
         const status = document.getElementById('hist-status').value;
 
@@ -13294,7 +14047,7 @@ const openAddSolutionModal = async (prospectId) => {
                 </thead>
                 <tbody>
                     ${overrides.map(o => {
-            const prospect = await DataStore.getById('prospects', o.prospect_id);
+            const prospect = DataStore.getById('prospects', o.prospect_id);
             const date = new Date(o.created_at).toLocaleDateString();
             return `
                             <tr>
@@ -13303,7 +14056,7 @@ const openAddSolutionModal = async (prospectId) => {
                                 <td><span class="type-badge type-${o.override_type}">${o.override_type.toUpperCase()}</span></td>
                                 <td>#${o.system_rank} → #${o.new_priority}</td>
                                 <td><span class="status-badge status-${o.status}">${o.status.toUpperCase()}</span></td>
-                                <td><button class="btn btn-sm secondary" onclick="app. viewJustification(${o.id})">View</button></td>
+                                <td><button class="btn btn-sm secondary" onclick="app.viewJustification(${o.id})">View</button></td>
                             </tr>
                         `;
         }).join('')}
@@ -13312,11 +14065,11 @@ const openAddSolutionModal = async (prospectId) => {
         `;
     };
 
-    const viewJustification = async (overrideId) => {
-        const override = await DataStore.getById('manual_overrides', overrideId);
+    const viewJustification = (overrideId) => {
+        const override = DataStore.getById('manual_overrides', overrideId);
         if (!override) return;
 
-        const prospect = await DataStore.getById('prospects', override.prospect_id);
+        const prospect = DataStore.getById('prospects', override.prospect_id);
 
         const content = `
             <div style="padding: 10px;">
@@ -13368,11 +14121,11 @@ const openAddSolutionModal = async (prospectId) => {
                     </div>
                     <div class="header-actions">
                         ${isSystemAdmin(_currentUser) || _currentUser?.role?.includes('Level 7') ?
-                `<button class="btn primary" onclick="app. async openTargetManagementModal()">
+                `<button class="btn primary" onclick="await app.openTargetManagementModal()">
                                 <i class="fas fa-bullseye"></i> Set Targets
                              </button>` : ''
             }
-                        <button class="btn secondary" onclick="app. async exportKPIReport('csv')">
+                        <button class="btn secondary" onclick="await app.exportKPIReport('csv')">
                             <i class="fas fa-file-csv"></i> Export CSV
                         </button>
                         <button class="btn secondary" onclick="app.printDashboard()">
@@ -13383,21 +14136,21 @@ const openAddSolutionModal = async (prospectId) => {
 
                 <div class="time-filter-bar">
                     <div class="time-toggle-group">
-                        <button class="time-toggle-btn ${_currentTimeFilter === 'weekly' ? 'active' : ''}" onclick="app. async setTimeFilter('weekly')">Weekly</button>
-                        <button class="time-toggle-btn ${_currentTimeFilter === 'monthly' ? 'active' : ''}" onclick="app. async setTimeFilter('monthly')">Monthly</button>
-                        <button class="time-toggle-btn ${_currentTimeFilter === 'quarterly' ? 'active' : ''}" onclick="app. async setTimeFilter('quarterly')">Quarterly</button>
-                        <button class="time-toggle-btn ${_currentTimeFilter === 'yearly' ? 'active' : ''}" onclick="app. setTimeFilter('yearly')">Yearly</button>
+                        <button class="time-toggle-btn ${_currentTimeFilter === 'weekly' ? 'active' : ''}" onclick="await app.setTimeFilter('weekly')">Weekly</button>
+                        <button class="time-toggle-btn ${_currentTimeFilter === 'monthly' ? 'active' : ''}" onclick="await app.setTimeFilter('monthly')">Monthly</button>
+                        <button class="time-toggle-btn ${_currentTimeFilter === 'quarterly' ? 'active' : ''}" onclick="await app.setTimeFilter('quarterly')">Quarterly</button>
+                        <button class="time-toggle-btn ${_currentTimeFilter === 'yearly' ? 'active' : ''}" onclick="await app.setTimeFilter('yearly')">Yearly</button>
                     </div>
                     <div class="role-filter-group" style="margin-left: 20px;">
-                        <select id="kpi-role-filter" class="form-control" onchange="app. setRoleFilter(this.value)" style="width: 200px;">
+                        <select id="kpi-role-filter" class="form-control" onchange="await app.setRoleFilter(this.value)" style="width: 200px;">
                             <option value="All">All Roles</option>
                             ${USER_ROLES.map(r => `<option value="${r}" ${_currentRoleFilter === r ? 'selected' : ''}>${r}</option>`).join('')}
                         </select>
                     </div>
                     <div class="date-range-picker" style="margin-left: auto;">
-                        <input type="date" id="kpi-date-from" value="${_customDateFrom}" onchange="app. setCustomDateRange(this.value, document.getElementById('kpi-date-to').value)">
+                        <input type="date" id="kpi-date-from" value="${_customDateFrom}" onchange="await app.setCustomDateRange(this.value, document.getElementById('kpi-date-to').value)">
                         <span>to</span>
-                        <input type="date" id="kpi-date-to" value="${_customDateTo}" onchange="app. setCustomDateRange(document.getElementById('kpi-date-from').value, this.value)">
+                        <input type="date" id="kpi-date-to" value="${_customDateTo}" onchange="await app.setCustomDateRange(document.getElementById('kpi-date-from').value, this.value)">
                     </div>
                 </div>
 
@@ -13518,7 +14271,7 @@ const openAddSolutionModal = async (prospectId) => {
     const calculateKPIs = async (from, to) => {
         return {
             cpsCount: await getCPSCount(from, to),
-            totalSales: await getTotalSales(from, to),
+            totalSales: getTotalSales(from, to),
             popCaseCount: await getPOPCaseCount(from, to),
             popSales: await getPOPSales(from, to),
             eppCaseCount: await getEPPCaseCount(from, to),
@@ -13532,17 +14285,17 @@ const openAddSolutionModal = async (prospectId) => {
     };
 
     const getConversionRate = async (from, to) => {
-        const totalProspects = (await DataStore.getAll('prospects')).filter(p => p.created_at >= from && p.created_at <= to).length;
-        const convertedCount = (await DataStore.getAll('customers')).filter(c => c.customer_since >= from && c.customer_since <= to).length;
+        const totalProspects = await DataStore.getAll('prospects').filter(p => p.created_at >= from && p.created_at <= to).length;
+        const convertedCount = await DataStore.getAll('customers').filter(c => c.customer_since >= from && c.customer_since <= to).length;
         if (totalProspects === 0) return 0;
         return Math.round((convertedCount / totalProspects) * 100);
     };
 
     const getCPSCount = async (from, to) => {
-        return (await DataStore.getAll('activities')).filter(a => {
+        return await DataStore.getAll('activities').filter(a => {
             if (a.activity_type !== 'CPS' || a.activity_date < from || a.activity_date > to) return false;
             if (_currentRoleFilter !== 'All') {
-                const agent = await DataStore.getById('users', a.agent_id);
+                const agent = DataStore.getById('users', a.agent_id);
                 if (!agent || agent.role !== _currentRoleFilter) return false;
             }
             return true;
@@ -13551,10 +14304,10 @@ const openAddSolutionModal = async (prospectId) => {
 
     const getTotalSales = async (from, to) => {
         // Sum async purchases (excluding agent packages)
-        return (await DataStore.getAll('purchases')).filter(p => {
+        return await DataStore.getAll('purchases').filter(p => {
             if (p.date < from || p.date > to || p.is_agent_package) return false;
             if (_currentRoleFilter !== 'All') {
-                const agent = await DataStore.getById('users', p.agent_id);
+                const agent = DataStore.getById('users', p.agent_id);
                 if (!agent || agent.role !== _currentRoleFilter) return false;
             }
             return true;
@@ -13562,10 +14315,10 @@ const openAddSolutionModal = async (prospectId) => {
     };
 
     const getPOPCaseCount = async (from, to) => {
-        return (await DataStore.getAll('purchases')).filter(p => {
+        return await DataStore.getAll('purchases').filter(p => {
             if (p.payment_method !== 'POP' || p.date < from || p.date > to) return false;
             if (_currentRoleFilter !== 'All') {
-                const agent = await DataStore.getById('users', p.agent_id);
+                const agent = DataStore.getById('users', p.agent_id);
                 if (!agent || agent.role !== _currentRoleFilter) return false;
             }
             return true;
@@ -13573,10 +14326,10 @@ const openAddSolutionModal = async (prospectId) => {
     };
 
     const getPOPSales = async (from, to) => {
-        return (await DataStore.getAll('purchases')).filter(p => {
+        return await DataStore.getAll('purchases').filter(p => {
             if (p.payment_method !== 'POP' || p.date < from || p.date > to) return false;
             if (_currentRoleFilter !== 'All') {
-                const agent = await DataStore.getById('users', p.agent_id);
+                const agent = DataStore.getById('users', p.agent_id);
                 if (!agent || agent.role !== _currentRoleFilter) return false;
             }
             return true;
@@ -13584,10 +14337,10 @@ const openAddSolutionModal = async (prospectId) => {
     };
 
     const getEPPCaseCount = async (from, to) => {
-        return (await DataStore.getAll('purchases')).filter(p => {
+        return await DataStore.getAll('purchases').filter(p => {
             if (p.payment_method !== 'EPP' || p.date < from || p.date > to) return false;
             if (_currentRoleFilter !== 'All') {
-                const agent = await DataStore.getById('users', p.agent_id);
+                const agent = DataStore.getById('users', p.agent_id);
                 if (!agent || agent.role !== _currentRoleFilter) return false;
             }
             return true;
@@ -13595,10 +14348,10 @@ const openAddSolutionModal = async (prospectId) => {
     };
 
     const getEPPSales = async (from, to) => {
-        return (await DataStore.getAll('purchases')).filter(p => {
+        return await DataStore.getAll('purchases').filter(p => {
             if (p.payment_method !== 'EPP' || p.date < from || p.date > to) return false;
             if (_currentRoleFilter !== 'All') {
-                const agent = await DataStore.getById('users', p.agent_id);
+                const agent = DataStore.getById('users', p.agent_id);
                 if (!agent || agent.role !== _currentRoleFilter) return false;
             }
             return true;
@@ -13606,7 +14359,7 @@ const openAddSolutionModal = async (prospectId) => {
     };
 
     const getNewAgents = async (from, to) => {
-        return (await DataStore.getAll('users')).filter(u => {
+        return await DataStore.getAll('users').filter(u => {
             if (u.join_date < from || u.join_date > to) return false;
             if (_currentRoleFilter !== 'All') {
                 if (u.role !== _currentRoleFilter) return false;
@@ -13619,17 +14372,17 @@ const openAddSolutionModal = async (prospectId) => {
     };
 
     const getNewCustomers = async (from, to) => {
-        return await  (await DataStore.getAll('customers')).filter(c =>
+        return await  DataStore.getAll('customers').filter(c =>
             c.customer_since >= from && c.customer_since <= to
         ).length;
     };
 
     const getTotalMeetings = async (from, to) => {
         // Sum attendees across all meetings (activities) in date range
-        return (await DataStore.getAll('activities')).filter(a => {
+        return await DataStore.getAll('activities').filter(a => {
             if (a.activity_date < from || a.activity_date > to) return false;
             if (_currentRoleFilter !== 'All') {
-                const agent = await DataStore.getById('users', a.agent_id);
+                const agent = DataStore.getById('users', a.agent_id);
                 if (!agent || agent.role !== _currentRoleFilter) return false;
             }
             return true;
@@ -13638,10 +14391,10 @@ const openAddSolutionModal = async (prospectId) => {
 
     const getActivityHeadcount = async (from, to) => {
         // Sum attendees from registrations
-        return (await DataStore.getAll('event_registrations')).filter(r => {
+        return await DataStore.getAll('event_registrations').filter(r => {
             if (!r.checked_in || r.checked_in_at < from || r.checked_in_at > to) return false;
             if (_currentRoleFilter !== 'All') {
-                const agent = await DataStore.getById('users', r.agent_id); // Assuming agent_id exists in registration
+                const agent = DataStore.getById('users', r.agent_id); // Assuming agent_id exists in registration
                 if (!agent || agent.role !== _currentRoleFilter) return false;
             }
             return true;
@@ -13698,7 +14451,7 @@ const openAddSolutionModal = async (prospectId) => {
         if (!container) return;
 
         const year = 2026;
-        const qTargets =await  (await DataStore.getAll('quarterly_targets')).filter(t => t.year === year);
+        const qTargets =await  DataStore.getAll('quarterly_targets').filter(t => t.year === year);
 
         container.innerHTML = `
             <div class="targets-card">
@@ -13720,7 +14473,7 @@ const openAddSolutionModal = async (prospectId) => {
             // Sum actual sales for this quarter
             const qStart = `${year}-${((q - 1) * 3 + 1).toString().padStart(2, '0')}-01`;
             const qEnd = `${year}-${(q * 3).toString().padStart(2, '0')}-${new Date(year, q * 3, 0).getDate()}`;
-            const actualSales =await  (await DataStore.getAll('purchases')).filter(p =>
+            const actualSales =await  DataStore.getAll('purchases').filter(p =>
                 p.date >= qStart && p.date <= qEnd && !p.is_agent_package
             ).reduce((sum, p) => sum + (p.amount || 0), 0);
 
@@ -13757,7 +14510,7 @@ const openAddSolutionModal = async (prospectId) => {
         const kpis = await calculateKPIs(ranges.current.from, ranges.current.to);
         const year = new Date().getFullYear();
         const quarter = Math.floor(new Date().getMonth() / 3) + 1;
-        const qTarget = (await DataStore.getAll('quarterly_targets')).find(t => t.year === year && t.quarter === quarter) || {};
+        const qTarget = await DataStore.getAll('quarterly_targets').find(t => t.year === year && t.quarter === quarter) || {};
 
         const metrics = [
             { name: 'CPS Count', target: qTarget.cps_count_target || 0, actual: kpis.cpsCount },
@@ -13810,18 +14563,18 @@ const openAddSolutionModal = async (prospectId) => {
         if (!container) return;
 
         // Get all agents
-        let agentsList = (await DataStore.getAll('users')).filter(isAgent);
+        let agentsList = await DataStore.getAll('users').filter(isAgent);
         if (_currentRoleFilter !== 'All') {
             agentsList = agentsList.filter(u => u.role === _currentRoleFilter);
         }
         const ranges = getDateRanges(_currentTimeFilter);
 
         const agentStats = agentsList.map(agent => {
-            const currentSales =await  (await DataStore.getAll('purchases')).filter(p =>
+            const currentSales =await  DataStore.getAll('purchases').filter(p =>
                 p.agent_id === agent.id && p.date >= ranges.current.from && p.date <= ranges.current.to
             ).reduce((sum, p) => sum + (p.amount || 0), 0);
 
-            const prevSales = (await DataStore.getAll('purchases')).filter(p =>
+            const prevSales = await DataStore.getAll('purchases').filter(p =>
                 p.agent_id === agent.id && p.date >= ranges.previous.from && p.date <= ranges.previous.to
             ).reduce((sum, p) => sum + (p.amount || 0), 0);
 
@@ -13884,15 +14637,15 @@ const openAddSolutionModal = async (prospectId) => {
         let targetData = [];
 
         const year = new Date().getFullYear();
-        const yTarget = (await DataStore.getAll('yearly_targets')).find(t => t.target_year === year) || {};
-        const qTargets = (await DataStore.getAll('quarterly_targets')).filter(t => t.year === year);
+        const yTarget = await DataStore.getAll('yearly_targets').find(t => t.target_year === year) || {};
+        const qTargets = await DataStore.getAll('quarterly_targets').filter(t => t.year === year);
 
         if (filter === 'weekly') {
             labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
             const dayMap = { 0: 6, 1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5 }; // Sunday is 0 in JS
             actualData = [0, 0, 0, 0, 0, 0, 0];
 
-            const currentWeekPurchases = (await DataStore.getAll('purchases')).filter(p =>
+            const currentWeekPurchases = await DataStore.getAll('purchases').filter(p =>
                 p.date >= range.from && p.date <= range.to && !p.is_agent_package
             );
 
@@ -13908,7 +14661,7 @@ const openAddSolutionModal = async (prospectId) => {
             actualData = Array(12).fill(0);
             targetData = Array(12).fill(0);
 
-            const yearPurchases = (await DataStore.getAll('purchases')).filter(p =>
+            const yearPurchases = await DataStore.getAll('purchases').filter(p =>
                 p.date.startsWith(year.toString()) && !p.is_agent_package
             );
 
@@ -13930,7 +14683,7 @@ const openAddSolutionModal = async (prospectId) => {
             actualData = Array(4).fill(0);
             targetData = [0, 0, 0, 0];
 
-            const yearPurchases = (await DataStore.getAll('purchases')).filter(p =>
+            const yearPurchases = await DataStore.getAll('purchases').filter(p =>
                 p.date.startsWith(year.toString()) && !p.is_agent_package
             );
 
@@ -13957,7 +14710,7 @@ const openAddSolutionModal = async (prospectId) => {
                 const dStr = d.toISOString().split('T')[0];
                 labels.push(dStr.split('-').slice(1).join('/'));
 
-                actualData[i] = (await DataStore.getAll('purchases')).filter(p =>
+                actualData[i] = await DataStore.getAll('purchases').filter(p =>
                     p.date === dStr && !p.is_agent_package
                 ).reduce((sum, p) => sum + (p.amount || 0), 0);
             }
@@ -14018,7 +14771,7 @@ const openAddSolutionModal = async (prospectId) => {
 
     const openTargetManagementModal = async () => {
         const year = new Date().getFullYear();
-        const existing = (await DataStore.getAll('yearly_targets')).find(t => t.target_year === year) || {};
+        const existing = await DataStore.getAll('yearly_targets').find(t => t.target_year === year) || {};
 
         const content = `
             <div class="target-form">
@@ -14064,7 +14817,7 @@ const openAddSolutionModal = async (prospectId) => {
 
         UI.showModal('Target Management', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save Targets', type: 'primary', action: 'await app. saveYearlyTargets()' }
+            { label: 'Save Targets', type: 'primary', action: 'await app.saveYearlyTargets()' }
         ]);
     };
 
@@ -14081,7 +14834,7 @@ const openAddSolutionModal = async (prospectId) => {
             seasonal_weighting: { q1: 0.9, q2: 1.0, q3: 1.1, q4: 1.2 }
         };
 
-        const existing = (await DataStore.getAll('yearly_targets')).find(t => t.target_year === data.target_year);
+        const existing = await DataStore.getAll('yearly_targets').find(t => t.target_year === data.target_year);
         if (existing) {
             await DataStore.update('yearly_targets', existing.id, data);
         } else {
@@ -14116,7 +14869,7 @@ const openAddSolutionModal = async (prospectId) => {
                 seasonal_factor: factors[q]
             };
 
-            const existing = (await DataStore.getAll('quarterly_targets')).find(t => t.year === qTarget.year && t.quarter === q);
+            const existing = await DataStore.getAll('quarterly_targets').find(t => t.year === qTarget.year && t.quarter === q);
             if (existing) {
                 await DataStore.update('quarterly_targets', existing.id, qTarget);
             } else {
@@ -14183,7 +14936,7 @@ const openAddSolutionModal = async (prospectId) => {
                         <p class="text-muted">Manage master data for products, events, and monthly promotions.</p>
                     </div>
                     <div class="header-actions">
-                        <button class="btn primary" onclick="app. openMarketingListAddModal()">
+                        <button class="btn primary" onclick="await app.openMarketingListAddModal()">
                             <i class="fas fa-plus"></i> New ${_currentMarketingListTab.charAt(0).toUpperCase() + _currentMarketingListTab.slice(1, -1)}
                         </button>
                     </div>
@@ -14191,17 +14944,17 @@ const openAddSolutionModal = async (prospectId) => {
 
                 <div class="tabs-container" style="margin-bottom: 20px; border-bottom: 1px solid var(--gray-200); display: flex; gap: 20px;">
                     <div class="tab-item ${_currentMarketingListTab === 'products' ? 'active' : ''}" 
-                         onclick="app. switchMarketingListTab('products')" 
+                         onclick="await app.switchMarketingListTab('products')" 
                          style="padding: 10px 16px; cursor: pointer; border-bottom: 2px solid ${_currentMarketingListTab === 'products' ? 'var(--primary-600)' : 'transparent'}; color: ${_currentMarketingListTab === 'products' ? 'var(--primary-600)' : 'var(--gray-600)'}; font-weight: 500;">
                         Products
                     </div>
                     <div class="tab-item ${_currentMarketingListTab === 'events' ? 'active' : ''}" 
-                         onclick="app. switchMarketingListTab('events')" 
+                         onclick="await app.switchMarketingListTab('events')" 
                          style="padding: 10px 16px; cursor: pointer; border-bottom: 2px solid ${_currentMarketingListTab === 'events' ? 'var(--primary-600)' : 'transparent'}; color: ${_currentMarketingListTab === 'events' ? 'var(--primary-600)' : 'var(--gray-600)'}; font-weight: 500;">
                         Events
                     </div>
                     <div class="tab-item ${_currentMarketingListTab === 'promotions' ? 'active' : ''}" 
-                         onclick="app. switchMarketingListTab('promotions')" 
+                         onclick="await app.switchMarketingListTab('promotions')" 
                          style="padding: 10px 16px; cursor: pointer; border-bottom: 2px solid ${_currentMarketingListTab === 'promotions' ? 'var(--primary-600)' : 'transparent'}; color: ${_currentMarketingListTab === 'promotions' ? 'var(--primary-600)' : 'var(--gray-600)'}; font-weight: 500;">
                         Promotions
                     </div>
@@ -14247,8 +15000,8 @@ const openAddSolutionModal = async (prospectId) => {
                                     </span>
                                 </td>
                                 <td>
-                                    <button class="btn-icon" onclick="app. openMarketingListEditModal('${item.id}')" title="Edit"><i class="fas fa-pencil-alt"></i></button>
-                                    <button class="btn-icon text-danger" onclick="app. deleteMarketingListItem('${item.id}')" title="Delete"><i class="fas fa-trash-alt"></i></button>
+                                    <button class="btn-icon" onclick="await app.openMarketingListEditModal('${item.id}')" title="Edit"><i class="fas fa-pencil-alt"></i></button>
+                                    <button class="btn-icon text-danger" onclick="await app.deleteMarketingListItem('${item.id}')" title="Delete"><i class="fas fa-trash-alt"></i></button>
                                 </td>
                             </tr>
                         `).join('')}
@@ -14281,8 +15034,8 @@ const openAddSolutionModal = async (prospectId) => {
                                     </span>
                                 </td>
                                 <td>
-                                    <button class="btn-icon" onclick="app. openMarketingListEditModal('${item.id}')" title="Edit"><i class="fas fa-pencil-alt"></i></button>
-                                    <button class="btn-icon text-danger" onclick="app. deleteMarketingListItem('${item.id}')" title="Delete"><i class="fas fa-trash-alt"></i></button>
+                                    <button class="btn-icon" onclick="await app.openMarketingListEditModal('${item.id}')" title="Edit"><i class="fas fa-pencil-alt"></i></button>
+                                    <button class="btn-icon text-danger" onclick="await app.deleteMarketingListItem('${item.id}')" title="Delete"><i class="fas fa-trash-alt"></i></button>
                                 </td>
                             </tr>
                         `).join('')}
@@ -14313,8 +15066,8 @@ const openAddSolutionModal = async (prospectId) => {
                                     </span>
                                 </td>
                                 <td>
-                                    <button class="btn-icon" onclick="app. openMarketingListEditModal('${item.id}')" title="Edit"><i class="fas fa-pencil-alt"></i></button>
-                                    <button class="btn-icon text-danger" onclick="app. deleteMarketingListItem('${item.id}')" title="Delete"><i class="fas fa-trash-alt"></i></button>
+                                    <button class="btn-icon" onclick="await app.openMarketingListEditModal('${item.id}')" title="Edit"><i class="fas fa-pencil-alt"></i></button>
+                                    <button class="btn-icon text-danger" onclick="await app.deleteMarketingListItem('${item.id}')" title="Delete"><i class="fas fa-trash-alt"></i></button>
                                 </td>
                             </tr>
                         `).join('')}
@@ -14359,12 +15112,12 @@ const openAddSolutionModal = async (prospectId) => {
 
         UI.showModal('Add New ' + type.slice(0, -1), content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save', type: 'primary', action: 'await app. saveMarketingListItem()' }
+            { label: 'Save', type: 'primary', action: 'await app.saveMarketingListItem()' }
         ]);
     };
 
     const openMarketingListEditModal = async (id) => {
-        const item = await DataStore.getById(_currentMarketingListTab, id);
+        const item = DataStore.getById(_currentMarketingListTab, id);
         if (!item) return;
 
         let content = '';
@@ -14401,7 +15154,7 @@ const openAddSolutionModal = async (prospectId) => {
 
         UI.showModal('Edit ' + type.slice(0, -1), content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save Changes', type: 'primary', action: `await app. saveMarketingListItem('${id}')` }
+            { label: 'Save Changes', type: 'primary', action: `await app.saveMarketingListItem('${id}')` }
         ]);
     };
 
@@ -14470,13 +15223,13 @@ const openAddSolutionModal = async (prospectId) => {
                         <p>WhatsApp Focus - Create templates and manage campaigns</p>
                     </div>
                     <div class="marketing-header-actions">
-                        <button class="btn primary" onclick="app. openCreateTemplateModal()">
+                        <button class="btn primary" onclick="await app.openCreateTemplateModal()">
                             <i class="fas fa-plus"></i> Create Template
                         </button>
-                        <button class="btn secondary" onclick="app. openCreateCampaignModal()">
+                        <button class="btn secondary" onclick="await app.openCreateCampaignModal()">
                             <i class="fas fa-bullhorn"></i> New Campaign
                         </button>
-                        <button class="btn secondary" onclick="app. switchMarketingTab('analytics')">
+                        <button class="btn secondary" onclick="await app.switchMarketingTab('analytics')">
                             <i class="fas fa-chart-bar"></i> Analytics
                         </button>
                         ${(isManagement(_currentUser) || isSystemAdmin(_currentUser)) ? `
@@ -14488,20 +15241,20 @@ const openAddSolutionModal = async (prospectId) => {
                 </div>
                 
                 <div class="marketing-tabs">
-                    <button class="marketing-tab ${_currentMarketingTab === 'templates' ? 'active' : ''}" onclick="app. switchMarketingTab('templates')">
+                    <button class="marketing-tab ${_currentMarketingTab === 'templates' ? 'active' : ''}" onclick="await app.switchMarketingTab('templates')">
                         <i class="fas fa-layer-group"></i> Message Templates
                     </button>
-                    <button class="marketing-tab ${_currentMarketingTab === 'campaigns' ? 'active' : ''}" onclick="app. async switchMarketingTab('campaigns')">
+                    <button class="marketing-tab ${_currentMarketingTab === 'campaigns' ? 'active' : ''}" onclick="await app.switchMarketingTab('campaigns')">
                         <i class="fas fa-bullhorn"></i> Active Campaigns
                     </button>
-                    <button class="marketing-tab ${_currentMarketingTab === 'analytics' ? 'active' : ''}" onclick="app. async switchMarketingTab('analytics')">
+                    <button class="marketing-tab ${_currentMarketingTab === 'analytics' ? 'active' : ''}" onclick="await app.switchMarketingTab('analytics')">
                         <i class="fas fa-chart-line"></i> Campaign Analytics
                     </button>
                     ${(isMarketingManager(_currentUser) || isSystemAdmin(_currentUser)) ? `
-                    <button class="marketing-tab ${_currentMarketingTab === 'products' ? 'active' : ''}" onclick="app. async switchMarketingTab('products')">
+                    <button class="marketing-tab ${_currentMarketingTab === 'products' ? 'active' : ''}" onclick="await app.switchMarketingTab('products')">
                         <i class="fas fa-box"></i> Products & Services
                     </button>
-                    <button class="marketing-tab ${_currentMarketingTab === 'packages' ? 'active' : ''}" onclick="app. async switchMarketingTab('packages')">
+                    <button class="marketing-tab ${_currentMarketingTab === 'packages' ? 'active' : ''}" onclick="await app.switchMarketingTab('packages')">
                         <i class="fas fa-gifts"></i> Promotion Packages
                     </button>
                     ` : ''}
@@ -14553,12 +15306,12 @@ const openAddSolutionModal = async (prospectId) => {
 
     // ========== PRODUCTS TAB ==========
     const renderProductsTab = async () => {
-        const products =await  await DataStore.getAll('products');
+        const products =await  DataStore.getAll('products');
         return `
             <div class="products-layout" style="padding: 24px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                     <h3>Product & Service Directory</h3>
-                    <button class="btn primary" onclick="app. openAddProductModal()">+ Add New Product</button>
+                    <button class="btn primary" onclick="await app.openAddProductModal()">+ Add New Product</button>
                 </div>
                 <table class="data-table" style="width: 100%; border-collapse: collapse;">
                     <thead>
@@ -14578,8 +15331,8 @@ const openAddSolutionModal = async (prospectId) => {
                                     <span class="status-badge ${p.is_active !== false ? 'status-active' : 'status-inactive'}">${p.is_active !== false ? 'Active' : 'Inactive'}</span>
                                 </td>
                                 <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">
-                                    <button class="btn btn-sm secondary" onclick="app. openAddProductModal(${p.id})">Edit</button>
-                                    <button class="btn btn-sm ${p.is_active !== false ? 'danger' : 'primary'}" onclick="app. toggleProductStatus(${p.id}, ${p.is_active !== false})">
+                                    <button class="btn btn-sm secondary" onclick="await app.openAddProductModal(${p.id})">Edit</button>
+                                    <button class="btn btn-sm ${p.is_active !== false ? 'danger' : 'primary'}" onclick="await app.toggleProductStatus(${p.id}, ${p.is_active !== false})">
                                         ${p.is_active !== false ? 'Deactivate' : 'Activate'}
                                     </button>
                                 </td>
@@ -14594,7 +15347,7 @@ const openAddSolutionModal = async (prospectId) => {
 
     const openAddProductModal = async (id = null) => {
         let p = { name: '', category: '', is_active: true };
-        if (id) p = await DataStore.getById('products', id);
+        if (id) p = DataStore.getById('products', id);
 
         const content = `
             <div class="form-group">
@@ -14608,7 +15361,7 @@ const openAddSolutionModal = async (prospectId) => {
 `;
         UI.showModal(id ? 'Edit Product' : 'Add Product', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save', type: 'primary', action: `await app. saveProduct(${id || 'null'})` }
+            { label: 'Save', type: 'primary', action: `await app.saveProduct(${id || 'null'})` }
         ]);
     };
 
@@ -14647,15 +15400,15 @@ const openAddSolutionModal = async (prospectId) => {
                         <h3>Promotion Packages</h3>
                         <p class="text-muted">Manage bundled offers and track customer purchases</p>
                     </div>
-                    <button class="btn primary" onclick="app. openCreatePackageModal()">+ New Package</button>
+                    <button class="btn primary" onclick="await app.openCreatePackageModal()">+ New Package</button>
                 </div>
 
                 <div class="packages-filters" style="display: flex; gap: 15px; margin-bottom: 20px;">
                     <div class="search-box" style="position: relative; flex: 1;">
                         <i class="fas fa-search" style="position: absolute; left: 12px; top: 50%; transform: await translateY(-50%); color: var(--gray-400);"></i>
-                        <input type="text" id="package-search" class="form-control" placeholder="Search by package name or product..." style="padding-left: 35px;" onkeyup="app. filterPackages()">
+                        <input type="text" id="package-search" class="form-control" placeholder="Search by package name or product..." style="padding-left: 35px;" onkeyup="await app.filterPackages()">
                     </div>
-                    <select id="package-status-filter" class="form-control" style="width: 150px;" onchange="app. filterPackages()">
+                    <select id="package-status-filter" class="form-control" style="width: 150px;" onchange="await app.filterPackages()">
                         <option value="all">All Status</option>
                         <option value="active">Active</option>
                         <option value="inactive">Inactive</option>
@@ -14674,7 +15427,7 @@ const openAddSolutionModal = async (prospectId) => {
                         </tr>
                     </thead>
                     <tbody id="packages-table-body">
-                        ${(await Promise.all(packages.map(p => renderPackageRow(p)))).join('')}
+                        ${packages.map(p => renderPackageRow(p)).join('')}
                         ${packages.length === 0 ? '<tr><td colspan="6" style="padding: 40px; text-align: center; color: var(--gray-500);">No promotion packages found. Click "+ New Package" to create one.</td></tr>' : ''}
                     </tbody>
                 </table>
@@ -14683,18 +15436,17 @@ const openAddSolutionModal = async (prospectId) => {
     };
 
     const renderPackageRow = async (p) => {
-        const productNamesList = await Promise.all((p.product_ids || []).map(async id => {
-            const prod = await DataStore.getById('products', id);
+        const productNames = (p.product_ids || []).map(id => {
+            const prod = DataStore.getById('products', id);
             return prod ? prod.name : 'Unknown Product';
-        }));
-        const productNames = productNamesList.join(', ');
+        }).join(', ');
 
         const abbreviatedProducts = productNames.length > 50 ? productNames.substring(0, 47) + '...' : productNames;
 
         return `
             <tr>
                 <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">
-                    <a href="javascript:async void(0)" onclick="app. viewPackageCustomers(${p.id})"><strong>${p.package_name || p.name}</strong></a>
+                    <a href="javascript:async void(0)" onclick="await app.viewPackageCustomers(${p.id})"><strong>${p.package_name || p.name}</strong></a>
                 </td>
                 <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);" title="${productNames}">${abbreviatedProducts}</td>
                 <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">RM ${UI.formatNumber(p.price)}</td>
@@ -14708,9 +15460,9 @@ const openAddSolutionModal = async (prospectId) => {
                 </td>
                 <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">
                     <div class="table-actions">
-                        <button class="btn-icon" onclick="app. openCreatePackageModal(${p.id})" title="Edit"><i class="fas fa-edit"></i></button>
-                        <button class="btn-icon" onclick="app. viewPackageCustomers(${p.id})" title="View Customers"><i class="fas fa-users"></i></button>
-                        <button class="btn-icon text-danger" onclick="app. deletePackage(${p.id})" title="Delete"><i class="fas fa-trash"></i></button>
+                        <button class="btn-icon" onclick="await app.openCreatePackageModal(${p.id})" title="Edit"><i class="fas fa-edit"></i></button>
+                        <button class="btn-icon" onclick="await app.viewPackageCustomers(${p.id})" title="View Customers"><i class="fas fa-users"></i></button>
+                        <button class="btn-icon text-danger" onclick="await app.deletePackage(${p.id})" title="Delete"><i class="fas fa-trash"></i></button>
                     </div>
                 </td>
             </tr>
@@ -14722,28 +15474,26 @@ const openAddSolutionModal = async (prospectId) => {
         const status = document.getElementById('package-status-filter')?.value || 'all';
 
         const packages = await DataStore.getAll('promotions');
-        const filteredResults = await Promise.all(packages.map(async p => {
-            // Pre-fetch all products for this package to check search keyword
-            const products = await Promise.all((p.product_ids || []).map(id => DataStore.getById('products', id)));
+        const filtered = packages.filter(p => {
             const matchesSearch = (p.package_name || p.name || '').toLowerCase().includes(search) ||
-                products.some(prod => prod && (prod.name || '').toLowerCase().includes(search));
+                (p.product_ids || []).some(id => {
+                    const prod = DataStore.getById('products', id);
+                    return prod && (prod.name || '').toLowerCase().includes(search);
+                });
             const matchesStatus = status === 'all' || (status === 'active' ? p.is_active : !p.is_active);
             return matchesSearch && matchesStatus;
-        }));
-        
-        const filtered = packages.filter((_, i) => filteredResults[i]);
+        });
 
         const tbody = document.getElementById('packages-table-body');
         if (tbody) {
-            const rows = await Promise.all(filtered.map(p => renderPackageRow(p)));
-            tbody.innerHTML = rows.join('') +
+            tbody.innerHTML = filtered.map(p => renderPackageRow(p)).join('') +
                 (filtered.length === 0 ? '<tr><td colspan="6" style="padding: 40px; text-align: center; color: var(--gray-500);">No matching packages found.</td></tr>' : '');
         }
     };
 
     const openCreatePackageModal = async (id = null) => {
         const isEdit = !!id;
-        const pkg = isEdit ? await DataStore.getById('promotions', id) : {
+        const pkg = isEdit ? DataStore.getById('promotions', id) : {
             package_name: '',
             product_ids: [],
             price: 0,
@@ -14753,7 +15503,7 @@ const openAddSolutionModal = async (prospectId) => {
             is_active: true
         };
 
-        const allProducts =await  (await DataStore.getAll('products')).filter(p => p.is_active !== false);
+        const allProducts =await  DataStore.getAll('products').filter(p => p.is_active !== false);
         const paymentOptions = ['Cash', 'Credit Card', 'Bank Transfer', 'EPP', 'POP', 'Cheque'];
 
         const content = `
@@ -14805,7 +15555,7 @@ const openAddSolutionModal = async (prospectId) => {
 
         UI.showModal(isEdit ? 'Edit Promotion Package' : 'Create Promotion Package', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: isEdit ? 'Update Package' : 'Create Package', type: 'primary', action: `await app. savePackage(${id || 'null'})` }
+            { label: isEdit ? 'Update Package' : 'Create Package', type: 'primary', action: `await app.savePackage(${id || 'null'})` }
         ]);
     };
 
@@ -14846,27 +15596,27 @@ const openAddSolutionModal = async (prospectId) => {
         }
 
         UI.hideModal();
-        if (_currentMarketingTab === 'packages') await app. switchMarketingTab('packages');
+        if (_currentMarketingTab === 'packages') await app.switchMarketingTab('packages');
     };
 
     const deletePackage = async (id) => {
         if (confirm("Are you sure you want to delete this promotion package? This action cannot be undone.")) {
             await DataStore.delete('promotions', id);
             UI.toast.success("Package deleted");
-            if (_currentMarketingTab === 'packages') await app. switchMarketingTab('packages');
+            if (_currentMarketingTab === 'packages') await app.switchMarketingTab('packages');
         }
     };
 
     const viewPackageCustomers = async (packageId) => {
-        const pkg = await DataStore.getById('promotions', packageId);
+        const pkg = DataStore.getById('promotions', packageId);
         if (!pkg) return;
 
-        const purchases =await  (await DataStore.getAll('purchases')).filter(p => p.package_id == packageId);
+        const purchases =await  DataStore.getAll('purchases').filter(p => p.package_id == packageId);
 
         // Fallback: match by product name if package_id is not set
         if (purchases.length === 0) {
             const productNames = pkg.product_ids.map(id => {
-                const prod = await DataStore.getById('products', id);
+                const prod = DataStore.getById('products', id);
                 return prod ? prod.name : null;
             }).filter(n => n);
 
@@ -14896,7 +15646,7 @@ const openAddSolutionModal = async (prospectId) => {
                     </thead>
                     <tbody>
                         ${purchases.map(p => {
-            const customer = await DataStore.getById('customers', p.customer_id) || await DataStore.getById('prospects', p.customer_id);
+            const customer = DataStore.getById('customers', p.customer_id) || DataStore.getById('prospects', p.customer_id);
             return `
                                 <tr>
                                     <td style="padding: 10px; border-bottom: 1px solid var(--gray-200);">
@@ -14927,19 +15677,16 @@ const openAddSolutionModal = async (prospectId) => {
 
     const renderTemplatesTab = async () => {
         const templates = await DataStore.getAll('whatsapp_templates');
-        const templatesHtml = templates.length > 0 
-            ? (await Promise.all(templates.map(t => renderTemplateCard(t)))).join('') 
-            : await renderSampleTemplates();
 
         return `
             <div class="templates-layout">
                 <div class="templates-list">
                     <div class="templates-search">
                         <i class="fas fa-search"></i>
-                        <input type="text" id="template-search" placeholder="Search templates..." onkeyup="app. searchTemplates()">
+                        <input type="text" id="template-search" placeholder="Search templates..." onkeyup="await app.searchTemplates()">
                     </div>
                     <div class="templates-grid" id="templates-grid">
-                        ${templatesHtml}
+                        ${templates.length > 0 ? templates.map(t => renderTemplateCard(t)).join('') : await renderSampleTemplates()}
                     </div>
                 </div>
                 <div class="template-preview-panel">
@@ -14982,8 +15729,7 @@ const openAddSolutionModal = async (prospectId) => {
             { id: 1, template_name: 'Happy Birthday Wishes', category: 'Birthday', content: 'Hi {{name}}, wishing you a very happy birthday...', variables: ['name', 'zodiac'] },
             { id: 2, template_name: 'Post-Consultation Thank You', category: 'Follow-up', content: 'Dear {{name}}, it was a pleasure meeting you...', variables: ['name', 'agent'] }
         ];
-        const cards = await Promise.all(sampleTemplates.map(t => renderTemplateCard(t)));
-        return cards.join('');
+        return sampleTemplates.map(t => renderTemplateCard(t)).join('');
     };
 
     const renderTemplateCard = async (template) => {
@@ -15000,13 +15746,13 @@ const openAddSolutionModal = async (prospectId) => {
         const colorClass = categoryColors[template.category] || 'badge-gray';
 
         return `
-            <div class="template-card" onclick="app. previewTemplate(${template.id})">
+            <div class="template-card" onclick="app.previewTemplate(${template.id})">
                 <div class="template-card-header">
                     <span class="template-badge ${colorClass}">${template.category}</span>
                     <div class="template-card-actions">
-                        <button class="btn-icon" onclick="event.stopPropagation(); app. editTemplate(${template.id})" title="Edit"><i class="fas fa-edit"></i></button>
-                        <button class="btn-icon" onclick="event.stopPropagation(); app. copyTemplate(${template.id})" title="Copy"><i class="fas fa-copy"></i></button>
-                        <button class="btn-icon" onclick="event.stopPropagation(); app. deleteTemplate(${template.id})" title="Delete"><i class="fas fa-trash"></i></button>
+                        <button class="btn-icon" onclick="event.stopPropagation(); await app.editTemplate(${template.id})" title="Edit"><i class="fas fa-edit"></i></button>
+                        <button class="btn-icon" onclick="event.stopPropagation(); await app.copyTemplate(${template.id})" title="Copy"><i class="fas fa-copy"></i></button>
+                        <button class="btn-icon" onclick="event.stopPropagation(); await app.deleteTemplate(${template.id})" title="Delete"><i class="fas fa-trash"></i></button>
                     </div>
                 </div>
                 <h4 class="template-title">${template.template_name}</h4>
@@ -15020,7 +15766,7 @@ const openAddSolutionModal = async (prospectId) => {
 
     const openCreateTemplateModal = async (templateId = null) => {
         const isEdit = !!templateId;
-        const template = isEdit ? await DataStore.getById('whatsapp_templates', templateId) : null;
+        const template = isEdit ? DataStore.getById('whatsapp_templates', templateId) : null;
 
         const content = `
             <div class="template-modal">
@@ -15078,7 +15824,7 @@ const openAddSolutionModal = async (prospectId) => {
 
         UI.showModal(isEdit ? 'Edit Template' : 'Create WhatsApp Template', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: isEdit ? 'Update Template' : 'Save Template', type: 'primary', action: `await app. saveTemplate(${isEdit ? templateId : 'null'})` }
+            { label: isEdit ? 'Update Template' : 'Save Template', type: 'primary', action: `await app.saveTemplate(${isEdit ? templateId : 'null'})` }
         ]);
     };
 
@@ -15178,8 +15924,8 @@ const openAddSolutionModal = async (prospectId) => {
         }
     };
 
-    const previewTemplate = async (templateId) => {
-        const template = await DataStore.getById('whatsapp_templates', templateId);
+    const previewTemplate = (templateId) => {
+        const template = DataStore.getById('whatsapp_templates', templateId);
         if (!template) return;
 
         const previewData = {
@@ -15248,21 +15994,18 @@ const openAddSolutionModal = async (prospectId) => {
 
     const searchTemplates = async () => {
         const search = document.getElementById('template-search').value.toLowerCase();
-        const templates = await DataStore.getAll('whatsapp_templates');
+        const templates =await  DataStore.getAll('whatsapp_templates');
         const filtered = templates.filter(t =>
             t.template_name.toLowerCase().includes(search) ||
             t.category.toLowerCase().includes(search)
         );
         const grid = document.getElementById('templates-grid');
-        if (grid) { 
-            const cards = await Promise.all(filtered.map(t => renderTemplateCard(t)));
-            grid.innerHTML = cards.join(''); 
-        }
+        if (grid) { grid.innerHTML = filtered.map(t => renderTemplateCard(t)).join(''); }
     };
 
     const editTemplate = async (id) => await openCreateTemplateModal(id);
     const copyTemplate = async (id) => {
-        const t = await DataStore.getById('whatsapp_templates', id);
+        const t = DataStore.getById('whatsapp_templates', id);
         if (t) {
             const copy = { ...t, id: undefined, template_name: t.template_name + ' (Copy)' };
             await DataStore.create('whatsapp_templates', copy);
@@ -15289,13 +16032,13 @@ const openAddSolutionModal = async (prospectId) => {
     // ========== CAMPAIGNS TAB ==========
 
     const renderCampaignsTab = async () => {
-        const campaigns =await  await DataStore.getAll('whatsapp_campaigns');
+        const campaigns =await  DataStore.getAll('whatsapp_campaigns');
 
         return `
             <div class="campaigns-filters">
                 <div class="form-group-inline">
                     <label>Status:</label>
-                    <select id="campaign-status-filter" onchange="app. async filterCampaigns()">
+                    <select id="campaign-status-filter" onchange="await app.filterCampaigns()">
                         <option value="all">All Status</option>
                         <option value="active">Active</option>
                         <option value="scheduled">Scheduled</option>
@@ -15305,7 +16048,7 @@ const openAddSolutionModal = async (prospectId) => {
                 </div>
                 <div class="form-group-inline">
                     <label>Sort By:</label>
-                    <select id="campaign-sort" onchange="app. async filterCampaigns()">
+                    <select id="campaign-sort" onchange="await app.filterCampaigns()">
                         <option value="date-desc">Newest First</option>
                         <option value="date-asc">Oldest First</option>
                         <option value="name">Name</option>
@@ -15327,7 +16070,7 @@ const openAddSolutionModal = async (prospectId) => {
                 </tr>
             </thead>
             <tbody id="campaigns-list-body">
-                ${campaigns.length > 0 ? (await Promise.all(campaigns.map(c => renderCampaignRow(c)))).join('') : '<tr><td colspan="7" style="text-align:center; padding:40px;">No campaigns found. Click "New Campaign" to start.</td></tr>'}
+                ${campaigns.length > 0 ? campaigns.map(c => renderCampaignRow(c)).join('') : '<tr><td colspan="7" style="text-align:center; padding:40px;">No campaigns found. Click "New Campaign" to start.</td></tr>'}
             </tbody>
         </table>
     </div>
@@ -15335,12 +16078,12 @@ const openAddSolutionModal = async (prospectId) => {
     };
 
     const renderCampaignRow = async (campaign) => {
-        const template = await DataStore.getById('whatsapp_templates', campaign.template_id);
+        const template = DataStore.getById('whatsapp_templates', campaign.template_id);
         const openRate = campaign.sent_count > 0 ? Math.round((campaign.opened_count / campaign.sent_count) * 100) : 0;
         const responseRate = campaign.sent_count > 0 ? Math.round((campaign.replied_count / campaign.sent_count) * 100) : 0;
 
         return `
-            <tr onclick="app. viewCampaignDetails(${campaign.id})">
+            <tr onclick="await app.viewCampaignDetails(${campaign.id})">
                 <td>
                     <strong>${campaign.campaign_name}</strong><br>
                     <small class="text-muted">${template?.template_name || 'No Template'}</small>
@@ -15357,11 +16100,11 @@ const openAddSolutionModal = async (prospectId) => {
                 <td>${responseRate}%</td>
                 <td>
                     <div class="table-actions">
-                        ${campaign.status === 'draft' ? `<button class="btn-icon" onclick="event.stopPropagation(); app. editCampaign(${campaign.id})" title="Edit"><i class="fas fa-edit"></i></button>` : ''}
-                        ${campaign.status === 'active' ? `<button class="btn-icon" onclick="event.stopPropagation(); app. pauseCampaign(${campaign.id})" title="Pause"><i class="fas fa-pause"></i></button>` : ''}
-                        ${campaign.status === 'paused' ? `<button class="btn-icon" onclick="event.stopPropagation(); app. resumeCampaign(${campaign.id})" title="Resume"><i class="fas fa-play"></i></button>` : ''}
-                        <button class="btn-icon" onclick="event.stopPropagation(); app. duplicateCampaign(${campaign.id})" title="Duplicate"><i class="fas fa-copy"></i></button>
-                        <button class="btn-icon" onclick="event.stopPropagation(); app. deleteCampaign(${campaign.id})" title="Delete"><i class="fas fa-trash"></i></button>
+                        ${campaign.status === 'draft' ? `<button class="btn-icon" onclick="event.stopPropagation(); await app.editCampaign(${campaign.id})" title="Edit"><i class="fas fa-edit"></i></button>` : ''}
+                        ${campaign.status === 'active' ? `<button class="btn-icon" onclick="event.stopPropagation(); await app.pauseCampaign(${campaign.id})" title="Pause"><i class="fas fa-pause"></i></button>` : ''}
+                        ${campaign.status === 'paused' ? `<button class="btn-icon" onclick="event.stopPropagation(); await app.resumeCampaign(${campaign.id})" title="Resume"><i class="fas fa-play"></i></button>` : ''}
+                        <button class="btn-icon" onclick="event.stopPropagation(); await app.duplicateCampaign(${campaign.id})" title="Duplicate"><i class="fas fa-copy"></i></button>
+                        <button class="btn-icon" onclick="event.stopPropagation(); await app.deleteCampaign(${campaign.id})" title="Delete"><i class="fas fa-trash"></i></button>
                     </div>
                 </td>
             </tr>
@@ -15370,7 +16113,7 @@ const openAddSolutionModal = async (prospectId) => {
 
     const openCreateCampaignModal = async (campaignId = null) => {
         const isEdit = !!campaignId;
-        const campaign = isEdit ? await DataStore.getById('whatsapp_campaigns', campaignId) : null;
+        const campaign = isEdit ? DataStore.getById('whatsapp_campaigns', campaignId) : null;
 
         const content = `
             <div class="campaign-modal">
@@ -15405,8 +16148,8 @@ const openAddSolutionModal = async (prospectId) => {
                 <div class="step-navigation">
                     <span class="step-indicator">Step 1 of 4</span>
                     <div class="step-buttons">
-                        <button class="btn secondary" id="btn-prev" style="display:none;" onclick="app. prevCampaignStep()">Previous</button>
-                        <button class="btn primary" id="btn-next" onclick="app. nextCampaignStep()">Next</button>
+                        <button class="btn secondary" id="btn-prev" style="display:none;" onclick="await app.prevCampaignStep()">Previous</button>
+                        <button class="btn primary" id="btn-next" onclick="await app.nextCampaignStep()">Next</button>
                     </div>
                 </div>
             </div>
@@ -15414,7 +16157,7 @@ const openAddSolutionModal = async (prospectId) => {
 
         UI.showModal(isEdit ? 'Edit Campaign' : 'Create WhatsApp Campaign', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save as Draft', type: 'secondary', action: 'await app. saveCampaignDraft()' }
+            { label: 'Save as Draft', type: 'secondary', action: 'await app.saveCampaignDraft()' }
         ]);
 
         _currentCampaignStep = 1;
@@ -15489,9 +16232,9 @@ const openAddSolutionModal = async (prospectId) => {
         btnPrev.style.display = _currentCampaignStep > 1 ? 'block' : 'none';
         btnNext.textContent = _currentCampaignStep === 4 ? 'Launch Campaign' : 'Next';
         if (_currentCampaignStep === 4) {
-            btnNext.onclick = async () => await app. saveCampaign();
+            btnNext.onclick = async () => await app.saveCampaign();
         } else {
-            btnNext.onclick = async () => await app. nextCampaignStep();
+            btnNext.onclick = async () => await app.nextCampaignStep();
         }
 
         if (_currentMarketingTab === 'analytics') {
@@ -15531,7 +16274,7 @@ const openAddSolutionModal = async (prospectId) => {
             `;
         } else if (_currentCampaignStep === 3) {
             const tags = await DataStore.getAll('tags');
-            const agents = (await DataStore.getAll('users')).filter(isAgent);
+            const agents = await DataStore.getAll('users').filter(isAgent);
 
             container.innerHTML = `
                 <div class="campaign-step" id="step-3">
@@ -15581,7 +16324,7 @@ const openAddSolutionModal = async (prospectId) => {
                     <div class="campaign-summary-box" style="background:var(--gray-50); padding:16px; border-radius:8px; margin-top:20px;">
                         <h5>Campaign Summary</h5>
                         <p><strong>Name:</strong> ${_campaignData.campaign_name}</p>
-                        <p><strong>Template:</strong> ${await DataStore.getById('whatsapp_templates', _campaignData.template_id)?.template_name}</p>
+                        <p><strong>Template:</strong> ${DataStore.getById('whatsapp_templates', _campaignData.template_id)?.template_name}</p>
                         <p><strong>Estimated Audience:</strong> <span id="final-audience-size">...</span></p>
                     </div>
                 </div>
@@ -15700,7 +16443,7 @@ const openAddSolutionModal = async (prospectId) => {
         const campaign = await DataStore.create('whatsapp_campaigns', _campaignData);
 
         // Create initial message tracking for each recipient
-        for (const rpId of recipients) {
+        recipients.forEach(rpId => {
             await DataStore.create('campaign_messages', {
                 campaign_id: campaign.id,
                 prospect_id: rpId,
@@ -15712,7 +16455,7 @@ const openAddSolutionModal = async (prospectId) => {
                 last_error: null,
                 retry_count: 0
             });
-        }
+        });
 
         if (launchType === 'now') {
             await simulateCampaignSending(campaign.id);
@@ -15724,10 +16467,10 @@ const openAddSolutionModal = async (prospectId) => {
     };
 
     const simulateCampaignSending = async (campaignId) => {
-        const messages = (await DataStore.getAll('campaign_messages')).filter(m => m.campaign_id === campaignId);
+        const messages = await DataStore.getAll('campaign_messages').filter(m => m.campaign_id === campaignId);
         let sent = 0;
 
-        const interval = async (() => {
+        const interval = (() => {
             if (sent >= messages.length) {
                 clearInterval(interval);
                 await DataStore.update('whatsapp_campaigns', campaignId, { status: 'completed', completed_date: new Date().toISOString() });
@@ -15748,7 +16491,7 @@ const openAddSolutionModal = async (prospectId) => {
             });
 
             // Update campaign stats
-            const campaign = await DataStore.getById('whatsapp_campaigns', campaignId);
+            const campaign = DataStore.getById('whatsapp_campaigns', campaignId);
             const updates = { sent_count: (campaign.sent_count || 0) + 1 };
             if (['delivered', 'opened', 'replied'].includes(status)) updates.delivered_count = (campaign.delivered_count || 0) + 1;
             if (['opened', 'replied'].includes(status)) updates.opened_count = (campaign.opened_count || 0) + 1;
@@ -15788,8 +16531,7 @@ const openAddSolutionModal = async (prospectId) => {
 
         const body = document.getElementById('campaigns-list-body');
         if (body) {
-            const rows = await Promise.all(campaigns.map(c => renderCampaignRow(c)));
-            body.innerHTML = campaigns.length > 0 ? rows.join('') : '<tr><td colspan="7" style="text-align:center; padding:40px;">No campaigns found.</td></tr>';
+            body.innerHTML = campaigns.length > 0 ? campaigns.map(c => renderCampaignRow(c)).join('') : '<tr><td colspan="7" style="text-align:center; padding:40px;">No campaigns found.</td></tr>';
         }
     };
 
@@ -15809,7 +16551,7 @@ const openAddSolutionModal = async (prospectId) => {
         }
     };
     const duplicateCampaign = async (id) => {
-        const c = await DataStore.getById('whatsapp_campaigns', id);
+        const c = DataStore.getById('whatsapp_campaigns', id);
         if (c) {
             const copy = {
                 ...c,
@@ -15826,8 +16568,8 @@ const openAddSolutionModal = async (prospectId) => {
         if (confirm('Delete this campaign and all its tracking data?')) {
             await DataStore.delete('whatsapp_campaigns', id);
             // Delete messages
-            const messages = (await DataStore.getAll('campaign_messages')).filter(m => m.campaign_id === id);
-            await Promise.all(messages.map(m => DataStore.delete('campaign_messages', m.id)));
+            const messages = await DataStore.getAll('campaign_messages').filter(m => m.campaign_id === id);
+            messages.forEach(m => await DataStore.delete('campaign_messages', m.id));
             await refreshCampaignsTab();
         }
     };
@@ -15910,14 +16652,14 @@ const openAddSolutionModal = async (prospectId) => {
                             `).join('')}
                         </tbody>
                     </table>
-                    <button class="btn-sm secondary" style="width:100%; margin-top:12px;" onclick="app. exportAnalyticsReport()">Export Detailed Report</button>
+                    <button class="btn-sm secondary" style="width:100%; margin-top:12px;" onclick="await app.exportAnalyticsReport()">Export Detailed Report</button>
                 </div>
             </div>
 `;
     };
 
     const getRealAnalyticsData = async () => {
-        const campaigns = (await DataStore.getAll('whatsapp_campaigns')).filter(c => c.status === 'completed' || c.status === 'active');
+        const campaigns = await DataStore.getAll('whatsapp_campaigns').filter(c => c.status === 'completed' || c.status === 'active');
 
         const totalCampaigns = campaigns.length;
         let totalSent = 0;
@@ -15949,7 +16691,7 @@ const openAddSolutionModal = async (prospectId) => {
     };
 
     const initMarketingCharts = async () => {
-        const campaigns = (await DataStore.getAll('whatsapp_campaigns')).filter(c => c.status === 'completed' || c.status === 'active').slice(-5);
+        const campaigns = await DataStore.getAll('whatsapp_campaigns').filter(c => c.status === 'completed' || c.status === 'active').slice(-5);
 
         // Message Volume Chart
         const volumeCtx = document.getElementById('message-volume-chart')?.getContext('2d');
@@ -16037,11 +16779,11 @@ const openAddSolutionModal = async (prospectId) => {
     // ========== CAMPAIGN DETAILS VIEW ==========
 
     const viewCampaignDetails = async (campaignId) => {
-        const campaign = await DataStore.getById('whatsapp_campaigns', campaignId);
+        const campaign = DataStore.getById('whatsapp_campaigns', campaignId);
         if (!campaign) return;
 
-        const template = await DataStore.getById('whatsapp_templates', campaign.template_id);
-        const messages = (await DataStore.getAll('campaign_messages')).filter(m => m.campaign_id === campaignId);
+        const template = DataStore.getById('whatsapp_templates', campaign.template_id);
+        const messages = await DataStore.getAll('campaign_messages').filter(m => m.campaign_id === campaignId);
 
         // Calculate metrics
         const sent = messages.filter(m => ['sent', 'delivered', 'opened', 'replied'].includes(m.status)).length;
@@ -16068,9 +16810,9 @@ const openAddSolutionModal = async (prospectId) => {
                         </div>
                     </div>
                     <div class="campaign-actions">
-                        <button class="btn secondary" onclick="app. duplicateCampaign(${campaignId})"><i class="fas fa-copy"></i> Duplicate</button>
-                        <button class="btn secondary" onclick="app. exportCampaignReport(${campaignId})"><i class="fas fa-download"></i> Export Report</button>
-                        ${campaign.status === 'active' ? `<button class="btn warning" onclick="app. pauseCampaign(${campaignId})"><i class="fas fa-pause"></i> Pause</button>` : ''}
+                        <button class="btn secondary" onclick="await app.duplicateCampaign(${campaignId})"><i class="fas fa-copy"></i> Duplicate</button>
+                        <button class="btn secondary" onclick="await app.exportCampaignReport(${campaignId})"><i class="fas fa-download"></i> Export Report</button>
+                        ${campaign.status === 'active' ? `<button class="btn warning" onclick="await app.pauseCampaign(${campaignId})"><i class="fas fa-pause"></i> Pause</button>` : ''}
                     </div>
                 </div>
 
@@ -16110,15 +16852,15 @@ const openAddSolutionModal = async (prospectId) => {
                     <div class="campaign-timeline">
                         <h3><i class="fas fa-history"></i> Recent Activity</h3>
                         <div class="timeline-list">
-                            ${(await Promise.all(messages.slice(0, 10).map(async m => `
+                            ${messages.slice(0, 10).map(m => `
                                 <div class="timeline-item">
                                     <div class="timeline-time">${UI.formatDate(m.sent_at || m.created_at)}</div>
                                     <div class="timeline-event">
-                                        <strong>${await getEntityName('prospects', m.prospect_id)}</strong>
+                                        <strong>${getEntityName('prospects', m.prospect_id)}</strong>
                                         <span class="status-badge status-${m.status}">${m.status}</span>
                                     </div>
                                 </div>
-                            `))).join('')}
+                            `).join('')}
                         </div>
                     </div>
 
@@ -16126,8 +16868,8 @@ const openAddSolutionModal = async (prospectId) => {
                         <div class="recipient-header">
                             <h3><i class="fas fa-users"></i> Recipient List</h3>
                             <div class="recipient-filters">
-                                <input type="text" id="recipient-search" placeholder="Search recipients..." onkeyup="app. filterRecipients(${campaignId})">
-                                <select id="recipient-status-filter" onchange="app. filterRecipients(${campaignId})">
+                                <input type="text" id="recipient-search" placeholder="Search recipients..." onkeyup="await app.filterRecipients(${campaignId})">
+                                <select id="recipient-status-filter" onchange="await app.filterRecipients(${campaignId})">
                                     <option value="all">All Status</option>
                                     <option value="sent">Sent</option>
                                     <option value="delivered">Delivered</option>
@@ -16149,7 +16891,7 @@ const openAddSolutionModal = async (prospectId) => {
                                     </tr>
                                 </thead>
                                 <tbody id="recipient-list-body">
-                                    ${(await Promise.all(messages.map(m => renderRecipientRow(m)))).join('')}
+                                    ${messages.map(m => renderRecipientRow(m)).join('')}
                                 </tbody>
                             </table>
                         </div>
@@ -16164,7 +16906,7 @@ const openAddSolutionModal = async (prospectId) => {
     };
 
     const renderRecipientRow = async (msg) => {
-        const prospect = await DataStore.getById('prospects', msg.prospect_id);
+        const prospect = DataStore.getById('prospects', msg.prospect_id);
         return `
             <tr>
                 <td><strong>${prospect?.full_name || 'Unknown'}</strong></td>
@@ -16172,8 +16914,8 @@ const openAddSolutionModal = async (prospectId) => {
                 <td><span class="status-badge status-${msg.status}">${msg.status}</span></td>
                 <td>${msg.sent_at ? UI.formatDate(msg.sent_at) : '-'}</td>
                 <td>
-                    <button class="btn-sm secondary" onclick="app. viewRecipientHistory(${msg.id})">History</button>
-                    ${msg.status === 'failed' ? `<button class="btn-sm primary" onclick="app. retryMessage(${msg.id})">Retry</button>` : ''}
+                    <button class="btn-sm secondary" onclick="await app.viewRecipientHistory(${msg.id})">History</button>
+                    ${msg.status === 'failed' ? `<button class="btn-sm primary" onclick="await app.retryMessage(${msg.id})">Retry</button>` : ''}
                 </td>
             </tr>
         `;
@@ -16182,28 +16924,25 @@ const openAddSolutionModal = async (prospectId) => {
     const filterRecipients = async (campaignId) => {
         const search = document.getElementById('recipient-search').value.toLowerCase();
         const status = document.getElementById('recipient-status-filter').value;
-        const messages = (await DataStore.getAll('campaign_messages')).filter(m => m.campaign_id === campaignId);
+        const messages = await DataStore.getAll('campaign_messages').filter(m => m.campaign_id === campaignId);
 
-        const filteredResults = await Promise.all(messages.map(async m => {
-            const prospect = await DataStore.getById('prospects', m.prospect_id);
+        const filtered = messages.filter(m => {
+            const prospect = DataStore.getById('prospects', m.prospect_id);
             const nameMatch = prospect?.full_name?.toLowerCase().includes(search);
             const statusMatch = status === 'all' || m.status === status;
             return nameMatch && statusMatch;
-        }));
-        
-        const filtered = messages.filter((_, i) => filteredResults[i]);
+        });
 
         const body = document.getElementById('recipient-list-body');
         if (body) {
-            const rows = await Promise.all(filtered.map(m => renderRecipientRow(m)));
-            body.innerHTML = rows.join('');
+            body.innerHTML = filtered.map(m => renderRecipientRow(m)).join('');
         }
     };
 
     const viewRecipientHistory = async (messageId) => {
-        const msg = await DataStore.getById('campaign_messages', messageId);
+        const msg = DataStore.getById('campaign_messages', messageId);
         if (!msg) return;
-        const prospect = await DataStore.getById('prospects', msg.prospect_id);
+        const prospect = DataStore.getById('prospects', msg.prospect_id);
 
         const content = `
             <div class="recipient-history">
@@ -16236,28 +16975,28 @@ const openAddSolutionModal = async (prospectId) => {
     `;
 
         UI.showModal('Recipient History', content, [
-            { label: 'Back', type: 'secondary', action: `await app. viewCampaignDetails(${msg.campaign_id})` }
+            { label: 'Back', type: 'secondary', action: `await app.viewCampaignDetails(${msg.campaign_id})` }
         ]);
     };
 
     const retryMessage = async (messageId) => {
-        const msg = await DataStore.getById('campaign_messages', messageId);
+        const msg = DataStore.getById('campaign_messages', messageId);
         if (msg) {
             await DataStore.update('campaign_messages', messageId, { status: 'queued', retry_count: (msg.retry_count || 0) + 1 });
             UI.toast.success('Message queued for retry');
-            await app. viewCampaignDetails(msg.campaign_id);
+            await app.viewCampaignDetails(msg.campaign_id);
         }
     };
 
     const exportCampaignReport = async (campaignId) => {
-        const campaign = await DataStore.getById('whatsapp_campaigns', campaignId);
-        const messages = (await DataStore.getAll('campaign_messages')).filter(m => m.campaign_id === campaignId);
+        const campaign = DataStore.getById('whatsapp_campaigns', campaignId);
+        const messages = await DataStore.getAll('campaign_messages').filter(m => m.campaign_id === campaignId);
 
         let csv = "Recipient,Phone,Status,SentAt,DeliveredAt,OpenedAt,RepliedAt\n";
-        for (const m of messages) {
-            const p = await DataStore.getById('prospects', m.prospect_id);
+        messages.forEach(m => {
+            const p = DataStore.getById('prospects', m.prospect_id);
             csv += `"${p?.full_name || 'Unknown'}", "${p?.phone || ''}", ${m.status}, "${m.sent_at || ''}", "${m.delivered_at || ''}", "${m.opened_at || ''}", "${m.replied_at || ''}"\n`;
-        }
+        });
 
         const blob = new Blob([csv], { type: 'text/csv' });
         const url = window.URL.createObjectURL(blob);
@@ -16270,8 +17009,8 @@ const openAddSolutionModal = async (prospectId) => {
         UI.toast.success('Campaign report exported');
     };
 
-    const getEntityName = async (table, id) => {
-        const item = await DataStore.getById(table, id);
+    const getEntityName = (table, id) => {
+        const item = DataStore.getById(table, id);
         if (!item) return 'Unknown';
         if (table === 'users' || table === 'agents') return item.full_name || item.username;
         if (table === 'prospects' || table === 'customers') return item.full_name;
@@ -16302,12 +17041,12 @@ const openAddSolutionModal = async (prospectId) => {
         const now = new Date();
         let expiredCount = 0;
 
-        for (const o of overrides) {
+        overrides.forEach(o => {
             if (o.status === 'active' && o.expires_at && new Date(o.expires_at) < now) {
                 await DataStore.update('manual_overrides', o.id, { status: 'expired' });
                 expiredCount++;
             }
-        }
+        });
 
         if (expiredCount > 0) {
             console.log(`${expiredCount} manual overrides have expired.`);
@@ -16346,7 +17085,7 @@ const openAddSolutionModal = async (prospectId) => {
                     <p style="margin-bottom: 20px; color: var(--gray-600); font-size: 14px;">Log in as a demo user to access CRM features:</p>
                     <div class="demo-users-list" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
                         ${demoUsers.map(u => `
-                            <div class="demo-user-item" onclick="app. loginAs('${u.id}')" style="padding: 12px; border: 1px solid var(--gray-200); border-radius: 8px; cursor: pointer; transition: all 0.2s; background: white; text-align: left;">
+                            <div class="demo-user-item" onclick="await app.loginAs('${u.id}')" style="padding: 12px; border: 1px solid var(--gray-200); border-radius: 8px; cursor: pointer; transition: all 0.2s; background: white; text-align: left;">
                                 <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
                                     <div class="avatar-sm" style="width: 28px; height: 28px; background: var(--primary-color); color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 11px;">
                                         ${(u.full_name || 'U').split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2)}
@@ -16375,7 +17114,7 @@ const openAddSolutionModal = async (prospectId) => {
                     <p style="color: var(--gray-500); text-transform: capitalize; margin-bottom: 32px; font-weight: 500;">${currentUser.role}</p>
                     
                     <div style="border-top: 1px solid var(--gray-100); padding-top: 20px;">
-                        <button class="btn danger" onclick="app. logout()" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 10px; padding: 14px; font-weight: 600;">
+                        <button class="btn danger" onclick="await app.logout()" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 10px; padding: 14px; font-weight: 600;">
                             <i class="fas fa-sign-out-alt"></i> LOGOUT FROM SYSTEM
                         </button>
                     </div>
@@ -16389,7 +17128,7 @@ const openAddSolutionModal = async (prospectId) => {
     };
 
     const loginAs = async (userId) => {
-        const user = await DataStore.getById('users', userId);
+        const user = DataStore.getById('users', userId);
         if (user) {
             // Auth.setUser removed – Supabase manages session; _currentUser set directly below
             _currentUser = user;
@@ -16418,9 +17157,9 @@ const openAddSolutionModal = async (prospectId) => {
                         <p>Upload legacy data, map fields, validate, and import records</p>
                     </div>
                     <div class="import-header-actions">
-                        <button class="btn primary" onclick="app. async openImportWizard()"><i class="fas fa-upload"></i> IMPORT NEW DATA</button>
+                        <button class="btn primary" onclick="await app.openImportWizard()"><i class="fas fa-upload"></i> IMPORT NEW DATA</button>
                         <button class="btn secondary" onclick="app.openTemplatesModal()"><i class="fas fa-download"></i> DOWNLOAD TEMPLATES</button>
-                        <button class="btn secondary" onclick="app. async showImportHistory()"><i class="fas fa-history"></i> VIEW IMPORT HISTORY</button>
+                        <button class="btn secondary" onclick="await app.showImportHistory()"><i class="fas fa-history"></i> VIEW IMPORT HISTORY</button>
                     </div>
                 </div>
                 <div class="recent-imports">
@@ -16437,11 +17176,11 @@ const openAddSolutionModal = async (prospectId) => {
     };
 
     const renderRecentImports = async () => {
-        const imports = (await DataStore.getAll('import_jobs')).sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 10);
+        const imports = await DataStore.getAll('import_jobs').sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 10);
         if (imports.length === 0) return `<tr><td colspan="7" style="text-align:center;padding:40px;"><i class="fas fa-cloud-upload-alt" style="font-size:48px;color:var(--gray-300);display:block;margin-bottom:16px;"></i><h3>No imports yet</h3><p>Click "IMPORT NEW DATA" to start your first import</p></td></tr>`;
         return imports.map(imp => {
             const pct = imp.total_rows > 0 ? Math.round((imp.valid_rows / imp.total_rows) * 100) : 0;
-            return `<tr><td><strong>${imp.file_name}</strong></td><td>${imp.import_type}</td><td>${imp.total_rows} (${imp.created_records} new)</td><td>${pct}%</td><td><span class="import-status status-${imp.status}">${imp.status.toUpperCase()}</span></td><td>${UI.formatDate(imp.created_at)}</td><td><button class="btn-icon" onclick="app. viewImportDetails(${imp.id})" title="View"><i class="fas fa-eye"></i></button><button class="btn-icon" onclick="app.downloadImportLog(${imp.id})" title="Download Log"><i class="fas fa-download"></i></button></td></tr>`;
+            return `<tr><td><strong>${imp.file_name}</strong></td><td>${imp.import_type}</td><td>${imp.total_rows} (${imp.created_records} new)</td><td>${pct}%</td><td><span class="import-status status-${imp.status}">${imp.status.toUpperCase()}</span></td><td>${UI.formatDate(imp.created_at)}</td><td><button class="btn-icon" onclick="app.viewImportDetails(${imp.id})" title="View"><i class="fas fa-eye"></i></button><button class="btn-icon" onclick="app.downloadImportLog(${imp.id})" title="Download Log"><i class="fas fa-download"></i></button></td></tr>`;
         }).join('');
     };
 
@@ -16478,12 +17217,12 @@ const openAddSolutionModal = async (prospectId) => {
                 ${getWizardStepsHtml(1)}
                 <div class="step-content">
                     <h3>Step 1: Upload File</h3>
-                    <div class="upload-area-large" id="import-dropzone" ondragover="event.preventDefault()" ondrop="app. handleImportFileDrop(event)">
+                    <div class="upload-area-large" id="import-dropzone" ondragover="event.preventDefault()" ondrop="await app.handleImportFileDrop(event)">
                         <i class="fas fa-cloud-upload-alt"></i>
                         <h4>Click or Drag Excel file to upload</h4>
                         <p>Supported formats: .xlsx, .xls, .csv</p>
                         <p class="file-limit">Max file size: 10MB</p>
-                        <input type="file" id="import-file-input" accept=".xlsx,.xls,.csv" style="display:none" onchange="app. handleImportFileSelect(event)">
+                        <input type="file" id="import-file-input" accept=".xlsx,.xls,.csv" style="display:none" onchange="await app.handleImportFileSelect(event)">
                         <button class="btn primary" onclick="document.getElementById('import-file-input').click()">Browse Files</button>
                     </div>
                     <div id="file-info" style="display:none;margin-top:20px;"></div>
@@ -16491,7 +17230,7 @@ const openAddSolutionModal = async (prospectId) => {
                 </div>
                 <div class="wizard-footer">
                     <button class="btn secondary" onclick="UI.hideModal()">Cancel</button>
-                    <button class="btn primary" id="step1-next" onclick="app. importNextStep()" disabled>Next: Field Mapping</button>
+                    <button class="btn primary" id="step1-next" onclick="await app.importNextStep()" disabled>Next: Field Mapping</button>
                 </div>
             </div>
         `;
@@ -16516,8 +17255,8 @@ const openAddSolutionModal = async (prospectId) => {
                     </div>
                 </div>
                 <div class="wizard-footer">
-                    <button class="btn secondary" onclick="app. importPrevStep()">Back</button>
-                    <button class="btn primary" onclick="app. importNextStep()">Next: Validation</button>
+                    <button class="btn secondary" onclick="await app.importPrevStep()">Back</button>
+                    <button class="btn primary" onclick="await app.importNextStep()">Next: Validation</button>
                 </div>
             </div>
         `;
@@ -16558,8 +17297,8 @@ const openAddSolutionModal = async (prospectId) => {
                     </div>
                 </div>
                 <div class="wizard-footer">
-                    <button class="btn secondary" onclick="app. importPrevStep()">Back</button>
-                    <button class="btn primary" onclick="app. importNextStep()">Next: Duplicate Handling</button>
+                    <button class="btn secondary" onclick="await app.importPrevStep()">Back</button>
+                    <button class="btn primary" onclick="await app.importNextStep()">Next: Duplicate Handling</button>
                 </div>
             </div>
         `;
@@ -16591,8 +17330,8 @@ const openAddSolutionModal = async (prospectId) => {
                     </div>
                 </div>
                 <div class="wizard-footer">
-                    <button class="btn secondary" onclick="app. async importPrevStep()">Back</button>
-                    <button class="btn primary" onclick="app. importNextStep()">Next: Import</button>
+                    <button class="btn secondary" onclick="await app.importPrevStep()">Back</button>
+                    <button class="btn primary" onclick="await app.importNextStep()">Next: Import</button>
                 </div>
             </div>
         `;
@@ -16629,8 +17368,8 @@ const openAddSolutionModal = async (prospectId) => {
                     </div>
                 </div>
                 <div class="wizard-footer">
-                    <button class="btn secondary" onclick="app. importPrevStep()">Back</button>
-                    <button class="btn primary" id="start-import-btn" onclick="app. startImport()"><i class="fas fa-play"></i> START IMPORT</button>
+                    <button class="btn secondary" onclick="await app.importPrevStep()">Back</button>
+                    <button class="btn primary" id="start-import-btn" onclick="await app.startImport()"><i class="fas fa-play"></i> START IMPORT</button>
                 </div>
             </div>
         `;
@@ -16704,7 +17443,7 @@ const openAddSolutionModal = async (prospectId) => {
         document.getElementById('progress-area').style.display = 'block';
         document.getElementById('start-import-btn').disabled = true;
         let progress = 0;
-        const iv = async (() => {
+        const iv = (() => {
             progress += 5;
             const bar = document.getElementById('progress-bar'); if (bar) { bar.style.width = progress + '%'; bar.textContent = progress + '%'; }
             const st = document.getElementById('progress-status'); if (st) st.textContent = `Processing ${Math.floor(progress * 2.5)}/250 records...`;
@@ -16720,8 +17459,8 @@ const openAddSolutionModal = async (prospectId) => {
         }, 150);
     };
 
-    const viewImportDetails = async (id) => {
-        const job = await DataStore.getById('import_jobs', id);
+    const viewImportDetails = (id) => {
+        const job = DataStore.getById('import_jobs', id);
         if (!job) return;
         const content = `<div><div style="background:var(--gray-50);padding:16px;border-radius:8px;margin-bottom:16px"><div><strong>File:</strong> ${job.file_name}</div><div><strong>Type:</strong> ${job.import_type}</div><div><strong>Status:</strong> ${job.status}</div><div><strong>Date:</strong> ${UI.formatDate(job.created_at)}</div></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"><div><strong>Total rows:</strong> ${job.total_rows}</div><div><strong>Valid rows:</strong> ${job.valid_rows}</div><div><strong>New records:</strong> ${job.created_records}</div><div><strong>Updated:</strong> ${job.updated_records}</div><div><strong>Skipped:</strong> ${job.skipped_records}</div><div><strong>Errors:</strong> ${job.error_rows}</div></div></div>`;
         UI.showModal(`Import Details: ${job.file_name}`, content, [{ label: 'Close', type: 'primary', action: 'UI.hideModal()' }]);
@@ -16751,9 +17490,9 @@ const openAddSolutionModal = async (prospectId) => {
     };
 
     const showImportHistory = async () => {
-        const jobs = (await DataStore.getAll('import_jobs')).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        const jobs = await DataStore.getAll('import_jobs').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
         const rows = jobs.length === 0 ? '<tr><td colspan="6" style="text-align:center;padding:20px">No import history</td></tr>' :
-            jobs.map(j => `<tr><td>${j.file_name}</td><td>${j.import_type}</td><td>${j.total_rows}</td><td><span class="import-status status-${j.status}">${j.status.toUpperCase()}</span></td><td>${UI.formatDate(j.created_at)}</td><td><button class="btn-icon" onclick="app. viewImportDetails(${j.id})"><i class="fas fa-eye"></i></button></td></tr>`).join('');
+            jobs.map(j => `<tr><td>${j.file_name}</td><td>${j.import_type}</td><td>${j.total_rows}</td><td><span class="import-status status-${j.status}">${j.status.toUpperCase()}</span></td><td>${UI.formatDate(j.created_at)}</td><td><button class="btn-icon" onclick="app.viewImportDetails(${j.id})"><i class="fas fa-eye"></i></button></td></tr>`).join('');
         const content = `<table style="width:100%;border-collapse:collapse"><thead><tr style="background:var(--gray-50)"><th style="padding:10px;text-align:left">File</th><th style="padding:10px;text-align:left">Type</th><th style="padding:10px;text-align:left">Records</th><th style="padding:10px;text-align:left">Status</th><th style="padding:10px;text-align:left">Date</th><th style="padding:10px;text-align:left">Actions</th></tr></thead><tbody>${rows}</tbody></table>`;
         UI.showModal('Import History', content, [{ label: 'Close', type: 'primary', action: 'UI.hideModal()' }]);
     };
@@ -16769,7 +17508,7 @@ const openAddSolutionModal = async (prospectId) => {
                         <button class="btn secondary" onclick="app.refreshFollowupStats()"><i class="fas fa-sync-alt"></i> Refresh Stats</button>
                         <button class="btn secondary" onclick="app.exportFollowupReport()"><i class="fas fa-download"></i> Export Report</button>
                         <button class="btn secondary" onclick="app.configureAlerts()"><i class="fas fa-bell"></i> Configure Alerts</button>
-                        <button class="btn primary" onclick="app. navigateTo('import')"><i class="fas fa-upload"></i> Bulk Import</button>
+                        <button class="btn primary" onclick="await app.navigateTo('import')"><i class="fas fa-upload"></i> Bulk Import</button>
                     </div>
                 </div>
                 <div class="team-summary-cards">${renderTeamSummaryCards()}</div>
@@ -16819,7 +17558,7 @@ const openAddSolutionModal = async (prospectId) => {
         return agents.map(a => {
             const rate = Math.round((a.followed / a.assigned) * 100);
             const cls = rate < 70 ? 'rate-bad' : rate < 90 ? 'rate-warning' : 'rate-good';
-            return `<tr><td><strong>${a.name}</strong></td><td>Team ${a.team}</td><td>${a.assigned}</td><td>${a.followed}</td><td><span class="rate-badge ${cls}">${rate}%</span></td><td>${a.i37}</td><td>${a.i814}</td><td>${a.i15}</td><td><button class="btn-icon" onclick="app.viewAgentDetails('${a.name}')" title="View"><i class="fas fa-eye"></i></button><button class="btn-icon" onclick="app. openReassignModal('${a.name}')" title="Reassign"><i class="fas fa-exchange-alt"></i></button><button class="btn-icon" onclick="app.bulkReassign('${a.name}')" title="Bulk Reassign"><i class="fas fa-users"></i></button></td></tr>`;
+            return `<tr><td><strong>${a.name}</strong></td><td>Team ${a.team}</td><td>${a.assigned}</td><td>${a.followed}</td><td><span class="rate-badge ${cls}">${rate}%</span></td><td>${a.i37}</td><td>${a.i814}</td><td>${a.i15}</td><td><button class="btn-icon" onclick="app.viewAgentDetails('${a.name}')" title="View"><i class="fas fa-eye"></i></button><button class="btn-icon" onclick="await app.openReassignModal('${a.name}')" title="Reassign"><i class="fas fa-exchange-alt"></i></button><button class="btn-icon" onclick="app.bulkReassign('${a.name}')" title="Bulk Reassign"><i class="fas fa-users"></i></button></td></tr>`;
         }).join('');
     };
 
@@ -16831,17 +17570,14 @@ const openAddSolutionModal = async (prospectId) => {
             { name: 'Wong Chee Meng', agent: 'Ah Seng', days: 9, score: 590, deadline: '25 Mar 2026', status: 'warning' },
             { name: 'Lim Siew Ling', agent: 'Mei Ling', days: 8, score: 710, deadline: '22 Mar 2026', status: 'warning' }
         ];
-        return prospects.map(p => `<tr><td><strong>${p.name}</strong></td><td>${p.agent}</td><td class="${p.days > 14 ? 'critical' : 'warning'}">${p.days} days</td><td>${p.score}</td><td>${p.deadline}</td><td><span class="status-badge status-${p.status}">${p.status === 'critical' ? '🔴 Critical' : '🟡 Warning'}</span></td><td><button class="btn-icon" onclick="app. openReassignModal('${p.name}')"><i class="fas fa-exchange-alt"></i></button><button class="btn-icon" onclick="app. contactProspect('${p.name}')"><i class="fas fa-phone"></i></button></td></tr>`).join('');
+        return prospects.map(p => `<tr><td><strong>${p.name}</strong></td><td>${p.agent}</td><td class="${p.days > 14 ? 'critical' : 'warning'}">${p.days} days</td><td>${p.score}</td><td>${p.deadline}</td><td><span class="status-badge status-${p.status}">${p.status === 'critical' ? '🔴 Critical' : '🟡 Warning'}</span></td><td><button class="btn-icon" onclick="await app.openReassignModal('${p.name}')"><i class="fas fa-exchange-alt"></i></button><button class="btn-icon" onclick="await app.contactProspect('${p.name}')"><i class="fas fa-phone"></i></button></td></tr>`).join('');
     };
 
     const renderReassignmentHistory = async () => {
-        const history = (await DataStore.getAll('reassignment_history')).sort((a, b) => new Date(b.reassignment_date) - new Date(a.reassignment_date));
+        const history = await DataStore.getAll('reassignment_history').sort((a, b) => new Date(b.reassignment_date) - new Date(a.reassignment_date));
         if (history.length === 0) return '<p style="padding:16px;color:var(--gray-500)">No reassignment history yet.</p>';
-        const getAgentNameById = async (id) => { const u = await DataStore.getById('users', id); return u?.full_name || `Agent #${id}`; };
-        
-        const rows = await Promise.all(history.map(async r => `<tr><td>${UI.formatDate(r.reassignment_date)}</td><td>#${r.prospect_id}</td><td>${await getAgentNameById(r.from_agent_id)}</td><td>${await getAgentNameById(r.to_agent_id)}</td><td>${r.reassignment_reason}</td><td>${await getAgentNameById(r.reassigned_by)}</td></tr>`));
-        
-        return `<table class="agent-performance-table"><thead><tr><th>Date</th><th>Prospect ID</th><th>From Agent</th><th>To Agent</th><th>Reason</th><th>By</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
+        const getAgentNameById = (id) => { const u = DataStore.getById('users', id); return u?.full_name || `Agent #${id}`; };
+        return `<table class="agent-performance-table"><thead><tr><th>Date</th><th>Prospect ID</th><th>From Agent</th><th>To Agent</th><th>Reason</th><th>By</th></tr></thead><tbody>${history.map(r => `<tr><td>${UI.formatDate(r.reassignment_date)}</td><td>#${r.prospect_id}</td><td>${getAgentNameById(r.from_agent_id)}</td><td>${getAgentNameById(r.to_agent_id)}</td><td>${r.reassignment_reason}</td><td>${getAgentNameById(r.reassigned_by)}</td></tr>`).join('')}</tbody></table>`;
     };
 
     const openReassignModal = async (prospectName) => {
@@ -16884,7 +17620,7 @@ const openAddSolutionModal = async (prospectId) => {
             </div>`;
         UI.showModal(`Reassign Prospect: ${prospectName}`, content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'CONFIRM REASSIGNMENT', type: 'primary', action: 'await app. async confirmReassignment()' }
+            { label: 'CONFIRM REASSIGNMENT', type: 'primary', action: 'await app.confirmReassignment()' }
         ]);
     };
 
@@ -16947,9 +17683,7 @@ const openAddSolutionModal = async (prospectId) => {
                 { id: 9003, is_demo: true, file_name: 'agents_2026.xlsx', import_type: 'agents', total_rows: 15, valid_rows: 15, error_rows: 0, created_records: 15, updated_records: 0, skipped_records: 0, status: 'completed', mapping_config: {}, duplicate_handling: 'skip', assignment_config: {}, created_by: 1, created_at: '2026-02-15T09:00:00Z', completed_at: '2026-02-15T09:01:00Z' },
                 { id: 9004, is_demo: true, file_name: 'product_catalog.xlsx', import_type: 'products', total_rows: 45, valid_rows: 0, error_rows: 45, created_records: 0, updated_records: 0, skipped_records: 0, status: 'failed', mapping_config: {}, duplicate_handling: 'skip', assignment_config: {}, created_by: 5, created_at: '2026-02-10T09:45:00Z', completed_at: '2026-02-10T09:45:30Z' }
             ];
-            for (const j of jobs) {
-                await DataStore.create('import_jobs', j);
-            }
+            jobs.forEach(async j => await DataStore.create('import_jobs', j));
         }
         if (await DataStore.getAll('reassignment_history').length === 0) {
             const reassignments = [
@@ -16957,9 +17691,7 @@ const openAddSolutionModal = async (prospectId) => {
                 { id: 8002, is_demo: true, prospect_id: 102, from_agent_id: 8, to_agent_id: 5, reassigned_by: 5, reassignment_date: '2026-03-05T15:45:00Z', reassignment_reason: 'inactive', reason_notes: 'High score prospect', days_inactive: 16, protection_deadline: '2026-03-15', created_at: '2026-03-05T15:45:00Z' },
                 { id: 8003, is_demo: true, prospect_id: 103, from_agent_id: 6, to_agent_id: 7, reassigned_by: 3, reassignment_date: '2026-03-04T09:30:00Z', reassignment_reason: 'workload', reason_notes: 'Balancing workload', days_inactive: 12, protection_deadline: '2026-03-20', created_at: '2026-03-04T09:30:00Z' }
             ];
-            for (const r of reassignments) {
-                await DataStore.create('reassignment_history', r);
-            }
+            reassignments.forEach(async r => await DataStore.create('reassignment_history', r));
         }
     };
 
@@ -16972,7 +17704,7 @@ const openAddSolutionModal = async (prospectId) => {
 
             // 1. Initialize Offline Storage & Sync
             if (typeof SyncManager !== 'undefined') {
-                await SyncManager. init();
+                await SyncManager.init();
             }
 
             // 2. Setup Push Notifications
@@ -17017,7 +17749,7 @@ const openAddSolutionModal = async (prospectId) => {
 
     const refreshPipelineCalculations = async () => {
         UI.toast.info('Recalculating pipeline...');
-        setTimeout(async () => {
+        (() => {
             await refreshPipeline();
         }, 500);
     };
@@ -17319,7 +18051,7 @@ const openAddSolutionModal = async (prospectId) => {
         insertVariable,
         addButtonField,
         searchTemplates,
-        editTemplate: async (id) => await openCreateTemplateModal(id),
+        editTemplate: (id) => await openCreateTemplateModal(id),
         copyTemplate,
         deleteTemplate,
         useTemplate,
@@ -17335,7 +18067,7 @@ const openAddSolutionModal = async (prospectId) => {
         simulateCampaignSending,
         refreshCampaignsTab,
         filterCampaigns,
-        editCampaign: async (id) => await openCreateCampaignModal(id),
+        editCampaign: (id) => await openCreateCampaignModal(id),
         pauseCampaign,
         resumeCampaign,
         cancelCampaign,
@@ -17415,6 +18147,7 @@ const openAddSolutionModal = async (prospectId) => {
         deleteCustomerNote,
         addAgentNote,
         deleteAgentNote,
+        loadAgentNotes,
 
         // Phase 14: Mobile
         toggleMobileNav,
@@ -17499,57 +18232,61 @@ const openAddSolutionModal = async (prospectId) => {
         refreshPerformanceInsights: () => UI.toast.info('Refreshing insights...'),
 
         // ========== GLOBAL DATA SYNCHRONIZATION ==========
-       refreshCurrentView: async () => {   // ✅ now async
-    const viewport = document.getElementById('content-viewport');
-    if (!viewport) return;
-    if (window._isRefreshing) return;
-    window._isRefreshing = true;
-    try {
-        const view = _currentView;
-        console.log(`Auto-refreshing view: ${view}`);
-        switch (view) {
-            case 'month':
-                if (typeof renderCalendar === 'function') await renderCalendar();
-                break;
-            case 'week':
-                if (typeof renderWeekView === 'function') await renderWeekView();
-                break;
-            case 'day':
-                if (typeof renderTodayActivities === 'function') await renderTodayActivities();
-                break;
-            case 'prospects':
-                if (typeof showProspectsView === 'function') await showProspectsView(viewport);
-                break;
-            case 'pipeline':
-                if (typeof showPipelineView === 'function') await showPipelineView(viewport);
-                break;
-            case 'reports':
-                if (typeof refreshKPIDashboard === 'function') await refreshKPIDashboard();
-                break;
-            case 'protection':
-                if (typeof showProtectionMonitoringView === 'function') await showProtectionMonitoringView(viewport);
-                break;
-            case 'agents':
-                if (typeof showAgentsView === 'function') await showAgentsView(viewport);
-                break;
-            case 'referrals':
-                if (typeof showReferralsView === 'function') await showReferralsView(viewport);
-                break;
-            case 'cases':
-                if (typeof showCasesView === 'function') await showCasesView(viewport);
-                break;
-            case 'promotions':
-                if (typeof showMarketingAutomationView === 'function') await showMarketingAutomationView(viewport);
-                break;
-            default:
-                console.log(`No specific refresh logic configured for ${view}`);
-        }
-    } catch (err) {
-        console.error("Error during auto-refresh:", err);
-    } finally {
-        window._isRefreshing = false;
-    }
-},
+        refreshCurrentView: () => {
+            const viewport = document.getElementById('content-viewport');
+            if (!viewport) return;
+
+            // Guard against infinite loops if render functions modify data
+            if (window._isRefreshing) return;
+            window._isRefreshing = true;
+
+            try {
+                const view = _currentView;
+                console.log(`Auto-refreshing view: ${view}`);
+
+                switch (view) {
+                    case 'month':
+                        if (typeof renderCalendar === 'function') await renderCalendar();
+                        break;
+                    case 'week':
+                        if (typeof renderWeekView === 'function') await renderWeekView();
+                        break;
+                    case 'day':
+                        if (typeof renderTodayActivities === 'function') await renderTodayActivities();
+                        break;
+                    case 'prospects':
+                        if (typeof showProspectsView === 'function') await showProspectsView(viewport);
+                        break;
+                    case 'pipeline':
+                        if (typeof showPipelineView === 'function') await showPipelineView(viewport);
+                        break;
+                    case 'reports':
+                        if (typeof refreshKPIDashboard === 'function') await refreshKPIDashboard();
+                        break;
+                    case 'protection':
+                        if (typeof showProtectionMonitoringView === 'function') await showProtectionMonitoringView(viewport);
+                        break;
+                    case 'agents':
+                        if (typeof showAgentsView === 'function') await showAgentsView(viewport);
+                        break;
+                    case 'referrals':
+                        if (typeof showReferralsView === 'function') await showReferralsView(viewport);
+                        break;
+                    case 'cases':
+                        if (typeof showCasesView === 'function') await showCasesView(viewport);
+                        break;
+                    case 'promotions':
+                        if (typeof showMarketingAutomationView === 'function') await showMarketingAutomationView(viewport);
+                        break;
+                    default:
+                        console.log(`No specific refresh logic configured for ${view}`);
+                }
+            } catch (err) {
+                console.error("Error during auto-refresh:", err);
+            } finally {
+                window._isRefreshing = false;
+            }
+        },
 
         initSync: () => {
             window.addEventListener('dataChanged', (e) => {
@@ -17614,11 +18351,11 @@ Object.assign(window.app, appLogic);
 // ========== SECURITY INITIALIZATION ==========
 const initSecurity = async () => {
     console.log('Initializing security features...');
-    if (typeof window.app.checkForSecurityIncidents !== 'undefined') window.app. checkForSecurityIncidents();
+    if (typeof window.app.checkForSecurityIncidents !== 'undefined') window.app.checkForSecurityIncidents();
     if (typeof window.app.monitorLoginAttempts !== 'undefined') window.app.monitorLoginAttempts();
-    if (typeof window.app.initSessionTimeout !== 'undefined') window.app. initSessionTimeout();
-    if (typeof window.app.checkExpiredConsents !== 'undefined') window.app. checkExpiredConsents();
-    if (typeof window.app.scheduleRetentionJobs !== 'undefined') window.app. scheduleRetentionJobs();
+    if (typeof window.app.initSessionTimeout !== 'undefined') window.app.initSessionTimeout();
+    if (typeof window.app.checkExpiredConsents !== 'undefined') window.app.checkExpiredConsents();
+    if (typeof window.app.scheduleRetentionJobs !== 'undefined') window.app.scheduleRetentionJobs();
     console.log('Security features initialized');
 };
 
@@ -17639,9 +18376,9 @@ const logoutDueToInactivity = async () => {
     if (window.UI && window.UI.toast) window.UI.toast.warning('Session expired due to inactivity');
     if (typeof AuditLogger !== 'undefined') AuditLogger.warn("AUTH", "LOGOUT", { reason: 'session_timeout' });
     if (typeof window.app.logout === 'function') {
-        window.app. logout();
+        window.app.logout();
     } else if (typeof Auth !== 'undefined') {
-        await Auth. logout();
+        await Auth.logout();
         window.location.reload();
     }
 };
@@ -17658,12 +18395,12 @@ const monitorLoginAttempts = () => {
 
 const checkForSecurityIncidents = async () => {
     if (!window.DataStore) return;
-    const incidents = (await DataStore.getAll('security_incidents')).filter(i => i.status === 'new' && !i.acknowledged);
+    const incidents = await DataStore.getAll('security_incidents').filter(i => i.status === 'new' && !i.acknowledged);
     if (incidents.length > 0) {
         const critical = incidents.filter(i => i.severity === 'critical');
         if (critical.length > 0) {
             if (window.UI && window.UI.toast) window.UI.toast.error(`${critical.length} critical security incidents require attention`, 0);
-            window.app. addSecurityAlertIcon();
+            window.app.addSecurityAlertIcon();
         }
     }
 };
@@ -17675,7 +18412,7 @@ const addSecurityAlertIcon = async () => {
         alert.className = 'security-alert';
         alert.innerHTML = '<i class="fas fa-exclamation-triangle" style="color:red; cursor:pointer; font-size:20px; margin-right:15px;"></i>';
         alert.title = 'Security incidents require attention';
-        alert.onclick = () => window.app. showSecurityDashboard();
+        alert.onclick = () => window.app.showSecurityDashboard();
         header.insertBefore(alert, header.firstChild);
     }
 };
@@ -17862,7 +18599,7 @@ const showAdminDashboard = async () => {
                     <div class="kpi-title" style="color: var(--gray-600); font-size: 14px; margin-bottom: 8px;">Active Tenants</div>
                     <div class="kpi-value" style="font-size: 24px; font-weight: bold; color: var(--gray-900);">${activeTenants} / ${tenants.length}</div>
                 </div>
-                <div class="kpi-card" style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); cursor: pointer;" onclick="app. showDeploymentCenter()">
+                <div class="kpi-card" style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); cursor: pointer;" onclick="await app.showDeploymentCenter()">
                     <div class="kpi-title" style="color: var(--gray-600); font-size: 14px; margin-bottom: 8px;">System Version</div>
                     <div class="kpi-value" style="font-size: 24px; font-weight: bold; color: var(--gray-900);">
                         ${updates && updates.hasUpdate ? '<span style="color: var(--warning-color); font-size:16px;">Update Available</span>' : 'Up to Date'}
@@ -17872,37 +18609,37 @@ const showAdminDashboard = async () => {
 
             <div class="admin-modules-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;">
                 
-                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="app.showTenantManagement()" onmouseover="this.style.transform='await translateY(-5px)'" onmouseout="this.style.transform='await translateY(0)'">
+                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="app.showTenantManagement()" onmouseover="this.style.transform='translateY(-5px)'" onmouseout="this.style.transform='translateY(0)'">
                     <i class="fas fa-building" style="font-size: 40px; color: var(--primary-color); margin-bottom: 16px;"></i>
                     <h3>Tenant Management</h3>
                     <p style="color: var(--gray-600); font-size: 14px; margin-top: 8px;">Manage multi-tenant architecture, provision new tenants, and monitor usage.</p>
                 </div>
 
-                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="app.showSystemHealth()" onmouseover="this.style.transform='await translateY(-5px)'" onmouseout="this.style.transform='await translateY(0)'">
+                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="app.showSystemHealth()" onmouseover="this.style.transform='translateY(-5px)'" onmouseout="this.style.transform='translateY(0)'">
                     <i class="fas fa-heartbeat" style="font-size: 40px; color: var(--success-color); margin-bottom: 16px;"></i>
                     <h3>System Health</h3>
                     <p style="color: var(--gray-600); font-size: 14px; margin-top: 8px;">Monitor database, API, storage, and external service connectivity.</p>
                 </div>
 
-                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="app. async showBackupManager()" onmouseover="this.style.transform='await translateY(-5px)'" onmouseout="this.style.transform='await translateY(0)'">
+                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="await app.showBackupManager()" onmouseover="this.style.transform='translateY(-5px)'" onmouseout="this.style.transform='translateY(0)'">
                     <i class="fas fa-database" style="font-size: 40px; color: var(--secondary-color); margin-bottom: 16px;"></i>
                     <h3>Backup & Restore</h3>
                     <p style="color: var(--gray-600); font-size: 14px; margin-top: 8px;">Configure automated backups, manage snapshots, and perform data restoration.</p>
                 </div>
 
-                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="app. async showPerformanceMonitor()" onmouseover="this.style.transform='await translateY(-5px)'" onmouseout="this.style.transform='await translateY(0)'">
+                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="await app.showPerformanceMonitor()" onmouseover="this.style.transform='translateY(-5px)'" onmouseout="this.style.transform='translateY(0)'">
                     <i class="fas fa-tachometer-alt" style="font-size: 40px; color: var(--warning-color); margin-bottom: 16px;"></i>
                     <h3>Performance Monitor</h3>
                     <p style="color: var(--gray-600); font-size: 14px; margin-top: 8px;">Track query execution times, memory usage, and application delays.</p>
                 </div>
 
-                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="app. async showDeploymentCenter()" onmouseover="this.style.transform='await translateY(-5px)'" onmouseout="this.style.transform='await translateY(0)'">
+                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="await app.showDeploymentCenter()" onmouseover="this.style.transform='translateY(-5px)'" onmouseout="this.style.transform='translateY(0)'">
                     <i class="fas fa-rocket" style="font-size: 40px; color: #8b5cf6; margin-bottom: 16px;"></i>
                     <h3>Deployment Center</h3>
                     <p style="color: var(--gray-600); font-size: 14px; margin-top: 8px;">Manage CI/CD pipelines, rollouts to different environments, and zero-downtime updates.</p>
                 </div>
 
-                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="app.showSystemLogs()" onmouseover="this.style.transform='await translateY(-5px)'" onmouseout="this.style.transform='async translateY(0)'">
+                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="app.showSystemLogs()" onmouseover="this.style.transform='translateY(-5px)'" onmouseout="this.style.transform='async translateY(0)'">
                     <i class="fas fa-terminal" style="font-size: 40px; color: var(--gray-800); margin-bottom: 16px;"></i>
                     <h3>System Logs</h3>
                     <p style="color: var(--gray-600); font-size: 14px; margin-top: 8px;">View consolidated application, database, and system error logs.</p>
@@ -18047,8 +18784,8 @@ const showBackupManager = async () => {
             <div class="header-actions" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
                 <h2>Backup & Restore</h2>
                 <div>
-                    <button class="btn secondary" onclick="app. async createBackup('INCREMENTAL')">Incremental Backup</button>
-                    <button class="btn primary" onclick="app. createBackup('FULL')"><i class="fas fa-save"></i> Full Backup</button>
+                    <button class="btn secondary" onclick="await app.createBackup('INCREMENTAL')">Incremental Backup</button>
+                    <button class="btn primary" onclick="await app.createBackup('FULL')"><i class="fas fa-save"></i> Full Backup</button>
                 </div>
             </div>
             <div class="data-table-container">
@@ -18087,7 +18824,7 @@ const showBackupManager = async () => {
 
 const createBackup = async (type) => {
     if (typeof BackupManager !== 'undefined') {
-        const id = await BackupManager. createBackup(type);
+        const id = await BackupManager.createBackup(type);
         if (window.UI) UI.toast.success(`Backup ${id} initiated successfully`);
         (showBackupManager, 1000); // Refresh view after a simulated delay
     }
@@ -18138,7 +18875,7 @@ const showDeploymentCenter = async () => {
         <div class="deployment-center" style="padding: 24px;">
             <div class="header-actions" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
                 <h2>Deployment Center</h2>
-                <button class="btn primary" onclick="app. executeDeployment()"><i class="fas fa-rocket"></i> Deploy New Version</button>
+                <button class="btn primary" onclick="await app.executeDeployment()"><i class="fas fa-rocket"></i> Deploy New Version</button>
             </div>
             
             <div class="data-table-container">
@@ -18160,7 +18897,7 @@ const showDeploymentCenter = async () => {
                                 <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);"><span class="status-badge status-${d.status.toLowerCase()}">${d.status}</span></td>
                                 <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">${new Date(d.deployed_at).toLocaleString()}</td>
                                 <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">
-                                    ${d.status === 'COMPLETED' ? `<button class="btn btn-sm warning" onclick="app. rollbackDeployment('${d.version}')">Rollback</button>` : '-'}
+                                    ${d.status === 'COMPLETED' ? `<button class="btn btn-sm warning" onclick="await app.rollbackDeployment('${d.version}')">Rollback</button>` : '-'}
                                 </td>
                             </tr>
                         `).join('') : '<tr><td colspan="5" style="padding: 16px; text-align: center;">No deployment history.</td></tr>'}
@@ -18185,7 +18922,7 @@ const executeDeployment = async () => {
 const rollbackDeployment = async (version) => {
     if (confirm(`Are you sure you want to rollback from ${version}?`)) {
         if (typeof DeploymentManager !== 'undefined') {
-            await DeploymentManager. rollbackDeployment(version);
+            await DeploymentManager.rollbackDeployment(version);
             if (window.UI) UI.toast.success('Rollback initiated');
             (showDeploymentCenter, 1000);
         }
@@ -18215,7 +18952,7 @@ Object.assign(window.app, {
     executeDeployment,
     rollbackDeployment,
     showSystemLogs,
-    viewEntityDetail: async (entity, id) => {
+    viewEntityDetail: (entity, id) => {
         if (typeof hideSearchPanel !== 'undefined') hideSearchPanel();
         switch (entity) {
             case 'prospects': if (typeof showProspectDetail !== 'undefined') await showProspectDetail(id); break;
@@ -18225,21 +18962,19 @@ Object.assign(window.app, {
         }
     },
     // Provide mocks for some inline UI handlers to avoid errors if they don't exist
-    suspendTenant: (id) => { if (window.UI) window.UI.toast.info("Tenant suspended state toggled."); await setTimeout(showTenantManagement, 500); },
+    suspendTenant: (id) => { if (window.UI) window.UI.toast.info("Tenant suspended state toggled."); (showTenantManagement, 500); },
     viewTenantDetails: (id) => { if (window.UI) window.UI.toast.info("Viewing details for " + id); }
 });
 
 // Initialize application when DOM is ready
-document.addEventListener('DOMContentLoaded', async () => {
+document.addEventListener('DOMContentLoaded', () => {
     console.log("Script end reached. Scheduling init...");
-    setTimeout(async () => {
-        if (window.app && window.app.init) {
-            console.log("Triggering window.app.init()");
-            await window.app.init();
-        }
-    }, 100);
-    if (window.app && window.app.initSecurity) await window.app.initSecurity();
+(() => {
+    if (window.app && window.app.init) {
+        console.log("Triggering window.app.init()");
+        window.app.init();
+    }
+}, 100);
+    if (window.app && window.app.initSecurity) window.app.initSecurity();
     if (window.app && window.app.initSync) window.app.initSync();
 });
-
-})();
