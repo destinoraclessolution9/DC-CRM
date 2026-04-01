@@ -12389,7 +12389,7 @@ const Auth = {
                     </tr>
                 </thead>
                 <tbody id="focus-list-body">
-                    ${focusList.mapasync async (async (rec, idx) => await renderFocusRow(rec, idx, allActivities)).join('')}
+                    ${(await Promise.all(focusList.map(async (rec, idx) => await renderFocusRow(rec, idx, allActivities)))).join('')}
                     ${focusList.length === 0 ? '<tr><td colspan="7" style="padding: 32px; text-align: center; color: #9CA3AF;">No prospects in your focus list yet.</td></tr>' : ''}
                 </tbody>
             </table>
@@ -12420,7 +12420,7 @@ const Auth = {
                     </tr>
                 </thead>
                 <tbody id="pipeline-list-body">
-                    ${systemProspects.map(async p => await renderSystemRow(p, allActivities)).join('')}
+                    ${(await Promise.all(systemProspects.map(async p => await renderSystemRow(p, allActivities)))).join('')}
                     ${systemProspects.length === 0 ? '<tr><td colspan="7" style="padding: 32px; text-align: center; color: #9CA3AF;">No active prospects found.</td></tr>' : ''}
                 </tbody>
             </table>
