@@ -11116,14 +11116,14 @@ function _wireLoginBtn() {
         await app. switchProspectTab('notes', prospectId, document.querySelector('.profile-tab.active'));
     };
 
-    const deleteNote = async (prospectId, noteId) => {
-        UI.confirm('Delete Note?', 'Are you sure you want to delete this note?', () => {
-            await DataStore.delete('notes', noteId);
-            UI.toast.success('Note deleted');
-            await app. switchProspectTab('notes', prospectId, document.querySelector('.profile-tab.active'));
-        });
-    };
-
+    
+const deleteNote = async (prospectId, noteId) => {
+    UI.confirm('Delete Note?', 'Are you sure you want to delete this note?', async () => {
+        await DataStore.delete('notes', noteId);
+        UI.toast.success('Note deleted');
+        await app. switchProspectTab('notes', prospectId, document.querySelector('.profile-tab.active'));
+    });
+};
 
     const openAddCustomerModal = async () => {
         const content = `
