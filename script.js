@@ -155,7 +155,8 @@ const appLogic = (() => {
 
     const getVisibleActivities = async () => {
         const all = await DataStore.getAll('activities');
-        return all.filter(async a => await canViewActivity(a));
+        const visibility = await Promise.all(all.map(a => canViewActivity(a)));
+        return all.filter((_, i) => visibility[i]);
     };
 
     // Check edit permission: super_admin, marketing_manager, manager can edit anything;
@@ -1066,11 +1067,13 @@ const appLogic = (() => {
         }
         if (filters.basic['has-purchased']) {
             const product = filters.basic['has-purchased'];
-            items = items.filter(async i => await hasProspectPurchasedProduct(i.id, product));
+            const hasPurchased = await Promise.all(items.map(i => hasProspectPurchasedProduct(i.id, product)));
+            items = items.filter((_, idx) => hasPurchased[idx]);
         }
         if (filters.basic['not-purchased']) {
             const product = filters.basic['not-purchased'];
-            items = items.filter(async i => !await hasProspectPurchasedProduct(i.id, product));
+            const notPurchased = await Promise.all(items.map(i => hasProspectPurchasedProduct(i.id, product)));
+            items = items.filter((_, idx) => !notPurchased[idx]);
         }
 
         if (filters.basic.keyword) {
@@ -1698,6 +1701,11 @@ const appLogic = (() => {
         const file = await DataStore.getById('documents', fileId);
         const users = (await DataStore.getAll('users')).filter(u => u.id !== _currentUser?.id);
         const shares = (await DataStore.getAll('document_shares')).filter(s => s.document_id === fileId);
+        const shareItems = await Promise.all(shares.map(async s => {
+            const user = await DataStore.getById('users', s.shared_with);
+            return `<div class="share-item">${user?.full_name || 'Unknown'} (${s.permission}) <button onclick="app. removeShare(${s.id})">x</button></div>`;
+        }));
+
         const content = `
             <div class="share-modal">
                 <h3>Share: ${file.filename}</h3>
@@ -1706,7 +1714,7 @@ const appLogic = (() => {
                     <button class="btn primary" onclick="app. createShare(${fileId})">Add Share</button>
                 </div>
                 <div class="share-list">
-                    ${(await Promise.all(shares.map(async s => `<div class="share-item">${(await DataStore.getById('users', s.shared_with))?.full_name} (${s.permission}) <button onclick="app. removeShare(${s.id})">x</button></div>`))).join('')}
+                    ${shareItems.join('')}
                 </div>
             </div>
         `;
@@ -1723,7 +1731,8 @@ const appLogic = (() => {
     const removeShare = async (id) => { await DataStore.delete('document_shares', id); UI.toast.success('Share removed'); UI.hideModal(); };
 
     const initDefaultFolders = async () => {
-        if (await DataStore.getAll('folders').length === 0) {
+        const existing = await DataStore.getAll('folders');
+        if (!existing || existing.length === 0) {
             const defaults = [
                 { id: 1, name: 'Company Policies', color: '#3b82f6', parent_id: null },
                 { id: 2, name: 'Customer Documents', color: '#10b981', parent_id: null },
@@ -7294,7 +7303,8 @@ function _wireLoginBtn() {
         let activities = await DataStore.getAll('activities');
 
         // Apply visibility filters using the same logic as await async getVisibleActivities()
-        activities = activities.filter(async a => await canViewActivity(a));
+        const calVisibility = await Promise.all(activities.map(a => canViewActivity(a)));
+        activities = activities.filter((_, i) => calVisibility[i]);
 
         // Apply filters if any
         if (_filters.agent && _filters.agent !== 'all') {
@@ -10537,6 +10547,25 @@ function _wireLoginBtn() {
         const refs = await DataStore.query('referrals', { referrer_customer_id: customer.id });
         const container = document.getElementById(containerId);
 
+        const rowsPromises = refs.map(async (r) => {
+            const prospect = await DataStore.getById('prospects', r.referred_prospect_id);
+            return `
+                <tr>
+                    <td><strong>${prospect?.full_name || 'N/A'}</strong></td>
+                    <td>${r.relationship}</td>
+                    <td>${r.date}</td>
+                    <td><span class="score-badge ${r.status === 'Active' ? 'score-A+' : 'score-A'}">${r.status}</span></td>
+                    <td>${r.reward_status}</td>
+                    <td>
+                        <button class="btn-sm secondary" onclick="app.todo('View Referral')">View</button>
+                        <button class="btn-sm secondary" onclick="app.todo('Update Referral')">Update</button>
+                    </td>
+                </tr>
+            `;
+        });
+
+        const rowsHtml = (await Promise.all(rowsPromises)).join('');
+
         container.innerHTML = `
             <table class="purchase-table">
                 <thead>
@@ -10550,22 +10579,7 @@ function _wireLoginBtn() {
                     </tr>
                 </thead>
                 <tbody>
-                    ${refs.map(r => {
-            const prospect = await DataStore.getById('prospects', r.referred_prospect_id);
-            return `
-                        <tr>
-                            <td><strong>${prospect?.full_name || 'N/A'}</strong></td>
-                            <td>${r.relationship}</td>
-                            <td>${r.date}</td>
-                            <td><span class="score-badge ${r.status === 'Active' ? 'score-A+' : 'score-A'}">${r.status}</span></td>
-                            <td>${r.reward_status}</td>
-                            <td>
-                                <button class="btn-sm secondary" onclick="app.todo('View Referral')">View</button>
-                                <button class="btn-sm secondary" onclick="app.todo('Update Referral')">Update</button>
-                            </td>
-                        </tr>
-                        `;
-        }).join('')}
+                    ${rowsHtml}
                 </tbody>
             </table>
             <div style="margin-top:16px;">
@@ -10658,18 +10672,24 @@ function _wireLoginBtn() {
         const container = document.getElementById('customer-tags-section');
         const entityTags = await DataStore.query('entity_tags', { entity_type: 'customer', entity_id: customer.id });
 
+        let tagsHtml = '<p style="color:var(--gray-400); font-size:12px;">No tags yet.</p>';
+        if (entityTags.length > 0) {
+            const tagSpans = await Promise.all(entityTags.map(async (et) => {
+                const tag = await DataStore.getById('tags', et.tag_id);
+                return tag ? `
+                    <span class="score-badge" style="background:${tag.color || 'var(--primary)'}; color:white; display:flex; align-items:center; gap:4px; font-size:11px;">
+                        ${tag.name} <span style="cursor:pointer;" onclick="app. removeTagFromCustomer(${customer.id}, ${tag.id})">&times;</span>
+                    </span>
+                ` : '';
+            }));
+            tagsHtml = tagSpans.join('');
+        }
+
         container.innerHTML = `
             <div style="background:var(--white); padding:16px; border-radius:12px; border:1px solid var(--gray-200);">
                 <h4 style="font-size:13px; font-weight:700; color:var(--gray-500); margin-bottom:12px;">TAGS</h4>
                 <div style="display:flex; flex-wrap:wrap; gap:8px;">
-                    ${entityTags.length > 0 ? entityTags.map(et => {
-            const tag = await DataStore.getById('tags', et.tag_id);
-            return tag ? `
-                            <span class="score-badge" style="background:${tag.color || 'var(--primary)'}; color:white; display:flex; align-items:center; gap:4px; font-size:11px;">
-                                ${tag.name} <span style="cursor:pointer;" onclick="app. removeTagFromCustomer(${customer.id}, ${tag.id})">&times;</span>
-                            </span>
-                        ` : '';
-        }).join('') : '<p style="color:var(--gray-400); font-size:12px;">No tags yet.</p>'}
+                    ${tagsHtml}
                     <button class="btn-sm secondary" style="border-radius:20px; font-size:11px;" onclick="app. openAddTagModal(${customer.id}, 'customer')">+ Add Tag</button>
                 </div>
             </div>
@@ -10788,7 +10808,7 @@ function _wireLoginBtn() {
                                 </tr>
                             </thead>
                             <tbody>
-                                ${await DataStore.query('names', { prospect_id: prospect.id }).length > 0 ? await DataStore.query('names', { prospect_id: prospect.id }).map(n => `
+                                ${names.length > 0 ? names.map(n => `
                                     <tr>
                                         <td>${n.relation}</td>
                                         <td>${n.full_name}</td>
@@ -12511,20 +12531,28 @@ function _wireLoginBtn() {
 
         const readinessColor = readiness.label === 'HOT' ? '#DC2626' : (readiness.label === 'WARM' ? '#F59E0B' : '#6B7280');
 
+        const prospectName = await escapeHtml(prospect.name);
+        const agentUser = await DataStore.getById('users', prospect.responsible_agent_id);
+        const agentName = await escapeHtml(agentUser?.full_name || 'Unassigned');
+        const productNameHtml = await escapeHtml(productInfo.name);
+        const tagsHtml = prospect.tags
+            ? (await Promise.all(prospect.tags.split(',').map(async t => `<span style="background: #FEF3C7; color: #92400E; padding: 2px 6px; border-radius: 4px; font-size: 10px;">${await escapeHtml(t.trim())}</span>`))).join('')
+            : '';
+
         return `
             <tr class="pipeline-row" data-prospect-id="${prospect.id}" style="border-bottom: 1px solid #F3F4F6;">
                 <td style="padding: 16px;">
-                    <div style="font-weight: 600; color: #111827;">${await escapeHtml(prospect.name)}</div>
+                    <div style="font-weight: 600; color: #111827;">${prospectName}</div>
                     <div style="display: flex; align-items: center; gap: 4px; margin-top: 4px;">
                         <span style="font-size: 12px; color: #F59E0B;">⭐ ${prospect.score || 0}</span>
-                        ${prospect.tags ? prospect.tags.split(',').map(t => `<span style="background: #FEF3C7; color: #92400E; padding: 2px 6px; border-radius: 4px; font-size: 10px;">${await escapeHtml(t.trim())}</span>`).join('') : ''}
+                        ${tagsHtml}
                     </div>
                 </td>
                 <td style="padding: 16px;">
-                    <div style="font-size: 13px;">${await escapeHtml(await DataStore.getById('users', prospect.responsible_agent_id)?.full_name || 'Unassigned')}</div>
+                    <div style="font-size: 13px;">${agentName}</div>
                 </td>
                 <td style="padding: 16px;">
-                    <div style="font-weight: 500;">${await escapeHtml(productInfo.name)}</div>
+                    <div style="font-weight: 500;">${productNameHtml}</div>
                 </td>
                 <td style="padding: 16px; font-weight: 600; color: #059669;">RM ${productInfo.amount.toLocaleString()}</td>
                 <td style="padding: 16px;">
@@ -14628,7 +14656,7 @@ function _wireLoginBtn() {
                         </tr>
                     </thead>
                     <tbody id="packages-table-body">
-                        ${packages.map(async p => await renderPackageRow(p)).join('')}
+                        ${(await Promise.all(packages.map(p => renderPackageRow(p)))).join('')}
                         ${packages.length === 0 ? '<tr><td colspan="6" style="padding: 40px; text-align: center; color: var(--gray-500);">No promotion packages found. Click "+ New Package" to create one.</td></tr>' : ''}
                     </tbody>
                 </table>
@@ -14637,10 +14665,11 @@ function _wireLoginBtn() {
     };
 
     const renderPackageRow = async (p) => {
-        const productNames = (p.product_ids || []).map(id => {
+        const productNamesList = await Promise.all((p.product_ids || []).map(async id => {
             const prod = await DataStore.getById('products', id);
             return prod ? prod.name : 'Unknown Product';
-        }).join(', ');
+        }));
+        const productNames = productNamesList.join(', ');
 
         const abbreviatedProducts = productNames.length > 50 ? productNames.substring(0, 47) + '...' : productNames;
 
@@ -14675,19 +14704,21 @@ function _wireLoginBtn() {
         const status = document.getElementById('package-status-filter')?.value || 'all';
 
         const packages = await DataStore.getAll('promotions');
-        const filtered = packages.filter(p => {
+        const filteredResults = await Promise.all(packages.map(async p => {
+            // Pre-fetch all products for this package to check search keyword
+            const products = await Promise.all((p.product_ids || []).map(id => DataStore.getById('products', id)));
             const matchesSearch = (p.package_name || p.name || '').toLowerCase().includes(search) ||
-                (p.product_ids || []).some(id => {
-                    const prod = await DataStore.getById('products', id);
-                    return prod && (prod.name || '').toLowerCase().includes(search);
-                });
+                products.some(prod => prod && (prod.name || '').toLowerCase().includes(search));
             const matchesStatus = status === 'all' || (status === 'active' ? p.is_active : !p.is_active);
             return matchesSearch && matchesStatus;
-        });
+        }));
+        
+        const filtered = packages.filter((_, i) => filteredResults[i]);
 
         const tbody = document.getElementById('packages-table-body');
         if (tbody) {
-            tbody.innerHTML = filtered.map(async p => await renderPackageRow(p)).join('') +
+            const rows = await Promise.all(filtered.map(p => renderPackageRow(p)));
+            tbody.innerHTML = rows.join('') +
                 (filtered.length === 0 ? '<tr><td colspan="6" style="padding: 40px; text-align: center; color: var(--gray-500);">No matching packages found.</td></tr>' : '');
         }
     };
@@ -14878,6 +14909,9 @@ function _wireLoginBtn() {
 
     const renderTemplatesTab = async () => {
         const templates = await DataStore.getAll('whatsapp_templates');
+        const templatesHtml = templates.length > 0 
+            ? (await Promise.all(templates.map(t => renderTemplateCard(t)))).join('') 
+            : await renderSampleTemplates();
 
         return `
             <div class="templates-layout">
@@ -14887,7 +14921,7 @@ function _wireLoginBtn() {
                         <input type="text" id="template-search" placeholder="Search templates..." onkeyup="app. searchTemplates()">
                     </div>
                     <div class="templates-grid" id="templates-grid">
-                        ${templates.length > 0 ? templates.map(async t => await renderTemplateCard(t)).join('') : await renderSampleTemplates()}
+                        ${templatesHtml}
                     </div>
                 </div>
                 <div class="template-preview-panel">
@@ -14930,7 +14964,8 @@ function _wireLoginBtn() {
             { id: 1, template_name: 'Happy Birthday Wishes', category: 'Birthday', content: 'Hi {{name}}, wishing you a very happy birthday...', variables: ['name', 'zodiac'] },
             { id: 2, template_name: 'Post-Consultation Thank You', category: 'Follow-up', content: 'Dear {{name}}, it was a pleasure meeting you...', variables: ['name', 'agent'] }
         ];
-        return sampleTemplates.map(async t => await renderTemplateCard(t)).join('');
+        const cards = await Promise.all(sampleTemplates.map(t => renderTemplateCard(t)));
+        return cards.join('');
     };
 
     const renderTemplateCard = async (template) => {
@@ -15195,13 +15230,16 @@ function _wireLoginBtn() {
 
     const searchTemplates = async () => {
         const search = document.getElementById('template-search').value.toLowerCase();
-        const templates =await  await DataStore.getAll('whatsapp_templates');
+        const templates = await DataStore.getAll('whatsapp_templates');
         const filtered = templates.filter(t =>
             t.template_name.toLowerCase().includes(search) ||
             t.category.toLowerCase().includes(search)
         );
         const grid = document.getElementById('templates-grid');
-        if (grid) { grid.innerHTML = filtered.map(async t => await renderTemplateCard(t)).join(''); }
+        if (grid) { 
+            const cards = await Promise.all(filtered.map(t => renderTemplateCard(t)));
+            grid.innerHTML = cards.join(''); 
+        }
     };
 
     const editTemplate = async (id) => await openCreateTemplateModal(id);
@@ -15271,7 +15309,7 @@ function _wireLoginBtn() {
                 </tr>
             </thead>
             <tbody id="campaigns-list-body">
-                ${campaigns.length > 0 ? campaigns.map(async c => await renderCampaignRow(c)).join('') : '<tr><td colspan="7" style="text-align:center; padding:40px;">No campaigns found. Click "New Campaign" to start.</td></tr>'}
+                ${campaigns.length > 0 ? (await Promise.all(campaigns.map(c => renderCampaignRow(c)))).join('') : '<tr><td colspan="7" style="text-align:center; padding:40px;">No campaigns found. Click "New Campaign" to start.</td></tr>'}
             </tbody>
         </table>
     </div>
@@ -15732,7 +15770,8 @@ function _wireLoginBtn() {
 
         const body = document.getElementById('campaigns-list-body');
         if (body) {
-            body.innerHTML = campaigns.length > 0 ? campaigns.map(async c => await renderCampaignRow(c)).join('') : '<tr><td colspan="7" style="text-align:center; padding:40px;">No campaigns found.</td></tr>';
+            const rows = await Promise.all(campaigns.map(c => renderCampaignRow(c)));
+            body.innerHTML = campaigns.length > 0 ? rows.join('') : '<tr><td colspan="7" style="text-align:center; padding:40px;">No campaigns found.</td></tr>';
         }
     };
 
@@ -15770,7 +15809,7 @@ function _wireLoginBtn() {
             await DataStore.delete('whatsapp_campaigns', id);
             // Delete messages
             const messages = (await DataStore.getAll('campaign_messages')).filter(m => m.campaign_id === id);
-            messages.forEach(async m => await DataStore.delete('campaign_messages', m.id));
+            await Promise.all(messages.map(m => DataStore.delete('campaign_messages', m.id)));
             await refreshCampaignsTab();
         }
     };
@@ -16053,7 +16092,7 @@ function _wireLoginBtn() {
                     <div class="campaign-timeline">
                         <h3><i class="fas fa-history"></i> Recent Activity</h3>
                         <div class="timeline-list">
-                            ${messages.slice(0, 10).map(m => `
+                            ${(await Promise.all(messages.slice(0, 10).map(async m => `
                                 <div class="timeline-item">
                                     <div class="timeline-time">${UI.formatDate(m.sent_at || m.created_at)}</div>
                                     <div class="timeline-event">
@@ -16061,7 +16100,7 @@ function _wireLoginBtn() {
                                         <span class="status-badge status-${m.status}">${m.status}</span>
                                     </div>
                                 </div>
-                            `).join('')}
+                            `))).join('')}
                         </div>
                     </div>
 
@@ -16092,7 +16131,7 @@ function _wireLoginBtn() {
                                     </tr>
                                 </thead>
                                 <tbody id="recipient-list-body">
-                                    ${messages.map(async m => await renderRecipientRow(m)).join('')}
+                                    ${(await Promise.all(messages.map(m => renderRecipientRow(m)))).join('')}
                                 </tbody>
                             </table>
                         </div>
@@ -16127,16 +16166,19 @@ function _wireLoginBtn() {
         const status = document.getElementById('recipient-status-filter').value;
         const messages = (await DataStore.getAll('campaign_messages')).filter(m => m.campaign_id === campaignId);
 
-        const filtered = messages.filter(m => {
+        const filteredResults = await Promise.all(messages.map(async m => {
             const prospect = await DataStore.getById('prospects', m.prospect_id);
             const nameMatch = prospect?.full_name?.toLowerCase().includes(search);
             const statusMatch = status === 'all' || m.status === status;
             return nameMatch && statusMatch;
-        });
+        }));
+        
+        const filtered = messages.filter((_, i) => filteredResults[i]);
 
         const body = document.getElementById('recipient-list-body');
         if (body) {
-            body.innerHTML = filtered.map(async m => await renderRecipientRow(m)).join('');
+            const rows = await Promise.all(filtered.map(m => renderRecipientRow(m)));
+            body.innerHTML = rows.join('');
         }
     };
 
@@ -16778,7 +16820,10 @@ function _wireLoginBtn() {
         const history = (await DataStore.getAll('reassignment_history')).sort((a, b) => new Date(b.reassignment_date) - new Date(a.reassignment_date));
         if (history.length === 0) return '<p style="padding:16px;color:var(--gray-500)">No reassignment history yet.</p>';
         const getAgentNameById = async (id) => { const u = await DataStore.getById('users', id); return u?.full_name || `Agent #${id}`; };
-        return `<table class="agent-performance-table"><thead><tr><th>Date</th><th>Prospect ID</th><th>From Agent</th><th>To Agent</th><th>Reason</th><th>By</th></tr></thead><tbody>${history.map(r => `<tr><td>${UI.formatDate(r.reassignment_date)}</td><td>#${r.prospect_id}</td><td>${await getAgentNameById(r.from_agent_id)}</td><td>${await getAgentNameById(r.to_agent_id)}</td><td>${r.reassignment_reason}</td><td>${await getAgentNameById(r.reassigned_by)}</td></tr>`).join('')}</tbody></table>`;
+        
+        const rows = await Promise.all(history.map(async r => `<tr><td>${UI.formatDate(r.reassignment_date)}</td><td>#${r.prospect_id}</td><td>${await getAgentNameById(r.from_agent_id)}</td><td>${await getAgentNameById(r.to_agent_id)}</td><td>${r.reassignment_reason}</td><td>${await getAgentNameById(r.reassigned_by)}</td></tr>`));
+        
+        return `<table class="agent-performance-table"><thead><tr><th>Date</th><th>Prospect ID</th><th>From Agent</th><th>To Agent</th><th>Reason</th><th>By</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
     };
 
     const openReassignModal = async (prospectName) => {
