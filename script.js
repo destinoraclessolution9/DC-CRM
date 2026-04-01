@@ -2783,7 +2783,7 @@ In a production system, this would show the actual file contents.
             }
         }, { passive: true });
 
-        content.addEventListener('touchend', (e) => {
+	content.addEventListener('touchend', async (e) => {
             if (!startY) return;
             const diff = e.changedTouches[0].clientY - startY;
             if (diff > 80) {
