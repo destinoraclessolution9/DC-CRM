@@ -2,7 +2,6 @@
  * Feng Shui CRM V8.7 - Auth Layer (Supabase)
  */
 const Auth = (() => {
-    const supabase = window.supabase;
 
     const getCurrentUser = async () => {
         try {

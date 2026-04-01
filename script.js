@@ -2141,7 +2141,7 @@ const appLogic = (() => {
         list.innerHTML = html;
     };
 
-    const uploadFiles = () => {
+    const uploadFiles = async () => {
         const files = window._pendingUploads || [];
         if (files.length === 0) {
             UI.toast.error('No files selected');
@@ -2156,7 +2156,7 @@ const appLogic = (() => {
 
         // Simulate async upload (in production, actually upload)
         for (const [index, file] of files.entries()) {
-            await setTimeout(async () => {
+            await new Promise(resolve => setTimeout(async () => {
                 // Create document record
                 const newDoc = {
                     id: Date.now() + index,
@@ -2181,13 +2181,14 @@ const appLogic = (() => {
                 document.getElementById('upload-status').textContent = `Uploaded ${uploaded} of ${total} files`;
 
                 if (uploaded === total) {
-                    await setTimeout(async () => {
+                    setTimeout(async () => {
                         UI.hideModal();
                         UI.toast.success(`${total} files uploaded successfully`);
                         await loadFolderContents();
                     }, 500);
                 }
-            }, index * 300); // Stagger for demo effect
+                resolve();
+            }, index * 300)); // Stagger for demo effect
         }
     };
 
