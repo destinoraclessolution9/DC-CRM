@@ -3128,7 +3128,7 @@ In a production system, this would show the actual file contents.
             localStorage.setItem('google_sync_log', JSON.stringify(filtered));
         }
 
-        await resolveConflict(choice, activityId, eventId) {
+        resolveConflict(choice, activityId, eventId) {
             UI.hideModal();
             UI.toast.success(`Conflict resolved. Chose: ${choice}`);
         }
@@ -6458,13 +6458,13 @@ function _wireLoginBtn() {
             .style("font-family", '"Font Awesome 5 Free"')
             .style("font-weight", "900")
             .text("\uf075") // fa-comment
-            .on("click", (e, d) => {
+            .on("click", async (e, d) => {
                 e.stopPropagation();
                 await app. openMemoModal(d.data.id, d.data.type);
             });
 
         // Click async Handler (View Profile)
-        nodes.on("click", (e, d) => {
+        nodes.on("click", async (e, d) => {
             if (d.data.type === 'customer') {
                 await app. showCustomerDetail(d.data.id);
             } else {
@@ -6473,7 +6473,7 @@ function _wireLoginBtn() {
         });
 
         // Expand/collapse on double-click
-        nodes.on("dblclick", (e, d) => {
+        nodes.on("dblclick", async (e, d) => {
             e.stopPropagation();
             await app. showReferralTree(d.data.id, d.data.type);
         });
