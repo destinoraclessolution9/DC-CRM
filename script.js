@@ -1,5 +1,6 @@
 // Ensure app object exists globally - MUST BE FIRST LINE
 window.app = window.app || {};
+(async function() {
 console.log("!!! ANTIGRAVITY v2 LOADED !!!");
 
 // Add initialization flag
@@ -9,7 +10,7 @@ window.onerror = (msg, url, line) => {
     console.error(`GLOBAL ERROR: ${msg} at ${url}:${line}`);
 };
 
-(async function() {
+
 const appLogic = (() => {
     let _currentView = 'dashboard';
     let _currentUser = null;
