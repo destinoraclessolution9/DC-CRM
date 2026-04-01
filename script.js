@@ -6120,13 +6120,14 @@ function _wireLoginBtn() {
             if (!r.referrer_id) return;
             grouped[r.referrer_id] = (grouped[r.referrer_id] || 0) + 1;
         });
-        const top3 = Object.entries(grouped)
+        const top3Promises = Object.entries(grouped)
             .sort((a, b) => b[1] - a[1])
             .slice(0, 3)
-            .map(([id, count]) => {
+            .map(async ([id, count]) => {
                 const person = await DataStore.getById('customers', id) || await DataStore.getById('prospects', id);
                 return { name: person?.full_name || `ID: ${id}`, count };
             });
+        const top3 = await Promise.all(top3Promises);
 
         container.innerHTML = `
             <div class="summary-table-v2">
