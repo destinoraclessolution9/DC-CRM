@@ -109,7 +109,7 @@ class DataStore {
     async add(tableName, record) {
         // If the record doesn't have an ID, we assume the DB handles it or we gen one
         const dataToInsert = { ...record };
-        // if (!dataToInsert.id) dataToInsert.id = this._generateId(); 
+        if (!dataToInsert.id) dataToInsert.id = this._generateId(); 
 
         const { data, error } = await window.supabaseClient
             .from(tableName)
