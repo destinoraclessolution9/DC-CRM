@@ -17418,61 +17418,57 @@ const Auth = {
         refreshPerformanceInsights: () => UI.toast.info('Refreshing insights...'),
 
         // ========== GLOBAL DATA SYNCHRONIZATION ==========
-        refreshCurrentView: () => {
-            const viewport = document.getElementById('content-viewport');
-            if (!viewport) return;
-
-            // Guard against infinite loops if render functions modify data
-            if (window._isRefreshing) return;
-            window._isRefreshing = true;
-
-            try {
-                const view = _currentView;
-                console.log(`Auto-refreshing view: ${view}`);
-
-                switch (view) {
-                    case 'month':
-                        if (typeof renderCalendar === 'function') await renderCalendar();
-                        break;
-                    case 'week':
-                        if (typeof renderWeekView === 'function') await renderWeekView();
-                        break;
-                    case 'day':
-                        if (typeof renderTodayActivities === 'function') await renderTodayActivities();
-                        break;
-                    case 'prospects':
-                        if (typeof showProspectsView === 'function') await showProspectsView(viewport);
-                        break;
-                    case 'pipeline':
-                        if (typeof showPipelineView === 'function') await showPipelineView(viewport);
-                        break;
-                    case 'reports':
-                        if (typeof refreshKPIDashboard === 'function') await refreshKPIDashboard();
-                        break;
-                    case 'protection':
-                        if (typeof showProtectionMonitoringView === 'function') await showProtectionMonitoringView(viewport);
-                        break;
-                    case 'agents':
-                        if (typeof showAgentsView === 'function') await showAgentsView(viewport);
-                        break;
-                    case 'referrals':
-                        if (typeof showReferralsView === 'function') await showReferralsView(viewport);
-                        break;
-                    case 'cases':
-                        if (typeof showCasesView === 'function') await showCasesView(viewport);
-                        break;
-                    case 'promotions':
-                        if (typeof showMarketingAutomationView === 'function') await showMarketingAutomationView(viewport);
-                        break;
-                    default:
-                        console.log(`No specific refresh logic configured for ${view}`);
-                }
-            } catch (err) {
-                console.error("Error during auto-refresh:", err);
-            } finally {
-                window._isRefreshing = false;
-            }
-        },
+       refreshCurrentView: async () => {   // ✅ now async
+    const viewport = document.getElementById('content-viewport');
+    if (!viewport) return;
+    if (window._isRefreshing) return;
+    window._isRefreshing = true;
+    try {
+        const view = _currentView;
+        console.log(`Auto-refreshing view: ${view}`);
+        switch (view) {
+            case 'month':
+                if (typeof renderCalendar === 'function') await renderCalendar();
+                break;
+            case 'week':
+                if (typeof renderWeekView === 'function') await renderWeekView();
+                break;
+            case 'day':
+                if (typeof renderTodayActivities === 'function') await renderTodayActivities();
+                break;
+            case 'prospects':
+                if (typeof showProspectsView === 'function') await showProspectsView(viewport);
+                break;
+            case 'pipeline':
+                if (typeof showPipelineView === 'function') await showPipelineView(viewport);
+                break;
+            case 'reports':
+                if (typeof refreshKPIDashboard === 'function') await refreshKPIDashboard();
+                break;
+            case 'protection':
+                if (typeof showProtectionMonitoringView === 'function') await showProtectionMonitoringView(viewport);
+                break;
+            case 'agents':
+                if (typeof showAgentsView === 'function') await showAgentsView(viewport);
+                break;
+            case 'referrals':
+                if (typeof showReferralsView === 'function') await showReferralsView(viewport);
+                break;
+            case 'cases':
+                if (typeof showCasesView === 'function') await showCasesView(viewport);
+                break;
+            case 'promotions':
+                if (typeof showMarketingAutomationView === 'function') await showMarketingAutomationView(viewport);
+                break;
+            default:
+                console.log(`No specific refresh logic configured for ${view}`);
+        }
+    } catch (err) {
+        console.error("Error during auto-refresh:", err);
+    } finally {
+        window._isRefreshing = false;
+    }
+},
 
         initSync: () => {
             window.addEventListener('dataChanged', (e) => {
