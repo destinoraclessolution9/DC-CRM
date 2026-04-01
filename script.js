@@ -5463,34 +5463,51 @@ In a production system, this would show the actual file contents.
     }
 
     function _wireLoginBtn() {
-        const btn = document.getElementById('loginBtn');
-        if (!btn || btn._supabaseSetup) return;
-        btn._supabaseSetup = true;
-        btn.onclick = async () => {
-            const email = document.getElementById('loginEmail')?.value?.trim();
-            const password = document.getElementById('loginPassword')?.value;
-            if (!email || !password) {
-                alert('Please enter email and password');
-                return;
+    const btn = document.getElementById('loginBtn');
+    if (!btn || btn._supabaseSetup) return;
+    btn._supabaseSetup = true;
+    btn.onclick = async () => {
+        const email = document.getElementById('loginEmail')?.value?.trim();
+        const password = document.getElementById('loginPassword')?.value;
+        if (!email || !password) {
+            alert('Please enter email and password');
+            return;
+        }
+        try {
+            btn.disabled = true;
+            btn.textContent = 'Logging in...';
+            // 1. Authenticate with Supabase Auth
+            const user = await Auth.login(email, password);
+            
+            // 2. Fetch the corresponding profile from the 'users' table
+            const { data: profile, error: profileError } = await window.supabase
+                .from('users')
+                .select('*')
+                .eq('email', user.email)
+                .single();
+            if (profileError || !profile) {
+                throw new Error('User profile not found. Contact admin.');
             }
-            try {
-                btn.disabled = true;
-                btn.textContent = 'Logging in...';
-                const user = await Auth.await login(email, password);
-                _currentUser = user;
-                document.getElementById('login-container').style.display = 'none';
-                document.getElementById('app-shell').style.display = 'block';
-                updateUserDisplay();
-                updateNavVisibility();
-                UI.toast.success('Welcome!');
-                await navigateTo('calendar');
-            } catch (err) {
-                alert('Login failed: ' + err.message);
-                btn.disabled = false;
-                btn.textContent = 'Login';
-            }
-        };
-    }
+            
+            // 3. Store the full profile (with name, role, etc.)
+            _currentUser = profile;
+            
+            // 4. Show the main app
+            document.getElementById('login-container').style.display = 'none';
+            document.getElementById('app-shell').style.display = 'block';
+            updateUserDisplay();
+            updateNavVisibility();
+            UI.toast.success(`Welcome ${profile.full_name}!`);
+            await navigateTo('calendar');
+        } catch (err) {
+            console.error('Login error:', err);
+            alert('Login failed: ' + err.message);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Login';
+        }
+    };
+}
 
     // ==================== INIT ====================
 
@@ -18113,15 +18130,15 @@ Object.assign(window.app, {
 });
 
 // Initialize application when DOM is ready
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     console.log("Script end reached. Scheduling init...");
-    await async setTimeout(() => {
+    setTimeout(async () => {
         if (window.app && window.app.init) {
-            console.log("Triggering window.app.await init()");
-            window.app.await init();
+            console.log("Triggering window.app.init()");
+            await window.app.init();
         }
     }, 100);
-    if (window.app && window.app.initSecurity) window.app.await initSecurity();
+    if (window.app && window.app.initSecurity) await window.app.initSecurity();
     if (window.app && window.app.initSync) window.app.initSync();
 });
 
