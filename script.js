@@ -6394,6 +6394,16 @@ function _wireLoginBtn() {
         const root = d3.hierarchy(rootData);
         tree(root);
 
+        // Pre-compute fill colors for all nodes before rendering
+        const nodesData = root.descendants();
+        for (const d of nodesData) {
+            if (d.data.type === 'customer') {
+                d.fillColor = '#ffffff';
+            } else {
+                d.fillColor = await getProspectColour(d.data.id);
+            }
+        }
+
         // Links
         _treeSvg.selectAll(".link")
             .data(root.links())
@@ -6419,7 +6429,7 @@ function _wireLoginBtn() {
             .attr("x", -80)
             .attr("y", -22)
             .attr("rx", 6)
-            .attr("fill", d => d.data.type === 'customer' ? '#ffffff' : await getProspectColour(d.data.id))
+            .attr("fill", d => d.fillColor)
             .attr("stroke", d => d.data.type === 'customer' ? '#0d9488' : 'none')
             .attr("stroke-width", 2)
             .style("filter", "drop-shadow(0 2px 4px rgba(0,0,0,0.05))");
@@ -6799,7 +6809,8 @@ function _wireLoginBtn() {
         // Apply Search/Filter logic
         if (_caseFilters.search) {
             const q = _caseFilters.search.toLowerCase();
-            cases = cases.filter(c => {
+            const filteredCases = [];
+            for (const c of cases) {
                 let nameMatch = false;
                 if (c.prospect_id) {
                     const p = await DataStore.getById('prospects', c.prospect_id);
@@ -6809,8 +6820,11 @@ function _wireLoginBtn() {
                     const cust = await DataStore.getById('customers', c.customer_id);
                     if (cust?.full_name?.toLowerCase().includes(q)) nameMatch = true;
                 }
-                return c.title.toLowerCase().includes(q) || nameMatch;
-            });
+                if (c.title.toLowerCase().includes(q) || nameMatch) {
+                    filteredCases.push(c);
+                }
+            }
+            cases = filteredCases;
         }
 
         if (_caseFilters.product !== 'all') {
@@ -6832,7 +6846,7 @@ function _wireLoginBtn() {
         }
 
         emptyState.style.display = 'none';
-        tbody.innerHTML = cases.map(c => {
+        const caseRows = await Promise.all(cases.map(async c => {
             let entityName = '-';
             let entityLink = '#';
             if (c.customer_id) {
@@ -6871,7 +6885,8 @@ function _wireLoginBtn() {
                     </td>
                 </tr>
             `;
-        }).join('');
+        }));
+        tbody.innerHTML = caseRows.join('');
     };
 
     const showCaseStudyDetail = async (id) => {
@@ -7535,14 +7550,14 @@ function _wireLoginBtn() {
         if (!todayList || !upcomingList) return;
 
         const today = new Date();
-        const mmdd = async (d) => `${(d.getMonth() + 1).toString().padStart(2, '0')} -${d.getDate().toString().padStart(2, '0')} `;
-        const todayStr = await mmdd(today);
+        const mmdd = (d) => `${(d.getMonth() + 1).toString().padStart(2, '0')}-${d.getDate().toString().padStart(2, '0')}`;
+        const todayStr = mmdd(today);
 
         // Get tomorrow and day after
         const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
-        const tomorrowStr = await mmdd(tomorrow);
+        const tomorrowStr = mmdd(tomorrow);
         const day2 = new Date(today); day2.setDate(today.getDate() + 2);
-        const day2Str = await mmdd(day2);
+        const day2Str = mmdd(day2);
 
         const prospects = await DataStore.getAll('prospects');
         const customers = await DataStore.getAll('customers');
@@ -7552,19 +7567,21 @@ function _wireLoginBtn() {
             const agent = await DataStore.getById('users', p.responsible_agent_id || p.lead_agent_id);
             return {
                 name: p.full_name,
-                info: `Agent: ${agent?.full_name || 'Michelle Tan'} · ${p.customer_since ? 'Customer' : 'Prospect'} `,
+                info: `Agent: ${agent?.full_name || 'Michelle Tan'} · ${p.customer_since ? 'Customer' : 'Prospect'}`,
                 dob: p.date_of_birth ? p.date_of_birth.substring(5) : '' // MM-DD
             };
         };
 
-        const todayBdays = all.filter(p => p.date_of_birth && p.date_of_birth.substring(5) === todayStr).map(getBdayInfo);
-        const upcomingBdays = all.filter(p => p.date_of_birth && (p.date_of_birth.substring(5) === tomorrowStr || p.date_of_birth.substring(5) === day2Str))
-            .map(p => {
+        const todayBdays = await Promise.all(all.filter(p => p.date_of_birth && p.date_of_birth.substring(5) === todayStr).map(getBdayInfo));
+        const upcomingBdays = await Promise.all(all.filter(p => p.date_of_birth && (p.date_of_birth.substring(5) === tomorrowStr || p.date_of_birth.substring(5) === day2Str))
+            .map(async p => {
                 const info = await getBdayInfo(p);
                 const isTomorrow = p.date_of_birth.substring(5) === tomorrowStr;
-                info.info += ` · ${isTomorrow ? 'Tomorrow' : 'In 2 days'} `;
+                info.info += ` · ${isTomorrow ? 'Tomorrow' : 'In 2 days'}`;
                 return info;
-            });
+            }));
+        
+        console.log("Birthday Data:", todayBdays, upcomingBdays);
 
         const renderBday = (data) => {
             if (data.length === 0) return '<div class="text-muted" style="padding:10px; font-size:12px;">No birthdays found.</div>';
@@ -7808,16 +7825,24 @@ function _wireLoginBtn() {
             const hourStr = `${i.toString().padStart(2, '0')}:00`;
             const actsAtHour = dayActs.filter(a => a.start_time.startsWith(i.toString().padStart(2, '0')));
 
+            const hourContent = await Promise.all(actsAtHour.map(async a => {
+                let prospectInfo = '';
+                if (a.prospect_id) {
+                    const p = await DataStore.getById('prospects', a.prospect_id);
+                    if (p) prospectInfo = `(${p.full_name})`;
+                }
+                return `
+                    <div class="day-act-item">
+                        <strong>${a.activity_type}</strong>: ${a.activity_title} ${prospectInfo}
+                    </div>
+                `;
+            }));
+
             hoursHtml += `
                 <div class="day-view-hour">
                     <div class="hour-label">${hourStr}</div>
                     <div class="hour-content">
-                        ${actsAtHour.map(a => `
-                            <div class="day-act-item">
-                                <strong>${a.activity_type}</strong>: ${a.activity_title}
-                                ${a.prospect_id ? `(${await DataStore.getById('prospects', a.prospect_id)?.full_name})` : ''}
-                            </div>
-                        `).join('')}
+                        ${hourContent.join('')}
                     </div>
                 </div>
             `;
@@ -7920,7 +7945,7 @@ function _wireLoginBtn() {
                 const customers = await DataStore.getAll('customers');
                 const all = [...prospects, ...customers];
 
-                let rows = attendees.map(att => {
+                const renderedRows = await Promise.all(attendees.map(async att => {
                     const person = all.find(p => p.id === att.entity_id);
                     const name = person ? person.full_name : 'Unknown';
                     const agent = await DataStore.getById('users', att.added_by_agent_id);
@@ -7939,7 +7964,8 @@ function _wireLoginBtn() {
                             </div>
                         </div>
                     `;
-                }).join('');
+                }));
+                const rows = renderedRows.join('');
 
                 attendeeHtml = `
                     <div class="detail-section">
@@ -8053,12 +8079,12 @@ function _wireLoginBtn() {
 
     const rescheduleActivity = async (activityId) => {
         await app. editActivity(activityId);
-        (() => {
+        setTimeout(() => {
             const dateEl = document.getElementById('activity-date');
             if (dateEl) {
                 dateEl.focus();
                 dateEl.style.boxShadow = '0 0 0 2px var(--primary-color)';
-                (() => dateEl.style.boxShadow = '', 2000);
+                setTimeout(() => { dateEl.style.boxShadow = ''; }, 2000);
             }
         }, 350);
     };
@@ -8067,8 +8093,8 @@ function _wireLoginBtn() {
         UI.hideModal();
         const ev = await DataStore.getById('events', eventId);
         await app. openActivityModal();
-        (() => {
-            const all = [...DataStore.getAll('prospects'), ...DataStore.getAll('customers')];
+        setTimeout(async () => {
+            const all = [...await DataStore.getAll('prospects'), ...await DataStore.getAll('customers')];
             const p = all.find(x => x.id === entityId);
             if (p) app. selectEntity(entityId, p.is_customer ? 'customer' : 'prospect');
 
@@ -8076,7 +8102,7 @@ function _wireLoginBtn() {
             if (typeEl) {
                 typeEl.value = 'CALL';
                 await app. updateActivityForm();
-                (() => {
+                setTimeout(() => {
                     const titleEl = document.getElementById('meeting-title');
                     if (titleEl && ev) titleEl.value = `Follow-up from ${ev.title}`;
                     document.getElementById('note-key-points')?.focus();
@@ -8465,8 +8491,12 @@ function _wireLoginBtn() {
     };
 
     // 3. Wait for the dynamic fields to be async injected (first wave)
-    (() => {
+    setTimeout(async () => {
         // Common fields for all activity types
+        const setField = (id, val) => {
+            const el = document.getElementById(id);
+            if (el) el.value = val || '';
+        };
         setField('activity-date', activity.activity_date);
         setField('start-time', activity.start_time);
         setField('end-time', activity.end_time);
@@ -8494,7 +8524,6 @@ function _wireLoginBtn() {
         }
 
         // 5. Poll for the entity badge container and render the badge if needed
-      setTimeout(() => {
         if (entityRestored) {
             const badgeContainerId = 'selected-entity-info';
             let attempts = 0;
@@ -8502,8 +8531,8 @@ function _wireLoginBtn() {
                 const container = document.getElementById(badgeContainerId);
                 if (container) {
                     const entityName = _selectedEntity.type === 'Prospect'
-                        ? await DataStore.getById('prospects', _selectedEntity.id)?.full_name
-                        : await DataStore.getById('customers', _selectedEntity.id)?.full_name;
+                        ? (await DataStore.getById('prospects', _selectedEntity.id))?.full_name
+                        : (await DataStore.getById('customers', _selectedEntity.id))?.full_name;
                     if (entityName) {
                         container.innerHTML = `
                             <div class="selected-entity-badge">
@@ -8519,8 +8548,7 @@ function _wireLoginBtn() {
                 }
             }, 100);
         }
-}, 0);
-        // 6. Type‑specific fields
+        // 6. Type-specific fields
         switch (activity.activity_type) {
             case 'FTF':
             case 'GR':
@@ -8531,60 +8559,55 @@ function _wireLoginBtn() {
                 setField('meeting-title', activity.activity_title || '');
                 break;
             case 'FSA':
-            case 'SITE':
+            case ' SITE':
                 if (activity.compass_needed) {
                     const chk = document.getElementById('compass-needed');
                     if (chk) chk.checked = true;
                 }
                 break;
-            // Add other types as needed (e.g., EVENT, AGENT_MEETING)
         }
 
-        // 7. Co‑agents
+        // 7. Co-agents
         _selectedCoAgents = activity.co_agents || [];
         if (typeof renderCoAgents === 'function') renderCoAgents();
 
-        // 8. If this is a CPS activity, poll for CPS‑specific fields
+        // 8. If this is a CPS activity, poll for CPS-specific fields
         if (activity.activity_type === 'CPS' && activity.prospect_id) {
             const prospect = await DataStore.getById('prospects', activity.prospect_id);
-            if (!prospect) {
-                console.error('Prospect not found for ID:', activity.prospect_id);
-                return;
+            if (prospect) {
+                let attempts = 0;
+                const cpsInterval = setInterval(() => {
+                    const cpsName = document.getElementById('cps-name');
+                    if (cpsName) {
+                        setField('cps-name', prospect.full_name);
+                        setField('cps-nickname', prospect.nickname);
+                        setField('cps-phone', prospect.phone);
+                        setField('cps-ic', prospect.ic_number);
+                        setField('cps-email', prospect.email);
+                        setField('cps-dob', prospect.date_of_birth);
+                        setField('cps-lunar', prospect.lunar_birth);
+                        setField('cps-gua', prospect.ming_gua);
+                        setField('cps-occupation', prospect.occupation);
+                        setField('cps-company', prospect.company_name);
+                        setField('cps-income', prospect.income_range);
+                        setField('cps-address', prospect.address);
+                        setField('cps-city', prospect.city);
+                        setField('cps-state', prospect.state);
+                        setField('cps-zip', prospect.postal_code);
+                        clearInterval(cpsInterval);
+                    } else if (++attempts >= 30) {
+                        console.warn('CPS fields did not appear after polling');
+                        clearInterval(cpsInterval);
+                    }
+                }, 100);
             }
-
-            let attempts = 0;
-            const cpsInterval = (() => {
-                const cpsName = document.getElementById('cps-name');
-                if (cpsName) {
-                    // CPS fields are present – populate all prospect fields
-                    setField('cps-name', prospect.full_name);
-                    setField('cps-nickname', prospect.nickname);
-                    setField('cps-phone', prospect.phone);
-                    setField('cps-ic', prospect.ic_number);
-                    setField('cps-email', prospect.email);
-                    setField('cps-dob', prospect.date_of_birth);
-                    setField('cps-lunar', prospect.lunar_birth);
-                    setField('cps-gua', prospect.ming_gua);
-                    setField('cps-occupation', prospect.occupation);
-                    setField('cps-company', prospect.company_name);
-                    setField('cps-income', prospect.income_range);
-                    setField('cps-address', prospect.address);
-                    setField('cps-city', prospect.city);
-                    setField('cps-state', prospect.state);
-                    setField('cps-zip', prospect.postal_code);
-                    clearInterval(cpsInterval);
-                } else if (++attempts >= 30) {
-                    console.warn('CPS fields did not appear after polling');
-                    clearInterval(cpsInterval);
-                }
-            }, 100);
         }
 
         // 9. Change the modal's save button to "Update Activity"
         const saveBtn = document.querySelector('.modal-footer .btn.primary');
         if (saveBtn) {
             saveBtn.textContent = 'Update Activity';
-            saveBtn.onclick = async () => await app. updateActivity(activity.id);
+            saveBtn.onclick = async () => await app.updateActivity(activity.id);
         }
     }, 500);
 };
@@ -8799,9 +8822,9 @@ function _wireLoginBtn() {
                     </div>
                 `;
                 // Diagnostic: Ensure searchReferrers is bound
-                (() => {
+                setTimeout(() => {
                     const input = document.getElementById('cps-referrer');
-                    if (input) input.onkeyup = setInterval(async () => await app. searchReferrers();
+                    if (input) input.onkeyup = async () => await app.searchReferrersForModal(input.value, 'referrer');
                 }, 100);
                 break;
 
@@ -10127,7 +10150,7 @@ function _wireLoginBtn() {
             await showFieldError('prospect-phone', 'Phone is required');
             hasError = true;
         } else if (!/^[0-9\+\-\s]{8,}$/.test(phone)) {
-            await async showFieldError('prospect-phone', 'Enter a valid phone number (min 8 digits)');
+            await showFieldError('prospect-phone', 'Enter a valid phone number (min 8 digits)');
             hasError = true;
         }
 
@@ -13193,7 +13216,8 @@ function _wireLoginBtn() {
         // Add event listeners for async filters
         setTimeout(() => {
             ['hist-type', 'hist-status'].forEach(id => {
-                document.getElementById(id).addEventListenerasync async ('change', async () => await loadOverrideHistory());
+                const el = document.getElementById(id);
+                if (el) el.addEventListener('change', async () => await loadOverrideHistory());
             });
         }, 100);
     };
