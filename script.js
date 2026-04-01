@@ -153,7 +153,8 @@ const appLogic = (() => {
 
     const getVisibleActivities = async () => {
         const all = await DataStore.getAll('activities');
-        return all.filter(async a => await canViewActivity(a));
+        const results = await Promise.all(all.map(a => canViewActivity(a)));
+        return all.filter((_, i) => results[i]);
     };
 
     // Check edit permission: super_admin, marketing_manager, manager can edit anything;
@@ -230,7 +231,7 @@ const appLogic = (() => {
         return 'Conversion failed';
     };
 
-    const escapeHtml = async (unsafe) => {
+    const escapeHtml = (unsafe) => {
         if (!unsafe || typeof unsafe !== 'string') return unsafe || '';
         return unsafe
             .replace(/&/g, "&amp;")
@@ -4067,7 +4068,7 @@ In a production system, this would show the actual file contents.
         await ensureAIModelsExist();
 
         // Run initial predictions
-        (() => {
+        setTimeout(async () => {
             await batchUpdateLeadScores();
             await batchUpdateChurnRisks();
         }, 2000);
@@ -5322,7 +5323,7 @@ In a production system, this would show the actual file contents.
 
         // Simulate training progress
         let progress = 0;
-        const interval = (() => {
+        const interval = setInterval(async () => {
             progress += 10;
             UI.toast.info(`Training progress: ${progress}%`);
 
@@ -7299,13 +7300,13 @@ In a production system, this would show the actual file contents.
             .style("font-family", '"Font Awesome 5 Free"')
             .style("font-weight", "900")
             .text("\uf075") // fa-comment
-            .on("click", (e, d) => {
+            .on("click", async (e, d) => {
                 e.stopPropagation();
                 await app.openMemoModal(d.data.id, d.data.type);
             });
 
         // Click async Handler (View Profile)
-        nodes.on("click", (e, d) => {
+        nodes.on("click", async (e, d) => {
             if (d.data.type === 'customer') {
                 await app.showCustomerDetail(d.data.id);
             } else {
@@ -7314,7 +7315,7 @@ In a production system, this would show the actual file contents.
         });
 
         // Expand/collapse on double-click
-        nodes.on("dblclick", (e, d) => {
+        nodes.on("dblclick", async (e, d) => {
             e.stopPropagation();
             await app.showReferralTree(d.data.id, d.data.type);
         });
@@ -11910,7 +11911,7 @@ In a production system, this would show the actual file contents.
     };
 
     const deleteNote = async (prospectId, noteId) => {
-        UI.confirm('Delete Note?', 'Are you sure you want to delete this note?', () => {
+        UI.confirm('Delete Note?', 'Are you sure you want to delete this note?', async () => {
             await DataStore.delete('notes', noteId);
             UI.toast.success('Note deleted');
             await app.switchProspectTab('notes', prospectId, document.querySelector('.profile-tab.active'));
@@ -12037,10 +12038,23 @@ In a production system, this would show the actual file contents.
         // Match with promotion package if exists
         let packageId = null;
         const allPackages = await DataStore.getAll('promotion_packages');
-        const matchingPkg = allPackages.find(p => p.is_active && p.product_ids.some(pid => {
-            const prod = DataStore.getById('products', pid);
-            return prod && prod.name === item;
-        }));
+        let matchingPkg = null;
+        for (const p of allPackages) {
+            if (!p.is_active) continue;
+            let foundItem = false;
+            for (const pid of p.product_ids) {
+                // Handle both sync and async DataStore.getById
+                const prod = await Promise.resolve(DataStore.getById('products', pid));
+                if (prod && prod.name === item) {
+                    foundItem = true;
+                    break;
+                }
+            }
+            if (foundItem) {
+                matchingPkg = p;
+                break;
+            }
+        }
         if (matchingPkg) packageId = matchingPkg.id;
 
         const pur = {
@@ -12259,7 +12273,7 @@ In a production system, this would show the actual file contents.
                 <select name="activity-outcome" class="form-control">
                     <option value="">-- Select Solution --</option>
                     ${(DataStore.get('products') || []).map(p => `
-                        <option value="${await escapeHtml(p.name)}">${await escapeHtml(p.name)}</option>
+                        <option value="${escapeHtml(p.name)}">${escapeHtml(p.name)}</option>
                     `).join('')}
                     <option value="No Solution Needed">No Solution Needed</option>
                     <option value="Follow-up Required">Follow-up Required</option>
@@ -12505,25 +12519,26 @@ In a production system, this would show the actual file contents.
         const statusFilter = document.getElementById('filter-agent-status')?.value || '';
 
         let html = '';
-        agents.forEach(agent => {
-            if (searchQuery && !agent.full_name.toLowerCase().includes(searchQuery) && !agent.agent_code?.toLowerCase().includes(searchQuery)) return;
-            if (teamFilter && agent.team !== teamFilter) return;
-            if (roleFilter && agent.role !== roleFilter) return;
-            if (statusFilter && agent.status !== statusFilter) return;
+        for (const agent of agents) {
+            if (searchQuery && !agent.full_name.toLowerCase().includes(searchQuery) && !agent.agent_code?.toLowerCase().includes(searchQuery)) continue;
+            if (teamFilter && agent.team !== teamFilter) continue;
+            if (roleFilter && agent.role !== roleFilter) continue;
+            if (statusFilter && agent.status !== statusFilter) continue;
 
-            const stats = await DataStore.query('agent_stats', { agent_id: agent.id })[0] || { total_assigned: 0, followup_rate: 0 };
+            const statsData = await DataStore.query('agent_stats', { agent_id: agent.id });
+            const stats = statsData[0] || { total_assigned: 0, followup_rate: 0 };
             const rateClass = stats.followup_rate >= 90 ? 'rate-good' : (stats.followup_rate >= 70 ? 'rate-warning' : 'rate-critical');
             const status = agent.status || 'active';
 
             html += `
                 <tr data-agent-id="${agent.id}" class="agent-row">
                     <td>
-                        <div style="font-weight:600;">${await escapeHtml(agent.full_name)}</div>
-                        <div style="font-size:12px; color:var(--gray-500);">${await escapeHtml(agent.agent_code) || 'N/A'}</div>
+                        <div style="font-weight:600;">${escapeHtml(agent.full_name)}</div>
+                        <div style="font-size:12px; color:var(--gray-500);">${escapeHtml(agent.agent_code) || 'N/A'}</div>
                     </td>
-                    <td>${await escapeHtml(agent.team) || 'Unassigned'}</td>
+                    <td>${escapeHtml(agent.team) || 'Unassigned'}</td>
                     <td><span class="status-badge status-${status}">${status.toUpperCase()}</span></td>
-                    <td>${await escapeHtml(agent.license_expiry) || 'N/A'}</td>
+                    <td>${escapeHtml(agent.license_expiry) || 'N/A'}</td>
                     <td>${stats.total_assigned} prospects</td>
                     <td>
                         <div class="followup-rate">
@@ -12537,7 +12552,7 @@ In a production system, this would show the actual file contents.
                     </td>
                 </tr>
             `;
-        });
+        }
 
         tbody.innerHTML = '';
         tbody.insertAdjacentHTML('beforeend', html || '<tr><td colspan="7" style="text-align:center; padding:20px;">No agents found</td></tr>');
@@ -12704,6 +12719,32 @@ In a production system, this would show the actual file contents.
             </div>
         loadAgentNotes(agent.id);
     };
+
+    const loadAgentNotes = async (agentId) => {
+        const container = document.getElementById(`agent-notes-list-${agentId}`);
+        if (!container) return;
+        try {
+            const notes = await DataStore.getAll('notes');
+            const agentNotes = notes.filter(n => n.prospect_id == null && n.agent_id === agentId); // Assuming agent notes use the same store
+            if (agentNotes.length === 0) {
+                container.innerHTML = '<p style="color:var(--gray-400); font-size:13px;">No performance notes yet.</p>';
+            } else {
+                container.innerHTML = agentNotes.map(n => `
+                    <div style="background:var(--gray-50); padding:12px; border-radius:8px; margin-bottom:8px; border:1px solid var(--gray-200);">
+                        <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+                            <span style="font-weight:600; font-size:13px; color:var(--gray-700);">${escapeHtml(n.author || 'Michelle Tan')}${n.is_voice_note ? ' <i class="fas fa-microphone" style="color:var(--primary);"></i>' : ''}</span>
+                            <span style="font-size:12px; color:var(--gray-400);">${n.date}</span>
+                        </div>
+                        <p style="font-size:14px; margin:0;">"${escapeHtml(n.text)}"</p>
+                    </div>
+                `).join('');
+            }
+        } catch (error) {
+            container.innerHTML = '<p style="color:var(--error); font-size:13px;">Error loading notes.</p>';
+            console.error('Error loading agent notes:', error);
+        }
+    };
+
     const renderCustomerHistory = async (agentId) => {
         const customers = await getVisibleCustomers().filter(c => c.responsible_agent_id === agentId);
         if (customers.length === 0) return '<p>No converted customers yet.</p>';
@@ -14453,6 +14494,37 @@ In a production system, this would show the actual file contents.
         const year = 2026;
         const qTargets =await  DataStore.getAll('quarterly_targets').filter(t => t.year === year);
 
+        let rowsHtml = '';
+        const purchases = await DataStore.getAll('purchases');
+        for (const q of [1, 2, 3, 4]) {
+            const target = qTargets.find(t => t.year === year && t.quarter === q) || {};
+            // Sum actual sales for this quarter
+            const qStart = `${year}-${((q - 1) * 3 + 1).toString().padStart(2, '0')}-01`;
+            const qEnd = `${year}-${(q * 3).toString().padStart(2, '0')}-${new Date(year, q * 3, 0).getDate()}`;
+            const actualSales = purchases.filter(p =>
+                p.date >= qStart && p.date <= qEnd && !p.is_agent_package
+            ).reduce((sum, p) => sum + (p.amount || 0), 0);
+
+            const progress = target.total_sales_target ? Math.min(100, (actualSales / target.total_sales_target * 100)) : 0;
+            const statusColor = progress > 90 ? 'green' : (progress > 70 ? 'yellow' : (progress > 0 ? 'red' : 'gray'));
+
+            rowsHtml += `
+                                <tr>
+                                    <td>Q${q}</td>
+                                    <td>${target.cps_count_target || 0}</td>
+                                    <td>RM ${(target.total_sales_target || 0).toLocaleString()}</td>
+                                    <td>
+                                        <div class="target-progress">
+                                            <div class="progress-bar-bg">
+                                                <div class="progress-bar-fill progress-${statusColor}" style="width: ${progress}%"></div>
+                                            </div>
+                                            <span style="font-size: 12px; font-weight: 600;">${progress > 0 ? progress.toFixed(0) + '%' : '0%'}</span>
+                                        </div>
+                                    </td>
+                                </tr>
+                            `;
+        }
+
         container.innerHTML = `
             <div class="targets-card">
                 <div class="targets-header">
@@ -14468,34 +14540,7 @@ In a production system, this would show the actual file contents.
                         </tr>
                     </thead>
                     <tbody>
-                        ${[1, 2, 3, 4].map(q => {
-            const target = qTargets.find(t => t.year === year && t.quarter === q) || {};
-            // Sum actual sales for this quarter
-            const qStart = `${year}-${((q - 1) * 3 + 1).toString().padStart(2, '0')}-01`;
-            const qEnd = `${year}-${(q * 3).toString().padStart(2, '0')}-${new Date(year, q * 3, 0).getDate()}`;
-            const actualSales =await  DataStore.getAll('purchases').filter(p =>
-                p.date >= qStart && p.date <= qEnd && !p.is_agent_package
-            ).reduce((sum, p) => sum + (p.amount || 0), 0);
-
-            const progress = target.total_sales_target ? Math.min(100, (actualSales / target.total_sales_target * 100)) : 0;
-            const statusColor = progress > 90 ? 'green' : (progress > 70 ? 'yellow' : (progress > 0 ? 'red' : 'gray'));
-
-            return `
-                                <tr>
-                                    <td>Q${q}</td>
-                                    <td>${target.cps_count_target || 0}</td>
-                                    <td>RM ${(target.total_sales_target || 0).toLocaleString()}</td>
-                                    <td>
-                                        <div class="target-progress">
-                                            <div class="progress-bar-bg">
-                                                <div class="progress-bar-fill progress-${statusColor}" style="width: ${progress}%"></div>
-                                            </div>
-                                            <span style="font-size: 12px; font-weight: 600;">${progress > 0 ? progress.toFixed(0) + '%' : '0%'}</span>
-                                        </div>
-                                    </td>
-                                </tr>
-                            `;
-        }).join('')}
+                        ${rowsHtml}
                     </tbody>
                 </table>
             </div>
