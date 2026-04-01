@@ -11244,10 +11244,24 @@ const deleteNote = async (prospectId, noteId) => {
         // Match with promotion package if exists
         let packageId = null;
         const allPackages = await DataStore.getAll('promotion_packages');
-        const matchingPkg = allPackages.find(p => p.is_active && p.product_ids.some(pid => {
-            const prod = await DataStore.getById('products', pid);
-            return prod && prod.name === item;
-        }));
+        
+let matchingPkg = null;
+for (const p of allPackages) {
+    if (!p.is_active) continue;
+    let found = false;
+    for (const pid of p.product_ids) {
+        const prod = await DataStore.getById('products', pid);
+        if (prod && prod.name === item) {
+            found = true;
+            break;
+        }
+    }
+    if (found) {
+        matchingPkg = p;
+        break;
+    }
+}
+
         if (matchingPkg) packageId = matchingPkg.id;
 
         const pur = {
