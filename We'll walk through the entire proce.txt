@@ -1,0 +1,680 @@
+We'll walk through the entire process from your current local CRM to a fully online version hosted on Vercel with a Supabase database. This guide assumes you have a basic familiarity with your code and can open files in a text editor. I'll give you clear, copy‑paste instructions.
+
+Step 1 – Prepare your project for online deployment
+Before touching any code, we need to get your project onto GitHub. This will act as a backup and allow Vercel to automatically deploy whenever you push changes.
+
+Create a GitHub account if you don’t have one (github.com).
+
+Create a new repository on GitHub:
+
+Click the + icon top right → “New repository”
+
+Name it (e.g., fengshui-crm), choose “Public” or “Private” (it’s fine either way)
+
+Do not check “Initialize this repository with a README”
+
+Click “Create repository”
+
+Push your current code to GitHub
+Open a terminal in your project folder and run these commands one by one:
+
+bash
+cd "C:\Users\DC\Desktop\DestinOraclesSolution CRM"
+
+git init
+git add .
+git commit -m "Initial commit"
+git remote add origin https://github.com/destinoraclessolution9/DC-CRM.git
+git branch -M main
+git push -u origin main
+Replace YOUR_USERNAME and REPO_NAME with your GitHub username and the repository name you just created.
+
+Step 2 – Set up Supabase (the database)
+Supabase will replace the browser’s localStorage that your CRM currently uses. It stores data in the cloud.
+
+Create a Supabase account at supabase.com (free tier is enough).
+
+Create a new project:
+
+Name: fengshui-crm
+
+Database password: choose a strong one (store it safely)
+
+Region: pick one close to your users (e.g., Singapore for Malaysia)
+
+Click “Create new project” – this takes a minute or two.
+
+Copy your project URL and public key
+Once the project is ready, go to Project Settings → API in the left menu.
+Copy:
+
+Project URL (looks like https://xyz.supabase.co)
+
+https://remuwhxvzkzjtgbzqjaa.supabase.co
+
+anon public key (a long string)
+
+You’ll need these later.
+
+Create tables – Your CRM uses many tables (users, prospects, activities, etc.). You must recreate them in Supabase.
+Go to the SQL Editor in the left menu. Copy and paste the following SQL script (I’ve derived the table structures from your data.js file). Run each table creation separately (select the whole script, click “Run”).
+
+sql
+-- Users table
+CREATE TABLE users (
+    id BIGINT PRIMARY KEY,
+    username TEXT,
+    password TEXT,
+    full_name TEXT,
+    role TEXT,
+    team_id BIGINT,
+    agent_code TEXT,
+    license_start DATE,
+    license_expiry DATE,
+    commission_rate INT,
+    monthly_target INT,
+    reporting_to BIGINT,
+    join_date DATE,
+    probation_end DATE,
+    status TEXT,
+    bank_name TEXT,
+    bank_account TEXT,
+    business_address TEXT,
+    phone TEXT,
+    email TEXT,
+    ic_number TEXT,
+    date_of_birth DATE,
+    gender TEXT,
+    company_name TEXT,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Prospects table
+CREATE TABLE prospects (
+    id BIGINT PRIMARY KEY,
+    full_name TEXT,
+    nickname TEXT,
+    title TEXT,
+    gender TEXT,
+    nationality TEXT,
+    phone TEXT,
+    email TEXT,
+    ic_number TEXT,
+    date_of_birth DATE,
+    lunar_birth TEXT,
+    ming_gua TEXT,
+    element TEXT,
+    occupation TEXT,
+    company_name TEXT,
+    income_range TEXT,
+    address TEXT,
+    city TEXT,
+    state TEXT,
+    postal_code TEXT,
+    responsible_agent_id BIGINT,
+    cps_agent_id BIGINT,
+    cps_assignment_date DATE,
+    protection_deadline DATE,
+    pipeline_stage TEXT,
+    deal_value NUMERIC,
+    expected_close_date DATE,
+    status TEXT,
+    referred_by TEXT,
+    referred_by_id BIGINT,
+    referred_by_type TEXT,
+    referral_relationship TEXT,
+    cps_invitation_method TEXT,
+    cps_invitation_details TEXT,
+    cps_attachment JSONB,
+    score INT,
+    tags TEXT[],
+    notes TEXT,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Customers table
+CREATE TABLE customers (
+    id BIGINT PRIMARY KEY,
+    full_name TEXT,
+    nickname TEXT,
+    phone TEXT,
+    email TEXT,
+    ic_number TEXT,
+    date_of_birth DATE,
+    lunar_birth TEXT,
+    ming_gua TEXT,
+    element TEXT,
+    gender TEXT,
+    nationality TEXT,
+    occupation TEXT,
+    company_name TEXT,
+    income_range TEXT,
+    address TEXT,
+    city TEXT,
+    state TEXT,
+    postal_code TEXT,
+    lifetime_value NUMERIC,
+    customer_since DATE,
+    conversion_amount NUMERIC,
+    converted_from_prospect_id BIGINT,
+    bank_name TEXT,
+    bank_account_number TEXT,
+    account_holder TEXT,
+    payment_methods TEXT,
+    converted_to_agent BOOLEAN DEFAULT false,
+    converted_to_agent_id BIGINT,
+    agent_package_purchased TEXT,
+    agent_package_amount NUMERIC,
+    agent_purchase_date DATE,
+    responsible_agent_id BIGINT,
+    status TEXT,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Activities table
+CREATE TABLE activities (
+    id BIGINT PRIMARY KEY,
+    activity_type TEXT,
+    activity_title TEXT,
+    activity_date DATE,
+    start_time TIME,
+    end_time TIME,
+    location_address TEXT,
+    compass_needed BOOLEAN,
+    co_agents JSONB,
+    is_closing BOOLEAN,
+    solution_sold TEXT,
+    amount_closed NUMERIC,
+    payment_method TEXT,
+    pop_monthly_amount NUMERIC,
+    pop_tenure INT,
+    pop_down_payment NUMERIC,
+    invoice_number TEXT,
+    collection_date DATE,
+    redemption_image_name TEXT,
+    unable_to_serve BOOLEAN,
+    unable_reason TEXT,
+    note_key_points TEXT,
+    note_outcome TEXT,
+    note_next_steps TEXT,
+    note_needs TEXT,
+    note_pain_points TEXT,
+    event_id BIGINT,
+    prospect_id BIGINT,
+    customer_id BIGINT,
+    lead_agent_id BIGINT,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Referrals table
+CREATE TABLE referrals (
+    id BIGINT PRIMARY KEY,
+    referrer_id BIGINT,
+    referrer_type TEXT,
+    referred_prospect_id BIGINT,
+    relationship TEXT,
+    date DATE,
+    status TEXT,
+    reward_status TEXT,
+    referral_source TEXT,
+    source_id TEXT,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Notes table
+CREATE TABLE notes (
+    id BIGINT PRIMARY KEY,
+    prospect_id BIGINT,
+    customer_id BIGINT,
+    agent_id BIGINT,
+    activity_id BIGINT,
+    text TEXT,
+    author TEXT,
+    date DATE,
+    is_voice_note BOOLEAN,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- … repeat for other tables (purchases, events, etc.) – I’ll stop here, but you get the idea.
+Important: The above is just a starting point. You’ll need to create all tables that your CRM uses (e.g., purchases, events, tags, entity_tags, names, proposed_solutions, my_potential_list, manual_overrides, etc.). You can find the list of tables in data.js (the TABLES array). For each, you’ll need to define appropriate columns based on how you use them in the code.
+
+If you’re not sure about column types, you can start with a simple JSONB column (store everything as JSON) and later refine – but for a proper relational database, it’s better to define columns.
+
+Set up Row Level Security (RLS)
+In Supabase, enable RLS for each table and create policies. For now, to keep things simple while you test, you can disable RLS (go to the table, click “Disable RLS”). Later, you’ll want to add policies to protect data.
+
+Step 3 – Install Supabase client in your project
+Your CRM is plain HTML/CSS/JS (no build step), so we’ll add the Supabase client via a <script> tag.
+
+Add Supabase script to your HTML
+Open index.html and add this line before your other scripts (like data.js):
+
+html
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+Create a new file supabase-client.js in your project root with the following content:
+
+javascript
+// supabase-client.js
+const supabaseUrl = 'YOUR_SUPABASE_URL';
+const supabaseKey = 'YOUR_ANON_KEY';
+const supabase = window.supabase.createClient(supabaseUrl, supabaseKey);
+Replace the placeholders with the URL and anon key you copied from Supabase.
+
+Include this file in index.html after the Supabase script:
+
+html
+<script src="supabase-client.js"></script>
+Step 4 – Replace localStorage with Supabase calls
+Your CRM uses a global DataStore object that reads/writes to localStorage. We need to replace it with calls to Supabase.
+
+Open data.js. We’ll modify the DataStore methods to use Supabase instead of localStorage. Because your project is large, we’ll focus on the most important methods: getAll, getById, create, update, delete. We’ll keep the same API so that other parts of your code don’t break.
+
+Important: This change will make your app live‑online only – it will no longer work offline. We’ll also need to adapt your authentication (the Auth module) to use Supabase Auth.
+
+4.1 Modify data.js – replace storage functions
+Open data.js and replace the whole file with this new version. I’ll show you the key changes; you can copy the entire new file from the end of this guide.
+
+javascript
+// data.js – Supabase version
+const DataStore = (() => {
+    const TABLES = [ ... ]; // same as before
+
+    // We'll use the global supabase client
+    const supabaseClient = window.supabase;
+
+    const getAll = async (tableName) => {
+        const { data, error } = await supabaseClient
+            .from(tableName)
+            .select('*');
+        if (error) throw error;
+        return data || [];
+    };
+
+    const getById = async (tableName, id) => {
+        const { data, error } = await supabaseClient
+            .from(tableName)
+            .select('*')
+            .eq('id', id)
+            .single();
+        if (error && error.code !== 'PGRST116') throw error;
+        return data || null;
+    };
+
+    const create = async (tableName, data) => {
+        const newRecord = { ...data, created_at: new Date().toISOString() };
+        const { data: inserted, error } = await supabaseClient
+            .from(tableName)
+            .insert(newRecord)
+            .select()
+            .single();
+        if (error) throw error;
+        // Dispatch event
+        window.dispatchEvent(new CustomEvent('dataChanged', {
+            detail: { table: tableName, action: 'create', id: inserted.id }
+        }));
+        return inserted;
+    };
+
+    const update = async (tableName, id, data) => {
+        const { data: updated, error } = await supabaseClient
+            .from(tableName)
+            .update(data)
+            .eq('id', id)
+            .select()
+            .single();
+        if (error) throw error;
+        window.dispatchEvent(new CustomEvent('dataChanged', {
+            detail: { table: tableName, action: 'update', id }
+        }));
+        return updated;
+    };
+
+    const deleteRecord = async (tableName, id) => {
+        const { error } = await supabaseClient
+            .from(tableName)
+            .delete()
+            .eq('id', id);
+        if (error) throw error;
+        window.dispatchEvent(new CustomEvent('dataChanged', {
+            detail: { table: tableName, action: 'delete', id }
+        }));
+        return true;
+    };
+
+    const query = async (tableName, filters) => {
+        let query = supabaseClient.from(tableName).select('*');
+        for (const [key, value] of Object.entries(filters)) {
+            query = query.eq(key, value);
+        }
+        const { data, error } = await query;
+        if (error) throw error;
+        return data || [];
+    };
+
+    // The rest of the DataStore methods (init, on, emit) need to be adapted to work asynchronously.
+    // For simplicity, we'll make all functions async and keep event listeners.
+
+    return {
+        getAll,
+        getById,
+        create,
+        update,
+        delete: deleteRecord,
+        query,
+        on: (event, cb) => { ... },  // same as before
+        emit: (event, data) => { ... },
+        init: () => { ... } // maybe check tables exist, etc.
+    };
+})();
+Note: Because we changed methods to be async, every place in your code that calls DataStore.getAll() will now need to use await. This is a big change. You must go through your script.js and add await before every DataStore call. For example:
+
+DataStore.getAll('users') becomes await DataStore.getAll('users')
+
+DataStore.create('prospects', data) becomes await DataStore.create('prospects', data)
+
+Since you have many functions, you’ll need to systematically add async to any function that uses await. This is a large but necessary step.
+
+4.2 Update your auth.js to use Supabase Auth
+Supabase has its own authentication system. You’ll need to replace your simple localStorage‑based login with Supabase Auth. In auth.js:
+
+javascript
+const Auth = (() => {
+    const supabase = window.supabase;
+
+    const getCurrentUser = async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        return user;
+    };
+
+    const login = async (email, password) => {
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+        return data.user;
+    };
+
+    const logout = async () => {
+        await supabase.auth.signOut();
+    };
+
+    return { getCurrentUser, login, logout };
+})();
+You’ll also need to change your login form to collect email/password instead of selecting a user from a dropdown. You can keep a dropdown for demo users, but you’d need to create those users in Supabase Auth first.
+
+Step 5 – Prepare your code for Vercel (environment variables)
+Your supabase-client.js currently has hard‑coded credentials. That’s not safe. We’ll use environment variables so that when deployed, Vercel injects them automatically.
+
+Create a file .env.local in your project root (do not commit it). Add:
+
+text
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
+(We prefix with NEXT_PUBLIC_ because Vercel makes these available in the browser.)
+
+Modify supabase-client.js to read from process.env:
+
+javascript
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const supabase = window.supabase.createClient(supabaseUrl, supabaseKey);
+Add .env.local to .gitignore to avoid committing it.
+
+Step 6 – Deploy to Vercel
+Push your updated code to GitHub (after all the changes). Use:
+
+bash
+git add .
+git commit -m "Switched to Supabase"
+git push
+Go to Vercel (vercel.com) and sign in with GitHub.
+
+Click Add New… → Project.
+
+Import your repository.
+
+On the configuration page:
+
+Framework Preset: leave as “Other” (since you have plain HTML/JS)
+
+Build Command: leave empty
+
+Output Directory: leave empty
+
+Environment Variables: add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY with the same values you used in .env.local.
+
+Click Deploy. Vercel will give you a URL like your-project.vercel.app.
+
+Check if your site loads. If you see errors, open the browser console (F12) to see what’s wrong.
+
+Step 7 – Migrate existing data from localStorage to Supabase
+Your current CRM stores data in the browser’s localStorage. To move that data to Supabase, you need to export it and import it into your Supabase tables.
+
+Export localStorage data
+In your local browser (where the CRM runs), open the Developer Tools (F12) and go to the Console tab. Run:
+
+javascript
+const exportData = {};
+const keys = Object.keys(localStorage);
+keys.forEach(key => {
+    if (key.startsWith('fs_crm_')) {
+        exportData[key] = JSON.parse(localStorage.getItem(key));
+    }
+});
+console.log(JSON.stringify(exportData));
+Copy the output (it will be a huge JSON). Save it to a file.
+
+Write a migration script
+You’ll need to insert each record into the corresponding Supabase table. Because you have many records, it’s easier to write a small Node.js script that uses the Supabase client to upload them. I’ll give you a simple example (you’ll need Node.js installed).
+
+Create a new file migrate.js outside your project folder. Install dependencies:
+
+bash
+npm init -y
+npm install @supabase/supabase-js
+Then write:
+
+javascript
+const { createClient } = require('@supabase/supabase-js');
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+const data = require('./exported-data.json'); // your saved JSON
+
+const tables = {
+    'fs_crm_users': 'users',
+    'fs_crm_prospects': 'prospects',
+    // ... map all table names
+};
+
+async function migrate() {
+    for (const [localKey, tableName] of Object.entries(tables)) {
+        const records = data[localKey];
+        if (!records) continue;
+        for (const record of records) {
+            // Remove any fields that don't exist in Supabase schema
+            const { error } = await supabase.from(tableName).insert(record);
+            if (error) console.error(`Error inserting into ${tableName}:`, error);
+            else console.log(`Inserted into ${tableName}`);
+        }
+    }
+}
+
+migrate();
+Run it with:
+
+bash
+SUPABASE_URL=your_url SUPABASE_KEY=your_key node migrate.js
+(Use the service role key from Supabase for this, not the anon key.)
+
+This is a simplified approach – you may need to handle conflicts, set proper IDs, etc.
+
+Step 8 – Connect your custom domain
+In Vercel, go to your project → Settings → Domains.
+
+Enter your domain (e.g., www.yourdomain.com) and click Add.
+
+Vercel will show DNS records you need to add at your domain registrar.
+
+For the apex domain (yourdomain.com): add an A record pointing to 76.76.21.21
+
+For www: add a CNAME record pointing to cname.vercel-dns.com
+
+Go to your domain registrar (Namecheap, GoDaddy, etc.), find DNS settings, and add those records.
+
+Wait a few minutes for DNS propagation. Vercel will show “Valid” once it’s working.
+
+Your site is now live on your own domain with a cloud database.
+
+Step 9 – Testing and debugging
+Check the browser console for any errors.
+
+Check Supabase logs (Dashboard → Database → Logs) for failed queries.
+
+Ensure Row Level Security is either disabled (for testing) or properly set up.
+
+If authentication doesn’t work, verify that users exist in Supabase Auth.
+
+Final notes
+This is a major change. I recommend testing everything locally first before pushing to production. Use the .env.local file and run your site with a local server (e.g., npx serve .). Verify that all DataStore functions work and that you can log in.
+
+Because your CRM is large, you might need to go through all your functions and add await and async everywhere. It’s tedious but necessary.
+
+If you get stuck, post specific error messages and I’ll help you.
+
+Once everything works, you’ll have a fully online CRM that runs on your own domain with a proper database. Congratulations!
+
+Appendix: Complete new data.js (to copy)
+javascript
+// data.js – Supabase version
+const DataStore = (() => {
+    const TABLES = [
+        'users', 'roles', 'teams', 'prospects', 'customers',
+        'activities', 'transactions', 'events', 'event_registrations',
+        'referrals', 'documents', 'notes', 'tags', 'entity_tags',
+        'names', 'proposed_solutions', 'platform_ids', 'purchases',
+        'agent_stats', 'assignments', 'agent_targets',
+        'my_potential_list', 'manual_overrides',
+        'event_categories', 'event_templates',
+        'yearly_targets', 'quarterly_targets', 'monthly_targets', 'weekly_targets',
+        'folders', 'document_versions', 'document_shares', 'document_tags', 'document_tag_mappings',
+        'whatsapp_templates', 'whatsapp_campaigns', 'campaign_messages',
+        'import_jobs', 'import_errors', 'import_templates',
+        'reassignment_history', 'agent_followup_stats', 'inactivity_alerts',
+        'integrations', 'integration_connections', 'sync_history',
+        'whatsapp_messages', 'whatsapp_conversations',
+        'ai_models', 'ai_predictions', 'lead_scores', 'churn_risk',
+        'forecast_history', 'performance_insights',
+        'offline_changes', 'sync_queue', 'sync_log', 'mobile_devices',
+        'audit_logs', 'security_incidents', 'consent_records', 'consent_revocations',
+        'dsar_requests', 'dsar_reports', 'retention_jobs', 'archived_records',
+        'encryption_keys', 'mfa_devices', 'login_attempts', 'ip_whitelist', 'data_classification',
+        'tenants', 'tenant_settings', 'health_checks', 'system_alerts', 'performance_metrics',
+        'performance_warnings', 'backups', 'backup_schedules', 'deployments', 'system_config',
+        'system_logs', 'maintenance_windows', 'audit_logs_archive',
+        'event_attendees', 'agent_event_attendees', 'case_studies',
+        'promotion_packages',
+        'products', 'promotions',
+        'appointment_locations'
+    ];
+
+    const _listeners = {};
+
+    const supabaseClient = window.supabase;
+
+    const getAll = async (tableName) => {
+        if (!TABLES.includes(tableName)) return [];
+        const { data, error } = await supabaseClient.from(tableName).select('*');
+        if (error) throw error;
+        return data || [];
+    };
+
+    const getById = async (tableName, id) => {
+        const { data, error } = await supabaseClient
+            .from(tableName)
+            .select('*')
+            .eq('id', id)
+            .single();
+        if (error && error.code !== 'PGRST116') throw error;
+        return data || null;
+    };
+
+    const create = async (tableName, data) => {
+        const newRecord = { ...data, created_at: new Date().toISOString() };
+        const { data: inserted, error } = await supabaseClient
+            .from(tableName)
+            .insert(newRecord)
+            .select()
+            .single();
+        if (error) throw error;
+        DataStore.emit(`${tableName}:created`, inserted);
+        window.dispatchEvent(new CustomEvent('dataChanged', {
+            detail: { table: tableName, action: 'create', id: inserted.id }
+        }));
+        return inserted;
+    };
+
+    const update = async (tableName, id, data) => {
+        const { data: updated, error } = await supabaseClient
+            .from(tableName)
+            .update(data)
+            .eq('id', id)
+            .select()
+            .single();
+        if (error) throw error;
+        DataStore.emit(`${tableName}:updated`, updated);
+        window.dispatchEvent(new CustomEvent('dataChanged', {
+            detail: { table: tableName, action: 'update', id: id }
+        }));
+        return updated;
+    };
+
+    const deleteRecord = async (tableName, id) => {
+        const { error } = await supabaseClient
+            .from(tableName)
+            .delete()
+            .eq('id', id);
+        if (error) throw error;
+        DataStore.emit(`${tableName}:deleted`, id);
+        window.dispatchEvent(new CustomEvent('dataChanged', {
+            detail: { table: tableName, action: 'delete', id: id }
+        }));
+        return true;
+    };
+
+    const query = async (tableName, filters) => {
+        let query = supabaseClient.from(tableName).select('*');
+        for (const [key, value] of Object.entries(filters)) {
+            query = query.eq(key, value);
+        }
+        const { data, error } = await query;
+        if (error) throw error;
+        return data || [];
+    };
+
+    const on = (eventName, callback) => {
+        if (!_listeners[eventName]) _listeners[eventName] = [];
+        _listeners[eventName].push(callback);
+    };
+
+    const emit = (eventName, data) => {
+        if (!_listeners[eventName]) return;
+        _listeners[eventName].forEach(cb => cb(data));
+    };
+
+    const init = async () => {
+        // Optionally check if tables exist
+        console.log('DataStore initialized with Supabase');
+    };
+
+    return {
+        getAll,
+        getById,
+        create,
+        update,
+        delete: deleteRecord,
+        query,
+        on,
+        emit,
+        init
+    };
+})();
+
+DataStore.init();
+Remember: This is just a start. You’ll need to update every file that uses DataStore to use async/await. Good luck!

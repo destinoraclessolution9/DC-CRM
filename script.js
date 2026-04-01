@@ -9,6 +9,7 @@ window.onerror = (msg, url, line) => {
     console.error(`GLOBAL ERROR: ${msg} at ${url}:${line}`);
 };
 
+(async function() {
 const appLogic = (() => {
     let _currentView = 'dashboard';
     let _currentUser = null;
@@ -18123,3 +18124,4 @@ document.addEventListener('DOMContentLoaded', () => {
     if (window.app && window.app.initSync) window.app.initSync();
 });
 
+})();
