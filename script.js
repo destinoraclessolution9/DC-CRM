@@ -13804,17 +13804,25 @@ container.innerHTML = `
         return Math.round((convertedCount / totalProspects) * 100);
     };
 
-    const getCPSCount = async (from, to) => {
-        return (await DataStore.getAll('activities')).filter(a => {
-            if (a.activity_type !== 'CPS' || a.activity_date < from || a.activity_date > to) return false;
-            if (_currentRoleFilter !== 'All') {
-                const agent = await DataStore.getById('users', a.agent_id);
-                if (!agent || agent.role !== _currentRoleFilter) return false;
-            }
-            return true;
-        }).length;
-    };
 
+const getCPSCount = async (from, to) => {
+    const activities = await DataStore.getAll('activities');
+    let count = 0;
+    
+    for (const a of activities) {
+        if (a.activity_type !== 'CPS' || a.activity_date < from || a.activity_date > to) continue;
+        
+        if (_currentRoleFilter !== 'All') {
+            const agent = await DataStore.getById('users', a.agent_id);
+            if (!agent || agent.role !== _currentRoleFilter) continue;
+        }
+        
+        count++;
+    }
+    
+    return count;
+};
+  
     const getTotalSales = async (from, to) => {
         // Sum async purchases (excluding agent packages)
         return (await DataStore.getAll('purchases')).filter(p => {
