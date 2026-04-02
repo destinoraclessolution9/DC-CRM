@@ -11768,7 +11768,196 @@ const openAddSolutionModal = async (prospectId) => {
         tbody.insertAdjacentHTML('beforeend', html || '<tr><td colspan="7" style="text-align:center; padding:20px;">No agents found</td></tr>');
     };
 
-    const filterAgents = async () => await renderAgentsTable();
+const showAgentProfile = async (agentId) => {
+    const agent = await DataStore.getById('users', agentId);
+    if (!agent) {
+        UI.toast.error('Agent not found');
+        return;
+    }
+
+    const isAdminOrLead = _currentUser && ['Super Admin', 'Marketing Manager', 'Marketing Admin', 'Teacher', 'Manager', 'Senior Team Leader', 'Team Leader'].includes(_currentUser.role);
+    const calculateDaysDiff = (expiryDate) => {
+        if (!expiryDate) return 0;
+        const diff = Math.ceil((new Date(expiryDate) - new Date()) / (1000 * 60 * 60 * 24));
+        return diff > 0 ? diff : 0;
+    };
+
+    const renderFollowupStats = async (agentId) => {
+        // Your existing implementation – ensure it returns a string
+        return `<div class="stat-row"><span>Follow-up rate: 85%</span></div>`;
+    };
+    const renderCurrentAssignments = async (agentId) => {
+        return `<div>3 active prospects assigned</div>`;
+    };
+    const renderPerformanceTargets = async (agentId) => {
+        return `<div>Monthly target: RM 50,000</div>`;
+    };
+    const renderCustomerHistory = async (agentId) => {
+        return `<div>12 customers converted</div>`;
+    };
+
+    const viewport = document.getElementById('content-viewport');
+    viewport.innerHTML = `
+    <div class="agent-profile-view">
+        <div class="header-actions" style="margin-bottom:16px;">
+            <button class="btn secondary" onclick="app.navigateTo('agents')"><i class="fas fa-arrow-left"></i> Back to Agents</button>
+        </div>
+
+        <div class="profile-header" style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:24px;">
+            <div>
+                <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
+                    <h1 style="font-size:32px; font-weight:700;">${escapeHtml(agent.full_name)}</h1>
+                    <span class="status-badge status-${agent.status}">${agent.status?.toUpperCase() || 'ACTIVE'}</span>
+                </div>
+                <div style="display:flex; gap:12px; color:var(--gray-500); font-size:14px;">
+                    <span>Agent ID: ${agent.agent_code}</span>
+                    <span><i class="fas fa-user-tie"></i> ${agent.role || 'Consultant'}</span>
+                    <span><i class="fas fa-users"></i> ${agent.team || 'Sales'}</span>
+                </div>
+            </div>
+            <div class="header-actions">
+                <button class="btn secondary" onclick="app.todo('Reset Password')">Reset Password</button>
+                <button class="btn secondary" onclick="app.todo('Edit Agent')">Edit Profile</button>
+                <button class="btn error" onclick="app.todo('Deactivate Agent')">Deactivate</button>
+            </div>
+        </div>
+
+        ${agent.id === 9 || agent.username === 'ong.beeling' ? `
+        <div class="conversion-banner">
+            <i class="fas fa-award"></i>
+            <span>Converted from Customer on 05 Mar 2026 via <strong>Premium Package (RM 5,500)</strong></span>
+        </div>
+        ` : ''}
+
+        ${isAdminOrLead ? `
+        <div class="license-dashboard">
+            <h3><i class="fas fa-id-card"></i> License Renewal Dashboard</h3>
+            <div class="license-stats">
+                <div class="license-stat">
+                    <span class="license-stat-label">License Expiry</span>
+                    <span class="license-stat-value">${agent.license_expiry || '2026-12-31'}</span>
+                </div>
+                <div class="license-stat">
+                    <span class="license-stat-label">Days Remaining</span>
+                    <span class="license-stat-value" style="color:${calculateDaysDiff(agent.license_expiry) < 30 ? '#ef4444' : '#0369a1'}">${calculateDaysDiff(agent.license_expiry)} Days</span>
+                </div>
+                <div class="license-stat">
+                    <span class="license-stat-label">Renewal Status</span>
+                    <span class="license-stat-value">${agent.renewal_status || 'ELIGIBLE'}</span>
+                </div>
+            </div>
+            <div class="license-actions">
+                <button class="btn primary" onclick="app.renewLicense(${agent.id})" ${calculateDaysDiff(agent.license_expiry) > 60 ? 'disabled' : ''}>Renew Now</button>
+                <button class="btn secondary" onclick="app.sendRenewalReminder(${agent.id})">Send Reminder</button>
+            </div>
+        </div>
+        ` : ''}
+
+        <div class="performance-grid">
+            <div class="performance-card">
+                <h4><i class="fas fa-info-circle"></i> Agent Information</h4>
+                <div class="performance-stats">
+                    <div class="stat-row">
+                        <span class="stat-label">Phone:</span>
+                        <span class="stat-value">${agent.phone || '012-1234567'}</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Email:</span>
+                        <span class="stat-value">${agent.email || 'agent@fengshui.com'}</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Join Date:</span>
+                        <span class="stat-value">${agent.join_date || '2026-01-01'}</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Comm. Rate:</span>
+                        <span class="stat-value">${agent.commission_rate}%</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Reporting To:</span>
+                        <span class="stat-value">Michelle Tan</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="performance-card">
+                <h4><i class="fas fa-chart-line"></i> Follow-up Performance</h4>
+                ${await renderFollowupStats(agent.id)}
+            </div>
+        </div>
+
+        <div class="performance-grid">
+            <div class="performance-card">
+                <h4><i class="fas fa-list-check"></i> Current Assignments</h4>
+                ${await renderCurrentAssignments(agent.id)}
+            </div>
+            <div class="performance-card">
+                <h4><i class="fas fa-bullseye"></i> Performance Targets (March)</h4>
+                ${await renderPerformanceTargets(agent.id)}
+            </div>
+        </div>
+
+        <div class="performance-grid">
+            <div class="performance-card">
+                <h4><i class="fas fa-history"></i> Customer History</h4>
+                ${await renderCustomerHistory(agent.id)}
+            </div>
+            <div class="performance-card">
+                <h4><i class="fas fa-clock-rotate-left"></i> Agent Activity History</h4>
+                <div class="performance-stats">
+                    <div class="stat-row">
+                        <span class="stat-label">05 Mar 10:00:</span>
+                        <span>Login via Web Portal</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">04 Mar 16:30:</span>
+                        <span>Commission rate updated to 30%</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">04 Mar 15:45:</span>
+                        <span>Renewed license for 2026</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Agent Notes Card -->
+        <div class="performance-grid">
+            <div class="performance-card">
+                <h4><i class="fas fa-sticky-note"></i> Agent Notes</h4>
+                <div class="add-note-section">
+                    <textarea id="agent-note-text-${agent.id}" class="form-control" rows="3" placeholder="Add note about agent performance..."></textarea>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
+                        <button class="btn-icon" onclick="app.openVoiceRecorder('agent-note-text-${agent.id}', 'agent', ${agent.id})" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+                        <button class="btn primary btn-sm" onclick="app.addAgentNote(${agent.id})">Add Note</button>
+                    </div>
+                </div>
+                <div id="agent-notes-list-${agent.id}" style="margin-top:12px;"></div>
+            </div>
+        </div>
+    </div>
+    `;  // <-- THIS CLOSES THE OUTER TEMPLATE LITERAL
+
+    // Populate agent notes after the DOM is ready
+    setTimeout(async () => {
+        const agentNotes = await DataStore.query('notes', { agent_id: agent.id });
+        const notesHtml = agentNotes.length 
+            ? agentNotes.map(n => `
+                <div class="notes-item" style="margin-top:8px;">
+                    <div class="notes-header">
+                        <span>${n.date} - ${n.author}${n.is_voice_note ? ' <i class="fas fa-microphone voice-note-icon" title="Voice note"></i>' : ''}</span>
+                        <button class="btn-icon" onclick="app.deleteAgentNote(${agent.id}, ${n.id})"><i class="fas fa-trash"></i></button>
+                    </div>
+                    <div>"${n.text}"</div>
+                </div>
+            `).join('')
+            : '<p style="color:var(--gray-400); font-size:13px;">No notes yet.</p>';
+        const notesContainer = document.getElementById(`agent-notes-list-${agent.id}`);
+        if (notesContainer) notesContainer.innerHTML = notesHtml;
+    }, 100);
+};
+
+  /*  const filterAgents = async () => await renderAgentsTable();
 
     const showAgentDetail = async (agentId) => {
         const agent = await DataStore.getById('users', agentId);
@@ -11912,18 +12101,6 @@ const openAddSolutionModal = async (prospectId) => {
                         </div>
                     </div>
 
-/*
-<div class="performance-card">
-    <h4><i class="fas fa-sticky-note"></i> Agent Notes</h4>
-    <div class="add-note-section">
-        <textarea id="agent-note-text-${agent.id}" class="form-control" rows="3" placeholder="Add note about agent performance..."></textarea>
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
-            <button class="btn-icon" onclick="app. openVoiceRecorder('agent-note-text-${agent.id}', 'agent', ${agent.id})" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
-            <button class="btn primary btn-sm" onclick="app. addAgentNote(${agent.id})">Add Note</button>
-        </div>
-    </div>
-    <div id="agent-notes-list-${agent.id}" style="margin-top:12px;"></div>
-</div>*/
 
 
 const html = `
@@ -11959,6 +12136,7 @@ const html = `
     const notesContainer = document.getElementById(`agent-notes-list-${agent.id}`);
     if (notesContainer) notesContainer.innerHTML = notesHtml;
 }, 100);
+*/
 
 
 // That’s it – no extra code after this point
