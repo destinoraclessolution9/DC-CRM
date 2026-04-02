@@ -18041,6 +18041,9 @@ const monitorLoginAttempts = () => {
 };
 
 const checkForSecurityIncidents = async () => {
+console.log('DataStore value:', DataStore);
+console.log('DataStore.getAll type:', typeof DataStore.getAll);
+console.log('Property descriptor:', Object.getOwnPropertyDescriptor(window, 'DataStore'));
     if (!window.DataStore) return;
     const incidents = (await DataStore.getAll('security_incidents')).filter(i => i.status === 'new' && !i.acknowledged);
     if (incidents.length > 0) {
