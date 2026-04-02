@@ -13859,81 +13859,99 @@ const getPOPCaseCount = async (from, to) => {
     return count;
 };
 
-    const getPOPSales = async (from, to) => {
-        return (await DataStore.getAll('purchases')).filter(p => {
-            if (p.payment_method !== 'POP' || p.date < from || p.date > to) return false;
-            if (_currentRoleFilter !== 'All') {
-                const agent = await DataStore.getById('users', p.agent_id);
-                if (!agent || agent.role !== _currentRoleFilter) return false;
-            }
-            return true;
-        }).reduce((sum, p) => sum + (p.amount || 0), 0);
-    };
+  const getPOPSales = async (from, to) => {
+    const purchases = await DataStore.getAll('purchases');
+    let total = 0;
+    for (const p of purchases) {
+        if (p.payment_method !== 'POP' || p.date < from || p.date > to) continue;
+        if (_currentRoleFilter !== 'All') {
+            const agent = await DataStore.getById('users', p.agent_id);
+            if (!agent || agent.role !== _currentRoleFilter) continue;
+        }
+        total += p.amount || 0;
+    }
+    return total;
+};
 
-    const getEPPCaseCount = async (from, to) => {
-        return (await DataStore.getAll('purchases')).filter(p => {
-            if (p.payment_method !== 'EPP' || p.date < from || p.date > to) return false;
-            if (_currentRoleFilter !== 'All') {
-                const agent = await DataStore.getById('users', p.agent_id);
-                if (!agent || agent.role !== _currentRoleFilter) return false;
-            }
-            return true;
-        }).length;
-    };
+const getEPPCaseCount = async (from, to) => {
+    const purchases = await DataStore.getAll('purchases');
+    let count = 0;
+    for (const p of purchases) {
+        if (p.payment_method !== 'EPP' || p.date < from || p.date > to) continue;
+        if (_currentRoleFilter !== 'All') {
+            const agent = await DataStore.getById('users', p.agent_id);
+            if (!agent || agent.role !== _currentRoleFilter) continue;
+        }
+        count++;
+    }
+    return count;
+};
 
-    const getEPPSales = async (from, to) => {
-        return (await DataStore.getAll('purchases')).filter(p => {
-            if (p.payment_method !== 'EPP' || p.date < from || p.date > to) return false;
-            if (_currentRoleFilter !== 'All') {
-                const agent = await DataStore.getById('users', p.agent_id);
-                if (!agent || agent.role !== _currentRoleFilter) return false;
-            }
-            return true;
-        }).reduce((sum, p) => sum + (p.amount || 0), 0);
-    };
+const getEPPSales = async (from, to) => {
+    const purchases = await DataStore.getAll('purchases');
+    let total = 0;
+    for (const p of purchases) {
+        if (p.payment_method !== 'EPP' || p.date < from || p.date > to) continue;
+        if (_currentRoleFilter !== 'All') {
+            const agent = await DataStore.getById('users', p.agent_id);
+            if (!agent || agent.role !== _currentRoleFilter) continue;
+        }
+        total += p.amount || 0;
+    }
+    return total;
+};
 
-    const getNewAgents = async (from, to) => {
-        return (await DataStore.getAll('users')).filter(u => {
-            if (u.join_date < from || u.join_date > to) return false;
-            if (_currentRoleFilter !== 'All') {
-                if (u.role !== _currentRoleFilter) return false;
-            } else {
-                // Default legacy behavior: only count consultants/agents if no filter
-                if (!isAgent(u)) return false;
-            }
-            return true;
-        }).length;
-    };
+const getNewAgents = async (from, to) => {
+    const users = await DataStore.getAll('users');
+    let count = 0;
+    for (const u of users) {
+        if (u.join_date < from || u.join_date > to) continue;
+        if (_currentRoleFilter !== 'All') {
+            if (u.role !== _currentRoleFilter) continue;
+        } else {
+            if (!isAgent(u)) continue;
+        }
+        count++;
+    }
+    return count;
+};
 
-    const getNewCustomers = async (from, to) => {
-        return await  (await DataStore.getAll('customers')).filter(c =>
-            c.customer_since >= from && c.customer_since <= to
-        ).length;
-    };
+const getNewCustomers = async (from, to) => {
+    const customers = await DataStore.getAll('customers');
+    let count = 0;
+    for (const c of customers) {
+        if (c.customer_since >= from && c.customer_since <= to) count++;
+    }
+    return count;
+};
 
-    const getTotalMeetings = async (from, to) => {
-        // Sum attendees across all meetings (activities) in date range
-        return (await DataStore.getAll('activities')).filter(a => {
-            if (a.activity_date < from || a.activity_date > to) return false;
-            if (_currentRoleFilter !== 'All') {
-                const agent = await DataStore.getById('users', a.agent_id);
-                if (!agent || agent.role !== _currentRoleFilter) return false;
-            }
-            return true;
-        }).length;
-    };
+const getTotalMeetings = async (from, to) => {
+    const activities = await DataStore.getAll('activities');
+    let count = 0;
+    for (const a of activities) {
+        if (a.activity_date < from || a.activity_date > to) continue;
+        if (_currentRoleFilter !== 'All') {
+            const agent = await DataStore.getById('users', a.agent_id);
+            if (!agent || agent.role !== _currentRoleFilter) continue;
+        }
+        count++;
+    }
+    return count;
+};
 
-    const getActivityHeadcount = async (from, to) => {
-        // Sum attendees from registrations
-        return (await DataStore.getAll('event_registrations')).filter(r => {
-            if (!r.checked_in || r.checked_in_at < from || r.checked_in_at > to) return false;
-            if (_currentRoleFilter !== 'All') {
-                const agent = await DataStore.getById('users', r.agent_id); // Assuming agent_id exists in registration
-                if (!agent || agent.role !== _currentRoleFilter) return false;
-            }
-            return true;
-        }).length;
-    };
+const getActivityHeadcount = async (from, to) => {
+    const registrations = await DataStore.getAll('event_registrations');
+    let count = 0;
+    for (const r of registrations) {
+        if (!r.checked_in || r.checked_in_at < from || r.checked_in_at > to) continue;
+        if (_currentRoleFilter !== 'All') {
+            const agent = await DataStore.getById('users', r.agent_id);
+            if (!agent || agent.role !== _currentRoleFilter) continue;
+        }
+        count++;
+    }
+    return count;
+};
 
     const renderKPIStats = (kpis, prevKpis) => {
         const grid = document.getElementById('kpi-stats-grid');
