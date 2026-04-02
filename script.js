@@ -11943,26 +11943,14 @@ setTimeout(async () => {
     if (notesContainer) notesContainer.innerHTML = notesHtml;
 }, 100);
 
+// That’s it – no extra code after this point
+</div> <!-- close the performance-grid div -->
+</div> <!-- close the viewport.innerHTML -->
+`;
+};
 
 
-                if (!agentNotes.length) return '<p style="color:var(--gray-400); font-size:13px;">No notes yet.</p>';
-                return agentNotes.map(n => `
-                                    <div class="notes-item" style="margin-top:8px;">
-                                        <div class="notes-header">
-                                            <span>${n.date} - ${n.author}${n.is_voice_note ? ' <i class="fas fa-microphone voice-note-icon" title="Voice note"></i>' : ''}</span>
-                                            <button class="btn-icon" onclick="app. deleteAgentNote(${agent.id}, ${n.id})"><i class="fas fa-trash"></i></button>
-                                        </div>
-                                        <div>"${n.text}"</div>
-                                    </div>
-                                `).join('');
-            })()}
-                        </div>
-                    </div>
-                </div>
-            </div>
-    `;
-    };
-
+                
     const renderCustomerHistory = async (agentId) => {
         const customers = await getVisibleCustomers().filter(c => c.responsible_agent_id === agentId);
         if (customers.length === 0) return '<p>No converted customers yet.</p>';
