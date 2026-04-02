@@ -14413,75 +14413,88 @@ const renderAgentLeaderboard = async () => {
         if (_currentView === 'reports') await refreshKPIDashboard();
     };
 
-    const calculateQuarterlyBreakdown = async (yearlyTarget) => {
-        const factors = { 1: 0.9, 2: 1.0, 3: 1.1, 4: 1.2 };
-        const totalFactor = Object.values(factors).reduce((a, b) => a + b, 0);
+const calculateQuarterlyBreakdown = async (yearlyTarget) => {
+    const factors = { 1: 0.9, 2: 1.0, 3: 1.1, 4: 1.2 };
+    const totalFactor = Object.values(factors).reduce((a, b) => a + b, 0);
 
-        [1, 2, 3, 4].forEach(q => {
-            const ratio = factors[q] / totalFactor;
-            const qTarget = {
-                yearly_target_id: yearlyTarget.id,
-                quarter: q,
-                year: yearlyTarget.target_year,
-                cps_count_target: Math.round(yearlyTarget.cps_count_target * ratio),
-                total_sales_target: yearlyTarget.total_sales_target * ratio,
-                pop_case_count_target: Math.round(yearlyTarget.pop_case_count_target * ratio),
-                pop_sales_target: yearlyTarget.pop_sales_target * ratio,
-                new_agents_target: Math.round(yearlyTarget.new_agents_target * ratio),
-                new_customers_target: Math.round(yearlyTarget.new_customers_target * ratio),
-                activity_headcount_target: Math.round(yearlyTarget.activity_headcount_target * ratio),
-                seasonal_factor: factors[q]
-            };
+    // Use a for...of loop instead of forEach to support await
+    for (const q of [1, 2, 3, 4]) {
+        const ratio = factors[q] / totalFactor;
+        const qTarget = {
+            yearly_target_id: yearlyTarget.id,
+            quarter: q,
+            year: yearlyTarget.target_year,
+            cps_count_target: Math.round(yearlyTarget.cps_count_target * ratio),
+            total_sales_target: yearlyTarget.total_sales_target * ratio,
+            pop_case_count_target: Math.round(yearlyTarget.pop_case_count_target * ratio),
+            pop_sales_target: yearlyTarget.pop_sales_target * ratio,
+            new_agents_target: Math.round(yearlyTarget.new_agents_target * ratio),
+            new_customers_target: Math.round(yearlyTarget.new_customers_target * ratio),
+            activity_headcount_target: Math.round(yearlyTarget.activity_headcount_target * ratio),
+            seasonal_factor: factors[q]
+        };
 
-            const existing = (await DataStore.getAll('quarterly_targets')).find(t => t.year === qTarget.year && t.quarter === q);
-            if (existing) {
-                await DataStore.update('quarterly_targets', existing.id, qTarget);
-            } else {
-                await DataStore.create('quarterly_targets', qTarget);
-            }
-        });
-    };
-
-    const exportKPIReport = async (format) => {
-        const ranges = getDateRanges(_currentTimeFilter, _customDateFrom, _customDateTo);
-        const kpis = await calculateKPIs(ranges.current.from, ranges.current.to);
-
-        if (format === 'csv') {
-            let csv = "\uFEFF"; // BOM for Excel CID
-            csv += `KPI Report: ${ranges.current.from} to ${ranges.current.to} (${_currentTimeFilter}) \n`;
-            csv += `Exported at: ${new Date().toLocaleString()} \n\n`;
-
-            csv += "--- Summary Metrics ---\n";
-            csv += "Metric,Value,Description\n";
-            Object.keys(kpis).forEach(key => {
-                let val = kpis[key];
-                if (key.toLowerCase().includes('sales')) val = `RM ${val.toLocaleString()} `;
-                csv += `"${key}", "${val}", "${KPI_DEFINITIONS[key] || ''}"\n`;
-            });
-
-            csv += "\n--- Trend Data ---\n";
-            const chartData = _revenueChart ? _revenueChart.data : null;
-            if (chartData) {
-                csv += "Label,Actual,Target\n";
-                chartData.labels.forEach((label, i) => {
-                    const actual = chartData.datasets[0].data[i] || 0;
-                    const target = chartData.datasets[1].data[i] || 0;
-                    csv += `"${label}", "${actual}", "${target}"\n`;
-                });
-            }
-
-            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.setAttribute('hidden', '');
-            a.setAttribute('href', url);
-            a.setAttribute('download', `KPI_Report_${ranges.current.from}_to_${ranges.current.to}.csv`);
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            UI.toast.success('Comprehensive CSV report exported.');
+        const allQuarterly = await DataStore.getAll('quarterly_targets');
+        const existing = allQuarterly.find(t => t.year === qTarget.year && t.quarter === q);
+        if (existing) {
+            await DataStore.update('quarterly_targets', existing.id, qTarget);
+        } else {
+            await DataStore.create('quarterly_targets', qTarget);
         }
-    };
+    }
+};
+  
+
+const KPI_DEFINITIONS = KPI_DEFINITIONS || {
+    cpsCount: 'Number of CPS activities',
+    totalSales: 'Total sales amount (excluding agent packages)',
+    newAgents: 'New agents joined',
+    newCustomers: 'New customers converted',
+    popCaseCount: 'Number of POP payment cases',
+    eppCaseCount: 'Number of EPP payment cases',
+    // Add any missing definitions
+};
+
+const exportKPIReport = async (format) => {
+    const ranges = getDateRanges(_currentTimeFilter, _customDateFrom, _customDateTo);
+    const kpis = await calculateKPIs(ranges.current.from, ranges.current.to);
+
+    if (format === 'csv') {
+        let csv = "\uFEFF"; // BOM for Excel
+        csv += `KPI Report: ${ranges.current.from} to ${ranges.current.to} (${_currentTimeFilter})\n`;
+        csv += `Exported at: ${new Date().toLocaleString()}\n\n`;
+
+        csv += "--- Summary Metrics ---\n";
+        csv += "Metric,Value,Description\n";
+        for (const [key, val] of Object.entries(kpis)) {
+            let displayVal = val;
+            if (key.toLowerCase().includes('sales')) displayVal = `RM ${val.toLocaleString()}`;
+            csv += `"${key}","${displayVal}","${KPI_DEFINITIONS[key] || ''}"\n`;
+        }
+
+        csv += "\n--- Trend Data ---\n";
+        const chartData = _revenueChart ? _revenueChart.data : null;
+        if (chartData) {
+            csv += "Label,Actual,Target\n";
+            chartData.labels.forEach((label, i) => {
+                const actual = chartData.datasets[0]?.data[i] || 0;
+                const target = chartData.datasets[1]?.data[i] || 0;
+                csv += `"${label}","${actual}","${target}"\n`;
+            });
+        }
+
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.setAttribute('hidden', '');
+        a.setAttribute('href', url);
+        a.setAttribute('download', `KPI_Report_${ranges.current.from}_to_${ranges.current.to}.csv`);
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        UI.toast.success('Comprehensive CSV report exported.');
+    }
+};
 
     const printDashboard = () => {
         window.print();
