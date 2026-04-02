@@ -16076,41 +16076,41 @@ const exportKPIReport = async (format) => {
         await refreshCampaignsTab();
     };
 
-    const simulateCampaignSending = async (campaignId) => {
-        const messages = (await DataStore.getAll('campaign_messages')).filter(m => m.campaign_id === campaignId);
-        let sent = 0;
+const simulateCampaignSending = async (campaignId) => {
+    const messages = (await DataStore.getAll('campaign_messages')).filter(m => m.campaign_id === campaignId);
+    let sent = 0;
 
-        const interval = async (() => {
-            if (sent >= messages.length) {
-                clearInterval(interval);
-                await DataStore.update('whatsapp_campaigns', campaignId, { status: 'completed', completed_date: new Date().toISOString() });
-                await refreshCampaignsTab();
-                return;
-            }
+    const intervalId = setInterval(async () => {
+        if (sent >= messages.length) {
+            clearInterval(intervalId);
+            await DataStore.update('whatsapp_campaigns', campaignId, { status: 'completed', completed_date: new Date().toISOString() });
+            await refreshCampaignsTab();
+            return;
+        }
 
-            const msg = messages[sent];
-            const statusRoll = Math.random();
-            let status = 'sent';
-            if (statusRoll > 0.1) status = 'delivered';
-            if (statusRoll > 0.4) status = 'opened';
-            if (statusRoll > 0.8) status = 'replied';
+        const msg = messages[sent];
+        const statusRoll = Math.random();
+        let status = 'sent';
+        if (statusRoll > 0.1) status = 'delivered';
+        if (statusRoll > 0.4) status = 'opened';
+        if (statusRoll > 0.8) status = 'replied';
 
-            await DataStore.update('campaign_messages', msg.id, {
-                status: status,
-                sent_at: new Date().toISOString()
-            });
+        await DataStore.update('campaign_messages', msg.id, {
+            status: status,
+            sent_at: new Date().toISOString()
+        });
 
-            // Update campaign stats
-            const campaign = await DataStore.getById('whatsapp_campaigns', campaignId);
-            const updates = { sent_count: (campaign.sent_count || 0) + 1 };
-            if (['delivered', 'opened', 'replied'].includes(status)) updates.delivered_count = (campaign.delivered_count || 0) + 1;
-            if (['opened', 'replied'].includes(status)) updates.opened_count = (campaign.opened_count || 0) + 1;
-            if (status === 'replied') updates.replied_count = (campaign.replied_count || 0) + 1;
+        // Update campaign stats
+        const campaign = await DataStore.getById('whatsapp_campaigns', campaignId);
+        const updates = { sent_count: (campaign.sent_count || 0) + 1 };
+        if (['delivered', 'opened', 'replied'].includes(status)) updates.delivered_count = (campaign.delivered_count || 0) + 1;
+        if (['opened', 'replied'].includes(status)) updates.opened_count = (campaign.opened_count || 0) + 1;
+        if (status === 'replied') updates.replied_count = (campaign.replied_count || 0) + 1;
 
-            await DataStore.update('whatsapp_campaigns', campaignId, updates);
-            sent++;
-        }, 500);
-    };
+        await DataStore.update('whatsapp_campaigns', campaignId, updates);
+        sent++;
+    }, 500);
+};
 
     const refreshCampaignsTab = async () => {
         if (_currentMarketingTab === 'campaigns') {
