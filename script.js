@@ -17548,7 +17548,7 @@ const initImportDemoData = async () => {
         showAgentsView,
         renderAgentsTable,
         //filterAgents,
-        showAgentDetail,
+        //showAgentDetail,
         openAddAgentModal,
         saveAgent,
         renewLicense,
