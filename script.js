@@ -15190,71 +15190,91 @@ const exportKPIReport = async (format) => {
         }
     };
 
-    const viewPackageCustomers = async (packageId) => {
-        const pkg = await DataStore.getById('promotions', packageId);
-        if (!pkg) return;
+   const viewPackageCustomers = async (packageId) => {
+    const pkg = await DataStore.getById('promotions', packageId);
+    if (!pkg) return;
 
-        const purchases =await  (await DataStore.getAll('purchases')).filter(p => p.package_id == packageId);
+    // Get all purchases (once)
+    const allPurchases = await DataStore.getAll('purchases');
+    
+    // Filter purchases that have matching package_id
+    let purchases = allPurchases.filter(p => p.package_id == packageId);
 
-        // Fallback: match by product name if package_id is not set
-        if (purchases.length === 0) {
-            const productNames = pkg.product_ids.map(id => {
-                const prod = await DataStore.getById('products', id);
-                return prod ? prod.name : null;
-            }).filter(n => n);
+    // Fallback: match by product name if package_id not set
+    if (purchases.length === 0 && pkg.product_ids && pkg.product_ids.length) {
+        // Fetch product names in parallel
+        const products = await Promise.all(
+            pkg.product_ids.map(id => DataStore.getById('products', id))
+        );
+        const productNames = products.map(prod => prod ? prod.name : null).filter(n => n);
 
-            const allPurchases = await DataStore.getAll('purchases');
-            allPurchases.forEach(p => {
-                if (!p.package_id && productNames.includes(p.item)) {
-                    purchases.push(p);
-                }
-            });
+        purchases = [];
+        for (const p of allPurchases) {
+            if (!p.package_id && productNames.includes(p.item)) {
+                purchases.push(p);
+            }
         }
+    }
 
-        const content = `
-            <div class="package-customers-view">
-                <div style="margin-bottom: 20px; padding: 15px; background: var(--gray-50); border-radius: 8px; border-left: 4px solid var(--primary-500);">
-                    <h4 style="margin: 0; color: var(--primary-700);">${pkg.package_name}</h4>
-                    <p style="margin: 5px 0 0; font-size: 13px;">Total Customers: <strong>${purchases.length}</strong></p>
-                </div>
-                
-                <table class="data-table" style="width: 100%; border-collapse: collapse;">
-                    <thead>
-                        <tr style="background: var(--gray-100); text-align: left;">
-                            <th style="padding: 10px; border-bottom: 2px solid var(--gray-200);">Customer Name</th>
-                            <th style="padding: 10px; border-bottom: 2px solid var(--gray-200);">Purchase Date</th>
-                            <th style="padding: 10px; border-bottom: 2px solid var(--gray-200);">Amount Paid</th>
-                            <th style="padding: 10px; border-bottom: 2px solid var(--gray-200);">Status</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${purchases.map(p => {
-            const customer = await DataStore.getById('customers', p.customer_id) || await DataStore.getById('prospects', p.customer_id);
-            return `
-                                <tr>
-                                    <td style="padding: 10px; border-bottom: 1px solid var(--gray-200);">
-                                        ${customer ? `<a href="javascript:await void(0)" onclick="UI.hideModal(); app.showProfile(${customer.id}, '${customer.is_customer ? 'customer' : 'prospect'}')">${customer.full_name || customer.name}</a>` : 'Deleted Member'}
-                                    </td>
-                                    <td style="padding: 10px; border-bottom: 1px solid var(--gray-200);">${UI.formatDate(p.date)}</td>
-                                    <td style="padding: 10px; border-bottom: 1px solid var(--gray-200);">RM ${UI.formatNumber(p.amount)}</td>
-                                    <td style="padding: 10px; border-bottom: 1px solid var(--gray-200);">
-                                        <span class="status-badge" style="background: ${p.status === 'COMPLETED' ? '#dcfce7' : '#fef9c3'}; color: ${p.status === 'COMPLETED' ? '#166534' : '#854d0e'};">
-                                            ${p.status || 'PENDING'}
-                                        </span>
-                                    </td>
-                                </tr>
-                            `;
-        }).join('')}
-                        ${purchases.length === 0 ? '<tr><td colspan="4" style="padding: 30px; text-align: center; color: var(--gray-500);">No customers have purchased this package yet.</td></tr>' : ''}
-                    </tbody>
-                </table>
+    // Build table rows asynchronously
+    const rows = [];
+    for (const p of purchases) {
+        let customer = await DataStore.getById('customers', p.customer_id);
+        let customerType = 'customer';
+        if (!customer) {
+            customer = await DataStore.getById('prospects', p.customer_id);
+            customerType = 'prospect';
+        }
+        
+        const customerName = customer ? (customer.full_name || customer.name) : 'Deleted Member';
+        const customerId = customer ? customer.id : null;
+        const profileLink = customerId 
+            ? `<a href="#" onclick="UI.hideModal(); app.showProfile(${customerId}, '${customerType}'); return false;">${escapeHtml(customerName)}</a>`
+            : escapeHtml(customerName);
+        
+        rows.push(`
+            <tr>
+                <td style="padding: 10px; border-bottom: 1px solid var(--gray-200);">${profileLink}</td>
+                <td style="padding: 10px; border-bottom: 1px solid var(--gray-200);">${UI.formatDate(p.date)}</td>
+                <td style="padding: 10px; border-bottom: 1px solid var(--gray-200);">RM ${UI.formatNumber(p.amount)}</td>
+                <td style="padding: 10px; border-bottom: 1px solid var(--gray-200);">
+                    <span class="status-badge" style="background: ${p.status === 'COMPLETED' ? '#dcfce7' : '#fef9c3'}; color: ${p.status === 'COMPLETED' ? '#166534' : '#854d0e'};">
+                        ${p.status || 'PENDING'}
+                    </span>
+                </td>
+            </tr>
+        `);
+    }
+
+    const content = `
+        <div class="package-customers-view">
+            <div style="margin-bottom: 20px; padding: 15px; background: var(--gray-50); border-radius: 8px; border-left: 4px solid var(--primary-500);">
+                <h4 style="margin: 0; color: var(--primary-700);">${escapeHtml(pkg.package_name || pkg.name)}</h4>
+                <p style="margin: 5px 0 0; font-size: 13px;">Total Customers: <strong>${purchases.length}</strong></p>
             </div>
-        `;
+            
+            <table class="data-table" style="width: 100%; border-collapse: collapse;">
+                <thead>
+                    <tr style="background: var(--gray-100); text-align: left;">
+                        <th style="padding: 10px; border-bottom: 2px solid var(--gray-200);">Customer Name</th>
+                        <th style="padding: 10px; border-bottom: 2px solid var(--gray-200);">Purchase Date</th>
+                        <th style="padding: 10px; border-bottom: 2px solid var(--gray-200);">Amount Paid</th>
+                        <th style="padding: 10px; border-bottom: 2px solid var(--gray-200);">Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rows.join('')}
+                    ${purchases.length === 0 ? '<tr><td colspan="4" style="padding: 30px; text-align: center; color: var(--gray-500);">No customers have purchased this package yet.</td></tr>' : ''}
+                </tbody>
+            </table>
+        </div>
+    `;
 
-        UI.showModal(`Customers - ${pkg.package_name || pkg.name} `, content, [
-            { label: 'Close', type: 'secondary', action: 'UI.hideModal()' }
-        ], 'large');
-    };
+    UI.showModal(`Customers - ${escapeHtml(pkg.package_name || pkg.name)}`, content, [
+        { label: 'Close', type: 'secondary', action: 'UI.hideModal()' }
+    ], 'large');
+};
+
 
     // ========== TEMPLATES TAB ==========
 
