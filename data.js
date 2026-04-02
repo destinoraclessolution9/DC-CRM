@@ -1,6 +1,6 @@
 /**
  * Feng Shui CRM V8.7 - DataStore Layer (Async Supabase Version)
- * Replaces localStorage with Supabase while maintaining the event system.
+ * Protected against accidental overwrites.
  */
 
 class DataStore {
@@ -56,16 +56,13 @@ class DataStore {
 
     async init() {
         try {
-            // FIXED: Use window.supabase (not window.supabaseClient)
             if (!window.supabase) {
-                throw new Error('Supabase client not found. Ensure supabase is loaded.');
+                throw new Error('Supabase client not found.');
             }
-            // Test connection
             const { error } = await window.supabase.from('users').select('*').limit(1);
             if (error) throw error;
-            
             this.initialized = true;
-            console.log('DataStore initialised (Supabase mode). Tables:', this.tables.length);
+            console.log('DataStore initialised (Supabase mode).');
             this.emit('ready');
             return true;
         } catch (err) {
@@ -97,7 +94,7 @@ class DataStore {
 
     async add(tableName, record) {
         const dataToInsert = { ...record };
-        if (!dataToInsert.id) dataToInsert.id = this._generateId(); 
+        if (!dataToInsert.id) dataToInsert.id = this._generateId();
         const { data, error } = await window.supabase
             .from(tableName)
             .insert(dataToInsert)
@@ -142,10 +139,15 @@ class DataStore {
     }
 }
 
-// Create instance and protect from being overwritten
-if (!window.DataStore || !window.DataStore.init) {
-    window.DataStore = new DataStore();
-    console.log('DataStore instance created');
-} else {
-    console.log('DataStore already exists, skipping re-creation');
-}
+// Create and protect the global instance
+const _dataStoreInstance = new DataStore();
+
+// Use Object.defineProperty to make window.DataStore read‑only and non‑configurable
+Object.defineProperty(window, 'DataStore', {
+    value: _dataStoreInstance,
+    writable: false,
+    configurable: false,
+    enumerable: true
+});
+
+console.log('DataStore instance created and locked.');

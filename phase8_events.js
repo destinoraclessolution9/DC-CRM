@@ -8,25 +8,38 @@ Object.assign(window.app, (() => {
         return colors[Math.floor(Math.random() * colors.length)];
     };
 
-    const applyTagsFromEngagement = (registration, breakdown) => {
+    const applyTagsFromEngagement = async (registration, breakdown) => {
         const entity = registration.attendee_type === 'prospect'
-            ? DataStore.getById('prospects', registration.prospect_id)
-            : DataStore.getById('customers', registration.customer_id);
+            ? await DataStore.getById('prospects', registration.prospect_id)
+            : await DataStore.getById('customers', registration.customer_id);
         if (!entity) return;
-        const event = DataStore.getById('events', registration.event_id);
+        const event = await DataStore.getById('events', registration.event_id);
         const tagsToApply = [];
         if (event.auto_tags && event.auto_tags.length) tagsToApply.push(...event.auto_tags);
         if (registration.brought_friends > 0 && event.conditional_tags?.friend) tagsToApply.push(event.conditional_tags.friend);
         if (registration.asked_questions > 0 && event.conditional_tags?.question) tagsToApply.push(event.conditional_tags.question);
         if (registration.made_purchase && event.conditional_tags?.purchase) tagsToApply.push(event.conditional_tags.purchase);
 
-        tagsToApply.forEach(tagName => {
-            let tag = DataStore.getAll('tags').find(t => t.name === tagName);
-            if (!tag) tag = DataStore.create('tags', { id: 'tag_' + Date.now() + Math.random(), name: tagName, color: getRandomTagColor(), created_at: new Date().toISOString() });
-            DataStore.create('entity_tags', {
-                id: 'et_' + Date.now() + Math.random(), entity_type: registration.attendee_type, entity_id: entity.id, tag_id: tag.id, applied_at: new Date().toISOString(), source: 'event', source_id: event.id
+        for (const tagName of tagsToApply) {
+            let tag = (await DataStore.getAll('tags')).find(t => t.name === tagName);
+            if (!tag) {
+                tag = await DataStore.create('tags', {
+                    id: 'tag_' + Date.now() + Math.random(),
+                    name: tagName,
+                    color: getRandomTagColor(),
+                    created_at: new Date().toISOString()
+                });
+            }
+            await DataStore.create('entity_tags', {
+                id: 'et_' + Date.now() + Math.random(),
+                entity_type: registration.attendee_type,
+                entity_id: entity.id,
+                tag_id: tag.id,
+                applied_at: new Date().toISOString(),
+                source: 'event',
+                source_id: event.id
             });
-        });
+        }
     };
 
     const calculateEventScore = (registration, event) => {
@@ -60,7 +73,6 @@ Object.assign(window.app, (() => {
             breakdown.purchase_bonus = pts;
         }
 
-        // Phase 8 Bonus: Registered for next event
         if (registration.registered_next_event) {
             engagementPoints += 10;
             breakdown.next_event_bonus = 10;
@@ -74,65 +86,73 @@ Object.assign(window.app, (() => {
         };
     };
 
-    const processEventScoring = (eventId) => {
-        const regs = DataStore.getAll('event_registrations').filter(r => r.event_id === eventId && r.checked_in && !r.scoring_processed);
-        const event = DataStore.getById('events', eventId);
+    const processEventScoring = async (eventId) => {
+        const allRegs = await DataStore.getAll('event_registrations');
+        const regs = allRegs.filter(r => r.event_id === eventId && r.checked_in && !r.scoring_processed);
+        const event = await DataStore.getById('events', eventId);
         if (!event) return;
-        regs.forEach(reg => {
+        for (const reg of regs) {
             const score = calculateEventScore(reg, event);
-            reg.points_awarded = score.total; reg.points_breakdown = score.breakdown; reg.scoring_processed = true;
-            DataStore.update('event_registrations', reg.id, reg);
+            reg.points_awarded = score.total;
+            reg.points_breakdown = score.breakdown;
+            reg.scoring_processed = true;
+            await DataStore.update('event_registrations', reg.id, reg);
             const table = reg.attendee_type === 'prospect' ? 'prospects' : 'customers';
             const entityId = reg.attendee_type === 'prospect' ? reg.prospect_id : reg.customer_id;
-            const entity = DataStore.getById(table, entityId);
-            if (entity) { entity.total_score = (entity.total_score || 0) + score.total; DataStore.update(table, entity.id, entity); }
-            applyTagsFromEngagement(reg, score.breakdown);
-        });
+            const entity = await DataStore.getById(table, entityId);
+            if (entity) {
+                entity.total_score = (entity.total_score || 0) + score.total;
+                await DataStore.update(table, entity.id, entity);
+            }
+            await applyTagsFromEngagement(reg, score.breakdown);
+        }
         UI.toast.success(`Processed scoring for ${regs.length} attendees.`);
-        if (document.querySelector('.event-attendees')) app.openEventAttendeesModal(eventId);
+        if (document.querySelector('.event-attendees')) await app.openEventAttendeesModal(eventId);
     };
 
-    const updateEngagementMetrics = (registrationId, metrics) => {
-        const registration = DataStore.getById('event_registrations', registrationId);
+    const updateEngagementMetrics = async (registrationId, metrics) => {
+        const registration = await DataStore.getById('event_registrations', registrationId);
         if (!registration) return;
         registration.brought_friends = metrics.brought_friends || 0;
         registration.asked_questions = metrics.asked_questions || 0;
         registration.stayed_till_end = metrics.stayed_till_end || false;
         registration.made_purchase = metrics.made_purchase || false;
         registration.purchase_amount = metrics.purchase_amount || 0;
-        DataStore.update('event_registrations', registrationId, registration);
+        await DataStore.update('event_registrations', registrationId, registration);
     };
 
     const checkInAttendee = (registrationId) => {
-        const registration = DataStore.getById('event_registrations', registrationId);
-        if (!registration) return;
-        const content = `
-            <div class="form-section">
-                <h4>Engagement Metrics</h4>
-                <div class="form-row">
-                    <div class="form-group half"><label>Friends Brought</label><input type="number" id="brought-friends" class="form-control" value="0" min="0" max="3"></div>
-                    <div class="form-group half"><label>Questions Asked</label><input type="number" id="asked-questions" class="form-control" value="0" min="0" max="3"></div>
+        (async () => {
+            const registration = await DataStore.getById('event_registrations', registrationId);
+            if (!registration) return;
+            const content = `
+                <div class="form-section">
+                    <h4>Engagement Metrics</h4>
+                    <div class="form-row">
+                        <div class="form-group half"><label>Friends Brought</label><input type="number" id="brought-friends" class="form-control" value="0" min="0" max="3"></div>
+                        <div class="form-group half"><label>Questions Asked</label><input type="number" id="asked-questions" class="form-control" value="0" min="0" max="3"></div>
+                    </div>
+                    <label class="bonus-checkbox"><input type="checkbox" id="stayed-till-end" checked> Stayed till end</label>
+                    <label class="bonus-checkbox"><input type="checkbox" id="made-purchase" onchange="document.getElementById('purchase-amount').disabled = !this.checked"> Made Purchase</label>
+                    <div class="form-group"><label>Purchase Amount (RM)</label><input type="number" id="purchase-amount" class="form-control" value="0" disabled></div>
+                    
+                    <hr style="margin: 15px 0; border: 0; border-top: 1px solid var(--gray-200);">
+                    <label class="bonus-checkbox" style="font-weight:600; color:var(--primary);">
+                        <input type="checkbox" id="reg-next-event"> Registered for next event (+10 bonus points)
+                    </label>
+                    
+                    <div class="form-group"><label>Check-in Notes</label><textarea id="checkin-notes" class="form-control"></textarea></div>
                 </div>
-                <label class="bonus-checkbox"><input type="checkbox" id="stayed-till-end" checked> Stayed till end</label>
-                <label class="bonus-checkbox"><input type="checkbox" id="made-purchase" onchange="document.getElementById('purchase-amount').disabled = !this.checked"> Made Purchase</label>
-                <div class="form-group"><label>Purchase Amount (RM)</label><input type="number" id="purchase-amount" class="form-control" value="0" disabled></div>
-                
-                <hr style="margin: 15px 0; border: 0; border-top: 1px solid var(--gray-200);">
-                <label class="bonus-checkbox" style="font-weight:600; color:var(--primary);">
-                    <input type="checkbox" id="reg-next-event"> Registered for next event (+10 bonus points)
-                </label>
-                
-                <div class="form-group"><label>Check-in Notes</label><textarea id="checkin-notes" class="form-control"></textarea></div>
-            </div>
-        `;
-        UI.showModal('Check-in Attendee', content, [
-            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Confirm Check-in', type: 'primary', action: `app.executeCheckIn(${registrationId})` }
-        ]);
+            `;
+            UI.showModal('Check-in Attendee', content, [
+                { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+                { label: 'Confirm Check-in', type: 'primary', action: `app.executeCheckIn(${registrationId})` }
+            ]);
+        })();
     };
 
-    const executeCheckIn = (regId) => {
-        const reg = DataStore.getById('event_registrations', regId);
+    const executeCheckIn = async (regId) => {
+        const reg = await DataStore.getById('event_registrations', regId);
         reg.checked_in = true;
         reg.checked_in_at = new Date().toISOString();
         reg.brought_friends = parseInt(document.getElementById('brought-friends')?.value || 0);
@@ -142,27 +162,26 @@ Object.assign(window.app, (() => {
         reg.purchase_amount = parseFloat(document.getElementById('purchase-amount')?.value || 0);
         reg.registered_next_event = document.getElementById('reg-next-event')?.checked || false;
 
-        DataStore.update('event_registrations', regId, reg);
+        await DataStore.update('event_registrations', regId, reg);
 
-        const event = DataStore.getById('events', reg.event_id);
+        const event = await DataStore.getById('events', reg.event_id);
         const score = calculateEventScore(reg, event);
         reg.points_awarded = score.total;
         reg.points_breakdown = score.breakdown;
         reg.scoring_processed = true;
-        DataStore.update('event_registrations', regId, reg);
+        await DataStore.update('event_registrations', regId, reg);
 
         const table = reg.attendee_type === 'prospect' ? 'prospects' : 'customers';
         const entityId = reg.attendee_type === 'prospect' ? reg.prospect_id : reg.customer_id;
-        const entity = DataStore.getById(table, entityId);
+        const entity = await DataStore.getById(table, entityId);
         if (entity) {
             entity.total_score = (entity.total_score || 0) + score.total;
-            DataStore.update(table, entity.id, entity);
+            await DataStore.update(table, entity.id, entity);
         }
-        applyTagsFromEngagement(reg, score.breakdown);
+        await applyTagsFromEngagement(reg, score.breakdown);
 
-        // Phase 8 rule: Create activity on check-in
-        const currentUser = Auth.getCurrentUser();
-        DataStore.create('activities', {
+        const currentUser = await Auth.getCurrentUser();
+        await DataStore.create('activities', {
             activity_type: 'EVENT',
             activity_title: `Checked in to: ${event?.event_title || 'Event'}`,
             activity_date: new Date().toISOString().split('T')[0],
@@ -177,24 +196,52 @@ Object.assign(window.app, (() => {
 
         UI.toast.success(`Checked in successfully! Awarded ${score.total} points`);
         UI.hideModal();
-        app.openEventAttendeesModal(reg.event_id);
+        await app.openEventAttendeesModal(reg.event_id);
     };
 
-    const registerAttendee = (eventId, entityId, type) => {
+    const registerAttendee = async (eventId, entityId, type) => {
         if (!entityId) return;
-        DataStore.create('event_registrations', { event_id: eventId, attendee_type: type, prospect_id: type === 'prospect' ? parseInt(entityId) : null, customer_id: type === 'customer' ? parseInt(entityId) : null, registered_at: new Date().toISOString(), checked_in: false, points_awarded: 0 });
+        await DataStore.create('event_registrations', {
+            event_id: eventId,
+            attendee_type: type,
+            prospect_id: type === 'prospect' ? parseInt(entityId) : null,
+            customer_id: type === 'customer' ? parseInt(entityId) : null,
+            registered_at: new Date().toISOString(),
+            checked_in: false,
+            points_awarded: 0
+        });
         UI.toast.success('Attendee registered!');
-        app.openEventAttendeesModal(eventId);
+        await app.openEventAttendeesModal(eventId);
     };
 
-    const openEventAttendeesModal = (eventId, activeTab = 'all') => {
-        const event = DataStore.getById('events', eventId);
+    const openEventAttendeesModal = async (eventId, activeTab = 'all') => {
+        const event = await DataStore.getById('events', eventId);
         if (!event) return;
-        const allRegs = DataStore.getAll('event_registrations').filter(r => r.event_id === eventId);
+        const allRegs = await DataStore.getAll('event_registrations');
+        const eventRegs = allRegs.filter(r => r.event_id === eventId);
 
-        let regs = allRegs;
-        if (activeTab === 'registered') regs = allRegs.filter(r => !r.checked_in);
-        if (activeTab === 'checked_in') regs = allRegs.filter(r => r.checked_in);
+        let regs = eventRegs;
+        if (activeTab === 'registered') regs = eventRegs.filter(r => !r.checked_in);
+        if (activeTab === 'checked_in') regs = eventRegs.filter(r => r.checked_in);
+
+        let attendeesHtml = '';
+        for (const r of regs) {
+            const entity = r.attendee_type === 'prospect'
+                ? await DataStore.getById('prospects', r.prospect_id)
+                : await DataStore.getById('customers', r.customer_id);
+            const name = entity ? entity.full_name : 'Unknown User';
+            const checkInBtn = r.checked_in
+                ? `<span style="color:var(--success);"><i class="fas fa-check"></i> Checked In</span>`
+                : `<button class="btn primary btn-sm" onclick="app.checkInAttendee(${r.id})">Check In</button>`;
+            attendeesHtml += `
+                <tr>
+                    <td>${name}</td>
+                    <td>${checkInBtn}</td>
+                    <td>${r.points_awarded || 0}</td>
+                    <td><button class="btn-icon text-error" onclick="app.deleteAttendee(${r.id}, ${eventId})"><i class="fas fa-times"></i></button></td>
+                </tr>
+            `;
+        }
 
         const content = `
             <div class="event-attendees">
@@ -203,26 +250,25 @@ Object.assign(window.app, (() => {
                     <button class="btn secondary" onclick="app.processEventScoring(${eventId})"><i class="fas fa-magic"></i> Auto Score</button>
                 </div>
                 <div class="event-tabs" style="margin-bottom: 16px; border-bottom: 2px solid var(--gray-200);">
-                    <button class="event-tab ${activeTab === 'all' ? 'active' : ''}" style="margin-bottom: -2px;" onclick="app.openEventAttendeesModal(${eventId}, 'all')">All (${allRegs.length})</button>
-                    <button class="event-tab ${activeTab === 'registered' ? 'active' : ''}" style="margin-bottom: -2px;" onclick="app.openEventAttendeesModal(${eventId}, 'registered')">Registered (${allRegs.filter(r => !r.checked_in).length})</button>
-                    <button class="event-tab ${activeTab === 'checked_in' ? 'active' : ''}" style="margin-bottom: -2px;" onclick="app.openEventAttendeesModal(${eventId}, 'checked_in')">Checked In (${allRegs.filter(r => r.checked_in).length})</button>
+                    <button class="event-tab ${activeTab === 'all' ? 'active' : ''}" style="margin-bottom: -2px;" onclick="app.openEventAttendeesModal(${eventId}, 'all')">All (${eventRegs.length})</button>
+                    <button class="event-tab ${activeTab === 'registered' ? 'active' : ''}" style="margin-bottom: -2px;" onclick="app.openEventAttendeesModal(${eventId}, 'registered')">Registered (${eventRegs.filter(r => !r.checked_in).length})</button>
+                    <button class="event-tab ${activeTab === 'checked_in' ? 'active' : ''}" style="margin-bottom: -2px;" onclick="app.openEventAttendeesModal(${eventId}, 'checked_in')">Checked In (${eventRegs.filter(r => r.checked_in).length})</button>
                 </div>
                 <div class="events-table-container">
                     <table class="events-table">
                         <thead><tr><th>Name</th><th>Status</th><th>Points</th><th>Actions</th></tr></thead>
                         <tbody>
-                            ${regs.map(r => {
-            const entity = r.attendee_type === 'prospect' ? DataStore.getById('prospects', r.prospect_id) : DataStore.getById('customers', r.customer_id);
-            const name = entity ? entity.full_name : 'Unknown User';
-            const checkInBtn = r.checked_in ? `<span style="color:var(--success);"><i class="fas fa-check"></i> Checked In</span>` : `<button class="btn primary btn-sm" onclick="app.checkInAttendee(${r.id})">Check In</button>`;
-            return `<tr><td>${name}</td><td>${checkInBtn}</td><td>${r.points_awarded || 0}</td><td><button class="btn-icon text-error" onclick="DataStore.delete('event_registrations', ${r.id}); app.openEventAttendeesModal(${eventId});"><i class="fas fa-times"></i></button></td></tr>`;
-        }).join('')}
-                            ${regs.length === 0 ? '<tr><td colspan="4" style="text-align:center;">No attendees registered.</td></tr>' : ''}
+                            ${attendeesHtml || '<tr><td colspan="4" style="text-align:center;">No attendees registered.</td></tr>'}
                         </tbody>
                     </table>
                 </div>
             </div>`;
         UI.showModal(`Attendees - ${event.event_title}`, content, [{ label: 'Done', type: 'secondary', action: 'UI.hideModal()' }]);
+    };
+
+    const deleteAttendee = async (regId, eventId) => {
+        await DataStore.delete('event_registrations', regId);
+        await app.openEventAttendeesModal(eventId);
     };
 
     const showEventManagementView = (container) => {
@@ -254,72 +300,116 @@ Object.assign(window.app, (() => {
         else if (tab === 'templates') app.renderEventTemplates();
     };
 
-    const renderUpcomingEvents = () => {
+    const renderUpcomingEvents = async () => {
         const container = document.getElementById('event-tab-content');
         if (!container) return;
-        const events = DataStore.getAll('events').filter(e => e.status !== 'completed');
+        const allEvents = await DataStore.getAll('events');
+        const events = allEvents.filter(e => e.status !== 'completed');
         let html = `<div class="events-table-container"><table class="events-table"><thead><tr><th>Event Title</th><th>Date</th><th>Expected</th><th>Price</th><th>Score</th><th>Actions</th></tr></thead><tbody>`;
         if (events.length === 0) html += `<tr><td colspan="6" style="text-align:center;">No upcoming events.</td></tr>`;
-        events.forEach(e => {
-            html += `<tr>
-                <td><strong>${e.event_title}</strong></td><td>${e.event_date}</td><td>${e.registered_count || 0}</td>
-                <td>RM ${e.ticket_price || 0}</td><td>+${e.base_score || 0}</td>
-                <td><button class="btn-icon" onclick="app.openCreateEventModal()"><i class="fas fa-edit"></i></button>
-                <button class="btn-icon" onclick="DataStore.delete('events', ${e.id}); app.renderUpcomingEvents()"><i class="fas fa-trash"></i></button>
-                <button class="btn secondary btn-sm" onclick="app.openEventAttendeesModal(${e.id})">View</button></td></tr>`;
-        });
+        for (const e of events) {
+            html += `
+                <tr>
+                    <td><strong>${e.event_title}</strong></td>
+                    <td>${e.event_date}</td>
+                    <td>${e.registered_count || 0}</td>
+                    <td>RM ${e.ticket_price || 0}</td>
+                    <td>+${e.base_score || 0}</td>
+                    <td>
+                        <button class="btn-icon" onclick="app.openCreateEventModal()"><i class="fas fa-edit"></i></button>
+                        <button class="btn-icon" onclick="app.deleteEvent(${e.id})"><i class="fas fa-trash"></i></button>
+                        <button class="btn secondary btn-sm" onclick="app.openEventAttendeesModal(${e.id})">View</button>
+                    </td>
+                </tr>
+            `;
+        }
         container.innerHTML = html + "</tbody></table></div>";
     };
 
-    const renderPastEvents = () => {
+    const renderPastEvents = async () => {
         const container = document.getElementById('event-tab-content');
         if (!container) return;
-        let events = DataStore.getAll('events').filter(e => e.status === 'completed');
+        let allEvents = await DataStore.getAll('events');
+        let events = allEvents.filter(e => e.status === 'completed');
         if (events.length === 0) {
-            const pastEvents = [{ id: 991, event_title: 'New Year Blessing', event_date: '2026-01-15', status: 'completed' }, { id: 992, event_title: 'Wealth Workshop', event_date: '2026-02-10', status: 'completed' }];
-            pastEvents.forEach(e => { if (!DataStore.getById('events', e.id)) DataStore.create('events', e); });
-            events = DataStore.getAll('events').filter(e => e.status === 'completed');
+            const pastEvents = [
+                { id: 991, event_title: 'New Year Blessing', event_date: '2026-01-15', status: 'completed' },
+                { id: 992, event_title: 'Wealth Workshop', event_date: '2026-02-10', status: 'completed' }
+            ];
+            for (const e of pastEvents) {
+                if (!(await DataStore.getById('events', e.id))) {
+                    await DataStore.create('events', e);
+                }
+            }
+            allEvents = await DataStore.getAll('events');
+            events = allEvents.filter(e => e.status === 'completed');
         }
         let html = `
             <div style="margin-bottom: 10px; text-align: right;">
                 <button class="btn secondary" onclick="app.exportEventData('csv')"><i class="fas fa-file-csv"></i> Export All Past Events</button>
             </div>
             <div class="events-table-container"><table class="events-table"><thead><tr><th>Event Title</th><th>Date</th><th>Actual</th><th>Score</th><th>Actions</th></tr></thead><tbody>`;
-        events.forEach(e => {
-            const regs = DataStore.getAll('event_registrations').filter(r => r.event_id === e.id && r.checked_in);
+        for (const e of events) {
+            const allRegs = await DataStore.getAll('event_registrations');
+            const regs = allRegs.filter(r => r.event_id === e.id && r.checked_in);
             const avgScore = regs.length ? (regs.reduce((sum, r) => sum + (r.points_awarded || 0), 0) / regs.length).toFixed(1) : 0;
             const attds = e.id === 991 ? 120 : (e.id === 992 ? 85 : regs.length);
             const scr = e.id === 991 ? 15 : (e.id === 992 ? 20 : avgScore);
-            html += `<tr><td><strong>${e.event_title}</strong></td><td>${e.event_date}</td><td>${attds}</td><td>+${scr}</td>
-                <td><button class="btn secondary btn-sm" onclick="app.openEventReports()">Report</button>
-                <button class="btn secondary btn-sm" onclick="app.exportEventData('csv')">Export</button></td></tr>`;
-        });
+            html += `
+                <tr>
+                    <td><strong>${e.event_title}</strong></td>
+                    <td>${e.event_date}</td>
+                    <td>${attds}</td>
+                    <td>+${scr}</td>
+                    <td>
+                        <button class="btn secondary btn-sm" onclick="app.openEventReports()">Report</button>
+                        <button class="btn secondary btn-sm" onclick="app.exportEventData('csv')">Export</button>
+                    </td>
+                </tr>
+            `;
+        }
         container.innerHTML = html + "</tbody></table></div>";
     };
 
-    const renderEventTemplates = () => {
+    const renderEventTemplates = async () => {
         const container = document.getElementById('event-tab-content');
         if (!container) return;
-        let templates = DataStore.getAll('event_templates');
+        let templates = await DataStore.getAll('event_templates');
         let html = `<div class="events-table-container"><table class="events-table"><thead><tr><th>Name</th><th>Category</th><th>Score</th><th>Actions</th></tr></thead><tbody>`;
         if (templates.length === 0) html += `<tr><td colspan="4" style="text-align:center;">No templates found.</td></tr>`;
-        templates.forEach(t => {
-            const cat = DataStore.getById('event_categories', t.event_category_id);
-            html += `<tr><td><strong>${t.template_name || t.event_title || 'Template'}</strong></td><td>${cat ? cat.category_name : 'N/A'}</td><td>+${t.base_score || 0}</td>
-                <td>
-                    <button class="btn primary btn-sm" onclick="app.openCreateEventModal(${t.id})">Use</button>
-                    <button class="btn secondary btn-sm" onclick="app.editTemplate(${t.id})">Edit</button>
-                    <button class="btn-icon" onclick="DataStore.delete('event_templates', ${t.id}); app.switchEventTab('templates')"><i class="fas fa-trash"></i></button>
-                </td></tr>`;
-        });
+        for (const t of templates) {
+            const cat = await DataStore.getById('event_categories', t.event_category_id);
+            html += `
+                <tr>
+                    <td><strong>${t.template_name || t.event_title || 'Template'}</strong></td>
+                    <td>${cat ? cat.category_name : 'N/A'}</td>
+                    <td>+${t.base_score || 0}</td>
+                    <td>
+                        <button class="btn primary btn-sm" onclick="app.openCreateEventModal(${t.id})">Use</button>
+                        <button class="btn secondary btn-sm" onclick="app.editTemplate(${t.id})">Edit</button>
+                        <button class="btn-icon" onclick="app.deleteTemplate(${t.id})"><i class="fas fa-trash"></i></button>
+                    </td>
+                </tr>
+            `;
+        }
         container.innerHTML = html + "</tbody></table></div>";
     };
 
-    const editTemplate = (templateId) => {
-        const template = DataStore.getById('event_templates', templateId);
+    const deleteEvent = async (id) => {
+        await DataStore.delete('events', id);
+        await renderUpcomingEvents();
+    };
+
+    const deleteTemplate = async (id) => {
+        await DataStore.delete('event_templates', id);
+        await renderEventTemplates();
+    };
+
+    const editTemplate = async (templateId) => {
+        const template = await DataStore.getById('event_templates', templateId);
         if (!template) return;
 
-        const categories = DataStore.getAll('event_categories');
+        const categories = await DataStore.getAll('event_categories');
         const catOptions = categories.map(c => `<option value="${c.id}" ${template.event_category_id == c.id ? 'selected' : ''}>${c.category_name}</option>`).join('');
 
         const content = `
@@ -339,18 +429,18 @@ Object.assign(window.app, (() => {
         ]);
     };
 
-    const saveTemplateUpdate = (templateId) => {
-        const template = DataStore.getById('event_templates', templateId);
+    const saveTemplateUpdate = async (templateId) => {
+        const template = await DataStore.getById('event_templates', templateId);
         template.template_name = document.getElementById('edit-template-name').value;
         template.event_category_id = parseInt(document.getElementById('edit-template-category').value);
-        DataStore.update('event_templates', templateId, template);
+        await DataStore.update('event_templates', templateId, template);
         UI.hideModal();
         UI.toast.success('Template updated');
-        app.renderEventTemplates();
+        await app.renderEventTemplates();
     };
 
-    const applyTemplate = (templateId) => {
-        const template = DataStore.getById('event_templates', templateId);
+    const applyTemplate = async (templateId) => {
+        const template = await DataStore.getById('event_templates', templateId);
         if (!template) return;
         document.getElementById('event-title').value = template.template_name || template.event_title || '';
         document.getElementById('event-category').value = template.event_category_id || 1;
@@ -365,8 +455,8 @@ Object.assign(window.app, (() => {
         UI.toast.success('Template applied');
     };
 
-    const openCreateEventModal = (isTemplate = false) => {
-        const categories = DataStore.getAll('event_categories');
+    const openCreateEventModal = async (isTemplate = false) => {
+        const categories = await DataStore.getAll('event_categories');
         const catOptions = categories.map(c => `<option value="${c.id}">${c.category_name}</option>`).join('');
         const content = `
             <form id="event-form" onsubmit="event.preventDefault(); app.saveEvent(${isTemplate});">
@@ -448,7 +538,7 @@ Object.assign(window.app, (() => {
         if (typeof isTemplate === 'number') setTimeout(() => app.applyTemplate(isTemplate), 100);
     };
 
-    const saveEvent = (isTemplate) => {
+    const saveEvent = async (isTemplate) => {
         const title = document.getElementById('event-title').value;
         const baseProps = {
             event_category_id: parseInt(document.getElementById('event-category').value) || 1,
@@ -475,15 +565,15 @@ Object.assign(window.app, (() => {
         };
 
         if (isTemplate === true) {
-            DataStore.create('event_templates', { template_name: title, ...baseProps });
+            await DataStore.create('event_templates', { template_name: title, ...baseProps });
             UI.toast.success('Template saved.');
-            app.switchEventTab('templates');
+            await app.switchEventTab('templates');
         } else {
             const autoTags = [];
             if (document.getElementById('tag-attendee').checked) autoTags.push('Event Attendee');
             if (document.getElementById('tag-course').checked) autoTags.push('Course Participant');
 
-            DataStore.create('events', {
+            await DataStore.create('events', {
                 event_title: title,
                 event_date: document.getElementById('event-date').value,
                 status: 'upcoming',
@@ -492,18 +582,31 @@ Object.assign(window.app, (() => {
                 ...baseProps
             });
             UI.toast.success('Event created.');
-            app.renderUpcomingEvents();
+            await app.renderUpcomingEvents();
         }
         UI.hideModal();
     };
 
-    const generateAttendanceChart = () => {
-        const events = DataStore.getAll('events'); const ctx = document.getElementById('attendance-chart')?.getContext('2d'); if (!ctx) return;
-        new Chart(ctx, { type: 'pie', data: { labels: events.map(e => e.event_title), datasets: [{ data: events.map(e => DataStore.getAll('event_registrations').filter(r => r.event_id === e.id && r.checked_in).length), backgroundColor: ['#3b82f6', '#f59e0b', '#10b981', '#8b5cf6', '#ec4899'] }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' }, title: { display: true, text: 'Attendance by Event' } } } });
+    const generateAttendanceChart = async () => {
+        const events = await DataStore.getAll('events');
+        const ctx = document.getElementById('attendance-chart')?.getContext('2d');
+        if (!ctx) return;
+        const regs = await DataStore.getAll('event_registrations');
+        const data = await Promise.all(events.map(async e => {
+            return (await DataStore.getAll('event_registrations')).filter(r => r.event_id === e.id && r.checked_in).length;
+        }));
+        new Chart(ctx, {
+            type: 'pie',
+            data: {
+                labels: events.map(e => e.event_title),
+                datasets: [{ data: data, backgroundColor: ['#3b82f6', '#f59e0b', '#10b981', '#8b5cf6', '#ec4899'] }]
+            },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' }, title: { display: true, text: 'Attendance by Event' } } }
+        });
     };
 
-    const generateScoreChart = () => {
-        const regs = DataStore.getAll('event_registrations').filter(r => r.checked_in && r.scoring_processed);
+    const generateScoreChart = async () => {
+        const regs = (await DataStore.getAll('event_registrations')).filter(r => r.checked_in && r.scoring_processed);
         const ranges = { '0-10': 0, '11-20': 0, '21-30': 0, '31-40': 0, '41+': 0 };
         regs.forEach(r => {
             const pts = r.points_awarded || 0;
@@ -513,36 +616,46 @@ Object.assign(window.app, (() => {
             else if (pts <= 40) ranges['31-40']++;
             else ranges['41+']++;
         });
-        const ctx = document.getElementById('score-chart')?.getContext('2d'); if (!ctx) return;
-        new Chart(ctx, { type: 'bar', data: { labels: Object.keys(ranges), datasets: [{ label: 'Attendees', data: Object.values(ranges), backgroundColor: '#3b82f6' }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: true, text: 'Score Distribution' } } } });
+        const ctx = document.getElementById('score-chart')?.getContext('2d');
+        if (!ctx) return;
+        new Chart(ctx, {
+            type: 'bar',
+            data: { labels: Object.keys(ranges), datasets: [{ label: 'Attendees', data: Object.values(ranges), backgroundColor: '#3b82f6' }] },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: true, text: 'Score Distribution' } } }
+        });
     };
 
-    const generateMonthlyTrendChart = () => {
-        const events = DataStore.getAll('events');
-        const regs = DataStore.getAll('event_registrations').filter(r => r.checked_in);
+    const generateMonthlyTrendChart = async () => {
+        const events = await DataStore.getAll('events');
+        const regs = (await DataStore.getAll('event_registrations')).filter(r => r.checked_in);
         const md = {};
-        regs.forEach(r => {
+        for (const r of regs) {
             const ev = events.find(e => e.id === r.event_id);
-            if (!ev || !ev.event_date) return;
+            if (!ev || !ev.event_date) continue;
             const m = new Date(ev.event_date).toLocaleString('default', { month: 'short' });
             md[m] = (md[m] || 0) + 1;
+        }
+        const ctx = document.getElementById('trend-chart')?.getContext('2d');
+        if (!ctx) return;
+        new Chart(ctx, {
+            type: 'line',
+            data: { labels: Object.keys(md), datasets: [{ label: 'Attendance', data: Object.values(md), borderColor: '#f59e0b', tension: 0.1 }] },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: true, text: 'Monthly Attendance Trend' } } }
         });
-        const ctx = document.getElementById('trend-chart')?.getContext('2d'); if (!ctx) return;
-        new Chart(ctx, { type: 'line', data: { labels: Object.keys(md), datasets: [{ label: 'Attendance', data: Object.values(md), borderColor: '#f59e0b', tension: 0.1 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: true, text: 'Monthly Attendance Trend' } } } });
     };
 
-    const exportEventData = (format) => {
-        const events = DataStore.getAll('events');
-        const registrations = DataStore.getAll('event_registrations');
+    const exportEventData = async (format) => {
+        const events = await DataStore.getAll('events');
+        const registrations = await DataStore.getAll('event_registrations');
 
         if (format === 'csv') {
             let csv = 'Event Title,Date,Registered,Attended,Avg Score\n';
-            events.forEach(e => {
+            for (const e of events) {
                 const evRegs = registrations.filter(r => r.event_id === e.id);
                 const att = evRegs.filter(r => r.checked_in).length;
                 const avg = att > 0 ? evRegs.reduce((sum, r) => sum + (r.points_awarded || 0), 0) / att : 0;
                 csv += `"${e.event_title}",${e.event_date},${evRegs.length},${att},${avg.toFixed(1)}\n`;
-            });
+            }
             const blob = new Blob([csv], { type: 'text/csv' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -561,12 +674,13 @@ Object.assign(window.app, (() => {
             doc.setTextColor(100);
             doc.text(`Generated on: ${new Date().toLocaleString()}`, 14, 30);
 
-            const tableData = events.map(e => {
+            const tableData = [];
+            for (const e of events) {
                 const evRegs = registrations.filter(r => r.event_id === e.id);
                 const att = evRegs.filter(r => r.checked_in).length;
                 const avg = att > 0 ? (evRegs.reduce((sum, r) => sum + (r.points_awarded || 0), 0) / att).toFixed(1) : '0.0';
-                return [e.event_title, e.event_date, evRegs.length, att, avg];
-            });
+                tableData.push([e.event_title, e.event_date, evRegs.length, att, avg]);
+            }
 
             doc.autoTable({
                 startY: 40,
@@ -581,9 +695,9 @@ Object.assign(window.app, (() => {
         }
     };
 
-    const exportAttendeeList = (eventId, format) => {
-        const event = DataStore.getById('events', eventId);
-        const regs = DataStore.getAll('event_registrations').filter(r => r.event_id === eventId);
+    const exportAttendeeList = async (eventId, format) => {
+        const event = await DataStore.getById('events', eventId);
+        const regs = (await DataStore.getAll('event_registrations')).filter(r => r.event_id === eventId);
 
         if (format === 'pdf') {
             const { jsPDF } = window.jspdf;
@@ -594,16 +708,19 @@ Object.assign(window.app, (() => {
             doc.setFontSize(11);
             doc.text(`Event Date: ${event.event_date}`, 14, 30);
 
-            const tableData = regs.map(r => {
-                const entity = r.attendee_type === 'prospect' ? DataStore.getById('prospects', r.prospect_id) : DataStore.getById('customers', r.customer_id);
-                return [
+            const tableData = [];
+            for (const r of regs) {
+                const entity = r.attendee_type === 'prospect'
+                    ? await DataStore.getById('prospects', r.prospect_id)
+                    : await DataStore.getById('customers', r.customer_id);
+                tableData.push([
                     entity?.full_name || 'Unknown',
                     r.attendee_type.toUpperCase(),
                     r.checked_in ? 'Yes' : 'No',
                     r.points_awarded || 0,
                     r.checked_in_at ? new Date(r.checked_in_at).toLocaleTimeString() : '-'
-                ];
-            });
+                ]);
+            }
 
             doc.autoTable({
                 startY: 40,
@@ -617,9 +734,9 @@ Object.assign(window.app, (() => {
         }
     };
 
-    const showSingleEventReport = (eventId) => {
-        const event = DataStore.getById('events', eventId);
-        const regs = DataStore.getAll('event_registrations').filter(r => r.event_id === eventId);
+    const showSingleEventReport = async (eventId) => {
+        const event = await DataStore.getById('events', eventId);
+        const regs = (await DataStore.getAll('event_registrations')).filter(r => r.event_id === eventId);
         const checkedIn = regs.filter(r => r.checked_in);
 
         const attendanceRate = regs.length > 0 ? Math.round((checkedIn.length / regs.length) * 100) : 0;
@@ -674,17 +791,21 @@ Object.assign(window.app, (() => {
         UI.showModal('Event Report', content, [{ label: 'Close', type: 'secondary', action: 'UI.hideModal()' }]);
     };
 
-    const openEventReports = () => {
-        const events = DataStore.getAll('events');
-        const regs = DataStore.getAll('event_registrations');
-        const checkedInRegs = regs.filter(r => r.checked_in);
+    const openEventReports = async () => {
+        const events = await DataStore.getAll('events');
+        const registrations = await DataStore.getAll('event_registrations');
+        const checkedInRegs = registrations.filter(r => r.checked_in);
         const totalAttendees = checkedInRegs.length;
         const totalScore = checkedInRegs.reduce((sum, r) => sum + (r.points_awarded || 0), 0);
         const avgScore = totalAttendees > 0 ? (totalScore / totalAttendees).toFixed(1) : '0.0';
 
         const content = `<div class="reports-dashboard"><div class="reports-grid"><div class="report-card"><h3>Events</h3><div class="stat">${events.length}</div></div><div class="report-card"><h3>Checked-in Attendees</h3><div class="stat">${totalAttendees}</div></div><div class="report-card"><h3>Avg Score Awarded</h3><div class="stat">${avgScore}</div></div></div><div class="chart-row"><div class="chart-container"><canvas id="attendance-chart"></canvas></div><div class="chart-container"><canvas id="score-chart"></canvas></div></div><div class="chart-container full-width"><canvas id="trend-chart"></canvas></div><div class="export-actions"><button class="btn primary" onclick="app.exportEventData('csv')"><i class="fas fa-file-csv"></i> Export CSV</button><button class="btn secondary" onclick="app.exportEventData('pdf')"><i class="fas fa-file-pdf"></i> Export PDF</button></div></div>`;
         UI.showModal('Event Reports', content, [{ label: 'Close', type: 'secondary', action: 'UI.hideModal()' }], 'fullscreen');
-        setTimeout(() => { app.generateAttendanceChart(); app.generateScoreChart(); app.generateMonthlyTrendChart(); }, 100);
+        setTimeout(async () => {
+            await app.generateAttendanceChart();
+            await app.generateScoreChart();
+            await app.generateMonthlyTrendChart();
+        }, 100);
     };
 
     return {
@@ -712,6 +833,9 @@ Object.assign(window.app, (() => {
         registerAttendee,
         checkInAttendee,
         executeCheckIn,
-        openEventReports
+        openEventReports,
+        deleteEvent,
+        deleteTemplate,
+        deleteAttendee
     };
 })());
