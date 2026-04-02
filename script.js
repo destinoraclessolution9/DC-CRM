@@ -11925,6 +11925,7 @@ const openAddSolutionModal = async (prospectId) => {
     <div id="agent-notes-list-${agent.id}" style="margin-top:12px;"></div>
 </div>
 
+/*
 // Populate agent notes after the DOM is ready
 setTimeout(async () => {
     const agentNotes = await DataStore.query('notes', { agent_id: agent.id });
@@ -11942,6 +11943,8 @@ setTimeout(async () => {
     const notesContainer = document.getElementById(`agent-notes-list-${agent.id}`);
     if (notesContainer) notesContainer.innerHTML = notesHtml;
 }, 100);
+*/
+
 
 // That’s it – no extra code after this point
 </div> <!-- close the performance-grid div -->
