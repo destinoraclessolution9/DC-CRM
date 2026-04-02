@@ -12474,14 +12474,18 @@ const renderCurrentAssignments = async (agentId) => {
         await showAgentDetail(agentId);
     };
 
-    const deactivateAgent = async (agentId) => {
-        UI.confirm('Deactivate Agent?', 'This will prevent the agent from logging in. You should reassign their active prospects first.', () => {
-            await DataStore.update('users', agentId, { status: 'inactive' });
-            UI.toast.success('Agent deactivated');
-            const main = document.getElementById('main-content');
-            if (main) await showAgentsView(main);
-        });
-    };
+  
+
+
+const deactivateAgent = async (agentId) => {
+    UI.confirm('Deactivate Agent?', 'This will prevent the agent from logging in. You should reassign their active prospects first.', async () => {
+        await DataStore.update('users', agentId, { status: 'inactive' });
+        UI.toast.success('Agent deactivated');
+        const main = document.getElementById('main-content');
+        if (main) await showAgentsView(main);
+    });
+};
+
 
     const assignProspectToAgent = async (prospectId, agentId) => {
         await DataStore.update('prospects', prospectId, { responsible_agent_id: agentId });
