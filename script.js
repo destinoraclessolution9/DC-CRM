@@ -13340,32 +13340,47 @@ const deactivateAgent = async (agentId) => {
             return;
         }
 
-        container.innerHTML = `
-            <table class="history-table">
-                <thead>
-                    <tr>
-                        <th>Prospect</th>
-                        <th>Date</th>
-                        <th>Type</th>
-                        <th>Changes</th>
-                        <th>Status</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${overrides.map(o => {
-            const prospect = await DataStore.getById('prospects', o.prospect_id);
-            const date = new Date(o.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-            return `
-                            <tr>
-                                <td>${prospect?.full_name || prospect?.name || 'Unknown'}</td>
-                                <td>${date}</td>
-                                <td><span class="type-badge type-${o.override_type}">${o.override_type.toUpperCase()}</span></td>
-                                <td>#${o.system_rank} → #${o.new_priority}</td>
-                                <td><span class="status-badge status-${o.status}">${o.status.toUpperCase()}</span></td>
-                            </tr>
-                        `;
-        }).join('')}
-                </tbody>
+
+// Fetch all prospects in parallel
+const prospectsData = await Promise.all(
+    overrides.map(async (o) => {
+        const prospect = await DataStore.getById('prospects', o.prospect_id);
+        const date = new Date(o.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+        return {
+            prospectName: prospect?.full_name || prospect?.name || 'Unknown',
+            date,
+            overrideType: o.override_type,
+            systemRank: o.system_rank,
+            newPriority: o.new_priority,
+            status: o.status
+        };
+    })
+);
+
+
+// Now build the HTML synchronously
+container.innerHTML = `
+    <table class="history-table">
+        <thead>
+            <tr>
+                <th>Prospect</th>
+                <th>Date</th>
+                <th>Type</th>
+                <th>Changes</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            ${prospectsData.map(p => `
+                <tr>
+                    <td>${p.prospectName}</td>
+                    <td>${p.date}</td>
+                    <td><span class="type-badge type-${p.overrideType}">${p.overrideType.toUpperCase()}</span></td>
+                    <td>#${p.systemRank} → #${p.newPriority}</td>
+                    <td><span class="status-badge status-${p.status}">${p.status.toUpperCase()}</span></td>
+                </tr>
+            `).join('')}
+               </tbody>
             </table>
         `;
     };
