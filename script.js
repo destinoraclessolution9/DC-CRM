@@ -11912,7 +11912,7 @@ const openAddSolutionModal = async (prospectId) => {
                         </div>
                     </div>
 
-/*
+
 <div class="performance-card">
     <h4><i class="fas fa-sticky-note"></i> Agent Notes</h4>
     <div class="add-note-section">
@@ -11925,12 +11925,14 @@ const openAddSolutionModal = async (prospectId) => {
     <div id="agent-notes-list-${agent.id}" style="margin-top:12px;"></div>
 </div>
 
-*/
+
 // Populate agent notes after the DOM is ready
 setTimeout(async () => {
     const agentNotes = await DataStore.query('notes', { agent_id: agent.id });
     const notesHtml = agentNotes.length
-        ? agentNotes.map(n => `
+//? agentNotes.map(n => `
+
+        agentNotes.map(n => `
             <div class="notes-item" style="margin-top:8px;">
                 <div class="notes-header">
                     <span>${n.date} - ${n.author}${n.is_voice_note ? ' <i class="fas fa-microphone voice-note-icon" title="Voice note"></i>' : ''}</span>
