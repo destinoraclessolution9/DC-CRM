@@ -18584,6 +18584,7 @@ const showSystemLogs = () => {
     }
 };
 
+
 // Add new Admin UI Functions to window.app
 Object.assign(window.app, {
     showAdminDashboard,
@@ -18609,8 +18610,14 @@ Object.assign(window.app, {
         }
     },
     // Provide mocks for some inline UI handlers to avoid errors if they don't exist
-    suspendTenant: (id) => { if (window.UI) window.UI.toast.info("Tenant suspended state toggled."); await setTimeout(showTenantManagement, 500); },
-    viewTenantDetails: (id) => { if (window.UI) window.UI.toast.info("Viewing details for " + id); }
+    suspendTenant: async (id) => {   // ← added 'async'
+        if (window.UI) window.UI.toast.info("Tenant suspended state toggled.");
+        // Remove 'await' – setTimeout doesn't return a promise
+        setTimeout(showTenantManagement, 500);
+    },
+    viewTenantDetails: (id) => {
+        if (window.UI) window.UI.toast.info("Viewing details for " + id);
+    }
 });
 
 // Initialize application when DOM is ready
