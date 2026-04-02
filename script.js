@@ -13262,19 +13262,24 @@ const deactivateAgent = async (agentId) => {
     };
 
     const renderManualPriority = async () => {
-        const userId = _currentUser?.id || 5;
-        const potentialRecords = await DataStore.query('my_potential_list', { user_id: userId })
-            .filter(rec => {
-                const p = await DataStore.getById('prospects', rec.prospect_id);
-                return p && p.status !== 'converted' && p.status !== 'lost';
-            })
-            .sort((a, b) => a.priority_order - b.priority_order);
-
-        // Since renderManualPriority usually calls refreshPipeline or similar, 
-        // we should ensure the filtering is applied where the list is actually rendered.
-        // The existing code just calls await refreshPipeline().
-        await refreshPipeline();
-    };
+    const userId = _currentUser?.id || 5;
+    const potentialRecords = await DataStore.query('my_potential_list', { user_id: userId });
+    
+    // Filter asynchronously using a for loop
+    const filtered = [];
+    for (const rec of potentialRecords) {
+        const p = await DataStore.getById('prospects', rec.prospect_id);
+        if (p && p.status !== 'converted' && p.status !== 'lost') {
+            filtered.push(rec);
+        }
+    }
+    
+    // Sort by priority_order
+    filtered.sort((a, b) => a.priority_order - b.priority_order);
+    
+    // The existing code just calls refreshPipeline()
+    await refreshPipeline();
+};
 
     const handleDragStart = (e, id) => {
         _draggedId = id;
