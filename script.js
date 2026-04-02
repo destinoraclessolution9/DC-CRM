@@ -11927,16 +11927,14 @@ const openAddSolutionModal = async (prospectId) => {
 
 
 // Populate agent notes after the DOM is ready
-setTimeout(async () => {
+ setTimeout(async () => {
     const agentNotes = await DataStore.query('notes', { agent_id: agent.id });
-    const notesHtml = agentNotes.length
-//? agentNotes.map(n => `
-
-        agentNotes.map(n => `
+    const notesHtml = agentNotes.length 
+        ? agentNotes.map(n => `
             <div class="notes-item" style="margin-top:8px;">
                 <div class="notes-header">
                     <span>${n.date} - ${n.author}${n.is_voice_note ? ' <i class="fas fa-microphone voice-note-icon" title="Voice note"></i>' : ''}</span>
-                    <button class="btn-icon" onclick="app. deleteAgentNote(${agent.id}, ${n.id})"><i class="fas fa-trash"></i></button>
+                    <button class="btn-icon" onclick="app.deleteAgentNote(${agent.id}, ${n.id})"><i class="fas fa-trash"></i></button>
                 </div>
                 <div>"${n.text}"</div>
             </div>
@@ -11945,7 +11943,6 @@ setTimeout(async () => {
     const notesContainer = document.getElementById(`agent-notes-list-${agent.id}`);
     if (notesContainer) notesContainer.innerHTML = notesHtml;
 }, 100);
-
 
 
 // That’s it – no extra code after this point
