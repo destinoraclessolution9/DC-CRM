@@ -12250,6 +12250,29 @@ const html = `
 `;
     };
 
+
+const renderCurrentAssignments = async (agentId) => {
+    const assignments = await DataStore.query('assignments', { agent_id: agentId });
+    if (assignments.length === 0) return '<p>No active assignments.</p>';
+
+    // Use for...of to avoid complex Promise.all, or use Promise.all with async map
+    let itemsHtml = '';
+    for (const a of assignments) {
+        const p = await DataStore.getById('prospects', a.prospect_id);
+        itemsHtml += `
+            <div class="assignment-item" onclick="app.showProspectDetail(${a.prospect_id})">
+                <div>
+                    <div class="assignment-prospect">${p ? escapeHtml(p.full_name) : 'Unknown'}</div>
+                    <div class="next-action">Next: ${a.next_action || 'None'}</div>
+                </div>
+                <span class="assignment-status status-${(a.status || 'active').toLowerCase()}">${a.status || 'Active'}</span>
+            </div>
+        `;
+    }
+
+    return `<div class="assignments-list">${itemsHtml}</div>`;
+};
+/*
     const renderCurrentAssignments = async (agentId) => {
         const assignments = await DataStore.query('assignments', { agent_id: agentId });
         if (assignments.length === 0) return '<p>No active assignments.</p>';
@@ -12273,7 +12296,7 @@ const html = `
             </div>
     `;
     };
-
+*/
     const renderPerformanceTargets = async (agentId) => {
         const target = await DataStore.query('agent_targets', { agent_id: agentId })[0];
         if (!target) return '<p>No targets set for this month.</p>';
