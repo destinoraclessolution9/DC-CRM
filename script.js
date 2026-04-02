@@ -14445,15 +14445,18 @@ const calculateQuarterlyBreakdown = async (yearlyTarget) => {
 };
   
 
-const KPI_DEFINITIONS = KPI_DEFINITIONS || {
-    cpsCount: 'Number of CPS activities',
-    totalSales: 'Total sales amount (excluding agent packages)',
-    newAgents: 'New agents joined',
-    newCustomers: 'New customers converted',
-    popCaseCount: 'Number of POP payment cases',
-    eppCaseCount: 'Number of EPP payment cases',
-    // Add any missing definitions
-};
+if (typeof KPI_DEFINITIONS === 'undefined') {
+    const KPI_DEFINITIONS = {
+        cpsCount: 'Number of CPS activities',
+        totalSales: 'Total sales amount (excluding agent packages)',
+        newAgents: 'New agents joined',
+        newCustomers: 'New customers converted',
+        popCaseCount: 'Number of POP payment cases',
+        eppCaseCount: 'Number of EPP payment cases',
+        // Add any missing definitions
+    };
+}
+
 
 const exportKPIReport = async (format) => {
     const ranges = getDateRanges(_currentTimeFilter, _customDateFrom, _customDateTo);
