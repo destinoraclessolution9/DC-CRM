@@ -13532,36 +13532,50 @@ container.innerHTML = `
         const container = document.getElementById('history-modal-table');
         if (!container) return;
 
-        container.innerHTML = `
-            <table class="history-table">
-                <thead>
-                    <tr>
-                        <th>Prospect Name</th>
-                        <th>Date</th>
-                        <th>Type</th>
-                        <th>From Rank → To Rank</th>
-                        <th>Status</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${overrides.map(o => {
-            const prospect = await DataStore.getById('prospects', o.prospect_id);
-            const date = new Date(o.created_at).toLocaleDateString();
-            return `
-                            <tr>
-                                <td>${prospect?.full_name || prospect?.name || 'Unknown'}</td>
-                                <td>${date}</td>
-                                <td><span class="type-badge type-${o.override_type}">${o.override_type.toUpperCase()}</span></td>
-                                <td>#${o.system_rank} → #${o.new_priority}</td>
-                                <td><span class="status-badge status-${o.status}">${o.status.toUpperCase()}</span></td>
-                                <td><button class="btn btn-sm secondary" onclick="app. viewJustification(${o.id})">View</button></td>
-                            </tr>
-                        `;
-        }).join('')}
-                </tbody>
-            </table>
-        `;
+// Fetch all prospect data in parallel
+const overridesWithDetails = await Promise.all(
+    overrides.map(async (o) => {
+        const prospect = await DataStore.getById('prospects', o.prospect_id);
+        const date = new Date(o.created_at).toLocaleDateString();
+        return {
+            id: o.id,
+            prospectName: prospect?.full_name || prospect?.name || 'Unknown',
+            date,
+            overrideType: o.override_type,
+            systemRank: o.system_rank,
+            newPriority: o.new_priority,
+            status: o.status
+        };
+    })
+);
+
+// Now build the HTML synchronously
+container.innerHTML = `
+    <table class="history-table">
+        <thead>
+            <tr>
+                <th>Prospect Name</th>
+                <th>Date</th>
+                <th>Type</th>
+                <th>From Rank → To Rank</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            ${overridesWithDetails.map(d => `
+                <tr>
+                    <td>${d.prospectName}</td>
+                    <td>${d.date}</td>
+                    <td><span class="type-badge type-${d.overrideType}">${d.overrideType.toUpperCase()}</span></td>
+                    <td>#${d.systemRank} → #${d.newPriority}</td>
+                    <td><span class="status-badge status-${d.status}">${d.status.toUpperCase()}</span></td>
+                    <td><button class="btn btn-sm secondary" onclick="app.viewJustification(${d.id})">View</button></td>
+                </tr>
+            `).join('')}
+        </tbody>
+    </table>
+`;
     };
 
     const viewJustification = async (overrideId) => {
