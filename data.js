@@ -33,7 +33,6 @@ class DataStore {
             'promotion_packages', 'products', 'promotions', 'appointment_locations'
         ];
         this.initialized = false;
-        // Event system
         this._events = {};
     }
 
@@ -50,23 +49,19 @@ class DataStore {
     emit(event, data) {
         if (!this._events[event]) return;
         this._events[event].forEach(cb => cb(data));
-        
-        // Also dispatch global event for cross‑module compatibility
         if (event === 'dataChanged') {
             window.dispatchEvent(new CustomEvent('dataChanged', { detail: data }));
         }
     }
 
-    // --------------------------------------------------------------
-    // Initialization – check connection
-    // --------------------------------------------------------------
     async init() {
         try {
-            if (!window.supabaseClient) {
-                throw new Error('Supabase client not found. Ensure supabase-client.js is loaded.');
+            // FIXED: Use window.supabase (not window.supabaseClient)
+            if (!window.supabase) {
+                throw new Error('Supabase client not found. Ensure supabase is loaded.');
             }
-            // Test connection by fetching one user record
-            const { error } = await window.supabaseClient.from('users').select('*').limit(1);
+            // Test connection
+            const { error } = await window.supabase.from('users').select('*').limit(1);
             if (error) throw error;
             
             this.initialized = true;
@@ -80,24 +75,18 @@ class DataStore {
         }
     }
 
-    // --------------------------------------------------------------
-    // Helper: Generate Numeric ID (for tables that don't auto-gen)
-    // --------------------------------------------------------------
     _generateId() {
         return Date.now() + Math.floor(Math.random() * 1000);
     }
 
-    // --------------------------------------------------------------
-    // Core CRUD methods
-    // --------------------------------------------------------------
     async getAll(tableName) {
-        const { data, error } = await window.supabaseClient.from(tableName).select('*');
+        const { data, error } = await window.supabase.from(tableName).select('*');
         if (error) throw error;
         return data || [];
     }
 
     async get(tableName, id) {
-        const { data, error } = await window.supabaseClient
+        const { data, error } = await window.supabase
             .from(tableName)
             .select('*')
             .eq('id', id)
@@ -107,51 +96,43 @@ class DataStore {
     }
 
     async add(tableName, record) {
-        // If the record doesn't have an ID, we assume the DB handles it or we gen one
         const dataToInsert = { ...record };
         if (!dataToInsert.id) dataToInsert.id = this._generateId(); 
-
-        const { data, error } = await window.supabaseClient
+        const { data, error } = await window.supabase
             .from(tableName)
             .insert(dataToInsert)
             .select()
             .single();
         if (error) throw error;
-        
         this.emit('dataChanged', { action: 'add', table: tableName, record: data });
         return data;
     }
 
     async update(tableName, id, updates) {
-        const { data, error } = await window.supabaseClient
+        const { data, error } = await window.supabase
             .from(tableName)
             .update(updates)
             .eq('id', id)
             .select()
             .single();
         if (error) throw error;
-        
         this.emit('dataChanged', { action: 'update', table: tableName, record: data });
         return data;
     }
 
     async delete(tableName, id) {
-        const { data, error } = await window.supabaseClient
+        const { data, error } = await window.supabase
             .from(tableName)
             .delete()
             .eq('id', id)
             .select();
         if (error) throw error;
-        
         this.emit('dataChanged', { action: 'delete', table: tableName, id });
         return data;
     }
 
-    // --------------------------------------------------------------
-    // Query method – translates simple filters to Supabase .eq()
-    // --------------------------------------------------------------
     async query(tableName, filters = {}) {
-        let query = window.supabaseClient.from(tableName).select('*');
+        let query = window.supabase.from(tableName).select('*');
         for (const [key, value] of Object.entries(filters)) {
             query = query.eq(key, value);
         }
@@ -161,5 +142,10 @@ class DataStore {
     }
 }
 
-// Create a single instance to be used throughout the app
-window.DataStore = new DataStore();
+// Create instance and protect from being overwritten
+if (!window.DataStore || !window.DataStore.init) {
+    window.DataStore = new DataStore();
+    console.log('DataStore instance created');
+} else {
+    console.log('DataStore already exists, skipping re-creation');
+}
