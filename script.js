@@ -13823,28 +13823,41 @@ const getCPSCount = async (from, to) => {
     return count;
 };
   
-    const getTotalSales = async (from, to) => {
-        // Sum async purchases (excluding agent packages)
-        return (await DataStore.getAll('purchases')).filter(p => {
-            if (p.date < from || p.date > to || p.is_agent_package) return false;
-            if (_currentRoleFilter !== 'All') {
-                const agent = await DataStore.getById('users', p.agent_id);
-                if (!agent || agent.role !== _currentRoleFilter) return false;
-            }
-            return true;
-        }).reduce((sum, p) => sum + (p.amount || 0), 0);
-    };
+ const getTotalSales = async (from, to) => {
+    const purchases = await DataStore.getAll('purchases');
+    let total = 0;
+    
+    for (const p of purchases) {
+        if (p.date < from || p.date > to || p.is_agent_package) continue;
+        
+        if (_currentRoleFilter !== 'All') {
+            const agent = await DataStore.getById('users', p.agent_id);
+            if (!agent || agent.role !== _currentRoleFilter) continue;
+        }
+        
+        total += p.amount || 0;
+    }
+    
+    return total;
+};
 
-    const getPOPCaseCount = async (from, to) => {
-        return (await DataStore.getAll('purchases')).filter(p => {
-            if (p.payment_method !== 'POP' || p.date < from || p.date > to) return false;
-            if (_currentRoleFilter !== 'All') {
-                const agent = await DataStore.getById('users', p.agent_id);
-                if (!agent || agent.role !== _currentRoleFilter) return false;
-            }
-            return true;
-        }).length;
-    };
+const getPOPCaseCount = async (from, to) => {
+    const purchases = await DataStore.getAll('purchases');
+    let count = 0;
+    
+    for (const p of purchases) {
+        if (p.payment_method !== 'POP' || p.date < from || p.date > to) continue;
+        
+        if (_currentRoleFilter !== 'All') {
+            const agent = await DataStore.getById('users', p.agent_id);
+            if (!agent || agent.role !== _currentRoleFilter) continue;
+        }
+        
+        count++;
+    }
+    
+    return count;
+};
 
     const getPOPSales = async (from, to) => {
         return (await DataStore.getAll('purchases')).filter(p => {
