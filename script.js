@@ -13997,62 +13997,68 @@ const getActivityHeadcount = async (from, to) => {
             `;
         }).join('');
     };
+const renderTargetOverview = async () => {
+    const container = document.getElementById('target-overview-container');
+    if (!container) return;
 
-    const renderTargetOverview = async () => {
-        const container = document.getElementById('target-overview-container');
-        if (!container) return;
+    const year = 2026;
+    const quarterlyTargets = await DataStore.getAll('quarterly_targets');
+    const qTargets = quarterlyTargets.filter(t => t.year === year);
 
-        const year = 2026;
-        const qTargets =await  (await DataStore.getAll('quarterly_targets')).filter(t => t.year === year);
+    // Build rows asynchronously
+    const rows = [];
+    for (const q of [1, 2, 3, 4]) {
+        const target = qTargets.find(t => t.quarter === q) || {};
+        const qStart = `${year}-${((q - 1) * 3 + 1).toString().padStart(2, '0')}-01`;
+        const qEnd = `${year}-${(q * 3).toString().padStart(2, '0')}-${new Date(year, q * 3, 0).getDate()}`;
+        
+        const purchases = await DataStore.getAll('purchases');
+        const actualSales = purchases
+            .filter(p => p.date >= qStart && p.date <= qEnd && !p.is_agent_package)
+            .reduce((sum, p) => sum + (p.amount || 0), 0);
+        
+        const progress = target.total_sales_target ? Math.min(100, (actualSales / target.total_sales_target * 100)) : 0;
+        const statusColor = progress > 90 ? 'green' : (progress > 70 ? 'yellow' : (progress > 0 ? 'red' : 'gray'));
 
-        container.innerHTML = `
-            <div class="targets-card">
-                <div class="targets-header">
-                    <h2>${year} Target Overview</h2>
-                </div>
-                <table class="targets-table">
-                    <thead>
-                        <tr>
-                            <th>Quarter</th>
-                            <th>CPS Target</th>
-                            <th>Sales Target</th>
-                            <th>Progress</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${[1, 2, 3, 4].map(q => {
-            const target = qTargets.find(t => t.year === year && t.quarter === q) || {};
-            // Sum actual sales for this quarter
-            const qStart = `${year}-${((q - 1) * 3 + 1).toString().padStart(2, '0')}-01`;
-            const qEnd = `${year}-${(q * 3).toString().padStart(2, '0')}-${new Date(year, q * 3, 0).getDate()}`;
-            const actualSales =await  (await DataStore.getAll('purchases')).filter(p =>
-                p.date >= qStart && p.date <= qEnd && !p.is_agent_package
-            ).reduce((sum, p) => sum + (p.amount || 0), 0);
+        rows.push(`
+            <tr>
+                <td>Q${q}</td>
+                <td>${target.cps_count_target || 0}</td>
+                <td>RM ${(target.total_sales_target || 0).toLocaleString()}</td>
+                <td>
+                    <div class="target-progress">
+                        <div class="progress-bar-bg">
+                            <div class="progress-bar-fill progress-${statusColor}" style="width: ${progress}%"></div>
+                        </div>
+                        <span style="font-size: 12px; font-weight: 600;">${progress > 0 ? progress.toFixed(0) + '%' : '0%'}</span>
+                    </div>
+                </td>
+            </tr>
+        `);
+    }
 
-            const progress = target.total_sales_target ? Math.min(100, (actualSales / target.total_sales_target * 100)) : 0;
-            const statusColor = progress > 90 ? 'green' : (progress > 70 ? 'yellow' : (progress > 0 ? 'red' : 'gray'));
-
-            return `
-                                <tr>
-                                    <td>Q${q}</td>
-                                    <td>${target.cps_count_target || 0}</td>
-                                    <td>RM ${(target.total_sales_target || 0).toLocaleString()}</td>
-                                    <td>
-                                        <div class="target-progress">
-                                            <div class="progress-bar-bg">
-                                                <div class="progress-bar-fill progress-${statusColor}" style="width: ${progress}%"></div>
-                                            </div>
-                                            <span style="font-size: 12px; font-weight: 600;">${progress > 0 ? progress.toFixed(0) + '%' : '0%'}</span>
-                                        </div>
-                                    </td>
-                                </tr>
-                            `;
-        }).join('')}
-                    </tbody>
-                </table>
+    container.innerHTML = `
+        <div class="targets-card">
+            <div class="targets-header">
+                <h2>${year} Target Overview</h2>
             </div>
-        `;
-    };
+            <table class="targets-table">
+                <thead>
+                    <tr>
+                        <th>Quarter</th>
+                        <th>CPS Target</th>
+                        <th>Sales Target</th>
+                        <th>Progress</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rows.join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
+};
+
 
     const renderPerformanceTable = async () => {
         const container = document.getElementById('quarterly-performance-table');
@@ -14110,73 +14116,79 @@ const getActivityHeadcount = async (from, to) => {
         `;
     };
 
-    const renderAgentLeaderboard = async () => {
-        const container = document.getElementById('agent-leaderboard-table');
-        if (!container) return;
 
-        // Get all agents
-        let agentsList = (await DataStore.getAll('users')).filter(isAgent);
-        if (_currentRoleFilter !== 'All') {
-            agentsList = agentsList.filter(u => u.role === _currentRoleFilter);
+const renderAgentLeaderboard = async () => {
+    const container = document.getElementById('agent-leaderboard-table');
+    if (!container) return;
+
+    let agentsList = (await DataStore.getAll('users')).filter(isAgent);
+    if (_currentRoleFilter !== 'All') {
+        agentsList = agentsList.filter(u => u.role === _currentRoleFilter);
+    }
+    const ranges = getDateRanges(_currentTimeFilter);
+    const allPurchases = await DataStore.getAll('purchases');
+
+    // Build stats using for...of to avoid async map issues
+    const agentStats = [];
+    for (const agent of agentsList) {
+        const currentSales = allPurchases
+            .filter(p => p.agent_id === agent.id && p.date >= ranges.current.from && p.date <= ranges.current.to)
+            .reduce((sum, p) => sum + (p.amount || 0), 0);
+
+        const prevSales = allPurchases
+            .filter(p => p.agent_id === agent.id && p.date >= ranges.previous.from && p.date <= ranges.previous.to)
+            .reduce((sum, p) => sum + (p.amount || 0), 0);
+
+        let trend = 'Stable';
+        let trendClass = 'warning';
+        if (prevSales > 0) {
+            const diff = ((currentSales - prevSales) / prevSales * 100);
+            trend = (diff >= 0 ? '+' : '') + diff.toFixed(0) + '%';
+            trendClass = diff >= 0 ? 'success' : 'danger';
+        } else if (currentSales > 0) {
+            trend = 'New';
+            trendClass = 'success';
         }
-        const ranges = getDateRanges(_currentTimeFilter);
 
-        const agentStats = agentsList.map(agent => {
-            const currentSales =await  (await DataStore.getAll('purchases')).filter(p =>
-                p.agent_id === agent.id && p.date >= ranges.current.from && p.date <= ranges.current.to
-            ).reduce((sum, p) => sum + (p.amount || 0), 0);
+        agentStats.push({
+            name: agent.full_name,
+            team: agent.team || 'General',
+            sales: currentSales,
+            trend: trend,
+            trendClass: trendClass
+        });
+    }
 
-            const prevSales = (await DataStore.getAll('purchases')).filter(p =>
-                p.agent_id === agent.id && p.date >= ranges.previous.from && p.date <= ranges.previous.to
-            ).reduce((sum, p) => sum + (p.amount || 0), 0);
+    agentStats.sort((a, b) => b.sales - a.sales);
+    const top10 = agentStats.slice(0, 10);
 
-            let trend = 'Stable';
-            let trendClass = 'warning';
-            if (prevSales > 0) {
-                const diff = ((currentSales - prevSales) / prevSales * 100);
-                trend = (diff >= 0 ? '+' : '') + diff.toFixed(0) + '%';
-                trendClass = diff >= 0 ? 'success' : 'danger';
-            } else if (currentSales > 0) {
-                trend = 'New';
-                trendClass = 'success';
-            }
-
-            return {
-                name: agent.full_name,
-                team: agent.team || 'General',
-                sales: currentSales,
-                trend: trend,
-                trendClass: trendClass
-            };
-        }).sort((a, b) => b.sales - a.sales).slice(0, 10);
-
-        container.innerHTML = `
-            <table class="leaderboard-table">
-                <thead>
+    container.innerHTML = `
+        <table class="leaderboard-table">
+            <thead>
+                <tr>
+                    <th>Rank</th>
+                    <th>Agent</th>
+                    <th>Sales</th>
+                    <th>Trend</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${top10.map((a, i) => `
                     <tr>
-                        <th>Rank</th>
-                        <th>Agent</th>
-                        <th>Sales</th>
-                        <th>Trend</th>
+                        <td><span class="rank-badge rank-${Math.min(i + 1, 5)}">${i + 1}</span></td>
+                        <td>
+                            <div><strong>${a.name}</strong></div>
+                            <div style="font-size: 11px; color: var(--gray-500);">${a.team}</div>
+                        </td>
+                        <td>RM ${a.sales.toLocaleString()}</td>
+                        <td><span class="status-badge-${a.trendClass}">${a.trend}</span></td>
                     </tr>
-                </thead>
-                <tbody>
-                    ${agentStats.map((a, i) => `
-                        <tr>
-                            <td><span class="rank-badge rank-${Math.min(i + 1, 5)}">${i + 1}</span></td>
-                            <td>
-                                <div><strong>${a.name}</strong></div>
-                                <div style="font-size: 11px; color: var(--gray-500);">${a.team}</div>
-                            </td>
-                            <td>RM ${a.sales.toLocaleString()}</td>
-                            <td><span class="status-badge-${a.trendClass}">${a.trend}</span></td>
-                        </tr>
-                    `).join('')}
-                    ${agentStats.length === 0 ? '<tr><td colspan="4" style="text-align:center; padding: 20px;">No agent data for this period</td></tr>' : ''}
-                </tbody>
-            </table>
-        `;
-    };
+                `).join('')}
+                ${top10.length === 0 ? '<tr><td colspan="4" style="text-align:center; padding: 20px;">No agent data for this period</td></tr>' : ''}
+            </tbody>
+        </table>
+    `;
+};
 
     const renderRevenueChart = async (filter, range) => {
         const ctx = document.getElementById('revenue-trend-chart');
