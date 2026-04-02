@@ -11912,7 +11912,7 @@ const openAddSolutionModal = async (prospectId) => {
                         </div>
                     </div>
 
-
+/*
 <div class="performance-card">
     <h4><i class="fas fa-sticky-note"></i> Agent Notes</h4>
     <div class="add-note-section">
@@ -11923,7 +11923,23 @@ const openAddSolutionModal = async (prospectId) => {
         </div>
     </div>
     <div id="agent-notes-list-${agent.id}" style="margin-top:12px;"></div>
+</div>*/
+
+
+const html = `
+<div class="performance-card">
+    <h4><i class="fas fa-sticky-note"></i> Agent Notes</h4>
+    <div class="add-note-section">
+        <textarea id="agent-note-text-${agent.id}" class="form-control" rows="3" placeholder="Add note about agent performance..."></textarea>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
+            <button class="btn-icon" onclick="app.openVoiceRecorder('agent-note-text-${agent.id}', 'agent', ${agent.id})" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+            <button class="btn primary btn-sm" onclick="app.addAgentNote(${agent.id})">Add Note</button>
+        </div>
+    </div>
+    <div id="agent-notes-list-${agent.id}" style="margin-top:12px;"></div>
 </div>
+`;
+
 
 
 // Populate agent notes after the DOM is ready
