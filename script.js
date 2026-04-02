@@ -17053,25 +17053,50 @@ const simulateCampaignSending = async (campaignId) => {
     const clearMappingField = (idx) => { const s = document.querySelector(`.mapping-select[data-col="${idx}"]`); if (s) s.value = ''; };
     const downloadErrorReport = () => UI.toast.success('Error report downloaded');
 
-    const startImport = async () => {
-        document.getElementById('progress-area').style.display = 'block';
-        document.getElementById('start-import-btn').disabled = true;
-        let progress = 0;
-        const iv = async (() => {
-            progress += 5;
-            const bar = document.getElementById('progress-bar'); if (bar) { bar.style.width = progress + '%'; bar.textContent = progress + '%'; }
-            const st = document.getElementById('progress-status'); if (st) st.textContent = `Processing ${Math.floor(progress * 2.5)}/250 records...`;
-            if (progress >= 100) {
-                clearInterval(iv);
-                (() => {
-                    UI.hideModal();
-                    UI.toast.success('Import completed! 217 new records created.');
-                    await DataStore.create('import_jobs', { file_name: _importData.fileName || 'import.xlsx', import_type: _importData.importType, total_rows: 250, valid_rows: 235, error_rows: 15, created_records: 217, updated_records: 18, skipped_records: 15, status: 'completed', mapping_config: {}, duplicate_handling: document.querySelector('input[name="duplicate-action"]:checked')?.value || 'skip', assignment_config: { assignTo: document.querySelector('input[name="assign-to"]:checked')?.value || 'myself' }, created_by: _currentUser?.id, created_at: new Date().toISOString(), completed_at: new Date().toISOString() });
-                    const vp = document.getElementById('content-viewport'); if (vp) await showImportDashboard(vp);
-                }, 500);
-            }
-        }, 150);
-    };
+const startImport = async () => {
+    document.getElementById('progress-area').style.display = 'block';
+    document.getElementById('start-import-btn').disabled = true;
+    let progress = 0;
+    
+    const intervalId = setInterval(() => {
+        progress += 5;
+        const bar = document.getElementById('progress-bar');
+        if (bar) {
+            bar.style.width = progress + '%';
+            bar.textContent = progress + '%';
+        }
+        const st = document.getElementById('progress-status');
+        if (st) st.textContent = `Processing ${Math.floor(progress * 2.5)}/250 records...`;
+        
+        if (progress >= 100) {
+            clearInterval(intervalId);
+            // Use setTimeout to allow UI to update before async operations
+            setTimeout(async () => {
+                UI.hideModal();
+                UI.toast.success('Import completed! 217 new records created.');
+                await DataStore.create('import_jobs', {
+                    file_name: _importData.fileName || 'import.xlsx',
+                    import_type: _importData.importType,
+                    total_rows: 250,
+                    valid_rows: 235,
+                    error_rows: 15,
+                    created_records: 217,
+                    updated_records: 18,
+                    skipped_records: 15,
+                    status: 'completed',
+                    mapping_config: {},
+                    duplicate_handling: document.querySelector('input[name="duplicate-action"]:checked')?.value || 'skip',
+                    assignment_config: { assignTo: document.querySelector('input[name="assign-to"]:checked')?.value || 'myself' },
+                    created_by: _currentUser?.id,
+                    created_at: new Date().toISOString(),
+                    completed_at: new Date().toISOString()
+                });
+                const vp = document.getElementById('content-viewport');
+                if (vp) await showImportDashboard(vp);
+            }, 500);
+        }
+    }, 150);
+};
 
     const viewImportDetails = async (id) => {
         const job = await DataStore.getById('import_jobs', id);
