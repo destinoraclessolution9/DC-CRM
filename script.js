@@ -11949,7 +11949,7 @@ setTimeout(async () => {
 // That’s it – no extra code after this point
 </div> <!-- close the performance-grid div -->
 </div> <!-- close the viewport.innerHTML -->
-`;
+//`;
 };
 
 
