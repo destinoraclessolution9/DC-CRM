@@ -17547,7 +17547,7 @@ const initImportDemoData = async () => {
         // Phase 5 Agent Management Functions
         showAgentsView,
         renderAgentsTable,
-        filterAgents,
+        //filterAgents,
         showAgentDetail,
         openAddAgentModal,
         saveAgent,
