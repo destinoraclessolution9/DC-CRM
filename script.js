@@ -14077,12 +14077,17 @@ container.innerHTML = `
 
     let _currentTimeFilter = 'monthly';
     let _currentRoleFilter = 'All';
+    let _currentAgentFilter = 'all';
     let _customDateFrom = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
     let _customDateTo = new Date().toISOString().split('T')[0];
     let _revenueChart = null;
 
     const showKPIDashboard = async (container) => {
         _selectedEntity = null; // Clear selection
+        const agents = (await AppDataStore.getAll('users')).filter(u => isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'));
+        const agentOptions = `<option value="all">All Agents</option>` +
+            agents.map(a => `<option value="${a.id}" ${_currentAgentFilter == a.id ? 'selected' : ''}>${escapeHtml(a.full_name)}</option>`).join('');
+
         container.innerHTML = `
             <div class="kpi-dashboard">
                 <div class="dashboard-header">
@@ -14092,11 +14097,11 @@ container.innerHTML = `
                     </div>
                     <div class="header-actions">
                         ${isSystemAdmin(_currentUser) || _currentUser?.role?.includes('Level 7') ?
-                `<button class="btn primary" onclick="app. async openTargetManagementModal()">
+                `<button class="btn primary" onclick="app.openTargetManagementModal()">
                                 <i class="fas fa-bullseye"></i> Set Targets
                              </button>` : ''
             }
-                        <button class="btn secondary" onclick="app. async exportKPIReport('csv')">
+                        <button class="btn secondary" onclick="app.exportKPIReport('csv')">
                             <i class="fas fa-file-csv"></i> Export CSV
                         </button>
                         <button class="btn secondary" onclick="app.printDashboard()">
@@ -14107,21 +14112,26 @@ container.innerHTML = `
 
                 <div class="time-filter-bar">
                     <div class="time-toggle-group">
-                        <button class="time-toggle-btn ${_currentTimeFilter === 'weekly' ? 'active' : ''}" onclick="app. async setTimeFilter('weekly')">Weekly</button>
-                        <button class="time-toggle-btn ${_currentTimeFilter === 'monthly' ? 'active' : ''}" onclick="app. async setTimeFilter('monthly')">Monthly</button>
-                        <button class="time-toggle-btn ${_currentTimeFilter === 'quarterly' ? 'active' : ''}" onclick="app. async setTimeFilter('quarterly')">Quarterly</button>
-                        <button class="time-toggle-btn ${_currentTimeFilter === 'yearly' ? 'active' : ''}" onclick="app. setTimeFilter('yearly')">Yearly</button>
+                        <button class="time-toggle-btn ${_currentTimeFilter === 'weekly' ? 'active' : ''}" onclick="app.setTimeFilter('weekly')">Weekly</button>
+                        <button class="time-toggle-btn ${_currentTimeFilter === 'monthly' ? 'active' : ''}" onclick="app.setTimeFilter('monthly')">Monthly</button>
+                        <button class="time-toggle-btn ${_currentTimeFilter === 'quarterly' ? 'active' : ''}" onclick="app.setTimeFilter('quarterly')">Quarterly</button>
+                        <button class="time-toggle-btn ${_currentTimeFilter === 'yearly' ? 'active' : ''}" onclick="app.setTimeFilter('yearly')">Yearly</button>
                     </div>
                     <div class="role-filter-group" style="margin-left: 20px;">
-                        <select id="kpi-role-filter" class="form-control" onchange="app. setRoleFilter(this.value)" style="width: 200px;">
+                        <select id="kpi-role-filter" class="form-control" onchange="app.setRoleFilter(this.value)" style="width: 200px;">
                             <option value="All">All Roles</option>
                             ${USER_ROLES.map(r => `<option value="${r}" ${_currentRoleFilter === r ? 'selected' : ''}>${r}</option>`).join('')}
                         </select>
                     </div>
+                    <div class="role-filter-group" style="margin-left: 12px;">
+                        <select id="kpi-agent-filter" class="form-control" onchange="app.setAgentFilter(this.value)" style="width: 200px;">
+                            ${agentOptions}
+                        </select>
+                    </div>
                     <div class="date-range-picker" style="margin-left: auto;">
-                        <input type="date" id="kpi-date-from" value="${_customDateFrom}" onchange="app. setCustomDateRange(this.value, document.getElementById('kpi-date-to').value)">
+                        <input type="date" id="kpi-date-from" value="${_customDateFrom}" onchange="app.setCustomDateRange(this.value, document.getElementById('kpi-date-to').value)">
                         <span>to</span>
-                        <input type="date" id="kpi-date-to" value="${_customDateTo}" onchange="app. setCustomDateRange(document.getElementById('kpi-date-from').value, this.value)">
+                        <input type="date" id="kpi-date-to" value="${_customDateTo}" onchange="app.setCustomDateRange(document.getElementById('kpi-date-from').value, this.value)">
                     </div>
                 </div>
 
@@ -14145,7 +14155,7 @@ container.innerHTML = `
                     </div>
                 </div>
 
-                <div style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 24px;">
+                <div style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 24px; margin-bottom: 24px;">
                     <div class="performance-card card">
                         <div class="card-header">
                             <h3>Current Quarter Performance Breakdown</h3>
@@ -14163,6 +14173,30 @@ container.innerHTML = `
                         </div>
                     </div>
                 </div>
+
+                <!-- Count by Cases -->
+                <div class="performance-card card" style="margin-bottom: 24px;">
+                    <div class="card-header">
+                        <h3>Count by Cases (Products)</h3>
+                    </div>
+                    <div id="cases-count-table"></div>
+                </div>
+
+                <!-- Count by Headcount -->
+                <div class="performance-card card" style="margin-bottom: 24px;">
+                    <div class="card-header">
+                        <h3>Count by Headcount (Events)</h3>
+                    </div>
+                    <div id="headcount-table"></div>
+                </div>
+
+                <!-- Activity Attendance Details -->
+                <div class="performance-card card">
+                    <div class="card-header">
+                        <h3>Activity Attendance Details by Topic</h3>
+                    </div>
+                    <div id="activity-attendance-details"></div>
+                </div>
             </div>
 `;
 
@@ -14179,6 +14213,16 @@ container.innerHTML = `
         await refreshKPIDashboard();
     };
 
+    const setAgentFilter = async (agentId) => {
+        _currentAgentFilter = agentId;
+        await refreshKPIDashboard();
+    };
+
+    const filterByAgent = (item, agentField = 'responsible_agent_id') => {
+        if (_currentAgentFilter === 'all') return true;
+        return item[agentField] == _currentAgentFilter;
+    };
+
     const setCustomDateRange = async (from, to) => {
         _customDateFrom = from;
         _customDateTo = to;
@@ -14191,11 +14235,18 @@ container.innerHTML = `
         const kpis = await calculateKPIs(ranges.current.from, ranges.current.to);
         const prevKpis = await calculateKPIs(ranges.previous.from, ranges.previous.to);
 
-        renderKPIStats(kpis, prevKpis);
+        const referrerCount = await getReferrerHeadcount(ranges.current.from, ranges.current.to);
+        const trainingCount = await getTrainingHeadcount(ranges.current.from, ranges.current.to);
+        const courseCount = await getCourseAttendeeCount(ranges.current.from, ranges.current.to);
+
+        renderKPIStats(kpis, prevKpis, referrerCount, trainingCount, courseCount);
         await renderTargetOverview();
         await renderPerformanceTable();
         await renderAgentLeaderboard();
         await renderRevenueChart(_currentTimeFilter, ranges.current);
+        await renderCaseCountsTable();
+        await renderHeadcountTable();
+        await renderActivityAttendanceDetails();
     };
 
     const getDateRanges = (filter, from, to) => {
@@ -14266,62 +14317,54 @@ container.innerHTML = `
 const getCPSCount = async (from, to) => {
     const activities = await AppDataStore.getAll('activities');
     let count = 0;
-    
     for (const a of activities) {
         if (a.activity_type !== 'CPS' || a.activity_date < from || a.activity_date > to) continue;
-        
+        if (_currentAgentFilter !== 'all' && a.lead_agent_id != _currentAgentFilter) continue;
         if (_currentRoleFilter !== 'All') {
-            const agent = await AppDataStore.getById('users', a.agent_id);
+            const agent = await AppDataStore.getById('users', a.lead_agent_id);
             if (!agent || agent.role !== _currentRoleFilter) continue;
         }
-        
         count++;
     }
-    
     return count;
 };
   
- const getTotalSales = async (from, to) => {
+const getTotalSales = async (from, to) => {
     const purchases = await AppDataStore.getAll('purchases');
     let total = 0;
-    
     for (const p of purchases) {
         if (p.date < from || p.date > to || p.is_agent_package) continue;
-        
+        if (_currentAgentFilter !== 'all' && p.agent_id != _currentAgentFilter) continue;
         if (_currentRoleFilter !== 'All') {
             const agent = await AppDataStore.getById('users', p.agent_id);
             if (!agent || agent.role !== _currentRoleFilter) continue;
         }
-        
         total += p.amount || 0;
     }
-    
     return total;
 };
 
 const getPOPCaseCount = async (from, to) => {
     const purchases = await AppDataStore.getAll('purchases');
     let count = 0;
-    
     for (const p of purchases) {
         if (p.payment_method !== 'POP' || p.date < from || p.date > to) continue;
-        
+        if (_currentAgentFilter !== 'all' && p.agent_id != _currentAgentFilter) continue;
         if (_currentRoleFilter !== 'All') {
             const agent = await AppDataStore.getById('users', p.agent_id);
             if (!agent || agent.role !== _currentRoleFilter) continue;
         }
-        
         count++;
     }
-    
     return count;
 };
 
-  const getPOPSales = async (from, to) => {
+const getPOPSales = async (from, to) => {
     const purchases = await AppDataStore.getAll('purchases');
     let total = 0;
     for (const p of purchases) {
         if (p.payment_method !== 'POP' || p.date < from || p.date > to) continue;
+        if (_currentAgentFilter !== 'all' && p.agent_id != _currentAgentFilter) continue;
         if (_currentRoleFilter !== 'All') {
             const agent = await AppDataStore.getById('users', p.agent_id);
             if (!agent || agent.role !== _currentRoleFilter) continue;
@@ -14336,6 +14379,7 @@ const getEPPCaseCount = async (from, to) => {
     let count = 0;
     for (const p of purchases) {
         if (p.payment_method !== 'EPP' || p.date < from || p.date > to) continue;
+        if (_currentAgentFilter !== 'all' && p.agent_id != _currentAgentFilter) continue;
         if (_currentRoleFilter !== 'All') {
             const agent = await AppDataStore.getById('users', p.agent_id);
             if (!agent || agent.role !== _currentRoleFilter) continue;
@@ -14350,6 +14394,7 @@ const getEPPSales = async (from, to) => {
     let total = 0;
     for (const p of purchases) {
         if (p.payment_method !== 'EPP' || p.date < from || p.date > to) continue;
+        if (_currentAgentFilter !== 'all' && p.agent_id != _currentAgentFilter) continue;
         if (_currentRoleFilter !== 'All') {
             const agent = await AppDataStore.getById('users', p.agent_id);
             if (!agent || agent.role !== _currentRoleFilter) continue;
@@ -14364,10 +14409,14 @@ const getNewAgents = async (from, to) => {
     let count = 0;
     for (const u of users) {
         if (u.join_date < from || u.join_date > to) continue;
-        if (_currentRoleFilter !== 'All') {
-            if (u.role !== _currentRoleFilter) continue;
+        if (_currentAgentFilter !== 'all') {
+            if (u.reporting_to != _currentAgentFilter) continue;
         } else {
-            if (!isAgent(u)) continue;
+            if (_currentRoleFilter !== 'All') {
+                if (u.role !== _currentRoleFilter) continue;
+            } else {
+                if (!isAgent(u)) continue;
+            }
         }
         count++;
     }
@@ -14378,7 +14427,9 @@ const getNewCustomers = async (from, to) => {
     const customers = await AppDataStore.getAll('customers');
     let count = 0;
     for (const c of customers) {
-        if (c.customer_since >= from && c.customer_since <= to) count++;
+        if (c.customer_since < from || c.customer_since > to) continue;
+        if (_currentAgentFilter !== 'all' && c.responsible_agent_id != _currentAgentFilter) continue;
+        count++;
     }
     return count;
 };
@@ -14388,8 +14439,9 @@ const getTotalMeetings = async (from, to) => {
     let count = 0;
     for (const a of activities) {
         if (a.activity_date < from || a.activity_date > to) continue;
+        if (_currentAgentFilter !== 'all' && a.lead_agent_id != _currentAgentFilter) continue;
         if (_currentRoleFilter !== 'All') {
-            const agent = await AppDataStore.getById('users', a.agent_id);
+            const agent = await AppDataStore.getById('users', a.lead_agent_id);
             if (!agent || agent.role !== _currentRoleFilter) continue;
         }
         count++;
@@ -14411,36 +14463,89 @@ const getActivityHeadcount = async (from, to) => {
     return count;
 };
 
-    const renderKPIStats = (kpis, prevKpis) => {
+const getReferrerHeadcount = async (from, to) => {
+    const referrals = await AppDataStore.getAll('referrals');
+    const customers = await AppDataStore.getAll('customers');
+    const activities = await AppDataStore.getAll('activities');
+    const customerIds = new Set();
+    for (const ref of referrals) {
+        const hasCPS = activities.some(a =>
+            a.prospect_id === ref.referred_prospect_id &&
+            a.activity_type === 'CPS' &&
+            a.activity_date >= from &&
+            a.activity_date <= to
+        );
+        if (hasCPS && ref.referrer_type === 'customer') {
+            const cust = customers.find(c => c.id == ref.referrer_id);
+            if (cust && (_currentAgentFilter === 'all' || cust.responsible_agent_id == _currentAgentFilter)) {
+                customerIds.add(ref.referrer_id);
+            }
+        }
+    }
+    return customerIds.size;
+};
+
+const getTrainingHeadcount = async (from, to) => {
+    const activities = await AppDataStore.getAll('activities');
+    const agentIds = new Set();
+    for (const a of activities) {
+        if (a.activity_type !== 'AGENT_TRAINING') continue;
+        if (a.activity_date < from || a.activity_date > to) continue;
+        if (_currentAgentFilter !== 'all' && a.lead_agent_id != _currentAgentFilter) continue;
+        agentIds.add(a.lead_agent_id);
+    }
+    return agentIds.size;
+};
+
+const getCourseAttendeeCount = async (from, to) => {
+    const events = (await AppDataStore.getAll('events')).filter(e => e.category === 'Course');
+    const registrations = await AppDataStore.getAll('event_registrations');
+    const attendeeIds = new Set();
+    for (const ev of events) {
+        for (const reg of registrations) {
+            if (reg.event_id !== ev.id) continue;
+            if (reg.event_date < from || reg.event_date > to) continue;
+            if (reg.attendance_status !== 'Attended') continue;
+            attendeeIds.add(reg.attendee_id);
+        }
+    }
+    return attendeeIds.size;
+};
+
+    const renderKPIStats = (kpis, prevKpis, referrerCount = 0, trainingCount = 0, courseCount = 0) => {
         const grid = document.getElementById('kpi-stats-grid');
         if (!grid) return;
 
         const cards = [
             { label: 'CPS Consultations', value: kpis.cpsCount, prev: prevKpis.cpsCount, icon: '📞', color: 'blue', key: 'cpsCount' },
-            { label: 'Total Sales', value: `RM ${kpis.totalSales.toLocaleString()} `, prev: prevKpis.totalSales, icon: '💰', color: 'green', key: 'totalSales' },
-            { label: 'POP Cases', value: kpis.popCaseCount, prev: prevKpis.popCaseCount, icon: '📦', color: 'orange', key: 'popCaseCount' },
+            { label: 'Total Sales', value: `RM ${kpis.totalSales.toLocaleString()}`, prev: prevKpis.totalSales, icon: '💰', color: 'green', key: 'totalSales' },
+            { label: 'POP Cases', value: `${kpis.popCaseCount} (RM ${kpis.popSales.toLocaleString()})`, prev: prevKpis.popCaseCount, icon: '📦', color: 'orange', key: 'popCaseCount' },
             { label: 'EPP Cases', value: kpis.eppCaseCount, prev: prevKpis.eppCaseCount, icon: '💳', color: 'purple', key: 'eppCaseCount' },
             { label: 'New Agents', value: kpis.newAgents, prev: prevKpis.newAgents, icon: '👤', color: 'blue', key: 'newAgents' },
             { label: 'New Customers', value: kpis.newCustomers, prev: prevKpis.newCustomers, icon: '👥', color: 'green', key: 'newCustomers' },
-            { label: 'Conversion Rate', value: `${kpis.conversionRate}% `, prev: prevKpis.conversionRate, icon: '📈', color: 'purple', key: 'conversionRate' },
+            { label: 'Conversion Rate', value: `${kpis.conversionRate}%`, prev: prevKpis.conversionRate, icon: '📈', color: 'purple', key: 'conversionRate' },
             { label: 'Total Meetings', value: kpis.totalMeetings, prev: prevKpis.totalMeetings, icon: '📅', color: 'orange', key: 'totalMeetings' },
-            { label: 'Activity Attendance', value: kpis.activityHeadcount, prev: prevKpis.activityHeadcount, icon: '📊', color: 'purple', key: 'activityHeadcount' }
+            { label: 'Activity Attendance', value: kpis.activityHeadcount, prev: prevKpis.activityHeadcount, icon: '📊', color: 'purple', key: 'activityHeadcount' },
+            { label: 'Referrer (Customers)', value: referrerCount, prev: 0, icon: '🔄', color: 'teal', key: null },
+            { label: 'Training Attendance', value: trainingCount, prev: 0, icon: '🎓', color: 'indigo', key: null },
+            { label: 'Attending Courses', value: courseCount, prev: 0, icon: '📖', color: 'pink', key: null }
         ];
 
         grid.innerHTML = cards.map(c => {
-            const diff = c.prev > 0 ? ((kpis[c.key] - prevKpis[c.key]) / prevKpis[c.key] * 100).toFixed(1) : (kpis[c.key] > 0 ? '100' : '0');
-            const trendClass = diff >= 0 ? 'trend-up' : 'trend-down';
-            const trendIcon = diff >= 0 ? 'fa-arrow-up' : 'fa-arrow-down';
+            const numericValue = typeof c.value === 'number' ? c.value : (c.key ? kpis[c.key] : c.value);
+            const diff = c.prev > 0 ? ((numericValue - c.prev) / c.prev * 100).toFixed(1) : (numericValue > 0 ? '100' : '0');
+            const trendClass = parseFloat(diff) >= 0 ? 'trend-up' : 'trend-down';
+            const trendIcon = parseFloat(diff) >= 0 ? 'fa-arrow-up' : 'fa-arrow-down';
 
             return `
                 <div class="stat-card">
                     <div class="stat-info">
                         <h3>
                             ${c.label}
-                            <div class="kpi-tooltip">
+                            ${c.key && KPI_DEFINITIONS[c.key] ? `<div class="kpi-tooltip">
                                 <i class="fas fa-info-circle"></i>
                                 <span class="tooltip-text">${KPI_DEFINITIONS[c.key]}</span>
-                            </div>
+                            </div>` : ''}
                         </h3>
                         <div class="stat-value">${c.value}</div>
                         <div class="stat-trend ${trendClass}">
@@ -14579,73 +14684,251 @@ const renderAgentLeaderboard = async () => {
     const container = document.getElementById('agent-leaderboard-table');
     if (!container) return;
 
-    let agentsList = (await AppDataStore.getAll('users')).filter(isAgent);
-    if (_currentRoleFilter !== 'All') {
-        agentsList = agentsList.filter(u => u.role === _currentRoleFilter);
+    const ranges = getDateRanges(_currentTimeFilter, _customDateFrom, _customDateTo);
+    const perfData = await getAgentPerformanceData(ranges.current.from, ranges.current.to);
+
+    let filtered = perfData;
+    if (_currentAgentFilter !== 'all') {
+        filtered = perfData.filter(a => a.id == _currentAgentFilter);
     }
-    const ranges = getDateRanges(_currentTimeFilter);
-    const allPurchases = await AppDataStore.getAll('purchases');
+    const top10 = filtered.slice(0, 10);
 
-    // Build stats using for...of to avoid async map issues
-    const agentStats = [];
-    for (const agent of agentsList) {
-        const currentSales = allPurchases
-            .filter(p => p.agent_id === agent.id && p.date >= ranges.current.from && p.date <= ranges.current.to)
-            .reduce((sum, p) => sum + (p.amount || 0), 0);
-
-        const prevSales = allPurchases
-            .filter(p => p.agent_id === agent.id && p.date >= ranges.previous.from && p.date <= ranges.previous.to)
-            .reduce((sum, p) => sum + (p.amount || 0), 0);
-
-        let trend = 'Stable';
-        let trendClass = 'warning';
-        if (prevSales > 0) {
-            const diff = ((currentSales - prevSales) / prevSales * 100);
-            trend = (diff >= 0 ? '+' : '') + diff.toFixed(0) + '%';
-            trendClass = diff >= 0 ? 'success' : 'danger';
-        } else if (currentSales > 0) {
-            trend = 'New';
-            trendClass = 'success';
-        }
-
-        agentStats.push({
-            name: agent.full_name,
-            team: agent.team || 'General',
-            sales: currentSales,
-            trend: trend,
-            trendClass: trendClass
-        });
-    }
-
-    agentStats.sort((a, b) => b.sales - a.sales);
-    const top10 = agentStats.slice(0, 10);
-
-    container.innerHTML = `
+    let html = `
         <table class="leaderboard-table">
             <thead>
                 <tr>
                     <th>Rank</th>
                     <th>Agent</th>
-                    <th>Sales</th>
-                    <th>Trend</th>
+                    <th>CPS</th>
+                    <th>Sales (RM)</th>
+                    <th>POP</th>
+                    <th>Recruitment</th>
+                    <th>New Customer</th>
+                    <th>Referrer</th>
                 </tr>
             </thead>
             <tbody>
-                ${top10.map((a, i) => `
-                    <tr>
-                        <td><span class="rank-badge rank-${Math.min(i + 1, 5)}">${i + 1}</span></td>
-                        <td>
-                            <div><strong>${a.name}</strong></div>
-                            <div style="font-size: 11px; color: var(--gray-500);">${a.team}</div>
-                        </td>
-                        <td>RM ${a.sales.toLocaleString()}</td>
-                        <td><span class="status-badge-${a.trendClass}">${a.trend}</span></td>
-                    </tr>
-                `).join('')}
-                ${top10.length === 0 ? '<tr><td colspan="4" style="text-align:center; padding: 20px;">No agent data for this period</td></tr>' : ''}
-            </tbody>
-        </table>
     `;
+    for (let i = 0; i < top10.length; i++) {
+        const a = top10[i];
+        html += `
+            <tr>
+                <td><span class="rank-badge rank-${Math.min(i + 1, 5)}">${i + 1}</span></td>
+                <td><strong>${escapeHtml(a.name)}</strong></td>
+                <td>${a.cps}</td>
+                <td>${a.sales.toLocaleString()}</td>
+                <td>${a.pop}</td>
+                <td>${a.recruitment}</td>
+                <td>${a.newCustomers}</td>
+                <td>${a.referrer}</td>
+            </tr>
+        `;
+    }
+    if (top10.length === 0) {
+        html += `<tr><td colspan="8" style="text-align:center; padding: 20px;">No agent data for this period</td></tr>`;
+    }
+    html += `</tbody></table>`;
+    container.innerHTML = html;
+};
+
+const getAgentPerformanceData = async (from, to) => {
+    const agents = (await AppDataStore.getAll('users')).filter(u => isAgent(u));
+    const purchases = await AppDataStore.getAll('purchases');
+    const activities = await AppDataStore.getAll('activities');
+    const customers = await AppDataStore.getAll('customers');
+    const referrals = await AppDataStore.getAll('referrals');
+    const allUsers = await AppDataStore.getAll('users');
+
+    const perf = [];
+    for (const agent of agents) {
+        const cpsCount = activities.filter(a =>
+            a.activity_type === 'CPS' &&
+            a.activity_date >= from && a.activity_date <= to &&
+            a.lead_agent_id === agent.id
+        ).length;
+
+        const sales = purchases.filter(p =>
+            p.date >= from && p.date <= to &&
+            !p.is_agent_package &&
+            p.agent_id === agent.id
+        ).reduce((sum, p) => sum + (p.amount || 0), 0);
+
+        const popCount = purchases.filter(p =>
+            p.payment_method === 'POP' &&
+            p.date >= from && p.date <= to &&
+            p.agent_id === agent.id
+        ).length;
+
+        const recruitment = allUsers.filter(u =>
+            u.reporting_to === agent.id &&
+            u.join_date >= from && u.join_date <= to
+        ).length;
+
+        const newCustomers = customers.filter(c =>
+            c.customer_since >= from && c.customer_since <= to &&
+            c.responsible_agent_id === agent.id
+        ).length;
+
+        const agentCustomers = customers.filter(c => c.responsible_agent_id === agent.id);
+        const referrerCount = agentCustomers.filter(c =>
+            referrals.some(r => r.referrer_id === c.id && r.referrer_type === 'customer')
+        ).length;
+
+        perf.push({
+            id: agent.id,
+            name: agent.full_name,
+            cps: cpsCount,
+            sales: sales,
+            pop: popCount,
+            recruitment: recruitment,
+            newCustomers: newCustomers,
+            referrer: referrerCount
+        });
+    }
+    return perf.sort((a, b) => b.sales - a.sales);
+};
+
+const getActivityAttendanceDetails = async (from, to) => {
+    const events = await AppDataStore.getAll('events');
+    const registrations = await AppDataStore.getAll('event_registrations');
+    const activities = await AppDataStore.getAll('activities');
+    const result = [];
+    for (const ev of events) {
+        const regs = registrations.filter(r => r.event_id === ev.id && r.event_date >= from && r.event_date <= to);
+        if (regs.length === 0) continue;
+        let prospectCount = 0, agentCount = 0;
+        for (const r of regs) {
+            if (r.attendee_type === 'prospect' || r.attendee_type === 'customer') prospectCount++;
+            if (r.attendee_type === 'agent') agentCount++;
+        }
+        result.push({ title: ev.title, prospectCount, agentCount, total: regs.length });
+    }
+    const standaloneActivities = activities.filter(a =>
+        a.activity_date >= from && a.activity_date <= to &&
+        !a.event_id && a.co_agents && a.co_agents.length > 0
+    );
+    for (const a of standaloneActivities) {
+        const agentCount = a.co_agents?.length || 0;
+        result.push({
+            title: `${a.activity_type} - ${a.activity_title || 'Meeting'}`,
+            prospectCount: a.prospect_id ? 1 : 0,
+            agentCount,
+            total: agentCount + (a.prospect_id ? 1 : 0)
+        });
+    }
+    return result;
+};
+
+const getCaseCountsByProduct = async (from, to) => {
+    const purchases = await AppDataStore.getAll('purchases');
+    const categories = {
+        'FengShui': 0,
+        'Flexi FengShui': 0,
+        'Simplified Feng Shui': 0,
+        'Power Ring': 0,
+        'Calligraphy': 0,
+        'Adornment': 0,
+        'Royal Woodwork': 0,
+        'Courses': 0,
+        'Book': 0
+    };
+    const keywordMap = {
+        'FengShui': ['feng shui', 'fengshui'],
+        'Flexi FengShui': ['flexi', 'flexible feng shui'],
+        'Simplified Feng Shui': ['simplified', 'simple feng shui'],
+        'Power Ring': ['power ring', 'pr4', 'pr3', 'pr5'],
+        'Calligraphy': ['calligraphy'],
+        'Adornment': ['adornment', 'decoration'],
+        'Royal Woodwork': ['royal woodwork', 'woodwork'],
+        'Courses': ['course', 'workshop', 'seminar'],
+        'Book': ['book', 'publication']
+    };
+    for (const p of purchases) {
+        if (p.date < from || p.date > to) continue;
+        if (_currentAgentFilter !== 'all' && p.agent_id != _currentAgentFilter) continue;
+        const itemLower = (p.item || '').toLowerCase();
+        for (const [cat, keywords] of Object.entries(keywordMap)) {
+            if (keywords.some(kw => itemLower.includes(kw))) {
+                categories[cat]++;
+                break;
+            }
+        }
+    }
+    return categories;
+};
+
+const getHeadcountByEventType = async (from, to) => {
+    const eventTypes = ['Monthly Talk', 'Weekly Talk', 'Huiji', 'Museum', 'Study Group', 'Customer Interaction'];
+    const events = await AppDataStore.getAll('events');
+    const registrations = await AppDataStore.getAll('event_registrations');
+    const result = {};
+    for (const type of eventTypes) {
+        result[type] = { prospects: 0, agents: 0, total: 0 };
+    }
+    for (const ev of events) {
+        const matchedType = eventTypes.find(t =>
+            ev.title.toLowerCase().includes(t.toLowerCase()) || ev.category === t
+        );
+        if (!matchedType) continue;
+        const regs = registrations.filter(r =>
+            r.event_id === ev.id &&
+            r.event_date >= from && r.event_date <= to &&
+            r.attendance_status === 'Attended'
+        );
+        for (const r of regs) {
+            if (r.attendee_type === 'prospect' || r.attendee_type === 'customer') {
+                result[matchedType].prospects++;
+                result[matchedType].total++;
+            } else if (r.attendee_type === 'agent') {
+                result[matchedType].agents++;
+                result[matchedType].total++;
+            }
+        }
+    }
+    return result;
+};
+
+const renderCaseCountsTable = async () => {
+    const container = document.getElementById('cases-count-table');
+    if (!container) return;
+    const ranges = getDateRanges(_currentTimeFilter, _customDateFrom, _customDateTo);
+    const counts = await getCaseCountsByProduct(ranges.current.from, ranges.current.to);
+    let html = `<table class="data-table"><thead><tr><th>Product Category</th><th>Case Count</th></tr></thead><tbody>`;
+    for (const [cat, cnt] of Object.entries(counts)) {
+        html += `<tr><td>${cat}</td><td>${cnt}</td></tr>`;
+    }
+    html += `</tbody></table>`;
+    container.innerHTML = html;
+};
+
+const renderHeadcountTable = async () => {
+    const container = document.getElementById('headcount-table');
+    if (!container) return;
+    const ranges = getDateRanges(_currentTimeFilter, _customDateFrom, _customDateTo);
+    const headcounts = await getHeadcountByEventType(ranges.current.from, ranges.current.to);
+    let html = `<table class="data-table"><thead><tr><th>Event Type</th><th>Prospects/Customers</th><th>Agents</th><th>Total</th></tr></thead><tbody>`;
+    for (const [type, data] of Object.entries(headcounts)) {
+        html += `<tr><td>${type}</td><td>${data.prospects}</td><td>${data.agents}</td><td>${data.total}</td></tr>`;
+    }
+    html += `</tbody></table>`;
+    container.innerHTML = html;
+};
+
+const renderActivityAttendanceDetails = async () => {
+    const container = document.getElementById('activity-attendance-details');
+    if (!container) return;
+    const ranges = getDateRanges(_currentTimeFilter, _customDateFrom, _customDateTo);
+    const details = await getActivityAttendanceDetails(ranges.current.from, ranges.current.to);
+    if (details.length === 0) {
+        container.innerHTML = '<p style="padding: 16px; color: var(--gray-500);">No attendance data for the selected period.</p>';
+        return;
+    }
+    let html = `<table class="data-table"><thead><tr><th>Topic / Activity</th><th>Prospect Headcount</th><th>Agent Headcount</th><th>Total</th></tr></thead><tbody>`;
+    for (const d of details) {
+        html += `<tr><td>${escapeHtml(d.title)}</td><td>${d.prospectCount}</td><td>${d.agentCount}</td><td>${d.total}</td></tr>`;
+    }
+    html += `</tbody></table>`;
+    container.innerHTML = html;
 };
 
     const renderRevenueChart = async (filter, range) => {
@@ -18482,6 +18765,7 @@ const initImportDemoData = async () => {
         setRoleFilter,
         setTimeFilter,
         setCustomDateRange,
+        setAgentFilter,
         refreshKPIDashboard
 
     };
