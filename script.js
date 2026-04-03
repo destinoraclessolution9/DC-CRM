@@ -3240,8 +3240,10 @@ In a production system, this would show the actual file contents.
     };
 
     const getConnectionStatus = async (integrationId) => {
+        const id = await getIntegrationId(integrationId);
+        if (!id) return 'disconnected';
         const connections = await AppDataStore.query('integration_connections', {
-            integration_id: await getIntegrationId(integrationId),
+            integration_id: id,
             user_id: _currentUser?.id || 1
         });
 
@@ -5827,6 +5829,7 @@ function _wireLoginBtn() {
     };
 
     const navigateTo = async (viewId) => {
+        UI.hideModal();
         document.querySelectorAll('.nav-links li').forEach(li => {
             li.classList.toggle('active', li.getAttribute('data-view') === viewId);
         });
@@ -6687,7 +6690,7 @@ function _wireLoginBtn() {
                         <h1>Case Studies Repository</h1>
                         <p>Document and share success stories, sales ideas, and closing strategies.</p>
                     </div>
-                    <button class="btn primary" onclick="app. async openCaseStudyModal()">
+                    <button class="btn primary" onclick="(async () => { await app.openCaseStudyModal(); })()">
                         <i class="fas fa-plus"></i> New Case Study
                     </button>
                 </div>
@@ -12586,8 +12589,8 @@ const deactivateAgent = async (agentId) => {
             prospects = prospects.filter(p => p.status === _pipelineStatusFilter);
         }
 
-        const focusList = await AppDataStore.query('my_potential_list', { user_id: userId })
-            .filter(rec => prospects.some(p => p.id == rec.prospect_id)) // Filter focus list too
+        const focusList = (await AppDataStore.query('my_potential_list', { user_id: userId }))
+            .filter(rec => prospects.some(p => p.id == rec.prospect_id))
             .sort((a, b) => a.priority_order - b.priority_order);
 
         // Calculate readiness for all prospects to sort the system pipeline
@@ -12610,7 +12613,7 @@ const deactivateAgent = async (agentId) => {
                     <option value="all">All Agents</option>
                     ${agents.map(a => `<option value="${a.id}" ${_pipelineAgentFilter == a.id ? 'selected' : ''}>${a.full_name}</option>`).join('')}
                 </select>
-                <select class="form-control" style="width: 140px; height: 38px;" onchange="app. async setPipelineFilter('status', this.value)">
+                <select class="form-control" style="width: 140px; height: 38px;" onchange="(async () => { await app.setPipelineFilter('status', this.value); })()">
                     <option value="all">All Status</option>
                     <option value="prospect" ${_pipelineStatusFilter === 'prospect' ? 'selected' : ''}>Prospect</option>
                     <option value="active" ${_pipelineStatusFilter === 'active' ? 'selected' : ''}>Active</option>
