@@ -108,12 +108,12 @@ const appLogic = (() => {
     // Returns an array of user IDs, or 'all' for roles that see everything.
     const getVisibleUserIds = async (user) => {
         if (!user) return [];
-        const role = user.role;
-        if (role === 'super_admin' || role === 'marketing_manager' || role === 'manager') {
-            return 'all'; // special marker
-        }
+        const lvlMatch = user.role?.match(/Level\s+(\d+)/i);
+        const level = lvlMatch ? parseInt(lvlMatch[1]) : 99;
+        // Levels 1–4 (Super Admin, Marketing Manager, Senior Manager, Manager) see everything
+        if (level <= 4) return 'all';
         // For team leaders and consultants, traverse down the reporting tree
-        const allUsers =await AppDataStore.getAll('users');
+        const allUsers = await AppDataStore.getAll('users');
         const result = [];
         const collect = (uid) => {
             result.push(uid);
@@ -10171,7 +10171,7 @@ function _wireLoginBtn() {
             ming_gua: d('prospect-minggua') || null,
             referred_by: d('prospect-referred') || null,
             referral_relationship: d('prospect-relationship') || null,
-            responsible_agent_id: parseInt(document.getElementById('prospect-agent')?.value) || null,
+            responsible_agent_id: parseInt(document.getElementById('prospect-agent')?.value) || _currentUser?.id || null,
             cps_assignment_date: d('prospect-cps-date') || new Date().toISOString().split('T')[0],
             pipeline_stage: d('prospect-stage') || 'new',
             expected_close_date: d('prospect-close-date') || null,
