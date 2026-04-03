@@ -1560,7 +1560,8 @@ const appLogic = (() => {
         if (!treeContainer) return;
         if (parentId === null) treeContainer.innerHTML = '';
 
-        const folders = await AppDataStore.getAll('folders')
+        const allFolders = await AppDataStore.getAll('folders');
+        const folders = allFolders
             .filter(f => f.parent_id === parentId)
             .sort((a, b) => a.name.localeCompare(b.name));
 
@@ -3180,7 +3181,8 @@ In a production system, this would show the actual file contents.
     };
 
     const showIntegrationHub = async (container) => {
-        container.innerHTML = `
+        try {
+            container.innerHTML = `
             <div class="integration-hub">
                 <div class="integration-header">
                     <div>
@@ -3191,7 +3193,7 @@ In a production system, this would show the actual file contents.
                         <i class="fas fa-arrow-left"></i> Back to Settings
                     </button>
                 </div>
-                
+
                 <div class="integration-grid">
                     ${await renderIntegrationCard('google', 'Google Calendar', 'Two-way sync', 'calendar', await getConnectionStatus('google'))}
                     ${await renderIntegrationCard('outlook', 'Outlook Calendar', 'One-way sync', 'calendar', await getConnectionStatus('outlook'))}
@@ -3202,6 +3204,10 @@ In a production system, this would show the actual file contents.
                 </div>
             </div>
         `;
+        } catch (e) {
+            console.error('Integration Hub error:', e);
+            container.innerHTML = '<div class="error-state" style="padding:40px;text-align:center;"><i class="fas fa-exclamation-circle" style="font-size:2rem;color:#ef4444;"></i><p style="margin-top:12px;">Failed to load integrations. Please try again later.</p></div>';
+        }
     };
 
     const renderIntegrationCard = async (id, name, description, type, status) => {
@@ -8988,7 +8994,8 @@ function _wireLoginBtn() {
 
                 let matches = [];
                 if (type === 'CPS' || type === 'EVENT') {
-                    const all = [...AppDataStore.getAll('prospects'), ...AppDataStore.getAll('customers')];
+                    const [_prospects, _customers] = await Promise.all([AppDataStore.getAll('prospects'), AppDataStore.getAll('customers')]);
+                    const all = [..._prospects, ..._customers];
                     const available = all.filter(p => !_selectedAttendees.find(a => a.id === p.id && a.type !== 'agent'));
                     matches = available.filter(p =>
                         (p.full_name && p.full_name.toLowerCase().includes(searchTerm)) ||
@@ -12417,7 +12424,7 @@ const renderCurrentAssignments = async (agentId) => {
     };
 */
     const renderPerformanceTargets = async (agentId) => {
-        const target = await AppDataStore.query('agent_targets', { agent_id: agentId })[0];
+        const target = (await AppDataStore.query('agent_targets', { agent_id: agentId }))[0];
         if (!target) return '<p>No targets set for this month.</p>';
 
         return `
@@ -12890,7 +12897,7 @@ const renderCurrentAssignments = async (agentId) => {
     };
 
     const updateAgentTargets = async (agentId) => {
-        const target = await AppDataStore.query('agent_targets', { agent_id: agentId })[0];
+        const target = (await AppDataStore.query('agent_targets', { agent_id: agentId }))[0];
         const content = `
     <div class="form-group" style="margin-bottom:15px;">
                 <label>Monthly Sales target (RM)</label>
@@ -12912,7 +12919,7 @@ const renderCurrentAssignments = async (agentId) => {
     };
 
     const saveAgentTargets = async (agentId) => {
-        const target = await AppDataStore.query('agent_targets', { agent_id: agentId })[0];
+        const target = (await AppDataStore.query('agent_targets', { agent_id: agentId }))[0];
         const data = {
             target_amount: parseInt(document.getElementById('target-sales').value),
             target_cps: parseInt(document.getElementById('target-cps').value),
@@ -18482,7 +18489,8 @@ const initImportDemoData = async () => {
         setRoleFilter,
         setTimeFilter,
         setCustomDateRange,
-        refreshKPIDashboard
+        refreshKPIDashboard,
+        exportKPIReport
 
     };
 

@@ -77,9 +77,17 @@ class DataStore {
     }
 
     async getAll(tableName) {
-        const { data, error } = await window.supabase.from(tableName).select('*');
-        if (error) throw error;
-        return data || [];
+        try {
+            const { data, error } = await window.supabase.from(tableName).select('*');
+            if (error) throw error;
+            const result = data || [];
+            try { localStorage.setItem(`fs_crm_${tableName}`, JSON.stringify(result)); } catch (_) {}
+            return result;
+        } catch (e) {
+            console.warn(`Offline: falling back to localStorage for ${tableName}`, e);
+            const local = localStorage.getItem(`fs_crm_${tableName}`);
+            return local ? JSON.parse(local) : [];
+        }
     }
 
     async get(tableName, id) {
@@ -129,13 +137,20 @@ class DataStore {
     }
 
     async query(tableName, filters = {}) {
-        let query = window.supabase.from(tableName).select('*');
-        for (const [key, value] of Object.entries(filters)) {
-            query = query.eq(key, value);
+        try {
+            let q = window.supabase.from(tableName).select('*');
+            for (const [key, value] of Object.entries(filters)) {
+                q = q.eq(key, value);
+            }
+            const { data, error } = await q;
+            if (error) throw error;
+            return data || [];
+        } catch (e) {
+            console.warn(`Offline: falling back to localStorage for ${tableName} query`, e);
+            const local = localStorage.getItem(`fs_crm_${tableName}`);
+            const all = local ? JSON.parse(local) : [];
+            return all.filter(row => Object.entries(filters).every(([k, v]) => row[k] == v));
         }
-        const { data, error } = await query;
-        if (error) throw error;
-        return data || [];
     }
 
     // Aliases used throughout script.js
