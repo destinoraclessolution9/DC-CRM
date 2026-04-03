@@ -10144,7 +10144,11 @@ function _wireLoginBtn() {
             hasError = true;
         }
 
-        if (hasError) return;
+        if (hasError) {
+            UI.toast.error('Please fill in the required fields');
+            document.querySelector('.form-control.error')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            return;
+        }
 
         const data = {
             title: document.getElementById('prospect-title')?.value,
