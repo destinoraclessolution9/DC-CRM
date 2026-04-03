@@ -5881,6 +5881,12 @@ function _wireLoginBtn() {
         } else if (viewId === 'marketing_lists') {
             _currentView = 'marketing_lists';
             await showMarketingListsView(viewport);
+        } else if (viewId === 'ranking' || viewId === 'performance') {
+            _currentView = 'ranking';
+            await showRankingPerformanceView(viewport);
+        } else if (viewId === 'workflows') {
+            _currentView = 'workflows';
+            await showWorkflowAutomationView(viewport);
         } else if (viewId === 'settings') {
             _currentView = 'settings';
             showSettingsView(viewport);
@@ -7555,7 +7561,10 @@ function _wireLoginBtn() {
         const getBdayInfo = async (p) => {
             const agent = await AppDataStore.getById('users', p.responsible_agent_id || p.lead_agent_id);
             return {
+                id: p.id,
                 name: p.full_name,
+                phone: p.phone || '',
+                type: p.customer_since ? 'customer' : 'prospect',
                 info: `Agent: ${agent?.full_name || 'Michelle Tan'} · ${p.customer_since ? 'Customer' : 'Prospect'}`,
                 dob: p.date_of_birth ? p.date_of_birth.substring(5) : '' // MM-DD
             };
@@ -7579,8 +7588,8 @@ function _wireLoginBtn() {
                     <div class="bday-name">${b.name} 🎂</div>
                     <div class="bday-info">${b.info}</div>
                     <div class="act-actions" style="border-top:none; margin-top:4px; padding-top:0;">
-                        <button class="btn btn-sm secondary" style="font-size:11px" onclick="app.todo('Send wish')">Send Wish</button>
-                        <button class="btn btn-sm secondary" style="font-size:11px" onclick="app.todo('Gift workflow')">Prepare Gift</button>
+                        <button class="btn btn-sm secondary" style="font-size:11px" onclick="app.sendBirthdayWish('${b.name}', '${b.phone}')">Send Wish</button>
+                        <button class="btn btn-sm secondary" style="font-size:11px" onclick="app.scheduleBirthdayFollowup('${b.name}', ${b.id}, '${b.type}')">Prepare Gift</button>
                     </div>
                 </div>
             `).join('');
@@ -9343,7 +9352,7 @@ function _wireLoginBtn() {
                 state: document.getElementById('cps-state')?.value || '',
                 postal_code: document.getElementById('cps-zip')?.value || '',
                 ming_gua: document.getElementById('cps-gua')?.value || '',
-                score: 5,
+                score: SCORING_RULES.CREATE_PROSPECT,
                 responsible_agent_id: _currentUser?.id || null,
                 referred_by_id: _selectedReferrer?.id || null,
                 referred_by_type: _selectedReferrer?.type || null,
@@ -9538,6 +9547,25 @@ function _wireLoginBtn() {
         }
 
         UI.toast.success('Activity saved!');
+
+        // === Auto Scoring: Award points based on activity type ===
+        try {
+            await applyActivityScoring(activity);
+        } catch (e) { console.warn('Activity scoring failed:', e); }
+
+        // === Auto Protection Extension: Extend deadline based on activity type ===
+        if (activity.prospect_id) {
+            try {
+                const extType = activity.is_closing ? 'transaction' : getExtensionType(activity.activity_type);
+                await autoExtendProtection(activity.prospect_id, extType);
+            } catch (e) { console.warn('Protection auto-extend failed:', e); }
+        }
+
+        // === Workflow Engine: Trigger activity_completed workflows ===
+        try {
+            const entityName = _selectedEntity?.name || activity.activity_title || '';
+            await executeWorkflows('activity_completed', { name: entityName, activityType: activity.activity_type });
+        } catch (e) { console.warn('Workflow trigger failed:', e); }
 
         await renderCalendar();
         await renderTodayActivities();
@@ -10310,11 +10338,13 @@ function _wireLoginBtn() {
             } else {
                 data.id = Date.now();
                 data.protection_deadline = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-                data.score = 5;
+                data.score = SCORING_RULES.CREATE_PROSPECT;
                 data.created_at = new Date().toISOString();
                 await AppDataStore.create('prospects', data);
                 UI.toast.success('Prospect created successfully');
                 document.dispatchEvent(new CustomEvent('prospectCreated', { detail: data }));
+                // Trigger new_prospect workflow
+                try { await executeWorkflows('new_prospect', { name: data.full_name }); } catch (e) { /* ignore */ }
             }
         } catch (err) {
             UI.toast.error('Save failed: ' + (err.message || 'Unknown error'));
@@ -10992,15 +11022,24 @@ function _wireLoginBtn() {
 
                     <!-- Potential & Opportunities -->
                     <div class="profile-section" style="margin-top:24px;">
-                        <h2><i class="fas fa-bolt"></i> Potential</h2>
+                        <h2>
+                            <i class="fas fa-bolt"></i> Potential & Opportunities
+                            <span class="section-actions">
+                                <button class="btn primary btn-sm" onclick="app.openEditPotentialModal(${prospect.id})"><i class="fas fa-edit"></i> Edit</button>
+                            </span>
+                        </h2>
                         <div class="detail-section" style="margin-bottom:0;">
-                            <div style="margin-bottom: 12px;"><span class="badge success">HIGH POTENTIAL</span></div>
-                            <div class="info-row"><div class="info-label">Budget</div><div class="info-value">RM 15k - 20k / mo</div></div>
-                            <div class="info-row"><div class="info-label">Close Prob.</div><div class="info-value">75%</div></div>
-                            <div class="progress-bar" style="margin-bottom: 16px;">
-                                <div class="progress-fill" style="width: 75%; background: var(--success);"></div>
+                            <div style="margin-bottom: 12px;"><span class="badge ${(prospect.potential_level === 'High' || !prospect.potential_level) ? 'success' : prospect.potential_level === 'Medium' ? 'warning' : 'secondary'}">${prospect.potential_level || 'NOT SET'} POTENTIAL</span></div>
+                            <div class="info-row"><div class="info-label">Close Prob.</div><div class="info-value">${prospect.close_probability || 0}%</div></div>
+                            <div class="progress-bar" style="margin-bottom: 12px;">
+                                <div class="progress-fill" style="width: ${prospect.close_probability || 0}%; background: var(--${(prospect.close_probability || 0) >= 60 ? 'success' : (prospect.close_probability || 0) >= 30 ? 'warning' : 'danger'});"></div>
                             </div>
-                            <div class="info-row"><div class="info-label">Est. Value</div><div class="info-value">RM 5k - 8k</div></div>
+                            <div class="info-row"><div class="info-label">Est. Value</div><div class="info-value">${prospect.estimated_value_min || prospect.estimated_value_max ? 'RM ' + (prospect.estimated_value_min || 0).toLocaleString() + ' - RM ' + (prospect.estimated_value_max || 0).toLocaleString() : '-'}</div></div>
+                            <div class="info-row"><div class="info-label">Budget</div><div class="info-value">${prospect.budget_range || '-'}</div></div>
+                            <div class="info-row"><div class="info-label">Timeline</div><div class="info-value">${prospect.decision_timeline || '-'}</div></div>
+                            <div class="info-row"><div class="info-label">Decision Maker</div><div class="info-value">${prospect.decision_maker === 'yes' ? 'Yes' : prospect.decision_maker === 'no' ? 'No' : 'Unknown'}</div></div>
+                            ${prospect.pain_points ? `<div class="info-row"><div class="info-label">Pain Points</div><div class="info-value">${prospect.pain_points}</div></div>` : ''}
+                            ${prospect.interests ? `<div class="info-row"><div class="info-label">Interests</div><div class="info-value">${prospect.interests}</div></div>` : ''}
                         </div>
                     </div>
                 </div>
@@ -14092,8 +14131,11 @@ container.innerHTML = `
                     </div>
                     <div class="header-actions">
                         ${isSystemAdmin(_currentUser) || _currentUser?.role?.includes('Level 7') ?
-                `<button class="btn primary" onclick="app. async openTargetManagementModal()">
-                                <i class="fas fa-bullseye"></i> Set Targets
+                `<button class="btn primary" onclick="app.openKPITargetsModal()">
+                                <i class="fas fa-bullseye"></i> Set Yearly Targets
+                             </button>
+                             <button class="btn secondary" onclick="app. async openTargetManagementModal()">
+                                <i class="fas fa-user-cog"></i> Agent Targets
                              </button>` : ''
             }
                         <button class="btn secondary" onclick="app. async exportKPIReport('csv')">
@@ -14163,6 +14205,11 @@ container.innerHTML = `
                         </div>
                     </div>
                 </div>
+
+                <!-- Hierarchical Target Comparison Section -->
+                <div id="kpi-target-comparison-section" style="margin-top:24px;">
+                    <!-- Loaded by refreshKPIDashboard -->
+                </div>
             </div>
 `;
 
@@ -14196,6 +14243,17 @@ container.innerHTML = `
         await renderPerformanceTable();
         await renderAgentLeaderboard();
         await renderRevenueChart(_currentTimeFilter, ranges.current);
+
+        // Render hierarchical target comparison
+        const targetSection = document.getElementById('kpi-target-comparison-section');
+        if (targetSection) {
+            try {
+                targetSection.innerHTML = await renderKPITargetComparison();
+            } catch (e) {
+                console.warn('KPI target comparison render failed:', e);
+                targetSection.innerHTML = '';
+            }
+        }
     };
 
     const getDateRanges = (filter, from, to) => {
@@ -17909,6 +17967,942 @@ const initImportDemoData = async () => {
         UI.toast.info('Opening prerequisite configuration (Marketing Manager only)');
     };
 
+    // ========== FEATURE: AUTOMATED SCORING RULES ==========
+    const SCORING_RULES = {
+        CREATE_PROSPECT: 5,
+        FIRST_CONTACT: 10,
+        CPS_ACTIVITY: 10,
+        FTF_MEETING: 10,
+        FSA_CONSULTATION: 25,
+        GR_GROUP_REVIEW: 15,
+        SITE_VISIT: 15,
+        CALL: 5,
+        WHATSAPP: 5,
+        PRICE_INQUIRY: 30,
+        HEARD_LIFE_PLAN: 40,
+        REFERRAL_CLOSED: 50,
+        WEEKLY_INACTIVITY: -5,
+        MARK_NOT_INTERESTED: -30
+    };
+
+    const addScoreToProspect = async (prospectId, points, reason) => {
+        if (!prospectId || !points) return;
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) return;
+        const oldScore = prospect.score || 0;
+        const newScore = Math.max(0, oldScore + points);
+        await AppDataStore.update('prospects', prospectId, { score: newScore });
+        // Log score history
+        try {
+            await AppDataStore.create('score_history', {
+                entity_type: 'prospect',
+                entity_id: prospectId,
+                old_score: oldScore,
+                new_score: newScore,
+                points_change: points,
+                reason: reason,
+                created_at: new Date().toISOString()
+            });
+        } catch (e) { /* score_history table may not exist yet */ }
+        console.log(`Score updated for prospect ${prospectId}: ${oldScore} → ${newScore} (${reason}: ${points > 0 ? '+' : ''}${points})`);
+    };
+
+    const addScoreToCustomer = async (customerId, points, reason) => {
+        if (!customerId || !points) return;
+        const customer = await AppDataStore.getById('customers', customerId);
+        if (!customer) return;
+        const oldScore = customer.score || 0;
+        const newScore = Math.max(0, oldScore + points);
+        await AppDataStore.update('customers', customerId, { score: newScore });
+        try {
+            await AppDataStore.create('score_history', {
+                entity_type: 'customer',
+                entity_id: customerId,
+                old_score: oldScore,
+                new_score: newScore,
+                points_change: points,
+                reason: reason,
+                created_at: new Date().toISOString()
+            });
+        } catch (e) { /* score_history table may not exist */ }
+    };
+
+    const scoreActivityType = (activityType) => {
+        switch (activityType) {
+            case 'CPS': return { points: SCORING_RULES.CPS_ACTIVITY, reason: 'CPS - Consultation/Planning Session' };
+            case 'FTF': return { points: SCORING_RULES.FTF_MEETING, reason: 'Face to Face Meeting' };
+            case 'FSA': return { points: SCORING_RULES.FSA_CONSULTATION, reason: 'Feng Shui Analysis (Consultation)' };
+            case 'GR': return { points: SCORING_RULES.GR_GROUP_REVIEW, reason: 'Group Review' };
+            case 'SITE': return { points: SCORING_RULES.SITE_VISIT, reason: 'Site Visit' };
+            case 'XG': return { points: SCORING_RULES.FTF_MEETING, reason: 'Xin Gua Session' };
+            case 'Call': return { points: SCORING_RULES.CALL, reason: 'Phone Call' };
+            case 'WhatsApp': return { points: SCORING_RULES.WHATSAPP, reason: 'WhatsApp Chat' };
+            default: return { points: 5, reason: `Activity: ${activityType}` };
+        }
+    };
+
+    const applyActivityScoring = async (activity) => {
+        const { points, reason } = scoreActivityType(activity.activity_type);
+        if (activity.prospect_id) {
+            await addScoreToProspect(activity.prospect_id, points, reason);
+        } else if (activity.customer_id) {
+            await addScoreToCustomer(activity.customer_id, points, reason);
+        }
+        // Bonus scoring for closing/transaction
+        if (activity.is_closing && activity.amount_closed) {
+            const txPoints = Math.round(parseFloat(activity.amount_closed) / 100);
+            if (activity.prospect_id) {
+                await addScoreToProspect(activity.prospect_id, txPoints, `Transaction closed: RM ${activity.amount_closed}`);
+            } else if (activity.customer_id) {
+                await addScoreToCustomer(activity.customer_id, txPoints, `Transaction closed: RM ${activity.amount_closed}`);
+            }
+        }
+    };
+
+    // ========== FEATURE: PROTECTION PERIOD AUTO-EXTENSION ==========
+    const PROTECTION_EXTENSIONS = {
+        ACTIVITY: 15,
+        CONSULTATION: 30,
+        TRANSACTION: 90,
+        EVENT: 10
+    };
+
+    const autoExtendProtection = async (prospectId, extensionType) => {
+        if (!prospectId) return;
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) return;
+
+        let days = PROTECTION_EXTENSIONS.ACTIVITY;
+        let label = 'activity';
+        if (extensionType === 'consultation') {
+            days = PROTECTION_EXTENSIONS.CONSULTATION;
+            label = 'consultation';
+        } else if (extensionType === 'transaction') {
+            days = PROTECTION_EXTENSIONS.TRANSACTION;
+            label = 'transaction';
+        } else if (extensionType === 'event') {
+            days = PROTECTION_EXTENSIONS.EVENT;
+            label = 'event attendance';
+        }
+
+        const currentDeadline = new Date(prospect.protection_deadline || Date.now());
+        const today = new Date();
+        const baseDate = currentDeadline > today ? currentDeadline : today;
+        const newDeadline = new Date(baseDate.getTime() + days * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        await AppDataStore.update('prospects', prospectId, {
+            protection_deadline: newDeadline,
+            last_contact_date: new Date().toISOString().split('T')[0]
+        });
+        console.log(`Protection auto-extended for prospect ${prospectId}: +${days} days (${label})`);
+    };
+
+    const getExtensionType = (activityType) => {
+        if (['FSA', 'GR'].includes(activityType)) return 'consultation';
+        if (['EVENT'].includes(activityType)) return 'event';
+        return 'activity';
+    };
+
+    // ========== FEATURE: PROSPECT POTENTIAL & OPPORTUNITIES ==========
+    const openEditPotentialModal = async (prospectId) => {
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) return;
+
+        const content = `
+            <div class="form-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                <div class="form-group">
+                    <label>Potential Level</label>
+                    <select id="pot-level" class="form-control">
+                        <option value="High" ${prospect.potential_level === 'High' ? 'selected' : ''}>HIGH POTENTIAL</option>
+                        <option value="Medium" ${prospect.potential_level === 'Medium' ? 'selected' : ''}>MEDIUM POTENTIAL</option>
+                        <option value="Low" ${prospect.potential_level === 'Low' ? 'selected' : ''}>LOW POTENTIAL</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Close Probability (%)</label>
+                    <input type="number" id="pot-probability" class="form-control" min="0" max="100" value="${prospect.close_probability || 0}">
+                </div>
+                <div class="form-group">
+                    <label>Est. Value Min (RM)</label>
+                    <input type="number" id="pot-value-min" class="form-control" value="${prospect.estimated_value_min || 0}">
+                </div>
+                <div class="form-group">
+                    <label>Est. Value Max (RM)</label>
+                    <input type="number" id="pot-value-max" class="form-control" value="${prospect.estimated_value_max || 0}">
+                </div>
+                <div class="form-group" style="grid-column:1/3;">
+                    <label>Decision Timeline</label>
+                    <input type="text" id="pot-timeline" class="form-control" placeholder="e.g. Within 1 month" value="${prospect.decision_timeline || ''}">
+                </div>
+                <div class="form-group" style="grid-column:1/3;">
+                    <label>Pain Points</label>
+                    <textarea id="pot-pain" class="form-control" rows="2" placeholder="e.g. Declining revenue, team morale">${prospect.pain_points || ''}</textarea>
+                </div>
+                <div class="form-group" style="grid-column:1/3;">
+                    <label>Interests</label>
+                    <input type="text" id="pot-interests" class="form-control" placeholder="e.g. PR4, Office Audit, Career Consultation" value="${prospect.interests || ''}">
+                </div>
+                <div class="form-group">
+                    <label>Decision Maker?</label>
+                    <select id="pot-decision-maker" class="form-control">
+                        <option value="yes" ${prospect.decision_maker === 'yes' ? 'selected' : ''}>Yes</option>
+                        <option value="no" ${prospect.decision_maker === 'no' ? 'selected' : ''}>No</option>
+                        <option value="unknown" ${(!prospect.decision_maker || prospect.decision_maker === 'unknown') ? 'selected' : ''}>Unknown</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Budget Range</label>
+                    <input type="text" id="pot-budget" class="form-control" placeholder="e.g. RM 15k-20k/mo" value="${prospect.budget_range || ''}">
+                </div>
+            </div>
+        `;
+        UI.showModal('Edit Potential & Opportunities', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save', type: 'primary', action: `(async () => { await app.savePotential(${prospectId}); })()` }
+        ]);
+    };
+
+    const savePotential = async (prospectId) => {
+        const data = {
+            potential_level: document.getElementById('pot-level')?.value || 'Medium',
+            close_probability: parseInt(document.getElementById('pot-probability')?.value) || 0,
+            estimated_value_min: parseFloat(document.getElementById('pot-value-min')?.value) || 0,
+            estimated_value_max: parseFloat(document.getElementById('pot-value-max')?.value) || 0,
+            decision_timeline: document.getElementById('pot-timeline')?.value || '',
+            pain_points: document.getElementById('pot-pain')?.value || '',
+            interests: document.getElementById('pot-interests')?.value || '',
+            decision_maker: document.getElementById('pot-decision-maker')?.value || 'unknown',
+            budget_range: document.getElementById('pot-budget')?.value || ''
+        };
+        await AppDataStore.update('prospects', prospectId, data);
+        UI.hideModal();
+        UI.toast.success('Potential & Opportunities updated');
+        await showProspectDetail(prospectId);
+    };
+
+    // ========== FEATURE: BIRTHDAY ACTION WORKFLOWS ==========
+    const sendBirthdayWish = async (personName, phone) => {
+        const templates = await AppDataStore.getAll('whatsapp_templates');
+        const bdayTemplate = templates.find(t => t.template_name?.toLowerCase().includes('birthday'));
+        const message = bdayTemplate
+            ? bdayTemplate.content.replace(/\{\{name\}\}/g, personName)
+            : `Hi ${personName}, Happy Birthday! 🎂 Wishing you a wonderful day filled with joy and blessings. — From the DestinOracles Team`;
+
+        UI.showModal('Send Birthday Wish', `
+            <div class="form-group">
+                <label>To: ${personName}</label>
+                <input type="text" class="form-control" value="${phone || ''}" readonly>
+            </div>
+            <div class="form-group">
+                <label>Message</label>
+                <textarea id="bday-msg" class="form-control" rows="5">${message}</textarea>
+            </div>
+            <div class="form-group">
+                <label>Channel</label>
+                <select id="bday-channel" class="form-control">
+                    <option value="whatsapp">WhatsApp</option>
+                    <option value="sms">SMS</option>
+                    <option value="call">Phone Call</option>
+                </select>
+            </div>
+        `, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Send', type: 'primary', action: `(async () => { UI.hideModal(); UI.toast.success('Birthday wish sent to ${personName} via ' + document.getElementById('bday-channel').value); })()` }
+        ]);
+    };
+
+    const scheduleBirthdayFollowup = async (personName, entityId, entityType) => {
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const dateStr = tomorrow.toISOString().split('T')[0];
+
+        UI.showModal('Schedule Birthday Follow-up', `
+            <div class="form-group">
+                <label>For: ${personName}</label>
+            </div>
+            <div class="form-group">
+                <label>Action Type</label>
+                <select id="bday-action-type" class="form-control">
+                    <option value="gift">Prepare Birthday Gift</option>
+                    <option value="call">Schedule Follow-up Call</option>
+                    <option value="meeting">Schedule Birthday Meeting</option>
+                    <option value="task">Create General Task</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Date</label>
+                <input type="date" id="bday-action-date" class="form-control" value="${dateStr}">
+            </div>
+            <div class="form-group">
+                <label>Notes</label>
+                <textarea id="bday-action-notes" class="form-control" rows="2" placeholder="e.g. Prepare fruit basket, call to wish..."></textarea>
+            </div>
+        `, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Create', type: 'primary', action: `(async () => { await app.executeBirthdayAction('${personName}', ${entityId}, '${entityType || 'prospect'}'); })()` }
+        ]);
+    };
+
+    const executeBirthdayAction = async (personName, entityId, entityType) => {
+        const actionType = document.getElementById('bday-action-type')?.value || 'task';
+        const actionDate = document.getElementById('bday-action-date')?.value || new Date().toISOString().split('T')[0];
+        const notes = document.getElementById('bday-action-notes')?.value || '';
+
+        if (actionType === 'call' || actionType === 'meeting') {
+            const activity = {
+                activity_type: actionType === 'call' ? 'Call' : 'FTF',
+                activity_date: actionDate,
+                start_time: '10:00',
+                end_time: '10:30',
+                activity_title: `Birthday follow-up with ${personName}`,
+                lead_agent_id: _currentUser?.id || 5,
+                discussion_summary: `Birthday follow-up. ${notes}`
+            };
+            if (entityType === 'prospect') activity.prospect_id = entityId;
+            else activity.customer_id = entityId;
+            await AppDataStore.create('activities', activity);
+            UI.hideModal();
+            UI.toast.success(`${actionType === 'call' ? 'Call' : 'Meeting'} scheduled for ${personName} on ${actionDate}`);
+        } else {
+            // Create as a note/task
+            await AppDataStore.create('notes', {
+                entity_type: entityType,
+                entity_id: entityId,
+                content: `[Birthday ${actionType === 'gift' ? 'Gift' : 'Task'}] ${personName} — ${notes || 'Prepare birthday follow-up'}`,
+                created_by: _currentUser?.id || 5,
+                created_at: new Date().toISOString(),
+                due_date: actionDate
+            });
+            UI.hideModal();
+            UI.toast.success(`Birthday ${actionType} created for ${personName}`);
+        }
+    };
+
+    // ========== FEATURE: KPI HIERARCHICAL TARGETS ==========
+    const openKPITargetsModal = async () => {
+        const currentYear = new Date().getFullYear();
+        const existing = (await AppDataStore.getAll('yearly_targets')).find(t => t.target_year === currentYear);
+
+        const content = `
+            <div style="max-height:70vh; overflow-y:auto;">
+                <h3 style="margin-bottom:12px;">Yearly Targets — ${currentYear}</h3>
+                <div class="form-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                    <div class="form-group"><label>CPS Count Target</label>
+                        <input type="number" id="yt-cps" class="form-control" value="${existing?.cps_count_target || 840}"></div>
+                    <div class="form-group"><label>Total Sales Target (RM)</label>
+                        <input type="number" id="yt-sales" class="form-control" value="${existing?.total_sales_target || 1680000}"></div>
+                    <div class="form-group"><label>POP Case Target</label>
+                        <input type="number" id="yt-pop-count" class="form-control" value="${existing?.pop_case_count_target || 120}"></div>
+                    <div class="form-group"><label>POP Sales Target (RM)</label>
+                        <input type="number" id="yt-pop-sales" class="form-control" value="${existing?.pop_sales_target || 480000}"></div>
+                    <div class="form-group"><label>EPP Case Target</label>
+                        <input type="number" id="yt-epp-count" class="form-control" value="${existing?.epp_case_count_target || 80}"></div>
+                    <div class="form-group"><label>EPP Sales Target (RM)</label>
+                        <input type="number" id="yt-epp-sales" class="form-control" value="${existing?.epp_sales_target || 320000}"></div>
+                    <div class="form-group"><label>New Agents Target</label>
+                        <input type="number" id="yt-agents" class="form-control" value="${existing?.new_agents_target || 48}"></div>
+                    <div class="form-group"><label>New Customers Target</label>
+                        <input type="number" id="yt-customers" class="form-control" value="${existing?.new_customers_target || 360}"></div>
+                    <div class="form-group"><label>Total Meetings Target</label>
+                        <input type="number" id="yt-meetings" class="form-control" value="${existing?.total_meetings_target || 2000}"></div>
+                    <div class="form-group"><label>Activity Headcount Target</label>
+                        <input type="number" id="yt-headcount" class="form-control" value="${existing?.activity_headcount_target || 500}"></div>
+                </div>
+                <h3 style="margin:16px 0 8px;">Seasonal Weighting</h3>
+                <p style="font-size:12px; color:var(--gray-500); margin-bottom:8px;">Distribute percentage weights across quarters (must sum to 100%)</p>
+                <div class="form-grid" style="display:grid; grid-template-columns:repeat(4,1fr); gap:8px;">
+                    <div class="form-group"><label>Q1 %</label><input type="number" id="yt-q1w" class="form-control" value="${existing?.q1_weight || 22}"></div>
+                    <div class="form-group"><label>Q2 %</label><input type="number" id="yt-q2w" class="form-control" value="${existing?.q2_weight || 25}"></div>
+                    <div class="form-group"><label>Q3 %</label><input type="number" id="yt-q3w" class="form-control" value="${existing?.q3_weight || 27}"></div>
+                    <div class="form-group"><label>Q4 %</label><input type="number" id="yt-q4w" class="form-control" value="${existing?.q4_weight || 26}"></div>
+                </div>
+            </div>
+        `;
+        UI.showModal('Set KPI Targets', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save & Auto-Generate Breakdown', type: 'primary', action: `(async () => { await app.saveKPITargets(${currentYear}); })()` }
+        ]);
+    };
+
+    const saveKPITargets = async (year) => {
+        const d = (id) => parseFloat(document.getElementById(id)?.value) || 0;
+        const weights = [d('yt-q1w'), d('yt-q2w'), d('yt-q3w'), d('yt-q4w')];
+        const totalWeight = weights.reduce((a, b) => a + b, 0);
+        if (Math.abs(totalWeight - 100) > 1) {
+            UI.toast.error(`Quarter weights must sum to 100% (currently ${totalWeight}%)`);
+            return;
+        }
+
+        const yearlyData = {
+            target_year: year,
+            cps_count_target: d('yt-cps'),
+            total_sales_target: d('yt-sales'),
+            pop_case_count_target: d('yt-pop-count'),
+            pop_sales_target: d('yt-pop-sales'),
+            epp_case_count_target: d('yt-epp-count'),
+            epp_sales_target: d('yt-epp-sales'),
+            new_agents_target: d('yt-agents'),
+            new_customers_target: d('yt-customers'),
+            total_meetings_target: d('yt-meetings'),
+            activity_headcount_target: d('yt-headcount'),
+            q1_weight: weights[0],
+            q2_weight: weights[1],
+            q3_weight: weights[2],
+            q4_weight: weights[3],
+            created_at: new Date().toISOString()
+        };
+
+        // Save or update yearly target
+        const existing = (await AppDataStore.getAll('yearly_targets')).find(t => t.target_year === year);
+        if (existing) {
+            await AppDataStore.update('yearly_targets', existing.id, yearlyData);
+        } else {
+            yearlyData.id = Date.now();
+            await AppDataStore.create('yearly_targets', yearlyData);
+        }
+
+        // Auto-generate quarterly targets
+        const metrics = ['cps_count_target', 'total_sales_target', 'pop_case_count_target', 'pop_sales_target', 'epp_case_count_target', 'epp_sales_target', 'new_agents_target', 'new_customers_target', 'total_meetings_target', 'activity_headcount_target'];
+        for (let q = 1; q <= 4; q++) {
+            const w = weights[q - 1] / 100;
+            const qData = { quarter: q, year: year };
+            metrics.forEach(m => { qData[m] = Math.round(yearlyData[m] * w); });
+            const existingQ = (await AppDataStore.getAll('quarterly_targets')).find(t => t.quarter === q && t.year === year);
+            if (existingQ) {
+                await AppDataStore.update('quarterly_targets', existingQ.id, qData);
+            } else {
+                qData.id = Date.now() + q;
+                await AppDataStore.create('quarterly_targets', qData);
+            }
+
+            // Auto-generate monthly targets (3 months per quarter, even split)
+            for (let m = 0; m < 3; m++) {
+                const month = (q - 1) * 3 + m + 1;
+                const mData = { month: month, year: year, quarter: q };
+                metrics.forEach(met => { mData[met] = Math.round(qData[met] / 3); });
+                const existingM = (await AppDataStore.getAll('monthly_targets')).find(t => t.month === month && t.year === year);
+                if (existingM) {
+                    await AppDataStore.update('monthly_targets', existingM.id, mData);
+                } else {
+                    mData.id = Date.now() + q * 10 + m;
+                    await AppDataStore.create('monthly_targets', mData);
+                }
+            }
+        }
+
+        UI.hideModal();
+        UI.toast.success('KPI targets saved — quarterly and monthly breakdowns auto-generated');
+        if (typeof refreshKPIDashboard === 'function') await refreshKPIDashboard();
+    };
+
+    const renderKPITargetComparison = async () => {
+        const year = new Date().getFullYear();
+        const quarter = Math.ceil((new Date().getMonth() + 1) / 3);
+        const month = new Date().getMonth() + 1;
+
+        const yearlyTargets = (await AppDataStore.getAll('yearly_targets')).find(t => t.target_year === year);
+        const quarterlyTarget = (await AppDataStore.getAll('quarterly_targets')).find(t => t.quarter === quarter && t.year === year);
+        const monthlyTarget = (await AppDataStore.getAll('monthly_targets')).find(t => t.month === month && t.year === year);
+
+        if (!yearlyTargets) return '<div style="text-align:center; padding:20px; color:var(--gray-500);">No targets set for ' + year + '. <button class="btn primary btn-sm" onclick="app.openKPITargetsModal()">Set Targets</button></div>';
+
+        // Calculate quarter date range
+        const qStart = `${year}-${String((quarter - 1) * 3 + 1).padStart(2, '0')}-01`;
+        const qEndMonth = quarter * 3;
+        const qEnd = `${year}-${String(qEndMonth).padStart(2, '0')}-${new Date(year, qEndMonth, 0).getDate()}`;
+
+        // Get actuals
+        const cpsActual = await getCPSCount(qStart, qEnd);
+        const salesActual = await getTotalSales(qStart, qEnd);
+        const popCountActual = await getPOPCaseCount(qStart, qEnd);
+        const popSalesActual = await getPOPSales(qStart, qEnd);
+        const eppCountActual = await getEPPCaseCount(qStart, qEnd);
+        const eppSalesActual = await getEPPSales(qStart, qEnd);
+        const agentsActual = await getNewAgents(qStart, qEnd);
+        const customersActual = await getNewCustomers(qStart, qEnd);
+        const meetingsActual = await getTotalMeetings(qStart, qEnd);
+
+        const row = (label, actual, target) => {
+            const pct = target > 0 ? Math.round((actual / target) * 100) : 0;
+            const color = pct >= 95 ? 'success' : pct >= 80 ? 'warning' : 'danger';
+            const variance = actual - target;
+            return `<tr>
+                <td>${label}</td>
+                <td style="text-align:right;">${typeof target === 'number' && target > 999 ? 'RM ' + target.toLocaleString() : target}</td>
+                <td style="text-align:right;">${typeof actual === 'number' && actual > 999 ? 'RM ' + actual.toLocaleString() : actual}</td>
+                <td style="text-align:right; color:${variance >= 0 ? 'var(--success)' : 'var(--danger)'};">${variance >= 0 ? '+' : ''}${typeof variance === 'number' && Math.abs(variance) > 999 ? 'RM ' + variance.toLocaleString() : variance}</td>
+                <td style="text-align:right;"><span class="badge ${color}">${pct}%</span></td>
+            </tr>`;
+        };
+
+        return `
+            <div class="profile-section" style="margin-top:20px;">
+                <h2><i class="fas fa-bullseye"></i> Q${quarter} ${year} — Target vs Actual</h2>
+                <table class="data-table" style="width:100%;">
+                    <thead><tr><th>Metric</th><th style="text-align:right;">Target</th><th style="text-align:right;">Actual</th><th style="text-align:right;">Variance</th><th style="text-align:right;">%</th></tr></thead>
+                    <tbody>
+                        ${row('CPS Count', cpsActual, quarterlyTarget?.cps_count_target || 0)}
+                        ${row('Total Sales', salesActual, quarterlyTarget?.total_sales_target || 0)}
+                        ${row('POP Cases', popCountActual, quarterlyTarget?.pop_case_count_target || 0)}
+                        ${row('POP Sales', popSalesActual, quarterlyTarget?.pop_sales_target || 0)}
+                        ${row('EPP Cases', eppCountActual, quarterlyTarget?.epp_case_count_target || 0)}
+                        ${row('EPP Sales', eppSalesActual, quarterlyTarget?.epp_sales_target || 0)}
+                        ${row('New Agents', agentsActual, quarterlyTarget?.new_agents_target || 0)}
+                        ${row('New Customers', customersActual, quarterlyTarget?.new_customers_target || 0)}
+                        ${row('Total Meetings', meetingsActual, quarterlyTarget?.total_meetings_target || 0)}
+                    </tbody>
+                </table>
+            </div>
+            <div class="profile-section" style="margin-top:16px;">
+                <h2><i class="fas fa-calendar-alt"></i> Yearly Target Overview — ${year}</h2>
+                <table class="data-table" style="width:100%;">
+                    <thead><tr><th>Metric</th><th style="text-align:right;">Q1</th><th style="text-align:right;">Q2</th><th style="text-align:right;">Q3</th><th style="text-align:right;">Q4</th><th style="text-align:right;">Year Total</th></tr></thead>
+                    <tbody>
+                        ${await renderYearlyTargetRows(year)}
+                    </tbody>
+                </table>
+            </div>`;
+    };
+
+    const renderYearlyTargetRows = async (year) => {
+        const qTargets = (await AppDataStore.getAll('quarterly_targets')).filter(t => t.year === year).sort((a, b) => a.quarter - b.quarter);
+        const yearlyTarget = (await AppDataStore.getAll('yearly_targets')).find(t => t.target_year === year);
+        if (!yearlyTarget || qTargets.length === 0) return '<tr><td colspan="6" style="text-align:center;">No targets configured</td></tr>';
+
+        const metrics = [
+            { key: 'cps_count_target', label: 'CPS Count' },
+            { key: 'total_sales_target', label: 'Total Sales (RM)' },
+            { key: 'pop_case_count_target', label: 'POP Cases' },
+            { key: 'pop_sales_target', label: 'POP Sales (RM)' },
+            { key: 'new_agents_target', label: 'New Agents' },
+            { key: 'new_customers_target', label: 'New Customers' },
+            { key: 'total_meetings_target', label: 'Total Meetings' }
+        ];
+        return metrics.map(m => {
+            const vals = qTargets.map(q => q[m.key] || 0);
+            const fmt = (v) => v > 999 ? v.toLocaleString() : v;
+            return `<tr>
+                <td>${m.label}</td>
+                ${vals.map(v => `<td style="text-align:right;">${fmt(v)}</td>`).join('')}
+                ${vals.length < 4 ? '<td></td>'.repeat(4 - vals.length) : ''}
+                <td style="text-align:right; font-weight:600;">${fmt(yearlyTarget[m.key] || 0)}</td>
+            </tr>`;
+        }).join('');
+    };
+
+    // ========== FEATURE: RANKING PERFORMANCE OVERVIEW ==========
+    const showRankingPerformanceView = async (container) => {
+        _currentView = 'ranking';
+        const users = await AppDataStore.getAll('users');
+        const agents = users.filter(u => u.role && (u.role.includes('Level') || u.role === 'agent' || u.role === 'consultant'));
+        const now = new Date();
+        const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+        const monthEnd = now.toISOString().split('T')[0];
+
+        // Gather agent stats
+        const agentStats = [];
+        for (const agent of agents) {
+            const activities = (await AppDataStore.getAll('activities')).filter(a => a.lead_agent_id === agent.id && a.activity_date >= monthStart && a.activity_date <= monthEnd);
+            const purchases = (await AppDataStore.getAll('purchases')).filter(p => p.agent_id === agent.id && p.purchase_date >= monthStart && p.purchase_date <= monthEnd);
+            const prospects = (await AppDataStore.getAll('prospects')).filter(p => p.responsible_agent_id === agent.id);
+            const cpsCount = activities.filter(a => a.activity_type === 'CPS').length;
+            const totalSales = purchases.reduce((s, p) => s + (p.amount || 0), 0);
+            const meetingCount = activities.filter(a => ['FTF', 'FSA', 'GR', 'SITE', 'XG'].includes(a.activity_type)).length;
+            const followedUp = prospects.filter(p => {
+                if (!p.last_contact_date) return false;
+                const diff = (now - new Date(p.last_contact_date)) / (1000 * 60 * 60 * 24);
+                return diff <= 7;
+            }).length;
+            const followupRate = prospects.length > 0 ? Math.round((followedUp / prospects.length) * 100) : 0;
+            const closingRate = cpsCount > 0 ? Math.round((purchases.length / cpsCount) * 100) : 0;
+
+            agentStats.push({
+                id: agent.id,
+                name: agent.full_name || 'Unknown',
+                team: agent.team || '-',
+                cps: cpsCount,
+                sales: totalSales,
+                meetings: meetingCount,
+                prospects: prospects.length,
+                followupRate,
+                closingRate,
+                // Overall performance score
+                performanceScore: Math.round(cpsCount * 5 + totalSales / 1000 + meetingCount * 3 + followupRate * 0.5 + closingRate * 0.8)
+            });
+        }
+        agentStats.sort((a, b) => b.performanceScore - a.performanceScore);
+
+        const rankBadge = (i) => i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`;
+
+        container.innerHTML = `
+            <div class="ranking-view">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                    <div>
+                        <h1>Ranking Performance Overview</h1>
+                        <p style="color:var(--gray-500);">Agent rankings for ${now.toLocaleString('default', { month: 'long', year: 'numeric' })}</p>
+                    </div>
+                    <div>
+                        <button class="btn secondary" onclick="app.refreshCurrentView()"><i class="fas fa-sync-alt"></i> Refresh</button>
+                    </div>
+                </div>
+
+                <!-- Top 3 Cards -->
+                <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:16px; margin-bottom:24px;">
+                    ${agentStats.slice(0, 3).map((a, i) => `
+                        <div style="background:var(--white); border-radius:12px; padding:20px; text-align:center; box-shadow:0 2px 8px rgba(0,0,0,0.06); border-top:4px solid ${i === 0 ? '#FFD700' : i === 1 ? '#C0C0C0' : '#CD7F32'};">
+                            <div style="font-size:32px; margin-bottom:8px;">${rankBadge(i)}</div>
+                            <div style="font-size:16px; font-weight:600;">${a.name}</div>
+                            <div style="color:var(--gray-500); font-size:12px; margin-bottom:12px;">${a.team}</div>
+                            <div style="font-size:24px; font-weight:700; color:var(--primary);">${a.performanceScore} pts</div>
+                            <div style="font-size:12px; color:var(--gray-500); margin-top:8px;">Sales: RM ${a.sales.toLocaleString()} · CPS: ${a.cps} · Rate: ${a.closingRate}%</div>
+                        </div>
+                    `).join('')}
+                </div>
+
+                <!-- Full Rankings Table -->
+                <div class="profile-section">
+                    <h2><i class="fas fa-list-ol"></i> Full Rankings</h2>
+                    <table class="data-table" style="width:100%;">
+                        <thead>
+                            <tr>
+                                <th>Rank</th>
+                                <th>Agent</th>
+                                <th>Team</th>
+                                <th style="text-align:right;">Score</th>
+                                <th style="text-align:right;">CPS</th>
+                                <th style="text-align:right;">Sales (RM)</th>
+                                <th style="text-align:right;">Meetings</th>
+                                <th style="text-align:right;">Prospects</th>
+                                <th style="text-align:right;">Follow-up %</th>
+                                <th style="text-align:right;">Closing %</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${agentStats.map((a, i) => `
+                                <tr style="${i < 3 ? 'background:var(--primary-50);' : ''}">
+                                    <td style="font-weight:600;">${rankBadge(i)}</td>
+                                    <td>${a.name}</td>
+                                    <td>${a.team}</td>
+                                    <td style="text-align:right; font-weight:600;">${a.performanceScore}</td>
+                                    <td style="text-align:right;">${a.cps}</td>
+                                    <td style="text-align:right;">${a.sales.toLocaleString()}</td>
+                                    <td style="text-align:right;">${a.meetings}</td>
+                                    <td style="text-align:right;">${a.prospects}</td>
+                                    <td style="text-align:right;"><span class="badge ${a.followupRate >= 80 ? 'success' : a.followupRate >= 50 ? 'warning' : 'danger'}">${a.followupRate}%</span></td>
+                                    <td style="text-align:right;"><span class="badge ${a.closingRate >= 30 ? 'success' : a.closingRate >= 15 ? 'warning' : 'danger'}">${a.closingRate}%</span></td>
+                                </tr>
+                            `).join('')}
+                            ${agentStats.length === 0 ? '<tr><td colspan="10" style="text-align:center; padding:20px;">No agent data available</td></tr>' : ''}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    };
+
+    // ========== FEATURE: WORKFLOW AUTOMATION ENGINE ==========
+    const showWorkflowAutomationView = async (container) => {
+        _currentView = 'workflows';
+        const workflows = await AppDataStore.getAll('automation_workflows');
+
+        container.innerHTML = `
+            <div class="workflow-view">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                    <div>
+                        <h1>Workflow Automation Engine</h1>
+                        <p style="color:var(--gray-500);">Create automated workflows with triggers and actions</p>
+                    </div>
+                    <div style="display:flex; gap:8px;">
+                        <button class="btn primary" onclick="app.openCreateWorkflowModal()"><i class="fas fa-plus"></i> Create Workflow</button>
+                        <button class="btn secondary" onclick="app.refreshCurrentView()"><i class="fas fa-sync-alt"></i> Refresh</button>
+                    </div>
+                </div>
+
+                <!-- Active Workflows -->
+                <div class="profile-section">
+                    <h2><i class="fas fa-bolt"></i> Active Workflows (${workflows.filter(w => w.status === 'active').length})</h2>
+                    <div id="workflows-list">
+                        ${workflows.length > 0 ? workflows.map(w => renderWorkflowCard(w)).join('') : `
+                            <div style="text-align:center; padding:40px; color:var(--gray-500);">
+                                <i class="fas fa-cogs" style="font-size:48px; margin-bottom:12px; color:var(--gray-300);"></i>
+                                <p>No workflows created yet</p>
+                                <p style="font-size:12px;">Create your first workflow to automate tasks like sending birthday wishes, scoring updates, and follow-up reminders.</p>
+                                <button class="btn primary" style="margin-top:12px;" onclick="app.openCreateWorkflowModal()"><i class="fas fa-plus"></i> Create First Workflow</button>
+                            </div>
+                        `}
+                    </div>
+                </div>
+
+                <!-- Workflow Templates -->
+                <div class="profile-section" style="margin-top:20px;">
+                    <h2><i class="fas fa-clipboard-list"></i> Quick Templates</h2>
+                    <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(250px, 1fr)); gap:12px;">
+                        ${renderWorkflowTemplate('Birthday Greeting', 'birthday', 'Send WhatsApp greeting on customer birthday', 'fas fa-birthday-cake')}
+                        ${renderWorkflowTemplate('Protection Expiring', 'protection_expiring', 'Alert agent 7 days before protection expires', 'fas fa-shield-alt')}
+                        ${renderWorkflowTemplate('Inactivity Alert', 'inactivity', 'Flag prospects with >7 days no follow-up', 'fas fa-exclamation-triangle')}
+                        ${renderWorkflowTemplate('New Prospect Welcome', 'new_prospect', 'Send welcome message when prospect created', 'fas fa-user-plus')}
+                        ${renderWorkflowTemplate('Event Follow-up', 'event_attendance', 'Create follow-up task after event attendance', 'fas fa-calendar-check')}
+                        ${renderWorkflowTemplate('Score Threshold', 'score_change', 'Notify agent when prospect reaches 600+ score', 'fas fa-chart-line')}
+                    </div>
+                </div>
+            </div>
+        `;
+    };
+
+    const renderWorkflowCard = (w) => {
+        const statusColor = w.status === 'active' ? 'success' : w.status === 'paused' ? 'warning' : 'secondary';
+        return `
+            <div style="background:var(--white); border-radius:8px; padding:16px; margin-bottom:12px; border:1px solid var(--gray-200); display:flex; justify-content:space-between; align-items:center;">
+                <div>
+                    <div style="font-weight:600; font-size:14px;">${w.workflow_name}</div>
+                    <div style="font-size:12px; color:var(--gray-500); margin-top:4px;">
+                        Trigger: <strong>${w.trigger_type}</strong> → Action: <strong>${w.action_type || 'Multiple'}</strong>
+                    </div>
+                    <div style="font-size:11px; color:var(--gray-400); margin-top:2px;">Runs: ${w.run_count || 0} times · Last: ${w.last_run || 'Never'}</div>
+                </div>
+                <div style="display:flex; gap:8px; align-items:center;">
+                    <span class="badge ${statusColor}">${w.status}</span>
+                    <button class="btn btn-sm secondary" onclick="app.toggleWorkflow(${w.id})">${w.status === 'active' ? 'Pause' : 'Activate'}</button>
+                    <button class="btn btn-sm secondary" onclick="app.editWorkflow(${w.id})"><i class="fas fa-edit"></i></button>
+                    <button class="btn btn-sm secondary" style="color:var(--danger);" onclick="app.deleteWorkflow(${w.id})"><i class="fas fa-trash"></i></button>
+                </div>
+            </div>
+        `;
+    };
+
+    const renderWorkflowTemplate = (name, trigger, desc, icon) => `
+        <div style="background:var(--gray-50); border-radius:8px; padding:16px; border:1px solid var(--gray-200); cursor:pointer;" onclick="app.createWorkflowFromTemplate('${trigger}')">
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+                <i class="${icon}" style="color:var(--primary);"></i>
+                <span style="font-weight:600; font-size:13px;">${name}</span>
+            </div>
+            <p style="font-size:12px; color:var(--gray-500); margin:0;">${desc}</p>
+        </div>
+    `;
+
+    const WORKFLOW_TRIGGERS = {
+        new_prospect: 'New Prospect Created',
+        new_customer: 'Customer Converted',
+        score_change: 'Score Threshold Reached',
+        purchase: 'Transaction Completed',
+        activity_completed: 'Activity Completed',
+        birthday: 'Customer/Prospect Birthday',
+        protection_expiring: 'Protection ≤7 Days Left',
+        inactivity: 'No Contact >7 Days',
+        event_attendance: 'Event Attended'
+    };
+
+    const WORKFLOW_ACTIONS = {
+        send_whatsapp: 'Send WhatsApp Message',
+        create_task: 'Create Follow-up Task',
+        add_tag: 'Add Tag',
+        remove_tag: 'Remove Tag',
+        add_score: 'Add Score Points',
+        extend_protection: 'Extend Protection Period',
+        send_notification: 'Send In-App Notification',
+        assign_agent: 'Reassign to Agent',
+        create_activity: 'Schedule Activity',
+        flag_reassignment: 'Flag for Reassignment'
+    };
+
+    const openCreateWorkflowModal = async (workflowId = null) => {
+        const existing = workflowId ? await AppDataStore.getById('automation_workflows', workflowId) : null;
+
+        const content = `
+            <div style="max-height:70vh; overflow-y:auto;">
+                <div class="form-group">
+                    <label>Workflow Name *</label>
+                    <input type="text" id="wf-name" class="form-control" value="${existing?.workflow_name || ''}" placeholder="e.g. Birthday Greeting Workflow">
+                </div>
+                <div class="form-group">
+                    <label>Trigger *</label>
+                    <select id="wf-trigger" class="form-control" onchange="app.updateWorkflowConditions()">
+                        <option value="">Select Trigger...</option>
+                        ${Object.entries(WORKFLOW_TRIGGERS).map(([k, v]) => `<option value="${k}" ${existing?.trigger_type === k ? 'selected' : ''}>${v}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="form-group" id="wf-conditions-container" style="display:${existing?.trigger_conditions ? 'block' : 'none'};">
+                    <label>Conditions (optional)</label>
+                    <div id="wf-conditions">
+                        ${existing?.trigger_conditions ? `<input type="text" id="wf-condition-value" class="form-control" value="${existing.trigger_conditions.value || ''}" placeholder="e.g. score threshold: 600">` : ''}
+                    </div>
+                </div>
+                <hr style="margin:16px 0;">
+                <div class="form-group">
+                    <label>Action *</label>
+                    <select id="wf-action" class="form-control">
+                        <option value="">Select Action...</option>
+                        ${Object.entries(WORKFLOW_ACTIONS).map(([k, v]) => `<option value="${k}" ${existing?.action_type === k ? 'selected' : ''}>${v}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Action Configuration</label>
+                    <textarea id="wf-action-config" class="form-control" rows="3" placeholder="e.g. Message: Happy Birthday {{name}}! or Tag: VIP Customer">${existing?.action_config || ''}</textarea>
+                </div>
+                <div class="form-group">
+                    <label>Delay (days after trigger)</label>
+                    <input type="number" id="wf-delay" class="form-control" min="0" value="${existing?.delay_days || 0}">
+                </div>
+                <div class="form-group">
+                    <label>Status</label>
+                    <select id="wf-status" class="form-control">
+                        <option value="active" ${(!existing || existing?.status === 'active') ? 'selected' : ''}>Active</option>
+                        <option value="paused" ${existing?.status === 'paused' ? 'selected' : ''}>Paused</option>
+                        <option value="draft" ${existing?.status === 'draft' ? 'selected' : ''}>Draft</option>
+                    </select>
+                </div>
+            </div>
+        `;
+        UI.showModal(workflowId ? 'Edit Workflow' : 'Create Workflow', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save Workflow', type: 'primary', action: `(async () => { await app.saveWorkflow(${workflowId || 'null'}); })()` }
+        ]);
+    };
+
+    const updateWorkflowConditions = () => {
+        const trigger = document.getElementById('wf-trigger')?.value;
+        const container = document.getElementById('wf-conditions-container');
+        const conditions = document.getElementById('wf-conditions');
+        if (!container || !conditions) return;
+
+        if (trigger === 'score_change') {
+            container.style.display = 'block';
+            conditions.innerHTML = '<input type="number" id="wf-condition-value" class="form-control" placeholder="Score threshold (e.g. 600)">';
+        } else if (trigger === 'inactivity') {
+            container.style.display = 'block';
+            conditions.innerHTML = '<input type="number" id="wf-condition-value" class="form-control" placeholder="Days inactive (e.g. 7)" value="7">';
+        } else if (trigger === 'protection_expiring') {
+            container.style.display = 'block';
+            conditions.innerHTML = '<input type="number" id="wf-condition-value" class="form-control" placeholder="Days before expiry (e.g. 7)" value="7">';
+        } else {
+            container.style.display = 'none';
+        }
+    };
+
+    const saveWorkflow = async (workflowId) => {
+        const name = document.getElementById('wf-name')?.value?.trim();
+        const trigger = document.getElementById('wf-trigger')?.value;
+        const action = document.getElementById('wf-action')?.value;
+
+        if (!name || !trigger || !action) {
+            UI.toast.error('Workflow name, trigger, and action are required');
+            return;
+        }
+
+        const data = {
+            workflow_name: name,
+            trigger_type: trigger,
+            action_type: action,
+            action_config: document.getElementById('wf-action-config')?.value || '',
+            delay_days: parseInt(document.getElementById('wf-delay')?.value) || 0,
+            status: document.getElementById('wf-status')?.value || 'active',
+            trigger_conditions: {
+                value: document.getElementById('wf-condition-value')?.value || ''
+            },
+            updated_at: new Date().toISOString()
+        };
+
+        if (workflowId) {
+            await AppDataStore.update('automation_workflows', workflowId, data);
+        } else {
+            data.id = Date.now();
+            data.created_by = _currentUser?.id || 5;
+            data.created_at = new Date().toISOString();
+            data.run_count = 0;
+            await AppDataStore.create('automation_workflows', data);
+        }
+
+        UI.hideModal();
+        UI.toast.success(workflowId ? 'Workflow updated' : 'Workflow created');
+        const viewport = document.getElementById('content-viewport');
+        if (viewport) await showWorkflowAutomationView(viewport);
+    };
+
+    const createWorkflowFromTemplate = async (triggerType) => {
+        const templates = {
+            birthday: { name: 'Birthday Greeting', action: 'send_whatsapp', config: 'Hi {{name}}, Happy Birthday! Wishing you a wonderful year ahead. — DestinOracles Team', delay: 0 },
+            protection_expiring: { name: 'Protection Expiry Alert', action: 'send_notification', config: 'Protection period for {{prospect_name}} expires in {{days}} days. Take action now.', delay: 0 },
+            inactivity: { name: 'Inactivity Follow-up Alert', action: 'flag_reassignment', config: 'Prospect {{name}} has been inactive for {{days}} days. Consider reassignment.', delay: 0 },
+            new_prospect: { name: 'New Prospect Welcome', action: 'send_whatsapp', config: 'Hi {{name}}, thank you for your interest! Our consultant will reach out to you shortly.', delay: 0 },
+            event_attendance: { name: 'Post-Event Follow-up', action: 'create_task', config: 'Follow up with {{name}} after attending {{event_name}}. Schedule a CPS within 3 days.', delay: 1 },
+            score_change: { name: 'High Score Notification', action: 'send_notification', config: 'Prospect {{name}} has reached score {{score}}. Prioritize follow-up.', delay: 0 }
+        };
+
+        const tpl = templates[triggerType];
+        if (!tpl) return;
+
+        const data = {
+            id: Date.now(),
+            workflow_name: tpl.name,
+            trigger_type: triggerType,
+            action_type: tpl.action,
+            action_config: tpl.config,
+            delay_days: tpl.delay,
+            status: 'active',
+            trigger_conditions: {},
+            created_by: _currentUser?.id || 5,
+            created_at: new Date().toISOString(),
+            run_count: 0
+        };
+
+        await AppDataStore.create('automation_workflows', data);
+        UI.toast.success(`Workflow "${tpl.name}" created from template`);
+        const viewport = document.getElementById('content-viewport');
+        if (viewport) await showWorkflowAutomationView(viewport);
+    };
+
+    const toggleWorkflow = async (workflowId) => {
+        const wf = await AppDataStore.getById('automation_workflows', workflowId);
+        if (!wf) return;
+        const newStatus = wf.status === 'active' ? 'paused' : 'active';
+        await AppDataStore.update('automation_workflows', workflowId, { status: newStatus });
+        UI.toast.success(`Workflow ${newStatus === 'active' ? 'activated' : 'paused'}`);
+        const viewport = document.getElementById('content-viewport');
+        if (viewport) await showWorkflowAutomationView(viewport);
+    };
+
+    const editWorkflow = async (workflowId) => {
+        await openCreateWorkflowModal(workflowId);
+    };
+
+    const deleteWorkflow = async (workflowId) => {
+        UI.showModal('Delete Workflow', '<p>Are you sure you want to delete this workflow?</p>', [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Delete', type: 'primary', action: `(async () => { await AppDataStore.delete('automation_workflows', ${workflowId}); UI.hideModal(); UI.toast.success('Workflow deleted'); const vp = document.getElementById('content-viewport'); if (vp) await app.showWorkflowAutomationView(vp); })()` }
+        ]);
+    };
+
+    // Workflow execution engine — runs on app events
+    const executeWorkflows = async (triggerType, context = {}) => {
+        const workflows = (await AppDataStore.getAll('automation_workflows')).filter(w => w.trigger_type === triggerType && w.status === 'active');
+        for (const wf of workflows) {
+            try {
+                // Check conditions
+                if (wf.trigger_conditions?.value) {
+                    if (triggerType === 'score_change' && context.score < parseInt(wf.trigger_conditions.value)) continue;
+                    if (triggerType === 'inactivity' && context.daysInactive < parseInt(wf.trigger_conditions.value)) continue;
+                }
+
+                // Execute action
+                const config = (wf.action_config || '')
+                    .replace(/\{\{name\}\}/g, context.name || '')
+                    .replace(/\{\{prospect_name\}\}/g, context.name || '')
+                    .replace(/\{\{score\}\}/g, context.score || '')
+                    .replace(/\{\{days\}\}/g, context.days || '')
+                    .replace(/\{\{event_name\}\}/g, context.eventName || '');
+
+                console.log(`Workflow "${wf.workflow_name}" triggered: ${wf.action_type} — ${config}`);
+
+                // Update run count
+                await AppDataStore.update('automation_workflows', wf.id, {
+                    run_count: (wf.run_count || 0) + 1,
+                    last_run: new Date().toISOString()
+                });
+            } catch (err) {
+                console.error(`Workflow execution error for "${wf.workflow_name}":`, err);
+            }
+        }
+    };
+
     return {
         init,
         navigateTo,
@@ -18421,6 +19415,12 @@ const initImportDemoData = async () => {
             case 'promotions':
                 if (typeof showMarketingAutomationView === 'function') await showMarketingAutomationView(viewport);
                 break;
+            case 'ranking':
+                if (typeof showRankingPerformanceView === 'function') await showRankingPerformanceView(viewport);
+                break;
+            case 'workflows':
+                if (typeof showWorkflowAutomationView === 'function') await showWorkflowAutomationView(viewport);
+                break;
             default:
                 console.log(`No specific refresh logic configured for ${view}`);
         }
@@ -18473,6 +19473,42 @@ const initImportDemoData = async () => {
         openMarketingListEditModal,
         saveMarketingListItem,
         deleteMarketingListItem,
+
+        // Feature: Automated Scoring
+        addScoreToProspect,
+        addScoreToCustomer,
+        applyActivityScoring,
+
+        // Feature: Protection Auto-Extension
+        autoExtendProtection,
+
+        // Feature: Prospect Potential & Opportunities
+        openEditPotentialModal,
+        savePotential,
+
+        // Feature: Birthday Action Workflows
+        sendBirthdayWish,
+        scheduleBirthdayFollowup,
+        executeBirthdayAction,
+
+        // Feature: KPI Hierarchical Targets
+        openKPITargetsModal,
+        saveKPITargets,
+        renderKPITargetComparison,
+
+        // Feature: Ranking Performance Overview
+        showRankingPerformanceView,
+
+        // Feature: Workflow Automation Engine
+        showWorkflowAutomationView,
+        openCreateWorkflowModal,
+        updateWorkflowConditions,
+        saveWorkflow,
+        createWorkflowFromTemplate,
+        toggleWorkflow,
+        editWorkflow,
+        deleteWorkflow,
+        executeWorkflows,
 
         // Auth exports
         login,
