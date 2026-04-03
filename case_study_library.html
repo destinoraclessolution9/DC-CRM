@@ -1,0 +1,1232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Feng Shui Case Study Vault · 5-Table Wisdom</title>
+<style>
+  /* ─── Reset & Base ─────────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:        #faf6f0;
+    --card-bg:   #fff9f2;
+    --brown:     #8b5e3c;
+    --brown-dk:  #6b4329;
+    --gold:      #d4a853;
+    --gold-lt:   #f5e6c0;
+    --stripe:    #f5ede0;
+    --border:    #e8d8c4;
+    --text:      #3a2c1e;
+    --muted:     #7a6a58;
+    --success:   #4a7c59;
+    --shadow:    0 2px 12px rgba(139,94,60,0.10);
+    --radius:    12px;
+  }
+
+  body {
+    font-family: Inter, 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+
+  /* ─── Header ───────────────────────────────────────────────── */
+  .page-header {
+    background: linear-gradient(135deg, var(--brown) 0%, var(--brown-dk) 100%);
+    color: #fff;
+    padding: 32px 40px 28px;
+    position: relative;
+    overflow: hidden;
+  }
+  .page-header::before {
+    content: '☯';
+    position: absolute;
+    right: 40px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 80px;
+    opacity: 0.12;
+    pointer-events: none;
+  }
+  .page-header h1 {
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+    margin-bottom: 6px;
+  }
+  .page-header h1 span { color: var(--gold); }
+  .page-header p {
+    opacity: 0.82;
+    font-size: 13.5px;
+  }
+  .header-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(255,255,255,0.15);
+    border: 1px solid rgba(255,255,255,0.25);
+    border-radius: 20px;
+    padding: 3px 12px;
+    font-size: 12px;
+    margin-top: 10px;
+  }
+
+  /* ─── Layout ────────────────────────────────────────────────── */
+  .page-body {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 28px 24px 60px;
+  }
+
+  /* ─── Filter Panel ──────────────────────────────────────────── */
+  .filter-panel {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 20px 24px;
+    margin-bottom: 28px;
+  }
+  .filter-panel-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--brown);
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .filter-panel-title::before {
+    content: '';
+    display: block;
+    width: 18px;
+    height: 3px;
+    background: var(--gold);
+    border-radius: 2px;
+  }
+  .filter-controls {
+    display: grid;
+    grid-template-columns: 1fr 220px 1fr auto;
+    gap: 12px;
+    align-items: end;
+  }
+  @media (max-width: 900px) {
+    .filter-controls { grid-template-columns: 1fr 1fr; }
+  }
+  @media (max-width: 560px) {
+    .filter-controls { grid-template-columns: 1fr; }
+  }
+  .filter-group label {
+    display: block;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    margin-bottom: 5px;
+  }
+  .filter-group input,
+  .filter-group select {
+    width: 100%;
+    padding: 9px 12px;
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+    background: #fff;
+    color: var(--text);
+    font-size: 13.5px;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .filter-group input:focus,
+  .filter-group select:focus { border-color: var(--gold); }
+  .btn-reset {
+    padding: 9px 20px;
+    background: var(--stripe);
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+    color: var(--brown);
+    font-size: 13px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+    white-space: nowrap;
+    align-self: end;
+  }
+  .btn-reset:hover { background: var(--gold-lt); border-color: var(--gold); }
+  .filter-stats {
+    margin-top: 12px;
+    font-size: 12.5px;
+    color: var(--muted);
+    min-height: 18px;
+  }
+  .filter-stats .active-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--gold-lt);
+    border: 1px solid var(--gold);
+    border-radius: 12px;
+    padding: 1px 9px;
+    color: var(--brown-dk);
+    font-size: 11.5px;
+    font-weight: 600;
+    margin-left: 6px;
+  }
+
+  /* ─── Table Card ────────────────────────────────────────────── */
+  .table-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    margin-bottom: 28px;
+    overflow: hidden;
+  }
+  .table-card-header {
+    padding: 16px 22px 14px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .table-card-header h2 {
+    font-size: 15.5px;
+    font-weight: 700;
+    color: var(--brown-dk);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .table-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    flex-shrink: 0;
+  }
+  .icon-t1 { background: #e8f4ea; }
+  .icon-t2 { background: #fff0e0; }
+  .icon-t3 { background: #e8f0ff; }
+  .icon-t4 { background: #fde8f0; }
+  .icon-t5 { background: #e8fae8; }
+  .table-count {
+    font-size: 12px;
+    color: var(--muted);
+    font-weight: 500;
+  }
+  .table-wrapper { overflow-x: auto; }
+
+  /* ─── Table Styles ──────────────────────────────────────────── */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    min-width: 700px;
+  }
+  thead th {
+    background: var(--stripe);
+    color: var(--brown);
+    font-weight: 700;
+    font-size: 11.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 10px 14px;
+    text-align: left;
+    border-bottom: 2px solid var(--border);
+    white-space: nowrap;
+  }
+  tbody tr {
+    border-bottom: 1px solid var(--border);
+    transition: background 0.12s;
+  }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: var(--stripe); }
+  tbody tr:nth-child(even) { background: rgba(240,232,216,0.35); }
+  tbody tr:nth-child(even):hover { background: var(--stripe); }
+  td {
+    padding: 11px 14px;
+    vertical-align: top;
+    color: var(--text);
+    line-height: 1.5;
+  }
+  td.nowrap { white-space: nowrap; }
+  td strong { font-weight: 600; color: var(--brown-dk); }
+  .demo-pill {
+    display: inline-block;
+    background: var(--gold-lt);
+    border: 1px solid var(--gold);
+    border-radius: 6px;
+    padding: 2px 8px;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--brown-dk);
+    white-space: nowrap;
+  }
+  .product-tag {
+    display: inline-block;
+    background: #e8f0e8;
+    border: 1px solid #b0ccb0;
+    border-radius: 5px;
+    padding: 2px 8px;
+    font-size: 11.5px;
+    color: #2d5a2d;
+    white-space: nowrap;
+  }
+  .rate-pill {
+    display: inline-block;
+    background: #e8faee;
+    border: 1px solid #88c898;
+    border-radius: 5px;
+    padding: 2px 8px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--success);
+  }
+  .week-tag {
+    display: inline-block;
+    background: var(--brown);
+    color: #fff;
+    border-radius: 5px;
+    padding: 2px 9px;
+    font-size: 11.5px;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  .referral-link {
+    font-size: 12px;
+    color: var(--muted);
+    font-style: italic;
+  }
+
+  /* ─── Action Buttons ────────────────────────────────────────── */
+  .actions-cell { white-space: nowrap; }
+  .btn-action {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    text-decoration: none;
+    cursor: pointer;
+    transition: all 0.15s;
+    border: 1.5px solid transparent;
+  }
+  .btn-view {
+    background: var(--gold-lt);
+    border-color: var(--gold);
+    color: var(--brown-dk);
+  }
+  .btn-view:hover { background: var(--gold); color: #fff; }
+  .btn-adopt {
+    background: #e8f4ea;
+    border-color: #88c898;
+    color: var(--success);
+    margin-left: 4px;
+  }
+  .btn-adopt:hover { background: var(--success); color: #fff; border-color: var(--success); }
+  .btn-analyze {
+    background: #e8f0ff;
+    border-color: #a0b8e8;
+    color: #2d4a8a;
+    margin-left: 4px;
+  }
+  .btn-analyze:hover { background: #2d4a8a; color: #fff; border-color: #2d4a8a; }
+
+  /* ─── No-Results Row ────────────────────────────────────────── */
+  .no-results-row td {
+    text-align: center;
+    padding: 22px;
+    color: var(--muted);
+    font-style: italic;
+    font-size: 13px;
+  }
+  .no-results-row { display: none; }
+
+  /* ─── Insight Box ───────────────────────────────────────────── */
+  .insight-box {
+    background: #fdf5e6;
+    border-left: 4px solid var(--gold);
+    border-radius: 0 8px 8px 0;
+    padding: 13px 18px;
+    margin: 0;
+    font-size: 13px;
+    color: var(--brown-dk);
+  }
+  .insight-box strong {
+    color: var(--brown);
+    font-size: 11.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    display: block;
+    margin-bottom: 4px;
+  }
+
+  /* ─── Section Label ─────────────────────────────────────────── */
+  .section-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin-bottom: 10px;
+    margin-top: 4px;
+    padding-left: 2px;
+  }
+
+  /* ─── Before/After ──────────────────────────────────────────── */
+  .before-text { color: #8a3a3a; font-size: 12.5px; }
+  .after-text  { color: var(--success); font-size: 12.5px; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- PAGE HEADER                                                  -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<header class="page-header">
+  <h1>Feng Shui Case Study Vault · <span>5-Table Wisdom</span></h1>
+  <p>A living knowledge base of weekly learnings, client transformations, CPS journeys, decision triggers, and proven tactics.</p>
+  <div class="header-badge">☯ Confidential · Agent Use Only · All client identities anonymised</div>
+</header>
+
+<div class="page-body">
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- SUPER ADVANCED FILTER PANEL                                  -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<div class="filter-panel">
+  <div class="filter-panel-title">Super Advanced Search &amp; Filter</div>
+  <div class="filter-controls">
+    <div class="filter-group">
+      <label>🔍 Keyword Search</label>
+      <input type="text" id="f-keyword" placeholder="Search any text across all tables…">
+    </div>
+    <div class="filter-group">
+      <label>📦 Product</label>
+      <select id="f-product">
+        <option value="all">All Products</option>
+        <option value="Feng Shui Audit">Feng Shui Audit</option>
+        <option value="Bagua Mapping">Bagua Mapping</option>
+        <option value="Flying Stars Analysis">Flying Stars Analysis</option>
+        <option value="Water Fountain Activation">Water Fountain Activation</option>
+        <option value="Feng Shui Masterclass">Feng Shui Masterclass</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <label>🤝 Referral / Colleague</label>
+      <input type="text" id="f-referral" placeholder="e.g. Master Li, Sarah Tan…">
+    </div>
+    <button class="btn-reset" id="btn-reset">↺ Reset</button>
+  </div>
+  <div class="filter-stats" id="filter-stats">Showing all entries across 5 tables.</div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- TABLE 1 — WEEKLY KEY STUDIES                                 -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<div class="table-card">
+  <div class="table-card-header">
+    <h2>
+      <span class="table-icon icon-t1">📅</span>
+      Table 1 — Weekly Key Studies
+    </h2>
+    <span class="table-count" id="count-t1"></span>
+  </div>
+  <div class="table-wrapper">
+    <table id="weeklyTable">
+      <thead>
+        <tr>
+          <th>Week</th>
+          <th>Topic / Headline</th>
+          <th>Source / Learning</th>
+          <th>Product</th>
+          <th>Relevance &amp; Application</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="nowrap"><span class="week-tag">W14 Apr '26</span></td>
+          <td><strong>Holistic Feng Shui for Modern Offices</strong><br><span class="referral-link">Book deep-dive: 5-element balance in workspace design</span></td>
+          <td>Book: <em>"Holistic Feng Shui for Modern Offices"</em><br>Key takeaway: 5-element balance increases team synergy by 34%</td>
+          <td><span class="product-tag">Feng Shui Audit</span></td>
+          <td>Applied with 3 corporate clients in KL CBD; all reported improved meeting-room energy within 2 weeks</td>
+          <td class="actions-cell">
+            <a class="btn-action btn-view" href="#">View</a>
+            <a class="btn-action btn-adopt" href="#">Adopt</a>
+          </td>
+        </tr>
+        <tr>
+          <td class="nowrap"><span class="week-tag">W13 Mar '26</span></td>
+          <td><strong>2026 Flying Stars — Annual Afflictions Alert</strong><br><span class="referral-link">Annual chart: SE sector renovation warning</span></td>
+          <td>Flying Stars Masterclass (online)<br>Avoid SE sector renovations Mar–Sep 2026; place metal cure</td>
+          <td><span class="product-tag">Flying Stars Analysis</span></td>
+          <td>Advised 12 residential clients proactively; 5 postponed planned renos — zero illness-star activation reported</td>
+          <td class="actions-cell">
+            <a class="btn-action btn-view" href="#">View</a>
+            <a class="btn-action btn-adopt" href="#">Adopt</a>
+          </td>
+        </tr>
+        <tr>
+          <td class="nowrap"><span class="week-tag">W12 Mar '26</span></td>
+          <td><strong>Water Feature Placement — 2026 Wealth Sector Shift</strong><br><span class="referral-link">Annual wealth star moves to North sector</span></td>
+          <td>Industry newsletter: Annual wealth star #8 activates North<br>Recommendation: activate with moving water or fountain</td>
+          <td><span class="product-tag">Water Fountain Activation</span></td>
+          <td>Upsold water fountain activation to 4 existing audit clients in March; avg deal +RM 1,800</td>
+          <td class="actions-cell">
+            <a class="btn-action btn-view" href="#">View</a>
+            <a class="btn-action btn-adopt" href="#">Adopt</a>
+          </td>
+        </tr>
+        <tr>
+          <td class="nowrap"><span class="week-tag">W11 Mar '26</span></td>
+          <td><strong>Bagua Mapping Trend: Home Office Boom Post-2025</strong><br><span class="referral-link">Market insight: WFH clients seek dedicated wealth corners</span></td>
+          <td>Industry report: 68% of new residential enquiries request home-office Bagua mapping</td>
+          <td><span class="product-tag">Bagua Mapping</span></td>
+          <td>Created "Home Office Prosperity Package" bundle; pitched to 6 prospects, 3 converted in week</td>
+          <td class="actions-cell">
+            <a class="btn-action btn-view" href="#">View</a>
+            <a class="btn-action btn-adopt" href="#">Adopt</a>
+          </td>
+        </tr>
+        <tr>
+          <td class="nowrap"><span class="week-tag">W10 Mar '26</span></td>
+          <td><strong>Feng Shui Masterclass Alumni Network — Referral Strategy</strong><br><span class="referral-link">LinkedIn post went viral: alumni sharing testimonials</span></td>
+          <td>Social media observation + internal team debrief<br>Alumni who attended masterclass refer 2.4× more than cold clients</td>
+          <td><span class="product-tag">Feng Shui Masterclass</span></td>
+          <td>Launched alumni referral incentive; 8 new leads in 2 weeks from masterclass graduates</td>
+          <td class="actions-cell">
+            <a class="btn-action btn-view" href="#">View</a>
+            <a class="btn-action btn-adopt" href="#">Adopt</a>
+          </td>
+        </tr>
+        <tr>
+          <td class="nowrap"><span class="week-tag">W09 Feb '26</span></td>
+          <td><strong>Li Chun 2026 Wealth Activation Window</strong><br><span class="referral-link">Hot topic: best day &amp; time for bank deposits &amp; activations</span></td>
+          <td>Chinese almanac + Grand Master webinar<br>Li Chun falls 4 Feb 2026; specific auspicious hours by zodiac sign</td>
+          <td><span class="product-tag">Feng Shui Audit</span></td>
+          <td>Sent personalised Li Chun guide to all active clients; received 22 thank-you messages and 4 new audit bookings from referrals</td>
+          <td class="actions-cell">
+            <a class="btn-action btn-view" href="#">View</a>
+            <a class="btn-action btn-adopt" href="#">Adopt</a>
+          </td>
+        </tr>
+        <tr class="no-results-row" id="no-results-t1">
+          <td colspan="6">No matching entries for current filters.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- TABLE 2 — CUSTOMERS' IMPROVEMENT                            -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<div class="table-card">
+  <div class="table-card-header">
+    <h2>
+      <span class="table-icon icon-t2">🌿</span>
+      Table 2 — Customers' Improvement
+    </h2>
+    <span class="table-count" id="count-t2"></span>
+  </div>
+  <div class="table-wrapper">
+    <table id="improvementTable">
+      <thead>
+        <tr>
+          <th>Customer Profile</th>
+          <th>Before Feng Shui</th>
+          <th>After Improvement</th>
+          <th>Special Creation / Cure</th>
+          <th>Product</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="demo-pill">Female · Age 42 · Business Owner · Married · 2 Children</span></td>
+          <td><span class="before-text">Stagnant wealth energy; main door facing stairway; lost 3 major contracts in 6 months; relationship conflicts with business partner</span></td>
+          <td><span class="after-text">+62% revenue in 4 months; partnership disputes resolved; secured 2 long-term contracts with government agencies</span></td>
+          <td>Custom 8-trigram Bagua mirror at main entrance + salt water cure in NW wealth corner + red carpet placement to redirect chi</td>
+          <td><span class="product-tag">Bagua Mapping</span></td>
+          <td class="actions-cell">
+            <a class="btn-action btn-view" href="#">View Case</a>
+            <a class="btn-action btn-analyze" href="#">Analyze</a>
+          </td>
+        </tr>
+        <tr>
+          <td><span class="demo-pill">Male · Age 38 · Tech Director · Married · 1 Child</span></td>
+          <td><span class="before-text">High staff turnover (40% annually); illness star #2 activated in SW — 3 key staff on prolonged MC; declining team morale</span></td>
+          <td><span class="after-text">Turnover dropped 45% within 2 quarters; sick leave -70%; team productivity index improved from 58 to 84 (internal KPI)</span></td>
+          <td>6-rod metal wind chime in SW sector + Wu Lou (metal gourd) on each affected desk + relocated team seating chart to face personal auspicious directions</td>
+          <td><span class="product-tag">Flying Stars Analysis</span></td>
+          <td class="actions-cell">
+            <a class="btn-action btn-view" href="#">View Case</a>
+            <a class="btn-action btn-analyze" href="#">Analyze</a>
+          </td>
+        </tr>
+        <tr>
+          <td><span class="demo-pill">Female · Age 55 · Wellness Spa Owner · Married · 3 Children</span></td>
+          <td><span class="before-text">Foot traffic declined 35% after renovation; cashier counter facing main door causing revenue leakage; two therapists resigned unexpectedly</span></td>
+          <td><span class="after-text">Foot traffic recovered +48% in 10 weeks; monthly revenue crossed RM 80,000 milestone for first time; staff stability improved</span></td>
+          <td>Dragon-phoenix crystal sphere at reception + water fountain activation SE sector + repositioned cashier to face auspicious direction; added indoor money plant cluster</td>
+          <td><span class="product-tag">Water Fountain Activation</span></td>
+          <td class="actions-cell">
+            <a class="btn-action btn-view" href="#">View Case</a>
+            <a class="btn-action btn-analyze" href="#">Analyze</a>
+          </td>
+        </tr>
+        <tr>
+          <td><span class="demo-pill">Male · Age 47 · Hotel GM · Married · No Children</span></td>
+          <td><span class="before-text">Occupancy stuck at 54% for 18 months despite marketing spend; frequent kitchen incidents; guests rarely returned; negative online reviews mentioning "heavy atmosphere"</span></td>
+          <td><span class="after-text">Occupancy climbed to 78% within 6 months; kitchen incidents zero for 5 consecutive months; Google rating improved from 3.6 to 4.4</span></td>
+          <td>Full flying stars audit + Grand Duke placement (Tai Sui) appeasement ritual + 5-element balancing across all 12 floors; specially designed bronze wealth vase in lobby</td>
+          <td><span class="product-tag">Flying Stars Analysis</span></td>
+          <td class="actions-cell">
+            <a class="btn-action btn-view" href="#">View Case</a>
+            <a class="btn-action btn-analyze" href="#">Analyze</a>
+          </td>
+        </tr>
+        <tr>
+          <td><span class="demo-pill">Female · Age 34 · Property Agent · Single · No Children</span></td>
+          <td><span class="before-text">Career stagnation — no promotion despite top sales figures; frequent misunderstandings with management; feeling mentally "blocked"</span></td>
+          <td><span class="after-text">Promoted to Senior Manager 3 months after audit; closed RM 2.3M property deal — largest personal sale to date; clarity and confidence returned</span></td>
+          <td>Personal Bagua assessment for home office + career enhancement cure (tortoise figurine in N sector) + purple quartz cluster on desk facing SE</td>
+          <td><span class="product-tag">Bagua Mapping</span></td>
+          <td class="actions-cell">
+            <a class="btn-action btn-view" href="#">View Case</a>
+            <a class="btn-action btn-analyze" href="#">Analyze</a>
+          </td>
+        </tr>
+        <tr>
+          <td><span class="demo-pill">Male · Age 62 · Retired Doctor · Married · 4 Children</span></td>
+          <td><span class="before-text">Health concerns recurring after moving to new house; sleeping in bedroom with illness star #2; relationship with children strained; financial disputes over inheritance</span></td>
+          <td><span class="after-text">Health check-ups consistently clear for 8 months; family dynamics noticeably calmer; inheritance mediation completed amicably</span></td>
+          <td>Bedroom relocation to auspicious sector + metal 6-coin wind chime + amethyst crystal grid in SW relationship corner + annual flying star updates</td>
+          <td><span class="product-tag">Feng Shui Audit</span></td>
+          <td class="actions-cell">
+            <a class="btn-action btn-view" href="#">View Case</a>
+            <a class="btn-action btn-analyze" href="#">Analyze</a>
+          </td>
+        </tr>
+        <tr class="no-results-row" id="no-results-t2">
+          <td colspan="6">No matching entries for current filters.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="insight-box">
+    <strong>What Agents Usually Do</strong>
+    Document special creations and unique cures in detail — they become your strongest marketing assets. A before-and-after improvement case with a specific, named cure is 4× more persuasive in a CPS than generic testimonials. Always capture the measurable result (%, RM, time frame).
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- TABLE 3 — CPS INVITATION LOG                                 -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<div class="table-card">
+  <div class="table-card-header">
+    <h2>
+      <span class="table-icon icon-t3">📋</span>
+      Table 3 — CPS Invitation Log
+    </h2>
+    <span class="table-count" id="count-t3"></span>
+  </div>
+  <div class="table-wrapper">
+    <table id="cpsTable">
+      <thead>
+        <tr>
+          <th>Customer Profile</th>
+          <th>Invite Date</th>
+          <th>Invitation Channel</th>
+          <th>Referral Relation</th>
+          <th>CPS Session Date</th>
+          <th>Product</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr data-referral="Master Li – former student, same feng shui lineage">
+          <td><span class="demo-pill">Female · Age 42 · Business Owner · Married · 2 Children</span></td>
+          <td class="nowrap">2026-02-10</td>
+          <td>Colleague referral (internal warm intro)</td>
+          <td><span class="referral-link">Master Li — former student, same feng shui lineage. Master Li personally called to introduce and vouch.</span></td>
+          <td class="nowrap">2026-02-18</td>
+          <td><span class="product-tag">Bagua Mapping</span></td>
+          <td class="actions-cell">
+            <a class="btn-action btn-view" href="#">View</a>
+            <a class="btn-action btn-adopt" href="#">Copy Link</a>
+          </td>
+        </tr>
+        <tr data-referral="Sarah Tan – existing client, COO's sister">
+          <td><span class="demo-pill">Male · Age 38 · Tech Director · Married · 1 Child</span></td>
+          <td class="nowrap">2026-02-22</td>
+          <td>Email + LinkedIn DM outreach</td>
+          <td><span class="referral-link">Sarah Tan — existing satisfied client; is the COO's younger sister. Sarah forwarded our testimonial video directly to COO's WhatsApp.</span></td>
+          <td class="nowrap">2026-03-01</td>
+          <td><span class="product-tag">Flying Stars Analysis</span></td>
+          <td class="actions-cell">
+            <a class="btn-action btn-view" href="#">View</a>
+            <a class="btn-action btn-adopt" href="#">Copy Link</a>
+          </td>
+        </tr>
+        <tr data-referral="David Chen – spa client's business partner">
+          <td><span class="demo-pill">Female · Age 55 · Wellness Spa Owner · Married · 3 Children</span></td>
+          <td class="nowrap">2026-01-15</td>
+          <td>Face-to-face at Wellness Expo KL</td>
+          <td><span class="referral-link">David Chen — long-term client; business partner of spa owner. David brought her to our booth and personally introduced us as "the master who transformed my office".</span></td>
+          <td class="nowrap">2026-01-22</td>
+          <td><span class="product-tag">Water Fountain Activation</span></td>
+          <td class="actions-cell">
+            <a class="btn-action btn-view" href="#">View</a>
+            <a class="btn-action btn-adopt" href="#">Copy Link</a>
+          </td>
+        </tr>
+        <tr data-referral="Uncle Raymond – family friend, golf club member">
+          <td><span class="demo-pill">Male · Age 47 · Hotel GM · Married · No Children</span></td>
+          <td class="nowrap">2026-01-08</td>
+          <td>Phone call (warm intro from mutual friend)</td>
+          <td><span class="referral-link">Uncle Raymond — family friend; both members of Royal Selangor Golf Club. Referred after hearing about the Harmony Wellness Spa transformation at a club dinner.</span></td>
+          <td class="nowrap">2026-01-20</td>
+          <td><span class="product-tag">Flying Stars Analysis</span></td>
+          <td class="actions-cell">
+            <a class="btn-action btn-view" href="#">View</a>
+            <a class="btn-action btn-adopt" href="#">Copy Link</a>
+          </td>
+        </tr>
+        <tr data-referral="Puan Rohani – property agency colleague">
+          <td><span class="demo-pill">Female · Age 34 · Property Agent · Single · No Children</span></td>
+          <td class="nowrap">2026-03-10</td>
+          <td>WhatsApp group (property agents network)</td>
+          <td><span class="referral-link">Puan Rohani — colleague at same property agency; attended the Feng Shui Masterclass earlier. Shared our digital brochure in the 450-member agents WhatsApp group.</span></td>
+          <td class="nowrap">2026-03-17</td>
+          <td><span class="product-tag">Bagua Mapping</span></td>
+          <td class="actions-cell">
+            <a class="btn-action btn-view" href="#">View</a>
+            <a class="btn-action btn-adopt" href="#">Copy Link</a>
+          </td>
+        </tr>
+        <tr data-referral="Dr. Lim – medical colleague, hospital">
+          <td><span class="demo-pill">Male · Age 62 · Retired Doctor · Married · 4 Children</span></td>
+          <td class="nowrap">2026-02-05</td>
+          <td>Referral via existing client (medical network)</td>
+          <td><span class="referral-link">Dr. Lim — former colleague at Pantai Hospital; attended our Chinese New Year talk. Personally accompanied the retired doctor to his first consultation.</span></td>
+          <td class="nowrap">2026-02-14</td>
+          <td><span class="product-tag">Feng Shui Audit</span></td>
+          <td class="actions-cell">
+            <a class="btn-action btn-view" href="#">View</a>
+            <a class="btn-action btn-adopt" href="#">Copy Link</a>
+          </td>
+        </tr>
+        <tr data-referral="Masterclass alumni group – WeChat community">
+          <td><span class="demo-pill">Female · Age 29 · Marketing Executive · Single · No Children</span></td>
+          <td class="nowrap">2026-03-22</td>
+          <td>WeChat community post (Masterclass alumni)</td>
+          <td><span class="referral-link">Masterclass alumni group — 120-member WeChat group of Feng Shui Masterclass graduates. Post by group admin praising her personal transformation story led to 3 enquiries.</span></td>
+          <td class="nowrap">2026-03-28</td>
+          <td><span class="product-tag">Feng Shui Masterclass</span></td>
+          <td class="actions-cell">
+            <a class="btn-action btn-view" href="#">View</a>
+            <a class="btn-action btn-adopt" href="#">Copy Link</a>
+          </td>
+        </tr>
+        <tr class="no-results-row" id="no-results-t3">
+          <td colspan="7">No matching entries for current filters.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="insight-box">
+    <strong>What Agents Usually Do</strong>
+    Track the referral relationship clearly — a warm introduction with context (how the referrer knows you AND the prospect) converts 3× faster than a cold outreach. Always record who made the introduction and what specific story or testimonial they shared. This data reveals your most powerful referral ecosystems.
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- TABLE 4 — PURCHASE DECISION TRIGGERS                        -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<div class="table-card">
+  <div class="table-card-header">
+    <h2>
+      <span class="table-icon icon-t4">⚡</span>
+      Table 4 — Purchase Decision Triggers
+    </h2>
+    <span class="table-count" id="count-t4"></span>
+  </div>
+  <div class="table-wrapper">
+    <table id="decisionTable">
+      <thead>
+        <tr>
+          <th>Customer Profile</th>
+          <th>Decision Date</th>
+          <th>Key Decision Factor</th>
+          <th>Objections Handled</th>
+          <th>Purchase Trigger</th>
+          <th>Product</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="demo-pill">Female · Age 42 · Business Owner · Married · 2 Children</span></td>
+          <td class="nowrap">2026-02-25</td>
+          <td>Tangible before-and-after testimonial from a business owner in the same industry (F&amp;B sector)</td>
+          <td><strong>Price concern:</strong> Showed 5× ROI case study — RM 4,500 package led to +RM 22,000 additional monthly revenue. Objection dissolved immediately.</td>
+          <td>Q1 promotion (10% off) + complimentary 3-month follow-up consultation. Client said: "The free follow-up sealed it for me."</td>
+          <td><span class="product-tag">Bagua Mapping</span></td>
+          <td class="actions-cell">
+            <a class="btn-action btn-adopt" href="#">Adopt</a>
+            <a class="btn-action btn-analyze" href="#">Analyze</a>
+          </td>
+        </tr>
+        <tr>
+          <td><span class="demo-pill">Male · Age 38 · Tech Director · Married · 1 Child</span></td>
+          <td class="nowrap">2026-03-05</td>
+          <td>Staff turnover cost analysis — HR calculated annual turnover cost at RM 180,000; our package was RM 6,800</td>
+          <td><strong>"It's superstition":</strong> Shared Harvard Business Review article on environment psychology. Reframed as "environmental optimisation science".</td>
+          <td>After showing flying stars map with illness star #2 exact location matching the sick staff seating area — client went pale and signed within 20 minutes.</td>
+          <td><span class="product-tag">Flying Stars Analysis</span></td>
+          <td class="actions-cell">
+            <a class="btn-action btn-adopt" href="#">Adopt</a>
+            <a class="btn-action btn-analyze" href="#">Analyze</a>
+          </td>
+        </tr>
+        <tr>
+          <td><span class="demo-pill">Female · Age 55 · Wellness Spa Owner · Married · 3 Children</span></td>
+          <td class="nowrap">2026-01-28</td>
+          <td>Fear of missing out on peak CNY season — understood that delayed activation would miss the auspicious Li Chun window</td>
+          <td><strong>"I need to ask my husband":</strong> Invited husband to a 15-minute Q&amp;A call. Addressed his scepticism with occupancy data from the hotel case study.</td>
+          <td>Created urgency: "Water fountain activation must be done within 7 days before Li Chun for maximum 2026 wealth activation." Client booked the next morning.</td>
+          <td><span class="product-tag">Water Fountain Activation</span></td>
+          <td class="actions-cell">
+            <a class="btn-action btn-adopt" href="#">Adopt</a>
+            <a class="btn-action btn-analyze" href="#">Analyze</a>
+          </td>
+        </tr>
+        <tr>
+          <td><span class="demo-pill">Male · Age 47 · Hotel GM · Married · No Children</span></td>
+          <td class="nowrap">2026-01-25</td>
+          <td>Board-level buy-in — GM presented our ROI projection to directors; board approved after seeing Harmony Wellness Spa case</td>
+          <td><strong>"Corporate can't pay for feng shui":</strong> Repackaged as "Guest Experience &amp; Environmental Wellness Audit" — passed compliance review.</td>
+          <td>Board director's personal interest in metaphysics was the silent trigger. GM later revealed the director had been quietly pushing for this for 2 years.</td>
+          <td><span class="product-tag">Flying Stars Analysis</span></td>
+          <td class="actions-cell">
+            <a class="btn-action btn-adopt" href="#">Adopt</a>
+            <a class="btn-action btn-analyze" href="#">Analyze</a>
+          </td>
+        </tr>
+        <tr>
+          <td><span class="demo-pill">Female · Age 34 · Property Agent · Single · No Children</span></td>
+          <td class="nowrap">2026-03-21</td>
+          <td>Career frustration reached a tipping point — failed promotion despite being #1 in sales for 2 consecutive quarters</td>
+          <td><strong>"I've tried everything else":</strong> This was actually our advantage — client was open to trying something unconventional precisely because conventional approaches had failed.</td>
+          <td>Showed career-sector Bagua map with blocked Mountain Star. Client recognised her bedroom layout matched the exact blockage pattern. Signed same day.</td>
+          <td><span class="product-tag">Bagua Mapping</span></td>
+          <td class="actions-cell">
+            <a class="btn-action btn-adopt" href="#">Adopt</a>
+            <a class="btn-action btn-analyze" href="#">Analyze</a>
+          </td>
+        </tr>
+        <tr>
+          <td><span class="demo-pill">Male · Age 62 · Retired Doctor · Married · 4 Children</span></td>
+          <td class="nowrap">2026-02-19</td>
+          <td>Health concern was paramount — after third abnormal check-up result, family agreed conventional explanations were insufficient</td>
+          <td><strong>"Feng shui can't cure illness":</strong> Clarified we address environmental energy — showed illness star #2 location in his bedroom matched sleeping position exactly.</td>
+          <td>Son (a doctor himself) conducted his own research on environmental energy and gave approval. Multi-generational family decision required the son's endorsement.</td>
+          <td><span class="product-tag">Feng Shui Audit</span></td>
+          <td class="actions-cell">
+            <a class="btn-action btn-adopt" href="#">Adopt</a>
+            <a class="btn-action btn-analyze" href="#">Analyze</a>
+          </td>
+        </tr>
+        <tr class="no-results-row" id="no-results-t4">
+          <td colspan="7">No matching entries for current filters.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="insight-box">
+    <strong>What Agents Usually Do</strong>
+    Identifying the real decision trigger lets you pre-empt objections before they arise. Map the decision maker carefully — in family decisions, it is often not the person you pitched. Handle the hidden decision maker proactively. Reframing the product name for corporate clients (e.g. "Environmental Wellness Audit") removes budget-approval friction without changing the service.
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- TABLE 5 — PROVEN CLOSING & SALES TACTICS                    -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<div class="table-card">
+  <div class="table-card-header">
+    <h2>
+      <span class="table-icon icon-t5">🏆</span>
+      Table 5 — Proven Closing &amp; Sales Tactics
+    </h2>
+    <span class="table-count" id="count-t5"></span>
+  </div>
+  <div class="table-wrapper">
+    <table id="strategyTable">
+      <thead>
+        <tr>
+          <th>Strategy Name</th>
+          <th>Description</th>
+          <th>Used For (Product)</th>
+          <th>Success Rate</th>
+          <th>Real Example</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Auspicious Date Close</strong></td>
+          <td>Offer a discount or bonus if the client signs before a specific Chinese almanac date (Li Chun, auspicious sector activation window, etc.). Creates genuine, non-manufactured urgency tied to the Feng Shui context itself.</td>
+          <td><span class="product-tag">Feng Shui Audit</span></td>
+          <td><span class="rate-pill">+55% closure</span></td>
+          <td>KL Boutique Hotel signed 3 days before Li Chun — GM said "We can't afford to miss the window." Package value: RM 18,000.</td>
+          <td class="actions-cell">
+            <a class="btn-action btn-adopt" href="#">Adopt</a>
+            <a class="btn-action btn-view" href="#">View</a>
+          </td>
+        </tr>
+        <tr>
+          <td><strong>Mirror Industry Case Close</strong></td>
+          <td>Present a before-and-after case from the exact same industry as the prospect. The industry-specific metrics (occupancy rate, staff turnover %, revenue RM) create instant relatability. "This is your competitor — or could be you."</td>
+          <td><span class="product-tag">Flying Stars Analysis</span></td>
+          <td><span class="rate-pill">+68% closure</span></td>
+          <td>Showed F&amp;B business owner a restaurant case study with +62% revenue — she signed within the same CPS session. "That's exactly my problem."</td>
+          <td class="actions-cell">
+            <a class="btn-action btn-adopt" href="#">Adopt</a>
+            <a class="btn-action btn-view" href="#">View</a>
+          </td>
+        </tr>
+        <tr>
+          <td><strong>ROI Reframe Close</strong></td>
+          <td>Convert the package price into a cost-of-inaction comparison. Calculate what the client is currently losing (staff turnover cost, lost contracts, low occupancy) and show that the Feng Shui package is a fraction of the annual loss.</td>
+          <td><span class="product-tag">Bagua Mapping</span></td>
+          <td><span class="rate-pill">+61% closure</span></td>
+          <td>Tech director: RM 180K annual turnover cost vs RM 6,800 package. "It's not a cost — it's the cheapest intervention you'll ever make." Signed on the spot.</td>
+          <td class="actions-cell">
+            <a class="btn-action btn-adopt" href="#">Adopt</a>
+            <a class="btn-action btn-view" href="#">View</a>
+          </td>
+        </tr>
+        <tr>
+          <td><strong>Repackage for Corporate</strong></td>
+          <td>Rename the service for corporate budget approval: "Environmental Wellness Audit" or "Workplace Energy Optimisation Consultation." Same service, compliance-friendly label that bypasses procurement scepticism.</td>
+          <td><span class="product-tag">Feng Shui Audit</span></td>
+          <td><span class="rate-pill">+44% closure</span></td>
+          <td>KL hotel's corporate compliance required neutral terminology. "Environmental Wellness Audit" passed board approval; "Feng Shui Consultation" would have been rejected outright.</td>
+          <td class="actions-cell">
+            <a class="btn-action btn-adopt" href="#">Adopt</a>
+            <a class="btn-action btn-view" href="#">View</a>
+          </td>
+        </tr>
+        <tr>
+          <td><strong>Hidden Decision Maker Strategy</strong></td>
+          <td>Before the CPS, identify who else must approve the decision (spouse, parent, business partner, board director). Invite them proactively or arrange a separate 15-minute call. Never leave the decision in the hands of someone who hasn't received the CPS.</td>
+          <td><span class="product-tag">Bagua Mapping</span></td>
+          <td><span class="rate-pill">+72% closure</span></td>
+          <td>Spa owner's husband was the sceptic. Separate 15-min video call resolved his doubts using data from the hotel case. Without it, deal would have stalled 3 weeks.</td>
+          <td class="actions-cell">
+            <a class="btn-action btn-adopt" href="#">Adopt</a>
+            <a class="btn-action btn-view" href="#">View</a>
+          </td>
+        </tr>
+        <tr>
+          <td><strong>Flying Stars Map Revelation</strong></td>
+          <td>During CPS, reveal the flying stars map for the client's property and overlay it with their problem areas (sick staff seating, stagnant sales counter, etc.). The visual "match" creates an undeniable aha-moment that converts sceptics on the spot.</td>
+          <td><span class="product-tag">Flying Stars Analysis</span></td>
+          <td><span class="rate-pill">+79% closure</span></td>
+          <td>Tech director saw illness star #2 exactly over the sick staff's desks — face went pale, signed within 20 minutes. "I can't unsee that." Highest single-session conversion rate in our team history.</td>
+          <td class="actions-cell">
+            <a class="btn-action btn-adopt" href="#">Adopt</a>
+            <a class="btn-action btn-view" href="#">View</a>
+          </td>
+        </tr>
+        <tr>
+          <td><strong>Alumni Testimonial Close</strong></td>
+          <td>For Masterclass prospects, use video testimonials from graduates of the same profession or industry. Frame the Masterclass as a professional-development investment, not a personal belief. "Your peers are already applying this."</td>
+          <td><span class="product-tag">Feng Shui Masterclass</span></td>
+          <td><span class="rate-pill">+58% closure</span></td>
+          <td>Property agent alumni WeChat group post — 3 enquiries from one testimonial shared by group admin. Pipeline cost: RM 0. Conversion: 2 of 3 enrolled within 7 days.</td>
+          <td class="actions-cell">
+            <a class="btn-action btn-adopt" href="#">Adopt</a>
+            <a class="btn-action btn-view" href="#">View</a>
+          </td>
+        </tr>
+        <tr>
+          <td><strong>Water Activation Urgency</strong></td>
+          <td>For water fountain activation, create time-sensitive urgency using the annual wealth star sector window. "The North sector wealth star is only active until [date] — after that, it shifts and activation loses 60% potency." Backed by authentic flying stars theory.</td>
+          <td><span class="product-tag">Water Fountain Activation</span></td>
+          <td><span class="rate-pill">+63% closure</span></td>
+          <td>Spa owner booked within 24 hours of hearing the Li Chun activation window. "We can't afford to wait — this is once a year." Standard urgency tactics feel pushy; astronomical timing feels genuine.</td>
+          <td class="actions-cell">
+            <a class="btn-action btn-adopt" href="#">Adopt</a>
+            <a class="btn-action btn-view" href="#">View</a>
+          </td>
+        </tr>
+        <tr class="no-results-row" id="no-results-t5">
+          <td colspan="6">No matching entries for current filters.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="insight-box">
+    <strong>What Agents Usually Do</strong>
+    The highest-performing agents don't invent new tactics for every client — they systematically apply proven frameworks from this vault. The Flying Stars Map Revelation (79% closure) and Hidden Decision Maker Strategy (72%) are the two highest-converting techniques. Master these two before developing new approaches. Auspicious date anchors create urgency without discounting — protect your margin.
+  </div>
+</div>
+
+</div><!-- /.page-body -->
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- JAVASCRIPT — FILTERING ENGINE                                -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<script>
+(function () {
+  'use strict';
+
+  // Product column index per table (0-based)
+  const PRODUCT_COL = {
+    weeklyTable:      3,
+    improvementTable: 4,
+    cpsTable:         5,
+    decisionTable:    5,
+    strategyTable:    2
+  };
+
+  const ALL_TABLE_IDS = [
+    'weeklyTable',
+    'improvementTable',
+    'cpsTable',
+    'decisionTable',
+    'strategyTable'
+  ];
+
+  // Only Table 3 respects the referral filter
+  const REFERRAL_TABLE = 'cpsTable';
+
+  // ── DOM refs ────────────────────────────────────────────────
+  const fKeyword  = document.getElementById('f-keyword');
+  const fProduct  = document.getElementById('f-product');
+  const fReferral = document.getElementById('f-referral');
+  const btnReset  = document.getElementById('btn-reset');
+  const statsEl   = document.getElementById('filter-stats');
+
+  // ── Core filter function ─────────────────────────────────────
+  function updateFilters() {
+    const kw       = fKeyword.value.trim().toLowerCase();
+    const product  = fProduct.value;           // 'all' or product name
+    const referral = fReferral.value.trim().toLowerCase();
+
+    let totalVisible = 0;
+    let totalRows    = 0;
+
+    ALL_TABLE_IDS.forEach(function (tableId) {
+      const table    = document.getElementById(tableId);
+      const tbody    = table.querySelector('tbody');
+      const rows     = Array.from(tbody.querySelectorAll('tr:not(.no-results-row)'));
+      const noResRow = document.getElementById('no-results-' + tableId.replace('Table', '-t')
+        .replace('weeklyTable', 't1')
+        .replace('improvementTable', 't2')
+        .replace('cpsTable', 't3')
+        .replace('decisionTable', 't4')
+        .replace('strategyTable', 't5'));
+      const countEl  = document.getElementById(
+        'count-' + tableId
+          .replace('weeklyTable', 't1')
+          .replace('improvementTable', 't2')
+          .replace('cpsTable', 't3')
+          .replace('decisionTable', 't4')
+          .replace('strategyTable', 't5')
+      );
+
+      let visibleInTable = 0;
+      const productColIdx = PRODUCT_COL[tableId];
+
+      rows.forEach(function (row) {
+        let show = true;
+
+        // 1 — Product filter
+        if (product !== 'all') {
+          const cells = row.querySelectorAll('td');
+          const cell  = cells[productColIdx];
+          const cellTxt = cell ? cell.textContent.toLowerCase() : '';
+          if (!cellTxt.includes(product.toLowerCase())) {
+            show = false;
+          }
+        }
+
+        // 2 — Referral filter (Table 3 only — uses data-referral attribute)
+        if (show && referral) {
+          if (tableId === REFERRAL_TABLE) {
+            const refAttr = (row.getAttribute('data-referral') || '').toLowerCase();
+            const refCellTxt = (row.querySelectorAll('td')[3] || {}).textContent || '';
+            if (!refAttr.includes(referral) && !refCellTxt.toLowerCase().includes(referral)) {
+              show = false;
+            }
+          }
+          // For other tables, referral term still matches via keyword scan below
+        }
+
+        // 3 — Keyword filter (all text in the row + data-referral)
+        if (show && kw) {
+          const rowText = row.textContent.toLowerCase() +
+                          (row.getAttribute('data-referral') || '').toLowerCase();
+          if (!rowText.includes(kw)) {
+            show = false;
+          }
+        }
+
+        row.style.display = show ? '' : 'none';
+        if (show) visibleInTable++;
+      });
+
+      // Show/hide no-results row
+      if (noResRow) {
+        noResRow.style.display = visibleInTable === 0 ? '' : 'none';
+      }
+
+      // Update count badge
+      if (countEl) {
+        countEl.textContent = visibleInTable + ' of ' + rows.length + ' entries';
+      }
+
+      totalVisible += visibleInTable;
+      totalRows    += rows.length;
+    });
+
+    // Stats line
+    const activeTags = [];
+    if (kw)               activeTags.push('Keyword: "' + fKeyword.value.trim() + '"');
+    if (product !== 'all') activeTags.push('Product: ' + product);
+    if (referral)          activeTags.push('Referral: "' + fReferral.value.trim() + '"');
+
+    if (activeTags.length === 0) {
+      statsEl.innerHTML = 'Showing all <strong>' + totalRows + '</strong> entries across 5 tables.';
+    } else {
+      const tagHtml = activeTags.map(function (t) {
+        return '<span class="active-tag">✓ ' + t + '</span>';
+      }).join('');
+      statsEl.innerHTML =
+        'Showing <strong>' + totalVisible + '</strong> of <strong>' + totalRows + '</strong> entries &nbsp;' + tagHtml;
+    }
+  }
+
+  // ── Helper: map table ID to no-results ID ────────────────────
+  function noResultsId(tableId) {
+    const map = {
+      weeklyTable:      'no-results-t1',
+      improvementTable: 'no-results-t2',
+      cpsTable:         'no-results-t3',
+      decisionTable:    'no-results-t4',
+      strategyTable:    'no-results-t5'
+    };
+    return map[tableId];
+  }
+
+  // ── Re-wire with correct helper ──────────────────────────────
+  // (Override updateFilters to use noResultsId helper cleanly)
+  function runFilters() {
+    const kw       = fKeyword.value.trim().toLowerCase();
+    const product  = fProduct.value;
+    const referral = fReferral.value.trim().toLowerCase();
+
+    let totalVisible = 0;
+    let totalRows    = 0;
+
+    ALL_TABLE_IDS.forEach(function (tableId) {
+      const table    = document.getElementById(tableId);
+      const tbody    = table.querySelector('tbody');
+      const rows     = Array.from(tbody.querySelectorAll('tr:not(.no-results-row)'));
+      const noResRow = document.getElementById(noResultsId(tableId));
+      const countIdx = { weeklyTable:'t1', improvementTable:'t2', cpsTable:'t3', decisionTable:'t4', strategyTable:'t5' };
+      const countEl  = document.getElementById('count-' + countIdx[tableId]);
+      const productColIdx = PRODUCT_COL[tableId];
+
+      let visibleInTable = 0;
+
+      rows.forEach(function (row) {
+        let show = true;
+
+        // 1 — Product filter
+        if (product !== 'all') {
+          const cells    = row.querySelectorAll('td');
+          const cell     = cells[productColIdx];
+          const cellTxt  = cell ? cell.textContent.toLowerCase() : '';
+          if (!cellTxt.includes(product.toLowerCase())) show = false;
+        }
+
+        // 2 — Referral filter (Table 3 only)
+        if (show && referral && tableId === REFERRAL_TABLE) {
+          const refAttr  = (row.getAttribute('data-referral') || '').toLowerCase();
+          const refCell  = row.querySelectorAll('td')[3];
+          const refTxt   = refCell ? refCell.textContent.toLowerCase() : '';
+          if (!refAttr.includes(referral) && !refTxt.includes(referral)) show = false;
+        }
+
+        // 3 — Keyword (all text + data-referral attribute)
+        if (show && kw) {
+          const rowText = row.textContent.toLowerCase() +
+                          (row.getAttribute('data-referral') || '').toLowerCase();
+          if (!rowText.includes(kw)) show = false;
+        }
+
+        row.style.display = show ? '' : 'none';
+        if (show) visibleInTable++;
+      });
+
+      if (noResRow) noResRow.style.display = visibleInTable === 0 ? '' : 'none';
+      if (countEl)  countEl.textContent = visibleInTable + ' of ' + rows.length + ' entries';
+
+      totalVisible += visibleInTable;
+      totalRows    += rows.length;
+    });
+
+    // Stats line
+    const tags = [];
+    if (kw)                tags.push('Keyword: "' + fKeyword.value.trim() + '"');
+    if (product !== 'all') tags.push('Product: ' + product);
+    if (referral)          tags.push('Referral: "' + fReferral.value.trim() + '"');
+
+    if (tags.length === 0) {
+      statsEl.innerHTML = 'Showing all <strong>' + totalRows + '</strong> entries across 5 tables.';
+    } else {
+      const tagHtml = tags.map(function (t) {
+        return '<span class="active-tag">✓ ' + t + '</span>';
+      }).join('');
+      statsEl.innerHTML =
+        'Showing <strong>' + totalVisible + '</strong> of <strong>' +
+        totalRows + '</strong> entries &nbsp;' + tagHtml;
+    }
+  }
+
+  // ── Event listeners ──────────────────────────────────────────
+  fKeyword.addEventListener('input',   runFilters);
+  fProduct.addEventListener('change',  runFilters);
+  fReferral.addEventListener('input',  runFilters);
+
+  btnReset.addEventListener('click', function () {
+    fKeyword.value  = '';
+    fProduct.value  = 'all';
+    fReferral.value = '';
+    runFilters();
+  });
+
+  // ── Initial run ──────────────────────────────────────────────
+  runFilters();
+
+})();
+</script>
+</body>
+</html>

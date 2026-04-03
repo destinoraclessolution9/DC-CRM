@@ -1,4 +1,4 @@
-$port = if ($env:PORT) { $env:PORT } else { 8085 }
+$port = if ($env:PORT) { [int]$env:PORT } else { 8095 }
 $listener = New-Object System.Net.HttpListener
 $listener.Prefixes.Add("http://localhost:$port/")
 try {
@@ -44,6 +44,10 @@ try {
             try { $response.Close() } catch {}
         }
     }
+} catch {
+    Write-Output "ERROR: Failed to start listener on port $port - $_"
+    [Console]::Out.Flush()
+    exit 1
 } finally {
-    $listener.Stop()
+    try { $listener.Stop() } catch {}
 }
