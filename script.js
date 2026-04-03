@@ -9916,6 +9916,7 @@ function _wireLoginBtn() {
             }
         }
         const prospect = prospectId ? await AppDataStore.getById('prospects', prospectId) : null;
+        const allUsers = await AppDataStore.getAll('users');
         const isEdit = !!prospect;
 
         const content = `
@@ -10060,10 +10061,8 @@ function _wireLoginBtn() {
                         <div class="form-group half">
                             <label>Assign to Agent</label>
                             <select id="prospect-agent" class="form-control">
-                                <option value="5" ${prospect?.responsible_agent_id == 5 ? 'selected' : ''}>Michelle Tan</option>
-                                <option value="6" ${prospect?.responsible_agent_id == 6 ? 'selected' : ''}>Ah Seng</option>
-                                <option value="7" ${prospect?.responsible_agent_id == 7 ? 'selected' : ''}>Mei Ling</option>
-                                <option value="8" ${prospect?.responsible_agent_id == 8 ? 'selected' : ''}>Raj Kumar</option>
+                                <option value="">— Select Agent —</option>
+                                ${allUsers.map(u => `<option value="${u.id}" ${prospect?.responsible_agent_id == u.id ? 'selected' : ''}>${escapeHtml(u.full_name || u.name || '')}</option>`).join('')}
                             </select>
                         </div>
                         <div class="form-group half">
@@ -10167,7 +10166,7 @@ function _wireLoginBtn() {
             ming_gua: document.getElementById('prospect-minggua')?.value || 'MG4',
             referred_by: document.getElementById('prospect-referred')?.value,
             referral_relationship: document.getElementById('prospect-relationship')?.value,
-            responsible_agent_id: parseInt(document.getElementById('prospect-agent')?.value) || 5,
+            responsible_agent_id: parseInt(document.getElementById('prospect-agent')?.value) || null,
             cps_assignment_date: document.getElementById('prospect-cps-date')?.value || new Date().toISOString().split('T')[0],
             pipeline_stage: document.getElementById('prospect-stage')?.value || 'new',
             expected_close_date: document.getElementById('prospect-close-date')?.value,
