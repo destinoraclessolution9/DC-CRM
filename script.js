@@ -5565,7 +5565,14 @@ function _wireLoginBtn() {
             updateUserDisplay();
             updateNavVisibility();
             UI.toast.success(`Welcome ${profile.full_name}!`);
-            await navigateTo('calendar');
+
+            // Force password change on first login
+            if (profile.force_password_change) {
+                await navigateTo('settings');
+                showForcePasswordChangeModal();
+            } else {
+                await navigateTo('calendar');
+            }
         } catch (err) {
             console.error('Login error:', err);
             alert('Login failed: ' + err.message);
@@ -5874,6 +5881,9 @@ function _wireLoginBtn() {
         } else if (viewId === 'marketing_lists') {
             _currentView = 'marketing_lists';
             await showMarketingListsView(viewport);
+        } else if (viewId === 'settings') {
+            _currentView = 'settings';
+            showSettingsView(viewport);
         } else {
             viewport.innerHTML = `
                 <div class="placeholder-view">
@@ -11836,6 +11846,7 @@ const openAddSolutionModal = async (prospectId) => {
                         <button class="btn-icon view-detail-btn" onclick="event.stopPropagation(); app.showAgentProfile('${agent.id}')" title="View Detail"><i class="fas fa-eye"></i></button>
                         <button class="btn-icon edit-agent-btn" onclick="event.stopPropagation(); app.openEditAgentModal('${agent.id}')" title="Edit Agent"><i class="fas fa-edit"></i></button>
                         ${canAssignUpline ? `<button class="btn-icon" onclick="event.stopPropagation(); app.openAssignUplineModal('${agent.id}')" title="Assign Upline"><i class="fas fa-sitemap"></i></button>` : ''}
+                        ${canAssignUpline ? `<button class="btn-icon" onclick="event.stopPropagation(); app.openResetPasswordModal('${agent.id}')" title="Reset Password"><i class="fas fa-key"></i></button>` : ''}
                     </td>
                 </tr>
             `;
@@ -12415,6 +12426,20 @@ const renderCurrentAssignments = async (agentId) => {
     `;
     };
 
+    const generatePassword = () => {
+        const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+        const lower = 'abcdefghjkmnpqrstuvwxyz';
+        const digits = '23456789';
+        const special = '@#$%!';
+        const all = upper + lower + digits + special;
+        let pwd = upper[Math.floor(Math.random()*upper.length)]
+                + lower[Math.floor(Math.random()*lower.length)]
+                + digits[Math.floor(Math.random()*digits.length)]
+                + special[Math.floor(Math.random()*special.length)];
+        for (let i = 0; i < 8; i++) pwd += all[Math.floor(Math.random()*all.length)];
+        return pwd.split('').sort(() => Math.random() - 0.5).join('');
+    };
+
     const openAddAgentModal = async (agentId = null) => {
         const agent = agentId ? await AppDataStore.getById('users', agentId) : null;
         const isEdit = !!agent;
@@ -12494,6 +12519,31 @@ const renderCurrentAssignments = async (agentId) => {
                         </div>
                     </div>
                 </div>
+
+                ${!isEdit ? `
+                <div class="form-section">
+                    <h4>Login Credentials</h4>
+                    <div class="form-row">
+                        <div class="form-group half">
+                            <label>Username <span class="required">*</span></label>
+                            <input type="text" id="agent-username" class="form-control" placeholder="e.g. wong.wai" oninput="this.value=this.value.toLowerCase().replace(/\\s+/g,'.')">
+                        </div>
+                        <div class="form-group half">
+                            <label>Initial Password <span class="required">*</span></label>
+                            <div style="display:flex; gap:8px;">
+                                <input type="text" id="agent-initial-password" class="form-control" placeholder="Min 8 characters">
+                                <button type="button" class="btn secondary" style="white-space:nowrap" onclick="(()=>{ const p=app.generatePassword(); document.getElementById('agent-initial-password').value=p; })()">Auto-generate</button>
+                            </div>
+                            <small style="color:var(--gray-500); margin-top:4px; display:block;">Agent must change password on first login.</small>
+                        </div>
+                    </div>
+                </div>
+                ` : `
+                <div class="form-section">
+                    <h4>Password Management</h4>
+                    <p style="color:var(--gray-600); margin-bottom:8px;">Use the "Reset Password" button from the agent list to reset this agent's login credentials.</p>
+                </div>
+                `}
             </div>
     `;
 
@@ -12529,17 +12579,65 @@ const renderCurrentAssignments = async (agentId) => {
             UI.hideModal();
             UI.toast.success('Agent updated successfully');
         } else {
+            const usernameVal = document.getElementById('agent-username')?.value?.trim()
+                || name.toLowerCase().replace(/\s+/g, '.');
+            const initialPassword = document.getElementById('agent-initial-password')?.value?.trim();
+
+            if (!initialPassword || initialPassword.length < 8) {
+                return UI.toast.error('Initial password must be at least 8 characters');
+            }
+            if (!fields.email) {
+                return UI.toast.error('Email is required to create login credentials');
+            }
+
             const newAgent = {
                 id: Date.now(),
-                username: name.toLowerCase().replace(' ', '.'),
-                password: 'agent123',
+                username: usernameVal,
+                password: initialPassword,
+                force_password_change: true,
                 status: 'probation',
                 join_date: new Date().toISOString().split('T')[0],
                 ...fields
             };
             await AppDataStore.create('users', newAgent);
+
+            // Create Supabase Auth account, preserving admin session
+            try {
+                const { data: { session: adminSession } } = await window.supabase.auth.getSession();
+                const { error: signUpError } = await window.supabase.auth.signUp({
+                    email: fields.email,
+                    password: initialPassword,
+                    options: { data: { full_name: name } }
+                });
+                if (signUpError && !signUpError.message.toLowerCase().includes('already registered')) {
+                    console.warn('Supabase signUp warning:', signUpError.message);
+                }
+                // Sign out the newly created agent session, restore admin session
+                await window.supabase.auth.signOut();
+                if (adminSession?.access_token && adminSession?.refresh_token) {
+                    await window.supabase.auth.setSession({
+                        access_token: adminSession.access_token,
+                        refresh_token: adminSession.refresh_token
+                    });
+                }
+            } catch (authErr) {
+                console.warn('Supabase Auth account creation skipped (offline?):', authErr.message);
+            }
+
             UI.hideModal();
-            UI.toast.success('Agent account created successfully');
+            UI.showModal('Agent Created', `
+                <div style="text-align:center; padding:8px 0;">
+                    <i class="fas fa-check-circle" style="font-size:48px; color:#22c55e; margin-bottom:12px;"></i>
+                    <p style="margin-bottom:16px;">Account created for <strong>${escapeHtml(name)}</strong></p>
+                    <div style="background:var(--gray-100); border-radius:8px; padding:16px; text-align:left;">
+                        <div style="margin-bottom:8px;"><span style="color:var(--gray-500)">Username:</span> <strong>${escapeHtml(usernameVal)}</strong></div>
+                        <div style="margin-bottom:8px;"><span style="color:var(--gray-500)">Email:</span> <strong>${escapeHtml(fields.email)}</strong></div>
+                        <div><span style="color:var(--gray-500)">Temp Password:</span> <strong id="show-temp-pwd">${escapeHtml(initialPassword)}</strong></div>
+                    </div>
+                    <p style="margin-top:12px; color:var(--gray-500); font-size:13px;">Agent must change their password on first login.</p>
+                </div>`, [
+                { label: 'Close', type: 'primary', action: 'UI.hideModal()' }
+            ]);
         }
         await renderAgentsTable();
     };
@@ -12576,6 +12674,194 @@ const renderCurrentAssignments = async (agentId) => {
         UI.hideModal();
         UI.toast.success('Upline assignment saved');
         await renderAgentsTable();
+    };
+
+    // ── Credential / Password Management ──────────────────────────────────────
+
+    const showForcePasswordChangeModal = () => {
+        const content = `
+            <div style="text-align:center; margin-bottom:16px;">
+                <i class="fas fa-lock" style="font-size:36px; color:var(--primary);"></i>
+                <p style="margin-top:8px; color:var(--gray-600);">You must set a new password before continuing.</p>
+            </div>
+            <div class="form-group">
+                <label>New Password <span class="required">*</span></label>
+                <input type="password" id="force-new-pwd" class="form-control" placeholder="Min 8 characters">
+            </div>
+            <div class="form-group">
+                <label>Confirm New Password <span class="required">*</span></label>
+                <input type="password" id="force-confirm-pwd" class="form-control" placeholder="Re-enter new password">
+            </div>`;
+        UI.showModal('Set Your Password', content, [
+            { label: 'Set Password', type: 'primary', action: '(async () => { await app.submitForcePasswordChange(); })()' }
+        ]);
+    };
+
+    const submitForcePasswordChange = async () => {
+        const newPwd = document.getElementById('force-new-pwd')?.value;
+        const confirmPwd = document.getElementById('force-confirm-pwd')?.value;
+        if (!newPwd || newPwd.length < 8) return UI.toast.error('Password must be at least 8 characters');
+        if (newPwd !== confirmPwd) return UI.toast.error('Passwords do not match');
+
+        try {
+            const { error } = await window.supabase.auth.updateUser({ password: newPwd });
+            if (error) throw error;
+        } catch (e) {
+            // Offline fallback — update users table only
+            console.warn('Supabase updateUser failed (offline?):', e.message);
+        }
+        await AppDataStore.update('users', _currentUser.id, {
+            force_password_change: false,
+            password: newPwd
+        });
+        _currentUser.force_password_change = false;
+        UI.hideModal();
+        UI.toast.success('Password set successfully. Welcome!');
+        await navigateTo('calendar');
+    };
+
+    const selfChangePassword = async () => {
+        const currentPwd = document.getElementById('settings-current-pwd')?.value;
+        const newPwd = document.getElementById('settings-new-pwd')?.value;
+        const confirmPwd = document.getElementById('settings-confirm-pwd')?.value;
+        if (!currentPwd) return UI.toast.error('Enter your current password');
+        if (!newPwd || newPwd.length < 8) return UI.toast.error('New password must be at least 8 characters');
+        if (newPwd !== confirmPwd) return UI.toast.error('Passwords do not match');
+        if (newPwd === currentPwd) return UI.toast.error('New password must differ from current password');
+
+        // Verify current password via re-auth
+        try {
+            const { error: verifyErr } = await window.supabase.auth.signInWithPassword({
+                email: _currentUser.email,
+                password: currentPwd
+            });
+            if (verifyErr) return UI.toast.error('Current password is incorrect');
+            const { error: updateErr } = await window.supabase.auth.updateUser({ password: newPwd });
+            if (updateErr) throw updateErr;
+        } catch (e) {
+            console.warn('Supabase password change (offline?):', e.message);
+        }
+        await AppDataStore.update('users', _currentUser.id, {
+            password: newPwd,
+            force_password_change: false
+        });
+        _currentUser.force_password_change = false;
+        document.getElementById('settings-current-pwd').value = '';
+        document.getElementById('settings-new-pwd').value = '';
+        document.getElementById('settings-confirm-pwd').value = '';
+        UI.toast.success('Password changed successfully');
+    };
+
+    const showSettingsView = (container) => {
+        const viewport = container || document.getElementById('content-viewport');
+        viewport.innerHTML = `
+        <div style="max-width:640px; margin:32px auto; padding:0 16px;">
+            <h2 style="font-size:24px; font-weight:700; margin-bottom:24px;"><i class="fas fa-cog"></i> Account Settings</h2>
+
+            <div class="performance-card" style="margin-bottom:24px;">
+                <h4><i class="fas fa-user"></i> Profile</h4>
+                <div class="performance-stats">
+                    <div class="stat-row"><span class="stat-label">Name:</span><span class="stat-value">${escapeHtml(_currentUser?.full_name || '')}</span></div>
+                    <div class="stat-row"><span class="stat-label">Email:</span><span class="stat-value">${escapeHtml(_currentUser?.email || '')}</span></div>
+                    <div class="stat-row"><span class="stat-label">Role:</span><span class="stat-value">${escapeHtml(_currentUser?.role || '')}</span></div>
+                    <div class="stat-row"><span class="stat-label">Agent Code:</span><span class="stat-value">${escapeHtml(_currentUser?.agent_code || '—')}</span></div>
+                </div>
+            </div>
+
+            <div class="performance-card">
+                <h4><i class="fas fa-key"></i> Change Password</h4>
+                <div style="margin-top:12px;">
+                    <div class="form-group" style="margin-bottom:12px;">
+                        <label>Current Password</label>
+                        <input type="password" id="settings-current-pwd" class="form-control" placeholder="Enter current password">
+                    </div>
+                    <div class="form-group" style="margin-bottom:12px;">
+                        <label>New Password</label>
+                        <input type="password" id="settings-new-pwd" class="form-control" placeholder="Min 8 characters">
+                    </div>
+                    <div class="form-group" style="margin-bottom:16px;">
+                        <label>Confirm New Password</label>
+                        <input type="password" id="settings-confirm-pwd" class="form-control" placeholder="Re-enter new password">
+                    </div>
+                    <button class="btn primary" onclick="(async()=>{ await app.selfChangePassword(); })()">
+                        <i class="fas fa-save"></i> Update Password
+                    </button>
+                </div>
+            </div>
+        </div>`;
+    };
+
+    // Admin: reset another agent's password
+    const openResetPasswordModal = async (agentId) => {
+        const agent = await AppDataStore.getById('users', agentId);
+        if (!agent) return UI.toast.error('Agent not found');
+        const tempPwd = generatePassword();
+        const content = `
+            <div class="form-group">
+                <p style="margin-bottom:12px;">Reset credentials for <strong>${escapeHtml(agent.full_name)}</strong> (${escapeHtml(agent.email || 'no email')})</p>
+                <div style="margin-bottom:16px;">
+                    <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                        <input type="radio" name="pwd-reset-type" value="email" ${agent.email ? 'checked' : 'disabled'}> Send password reset email to agent
+                    </label>
+                    <label style="display:flex;align-items:center;gap:8px;">
+                        <input type="radio" name="pwd-reset-type" value="manual" ${!agent.email ? 'checked' : ''}> Set temporary password manually
+                    </label>
+                </div>
+                <div id="manual-reset-section" style="${!agent.email ? '' : 'display:none;'}">
+                    <label>Temporary Password</label>
+                    <div style="display:flex; gap:8px; margin-top:4px;">
+                        <input type="text" id="reset-temp-pwd" class="form-control" value="${escapeHtml(tempPwd)}">
+                        <button type="button" class="btn secondary" style="white-space:nowrap" onclick="document.getElementById('reset-temp-pwd').value=app.generatePassword()">Regenerate</button>
+                    </div>
+                    <small style="color:var(--gray-500); margin-top:4px; display:block;">Agent must change password on next login.</small>
+                </div>
+            </div>
+            <script>
+                document.querySelectorAll('[name=pwd-reset-type]').forEach(r => r.addEventListener('change', e => {
+                    document.getElementById('manual-reset-section').style.display = e.target.value === 'manual' ? '' : 'none';
+                }));
+            <\/script>`;
+        UI.showModal('Reset Agent Password', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Reset Password', type: 'primary', action: `(async () => { await app.executePasswordReset('${agentId}'); })()` }
+        ]);
+    };
+
+    const executePasswordReset = async (agentId) => {
+        const agent = await AppDataStore.getById('users', agentId);
+        if (!agent) return UI.toast.error('Agent not found');
+
+        const resetType = document.querySelector('[name=pwd-reset-type]:checked')?.value || 'manual';
+
+        if (resetType === 'email' && agent.email) {
+            try {
+                const { error } = await window.supabase.auth.resetPasswordForEmail(agent.email, {
+                    redirectTo: window.location.origin + window.location.pathname + '?reset=true'
+                });
+                if (error) throw error;
+                UI.hideModal();
+                UI.toast.success(`Password reset email sent to ${agent.email}`);
+            } catch (e) {
+                UI.toast.error('Failed to send reset email: ' + e.message);
+            }
+        } else {
+            const tempPwd = document.getElementById('reset-temp-pwd')?.value?.trim();
+            if (!tempPwd || tempPwd.length < 8) return UI.toast.error('Temporary password must be at least 8 characters');
+            await AppDataStore.update('users', agentId, {
+                password: tempPwd,
+                force_password_change: true
+            });
+            UI.hideModal();
+            UI.showModal('Password Reset', `
+                <div style="text-align:center; padding:8px;">
+                    <i class="fas fa-check-circle" style="font-size:36px; color:#22c55e; margin-bottom:12px;"></i>
+                    <p>Password reset for <strong>${escapeHtml(agent.full_name)}</strong></p>
+                    <div style="background:var(--gray-100); border-radius:8px; padding:12px; margin-top:12px;">
+                        <div><span style="color:var(--gray-500)">Temp Password:</span> <strong>${escapeHtml(tempPwd)}</strong></div>
+                    </div>
+                    <p style="margin-top:8px; color:var(--gray-500); font-size:13px;">Agent must change password on next login.</p>
+                </div>`, [{ label: 'Done', type: 'primary', action: 'UI.hideModal()' }]);
+        }
     };
 
     const updateAgentTargets = async (agentId) => {
@@ -17729,6 +18015,13 @@ const initImportDemoData = async () => {
         saveAgent,
         openAssignUplineModal,
         saveUplineAssignment,
+        generatePassword,
+        showForcePasswordChangeModal,
+        submitForcePasswordChange,
+        selfChangePassword,
+        showSettingsView,
+        openResetPasswordModal,
+        executePasswordReset,
         renewLicense,
         executeRenewal,
         sendRenewalReminder,
