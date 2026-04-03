@@ -8807,10 +8807,9 @@ function _wireLoginBtn() {
                         </div>
                     </div>
                 `;
-                // Diagnostic: Ensure searchReferrers is bound
                 setTimeout(() => {
                     const input = document.getElementById('cps-referrer');
-                    if (input) input.onkeyup = async () => await app.searchReferrersForModal(input.value, 'referrer');
+                    if (input) input.onkeyup = () => app.searchReferrers();
                 }, 100);
                 break;
 
@@ -9093,7 +9092,10 @@ function _wireLoginBtn() {
 
             const prospects = (await AppDataStore.getAll('prospects')).filter(p => !p.status || p.status === 'active');
             const customers = (await AppDataStore.getAll('customers')).filter(c => !c.status || c.status === 'active');
-            const agents = (await AppDataStore.getAll('users')).filter(u => isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'));
+            const agents = (await AppDataStore.getAll('users')).filter(u => {
+                const lvl = parseInt(u.role?.match(/Level\s+(\d+)/i)?.[1] || 0);
+                return lvl >= 5 || isAgent(u) || u.role === 'team_leader';
+            });
 
             const all = [
                 ...prospects.map(p => ({ id: p.id, name: p.full_name, type: 'Prospect' })),
