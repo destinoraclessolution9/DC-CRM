@@ -5784,8 +5784,8 @@ function _wireLoginBtn() {
 
     // ----- 2. Prospects (depend on users) -----
     const demoProspects = [
-        { id: 1, full_name: 'Tan Ah Kow', phone: '012-3456789', score: 850, responsible_agent_id: 5, ming_gua: 'MG4', element: 'Wood', status: 'active' },
-        { id: 2, full_name: 'Ong Bee Ling', phone: '012-9876543', score: 720, responsible_agent_id: 5, protection_deadline: '2026-03-20', ming_gua: 'MG2', status: 'active' }
+        { id: 1, full_name: 'Tan Ah Kow', phone: '012-3456789', score: 850, responsible_agent_id: 5, ming_gua: 'MG4', element: 'Wood', status: 'active', house_audit_status: 'Completed', needs: 'Wealth,Career' },
+        { id: 2, full_name: 'Ong Bee Ling', phone: '012-9876543', score: 720, responsible_agent_id: 5, protection_deadline: '2026-03-20', ming_gua: 'MG2', status: 'active', house_audit_status: 'Pending', needs: 'Health,Relationship' }
     ];
     for (const p of demoProspects) {
         await safeInsert('prospects', p);
@@ -9598,6 +9598,27 @@ function _wireLoginBtn() {
                             <option value="reassign">Reassignable</option>
                             <option value="critical">Critical</option>
                         </select>
+                        <select id="filter-deficiency" onchange="app. async filterProspects()">
+                            <option value="">Star Deficiency: All</option>
+                            <option value="Wealth">Wealth</option>
+                            <option value="Career">Career</option>
+                            <option value="Relationship">Romance/Relationship</option>
+                            <option value="Health">Health</option>
+                        </select>
+                        <select id="filter-house-audit" onchange="app. async filterProspects()">
+                            <option value="">House Audit: All</option>
+                            <option value="Pending">Pending</option>
+                            <option value="Scheduled">Scheduled</option>
+                            <option value="Completed">Completed</option>
+                            <option value="None">Not Done</option>
+                        </select>
+                        <select id="filter-solution-proposed" onchange="app. async filterProspects()">
+                            <option value="">Solution Proposed: All</option>
+                            <option value="PR3 Ring">PR3 Ring (proposed)</option>
+                            <option value="PR4 Power Ring">PR4 Power Ring (proposed)</option>
+                            <option value="PR5 Ring">PR5 Ring (proposed)</option>
+                        </select>
+                        <input type="number" id="filter-min-events" min="0" placeholder="Min events attended" onchange="app. async filterProspects()" style="width:160px; padding:6px 10px; border:1px solid var(--border); border-radius:6px; background:var(--surface); color:var(--text);">
                         <button class="btn primary" onclick="app. async filterProspects()">Apply Filters</button>
                     </div>
                 </div>
@@ -9699,6 +9720,21 @@ function _wireLoginBtn() {
                             <option value="90d">Purchased Last 90 Days</option>
                             <option value="no90d">No Purchase 90+ Days</option>
                         </select>
+                        <select id="filter-customer-deficiency" onchange="app. async filterCustomers()">
+                            <option value="">Star Deficiency: All</option>
+                            <option value="Wealth">Wealth</option>
+                            <option value="Career">Career</option>
+                            <option value="Relationship">Romance/Relationship</option>
+                            <option value="Health">Health</option>
+                        </select>
+                        <select id="filter-customer-house-audit" onchange="app. async filterCustomers()">
+                            <option value="">House Audit: All</option>
+                            <option value="Pending">Pending</option>
+                            <option value="Scheduled">Scheduled</option>
+                            <option value="Completed">Completed</option>
+                            <option value="None">Not Done</option>
+                        </select>
+                        <input type="number" id="filter-customer-min-events" min="0" placeholder="Min events attended" onchange="app. async filterCustomers()" style="width:160px; padding:6px 10px; border:1px solid var(--border); border-radius:6px; background:var(--surface); color:var(--text);">
                         <button class="btn primary" onclick="app. async filterCustomers()">Apply Filters</button>
                     </div>
                 </div>
@@ -9735,13 +9771,39 @@ function _wireLoginBtn() {
         const typeFilter = document.getElementById('filter-customer-type')?.value || '';
         const guaFilter = document.getElementById('filter-customer-gua')?.value || '';
         const purchaseFilter = document.getElementById('filter-purchase-status')?.value || '';
+        const deficiencyFilter = document.getElementById('filter-customer-deficiency')?.value || '';
+        const houseAuditFilter = document.getElementById('filter-customer-house-audit')?.value || '';
+        const minEventsFilter = parseInt(document.getElementById('filter-customer-min-events')?.value || '0');
+
+        let allEventRegs = [];
+        if (minEventsFilter > 0) {
+            allEventRegs = await AppDataStore.getAll('event_registrations');
+        }
 
         let html = '';
         for (const c of customers) {
-            if (searchQuery && !c.full_name.toLowerCase().includes(searchQuery) && !c.phone.includes(searchQuery)) return;
-            if (guaFilter && c.ming_gua !== guaFilter) return;
+            if (searchQuery && !c.full_name.toLowerCase().includes(searchQuery) && !c.phone.includes(searchQuery)) continue;
+            if (guaFilter && c.ming_gua !== guaFilter) continue;
             // Type and Purchase filters simplified for demo
-            if (typeFilter === 'VIP' && c.lifetime_value < 5000) return;
+            if (typeFilter === 'VIP' && c.lifetime_value < 5000) continue;
+
+            // 16.3 Star Deficiency filter
+            if (deficiencyFilter) {
+                const needs = c.needs ? (Array.isArray(c.needs) ? c.needs : c.needs.split(',').map(t => t.trim())) : [];
+                if (!needs.includes(deficiencyFilter)) continue;
+            }
+
+            // 16.4 House Audit Status filter
+            if (houseAuditFilter) {
+                const auditStatus = c.house_audit_status || 'None';
+                if (auditStatus !== houseAuditFilter) continue;
+            }
+
+            // 16.8 Event attendance filter
+            if (minEventsFilter > 0) {
+                const attendedCount = allEventRegs.filter(r => r.attendee_id === c.id).length;
+                if (attendedCount < minEventsFilter) continue;
+            }
 
             html += `
                 <tr onclick="app. showCustomerDetail(${c.id})">
@@ -9775,6 +9837,20 @@ function _wireLoginBtn() {
         const scoreFilter = document.getElementById('filter-score')?.value || '';
         const guaFilter = document.getElementById('filter-gua')?.value || '';
         const statusFilter = document.getElementById('filter-status')?.value || '';
+        const deficiencyFilter = document.getElementById('filter-deficiency')?.value || '';
+        const houseAuditFilter = document.getElementById('filter-house-audit')?.value || '';
+        const solutionProposedFilter = document.getElementById('filter-solution-proposed')?.value || '';
+        const minEventsFilter = parseInt(document.getElementById('filter-min-events')?.value || '0');
+
+        // Pre-load cross-table data only when those filters are active
+        let allProposedSolutions = [];
+        let allEventRegs = [];
+        if (solutionProposedFilter) {
+            allProposedSolutions = await AppDataStore.getAll('proposed_solutions');
+        }
+        if (minEventsFilter > 0) {
+            allEventRegs = await AppDataStore.getAll('event_registrations');
+        }
 
         // Apply sorting
         prospects.sort((a, b) => {
@@ -9813,14 +9889,14 @@ function _wireLoginBtn() {
                 (p.phone && p.phone.includes(searchQuery)) ||
                 (p.email && p.email.toLowerCase().includes(searchQuery)) ||
                 (p.id && p.id.toString().includes(searchQuery));
-            if (!matchesSearch) return;
+            if (!matchesSearch) continue;
 
             // Score filter
             const grade = getScoreGrade(p.score);
-            if (scoreFilter && scoreFilter !== grade) return;
+            if (scoreFilter && scoreFilter !== grade) continue;
 
             // Ming Gua filter
-            if (guaFilter && p.ming_gua !== guaFilter) return;
+            if (guaFilter && p.ming_gua !== guaFilter) continue;
 
             // Get last activity
             const lastActivity = activities
@@ -9836,10 +9912,38 @@ function _wireLoginBtn() {
 
             // Status filter (Active, Attention, Reassignable, Critical)
             if (statusFilter) {
-                if (statusFilter === 'active' && protectionStatus !== 'normal') return;
-                if (statusFilter === 'attention' && protectionStatus !== 'warning') return;
-                if (statusFilter === 'reassign' && protectionStatus !== 'normal') return; // Adjust logic if reassign means something else
-                if (statusFilter === 'critical' && protectionStatus !== 'critical') return;
+                if (statusFilter === 'active' && protectionStatus !== 'normal') continue;
+                if (statusFilter === 'attention' && protectionStatus !== 'warning') continue;
+                if (statusFilter === 'reassign' && protectionStatus !== 'normal') continue;
+                if (statusFilter === 'critical' && protectionStatus !== 'critical') continue;
+            }
+
+            // 16.3 Star Deficiency filter (maps to needs field)
+            if (deficiencyFilter) {
+                const needs = p.needs ? (Array.isArray(p.needs) ? p.needs : p.needs.split(',').map(t => t.trim())) : [];
+                if (!needs.includes(deficiencyFilter)) continue;
+            }
+
+            // 16.4 House Audit Status filter
+            if (houseAuditFilter) {
+                const auditStatus = p.house_audit_status || 'None';
+                if (auditStatus !== houseAuditFilter) continue;
+            }
+
+            // 16.5 Solution Proposed (not purchased) filter
+            if (solutionProposedFilter) {
+                const hasPending = allProposedSolutions.some(s =>
+                    s.prospect_id === p.id &&
+                    s.solution === solutionProposedFilter &&
+                    s.status !== 'Purchased'
+                );
+                if (!hasPending) continue;
+            }
+
+            // 16.8 Event attendance filter
+            if (minEventsFilter > 0) {
+                const attendedCount = allEventRegs.filter(r => r.attendee_id === p.id).length;
+                if (attendedCount < minEventsFilter) continue;
             }
 
             html += `
