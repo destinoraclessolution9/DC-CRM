@@ -8414,8 +8414,8 @@ function _wireLoginBtn() {
 
         UI.showModal('Quick Add Activity', modalContent, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save & Add Another', type: 'secondary', action: 'await app. async saveAndAddAnother()' },
-            { label: 'Save Activity', type: 'primary', action: 'await app. async saveActivity()' }
+            { label: 'Save & Add Another', type: 'secondary', action: '(async () => { await app.saveAndAddAnother(); })()' },
+            { label: 'Save Activity', type: 'primary', action: '(async () => { await app.saveActivity(); })()' }
         ]);
 
         await updateActivityForm();
@@ -10090,7 +10090,7 @@ function _wireLoginBtn() {
 
         UI.showModal(isEdit ? 'Edit Prospect' : 'Add New Prospect', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: isEdit ? 'Update Prospect' : 'Create Prospect', type: 'primary', action: 'await app. saveProspect()' }
+            { label: isEdit ? 'Update Prospect' : 'Create Prospect', type: 'primary', action: '(async () => { await app.saveProspect(); })()' }
         ]);
     };
 
@@ -11117,7 +11117,7 @@ const deleteNote = async (prospectId, noteId) => {
 `;
         UI.showModal('Add New Customer (Legacy Import)', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Create Customer', type: 'primary', action: 'await app. saveCustomer()' }
+            { label: 'Create Customer', type: 'primary', action: '(async () => { await app.saveCustomer(); })()' }
         ]);
     };
 
@@ -12366,7 +12366,7 @@ const renderCurrentAssignments = async (agentId) => {
 
         UI.showModal('Add New Agent', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Create Agent Account', type: 'primary', action: 'await app. saveAgent()' }
+            { label: 'Create Agent Account', type: 'primary', action: '(async () => { await app.saveAgent(); })()' }
         ]);
     };
 
@@ -12921,7 +12921,7 @@ const deactivateAgent = async (agentId) => {
 
         UI.showModal('Configure Pipeline Rules', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save Configuration', type: 'primary', action: 'await app. savePipelineConfig()' }
+            { label: 'Save Configuration', type: 'primary', action: '(async () => { await app.savePipelineConfig(); })()' }
         ]);
     };
 
@@ -13388,7 +13388,7 @@ container.innerHTML = `
 
         UI.showModal('Boost Opportunity', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Confirm Boost', type: 'primary', action: 'await app. submitBoost()' }
+            { label: 'Confirm Boost', type: 'primary', action: '(async () => { await app.submitBoost(); })()' }
         ]);
     };
 
@@ -14348,7 +14348,7 @@ const renderAgentLeaderboard = async () => {
 
         UI.showModal('Target Management', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save Targets', type: 'primary', action: 'await app. saveYearlyTargets()' }
+            { label: 'Save Targets', type: 'primary', action: '(async () => { await app.saveYearlyTargets(); })()' }
         ]);
     };
 
@@ -14659,7 +14659,7 @@ const exportKPIReport = async (format) => {
 
         UI.showModal('Add New ' + type.slice(0, -1), content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save', type: 'primary', action: 'await app. saveMarketingListItem()' }
+            { label: 'Save', type: 'primary', action: '(async () => { await app.saveMarketingListItem(); })()' }
         ]);
     };
 
@@ -15734,7 +15734,7 @@ const exportKPIReport = async (format) => {
 
         UI.showModal(isEdit ? 'Edit Campaign' : 'Create WhatsApp Campaign', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save as Draft', type: 'secondary', action: 'await app. saveCampaignDraft()' }
+            { label: 'Save as Draft', type: 'secondary', action: '(async () => { await app.saveCampaignDraft(); })()' }
         ]);
 
         _currentCampaignStep = 1;
@@ -17229,7 +17229,7 @@ const startImport = async () => {
             </div>`;
         UI.showModal(`Reassign Prospect: ${prospectName}`, content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'CONFIRM REASSIGNMENT', type: 'primary', action: 'await app. async confirmReassignment()' }
+            { label: 'CONFIRM REASSIGNMENT', type: 'primary', action: '(async () => { await app.confirmReassignment(); })()' }
         ]);
     };
 
