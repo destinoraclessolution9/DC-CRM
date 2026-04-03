@@ -277,6 +277,12 @@
             if (window.app && window.app.init) {
                 window.app.init();
             }
+
+            // Fallback: ensure login button always has a handler
+            const loginBtn = document.getElementById('loginBtn');
+            if (loginBtn && !loginBtn._supabaseSetup && window.app && window.app._wireLoginBtn) {
+                window.app._wireLoginBtn();
+            }
         });
 
         // Fallback if scripts load after DOM

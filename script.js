@@ -5524,14 +5524,37 @@ function _wireLoginBtn() {
             btn.disabled = true;
             btn.textContent = 'Logging in...';
             const user = await Auth.login(email, password);
-            const { data: profile, error: profileError } = await window.supabase
+            
+            // Try to get profile from 'users' table
+            let { data: profile, error: profileError } = await window.supabase
                 .from('users')
                 .select('*')
                 .eq('email', user.email)
                 .single();
-            if (profileError || !profile) {
-                throw new Error('User profile not found. Contact admin.');
+            
+            // If profile not found, create one automatically
+            if (profileError && profileError.code === 'PGRST116') {
+                console.log('Profile not found, creating one...');
+                const newProfile = {
+                    id: user.id,                     // Use Supabase Auth user ID
+                    email: user.email,
+                    username: user.email.split('@')[0],
+                    full_name: user.user_metadata?.full_name || user.email,
+                    role: 'Level 12 Agent',          // Default role
+                    status: 'active',
+                    created_at: new Date().toISOString()
+                };
+                const { data: created, error: createError } = await window.supabase
+                    .from('users')
+                    .insert(newProfile)
+                    .select()
+                    .single();
+                if (createError) throw createError;
+                profile = created;
+            } else if (profileError) {
+                throw profileError;
             }
+            
             _currentUser = profile;
             document.getElementById('login-container').style.display = 'none';
             document.getElementById('app-shell').style.display = 'block';
@@ -5547,7 +5570,6 @@ function _wireLoginBtn() {
             btn.textContent = 'Login';
         }
     };
-    // ← the problematic line was here, remove it
 }
 
     // ==================== INIT ====================
@@ -17344,10 +17366,10 @@ const initImportDemoData = async () => {
     const importJobs = await AppDataStore.getAll('import_jobs');
     if (importJobs.length === 0) {
         const jobs = [
-            { id: 9001, is_demo: true, file_name: 'leads_march_2026.xlsx', import_type: 'prospects', total_rows: 250, valid_rows: 235, error_rows: 15, created_records: 217, updated_records: 18, skipped_records: 15, status: 'completed', mapping_config: {}, duplicate_handling: 'skip', assignment_config: { assignTo: 'myself' }, created_by: 5, created_at: '2026-03-05T14:30:00Z', completed_at: '2026-03-05T14:32:35Z' },
-            { id: 9002, is_demo: true, file_name: 'customers_feb.xlsx', import_type: 'customers', total_rows: 128, valid_rows: 122, error_rows: 6, created_records: 115, updated_records: 7, skipped_records: 6, status: 'completed', mapping_config: {}, duplicate_handling: 'update', assignment_config: { assignTo: 'team' }, created_by: 5, created_at: '2026-02-28T10:15:00Z', completed_at: '2026-02-28T10:17:22Z' },
-            { id: 9003, is_demo: true, file_name: 'agents_2026.xlsx', import_type: 'agents', total_rows: 15, valid_rows: 15, error_rows: 0, created_records: 15, updated_records: 0, skipped_records: 0, status: 'completed', mapping_config: {}, duplicate_handling: 'skip', assignment_config: {}, created_by: 1, created_at: '2026-02-15T09:00:00Z', completed_at: '2026-02-15T09:01:00Z' },
-            { id: 9004, is_demo: true, file_name: 'product_catalog.xlsx', import_type: 'products', total_rows: 45, valid_rows: 0, error_rows: 45, created_records: 0, updated_records: 0, skipped_records: 0, status: 'failed', mapping_config: {}, duplicate_handling: 'skip', assignment_config: {}, created_by: 5, created_at: '2026-02-10T09:45:00Z', completed_at: '2026-02-10T09:45:30Z' }
+            { id: 9001, file_name: 'leads_march_2026.xlsx', import_type: 'prospects', total_rows: 250, valid_rows: 235, error_rows: 15, created_records: 217, updated_records: 18, skipped_records: 15, status: 'completed', mapping_config: {}, duplicate_handling: 'skip', assignment_config: { assignTo: 'myself' }, created_by: 5, created_at: '2026-03-05T14:30:00Z', completed_at: '2026-03-05T14:32:35Z' },
+            { id: 9002, file_name: 'customers_feb.xlsx', import_type: 'customers', total_rows: 128, valid_rows: 122, error_rows: 6, created_records: 115, updated_records: 7, skipped_records: 6, status: 'completed', mapping_config: {}, duplicate_handling: 'update', assignment_config: { assignTo: 'team' }, created_by: 5, created_at: '2026-02-28T10:15:00Z', completed_at: '2026-02-28T10:17:22Z' },
+            { id: 9003, file_name: 'agents_2026.xlsx', import_type: 'agents', total_rows: 15, valid_rows: 15, error_rows: 0, created_records: 15, updated_records: 0, skipped_records: 0, status: 'completed', mapping_config: {}, duplicate_handling: 'skip', assignment_config: {}, created_by: 1, created_at: '2026-02-15T09:00:00Z', completed_at: '2026-02-15T09:01:00Z' },
+            { id: 9004, file_name: 'product_catalog.xlsx', import_type: 'products', total_rows: 45, valid_rows: 0, error_rows: 45, created_records: 0, updated_records: 0, skipped_records: 0, status: 'failed', mapping_config: {}, duplicate_handling: 'skip', assignment_config: {}, created_by: 5, created_at: '2026-02-10T09:45:00Z', completed_at: '2026-02-10T09:45:30Z' }
         ];
         for (const j of jobs) {
             await AppDataStore.create('import_jobs', j);
@@ -17357,9 +17379,9 @@ const initImportDemoData = async () => {
     const reassignmentsAll = await AppDataStore.getAll('reassignment_history');
     if (reassignmentsAll.length === 0) {
         const reassignments = [
-            { id: 8001, is_demo: true, prospect_id: 101, from_agent_id: 8, to_agent_id: 6, reassigned_by: 5, reassignment_date: '2026-03-06T10:23:00Z', reassignment_reason: 'inactive', reason_notes: 'Raj Kumar unresponsive', days_inactive: 14, protection_deadline: '2026-03-17', created_at: '2026-03-06T10:23:00Z' },
-            { id: 8002, is_demo: true, prospect_id: 102, from_agent_id: 8, to_agent_id: 5, reassigned_by: 5, reassignment_date: '2026-03-05T15:45:00Z', reassignment_reason: 'inactive', reason_notes: 'High score prospect', days_inactive: 16, protection_deadline: '2026-03-15', created_at: '2026-03-05T15:45:00Z' },
-            { id: 8003, is_demo: true, prospect_id: 103, from_agent_id: 6, to_agent_id: 7, reassigned_by: 3, reassignment_date: '2026-03-04T09:30:00Z', reassignment_reason: 'workload', reason_notes: 'Balancing workload', days_inactive: 12, protection_deadline: '2026-03-20', created_at: '2026-03-04T09:30:00Z' }
+            { id: 8001, prospect_id: 101, from_agent_id: 8, to_agent_id: 6, reassigned_by: 5, reassignment_date: '2026-03-06T10:23:00Z', reassignment_reason: 'inactive', reason_notes: 'Raj Kumar unresponsive', days_inactive: 14, protection_deadline: '2026-03-17', created_at: '2026-03-06T10:23:00Z' },
+            { id: 8002, prospect_id: 102, from_agent_id: 8, to_agent_id: 5, reassigned_by: 5, reassignment_date: '2026-03-05T15:45:00Z', reassignment_reason: 'inactive', reason_notes: 'High score prospect', days_inactive: 16, protection_deadline: '2026-03-15', created_at: '2026-03-05T15:45:00Z' },
+            { id: 8003, prospect_id: 103, from_agent_id: 6, to_agent_id: 7, reassigned_by: 3, reassignment_date: '2026-03-04T09:30:00Z', reassignment_reason: 'workload', reason_notes: 'Balancing workload', days_inactive: 12, protection_deadline: '2026-03-20', created_at: '2026-03-04T09:30:00Z' }
         ];
         for (const r of reassignments) {
             await AppDataStore.create('reassignment_history', r);
