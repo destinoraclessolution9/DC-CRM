@@ -12808,10 +12808,12 @@ const renderCurrentAssignments = async (agentId) => {
                 <p style="margin-bottom:12px;">Reset credentials for <strong>${escapeHtml(agent.full_name)}</strong> (${escapeHtml(agent.email || 'no email')})</p>
                 <div style="margin-bottom:16px;">
                     <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
-                        <input type="radio" name="pwd-reset-type" value="email" ${agent.email ? 'checked' : 'disabled'}> Send password reset email to agent
+                        <input type="radio" name="pwd-reset-type" value="email" ${agent.email ? 'checked' : 'disabled'}
+                            onchange="document.getElementById('manual-reset-section').style.display='none'"> Send password reset email to agent
                     </label>
                     <label style="display:flex;align-items:center;gap:8px;">
-                        <input type="radio" name="pwd-reset-type" value="manual" ${!agent.email ? 'checked' : ''}> Set temporary password manually
+                        <input type="radio" name="pwd-reset-type" value="manual" ${!agent.email ? 'checked' : ''}
+                            onchange="document.getElementById('manual-reset-section').style.display=''"> Set temporary password manually
                     </label>
                 </div>
                 <div id="manual-reset-section" style="${!agent.email ? '' : 'display:none;'}">
@@ -12822,12 +12824,7 @@ const renderCurrentAssignments = async (agentId) => {
                     </div>
                     <small style="color:var(--gray-500); margin-top:4px; display:block;">Agent must change password on next login.</small>
                 </div>
-            </div>
-            <script>
-                document.querySelectorAll('[name=pwd-reset-type]').forEach(r => r.addEventListener('change', e => {
-                    document.getElementById('manual-reset-section').style.display = e.target.value === 'manual' ? '' : 'none';
-                }));
-            <\/script>`;
+            </div>`;
         UI.showModal('Reset Agent Password', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
             { label: 'Reset Password', type: 'primary', action: `(async () => { await app.executePasswordReset('${agentId}'); })()` }
