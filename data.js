@@ -137,6 +137,10 @@ class DataStore {
         if (error) throw error;
         return data || [];
     }
+
+    // Aliases used throughout script.js
+    async getById(tableName, id) { return this.get(tableName, id); }
+    async create(tableName, record) { return this.add(tableName, record); }
 }
 
 // Create and protect the global instance
