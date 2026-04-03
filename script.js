@@ -9341,7 +9341,7 @@ function _wireLoginBtn() {
                 postal_code: document.getElementById('cps-zip')?.value || '',
                 ming_gua: document.getElementById('cps-gua')?.value || '',
                 score: 5,
-                responsible_agent_id: 5,
+                responsible_agent_id: _currentUser?.id || null,
                 referred_by_id: _selectedReferrer?.id || null,
                 referred_by_type: _selectedReferrer?.type || null,
                 referred_by: _selectedReferrer?.name || document.getElementById('cps-referrer')?.value || '',
@@ -9355,7 +9355,13 @@ function _wireLoginBtn() {
                 prospectData.lunar_birth = document.getElementById('cps-lunar')?.value;
             }
 
-            const prospect = await AppDataStore.create('prospects', prospectData);
+            let prospect;
+            try {
+                prospect = await AppDataStore.create('prospects', prospectData);
+            } catch (err) {
+                UI.toast.error('Failed to create prospect: ' + (err.message || 'Unknown error'));
+                return;
+            }
             activity.prospect_id = prospect.id;
             activity.activity_title = `CPS With ${name}`;
 
@@ -9493,7 +9499,13 @@ function _wireLoginBtn() {
             }
         }
 
-        const savedActivity = await AppDataStore.create('activities', activity);
+        let savedActivity;
+        try {
+            savedActivity = await AppDataStore.create('activities', activity);
+        } catch (err) {
+            UI.toast.error('Failed to save activity: ' + (err.message || 'Unknown error'));
+            return;
+        }
 
         if (document.getElementById('is-closing')?.checked) {
             const salesIdea = document.getElementById('case-sales-idea')?.value;
@@ -9501,20 +9513,24 @@ function _wireLoginBtn() {
             const successStory = document.getElementById('case-success-story')?.value;
 
             if (salesIdea || planDetails || successStory) {
-                await AppDataStore.create('case_studies', {
-                    title: `Case Study: ${activity.activity_title}`,
-                    prospect_id: activity.prospect_id || null,
-                    customer_id: activity.customer_id || null,
-                    activity_id: savedActivity.id,
-                    sales_idea: salesIdea,
-                    plan_details: planDetails,
-                    success_story: successStory,
-                    product: activity.solution_sold,
-                    amount: activity.amount_closed,
-                    closing_date: activity.activity_date,
-                    created_by: 5,
-                    is_public: false
-                });
+                try {
+                    await AppDataStore.create('case_studies', {
+                        title: `Case Study: ${activity.activity_title}`,
+                        prospect_id: activity.prospect_id || null,
+                        customer_id: activity.customer_id || null,
+                        activity_id: savedActivity.id,
+                        sales_idea: salesIdea,
+                        plan_details: planDetails,
+                        success_story: successStory,
+                        product: activity.solution_sold,
+                        amount: activity.amount_closed,
+                        closing_date: activity.activity_date,
+                        created_by: _currentUser?.id || null,
+                        is_public: false
+                    });
+                } catch (err) {
+                    console.warn('Case study save failed:', err.message);
+                }
             }
         }
 
