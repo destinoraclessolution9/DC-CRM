@@ -67,7 +67,7 @@ const SystemHealth = {
 
         try {
             // Test database connection
-            const testResult = DataStore.getAll('users').length >= 0;
+            const testResult = AppDataStore.getAll('users').length >= 0;
             const responseTime = performance.now() - start;
 
             return {
@@ -245,7 +245,7 @@ const SystemHealth = {
 
         try {
             // Check if AI models are loaded
-            const models = DataStore.getAll('ai_models');
+            const models = AppDataStore.getAll('ai_models');
             const hasActiveModels = models.some(m => m.is_active);
 
             return {
@@ -304,13 +304,13 @@ const SystemHealth = {
             summary: overall.summary
         };
 
-        DataStore.create('health_checks', check);
+        AppDataStore.create('health_checks', check);
 
         // Keep only last 1000 checks
-        const checks = DataStore.getAll('health_checks');
+        const checks = AppDataStore.getAll('health_checks');
         if (checks.length > 1000) {
             const toRemove = checks.slice(0, checks.length - 1000);
-            toRemove.forEach(c => DataStore.delete('health_checks', c.id));
+            toRemove.forEach(c => AppDataStore.delete('health_checks', c.id));
         }
 
         return check;
@@ -328,7 +328,7 @@ const SystemHealth = {
             acknowledged: false
         };
 
-        DataStore.create('system_alerts', alert);
+        AppDataStore.create('system_alerts', alert);
 
         // Notify admins
         notifyAdmins('System Health Alert', alert.message, 'critical');
@@ -345,7 +345,7 @@ const SystemHealth = {
     getHealthHistory: (hours = 24) => {
         const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000);
 
-        return DataStore.getAll('health_checks')
+        return AppDataStore.getAll('health_checks')
             .filter(c => new Date(c.timestamp) >= cutoff)
             .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
     },

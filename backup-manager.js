@@ -41,7 +41,7 @@ const BackupManager = {
             encrypted: options.encrypted !== false
         };
 
-        DataStore.create('backups', backup);
+        AppDataStore.create('backups', backup);
 
         // Start backup process
         BackupManager.processBackup(backupId);
@@ -51,13 +51,13 @@ const BackupManager = {
 
     // Process backup
     processBackup: async (backupId) => {
-        const backup = DataStore.getById('backups', backupId);
+        const backup = AppDataStore.getById('backups', backupId);
         if (!backup) return null;
 
         // Update status
         backup.status = BackupStatus.IN_PROGRESS;
         backup.started_at = new Date().toISOString();
-        DataStore.update('backups', backupId, backup);
+        AppDataStore.update('backups', backupId, backup);
 
         try {
             const backupData = {};
@@ -67,7 +67,7 @@ const BackupManager = {
             for (const table of backup.include_tables) {
                 if (backup.exclude_tables.includes(table)) continue;
 
-                const records = DataStore.getAll(table);
+                const records = AppDataStore.getAll(table);
                 backupData[table] = records;
                 totalRecords += records.length;
             }
@@ -108,7 +108,7 @@ const BackupManager = {
             backup.size = size;
             backup.records_backed_up = totalRecords;
             backup.file_location = `backup_${backupId}`;
-            DataStore.update('backups', backupId, backup);
+            AppDataStore.update('backups', backupId, backup);
 
             // Audit log
             AuditLogger.info(
@@ -131,7 +131,7 @@ const BackupManager = {
             backup.status = BackupStatus.FAILED;
             backup.error = error.message;
             backup.failed_at = new Date().toISOString();
-            DataStore.update('backups', backupId, backup);
+            AppDataStore.update('backups', backupId, backup);
 
             AuditLogger.error(
                 AuditCategory.BACKUP,
@@ -148,13 +148,13 @@ const BackupManager = {
 
     // Restore from backup
     restoreBackup: async (backupId, options = {}) => {
-        const backup = DataStore.getById('backups', backupId);
+        const backup = AppDataStore.getById('backups', backupId);
         if (!backup) return null;
 
         // Update status
         backup.restore_status = BackupStatus.RESTORING;
         backup.restore_started_at = new Date().toISOString();
-        DataStore.update('backups', backupId, backup);
+        AppDataStore.update('backups', backupId, backup);
 
         try {
             // Get backup data
@@ -184,15 +184,15 @@ const BackupManager = {
                 if (data[table]) {
                     // Clear existing data if specified
                     if (options.clearExisting) {
-                        const existing = DataStore.getAll(table);
+                        const existing = AppDataStore.getAll(table);
                         existing.forEach(record => {
-                            DataStore.delete(table, record.id);
+                            AppDataStore.delete(table, record.id);
                         });
                     }
 
                     // Restore records
                     for (const record of data[table]) {
-                        DataStore.create(table, record);
+                        AppDataStore.create(table, record);
                     }
                 }
             }
@@ -201,7 +201,7 @@ const BackupManager = {
             backup.restore_status = BackupStatus.COMPLETED;
             backup.restore_completed_at = new Date().toISOString();
             backup.restored_by = _currentUser?.id;
-            DataStore.update('backups', backupId, backup);
+            AppDataStore.update('backups', backupId, backup);
 
             // Audit log
             AuditLogger.critical(
@@ -221,7 +221,7 @@ const BackupManager = {
 
             backup.restore_status = BackupStatus.FAILED;
             backup.restore_error = error.message;
-            DataStore.update('backups', backupId, backup);
+            AppDataStore.update('backups', backupId, backup);
 
             AuditLogger.error(
                 AuditCategory.BACKUP,
@@ -255,7 +255,7 @@ const BackupManager = {
             created_by: _currentUser?.id
         };
 
-        DataStore.create('backup_schedules', job);
+        AppDataStore.create('backup_schedules', job);
 
         return job;
     },
@@ -280,7 +280,7 @@ const BackupManager = {
 
     // Cleanup old backups
     cleanupOldBackups: () => {
-        const backups = DataStore.getAll('backups');
+        const backups = AppDataStore.getAll('backups');
         const now = new Date();
 
         backups.forEach(backup => {
@@ -289,14 +289,14 @@ const BackupManager = {
                 localStorage.removeItem(`backup_${backup.id}`);
 
                 // Delete record
-                DataStore.delete('backups', backup.id);
+                AppDataStore.delete('backups', backup.id);
             }
         });
     },
 
     // List all backups
     listBackups: (filters = {}) => {
-        let backups = DataStore.getAll('backups').sort((a, b) =>
+        let backups = AppDataStore.getAll('backups').sort((a, b) =>
             new Date(b.created_at) - new Date(a.created_at)
         );
 
@@ -321,7 +321,7 @@ const BackupManager = {
 
     // Download backup
     downloadBackup: (backupId) => {
-        const backup = DataStore.getById('backups', backupId);
+        const backup = AppDataStore.getById('backups', backupId);
         if (!backup) return;
 
         const backupData = localStorage.getItem(`backup_${backupId}`);

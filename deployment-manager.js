@@ -48,7 +48,7 @@ const DeploymentManager = {
             rollback_version: DeploymentManager.currentVersion
         };
 
-        DataStore.create('deployments', deployment);
+        AppDataStore.create('deployments', deployment);
 
         // Start deployment process
         DeploymentManager.processDeployment(deployment.id);
@@ -58,14 +58,14 @@ const DeploymentManager = {
 
     // Process deployment
     processDeployment: async (deploymentId) => {
-        const deployment = DataStore.getById('deployments', deploymentId);
+        const deployment = AppDataStore.getById('deployments', deploymentId);
         if (!deployment) return null;
 
         try {
             // Build phase
             deployment.status = DeploymentStatus.BUILDING;
             deployment.build_started_at = new Date().toISOString();
-            DataStore.update('deployments', deploymentId, deployment);
+            AppDataStore.update('deployments', deploymentId, deployment);
 
             const buildResult = await DeploymentManager.build(deployment);
             if (!buildResult.success) throw new Error('Build failed');
@@ -75,7 +75,7 @@ const DeploymentManager = {
             // Test phase
             deployment.status = DeploymentStatus.TESTING;
             deployment.test_started_at = new Date().toISOString();
-            DataStore.update('deployments', deploymentId, deployment);
+            AppDataStore.update('deployments', deploymentId, deployment);
 
             const testResult = await DeploymentManager.test(deployment);
             deployment.tests = testResult;
@@ -89,7 +89,7 @@ const DeploymentManager = {
             // Deploy phase
             deployment.status = DeploymentStatus.DEPLOYING;
             deployment.deploy_started_at = new Date().toISOString();
-            DataStore.update('deployments', deploymentId, deployment);
+            AppDataStore.update('deployments', deploymentId, deployment);
 
             const deployResult = await DeploymentManager.deploy(deployment);
             if (!deployResult.success) throw new Error('Deployment failed');
@@ -99,7 +99,7 @@ const DeploymentManager = {
             // Complete
             deployment.status = DeploymentStatus.COMPLETED;
             deployment.completed_at = new Date().toISOString();
-            DataStore.update('deployments', deploymentId, deployment);
+            AppDataStore.update('deployments', deploymentId, deployment);
 
             // Update current version
             if (deployment.environment === DeploymentEnvironment.PRODUCTION) {
@@ -127,7 +127,7 @@ const DeploymentManager = {
             deployment.status = DeploymentStatus.FAILED;
             deployment.error = error.message;
             deployment.failed_at = new Date().toISOString();
-            DataStore.update('deployments', deploymentId, deployment);
+            AppDataStore.update('deployments', deploymentId, deployment);
 
             // Attempt rollback
             await DeploymentManager.rollback(deployment);
@@ -204,24 +204,24 @@ const DeploymentManager = {
             description: `Rollback from ${deployment.version}`
         };
 
-        DataStore.create('deployments', rollback);
+        AppDataStore.create('deployments', rollback);
 
         // Process rollback
         rollback.status = DeploymentStatus.DEPLOYING;
-        DataStore.update('deployments', rollback.id, rollback);
+        AppDataStore.update('deployments', rollback.id, rollback);
 
         // Simulate rollback
         await new Promise(resolve => setTimeout(resolve, 2000));
 
         rollback.status = DeploymentStatus.COMPLETED;
         rollback.completed_at = new Date().toISOString();
-        DataStore.update('deployments', rollback.id, rollback);
+        AppDataStore.update('deployments', rollback.id, rollback);
 
         // Update original deployment
         deployment.status = DeploymentStatus.ROLLED_BACK;
         deployment.rolled_back_at = new Date().toISOString();
         deployment.rollback_deployment = rollback.id;
-        DataStore.update('deployments', deployment.id, deployment);
+        AppDataStore.update('deployments', deployment.id, deployment);
 
         AuditLogger.critical(
             AuditCategory.DEPLOYMENT,
@@ -245,7 +245,7 @@ const DeploymentManager = {
 
     // Get deployment history
     getDeploymentHistory: (environment = null) => {
-        let deployments = DataStore.getAll('deployments')
+        let deployments = AppDataStore.getAll('deployments')
             .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
         if (environment) {

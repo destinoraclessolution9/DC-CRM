@@ -68,8 +68,8 @@ const AuditLogger = {
                 error_message: details.error || null
             };
 
-            // Store in DataStore
-            DataStore.create('audit_logs', auditEntry);
+            // Store in AppDataStore
+            AppDataStore.create('audit_logs', auditEntry);
 
             // Also send to server for permanent storage
             if (navigator.onLine) {
@@ -158,7 +158,7 @@ const AuditLogger = {
 
     // Search audit logs
     search: async (filters = {}) => {
-        let logs = DataStore.getAll('audit_logs');
+        let logs = AppDataStore.getAll('audit_logs');
 
         if (filters.startDate) {
             logs = logs.filter(log => log.timestamp >= filters.startDate);
@@ -203,7 +203,7 @@ const AuditLogger = {
         const cutoff = new Date();
         cutoff.setDate(cutoff.getDate() - days);
 
-        const logs = DataStore.getAll('audit_logs').filter(
+        const logs = AppDataStore.getAll('audit_logs').filter(
             log => new Date(log.timestamp) >= cutoff
         );
 
@@ -276,7 +276,7 @@ const checkSecurityIncident = (auditEntry) => {
 
     // Multiple failed logins
     if (auditEntry.action === AuditAction.LOGIN_FAILED) {
-        const recentFailures = DataStore.query('audit_logs', {
+        const recentFailures = AppDataStore.query('audit_logs', {
             action: AuditAction.LOGIN_FAILED,
             username: auditEntry.username
         }).filter(log => {
@@ -322,7 +322,7 @@ const checkSecurityIncident = (auditEntry) => {
 
     // Store incidents
     incidents.forEach(incident => {
-        DataStore.create('security_incidents', {
+        AppDataStore.create('security_incidents', {
             id: `incident_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
             ...incident,
             status: 'new',

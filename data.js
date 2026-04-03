@@ -142,12 +142,11 @@ class DataStore {
 // Create and protect the global instance
 const _dataStoreInstance = new DataStore();
 
-// Use Object.defineProperty to make window.DataStore read‑only and non‑configurable
-Object.defineProperty(window, 'DataStore', {
+// Use Object.defineProperty to make window.AppDataStore read‑only and non‑configurable
+Object.defineProperty(window, 'AppDataStore', {
     value: _dataStoreInstance,
     writable: false,
     configurable: false,
     enumerable: true
 });
-
-console.log('DataStore instance created and locked.');
+console.log('AppDataStore instance created and locked.');

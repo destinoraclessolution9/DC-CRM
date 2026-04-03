@@ -66,9 +66,9 @@ const SystemLogger = {
             SystemLogger.queue.shift();
         }
 
-        // Store in DataStore (with sampling for performance)
+        // Store in AppDataStore (with sampling for performance)
         if (level === LogLevel.ERROR || level === LogLevel.FATAL || Math.random() < 0.1) {
-            DataStore.create('system_logs', logEntry);
+            AppDataStore.create('system_logs', logEntry);
         }
 
         // Send critical logs to server

@@ -89,7 +89,7 @@ const getRole = (roleName) => {
     }
 
     // Check custom roles
-    const customRole = DataStore.getAll('roles').find(r => r.name === roleName);
+    const customRole = AppDataStore.getAll('roles').find(r => r.name === roleName);
     return customRole || DefaultRoles.VIEWER;
 };
 
@@ -194,7 +194,7 @@ const RoleManager = {
             created_by: window._currentUser?.id
         };
 
-        DataStore.create('roles', role);
+        AppDataStore.create('roles', role);
 
         AuditLogger.info(
             AuditCategory.PERMISSION,
@@ -211,8 +211,8 @@ const RoleManager = {
 
     // Assign role to user
     assignRole: (userId, roleId) => {
-        const user = DataStore.getById('users', userId);
-        const role = DataStore.getById('roles', roleId);
+        const user = AppDataStore.getById('users', userId);
+        const role = AppDataStore.getById('roles', roleId);
 
         if (!user || !role) return false;
 
@@ -221,7 +221,7 @@ const RoleManager = {
         user.role_assigned_at = new Date().toISOString();
         user.role_assigned_by = window._currentUser?.id;
 
-        DataStore.update('users', userId, user);
+        AppDataStore.update('users', userId, user);
 
         AuditLogger.info(
             AuditCategory.PERMISSION,
@@ -238,7 +238,7 @@ const RoleManager = {
 
     // Get effective permissions for user
     getUserPermissions: (userId) => {
-        const user = DataStore.getById('users', userId);
+        const user = AppDataStore.getById('users', userId);
         if (!user) return null;
 
         const role = getRole(user.role);

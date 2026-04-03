@@ -4,12 +4,12 @@ const traverse = require('@babel/traverse').default;
 const generate = require('@babel/generator').default;
 const t = require('@babel/types');
 
-// Read code and remove all "await DataStore" and "await  DataStore" to bypass syntax errors!
+// Read code and remove all "await AppDataStore" and "await  AppDataStore" to bypass syntax errors!
 let code = fs.readFileSync('script.js', 'utf8');
 
 // Some awaits were added manually by the user, causing syntax errors. We remove them before parsing.
 // We also remove existing async keywords from the user's manual attempts so we can apply them uniformly based on AST.
-code = code.replace(/await\s+DataStore/g, 'DataStore');
+code = code.replace(/await\s+AppDataStore/g, 'AppDataStore');
 
 console.log('Parsing code...');
 let ast;
@@ -27,13 +27,13 @@ try {
 
 const dataStoreMethods = ['getAll', 'getById', 'create', 'update', 'delete', 'query'];
 
-console.log('Traversing and modifying DataStore calls...');
-// First pass: add await to DataStore calls
+console.log('Traversing and modifying AppDataStore calls...');
+// First pass: add await to AppDataStore calls
 traverse(ast, {
     CallExpression(path) {
         if (
             t.isMemberExpression(path.node.callee) &&
-            t.isIdentifier(path.node.callee.object, { name: 'DataStore' }) &&
+            t.isIdentifier(path.node.callee.object, { name: 'AppDataStore' }) &&
             t.isIdentifier(path.node.callee.property) &&
             dataStoreMethods.includes(path.node.callee.property.name)
         ) {

@@ -172,7 +172,7 @@ const EncryptedFields = {
     documents: ['content', 'file_data']
 };
 
-// Wrapper for DataStore with encryption
+// Wrapper for AppDataStore with encryption
 const SecureDataStore = {
     // Create with encryption
     create: async (table, data) => {
@@ -198,13 +198,13 @@ const SecureDataStore = {
         encryptedData._encrypted_at = new Date().toISOString();
         encryptedData._encryption_version = '1.0';
 
-        // Store in DataStore
-        return DataStore.create(table, encryptedData);
+        // Store in AppDataStore
+        return AppDataStore.create(table, encryptedData);
     },
 
     // Read with decryption
     getById: async (table, id) => {
-        const data = DataStore.getById(table, id);
+        const data = AppDataStore.getById(table, id);
         if (!data) return null;
 
         // Check if data is encrypted
@@ -229,7 +229,7 @@ const SecureDataStore = {
 
     // Update with encryption
     update: async (table, id, data) => {
-        const existing = DataStore.getById(table, id);
+        const existing = AppDataStore.getById(table, id);
         if (!existing) return null;
 
         const encryptedFields = EncryptedFields[table] || [];
@@ -252,12 +252,12 @@ const SecureDataStore = {
         ])];
         encryptedData._encrypted_at = new Date().toISOString();
 
-        return DataStore.update(table, id, encryptedData);
+        return AppDataStore.update(table, id, encryptedData);
     },
 
     // Query with decryption (careful with performance)
     query: async (table, conditions) => {
-        const results = DataStore.query(table, conditions);
+        const results = AppDataStore.query(table, conditions);
         if (!results || results.length === 0) return results;
 
         // Check if any result has encrypted fields

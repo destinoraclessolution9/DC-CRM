@@ -1,6 +1,6 @@
 const appLogic = (() => {
     const getVisibleUserIds = async (user) => {
-        const allUsers = await DataStore.getAll('users');
+        const allUsers = await AppDataStore.getAll('users');
         return allUsers;
     };
 

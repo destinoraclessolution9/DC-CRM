@@ -23,15 +23,15 @@
         ]
     };
 
-    // 2. Mock DataStore
-    const originalDataStore = window.DataStore;
-    window.DataStore = {
+    // 2. Mock AppDataStore
+    const originalDataStore = window.AppDataStore;
+    window.AppDataStore = {
         getAll: (table) => JSON.parse(JSON.stringify(mockData[table] || [])),
         update: (table, id, data) => {
             const idx = mockData[table].findIndex(r => r.id == id);
             if (idx !== -1) {
                 mockData[table][idx] = { ...mockData[table][idx], ...data };
-                console.log(`[TEST] Mock DataStore updated ${table}:${id}`);
+                console.log(`[TEST] Mock AppDataStore updated ${table}:${id}`);
             }
         },
         emit: () => {} // No-op for tests
@@ -138,7 +138,7 @@
 
     // 4. Run Migration Logic (Inlined for test script self-containment)
     Object.entries(fieldMappings).forEach(([tableName, mapping]) => {
-        const records = DataStore.getAll(tableName);
+        const records = AppDataStore.getAll(tableName);
         records.forEach(record => {
             let updated = false;
             const newRecord = { ...record };
@@ -154,7 +154,7 @@
                 }
             });
             if (updated) {
-                DataStore.update(tableName, record.id, newRecord);
+                AppDataStore.update(tableName, record.id, newRecord);
             }
         });
     });
@@ -188,7 +188,7 @@
     } catch (e) {
         console.error('--- TESTS FAILED ---', e);
     } finally {
-        // Restore DataStore
-        window.DataStore = originalDataStore;
+        // Restore AppDataStore
+        window.AppDataStore = originalDataStore;
     }
 })();

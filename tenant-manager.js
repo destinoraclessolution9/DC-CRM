@@ -51,7 +51,7 @@ const TenantManager = {
         };
 
         // Create tenant record
-        DataStore.create('tenants', tenant);
+        AppDataStore.create('tenants', tenant);
 
         // Provision tenant resources
         await TenantManager.provisionTenant(tenant.id);
@@ -75,7 +75,7 @@ const TenantManager = {
 
     // Provision tenant resources
     provisionTenant: async (tenantId) => {
-        const tenant = DataStore.getById('tenants', tenantId);
+        const tenant = AppDataStore.getById('tenants', tenantId);
         if (!tenant) throw new Error('Tenant not found');
 
         // Create isolated storage
@@ -90,28 +90,28 @@ const TenantManager = {
         // Initialize tenant settings
         tenant.provisioned_at = new Date().toISOString();
         tenant.status = TenantStatus.ACTIVE;
-        DataStore.update('tenants', tenantId, tenant);
+        AppDataStore.update('tenants', tenantId, tenant);
 
         return true;
     },
 
     // Get tenant by domain
     getTenantByDomain: (domain) => {
-        return DataStore.getAll('tenants').find(t => t.domain === domain && t.status === TenantStatus.ACTIVE);
+        return AppDataStore.getAll('tenants').find(t => t.domain === domain && t.status === TenantStatus.ACTIVE);
     },
 
     // Get tenant by ID
     getTenant: (tenantId) => {
-        return DataStore.getById('tenants', tenantId);
+        return AppDataStore.getById('tenants', tenantId);
     },
 
     // Update tenant
     updateTenant: (tenantId, updates) => {
-        const tenant = DataStore.getById('tenants', tenantId);
+        const tenant = AppDataStore.getById('tenants', tenantId);
         if (!tenant) return null;
 
         const updated = { ...tenant, ...updates, updated_at: new Date().toISOString() };
-        DataStore.update('tenants', tenantId, updated);
+        AppDataStore.update('tenants', tenantId, updated);
 
         AuditLogger.info(
             AuditCategory.TENANT,
@@ -127,13 +127,13 @@ const TenantManager = {
 
     // Suspend tenant
     suspendTenant: (tenantId, reason) => {
-        const tenant = DataStore.getById('tenants', tenantId);
+        const tenant = AppDataStore.getById('tenants', tenantId);
         if (!tenant) return null;
 
         tenant.status = TenantStatus.SUSPENDED;
         tenant.suspended_at = new Date().toISOString();
         tenant.suspension_reason = reason;
-        DataStore.update('tenants', tenantId, tenant);
+        AppDataStore.update('tenants', tenantId, tenant);
 
         // Notify tenant users
         TenantManager.notifyTenantUsers(tenantId, 'suspension', { reason });
@@ -152,12 +152,12 @@ const TenantManager = {
 
     // Activate tenant
     activateTenant: (tenantId) => {
-        const tenant = DataStore.getById('tenants', tenantId);
+        const tenant = AppDataStore.getById('tenants', tenantId);
         if (!tenant) return null;
 
         tenant.status = TenantStatus.ACTIVE;
         tenant.activated_at = new Date().toISOString();
-        DataStore.update('tenants', tenantId, tenant);
+        AppDataStore.update('tenants', tenantId, tenant);
 
         AuditLogger.info(
             AuditCategory.TENANT,
@@ -170,18 +170,18 @@ const TenantManager = {
 
     // Delete tenant (with data purging)
     deleteTenant: async (tenantId, permanent = false) => {
-        const tenant = DataStore.getById('tenants', tenantId);
+        const tenant = AppDataStore.getById('tenants', tenantId);
         if (!tenant) return null;
 
         if (permanent) {
             // Permanently delete all tenant data
             await TenantManager.purgeTenantData(tenantId);
-            DataStore.delete('tenants', tenantId);
+            AppDataStore.delete('tenants', tenantId);
         } else {
             // Soft delete
             tenant.status = TenantStatus.EXPIRED;
             tenant.deleted_at = new Date().toISOString();
-            DataStore.update('tenants', tenantId, tenant);
+            AppDataStore.update('tenants', tenantId, tenant);
         }
 
         AuditLogger.critical(
@@ -195,7 +195,7 @@ const TenantManager = {
 
     // List all tenants with filters
     listTenants: (filters = {}) => {
-        let tenants = DataStore.getAll('tenants');
+        let tenants = AppDataStore.getAll('tenants');
 
         if (filters.status) {
             tenants = tenants.filter(t => t.status === filters.status);
@@ -218,14 +218,14 @@ const TenantManager = {
 
     // Get tenant usage statistics
     getTenantUsage: (tenantId) => {
-        const tenant = DataStore.getById('tenants', tenantId);
+        const tenant = AppDataStore.getById('tenants', tenantId);
         if (!tenant) return null;
 
         // Get counts from various tables (would need tenant filtering in real implementation)
-        const users = DataStore.getAll('users').filter(u => u.tenant_id === tenantId);
-        const prospects = DataStore.getAll('prospects').filter(p => p.tenant_id === tenantId);
-        const customers = DataStore.getAll('customers').filter(c => c.tenant_id === tenantId);
-        const documents = DataStore.getAll('documents').filter(d => d.tenant_id === tenantId);
+        const users = AppDataStore.getAll('users').filter(u => u.tenant_id === tenantId);
+        const prospects = AppDataStore.getAll('prospects').filter(p => p.tenant_id === tenantId);
+        const customers = AppDataStore.getAll('customers').filter(c => c.tenant_id === tenantId);
+        const documents = AppDataStore.getAll('documents').filter(d => d.tenant_id === tenantId);
 
         // Calculate storage usage (simplified)
         const storageUsed = documents.reduce((sum, doc) => sum + (doc.size || 0), 0);
@@ -247,7 +247,7 @@ const TenantManager = {
 
     // Get all tenants usage summary
     getAllTenantsUsage: () => {
-        const tenants = DataStore.getAll('tenants');
+        const tenants = AppDataStore.getAll('tenants');
         const usage = [];
 
         tenants.forEach(tenant => {

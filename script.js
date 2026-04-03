@@ -94,7 +94,7 @@ const appLogic = (() => {
             return 'all'; // special marker
         }
         // For team leaders and consultants, traverse down the reporting tree
-        const allUsers =await DataStore.getAll('users');
+        const allUsers =await AppDataStore.getAll('users');
         const result = [];
         const collect = (uid) => {
             result.push(uid);
@@ -115,7 +115,7 @@ const appLogic = (() => {
 
     // Get all prospects visible to current user
     const getVisibleProspects = async () => {
-        const all = await DataStore.getAll('prospects');
+        const all = await AppDataStore.getAll('prospects');
         const user = _currentUser;
         if (!user) return [];
         const visibleIds = await getVisibleUserIds(user);
@@ -134,9 +134,9 @@ const appLogic = (() => {
 
     const getVisibleCustomers = async () => {
         if (_currentUser && (isSystemAdmin(_currentUser) || isMarketingManager(_currentUser) || _currentUser.role === 'admin')) {
-            return await DataStore.getAll('customers');
+            return await AppDataStore.getAll('customers');
         }
-        return (await DataStore.getAll('customers')).filter(c => c.agent_id === _currentUser?.id);
+        return (await AppDataStore.getAll('customers')).filter(c => c.agent_id === _currentUser?.id);
     };
 
     // For activities: visible if current user is lead, co-agent, or the activity is 'open', or if the lead agent is within visible users.
@@ -154,7 +154,7 @@ const appLogic = (() => {
     };
 
     const getVisibleActivities = async () => {
-        const all = await DataStore.getAll('activities');
+        const all = await AppDataStore.getAll('activities');
         const visibility = await Promise.all(all.map(a => canViewActivity(a)));
         return all.filter((_, i) => visibility[i]);
     };
@@ -348,7 +348,7 @@ const appLogic = (() => {
 
     // Ensure referrals have the new fields (id, referrer_id, referrer_type, referred_prospect_id)
     const ensureReferralFields = async () => {
-        const referrals = await DataStore.getAll('referrals');
+        const referrals = await AppDataStore.getAll('referrals');
         let changed = false;
         referrals.forEach(r => {
             if (r.referrer_customer_id && !r.referrer_id) {
@@ -682,14 +682,14 @@ const appLogic = (() => {
                     <label>Has Purchased</label>
                     <select id="filter-prospect-has-purchased" class="form-control">
                         <option value="">Select Product</option>
-                        ${(await DataStore.getAll('products')).filter(p => p.is_active !== false).map(p => `<option value="${p.name}">${p.name}</option>`).join('')}
+                        ${(await AppDataStore.getAll('products')).filter(p => p.is_active !== false).map(p => `<option value="${p.name}">${p.name}</option>`).join('')}
                     </select>
                 </div>
                 <div class="filter-group">
                     <label>Has Not Purchased</label>
                     <select id="filter-prospect-not-purchased" class="form-control">
                         <option value="">Select Product</option>
-                        ${(await DataStore.getAll('products')).filter(p => p.is_active !== false).map(p => `<option value="${p.name}">${p.name}</option>`).join('')}
+                        ${(await AppDataStore.getAll('products')).filter(p => p.is_active !== false).map(p => `<option value="${p.name}">${p.name}</option>`).join('')}
                     </select>
                 </div>
             </div>
@@ -1034,7 +1034,7 @@ const appLogic = (() => {
     };
 
     const performAgentSearch = async (filters) => {
-        let items = (await DataStore.getAll('users')).filter(u => isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'));
+        let items = (await AppDataStore.getAll('users')).filter(u => isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'));
 
         // Basic filters
         if (filters.basic.name) {
@@ -1116,10 +1116,10 @@ const appLogic = (() => {
     };
 
     const hasProspectPurchasedProduct = async (prospectId, productName) => {
-        const purchases = await DataStore.getAll('purchases');
+        const purchases = await AppDataStore.getAll('purchases');
         if (purchases.some(p => p.customer_id === prospectId && p.item && p.item.includes(productName))) return true;
 
-        const activities = await DataStore.getAll('activities');
+        const activities = await AppDataStore.getAll('activities');
         return activities.some(a => (a.prospect_id === prospectId || a.customer_id === prospectId) && a.is_closing && a.solution_sold === productName);
     };
 
@@ -1171,7 +1171,7 @@ const appLogic = (() => {
     };
 
     const performActivitySearch = async (filters) => {
-        let items = await DataStore.getAll('activities');
+        let items = await AppDataStore.getAll('activities');
 
         if (filters.basic.type) {
             items = items.filter(i => i.activity_type === filters.basic.type);
@@ -1181,7 +1181,7 @@ const appLogic = (() => {
     };
 
     const performTransactionSearch = async (filters) => {
-        let items = await DataStore.getAll('purchases');
+        let items = await AppDataStore.getAll('purchases');
 
         if (filters.basic.product) {
             const query = filters.basic.product.toLowerCase();
@@ -1192,7 +1192,7 @@ const appLogic = (() => {
     };
 
     const performEventSearch = async (filters) => {
-        let items = await DataStore.getAll('events');
+        let items = await AppDataStore.getAll('events');
 
         if (filters.basic.title) {
             const query = filters.basic.title.toLowerCase();
@@ -1261,7 +1261,7 @@ const appLogic = (() => {
                     ${(await Promise.all(pageItems.map(async item => {
             let agentName = '-';
             if (item.lead_agent_id || item.responsible_agent_id) {
-                const agent = await DataStore.getById('users', item.lead_agent_id || item.responsible_agent_id);
+                const agent = await AppDataStore.getById('users', item.lead_agent_id || item.responsible_agent_id);
                 if (agent) agentName = agent.full_name;
             }
 
@@ -1321,7 +1321,7 @@ const appLogic = (() => {
         const container = document.getElementById('saved-searches-list');
         if (!container) return;
 
-        const searches = await DataStore.getAll('saved_searches');
+        const searches = await AppDataStore.getAll('saved_searches');
         if (searches.length === 0) {
             container.innerHTML = '<p class="text-muted" style="font-size: 12px; margin: 12px 0;">No saved searches yet.</p>';
             return;
@@ -1358,13 +1358,13 @@ const appLogic = (() => {
             created_at: new Date().toISOString()
         };
 
-        await DataStore.create('saved_searches', savedSearch);
+        await AppDataStore.create('saved_searches', savedSearch);
         UI.toast.success('Search saved successfully');
         await renderSavedSearches();
     };
 
     const loadSavedSearch = async (id) => {
-        const search = await DataStore.getById('saved_searches', id);
+        const search = await AppDataStore.getById('saved_searches', id);
         if (!search) return;
 
         UI.toast.info(`Loading search: ${search.search_name}`);
@@ -1386,7 +1386,7 @@ const appLogic = (() => {
 
     const deleteSavedSearch = async (id) => {
         if (confirm('Are you sure you want to delete this saved search?')) {
-            await DataStore.delete('saved_searches', id);
+            await AppDataStore.delete('saved_searches', id);
             UI.toast.success('Search deleted');
             await renderSavedSearches();
         }
@@ -1541,12 +1541,12 @@ const appLogic = (() => {
         if (!treeContainer) return;
         if (parentId === null) treeContainer.innerHTML = '';
 
-        const folders = await DataStore.getAll('folders')
+        const folders = await AppDataStore.getAll('folders')
             .filter(f => f.parent_id === parentId)
             .sort((a, b) => a.name.localeCompare(b.name));
 
         for (const folder of folders) {
-            const hasChildren = (await DataStore.getAll('folders')).some(f => f.parent_id === folder.id);
+            const hasChildren = (await AppDataStore.getAll('folders')).some(f => f.parent_id === folder.id);
             const isActive = _currentFolder === folder.id;
 
             const div = document.createElement('div');
@@ -1575,8 +1575,8 @@ const appLogic = (() => {
         const container = document.getElementById('breadcrumb');
         if (!container) return;
         const path = [];
-        let curr = _currentFolder ? await DataStore.getById('folders', _currentFolder) : null;
-        while (curr) { path.unshift(curr); curr = curr.parent_id ? await DataStore.getById('folders', curr.parent_id) : null; }
+        let curr = _currentFolder ? await AppDataStore.getById('folders', _currentFolder) : null;
+        while (curr) { path.unshift(curr); curr = curr.parent_id ? await AppDataStore.getById('folders', curr.parent_id) : null; }
 
         let html = '<span class="breadcrumb-item" onclick="app. navigateToFolder(null)">Root</span>';
         for (const f of path) { html += `<span class="breadcrumb-separator">/</span><span class="breadcrumb-item" onclick="app. navigateToFolder(${f.id})">${f.name}</span>`; }
@@ -1599,39 +1599,39 @@ const appLogic = (() => {
     const createFolder = async () => {
         const name = document.getElementById('new-folder-name')?.value;
         if (!name) return UI.toast.error('Name required');
-        await DataStore.create('folders', { id: Date.now(), name, parent_id: _currentFolder, color: document.getElementById('new-folder-color').value, created_by: _currentUser?.id, created_at: new Date().toISOString() });
+        await AppDataStore.create('folders', { id: Date.now(), name, parent_id: _currentFolder, color: document.getElementById('new-folder-color').value, created_by: _currentUser?.id, created_at: new Date().toISOString() });
         UI.hideModal(); UI.toast.success('Folder created'); await renderFolderTree();
     };
 
     const renameFolder = async (id) => {
-        const folder = await DataStore.getById('folders', id);
+        const folder = await AppDataStore.getById('folders', id);
         UI.showModal('Rename Folder', `<div class="form-group"><label>New Name</label><input type="text" id="rename-folder-input" class="form-control" value="${folder.name}"></div>`,
             [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Rename', type: 'primary', action: `await app. confirmRenameFolder(${id})` }]);
     };
     window.app.confirmRenameFolder = async (id) => {
         const name = document.getElementById('rename-folder-input')?.value;
         if (!name) return;
-        await DataStore.update('folders', id, { name }); UI.hideModal(); await renderFolderTree(); await renderBreadcrumb();
+        await AppDataStore.update('folders', id, { name }); UI.hideModal(); await renderFolderTree(); await renderBreadcrumb();
     };
 
     const deleteFolder = async (id) => {
-        const hasSub =(await DataStore.getAll('folders')).some(f => f.parent_id === id);
-        const hasFiles = (await DataStore.getAll('documents')).some(d => d.folder_id === id);
+        const hasSub =(await AppDataStore.getAll('folders')).some(f => f.parent_id === id);
+        const hasFiles = (await AppDataStore.getAll('documents')).some(d => d.folder_id === id);
         if (hasSub || hasFiles) return UI.toast.error('Cannot delete: Folder is not empty');
         UI.showModal('Delete Folder', '<p>Are you sure?</p>', [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Delete', type: 'primary', action: `await app. confirmDeleteFolder(${id})` }]);
     };
-    window.app.confirmDeleteFolder = async (id) => { await DataStore.delete('folders', id); UI.hideModal(); if (_currentFolder === id) _currentFolder = null; await renderFolderTree(); await loadFolderContents(); };
+    window.app.confirmDeleteFolder = async (id) => { await AppDataStore.delete('folders', id); UI.hideModal(); if (_currentFolder === id) _currentFolder = null; await renderFolderTree(); await loadFolderContents(); };
 
     const showRecentFiles = async () => {
-        const allFiles = (await DataStore.getAll('documents')).sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at));
+        const allFiles = (await AppDataStore.getAll('documents')).sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at));
         await renderFileListView(allFiles.slice(0, 20)); // Show top 20
         _currentFolder = 'recent'; await renderBreadcrumb();
     };
 
-    const showAllFiles = async () => { await renderFileListView(await DataStore.getAll('documents')); _currentFolder = 'all'; await renderBreadcrumb(); };
-    const showStarredFiles = async () => { await renderFileListView((await DataStore.getAll('documents')).filter(d => d.is_starred)); _currentFolder = 'starred'; await renderBreadcrumb(); };
+    const showAllFiles = async () => { await renderFileListView(await AppDataStore.getAll('documents')); _currentFolder = 'all'; await renderBreadcrumb(); };
+    const showStarredFiles = async () => { await renderFileListView((await AppDataStore.getAll('documents')).filter(d => d.is_starred)); _currentFolder = 'starred'; await renderBreadcrumb(); };
 
-    const toggleStar = async (id) => { const f = await DataStore.getById('documents', id); await DataStore.update('documents', id, { is_starred: !f.is_starred }); await loadFolderContents(); };
+    const toggleStar = async (id) => { const f = await AppDataStore.getById('documents', id); await AppDataStore.update('documents', id, { is_starred: !f.is_starred }); await loadFolderContents(); };
 
     const downloadFile = (id) => { UI.toast.info('Starting download...'); /* Implementation depends on environment */ };
 
@@ -1640,12 +1640,12 @@ const appLogic = (() => {
     const handleDropOnFolder = async (e, folderId) => {
         e.preventDefault();
         const fileId = parseInt(e.dataTransfer.getData('text/plain'));
-        if (fileId) { await DataStore.update('documents', fileId, { folder_id: folderId }); UI.toast.success('Moved successfully'); await loadFolderContents(); await renderFolderTree(); }
+        if (fileId) { await AppDataStore.update('documents', fileId, { folder_id: folderId }); UI.toast.success('Moved successfully'); await loadFolderContents(); await renderFolderTree(); }
     };
 
     const showVersionHistory = async (fileId) => {
-        const file = await DataStore.getById('documents', fileId);
-        const versions = (await DataStore.getAll('document_versions')).filter(v => v.document_id === fileId).sort((a, b) => b.version_number - a.version_number);
+        const file = await AppDataStore.getById('documents', fileId);
+        const versions = (await AppDataStore.getAll('document_versions')).filter(v => v.document_id === fileId).sort((a, b) => b.version_number - a.version_number);
         const content = `
             <div class="version-history">
                 <div class="version-header"><h3>Version History: ${file.filename}</h3><p>Current: v${file.current_version || 1}</p></div>
@@ -1657,7 +1657,7 @@ const appLogic = (() => {
                                 <td>v${v.version_number}</td>
                                 <td>${new Date(v.created_at).toLocaleString()}</td>
                                 <td>${formatFileSize(v.size)}</td>
-                                <td>${(await DataStore.getById('users', v.created_by))?.full_name || 'System'}</td>
+                                <td>${(await AppDataStore.getById('users', v.created_by))?.full_name || 'System'}</td>
                                 <td>${v.change_note || '-'}</td>
                                 <td>
                                     <button class="btn-icon" onclick="app.downloadVersion(${v.id})"><i class="fas fa-download"></i></button>
@@ -1674,7 +1674,7 @@ const appLogic = (() => {
     };
 
     const showCompareTool = async (fileId) => {
-        const versions = (await DataStore.getAll('document_versions')).filter(v => v.document_id === fileId);
+        const versions = (await AppDataStore.getAll('document_versions')).filter(v => v.document_id === fileId);
         UI.showModal('Compare Versions', `
             <div class="compare-setup">
                 <select id="v1" class="form-control">${versions.map(v => `<option value="${v.id}">Version ${v.version_number}</option>`).join('')}</select>
@@ -1685,24 +1685,24 @@ const appLogic = (() => {
     };
 
     const compareVersions = async (fileId) => {
-        const v1 = await DataStore.getById('document_versions', parseInt(document.getElementById('v1').value));
-        const v2 = await DataStore.getById('document_versions', parseInt(document.getElementById('v2').value));
+        const v1 = await AppDataStore.getById('document_versions', parseInt(document.getElementById('v1').value));
+        const v2 = await AppDataStore.getById('document_versions', parseInt(document.getElementById('v2').value));
         UI.showModal('Comparison', `<div class="diff-view"><pre>${v1.data || ''}</pre><pre>${v2.data || ''}</pre></div>`, [{ label: 'Close', type: 'primary', action: 'UI.hideModal()' }]);
     };
 
     const downloadVersion = (versionId) => { UI.toast.info(`Downloading version ${versionId}...`); };
     const restoreVersion = async (versionId) => {
-        const ver = await DataStore.getById('document_versions', versionId);
-        await DataStore.update('documents', ver.document_id, { current_version: ver.version_number, updatedAt: new Date().toISOString() });
+        const ver = await AppDataStore.getById('document_versions', versionId);
+        await AppDataStore.update('documents', ver.document_id, { current_version: ver.version_number, updatedAt: new Date().toISOString() });
         UI.toast.success(`Restored to version ${ver.version_number}`); UI.hideModal(); await loadFolderContents();
     };
 
     const openShareModal = async (fileId) => {
-        const file = await DataStore.getById('documents', fileId);
-        const users = (await DataStore.getAll('users')).filter(u => u.id !== _currentUser?.id);
-        const shares = (await DataStore.getAll('document_shares')).filter(s => s.document_id === fileId);
+        const file = await AppDataStore.getById('documents', fileId);
+        const users = (await AppDataStore.getAll('users')).filter(u => u.id !== _currentUser?.id);
+        const shares = (await AppDataStore.getAll('document_shares')).filter(s => s.document_id === fileId);
         const shareItems = await Promise.all(shares.map(async s => {
-            const user = await DataStore.getById('users', s.shared_with);
+            const user = await AppDataStore.getById('users', s.shared_with);
             return `<div class="share-item">${user?.full_name || 'Unknown'} (${s.permission}) <button onclick="app. removeShare(${s.id})">x</button></div>`;
         }));
 
@@ -1724,14 +1724,14 @@ const appLogic = (() => {
     const createShare = async (fileId) => {
         const userId = parseInt(document.getElementById('share-user').value);
         if (!userId) return;
-        await DataStore.create('document_shares', { id: Date.now(), document_id: fileId, shared_with: userId, permission: 'view', shared_by: _currentUser?.id });
+        await AppDataStore.create('document_shares', { id: Date.now(), document_id: fileId, shared_with: userId, permission: 'view', shared_by: _currentUser?.id });
         await openShareModal(fileId);
     };
 
-    const removeShare = async (id) => { await DataStore.delete('document_shares', id); UI.toast.success('Share removed'); UI.hideModal(); };
+    const removeShare = async (id) => { await AppDataStore.delete('document_shares', id); UI.toast.success('Share removed'); UI.hideModal(); };
 
     const initDefaultFolders = async () => {
-        const existing = await DataStore.getAll('folders');
+        const existing = await AppDataStore.getAll('folders');
         if (!existing || existing.length === 0) {
             const defaults = [
                 { id: 1, name: 'Company Policies', color: '#3b82f6', parent_id: null },
@@ -1740,20 +1740,20 @@ const appLogic = (() => {
                 { id: 4, name: 'Marketing Materials', color: '#ef4444', parent_id: null }
             ];
             for (const f of defaults) {
-                await DataStore.create('folders', f);
+                await AppDataStore.create('folders', f);
             }
         }
     };
 
     const initSampleDocuments = async () => {
-        if (await DataStore.getAll('documents').length === 0) {
-            await DataStore.create('documents', { id: 101, filename: 'Welcome Guide.pdf', folder_id: 1, size: 1024 * 500, created_at: new Date().toISOString() });
-            await DataStore.create('documents', { id: 102, filename: 'Privacy Policy.docx', folder_id: 1, size: 1024 * 200, created_at: new Date().toISOString() });
+        if (await AppDataStore.getAll('documents').length === 0) {
+            await AppDataStore.create('documents', { id: 101, filename: 'Welcome Guide.pdf', folder_id: 1, size: 1024 * 500, created_at: new Date().toISOString() });
+            await AppDataStore.create('documents', { id: 102, filename: 'Privacy Policy.docx', folder_id: 1, size: 1024 * 200, created_at: new Date().toISOString() });
         }
     };
 
     const getFilesInCurrentFolder = async () => {
-        let files = await DataStore.getAll('documents');
+        let files = await AppDataStore.getAll('documents');
 
         // Filter by current folder
         if (_currentFolder && _currentFolder !== 'recent' && _currentFolder !== 'all' && _currentFolder !== 'starred') {
@@ -2046,7 +2046,7 @@ const appLogic = (() => {
 
     const confirmDeleteSelected = async () => {
         for (const fileId of _selectedFiles) {
-            await DataStore.delete('documents', fileId);
+            await AppDataStore.delete('documents', fileId);
         }
         _selectedFiles = [];
         await loadFolderContents();
@@ -2184,7 +2184,7 @@ const appLogic = (() => {
                     is_starred: false
                 };
 
-                await DataStore.create('documents', newDoc);
+                await AppDataStore.create('documents', newDoc);
 
                 uploaded++;
                 const percent = (uploaded / total) * 100;
@@ -2204,7 +2204,7 @@ const appLogic = (() => {
     };
 
     const previewFile = async (fileId) => {
-        const file = await DataStore.getById('documents', fileId);
+        const file = await AppDataStore.getById('documents', fileId);
         if (!file) return;
 
         const filename = file.filename;
@@ -2261,11 +2261,11 @@ In a production system, this would show the actual file contents.
     };
 
     const showFileMetadata = async (fileId) => {
-        const file = await DataStore.getById('documents', fileId);
+        const file = await AppDataStore.getById('documents', fileId);
         if (!file) return;
 
-        const creator = file.created_by ? await DataStore.getById('users', file.created_by) : null;
-        const versions = (await DataStore.getAll('document_versions')).filter(v => v.document_id === fileId);
+        const creator = file.created_by ? await AppDataStore.getById('users', file.created_by) : null;
+        const versions = (await AppDataStore.getAll('document_versions')).filter(v => v.document_id === fileId);
 
         const content = `
             <div class="file-metadata">
@@ -2345,20 +2345,20 @@ In a production system, this would show the actual file contents.
     const getFolderPath = async (folderId) => {
         if (!folderId) return 'Root';
         const path = [];
-        let current = await DataStore.getById('folders', folderId);
-        while (current) { path.unshift(current.name); current = current.parent_id ? await DataStore.getById('folders', current.parent_id) : null; }
+        let current = await AppDataStore.getById('folders', folderId);
+        while (current) { path.unshift(current.name); current = current.parent_id ? await AppDataStore.getById('folders', current.parent_id) : null; }
         return path.join(' / ');
     };
 
     const editFileDescription = async (fileId) => {
-        const file = await DataStore.getById('documents', fileId);
+        const file = await AppDataStore.getById('documents', fileId);
         UI.showModal('Edit Description', `<div class="form-group"><label>Description</label><textarea id="edit-file-desc" class="form-control" rows="4">${file.description || ''}</textarea></div>`,
             [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Save', type: 'primary', action: `await app. saveFileDescription(${fileId})` }]);
     };
 
     const saveFileDescription = async (fileId) => {
         const description = document.getElementById('edit-file-desc')?.value;
-        await DataStore.update('documents', fileId, { description }); UI.hideModal(); UI.toast.success('Description updated'); await showFileMetadata(fileId);
+        await AppDataStore.update('documents', fileId, { description }); UI.hideModal(); UI.toast.success('Description updated'); await showFileMetadata(fileId);
     };
 
     console.log('App initializing...');
@@ -2369,7 +2369,7 @@ In a production system, this would show the actual file contents.
         const text = document.getElementById('customer-note-text')?.value?.trim();
         if (!text) { UI.toast.error('Please enter a note'); return; }
         const currentUser = await Auth.getCurrentUser();
-        await DataStore.create('notes', {
+        await AppDataStore.create('notes', {
             id: Date.now(),
             customer_id: customerId,
             text,
@@ -2383,7 +2383,7 @@ In a production system, this would show the actual file contents.
 
     const deleteCustomerNote = async (customerId, noteId) => {
         UI.confirm('Delete Note?', 'Are you sure?', async () => {
-            await DataStore.delete('notes', noteId);
+            await AppDataStore.delete('notes', noteId);
             UI.toast.success('Note deleted');
             await showCustomerDetail(customerId);
         });
@@ -2393,7 +2393,7 @@ In a production system, this would show the actual file contents.
         const text = document.getElementById(`agent-note-text-${agentId}`)?.value?.trim();
         if (!text) { UI.toast.error('Please enter a note'); return; }
         const currentUser = await Auth.getCurrentUser();
-        await DataStore.create('notes', {
+        await AppDataStore.create('notes', {
             id: Date.now(),
             agent_id: agentId,
             text,
@@ -2407,7 +2407,7 @@ In a production system, this would show the actual file contents.
 
     const deleteAgentNote = async (agentId, noteId) => {
         UI.confirm('Delete Note?', 'Are you sure?', async () => {
-            await DataStore.delete('notes', noteId);
+            await AppDataStore.delete('notes', noteId);
             UI.toast.success('Note deleted');
             await showAgentDetail(agentId);
         });
@@ -2610,18 +2610,18 @@ In a production system, this would show the actual file contents.
 
         if (entityType === 'prospect') {
             noteData.prospect_id = entityId;
-            await DataStore.create('notes', noteData);
+            await AppDataStore.create('notes', noteData);
             if (entityId) await showProspectDetail(entityId);
         } else if (entityType === 'customer') {
             noteData.customer_id = entityId;
-            await DataStore.create('notes', noteData);
+            await AppDataStore.create('notes', noteData);
             if (entityId) await showCustomerDetail(entityId);
         } else if (entityType === 'agent') {
             noteData.agent_id = entityId;
-            await DataStore.create('notes', noteData);
+            await AppDataStore.create('notes', noteData);
             if (entityId) await showAgentDetail(entityId);
         } else {
-            await DataStore.create('notes', noteData);
+            await AppDataStore.create('notes', noteData);
         }
     };
 
@@ -2877,9 +2877,9 @@ In a production system, this would show the actual file contents.
         for (const item of queue) {
             try {
                 if (item.action.startsWith('create_')) {
-                    await DataStore.create(item.action.replace('create_', ''), item.data);
+                    await AppDataStore.create(item.action.replace('create_', ''), item.data);
                 } else if (item.action.startsWith('update_')) {
-                    await DataStore.update(item.action.replace('update_', ''), item.data.id, item.data);
+                    await AppDataStore.update(item.action.replace('update_', ''), item.data.id, item.data);
                 }
                 success++;
             } catch (e) {
@@ -2895,13 +2895,13 @@ In a production system, this would show the actual file contents.
     };
 
     const offlineCreate = async (tableName, data) => {
-        if (_isOnline) return await DataStore.create(tableName, data);
+        if (_isOnline) return await AppDataStore.create(tableName, data);
         addToOfflineQueue('create_' + tableName, data);
         return { ...data, id: 'offline-' + Date.now(), offline: true };
     };
 
     const offlineUpdate = async (tableName, id, data) => {
-        if (_isOnline) return await DataStore.update(tableName, id, data);
+        if (_isOnline) return await AppDataStore.update(tableName, id, data);
         addToOfflineQueue('update_' + tableName, { ...data, id });
         return { ...data, id, offline: true };
     };
@@ -3010,7 +3010,7 @@ In a production system, this would show the actual file contents.
             this.syncInProgress = true;
 
             try {
-                const activities = await DataStore.getAll('activities');
+                const activities = await AppDataStore.getAll('activities');
                 const syncLog = this.getSyncLog();
 
                 let synced = 0, created = 0, updated = 0, deleted = 0;
@@ -3089,7 +3089,7 @@ In a production system, this would show the actual file contents.
             // Also add to sync_history table
             const connection = await getGoogleConnection();
             if (connection && _currentUser) {
-                await DataStore.create('sync_history', {
+                await AppDataStore.create('sync_history', {
                     integration_id: connection.integration_id,
                     user_id: _currentUser.id,
                     activity_id: activityId,
@@ -3118,7 +3118,7 @@ In a production system, this would show the actual file contents.
 
             const connection = await getGoogleConnection();
             if (connection && _currentUser) {
-                await DataStore.create('sync_history', {
+                await AppDataStore.create('sync_history', {
                     integration_id: connection.integration_id,
                     user_id: _currentUser.id,
                     activity_id: activityId,
@@ -3221,7 +3221,7 @@ In a production system, this would show the actual file contents.
     };
 
     const getConnectionStatus = async (integrationId) => {
-        const connections = await DataStore.query('integration_connections', {
+        const connections = await AppDataStore.query('integration_connections', {
             integration_id: await getIntegrationId(integrationId),
             user_id: _currentUser?.id || 1
         });
@@ -3237,7 +3237,7 @@ In a production system, this would show the actual file contents.
     };
 
     const getIntegrationId = async (provider) => {
-        const integrations = await DataStore.getAll('integrations');
+        const integrations = await AppDataStore.getAll('integrations');
         const integration = integrations.find(i => i.provider === provider);
         return integration ? integration.id : null;
     };
@@ -3356,7 +3356,7 @@ In a production system, this would show the actual file contents.
         const integrationId = await getIntegrationId('google');
         if (!integrationId) return null;
 
-        const connections = await DataStore.query('integration_connections', {
+        const connections = await AppDataStore.query('integration_connections', {
             integration_id: integrationId,
             user_id: _currentUser?.id || 1
         });
@@ -3396,9 +3396,9 @@ In a production system, this would show the actual file contents.
 
     const simulateGoogleConnection = async () => {
         UI.hideModal();
-        let integration = (await DataStore.getAll('integrations')).find(i => i.provider === 'google');
+        let integration = (await AppDataStore.getAll('integrations')).find(i => i.provider === 'google');
         if (!integration) {
-            integration = await DataStore.create('integrations', {
+            integration = await AppDataStore.create('integrations', {
                 integration_name: 'Google Calendar',
                 provider: 'google',
                 type: 'calendar',
@@ -3410,13 +3410,13 @@ In a production system, this would show the actual file contents.
 
         const oldConn = await getGoogleConnection();
         if (oldConn) {
-            await DataStore.update('integration_connections', oldConn.id, {
+            await AppDataStore.update('integration_connections', oldConn.id, {
                 status: 'connected',
                 token_expires_at: new Date(Date.now() + 3600 * 1000).toISOString(),
                 updated_at: new Date().toISOString()
             });
         } else {
-            await DataStore.create('integration_connections', {
+            await AppDataStore.create('integration_connections', {
                 integration_id: integration.id,
                 user_id: _currentUser?.id || 1,
                 access_token: 'encrypted_mock_token',
@@ -3455,7 +3455,7 @@ In a production system, this would show the actual file contents.
             reminder: document.getElementById('default-reminder')?.value || '15'
         };
 
-        await DataStore.update('integration_connections', connection.id, {
+        await AppDataStore.update('integration_connections', connection.id, {
             sync_settings: settings,
             updated_at: new Date().toISOString()
         });
@@ -3475,7 +3475,7 @@ In a production system, this would show the actual file contents.
 
         const connection = await getGoogleConnection();
         if (connection) {
-            await DataStore.update('integration_connections', connection.id, {
+            await AppDataStore.update('integration_connections', connection.id, {
                 last_sync: new Date().toISOString()
             });
         }
@@ -3483,7 +3483,7 @@ In a production system, this would show the actual file contents.
     };
 
     const viewSyncHistory = async () => {
-        const syncHistory = (await DataStore.getAll('sync_history')).filter(
+        const syncHistory = (await AppDataStore.getAll('sync_history')).filter(
             h => h.user_id === (_currentUser?.id || 1)
         ).sort((a, b) => new Date(b.synced_at) - new Date(a.synced_at));
 
@@ -3523,7 +3523,7 @@ In a production system, this would show the actual file contents.
             `;
         } else {
             for (const [index, item] of syncHistory.slice(0, 10).entries()) {
-                const activity = await DataStore.getById('activities', item.activity_id);
+                const activity = await AppDataStore.getById('activities', item.activity_id);
                 const directionIcon = item.direction === 'crm_to_google' ? '→' : '←';
                 const statusIcon = item.status === 'success' ? '✓' : item.status === 'conflict' ? '⚠' : '✗';
                 const statusColor = item.status === 'success' ? '#10b981' : item.status === 'conflict' ? '#f59e0b' : '#ef4444';
@@ -3558,7 +3558,7 @@ In a production system, this would show the actual file contents.
 
     const exportSyncHistory = () => { UI.toast.info('Exporting sync history...'); };
     const clearSyncHistory = async () => {
-        const logs =await  (await DataStore.getAll('sync_history')).filter(h => h.user_id !== (_currentUser?.id || 1));
+        const logs =await  (await AppDataStore.getAll('sync_history')).filter(h => h.user_id !== (_currentUser?.id || 1));
         localStorage.setItem('fs_crm_sync_history', JSON.stringify(logs));
         UI.toast.success('Sync history cleared');
         await viewSyncHistory();
@@ -3579,7 +3579,7 @@ In a production system, this would show the actual file contents.
     const confirmDisconnectGoogle = async () => {
         const connection = await getGoogleConnection();
         if (connection) {
-            await DataStore.update('integration_connections', connection.id, {
+            await AppDataStore.update('integration_connections', connection.id, {
                 status: 'disconnected',
                 updated_at: new Date().toISOString()
             });
@@ -3594,11 +3594,11 @@ In a production system, this would show the actual file contents.
     };
 
     // Hook into activity CRUD for auto-sync
-    const originalCreateActivity = DataStore.create;
-    const originalUpdateActivity = DataStore.update;
-    const originalDeleteActivity = DataStore.delete;
+    const originalCreateActivity = AppDataStore.create;
+    const originalUpdateActivity = AppDataStore.update;
+    const originalDeleteActivity = AppDataStore.delete;
 
-    DataStore.create = async function (tableName, data) {
+    AppDataStore.create = async function (tableName, data) {
         const result = await originalCreateActivity.call(this, tableName, data);
         if (tableName === 'activities' && _syncManager) {
             await setTimeout(async () => {
@@ -3611,12 +3611,12 @@ In a production system, this would show the actual file contents.
         return result;
     };
 
-    DataStore.update = async function (tableName, id, data) {
+    AppDataStore.update = async function (tableName, id, data) {
         const result = await originalUpdateActivity.call(this, tableName, id, data);
         if (tableName === 'activities' && _syncManager) {
             await setTimeout(async () => {
                 const connection = await getGoogleConnection();
-                const activity = await DataStore.getById('activities', id);
+                const activity = await AppDataStore.getById('activities', id);
                 if (connection && activity && connection.sync_settings?.syncTypes[activity.activity_type?.toLowerCase()]) {
                     await _syncManager. syncCRMtoGoogle().catch(console.error);
                 }
@@ -3625,7 +3625,7 @@ In a production system, this would show the actual file contents.
         return result;
     };
 
-    DataStore.delete = async function (tableName, id) {
+    AppDataStore.delete = async function (tableName, id) {
         const result = await originalDeleteActivity.call(this, tableName, id);
         if (tableName === 'activities' && _syncManager) {
             await setTimeout(async () => {
@@ -3653,12 +3653,12 @@ In a production system, this would show the actual file contents.
 
     // Get WhatsApp connection
     const getWhatsAppConnection = async () => {
-        const integrations = await DataStore.getAll('integrations');
+        const integrations = await AppDataStore.getAll('integrations');
         const whatsappIntegration = integrations.find(i => i.provider === 'whatsapp');
 
         if (!whatsappIntegration) return null;
 
-        const connections = await DataStore.query('integration_connections', {
+        const connections = await AppDataStore.query('integration_connections', {
             integration_id: whatsappIntegration.id,
             user_id: _currentUser?.id || 1
         });
@@ -3775,9 +3775,9 @@ In a production system, this would show the actual file contents.
             return;
         }
 
-        let integration = (await DataStore.getAll('integrations')).find(i => i.provider === 'whatsapp');
+        let integration = (await AppDataStore.getAll('integrations')).find(i => i.provider === 'whatsapp');
         if (!integration) {
-            integration = await DataStore.create('integrations', {
+            integration = await AppDataStore.create('integrations', {
                 integration_name: 'WhatsApp Business',
                 provider: 'whatsapp',
                 type: 'messaging',
@@ -3801,9 +3801,9 @@ In a production system, this would show the actual file contents.
         };
 
         if (existingConnection) {
-            await DataStore.update('integration_connections', existingConnection.id, connectionData);
+            await AppDataStore.update('integration_connections', existingConnection.id, connectionData);
         } else {
-            await DataStore.create('integration_connections', {
+            await AppDataStore.create('integration_connections', {
                 ...connectionData,
                 created_at: new Date().toISOString()
             });
@@ -3825,7 +3825,7 @@ In a production system, this would show the actual file contents.
         UI.toast.success('Webhook verified successfully');
         const connection = await getWhatsAppConnection();
         if (connection) {
-            await DataStore.update('integration_connections', connection.id, {
+            await AppDataStore.update('integration_connections', connection.id, {
                 webhook_verified: true,
                 updated_at: new Date().toISOString()
             });
@@ -3852,7 +3852,7 @@ In a production system, this would show the actual file contents.
     const confirmDisconnectWhatsApp = async () => {
         const connection = await getWhatsAppConnection();
         if (connection) {
-            await DataStore.update('integration_connections', connection.id, {
+            await AppDataStore.update('integration_connections', connection.id, {
                 status: 'disconnected',
                 updated_at: new Date().toISOString()
             });
@@ -3864,16 +3864,16 @@ In a production system, this would show the actual file contents.
 
     const openSendWhatsAppModal = async (entityType, entityId) => {
         const entity = entityType === 'prospect'
-            ? await DataStore.getById('prospects', entityId)
-            : await DataStore.getById('customers', entityId);
+            ? await AppDataStore.getById('prospects', entityId)
+            : await AppDataStore.getById('customers', entityId);
         if (!entity) return;
 
         // Create demo templates if empty
-        let templates = await DataStore.getAll('whatsapp_templates');
+        let templates = await AppDataStore.getAll('whatsapp_templates');
         if (templates.length === 0) {
             templates = [
-                await DataStore.create('whatsapp_templates', { template_name: 'Birthday Greeting', status: 'APPROVED', content: 'Hi {{name}}, wishing you a very happy birthday!' }),
-                await DataStore.create('whatsapp_templates', { template_name: 'Appointment Reminder', status: 'APPROVED', content: 'Hi {{name}}, your appointment is confirmed.' })
+                await AppDataStore.create('whatsapp_templates', { template_name: 'Birthday Greeting', status: 'APPROVED', content: 'Hi {{name}}, wishing you a very happy birthday!' }),
+                await AppDataStore.create('whatsapp_templates', { template_name: 'Appointment Reminder', status: 'APPROVED', content: 'Hi {{name}}, your appointment is confirmed.' })
             ];
         }
 
@@ -3932,9 +3932,9 @@ In a production system, this would show the actual file contents.
         if (isTemplate) {
             const templateId = document.getElementById('template-select')?.value;
             if (!templateId) { UI.toast.error('Please select a template'); return; }
-            const template = await DataStore.getById('whatsapp_templates', parseInt(templateId));
+            const template = await AppDataStore.getById('whatsapp_templates', parseInt(templateId));
             await setTimeout(async () => {
-                await DataStore.create('whatsapp_messages', {
+                await AppDataStore.create('whatsapp_messages', {
                     id: 'wamid_' + Date.now(),
                     entity_type: entityType,
                     entity_id: entityId,
@@ -3954,7 +3954,7 @@ In a production system, this would show the actual file contents.
             const message = document.getElementById('free-message')?.value;
             if (!message) { UI.toast.error('Please enter a message'); return; }
             await setTimeout(async () => {
-                await DataStore.create('whatsapp_messages', {
+                await AppDataStore.create('whatsapp_messages', {
                     id: 'wamid_' + Date.now(),
                     entity_type: entityType,
                     entity_id: entityId,
@@ -3973,7 +3973,7 @@ In a production system, this would show the actual file contents.
     };
 
     const renderWhatsAppHistoryTab = async (entityType, entityId) => {
-        const messages = await DataStore.getAll('whatsapp_messages')
+        const messages = await AppDataStore.getAll('whatsapp_messages')
             .filter(m => m.entity_type === entityType && m.entity_id == entityId)
             .sort((a, b) => new Date(b.sent_at || b.created_at) - new Date(a.sent_at || a.created_at));
 
@@ -4028,7 +4028,7 @@ In a production system, this would show the actual file contents.
     };
 
     const viewMessageDetails = async (messageId) => {
-        const message = (await DataStore.getAll('whatsapp_messages')).find(m => m.id === messageId);
+        const message = (await AppDataStore.getAll('whatsapp_messages')).find(m => m.id === messageId);
         if (!message) return;
         const content = `
             <div class="message-details">
@@ -4087,9 +4087,9 @@ In a production system, this would show the actual file contents.
         }, 2000);
     };
 
-    // Ensure AI models exist in DataStore
+    // Ensure AI models exist in AppDataStore
     const ensureAIModelsExist = async () => {
-        const models = await DataStore.getAll('ai_models');
+        const models = await AppDataStore.getAll('ai_models');
 
         if (models.length === 0) {
             // Create default models
@@ -4151,7 +4151,7 @@ In a production system, this would show the actual file contents.
             ];
 
             for (const model of defaultModels) {
-                await DataStore.create('ai_models', model);
+                await AppDataStore.create('ai_models', model);
             }
 
             console.log('Default AI models created');
@@ -4241,14 +4241,14 @@ In a production system, this would show the actual file contents.
     // Render AI Stats Cards
     const renderAIStatsCards = async () => {
         // Get forecast data
-        const forecasts = await DataStore.getAll('forecast_history')
+        const forecasts = await AppDataStore.getAll('forecast_history')
             .filter(f => new Date(f.forecast_date) > new Date(Date.now() - 30 * 24 * 60 * 60 * 1000))
             .sort((a, b) => new Date(b.forecast_date) - new Date(a.forecast_date));
 
         const latestForecast = forecasts[0] || { predicted_amount: 2400000 };
 
         // Get lead scores
-        const leadScores = await DataStore.getAll('lead_scores')
+        const leadScores = await AppDataStore.getAll('lead_scores')
             .filter(l => new Date(l.score_date) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000));
 
         const highValueLeads = leadScores.filter(l => l.overall_score >= 80).length;
@@ -4258,7 +4258,7 @@ In a production system, this would show the actual file contents.
         ).length;
 
         // Get churn risks
-        const churnRisks = await DataStore.getAll('churn_risk')
+        const churnRisks = await AppDataStore.getAll('churn_risk')
             .filter(c => c.risk_level === 'high');
 
         return `
@@ -4341,14 +4341,14 @@ In a production system, this would show the actual file contents.
         const predictions = [];
 
         // Add top lead scores
-        const allLeadScores = await DataStore.getAll('lead_scores');
+        const allLeadScores = await AppDataStore.getAll('lead_scores');
         const leadScores = (allLeadScores || [])
             .filter(l => l.prospect_id)
             .sort((a, b) => b.overall_score - a.overall_score)
             .slice(0, 3);
 
         for (const score of leadScores) {
-            const prospect = await DataStore.getById('prospects', score.prospect_id);
+            const prospect = await AppDataStore.getById('prospects', score.prospect_id);
             if (prospect) {
                 predictions.push({
                     name: prospect.full_name,
@@ -4362,13 +4362,13 @@ In a production system, this would show the actual file contents.
         }
 
         // Add top churn risks
-        const allChurnRisks = await DataStore.getAll('churn_risk');
+        const allChurnRisks = await AppDataStore.getAll('churn_risk');
         const churnRisks = (allChurnRisks || [])
             .sort((a, b) => b.risk_score - a.risk_score)
             .slice(0, 2);
 
         for (const risk of churnRisks) {
-            const customer = await DataStore.getById('customers', risk.customer_id);
+            const customer = await AppDataStore.getById('customers', risk.customer_id);
             if (customer) {
                 predictions.push({
                     name: customer.full_name,
@@ -4405,11 +4405,11 @@ In a production system, this would show the actual file contents.
     // Show Lead Scoring Interface
     const showLeadScoring = async () => {
         // Get active model
-        const allModels = await DataStore.getAll('ai_models');
+        const allModels = await AppDataStore.getAll('ai_models');
         const model = (allModels || []).find(m => m.model_name === 'lead_scoring' && m.is_active);
 
         // Get recent lead scores
-        const allLeadScores = await DataStore.getAll('lead_scores');
+        const allLeadScores = await AppDataStore.getAll('lead_scores');
         const leadScores = (allLeadScores || [])
             .filter(l => l.prospect_id)
             .sort((a, b) => new Date(b.score_date) - new Date(a.score_date))
@@ -4417,7 +4417,7 @@ In a production system, this would show the actual file contents.
 
         let scoresHTML = '';
         for (const score of leadScores) {
-            const prospect = await DataStore.getById('prospects', score.prospect_id);
+            const prospect = await AppDataStore.getById('prospects', score.prospect_id);
             if (!prospect) continue;
 
             const trendIcon = score.trend === 'up' ? '⬆️' : score.trend === 'down' ? '⬇️' : '➡️';
@@ -4548,11 +4548,11 @@ In a production system, this would show the actual file contents.
 
     // Predict lead score for a prospect
     const predictLeadScore = async (prospectId) => {
-        const prospect = await DataStore.getById('prospects', prospectId);
+        const prospect = await AppDataStore.getById('prospects', prospectId);
         if (!prospect) return null;
 
         // Get activities for this prospect
-        const activities = await DataStore.query('activities', { prospect_id: prospectId });
+        const activities = await AppDataStore.query('activities', { prospect_id: prospectId });
 
         // Calculate engagement score (0-100)
         const recentActivities = activities.filter(a =>
@@ -4604,7 +4604,7 @@ In a production system, this would show the actual file contents.
         );
 
         // Determine async trend (compare with last score)
-        const lastScore = await DataStore.getAll('lead_scores')
+        const lastScore = await AppDataStore.getAll('lead_scores')
             .filter(l => l.prospect_id === prospectId)
             .sort((a, b) => new Date(b.score_date) - new Date(a.score_date))[0];
 
@@ -4649,14 +4649,14 @@ In a production system, this would show the actual file contents.
             created_at: new Date().toISOString()
         };
 
-        await DataStore.create('lead_scores', leadScore);
+        await AppDataStore.create('lead_scores', leadScore);
 
         return leadScore;
     };
 
     // Batch update all lead scores
     const batchUpdateLeadScores = async () => {
-        const allProspects = await DataStore.getAll('prospects');
+        const allProspects = await AppDataStore.getAll('prospects');
         const prospects = (allProspects || []).filter(p => p.status === 'active');
 
         for (const prospect of prospects) {
@@ -4794,10 +4794,10 @@ In a production system, this would show the actual file contents.
     // Generate sales forecast
     const generateSalesForecast = async (period = 'quarterly') => {
         // Get historical transactions
-        const transactions = await DataStore.getAll('transactions');
+        const transactions = await AppDataStore.getAll('transactions');
 
         // Get pipeline deals
-        const prospects = (await DataStore.getAll('prospects')).filter(p => p.status === 'active');
+        const prospects = (await AppDataStore.getAll('prospects')).filter(p => p.status === 'active');
 
         // Simple forecast calculation
         const historicalAvg = transactions.length > 0
@@ -4830,7 +4830,7 @@ In a production system, this would show the actual file contents.
             created_at: new Date().toISOString()
         };
 
-        await DataStore.create('forecast_history', forecast);
+        await AppDataStore.create('forecast_history', forecast);
 
         return {
             predicted_amount: predictedAmount,
@@ -4893,7 +4893,7 @@ In a production system, this would show the actual file contents.
     // Show Churn Risk Analysis
     const showChurnRiskAnalysis = async () => {
         // Get all churn risks
-        const allChurnRisks = await DataStore.getAll('churn_risk');
+        const allChurnRisks = await AppDataStore.getAll('churn_risk');
         const churnRisks = (allChurnRisks || [])
             .sort((a, b) => b.risk_score - a.risk_score);
 
@@ -4905,7 +4905,7 @@ In a production system, this would show the actual file contents.
         let risksHTML = '';
         const topRisks = churnRisks.slice(0, 5);
         for (const risk of topRisks) {
-            const customer = await DataStore.getById('customers', risk.customer_id);
+            const customer = await AppDataStore.getById('customers', risk.customer_id);
             if (!customer) continue;
 
             const riskClass = risk.risk_level === 'high' ? 'high' : risk.risk_level === 'medium' ? 'medium' : 'low';
@@ -5015,11 +5015,11 @@ In a production system, this would show the actual file contents.
 
     // Calculate churn risk for a customer
     const calculateChurnRisk = async (customerId) => {
-        const customer = await DataStore.getById('customers', customerId);
+        const customer = await AppDataStore.getById('customers', customerId);
         if (!customer) return null;
 
         // Get customer activities
-        const activities = await DataStore.query('activities', { customer_id: customerId });
+        const activities = await AppDataStore.query('activities', { customer_id: customerId });
 
         // Calculate activity recency
         const lastActivity = activities.sort((a, b) =>
@@ -5120,14 +5120,14 @@ In a production system, this would show the actual file contents.
             updated_at: new Date().toISOString()
         };
 
-        await DataStore.create('churn_risk', churnRisk);
+        await AppDataStore.create('churn_risk', churnRisk);
 
         return churnRisk;
     };
 
     // Batch update all churn risks
     const batchUpdateChurnRisks = async () => {
-        const allCustomers = await DataStore.getAll('customers');
+        const allCustomers = await AppDataStore.getAll('customers');
         const customers = (allCustomers || []).filter(c => c.status === 'active');
 
         for (const customer of customers) {
@@ -5140,7 +5140,7 @@ In a production system, this would show the actual file contents.
 
     // Show Performance Insights
     const showPerformanceInsights = async () => {
-        const allAgents = await DataStore.getAll('users');
+        const allAgents = await AppDataStore.getAll('users');
         const agents = (allAgents || []).filter(isAgent);
 
         let insightsHTML = '';
@@ -5259,11 +5259,11 @@ In a production system, this would show the actual file contents.
     // Generate insights for an agent
     const generateAgentInsights = async (agentId) => {
         // Get agent stats
-        const stats = await DataStore.query('agent_stats', { agent_id: agentId })[0];
+        const stats = await AppDataStore.query('agent_stats', { agent_id: agentId })[0];
         if (!stats) return null;
 
         // Get agent targets
-        const target = await DataStore.query('monthly_targets', { agent_id: agentId })[0];
+        const target = await AppDataStore.query('monthly_targets', { agent_id: agentId })[0];
 
         // Mock data for demo
         const actual = 435000 + Math.floor(Math.random() * 150000);
@@ -5302,7 +5302,7 @@ In a production system, this would show the actual file contents.
             created_at: new Date().toISOString()
         };
 
-        await DataStore.create('performance_insights', insight);
+        await AppDataStore.create('performance_insights', insight);
 
         return {
             target: targetValue,
@@ -5353,7 +5353,7 @@ In a production system, this would show the actual file contents.
                 clearInterval(interval);
 
                 // Update model versions and accuracy
-                const models = Object.values(await DataStore.getAll('ai_models') || {});
+                const models = Object.values(await AppDataStore.getAll('ai_models') || {});
                 for (const model of models) {
                     model.model_version = '1.1.0';
                     model.accuracy += Math.random() * 3 - 1; // Random change
@@ -5361,7 +5361,7 @@ In a production system, this would show the actual file contents.
                     model.trained_on_records += Math.floor(Math.random() * 100);
                     model.updated_at = new Date().toISOString();
 
-                    await DataStore.update('ai_models', model.id, model);
+                    await AppDataStore.update('ai_models', model.id, model);
                 }
 
                 UI.toast.success('AI models trained successfully! Accuracy improved.');
@@ -5536,12 +5536,12 @@ function _wireLoginBtn() {
     // ==================== INIT ====================
 
     const init = async () => {
-        await DataStore.init();
+        await AppDataStore.init();
         console.log('App initializing...');
 
         try {
             // Check if tables exist, if not init demo data
-            if (!await DataStore.getAll('users').length) {
+            if (!await AppDataStore.getAll('users').length) {
                 console.log('No users found. Initializing demo data...');
                 await initDemoData();
                 await initDefaultFolders();
@@ -5644,7 +5644,7 @@ function _wireLoginBtn() {
     };
 
     const openAddNameModal = async (prospectId, nameId = null) => {
-        const nameData = nameId ? await DataStore.getById('names', nameId) : null;
+        const nameData = nameId ? await AppDataStore.getById('names', nameId) : null;
         const isEdit = !!nameData;
 
         const content = `
@@ -5700,10 +5700,10 @@ function _wireLoginBtn() {
         };
 
         if (nameId) {
-            await DataStore.update('names', parseInt(nameId), data);
+            await AppDataStore.update('names', parseInt(nameId), data);
             UI.toast.success('Name updated successfully');
         } else {
-            await DataStore.create('names', data);
+            await AppDataStore.create('names', data);
             UI.toast.success('Name added successfully');
         }
 
@@ -5719,7 +5719,7 @@ function _wireLoginBtn() {
     };
 
     const confirmDeleteName = async (prospectId, nameId) => {
-        await DataStore.delete('names', nameId);
+        await AppDataStore.delete('names', nameId);
         UI.hideModal();
         UI.toast.success('Name deleted');
         await app. showProspectDetail(prospectId);
@@ -5730,7 +5730,7 @@ function _wireLoginBtn() {
         console.log('Checking for demo data seeding...');
 
         // 1. Roles
-        const roles = await DataStore.getAll('roles');
+        const roles = await AppDataStore.getAll('roles');
         if (roles.length === 0) {
             console.log('Seeding roles...');
             const defaultRoles = USER_ROLES.map(r => ({ role_name: r, permissions: { all: true } }));
@@ -5741,12 +5741,12 @@ function _wireLoginBtn() {
                 { role_name: 'consultant', permissions: { 'view-dashboard': true, 'manage-self-prospects': true } }
             );
             for (const r of defaultRoles) {
-                await DataStore.create('roles', r);
+                await AppDataStore.create('roles', r);
             }
         }
 
         // 2. Users
-        const users = await DataStore.getAll('users');
+        const users = await AppDataStore.getAll('users');
         if (users.length === 0) {
             console.log('Seeding users...');
             const demoUsers = [
@@ -5758,12 +5758,12 @@ function _wireLoginBtn() {
                 { id: 10, username: 'manager', password: 'manager123', full_name: 'Manager', role: 'Level 8 Consultant Manager', team_id: 1, reporting_to: null }
             ];
             for (const u of demoUsers) {
-                await DataStore.create('users', u);
+                await AppDataStore.create('users', u);
             }
         }
 
         // 3. Prospects
-        const prospects = await DataStore.getAll('prospects');
+        const prospects = await AppDataStore.getAll('prospects');
         if (prospects.length === 0) {
             console.log('Seeding prospects...');
             const demoProspects = [
@@ -5787,12 +5787,12 @@ function _wireLoginBtn() {
                 }
             ];
             for (const p of demoProspects) {
-                await DataStore.create('prospects', p);
+                await AppDataStore.create('prospects', p);
             }
         }
 
         // 4. Activities
-        const activities = await DataStore.getAll('activities');
+        const activities = await AppDataStore.getAll('activities');
         if (activities.length === 0) {
             console.log('Seeding activities...');
             const demoActivities = [
@@ -5818,20 +5818,20 @@ function _wireLoginBtn() {
                 }
             ];
             for (const ac of demoActivities) {
-                await DataStore.create('activities', ac);
+                await AppDataStore.create('activities', ac);
             }
         }
 
         // 5. Projects & Tasks
-        const projects = await DataStore.getAll('projects');
+        const projects = await AppDataStore.getAll('projects');
         if (projects.length === 0) {
-            await DataStore.create('projects', { name: 'Website Redesign', status: 'active' });
-            await DataStore.create('projects', { name: 'Mobile App', status: 'planning' });
+            await AppDataStore.create('projects', { name: 'Website Redesign', status: 'active' });
+            await AppDataStore.create('projects', { name: 'Mobile App', status: 'planning' });
         }
 
-        const tasks = await DataStore.getAll('tasks');
+        const tasks = await AppDataStore.getAll('tasks');
         if (tasks.length === 0) {
-            await DataStore.create('tasks', { title: 'Design mockups', project_id: 1, completed: false });
+            await AppDataStore.create('tasks', { title: 'Design mockups', project_id: 1, completed: false });
         }
 
         UI.toast.success('Check complete. Missing demo data seeded.');
@@ -6074,9 +6074,9 @@ function _wireLoginBtn() {
             const lowerRoles = ['consultant', 'junior_consultant', 'senior_consultant', 'agent', 'junior_agent', 'senior_agent'];
             if (lowerRoles.includes(role)) {
                 // Show their own tree if they have any downline, else show placeholder
-                const rootPerson = await DataStore.getById('customers', user.id) || await DataStore.getById('prospects', user.id);
+                const rootPerson = await AppDataStore.getById('customers', user.id) || await AppDataStore.getById('prospects', user.id);
                 if (rootPerson) {
-                    await app. showReferralTree(rootPerson.id, rootPerson.id in await DataStore.getAll('customers') ? 'customer' : 'prospect');
+                    await app. showReferralTree(rootPerson.id, rootPerson.id in await AppDataStore.getAll('customers') ? 'customer' : 'prospect');
                 } else {
                     // Show placeholder – no data
                     const ph = document.getElementById('referral-tree-placeholder');
@@ -6115,7 +6115,7 @@ function _wireLoginBtn() {
         const container = document.getElementById('referral-summary-container');
         if (!container) return;
 
-        const referrals = await DataStore.getAll('referrals');
+        const referrals = await AppDataStore.getAll('referrals');
         const totalReferrals = referrals.length;
         const totalReferrers = new Set(referrals.map(r => r.referrer_id)).size;
         
@@ -6133,7 +6133,7 @@ function _wireLoginBtn() {
             .sort((a, b) => b[1] - a[1])
             .slice(0, 3)
             .map(async ([id, count]) => {
-                const person = await DataStore.getById('customers', id) || await DataStore.getById('prospects', id);
+                const person = await AppDataStore.getById('customers', id) || await AppDataStore.getById('prospects', id);
                 return { name: person?.full_name || `ID: ${id}`, count };
             });
         const top3 = await Promise.all(top3Promises);
@@ -6173,7 +6173,7 @@ function _wireLoginBtn() {
         const hiddenKey = `hidden_top_referrers_v2_${userId}`;
         const hiddenIds = JSON.parse(localStorage.getItem(hiddenKey) || '[]');
         
-        const referrals = await DataStore.getAll('referrals');
+        const referrals = await AppDataStore.getAll('referrals');
         const grouped = {};
         referrals.forEach(r => {
             if (!r.referrer_id) return;
@@ -6189,7 +6189,7 @@ function _wireLoginBtn() {
 
         const leaderboardItems = await Promise.all(sorted.map(async (item, idx) => {
             if (hiddenIds.includes(String(item.id))) return '';
-            const person = await DataStore.getById('customers', item.id) || await DataStore.getById('prospects', item.id);
+            const person = await AppDataStore.getById('customers', item.id) || await AppDataStore.getById('prospects', item.id);
             if (!person) return '';
             return `
                 <tr class="rank-${idx + 1}">
@@ -6277,8 +6277,8 @@ function _wireLoginBtn() {
             return;
         }
 
-        const prospects = await DataStore.getAll('prospects');
-        const customers = await DataStore.getAll('customers');
+        const prospects = await AppDataStore.getAll('prospects');
+        const customers = await AppDataStore.getAll('customers');
         const all = [
             ...prospects.map(p => ({ ...p, type: 'prospect' })),
             ...customers.map(c => ({ ...c, type: 'customer' }))
@@ -6322,7 +6322,7 @@ function _wireLoginBtn() {
     };
 
     const buildTreeData = async (rootId, rootType) => {
-        const person = await DataStore.getById(rootType === 'customer' ? 'customers' : 'prospects', rootId);
+        const person = await AppDataStore.getById(rootType === 'customer' ? 'customers' : 'prospects', rootId);
         if (!person || !await canViewNode(rootId, rootType)) return null;
 
         const node = {
@@ -6334,7 +6334,7 @@ function _wireLoginBtn() {
         };
 
         // Find child referrals
-        const referrals = await DataStore.getAll('referrals');
+        const referrals = await AppDataStore.getAll('referrals');
         // Match by referrer_id (new format)
         const children = referrals.filter(r => String(r.referrer_id) === String(rootId));
 
@@ -6351,7 +6351,7 @@ function _wireLoginBtn() {
     };
 
     const getProspectColour = async (prospectId) => {
-        const prospect = await DataStore.getById('prospects', prospectId);
+        const prospect = await AppDataStore.getById('prospects', prospectId);
         if (!prospect) return "#cbd5e1"; // Gray default
         const status = prospect.pipeline_stage?.toLowerCase();
         
@@ -6367,11 +6367,11 @@ function _wireLoginBtn() {
     };
 
     const getCustomerBadge = async (customerId) => {
-        const customer = await DataStore.getById('customers', customerId);
+        const customer = await AppDataStore.getById('customers', customerId);
         if (!customer) return null;
         
         // Logic for Hot/Cool badges
-        const purchases = (await DataStore.getAll('purchases')).filter(p => p.customer_id == customerId);
+        const purchases = (await AppDataStore.getAll('purchases')).filter(p => p.customer_id == customerId);
         if (purchases.length > 3) return { icon: "🔥", color: "#ef4444" }; // Hot
         if (customer.conversion_amount > 5000) return { icon: "💰", color: "#f59e0b" }; // VIP
         return null;
@@ -6596,8 +6596,8 @@ function _wireLoginBtn() {
             return;
         }
  
-        const prospects = await DataStore.getAll('prospects');
-        const customers = await DataStore.getAll('customers');
+        const prospects = await AppDataStore.getAll('prospects');
+        const customers = await AppDataStore.getAll('customers');
         const all = [
             ...prospects.map(p => ({ ...p, type: 'prospect' })),
             ...customers.map(c => ({ ...c, type: 'customer' }))
@@ -6622,7 +6622,7 @@ function _wireLoginBtn() {
     };
  
     const selectReferrerForModal = async (id, type, modalType) => {
-        const person = await DataStore.getById(type === 'customer' ? 'customers' : 'prospects', id);
+        const person = await AppDataStore.getById(type === 'customer' ? 'customers' : 'prospects', id);
         if (!person) return;
  
         if (modalType === 'referrer') _modalSelectedReferrer = { id, type, name: person.full_name };
@@ -6675,7 +6675,7 @@ function _wireLoginBtn() {
             created_at: new Date().toISOString()
         };
 
-        await DataStore.create('referrals', referral);
+        await AppDataStore.create('referrals', referral);
         UI.toast.success("Referral created successfully!");
         UI.hideModal();
         
@@ -6687,7 +6687,7 @@ function _wireLoginBtn() {
     };
 
     const openMemoModal = async (id, type) => {
-        const notesArr = await DataStore.getAll('notes');
+        const notesArr = await AppDataStore.getAll('notes');
         const notes = (notesArr || []).filter(n => n.entity_type === type && n.entity_id == id);
         const latest = notes.sort((a,b) => new Date(b.created_at) - new Date(a.created_at))[0];
 
@@ -6697,7 +6697,7 @@ function _wireLoginBtn() {
                 <div style="background:#f1f5f9; padding:16px; border-radius:8px; margin:16px 0; border-left:4px solid #3b82f6">
                     ${latest ? latest.content : 'No memos found for this person.'}
                     <div style="font-size:11px; color:#64748b; margin-top:8px">
-                        ${latest ? 'Written by ' + ((await DataStore.getById('users', latest.created_by))?.full_name || 'Admin') + ' on ' + UI.formatDate(latest.created_at) : ''}
+                        ${latest ? 'Written by ' + ((await AppDataStore.getById('users', latest.created_by))?.full_name || 'Admin') + ' on ' + UI.formatDate(latest.created_at) : ''}
                     </div>
                 </div>
                 <button class="btn secondary btn-block" onclick="UI.hideModal(); app.show${type.charAt(0).toUpperCase() + type.slice(1)}Detail(${id})">View Full Profile</button>
@@ -6734,7 +6734,7 @@ function _wireLoginBtn() {
                         <label>Product</label>
                         <select id="case-product-filter" onchange="app. async handleCaseFilterChange()">
                             <option value="all">All Products</option>
-                            ${((await DataStore.getAll('products')) || []).filter(p => p.is_active !== false).map(p => `<option value="${p.name}" ${_caseFilters.product === p.name ? 'selected' : ''}>${p.name}</option>`).join('')}
+                            ${((await AppDataStore.getAll('products')) || []).filter(p => p.is_active !== false).map(p => `<option value="${p.name}" ${_caseFilters.product === p.name ? 'selected' : ''}>${p.name}</option>`).join('')}
                         </select>
                     </div>
                     <div class="filter-group">
@@ -6800,7 +6800,7 @@ function _wireLoginBtn() {
         const emptyState = document.getElementById('cases-empty-state');
         if (!tbody) return;
 
-        let cases = await DataStore.getAll('case_studies');
+        let cases = await AppDataStore.getAll('case_studies');
         const currentUser = _currentUser;
 
         // Apply Permission/Visibility Filters
@@ -6822,11 +6822,11 @@ function _wireLoginBtn() {
             for (const c of cases) {
                 let nameMatch = false;
                 if (c.prospect_id) {
-                    const p = await DataStore.getById('prospects', c.prospect_id);
+                    const p = await AppDataStore.getById('prospects', c.prospect_id);
                     if (p?.full_name?.toLowerCase().includes(q)) nameMatch = true;
                 }
                 if (c.customer_id) {
-                    const cust = await DataStore.getById('customers', c.customer_id);
+                    const cust = await AppDataStore.getById('customers', c.customer_id);
                     if (cust?.full_name?.toLowerCase().includes(q)) nameMatch = true;
                 }
                 if (c.title.toLowerCase().includes(q) || nameMatch) {
@@ -6859,11 +6859,11 @@ function _wireLoginBtn() {
             let entityName = '-';
             let entityLink = '#';
             if (c.customer_id) {
-                const cust = await DataStore.getById('customers', c.customer_id);
+                const cust = await AppDataStore.getById('customers', c.customer_id);
                 entityName = cust ? `<i class="fas fa-user-check" title="Customer"></i> ${cust.full_name}` : 'Unknown Customer';
                 entityLink = `await app. showCustomerDetail(${c.customer_id})`;
             } else if (c.prospect_id) {
-                const pros = await DataStore.getById('prospects', c.prospect_id);
+                const pros = await AppDataStore.getById('prospects', c.prospect_id);
                 entityName = pros ? `<i class="fas fa-user" title="Prospect"></i> ${pros.full_name}` : 'Unknown Prospect';
                 entityLink = `await app. showProspectDetail(${c.prospect_id})`;
             }
@@ -6899,7 +6899,7 @@ function _wireLoginBtn() {
     };
 
     const showCaseStudyDetail = async (id) => {
-        const c = await DataStore.getById('case_studies', id);
+        const c = await AppDataStore.getById('case_studies', id);
         if (!c) return;
 
         const viewport = document.getElementById('content-viewport');
@@ -6909,14 +6909,14 @@ function _wireLoginBtn() {
 
         let entityInfo = 'Generic Case Study';
         if (c.customer_id) {
-            const cust = await DataStore.getById('customers', c.customer_id);
+            const cust = await AppDataStore.getById('customers', c.customer_id);
             entityInfo = cust ? `Customer: ${cust.full_name}` : 'Unknown Customer';
         } else if (c.prospect_id) {
-            const pros = await DataStore.getById('prospects', c.prospect_id);
+            const pros = await AppDataStore.getById('prospects', c.prospect_id);
             entityInfo = pros ? `Prospect: ${pros.full_name}` : 'Unknown Prospect';
         }
 
-        const creator = await DataStore.getById('users', c.created_by);
+        const creator = await AppDataStore.getById('users', c.created_by);
         const creatorName = creator ? (creator.full_name || creator.username) : 'System';
 
         viewport.innerHTML = `
@@ -6986,9 +6986,9 @@ function _wireLoginBtn() {
     };
 
     const toggleCasePublic = async (id) => {
-        const c = await DataStore.getById('case_studies', id);
+        const c = await AppDataStore.getById('case_studies', id);
         if (!c) return;
-        await DataStore.update('case_studies', id, { is_public: !c.is_public });
+        await AppDataStore.update('case_studies', id, { is_public: !c.is_public });
         UI.toast.success(`Case study is now ${!c.is_public ? 'public' : 'private'}.`);
         await showCaseStudyDetail(id);
     };
@@ -7002,7 +7002,7 @@ function _wireLoginBtn() {
 
     const deleteCaseStudy = async (id) => {
         if (confirm("Are you sure you want to delete this case study? This action cannot be undone.")) {
-            await DataStore.delete('case_studies', id);
+            await AppDataStore.delete('case_studies', id);
             UI.toast.success("Case study deleted.");
             if (_currentView === 'cases') {
                 await renderCasesList();
@@ -7013,16 +7013,16 @@ function _wireLoginBtn() {
     };
 
     const openCaseStudyModal = async (id = null) => {
-        const c = id ? await DataStore.getById('case_studies', id) : null;
+        const c = id ? await AppDataStore.getById('case_studies', id) : null;
         const title = id ? 'Edit Case Study' : 'New Case Study';
 
         let entityName = '';
         if (c) {
             if (c.customer_id) {
-                const cust = await DataStore.getById('customers', c.customer_id);
+                const cust = await AppDataStore.getById('customers', c.customer_id);
                 entityName = cust ? cust.full_name : '';
             } else if (c.prospect_id) {
-                const pros = await DataStore.getById('prospects', c.prospect_id);
+                const pros = await AppDataStore.getById('prospects', c.prospect_id);
                 entityName = pros ? pros.full_name : '';
             }
         }
@@ -7055,7 +7055,7 @@ function _wireLoginBtn() {
                             <label>Product</label>
                             <select id="case-product" class="form-control">
                                 <option value="">Select Product...</option>
-                                ${((await DataStore.getAll('products')) || []).map(p => `<option value="${p.name}" ${c && c.product === p.name ? 'selected' : ''}>${p.name}</option>`).join('')}
+                                ${((await AppDataStore.getAll('products')) || []).map(p => `<option value="${p.name}" ${c && c.product === p.name ? 'selected' : ''}>${p.name}</option>`).join('')}
                             </select>
                         </div>
                     </div>
@@ -7128,9 +7128,9 @@ function _wireLoginBtn() {
             return;
         }
 
-        const allP = await DataStore.getAll('prospects');
+        const allP = await AppDataStore.getAll('prospects');
         const prospects = (allP || []).filter(p => p.full_name?.toLowerCase().includes(query.toLowerCase()));
-        const allC = await DataStore.getAll('customers');
+        const allC = await AppDataStore.getAll('customers');
         const customers = (allC || []).filter(c => c.full_name?.toLowerCase().includes(query.toLowerCase()));
 
         let html = '';
@@ -7182,12 +7182,12 @@ function _wireLoginBtn() {
         };
 
         if (id) {
-            await DataStore.update('case_studies', id, data);
+            await AppDataStore.update('case_studies', id, data);
             UI.toast.success("Case study updated.");
         } else {
             data.created_by = _currentUser?.id || 1;
             data.created_at = new Date().toISOString();
-            const newCase = await DataStore.create('case_studies', data);
+            const newCase = await AppDataStore.create('case_studies', data);
             UI.toast.success("Case study created.");
             id = newCase.id;
         }
@@ -7300,7 +7300,7 @@ function _wireLoginBtn() {
             html += `<div class="calendar-cell"><span class="date-num other-month">${dateNum}</span></div>`;
         }
 
-        let activities = await DataStore.getAll('activities');
+        let activities = await AppDataStore.getAll('activities');
 
         // Apply visibility filters using the same logic as await async getVisibleActivities()
         const calVisibility = await Promise.all(activities.map(a => canViewActivity(a)));
@@ -7334,12 +7334,12 @@ function _wireLoginBtn() {
             for (const a of dayActivities) {
                 if (!seenIds.has(a.id)) {
                     seenIds.add(a.id);
-                    const prospect = a.prospect_id ? await DataStore.getById('prospects', a.prospect_id) : null;
-                    const customer = a.customer_id ? await DataStore.getById('customers', a.customer_id) : null;
+                    const prospect = a.prospect_id ? await AppDataStore.getById('prospects', a.prospect_id) : null;
+                    const customer = a.customer_id ? await AppDataStore.getById('customers', a.customer_id) : null;
                     const entityName = prospect ? prospect.full_name : (customer ? customer.full_name : (a.activity_title || a.customer_name || 'Event'));
 
                     if (entityName) {
-                        const agent = a.lead_agent_id ? await DataStore.getById('users', a.lead_agent_id) : null;
+                        const agent = a.lead_agent_id ? await AppDataStore.getById('users', a.lead_agent_id) : null;
                         const agentName = agent ? agent.full_name : 'No Agent';
 
                         activityHtml += `
@@ -7393,7 +7393,7 @@ function _wireLoginBtn() {
     };
 
     const openCalendarFilterModal = async () => {
-        const agents = (await DataStore.getAll('users')).filter(u => isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'));
+        const agents = (await AppDataStore.getAll('users')).filter(u => isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'));
         const types = ['CPS', 'FTF', 'FSA', 'EVENT', 'CALL', 'EMAIL', 'WHATSAPP'];
 
         const content = `
@@ -7521,9 +7521,9 @@ function _wireLoginBtn() {
             `;
 
         for (const a of activities) {
-            const agent = await DataStore.getById('users', a.lead_agent_id) || { full_name: 'Unknown Agent' };
-            const prospect = a.prospect_id ? await DataStore.getById('prospects', a.prospect_id) : null;
-            const customer = a.customer_id ? await DataStore.getById('customers', a.customer_id) : null;
+            const agent = await AppDataStore.getById('users', a.lead_agent_id) || { full_name: 'Unknown Agent' };
+            const prospect = a.prospect_id ? await AppDataStore.getById('prospects', a.prospect_id) : null;
+            const customer = a.customer_id ? await AppDataStore.getById('customers', a.customer_id) : null;
             const entityName = prospect ? prospect.full_name : (customer ? customer.full_name : (a.customer_name || 'N/A'));
 
             html += `
@@ -7569,12 +7569,12 @@ function _wireLoginBtn() {
         const day2 = new Date(today); day2.setDate(today.getDate() + 2);
         const day2Str = mmdd(day2);
 
-        const prospects = await DataStore.getAll('prospects');
-        const customers = await DataStore.getAll('customers');
+        const prospects = await AppDataStore.getAll('prospects');
+        const customers = await AppDataStore.getAll('customers');
         const all = [...prospects, ...customers];
 
         const getBdayInfo = async (p) => {
-            const agent = await DataStore.getById('users', p.responsible_agent_id || p.lead_agent_id);
+            const agent = await AppDataStore.getById('users', p.responsible_agent_id || p.lead_agent_id);
             return {
                 name: p.full_name,
                 info: `Agent: ${agent?.full_name || 'Michelle Tan'} · ${p.customer_since ? 'Customer' : 'Prospect'}`,
@@ -7717,7 +7717,7 @@ function _wireLoginBtn() {
         html += '<div class="week-body">';
 
         // Get all activities
-        const activities = await DataStore.getAll('activities');
+        const activities = await AppDataStore.getAll('activities');
 
         // Time async slots (8 AM to 8 PM)
         for (let hour = 8; hour <= 20; hour++) {
@@ -7738,8 +7738,8 @@ function _wireLoginBtn() {
 
                 html += '<div class="week-hour-cell">';
                 for (const a of dayActivities) {
-                    const prospect = a.prospect_id ? await DataStore.getById('prospects', a.prospect_id) : null;
-                    const customer = a.customer_id ? await DataStore.getById('customers', a.customer_id) : null;
+                    const prospect = a.prospect_id ? await AppDataStore.getById('prospects', a.prospect_id) : null;
+                    const customer = a.customer_id ? await AppDataStore.getById('customers', a.customer_id) : null;
                     const name = prospect?.full_name || customer?.full_name || 'Activity';
 
                     html += `
@@ -7760,7 +7760,7 @@ function _wireLoginBtn() {
     const renderDayView = async () => {
         const grid = document.getElementById('calendar-grid');
         const todayStr = _currentDate.toISOString().split('T')[0];
-        const dayActivities = (await DataStore.getAll('activities')).filter(a => a.activity_date === todayStr);
+        const dayActivities = (await AppDataStore.getAll('activities')).filter(a => a.activity_date === todayStr);
 
         // Calculate summary stats
         const totalMeetings = dayActivities.filter(a => a.activity_type === 'FTF').length;
@@ -7805,10 +7805,10 @@ function _wireLoginBtn() {
             `;
 
             for (const a of hourActivities) {
-                const prospect = a.prospect_id ? await DataStore.getById('prospects', a.prospect_id) : null;
-                const customer = a.customer_id ? await DataStore.getById('customers', a.customer_id) : null;
+                const prospect = a.prospect_id ? await AppDataStore.getById('prospects', a.prospect_id) : null;
+                const customer = a.customer_id ? await AppDataStore.getById('customers', a.customer_id) : null;
                 const name = prospect?.full_name || customer?.full_name || '';
-                const agent = await DataStore.getById('users', a.lead_agent_id);
+                const agent = await AppDataStore.getById('users', a.lead_agent_id);
 
                 html += `
                     <div class="timeline-activity ${a.activity_type.toLowerCase()}" onclick="app. viewActivityDetails(${a.id})">
@@ -7829,7 +7829,7 @@ function _wireLoginBtn() {
     const generateDayHours = async () => {
         let hoursHtml = '';
         const todayStr = _currentDate.toISOString().split('T')[0];
-        const dayActs = (await DataStore.getAll('activities')).filter(a => a.activity_date === todayStr);
+        const dayActs = (await AppDataStore.getAll('activities')).filter(a => a.activity_date === todayStr);
 
         for (let i = 8; i <= 20; i++) {
             const hourStr = `${i.toString().padStart(2, '0')}:00`;
@@ -7838,7 +7838,7 @@ function _wireLoginBtn() {
             const hourContent = await Promise.all(actsAtHour.map(async a => {
                 let prospectInfo = '';
                 if (a.prospect_id) {
-                    const p = await DataStore.getById('prospects', a.prospect_id);
+                    const p = await AppDataStore.getById('prospects', a.prospect_id);
                     if (p) prospectInfo = `(${p.full_name})`;
                 }
                 return `
@@ -7940,25 +7940,25 @@ function _wireLoginBtn() {
     };
 
     const viewActivityDetails = async (activityId) => {
-        const activity = await DataStore.getById('activities', activityId);
+        const activity = await AppDataStore.getById('activities', activityId);
         if (!activity) return;
 
-        const prospect = activity.prospect_id ? await DataStore.getById('prospects', activity.prospect_id) : null;
-        const customer = activity.customer_id ? await DataStore.getById('customers', activity.customer_id) : null;
+        const prospect = activity.prospect_id ? await AppDataStore.getById('prospects', activity.prospect_id) : null;
+        const customer = activity.customer_id ? await AppDataStore.getById('customers', activity.customer_id) : null;
         const entityName = prospect?.full_name || customer?.full_name || 'Unknown';
 
         let attendeeHtml = '';
         if (activity.activity_type === 'EVENT' && activity.event_id) {
-            const attendees = (await DataStore.getAll('event_attendees')).filter(a => a.event_id === activity.event_id);
+            const attendees = (await AppDataStore.getAll('event_attendees')).filter(a => a.event_id === activity.event_id);
             if (attendees.length > 0) {
-                const prospects = await DataStore.getAll('prospects');
-                const customers = await DataStore.getAll('customers');
+                const prospects = await AppDataStore.getAll('prospects');
+                const customers = await AppDataStore.getAll('customers');
                 const all = [...prospects, ...customers];
 
                 const renderedRows = await Promise.all(attendees.map(async att => {
                     const person = all.find(p => p.id === att.entity_id);
                     const name = person ? person.full_name : 'Unknown';
-                    const agent = await DataStore.getById('users', att.added_by_agent_id);
+                    const agent = await AppDataStore.getById('users', att.added_by_agent_id);
                     const agentName = agent ? agent.full_name : 'Unknown';
                     return `
                         <div class="info-row" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #eee; padding-bottom:5px; margin-bottom:5px;">
@@ -8039,7 +8039,7 @@ function _wireLoginBtn() {
     };
 
     const editActivity = async (activityId) => {
-        const activity = await DataStore.getById('activities', activityId);
+        const activity = await AppDataStore.getById('activities', activityId);
         if (!activity) return;
         UI.hideModal(); // close any open modal
         await openActivityModal(null, null, activity);
@@ -8056,7 +8056,7 @@ function _wireLoginBtn() {
     };
 
     const confirmDeleteActivity = async (activityId) => {
-        await DataStore.delete('activities', activityId);
+        await AppDataStore.delete('activities', activityId);
         UI.hideModal();
         UI.toast.success('Activity deleted');
         if (document.querySelector('.calendar-view-container')) {
@@ -8066,12 +8066,12 @@ function _wireLoginBtn() {
     };
 
     const markActivityComplete = async (activityId) => {
-        const activity = await DataStore.getById('activities', activityId);
+        const activity = await AppDataStore.getById('activities', activityId);
         if (!activity) return;
 
         activity.status = 'completed';
         activity.completed_at = new Date().toISOString();
-        await DataStore.update('activities', activityId, activity);
+        await AppDataStore.update('activities', activityId, activity);
 
         UI.toast.success('Activity marked as complete');
         if (document.querySelector('.calendar-view-container')) {
@@ -8101,10 +8101,10 @@ function _wireLoginBtn() {
 
     const postEventFollowUp = async (eventId, entityId) => {
         UI.hideModal();
-        const ev = await DataStore.getById('events', eventId);
+        const ev = await AppDataStore.getById('events', eventId);
         await app. openActivityModal();
         setTimeout(async () => {
-            const all = [...await DataStore.getAll('prospects'), ...await DataStore.getAll('customers')];
+            const all = [...await AppDataStore.getAll('prospects'), ...await AppDataStore.getAll('customers')];
             const p = all.find(x => x.id === entityId);
             if (p) app. selectEntity(entityId, p.is_customer ? 'customer' : 'prospect');
 
@@ -8123,10 +8123,10 @@ function _wireLoginBtn() {
 
     const openAttendeeOutcomeModal = async (attendeeId, attendeeType, activityId) => {
         const attendee = attendeeType === 'agent'
-            ? await DataStore.getById('users', attendeeId)
-            : (attendeeType === 'prospect' ? await DataStore.getById('prospects', attendeeId) : await DataStore.getById('customers', attendeeId));
+            ? await AppDataStore.getById('users', attendeeId)
+            : (attendeeType === 'prospect' ? await AppDataStore.getById('prospects', attendeeId) : await AppDataStore.getById('customers', attendeeId));
 
-        const existingNote =(await DataStore.getAll('notes')).find(n => n.activity_id === activityId && n.note_type === 'outcome' &&
+        const existingNote =(await AppDataStore.getAll('notes')).find(n => n.activity_id === activityId && n.note_type === 'outcome' &&
             ((attendeeType === 'agent' && n.agent_id === attendeeId) ||
                 (attendeeType === 'prospect' && n.prospect_id === attendeeId) ||
                 (attendeeType === 'customer' && n.customer_id === attendeeId)));
@@ -8146,10 +8146,10 @@ function _wireLoginBtn() {
 
     const openAttendeeNotesModal = async (attendeeId, attendeeType, activityId) => {
         const attendee = attendeeType === 'agent'
-            ? await DataStore.getById('users', attendeeId)
-            : (attendeeType === 'prospect' ? await DataStore.getById('prospects', attendeeId) : await DataStore.getById('customers', attendeeId));
+            ? await AppDataStore.getById('users', attendeeId)
+            : (attendeeType === 'prospect' ? await AppDataStore.getById('prospects', attendeeId) : await AppDataStore.getById('customers', attendeeId));
 
-        const existingNote = (await DataStore.getAll('notes')).find(n => n.activity_id === activityId && n.note_type === 'post_meetup' &&
+        const existingNote = (await AppDataStore.getAll('notes')).find(n => n.activity_id === activityId && n.note_type === 'post_meetup' &&
             ((attendeeType === 'agent' && n.agent_id === attendeeId) ||
                 (attendeeType === 'prospect' && n.prospect_id === attendeeId) ||
                 (attendeeType === 'customer' && n.customer_id === attendeeId)));
@@ -8190,15 +8190,15 @@ function _wireLoginBtn() {
         else if (attendeeType === 'customer') noteData.customer_id = attendeeId;
 
         // Check if note already exists to update
-        const existingNote = (await DataStore.getAll('notes')).find(n => n.activity_id === activityId && n.note_type === noteType &&
+        const existingNote = (await AppDataStore.getAll('notes')).find(n => n.activity_id === activityId && n.note_type === noteType &&
             ((attendeeType === 'agent' && n.agent_id === attendeeId) ||
                 (attendeeType === 'prospect' && n.prospect_id === attendeeId) ||
                 (attendeeType === 'customer' && n.customer_id === attendeeId)));
 
         if (existingNote) {
-            await DataStore.update('notes', existingNote.id, noteData);
+            await AppDataStore.update('notes', existingNote.id, noteData);
         } else {
-            await DataStore.create('notes', noteData);
+            await AppDataStore.create('notes', noteData);
         }
 
         UI.toast.success('Note saved successfully');
@@ -8219,7 +8219,7 @@ function _wireLoginBtn() {
     };
 
     const getAgentName = async (agentId) => {
-        const agent = await DataStore.getById('users', agentId);
+        const agent = await AppDataStore.getById('users', agentId);
         return agent?.full_name || 'Unknown';
     };
 
@@ -8321,7 +8321,7 @@ function _wireLoginBtn() {
                         <div class="form-group">
                             <label>Product/Service Sold</label>
                             <select id="solution-sold" class="form-control">
-                                ${(await DataStore.getAll('products')).filter(p => p.is_active !== false).map(p => `<option value="${p.name}">${p.name}</option>`).join('') || '<option value="">No products available</option>'}
+                                ${(await AppDataStore.getAll('products')).filter(p => p.is_active !== false).map(p => `<option value="${p.name}">${p.name}</option>`).join('') || '<option value="">No products available</option>'}
                             </select>
                         </div>
                         <div class="form-row">
@@ -8462,7 +8462,7 @@ function _wireLoginBtn() {
         // If prospectId is provided, pre-select it
         if (prospectId) {
             setTimeout(async () => {
-                const prospect = await DataStore.getById('prospects', prospectId);
+                const prospect = await AppDataStore.getById('prospects', prospectId);
                 if (prospect) {
                     _selectedEntity = { id: prospectId, type: 'Prospect' };
                     const infoDiv = document.getElementById('selected-entity-info');
@@ -8520,13 +8520,13 @@ function _wireLoginBtn() {
         // 4. Restore selected entity (store in module variable)
         let entityRestored = false;
         if (activity.prospect_id) {
-            const prospect = await DataStore.getById('prospects', activity.prospect_id);
+            const prospect = await AppDataStore.getById('prospects', activity.prospect_id);
             if (prospect) {
                 _selectedEntity = { id: prospect.id, type: 'Prospect' };
                 entityRestored = true;
             }
         } else if (activity.customer_id) {
-            const customer = await DataStore.getById('customers', activity.customer_id);
+            const customer = await AppDataStore.getById('customers', activity.customer_id);
             if (customer) {
                 _selectedEntity = { id: customer.id, type: 'Customer' };
                 entityRestored = true;
@@ -8541,8 +8541,8 @@ function _wireLoginBtn() {
                 const container = document.getElementById(badgeContainerId);
                 if (container) {
                     const entityName = _selectedEntity.type === 'Prospect'
-                        ? (await DataStore.getById('prospects', _selectedEntity.id))?.full_name
-                        : (await DataStore.getById('customers', _selectedEntity.id))?.full_name;
+                        ? (await AppDataStore.getById('prospects', _selectedEntity.id))?.full_name
+                        : (await AppDataStore.getById('customers', _selectedEntity.id))?.full_name;
                     if (entityName) {
                         container.innerHTML = `
                             <div class="selected-entity-badge">
@@ -8583,7 +8583,7 @@ function _wireLoginBtn() {
 
         // 8. If this is a CPS activity, poll for CPS-specific fields
         if (activity.activity_type === 'CPS' && activity.prospect_id) {
-            const prospect = await DataStore.getById('prospects', activity.prospect_id);
+            const prospect = await AppDataStore.getById('prospects', activity.prospect_id);
             if (prospect) {
                 let attempts = 0;
                 const cpsInterval = setInterval(() => {
@@ -8623,7 +8623,7 @@ function _wireLoginBtn() {
 };
 
     const updateActivity = async (activityId) => {
-    const activity = await DataStore.getById('activities', activityId);
+    const activity = await AppDataStore.getById('activities', activityId);
     if (!activity) return;
 
     const updatedData = {
@@ -8659,7 +8659,7 @@ function _wireLoginBtn() {
         console.log('No entity selected – clearing IDs');
     }
 
-    await DataStore.update('activities', activityId, { ...activity, ...updatedData });
+    await AppDataStore.update('activities', activityId, { ...activity, ...updatedData });
     UI.hideModal();
     UI.toast.success('Activity updated');
     if (typeof renderCalendar === 'function') await renderCalendar();
@@ -8917,7 +8917,7 @@ function _wireLoginBtn() {
                                 <label>Choose ${type.includes('AGENT') ? 'Meeting/Training' : 'Event'}</label>
                                 <select id="existing-event" class="form-control">
                                     <option value="">-- Select --</option>
-                                    ${(await DataStore.getAll('events')).filter(e => e.is_active !== false).map(e => `<option value="${e.id}">${e.title}</option>`).join('')}
+                                    ${(await AppDataStore.getAll('events')).filter(e => e.is_active !== false).map(e => `<option value="${e.id}">${e.title}</option>`).join('')}
                                 </select>
                             </div>
                         </div>
@@ -9010,7 +9010,7 @@ function _wireLoginBtn() {
 
                 let matches = [];
                 if (type === 'CPS' || type === 'EVENT') {
-                    const all = [...DataStore.getAll('prospects'), ...DataStore.getAll('customers')];
+                    const all = [...AppDataStore.getAll('prospects'), ...AppDataStore.getAll('customers')];
                     const available = all.filter(p => !_selectedAttendees.find(a => a.id === p.id && a.type !== 'agent'));
                     matches = available.filter(p =>
                         (p.full_name && p.full_name.toLowerCase().includes(searchTerm)) ||
@@ -9020,7 +9020,7 @@ function _wireLoginBtn() {
                 }
 
                 if (isAgentRelevant) {
-                    const agents = (await DataStore.getAll('users')).filter(u =>
+                    const agents = (await AppDataStore.getAll('users')).filter(u =>
                         isAgent(u) &&
                         !_selectedAttendees.find(a => a.id === u.id && a.type === 'agent')
                     );
@@ -9115,9 +9115,9 @@ function _wireLoginBtn() {
                 return;
             }
 
-            const prospects = (await DataStore.getAll('prospects')).filter(p => !p.status || p.status === 'active');
-            const customers = (await DataStore.getAll('customers')).filter(c => !c.status || c.status === 'active');
-            const agents = (await DataStore.getAll('users')).filter(u => isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'));
+            const prospects = (await AppDataStore.getAll('prospects')).filter(p => !p.status || p.status === 'active');
+            const customers = (await AppDataStore.getAll('customers')).filter(c => !c.status || c.status === 'active');
+            const agents = (await AppDataStore.getAll('users')).filter(u => isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'));
 
             const all = [
                 ...prospects.map(p => ({ id: p.id, name: p.full_name, type: 'Prospect' })),
@@ -9193,8 +9193,8 @@ function _wireLoginBtn() {
     const selectEntity = async (id, type) => {
         _selectedEntity = { id, type };
         const entity = type === 'Prospect'
-            ? await DataStore.getById('prospects', id)
-            : await DataStore.getById('customers', id);
+            ? await AppDataStore.getById('prospects', id)
+            : await AppDataStore.getById('customers', id);
 
         const infoDiv = document.getElementById('selected-entity-info');
         if (infoDiv) {
@@ -9222,7 +9222,7 @@ function _wireLoginBtn() {
         const resultsDiv = document.getElementById('agent-search-results');
         if (!term || term.length < 2) return;
 
-        const users = (await DataStore.getAll('users')).filter(isAgent);
+        const users = (await AppDataStore.getAll('users')).filter(isAgent);
         const matches = users.filter(u => u.full_name.toLowerCase().includes(term));
 
         if (resultsDiv) {
@@ -9329,9 +9329,9 @@ function _wireLoginBtn() {
                 const isDuplicate = all.find(p => p.phone === phone || normalize(p.full_name) === normName);
 
                 if (isDuplicate) {
-                    const agent = await DataStore.getById('users', isDuplicate.responsible_agent_id || isDuplicate.lead_agent_id) || { full_name: 'Unknown Agent' };
+                    const agent = await AppDataStore.getById('users', isDuplicate.responsible_agent_id || isDuplicate.lead_agent_id) || { full_name: 'Unknown Agent' };
                     // Find last activity
-                    const activities = (await DataStore.getAll('activities')).filter(a => a.prospect_id === isDuplicate.id || a.customer_id === isDuplicate.id);
+                    const activities = (await AppDataStore.getAll('activities')).filter(a => a.prospect_id === isDuplicate.id || a.customer_id === isDuplicate.id);
                     activities.sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
                     const lastDate = activities.length > 0 ? activities[0].activity_date : 'N/A';
 
@@ -9377,7 +9377,7 @@ function _wireLoginBtn() {
                 prospectData.lunar_birth = document.getElementById('cps-lunar')?.value;
             }
 
-            const prospect = await DataStore.create('prospects', prospectData);
+            const prospect = await AppDataStore.create('prospects', prospectData);
             activity.prospect_id = prospect.id;
             activity.activity_title = `CPS With ${name}`;
 
@@ -9413,7 +9413,7 @@ function _wireLoginBtn() {
                 if (type === 'AGENT_MEETING') category = 'Meeting';
                 if (type === 'AGENT_TRAINING') category = 'Training';
 
-                const newEvent = await DataStore.create('events', {
+                const newEvent = await AppDataStore.create('events', {
                     title: title,
                     date: date,
                     time: start,
@@ -9431,7 +9431,7 @@ function _wireLoginBtn() {
                     UI.toast.error('Please select an event.');
                     return;
                 }
-                const ev = await DataStore.getById('events', eventId);
+                const ev = await AppDataStore.getById('events', eventId);
                 activity.activity_title = ev ? ev.title : 'Existing Event';
                 // Update visibility on existing event if needed (optional, keeping it simple for now)
             }
@@ -9446,7 +9446,7 @@ function _wireLoginBtn() {
 
             // Save attendees
             for (const att of _selectedAttendees) {
-                await DataStore.create('event_attendees', {
+                await AppDataStore.create('event_attendees', {
                     event_id: parseInt(eventId),
                     attendee_id: att.id,
                     attendee_type: att.type, // 'prospect', 'customer', 'agent'
@@ -9515,7 +9515,7 @@ function _wireLoginBtn() {
             }
         }
 
-        const savedActivity = await DataStore.create('activities', activity);
+        const savedActivity = await AppDataStore.create('activities', activity);
 
         if (document.getElementById('is-closing')?.checked) {
             const salesIdea = document.getElementById('case-sales-idea')?.value;
@@ -9523,7 +9523,7 @@ function _wireLoginBtn() {
             const successStory = document.getElementById('case-success-story')?.value;
 
             if (salesIdea || planDetails || successStory) {
-                await DataStore.create('case_studies', {
+                await AppDataStore.create('case_studies', {
                     title: `Case Study: ${activity.activity_title}`,
                     prospect_id: activity.prospect_id || null,
                     customer_id: activity.customer_id || null,
@@ -9930,7 +9930,7 @@ function _wireLoginBtn() {
 
     const openProspectModal = async (prospectId = null) => {
         if (prospectId) {
-            const prospect = await DataStore.getById('prospects', prospectId);
+            const prospect = await AppDataStore.getById('prospects', prospectId);
             const currentUser = _currentUser || await Auth.getCurrentUser();
             const isAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || currentUser.role?.includes('Level 3') || currentUser.role?.includes('Level 7') || currentUser.role === 'team_leader';
             const isOwner = prospect.responsible_agent_id == currentUser.id;
@@ -9939,7 +9939,7 @@ function _wireLoginBtn() {
                 return;
             }
         }
-        const prospect = prospectId ? await DataStore.getById('prospects', prospectId) : null;
+        const prospect = prospectId ? await AppDataStore.getById('prospects', prospectId) : null;
         const isEdit = !!prospect;
 
         const content = `
@@ -10199,14 +10199,14 @@ function _wireLoginBtn() {
         };
 
         if (editId) {
-            await DataStore.update('prospects', parseInt(editId), data);
+            await AppDataStore.update('prospects', parseInt(editId), data);
             UI.toast.success('Prospect updated successfully');
         } else {
             data.id = Date.now();
             data.protection_deadline = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
             data.score = 5;
             data.created_at = new Date().toISOString();
-            await DataStore.create('prospects', data);
+            await AppDataStore.create('prospects', data);
             UI.toast.success('Prospect created successfully');
 
             // Step 8: Trigger event for referral modal
@@ -10224,7 +10224,7 @@ function _wireLoginBtn() {
     };
 
     const showCustomerDetail = async (customerId) => {
-        const customer = await DataStore.getById('customers', customerId);
+        const customer = await AppDataStore.getById('customers', customerId);
         if (!customer || !await canViewCustomer(customer)) {
             UI.toast.error('You do not have permission to view this customer.');
             await navigateTo('prospects');
@@ -10331,7 +10331,7 @@ function _wireLoginBtn() {
         if (btn) btn.classList.add('active');
 
         const customerId = cId || 101; // Mocking fallback
-        const customer = await DataStore.getById('customers', customerId);
+        const customer = await AppDataStore.getById('customers', customerId);
         if (!customer) return;
 
         if (tabName === 'basic') await renderBasicBankTab(customer);
@@ -10340,7 +10340,7 @@ function _wireLoginBtn() {
         else if (tabName === 'activity') await renderCustomerActivityTab(customer);
         else if (tabName === 'referrals') await renderReferralsTab(customer);
         else if (tabName === 'events') {
-            const registrations = (await DataStore.getAll('event_registrations')).filter(
+            const registrations = (await AppDataStore.getAll('event_registrations')).filter(
                 r => r.attendee_type === 'customer' && r.attendee_id == customerId
             );
             let html = '<h4>Events Attended</h4>';
@@ -10349,7 +10349,7 @@ function _wireLoginBtn() {
             } else {
                 html += '<table class="events-table"><thead><tr><th>Event</th><th>Date</th><th>Status</th><th>Points</th></tr></thead><tbody>';
                 for (const r of registrations) {
-                    const event = await DataStore.getById('events', r.event_id);
+                    const event = await AppDataStore.getById('events', r.event_id);
                     html += `<tr><td>${event?.title || 'Unknown'}</td><td>${r.event_date || '-'}</td><td>${r.attendance_status}</td><td>${r.points_awarded || 0}</td></tr>`;
                 }
                 html += '</tbody></table>';
@@ -10426,7 +10426,7 @@ function _wireLoginBtn() {
         `;
 
         // Phase 14: Append Internal Notes section
-        const customerNotes = await DataStore.query('notes', { customer_id: customer.id });
+        const customerNotes = await AppDataStore.query('notes', { customer_id: customer.id });
         container.insertAdjacentHTML('beforeend', `
             <div class="profile-section" style="margin-top:24px; border:1px solid var(--gray-200); border-radius:12px; padding:20px; background:var(--white);">
                 <h4 style="font-size:16px; font-weight:600; margin-bottom:16px; color:var(--primary);"><i class="fas fa-sticky-note"></i> Internal Notes</h4>
@@ -10451,7 +10451,7 @@ function _wireLoginBtn() {
     };
 
     const renderPlatformIdsTab = async (customer, containerId = 'profile-tab-content') => {
-        const platformData = await DataStore.query('platform_ids', { customer_id: customer.id });
+        const platformData = await AppDataStore.query('platform_ids', { customer_id: customer.id });
         const internal = platformData.slice(0, 4);
         const external = platformData.slice(4);
 
@@ -10490,7 +10490,7 @@ function _wireLoginBtn() {
     };
 
     const renderPurchaseHistoryTab = async (customer, containerId = 'profile-tab-content') => {
-        const purchases = await DataStore.query('purchases', { customer_id: customer.id });
+        const purchases = await AppDataStore.query('purchases', { customer_id: customer.id });
         const container = document.getElementById(containerId);
 
         let totalPaid = 0;
@@ -10544,11 +10544,11 @@ function _wireLoginBtn() {
     };
 
     const renderReferralsTab = async (customer, containerId = 'profile-tab-content') => {
-        const refs = await DataStore.query('referrals', { referrer_customer_id: customer.id });
+        const refs = await AppDataStore.query('referrals', { referrer_customer_id: customer.id });
         const container = document.getElementById(containerId);
 
         const rowsPromises = refs.map(async (r) => {
-            const prospect = await DataStore.getById('prospects', r.referred_prospect_id);
+            const prospect = await AppDataStore.getById('prospects', r.referred_prospect_id);
             return `
                 <tr>
                     <td><strong>${prospect?.full_name || 'N/A'}</strong></td>
@@ -10632,7 +10632,7 @@ function _wireLoginBtn() {
     const renderCustomerActivityTab = async (customer, containerId = 'profile-tab-content') => {
         const container = document.getElementById(containerId);
         // Combine activities linked to this customer OR original prospect
-        const activities = (await DataStore.getAll('activities')).filter(a =>
+        const activities = (await AppDataStore.getAll('activities')).filter(a =>
             a.customer_id == customer.id ||
             (customer.converted_from_prospect_id && a.prospect_id == customer.converted_from_prospect_id)
         ).sort((a, b) => new Date(b.date || b.created_at) - new Date(a.date || a.created_at));
@@ -10670,12 +10670,12 @@ function _wireLoginBtn() {
 
     const renderCustomerTags = async (customer) => {
         const container = document.getElementById('customer-tags-section');
-        const entityTags = await DataStore.query('entity_tags', { entity_type: 'customer', entity_id: customer.id });
+        const entityTags = await AppDataStore.query('entity_tags', { entity_type: 'customer', entity_id: customer.id });
 
         let tagsHtml = '<p style="color:var(--gray-400); font-size:12px;">No tags yet.</p>';
         if (entityTags.length > 0) {
             const tagSpans = await Promise.all(entityTags.map(async (et) => {
-                const tag = await DataStore.getById('tags', et.tag_id);
+                const tag = await AppDataStore.getById('tags', et.tag_id);
                 return tag ? `
                     <span class="score-badge" style="background:${tag.color || 'var(--primary)'}; color:white; display:flex; align-items:center; gap:4px; font-size:11px;">
                         ${tag.name} <span style="cursor:pointer;" onclick="app. removeTagFromCustomer(${customer.id}, ${tag.id})">&times;</span>
@@ -10697,7 +10697,7 @@ function _wireLoginBtn() {
     };
 
     const showProspectDetail = async (prospectId) => {
-        const prospect = await DataStore.getById('prospects', prospectId);
+        const prospect = await AppDataStore.getById('prospects', prospectId);
         if (!prospect || !await canViewProspect(prospect)) {
             UI.toast.error('You do not have permission to view this prospect.');
             await navigateTo('prospects');
@@ -10719,10 +10719,10 @@ function _wireLoginBtn() {
         const container = document.getElementById('content-viewport');
         if (!container) return;
 
-        const solutions = await DataStore.query('proposed_solutions', { prospect_id: prospectId });
-        const activities =await  (await DataStore.getAll('activities')).filter(a => a.prospect_id == prospectId);
-        const notes = await DataStore.query('notes', { prospect_id: prospectId });
-        const names = await DataStore.query('names', { prospect_id: prospectId });
+        const solutions = await AppDataStore.query('proposed_solutions', { prospect_id: prospectId });
+        const activities =await  (await AppDataStore.getAll('activities')).filter(a => a.prospect_id == prospectId);
+        const notes = await AppDataStore.query('notes', { prospect_id: prospectId });
+        const names = await AppDataStore.query('names', { prospect_id: prospectId });
 
         const daysLeft = calculateProtectionDays(prospect);
         const protectionStatus = getProtectionStatus(daysLeft);
@@ -10914,7 +10914,7 @@ function _wireLoginBtn() {
             btn.style.fontWeight = '600';
         }
 
-        const prospect = await DataStore.getById('prospects', prospectId);
+        const prospect = await AppDataStore.getById('prospects', prospectId);
         const container = document.getElementById('prospect-tab-content');
         if (!container || !prospect) return;
 
@@ -10977,7 +10977,7 @@ function _wireLoginBtn() {
     `;
         }
         else if (tab === 'names') {
-            const names = await DataStore.query('names', { prospect_id: prospectId });
+            const names = await AppDataStore.query('names', { prospect_id: prospectId });
             container.innerHTML = `
     <div class="profile-section">
                     <h2>
@@ -11017,7 +11017,7 @@ function _wireLoginBtn() {
     `;
         }
         else if (tab === 'activity') {
-            const activities =await  (await DataStore.getAll('activities')).filter(a => a.prospect_id == prospectId);
+            const activities =await  (await AppDataStore.getAll('activities')).filter(a => a.prospect_id == prospectId);
             container.innerHTML = `
     <div class="profile-section">
                     <h2>
@@ -11045,7 +11045,7 @@ function _wireLoginBtn() {
     `;
         }
         else if (tab === 'notes') {
-            const notes = await DataStore.query('notes', { prospect_id: prospectId });
+            const notes = await AppDataStore.query('notes', { prospect_id: prospectId });
             container.innerHTML = `
     <div class="profile-section" style="margin-bottom: 24px;">
                 <h2><i class="fas fa-sticky-note"></i> Notes</h2>
@@ -11080,7 +11080,7 @@ function _wireLoginBtn() {
 `;
         }
         else if (tab === 'events') {
-            const registrations =await  (await DataStore.getAll('event_registrations')).filter(
+            const registrations =await  (await AppDataStore.getAll('event_registrations')).filter(
                 r => r.attendee_type === 'prospect' && r.attendee_id == prospectId
             );
             let html = '<h2>Events Attended</h2>';
@@ -11089,7 +11089,7 @@ function _wireLoginBtn() {
             } else {
                 html += '<table class="events-table"><thead><tr><th>Event</th><th>Date</th><th>Status</th><th>Points</th></tr></thead><tbody>';
                 for (const r of registrations) {
-                    const event = await DataStore.getById('events', r.event_id);
+                    const event = await AppDataStore.getById('events', r.event_id);
                     html += `<tr><td>${event?.title || 'Unknown'}</td><td>${r.event_date || '-'}</td><td>${r.attendance_status}</td><td>${r.points_awarded || 0}</td></tr> `;
                 }
                 html += '</tbody></table>';
@@ -11104,7 +11104,7 @@ function _wireLoginBtn() {
         const text = document.getElementById('new-note-text')?.value?.trim();
         if (!text) return;
         const currentUser = await Auth.getCurrentUser();
-        await DataStore.create('notes', {
+        await AppDataStore.create('notes', {
             id: Date.now(),
             prospect_id: prospectId,
             text: text,
@@ -11119,7 +11119,7 @@ function _wireLoginBtn() {
     
 const deleteNote = async (prospectId, noteId) => {
     UI.confirm('Delete Note?', 'Are you sure you want to delete this note?', async () => {
-        await DataStore.delete('notes', noteId);
+        await AppDataStore.delete('notes', noteId);
         UI.toast.success('Note deleted');
         await app. switchProspectTab('notes', prospectId, document.querySelector('.profile-tab.active'));
     });
@@ -11157,7 +11157,7 @@ const deleteNote = async (prospectId, noteId) => {
     const saveCustomer = async () => {
         const name = document.getElementById('cust-name')?.value;
         if (!name) return UI.toast.error('Name is required');
-        await DataStore.create('customers', {
+        await AppDataStore.create('customers', {
             full_name: name,
             phone: document.getElementById('cust-phone')?.value,
             email: document.getElementById('cust-email')?.value,
@@ -11173,7 +11173,7 @@ const deleteNote = async (prospectId, noteId) => {
     };
 
     const openAddPurchaseModal = async (customerId) => {
-        const customer = await DataStore.getById('customers', customerId);
+        const customer = await AppDataStore.getById('customers', customerId);
         const content = `
     <div class="form-section">
                     <div class="form-group">
@@ -11243,14 +11243,14 @@ const deleteNote = async (prospectId, noteId) => {
 
         // Match with promotion package if exists
         let packageId = null;
-        const allPackages = await DataStore.getAll('promotion_packages');
+        const allPackages = await AppDataStore.getAll('promotion_packages');
         
 let matchingPkg = null;
 for (const p of allPackages) {
     if (!p.is_active) continue;
     let found = false;
     for (const pid of p.product_ids) {
-        const prod = await DataStore.getById('products', pid);
+        const prod = await AppDataStore.getById('products', pid);
         if (prod && prod.name === item) {
             found = true;
             break;
@@ -11274,11 +11274,11 @@ for (const p of allPackages) {
             proof: document.getElementById('pur-file')?.value ? 'image_uploaded.png' : '',
             package_id: packageId
         };
-        await DataStore.create('purchases', pur);
+        await AppDataStore.create('purchases', pur);
 
         // Update lifetime value
-        const customer = await DataStore.getById('customers', customerId);
-        await DataStore.update('customers', customerId, { lifetime_value: (customer.lifetime_value || 0) + amt });
+        const customer = await AppDataStore.getById('customers', customerId);
+        await AppDataStore.update('customers', customerId, { lifetime_value: (customer.lifetime_value || 0) + amt });
 
         UI.hideModal();
         UI.toast.success('Purchase added');
@@ -11287,7 +11287,7 @@ for (const p of allPackages) {
     };
 
     const openRecruitModal = async (customerId) => {
-        const customer = await DataStore.getById('customers', customerId);
+        const customer = await AppDataStore.getById('customers', customerId);
         const content = `
     <div class="form-section">
                     <h4 style="margin-bottom:12px;">Package Selection</h4>
@@ -11335,7 +11335,7 @@ for (const p of allPackages) {
 
     const executeDelete = async (id) => {
         UI.hideModal();
-        await DataStore.delete('prospects', id);
+        await AppDataStore.delete('prospects', id);
         UI.toast.success('Prospect deleted successfully');
         await showProspectsView(document.getElementById('content-viewport'));
     };
@@ -11349,8 +11349,8 @@ for (const p of allPackages) {
 
     // Tag Functions
     const openAddTagModal = async (entityId, entityType = 'prospect') => {
-        const allTags = await DataStore.getAll('tags');
-        const existingTagMappings = await DataStore.query('entity_tags', { entity_type: entityType, entity_id: entityId });
+        const allTags = await AppDataStore.getAll('tags');
+        const existingTagMappings = await AppDataStore.query('entity_tags', { entity_type: entityType, entity_id: entityId });
         const existingTagIds = existingTagMappings.map(et => et.tag_id);
         const availableTags = allTags.filter(t => !existingTagIds.includes(t.id));
 
@@ -11395,7 +11395,7 @@ for (const p of allPackages) {
         if (tagSelect && tagSelect.value) {
             tagId = parseInt(tagSelect.value);
         } else if (newTagName) {
-            const newTag = await DataStore.create('tags', {
+            const newTag = await AppDataStore.create('tags', {
                 name: newTagName,
                 color: newTagColor || 'blue'
             });
@@ -11405,7 +11405,7 @@ for (const p of allPackages) {
             return;
         }
 
-        await DataStore.create('entity_tags', {
+        await AppDataStore.create('entity_tags', {
             entity_type: entityType,
             entity_id: entityId,
             tag_id: tagId
@@ -11421,26 +11421,26 @@ for (const p of allPackages) {
     };
 
     const removeTagFromCustomer = async (customerId, tagId) => {
-        const mappings = await DataStore.query('entity_tags', {
+        const mappings = await AppDataStore.query('entity_tags', {
             entity_type: 'customer',
             entity_id: customerId,
             tag_id: tagId
         });
         if (mappings.length > 0) {
-            await DataStore.delete('entity_tags', mappings[0].id);
+            await AppDataStore.delete('entity_tags', mappings[0].id);
             await app. showCustomerDetail(customerId);
             UI.toast.success('Tag removed');
         }
     };
 
     const removeTagFromProspect = async (prospectId, tagId) => {
-        const mappings = await DataStore.query('entity_tags', {
+        const mappings = await AppDataStore.query('entity_tags', {
             entity_type: 'prospect',
             entity_id: prospectId,
             tag_id: tagId
         });
         if (mappings.length > 0) {
-            await DataStore.delete('entity_tags', mappings[0].id);
+            await AppDataStore.delete('entity_tags', mappings[0].id);
             await app. showProspectDetail(prospectId);
             UI.toast.success('Tag removed');
         }
@@ -11448,7 +11448,7 @@ for (const p of allPackages) {
 
     // Solution Functions
 const openAddSolutionModal = async (prospectId) => {
-    const products = await DataStore.getAll('products');
+    const products = await AppDataStore.getAll('products');
     const productOptions = products
         .filter(p => p.is_active !== false)
         .map(p => `<option value="${escapeHtml(p.name)}">${escapeHtml(p.name)}</option>`)
@@ -11509,7 +11509,7 @@ const openAddSolutionModal = async (prospectId) => {
             return;
         }
 
-        await DataStore.create('proposed_solutions', {
+        await AppDataStore.create('proposed_solutions', {
             prospect_id: prospectId,
             solution: solution,
             proposed_date: date,
@@ -11524,7 +11524,7 @@ const openAddSolutionModal = async (prospectId) => {
 
     // Name List Functions
     const confirmConvertToCustomer = async (prospectId, isManual = false) => {
-        const prospect = await DataStore.getById('prospects', prospectId);
+        const prospect = await AppDataStore.getById('prospects', prospectId);
         if (!prospect) return;
 
         const amount = isManual
@@ -11563,12 +11563,12 @@ const openAddSolutionModal = async (prospectId) => {
             referral_relationship: prospect.referral_relationship
         };
 
-        const newCustomer = await DataStore.create('customers', customer);
-        await DataStore.update('prospects', prospectId, { status: 'converted' });
+        const newCustomer = await AppDataStore.create('customers', customer);
+        await AppDataStore.update('prospects', prospectId, { status: 'converted' });
 
         // Phase X: Create purchase record for conversion amount
         if (amount > 0) {
-           await  await DataStore.create('purchases', {
+           await  await AppDataStore.create('purchases', {
                 customer_id: newCustomer.id,
                 date: customer.customer_since,
                 item: 'Conversion Package / First Deal',
@@ -11587,11 +11587,11 @@ const openAddSolutionModal = async (prospectId) => {
     };
 
     const extendProtection = async (prospectId) => {
-        const prospect = await DataStore.getById('prospects', prospectId);
+        const prospect = await AppDataStore.getById('prospects', prospectId);
         if (!prospect) return;
         const currentDeadline = new Date(prospect.protection_deadline || Date.now());
         const newDeadline = new Date(currentDeadline.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-        await DataStore.update('prospects', prospectId, { protection_deadline: newDeadline });
+        await AppDataStore.update('prospects', prospectId, { protection_deadline: newDeadline });
         UI.toast.success('Protection extended by 30 days');
         await app. showProspectDetail(prospectId);
     };
@@ -11606,10 +11606,10 @@ const openAddSolutionModal = async (prospectId) => {
 
 
     const convertToCustomer = async (prospectId) => {
-        const prospect = await DataStore.getById('prospects', prospectId);
+        const prospect = await AppDataStore.getById('prospects', prospectId);
         if (!prospect) return;
 
-        const totalPurchases = await DataStore.getAll('purchases')
+        const totalPurchases = await AppDataStore.getAll('purchases')
             .filter(p => p.prospect_id === prospectId)
             .reduce((sum, p) => sum + (p.amount || 0), 0);
 
@@ -11723,7 +11723,7 @@ const openAddSolutionModal = async (prospectId) => {
             return;
         }
 
-        const agents = (await DataStore.getAll('users')).filter(u => isAgent(u) || u.agent_code);
+        const agents = (await AppDataStore.getAll('users')).filter(u => isAgent(u) || u.agent_code);
         const searchQuery = document.getElementById('agent-search')?.value.toLowerCase() || '';
         const teamFilter = document.getElementById('filter-agent-team')?.value || '';
         const roleFilter = document.getElementById('filter-agent-role')?.value || '';
@@ -11736,7 +11736,7 @@ const openAddSolutionModal = async (prospectId) => {
             if (roleFilter && agent.role !== roleFilter) return;
             if (statusFilter && agent.status !== statusFilter) return;
 
-            const stats = await DataStore.query('agent_stats', { agent_id: agent.id })[0] || { total_assigned: 0, followup_rate: 0 };
+            const stats = await AppDataStore.query('agent_stats', { agent_id: agent.id })[0] || { total_assigned: 0, followup_rate: 0 };
             const rateClass = stats.followup_rate >= 90 ? 'rate-good' : (stats.followup_rate >= 70 ? 'rate-warning' : 'rate-critical');
             const status = agent.status || 'active';
 
@@ -11769,7 +11769,7 @@ const openAddSolutionModal = async (prospectId) => {
     };
 
 const showAgentProfile = async (agentId) => {
-    const agent = await DataStore.getById('users', agentId);
+    const agent = await AppDataStore.getById('users', agentId);
     if (!agent) {
         UI.toast.error('Agent not found');
         return;
@@ -11940,7 +11940,7 @@ const showAgentProfile = async (agentId) => {
 
     // Populate agent notes after the DOM is ready
     setTimeout(async () => {
-        const agentNotes = await DataStore.query('notes', { agent_id: agent.id });
+        const agentNotes = await AppDataStore.query('notes', { agent_id: agent.id });
         const notesHtml = agentNotes.length 
             ? agentNotes.map(n => `
                 <div class="notes-item" style="margin-top:8px;">
@@ -11960,7 +11960,7 @@ const showAgentProfile = async (agentId) => {
   /*  const filterAgents = async () => await renderAgentsTable();
 
     const showAgentDetail = async (agentId) => {
-        const agent = await DataStore.getById('users', agentId);
+        const agent = await AppDataStore.getById('users', agentId);
         if (!agent) return;
 
         // --- NEW: define isAdminOrLead ---
@@ -12121,7 +12121,7 @@ const html = `
 
 // Populate agent notes after the DOM is ready
  setTimeout(async () => {
-    const agentNotes = await DataStore.query('notes', { agent_id: agent.id });
+    const agentNotes = await AppDataStore.query('notes', { agent_id: agent.id });
     const notesHtml = agentNotes.length 
         ? agentNotes.map(n => `
             <div class="notes-item" style="margin-top:8px;">
@@ -12195,9 +12195,9 @@ const html = `
     };
 
     const executeRenewal = async (agentId) => {
-        const agent = await DataStore.getById('users', agentId);
+        const agent = await AppDataStore.getById('users', agentId);
         if (agent) {
-            await DataStore.update('users', agentId, {
+            await AppDataStore.update('users', agentId, {
                 renewal_status: 'PENDING_REVIEW',
                 license_renewal_requested: true,
                 license_renewal_date: new Date().toISOString().split('T')[0]
@@ -12217,7 +12217,7 @@ const html = `
     };
 
     const renderFollowupStats = async (agentId) => {
-        const stats = await DataStore.query('agent_stats', { agent_id: agentId })[0];
+        const stats = await AppDataStore.query('agent_stats', { agent_id: agentId })[0];
         if (!stats) return '<p>No performance data available.</p>';
 
         return `
@@ -12252,13 +12252,13 @@ const html = `
 
 
 const renderCurrentAssignments = async (agentId) => {
-    const assignments = await DataStore.query('assignments', { agent_id: agentId });
+    const assignments = await AppDataStore.query('assignments', { agent_id: agentId });
     if (assignments.length === 0) return '<p>No active assignments.</p>';
 
     // Use for...of to avoid complex Promise.all, or use Promise.all with async map
     let itemsHtml = '';
     for (const a of assignments) {
-        const p = await DataStore.getById('prospects', a.prospect_id);
+        const p = await AppDataStore.getById('prospects', a.prospect_id);
         itemsHtml += `
             <div class="assignment-item" onclick="app.showProspectDetail(${a.prospect_id})">
                 <div>
@@ -12274,13 +12274,13 @@ const renderCurrentAssignments = async (agentId) => {
 };
 /*
     const renderCurrentAssignments = async (agentId) => {
-        const assignments = await DataStore.query('assignments', { agent_id: agentId });
+        const assignments = await AppDataStore.query('assignments', { agent_id: agentId });
         if (assignments.length === 0) return '<p>No active assignments.</p>';
 
         return `
     <div class="assignments-list">
         ${assignments.map(a => {
-            const p = await DataStore.getById('prospects', a.prospect_id);
+            const p = await AppDataStore.getById('prospects', a.prospect_id);
             return `
                     <div class="assignment-item" onclick="app. showProspectDetail(${a.prospect_id})">
                         <div>
@@ -12298,7 +12298,7 @@ const renderCurrentAssignments = async (agentId) => {
     };
 */
     const renderPerformanceTargets = async (agentId) => {
-        const target = await DataStore.query('agent_targets', { agent_id: agentId })[0];
+        const target = await AppDataStore.query('agent_targets', { agent_id: agentId })[0];
         if (!target) return '<p>No targets set for this month.</p>';
 
         return `
@@ -12424,7 +12424,7 @@ const renderCurrentAssignments = async (agentId) => {
             join_date: new Date().toISOString().split('T')[0]
         };
 
-        await DataStore.create('users', newAgent);
+        await AppDataStore.create('users', newAgent);
         UI.hideModal();
         UI.toast.success('Agent account created successfully');
         await renderAgentsTable();
@@ -12432,7 +12432,7 @@ const renderCurrentAssignments = async (agentId) => {
 
 
     const updateAgentTargets = async (agentId) => {
-        const target = await DataStore.query('agent_targets', { agent_id: agentId })[0];
+        const target = await AppDataStore.query('agent_targets', { agent_id: agentId })[0];
         const content = `
     <div class="form-group" style="margin-bottom:15px;">
                 <label>Monthly Sales target (RM)</label>
@@ -12454,20 +12454,20 @@ const renderCurrentAssignments = async (agentId) => {
     };
 
     const saveAgentTargets = async (agentId) => {
-        const target = await DataStore.query('agent_targets', { agent_id: agentId })[0];
+        const target = await AppDataStore.query('agent_targets', { agent_id: agentId })[0];
         const data = {
             target_amount: parseInt(document.getElementById('target-sales').value),
             target_cps: parseInt(document.getElementById('target-cps').value),
             target_meetings: parseInt(document.getElementById('target-meetings').value)
         };
         if (target) {
-            await DataStore.update('agent_targets', target.id, data);
+            await AppDataStore.update('agent_targets', target.id, data);
         } else {
             data.agent_id = agentId;
             data.current_amount = 0;
             data.current_cps = 0;
             data.current_meetings = 0;
-            await DataStore.create('agent_targets', data);
+            await AppDataStore.create('agent_targets', data);
         }
         UI.hideModal();
         UI.toast.success('Agent targets updated');
@@ -12479,7 +12479,7 @@ const renderCurrentAssignments = async (agentId) => {
 
 const deactivateAgent = async (agentId) => {
     UI.confirm('Deactivate Agent?', 'This will prevent the agent from logging in. You should reassign their active prospects first.', async () => {
-        await DataStore.update('users', agentId, { status: 'inactive' });
+        await AppDataStore.update('users', agentId, { status: 'inactive' });
         UI.toast.success('Agent deactivated');
         const main = document.getElementById('main-content');
         if (main) await showAgentsView(main);
@@ -12488,7 +12488,7 @@ const deactivateAgent = async (agentId) => {
 
 
     const assignProspectToAgent = async (prospectId, agentId) => {
-        await DataStore.update('prospects', prospectId, { responsible_agent_id: agentId });
+        await AppDataStore.update('prospects', prospectId, { responsible_agent_id: agentId });
         UI.toast.success('Prospect reassigned');
         await app. showProspectDetail(prospectId);
     };
@@ -12560,7 +12560,7 @@ const deactivateAgent = async (agentId) => {
     };
 
     const getProposedProduct = async (prospectId) => {
-        const solutions = await DataStore.query('proposed_solutions', { prospect_id: prospectId });
+        const solutions = await AppDataStore.query('proposed_solutions', { prospect_id: prospectId });
         if (solutions.length > 0) {
             return {
                 name: solutions[0].product_name || 'Standard Consultation',
@@ -12571,15 +12571,15 @@ const deactivateAgent = async (agentId) => {
     };
 
     const getNoteCount = async (prospectId) => {
-        return await DataStore.query('notes', { prospect_id: prospectId }).length +
-            await DataStore.query('activities', { prospect_id: prospectId }).length;
+        return await AppDataStore.query('notes', { prospect_id: prospectId }).length +
+            await AppDataStore.query('activities', { prospect_id: prospectId }).length;
     };
 
     const getProspectOutcome = async (prospect) => {
         if (prospect.status === 'converted') return 'Won';
         if (prospect.status === 'lost') return 'Lost';
 
-        const purchases = await DataStore.query('purchases', { prospect_id: prospect.id });
+        const purchases = await AppDataStore.query('purchases', { prospect_id: prospect.id });
         if (purchases.length > 0) return 'Won';
 
         return 'Open';
@@ -12593,7 +12593,7 @@ const deactivateAgent = async (agentId) => {
         const userId = _currentUser?.id || 5;
         const allActivities = await getVisibleActivities();
         let prospects = await getVisibleProspects();
-        const agents = (await DataStore.getAll('users')).filter(u => isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'));
+        const agents = (await AppDataStore.getAll('users')).filter(u => isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'));
 
         // --- NEW: Apply Filters ---
         if (_pipelineAgentFilter !== 'all') {
@@ -12603,7 +12603,7 @@ const deactivateAgent = async (agentId) => {
             prospects = prospects.filter(p => p.status === _pipelineStatusFilter);
         }
 
-        const focusList = await DataStore.query('my_potential_list', { user_id: userId })
+        const focusList = await AppDataStore.query('my_potential_list', { user_id: userId })
             .filter(rec => prospects.some(p => p.id == rec.prospect_id)) // Filter focus list too
             .sort((a, b) => a.priority_order - b.priority_order);
 
@@ -12718,7 +12718,7 @@ const deactivateAgent = async (agentId) => {
     };
 
     const renderFocusRow = async (rec, idx, allActivities) => {
-        const prospect = await DataStore.getById('prospects', rec.prospect_id);
+        const prospect = await AppDataStore.getById('prospects', rec.prospect_id);
         if (!prospect) return '';
 
         const readiness = calculateReadiness(prospect, allActivities);
@@ -12738,7 +12738,7 @@ const deactivateAgent = async (agentId) => {
                     <div style="font-size: 12px; color: #6B7280; margin-top: 2px;">Created: ${prospect.created_at || 'N/A'}</div>
                 </td>
                 <td style="padding: 16px;">
-                    <div style="font-size: 13px;">${await escapeHtml(await DataStore.getById('users', prospect.responsible_agent_id)?.full_name || 'Unassigned')}</div>
+                    <div style="font-size: 13px;">${await escapeHtml(await AppDataStore.getById('users', prospect.responsible_agent_id)?.full_name || 'Unassigned')}</div>
                 </td>
                 <td style="padding: 16px;">
                     <div style="font-weight: 500;">${await escapeHtml(productInfo.name)}</div>
@@ -12782,7 +12782,7 @@ const deactivateAgent = async (agentId) => {
         const readinessColor = readiness.label === 'HOT' ? '#DC2626' : (readiness.label === 'WARM' ? '#F59E0B' : '#6B7280');
 
         const prospectName = await escapeHtml(prospect.name);
-        const agentUser = await DataStore.getById('users', prospect.responsible_agent_id);
+        const agentUser = await AppDataStore.getById('users', prospect.responsible_agent_id);
         const agentName = await escapeHtml(agentUser?.full_name || 'Unassigned');
         const productNameHtml = await escapeHtml(productInfo.name);
         const tagsHtml = prospect.tags
@@ -12853,7 +12853,7 @@ const deactivateAgent = async (agentId) => {
 
     const addToFocusList = async (prospectId) => {
         const userId = _currentUser?.id || 5;
-        const currentList = await DataStore.query('my_potential_list', { user_id: userId });
+        const currentList = await AppDataStore.query('my_potential_list', { user_id: userId });
 
         // Check if already in list
         if (currentList.some(item => item.prospect_id == prospectId)) {
@@ -12863,7 +12863,7 @@ const deactivateAgent = async (agentId) => {
 
         const nextPriority = currentList.length + 1;
 
-        await DataStore.create('my_potential_list', {
+        await AppDataStore.create('my_potential_list', {
             user_id: userId,
             prospect_id: prospectId,
             priority_order: nextPriority
@@ -12874,18 +12874,18 @@ const deactivateAgent = async (agentId) => {
     };
 
     const removeFromFocusList = async (listItemId) => {
-        const item = await DataStore.getById('my_potential_list', listItemId);
+        const item = await AppDataStore.getById('my_potential_list', listItemId);
         if (!item) return;
 
         const userId = item.user_id;
-        await DataStore.delete('my_potential_list', listItemId);
+        await AppDataStore.delete('my_potential_list', listItemId);
 
         // Re-compact
-        const remaining = await DataStore.query('my_potential_list', { user_id: userId })
+        const remaining = await AppDataStore.query('my_potential_list', { user_id: userId })
             .sort((a, b) => a.priority_order - b.priority_order);
 
         for (const [idx, rec] of remaining.entries()) {
-            await DataStore.update('my_potential_list', rec.id, { priority_order: idx + 1 });
+            await AppDataStore.update('my_potential_list', rec.id, { priority_order: idx + 1 });
         }
 
         UI.toast.info('Removed from Focus List');
@@ -12999,10 +12999,10 @@ const deactivateAgent = async (agentId) => {
     };
 
     const showComments = async (prospectId) => {
-        const prospect = await DataStore.getById('prospects', prospectId);
-        const notes = await DataStore.query('notes', { prospect_id: prospectId })
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        const notes = await AppDataStore.query('notes', { prospect_id: prospectId })
             .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-        const activities = await DataStore.query('activities', { prospect_id: prospectId })
+        const activities = await AppDataStore.query('activities', { prospect_id: prospectId })
             .sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
 
         const content = `
@@ -13047,7 +13047,7 @@ const deactivateAgent = async (agentId) => {
             return;
         }
 
-        await DataStore.create('notes', {
+        await AppDataStore.create('notes', {
             prospect_id: prospectId,
             content: content.trim(),
             created_at: new Date().toISOString(),
@@ -13089,7 +13089,7 @@ const deactivateAgent = async (agentId) => {
     const handleStageDrop = async (e, stageId) => {
         e.preventDefault();
         const prospectId = e.dataTransfer.getData('text/plain');
-        const prospect = await DataStore.getById('prospects', parseInt(prospectId));
+        const prospect = await AppDataStore.getById('prospects', parseInt(prospectId));
 
         if (!prospect) return;
 
@@ -13142,7 +13142,7 @@ const deactivateAgent = async (agentId) => {
         // Normal stage move
         else {
             prospect.pipeline_stage = stageId;
-            await DataStore.update('prospects', prospect.id, prospect);
+            await AppDataStore.update('prospects', prospect.id, prospect);
 
             // Log to audit
             if (typeof AuditLogger !== 'undefined') {
@@ -13159,7 +13159,7 @@ const deactivateAgent = async (agentId) => {
     };
 
     const closeDealWon = async (prospectId) => {
-        const prospect = await DataStore.getById('prospects', prospectId);
+        const prospect = await AppDataStore.getById('prospects', prospectId);
         const amount = parseFloat(document.getElementById('deal-amount')?.value || prospect.deal_value || 5000);
         const closeDate = document.getElementById('close-date')?.value || new Date().toISOString().split('T')[0];
 
@@ -13186,7 +13186,7 @@ const deactivateAgent = async (agentId) => {
             conversion_date: closeDate
         };
 
-        await DataStore.create('customers', customer);
+        await AppDataStore.create('customers', customer);
 
         // Update prospect
         prospect.status = 'converted';
@@ -13194,7 +13194,7 @@ const deactivateAgent = async (agentId) => {
         prospect.deal_value = amount;
         prospect.closed_at = new Date().toISOString();
         prospect.closed_date = closeDate;
-        await DataStore.update('prospects', prospect.id, prospect);
+        await AppDataStore.update('prospects', prospect.id, prospect);
 
         // Log to audit
         if (typeof AuditLogger !== 'undefined') {
@@ -13212,7 +13212,7 @@ const deactivateAgent = async (agentId) => {
     };
 
     const closeDealLost = async (prospectId) => {
-        const prospect = await DataStore.getById('prospects', prospectId);
+        const prospect = await AppDataStore.getById('prospects', prospectId);
         const reason = document.getElementById('lost-reason')?.value || 'Not specified';
         const notes = document.getElementById('lost-notes')?.value || '';
 
@@ -13221,7 +13221,7 @@ const deactivateAgent = async (agentId) => {
         prospect.lost_notes = notes;
         prospect.lost_at = new Date().toISOString();
         prospect.status = 'lost';
-        await DataStore.update('prospects', prospect.id, prospect);
+        await AppDataStore.update('prospects', prospect.id, prospect);
 
         // Log to audit
         if (typeof AuditLogger !== 'undefined') {
@@ -13263,12 +13263,12 @@ const deactivateAgent = async (agentId) => {
 
     const renderManualPriority = async () => {
     const userId = _currentUser?.id || 5;
-    const potentialRecords = await DataStore.query('my_potential_list', { user_id: userId });
+    const potentialRecords = await AppDataStore.query('my_potential_list', { user_id: userId });
     
     // Filter asynchronously using a for loop
     const filtered = [];
     for (const rec of potentialRecords) {
-        const p = await DataStore.getById('prospects', rec.prospect_id);
+        const p = await AppDataStore.getById('prospects', rec.prospect_id);
         if (p && p.status !== 'converted' && p.status !== 'lost') {
             filtered.push(rec);
         }
@@ -13300,7 +13300,7 @@ const deactivateAgent = async (agentId) => {
         if (_draggedId === targetId) return;
 
         const userId = _currentUser?.id || 5;
-        const list = await DataStore.query('my_potential_list', { user_id: userId })
+        const list = await AppDataStore.query('my_potential_list', { user_id: userId })
             .sort((a, b) => a.priority_order - b.priority_order);
 
         const draggedIndex = list.findIndex(i => i.id === _draggedId);
@@ -13314,7 +13314,7 @@ const deactivateAgent = async (agentId) => {
 
         // Update priority_order and PERSIST
         for (const [idx, item] of list.entries()) {
-            await DataStore.update('my_potential_list', item.id, { priority_order: idx + 1 });
+            await AppDataStore.update('my_potential_list', item.id, { priority_order: idx + 1 });
         }
 
         UI.toast.info('Order rearranged.');
@@ -13331,7 +13331,7 @@ const deactivateAgent = async (agentId) => {
         const container = document.getElementById('recent-overrides-table');
         if (!container) return;
 
-        const overrides = await DataStore.query('manual_overrides', { user_id: _currentUser?.id || 5 })
+        const overrides = await AppDataStore.query('manual_overrides', { user_id: _currentUser?.id || 5 })
             .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
             .slice(0, 3);
 
@@ -13344,7 +13344,7 @@ const deactivateAgent = async (agentId) => {
 // Fetch all prospects in parallel
 const prospectsData = await Promise.all(
     overrides.map(async (o) => {
-        const prospect = await DataStore.getById('prospects', o.prospect_id);
+        const prospect = await AppDataStore.getById('prospects', o.prospect_id);
         const date = new Date(o.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
         return {
             prospectName: prospect?.full_name || prospect?.name || 'Unknown',
@@ -13389,7 +13389,7 @@ container.innerHTML = `
     // Boost Logic
     const openBoostModal = async () => {
         const prospects = await getVisibleProspects();
-        const manualList = await DataStore.query('my_potential_list', { user_id: _currentUser?.id || 5 });
+        const manualList = await AppDataStore.query('my_potential_list', { user_id: _currentUser?.id || 5 });
 
         const options = manualList.map(item => {
             const p = prospects.find(pro => pro.id === item.prospect_id);
@@ -13436,7 +13436,7 @@ container.innerHTML = `
             return;
         }
 
-        const manualList = await DataStore.query('my_potential_list', { user_id: _currentUser?.id || 5 })
+        const manualList = await AppDataStore.query('my_potential_list', { user_id: _currentUser?.id || 5 })
             .sort((a, b) => a.priority_order - b.priority_order);
 
         const currentItem = manualList.find(i => i.prospect_id === prospectId);
@@ -13447,10 +13447,10 @@ container.innerHTML = `
         for (const item of manualList) {
             if (item.priority_order < oldRank) {
                 item.priority_order += 1;
-                await DataStore.update('my_potential_list', item.id, { priority_order: item.priority_order });
+                await AppDataStore.update('my_potential_list', item.id, { priority_order: item.priority_order });
             }
         }
-        await DataStore.update('my_potential_list', currentItem.id, { priority_order: 1 });
+        await AppDataStore.update('my_potential_list', currentItem.id, { priority_order: 1 });
 
         // Log override
         const override = {
@@ -13464,7 +13464,7 @@ container.innerHTML = `
             status: 'active',
             expires_at: expires ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString() : null
         };
-        await DataStore.create('manual_overrides', override);
+        await AppDataStore.create('manual_overrides', override);
 
         UI.hideModal();
         await renderManualPriority();
@@ -13524,7 +13524,7 @@ container.innerHTML = `
         const type = document.getElementById('hist-type').value;
         const status = document.getElementById('hist-status').value;
 
-        let overrides = await DataStore.query('manual_overrides', { user_id: _currentUser?.id || 5 });
+        let overrides = await AppDataStore.query('manual_overrides', { user_id: _currentUser?.id || 5 });
 
         if (type !== 'all') overrides = overrides.filter(o => o.override_type === type);
         if (status !== 'all') overrides = overrides.filter(o => o.status === status);
@@ -13535,7 +13535,7 @@ container.innerHTML = `
 // Fetch all prospect data in parallel
 const overridesWithDetails = await Promise.all(
     overrides.map(async (o) => {
-        const prospect = await DataStore.getById('prospects', o.prospect_id);
+        const prospect = await AppDataStore.getById('prospects', o.prospect_id);
         const date = new Date(o.created_at).toLocaleDateString();
         return {
             id: o.id,
@@ -13579,10 +13579,10 @@ container.innerHTML = `
     };
 
     const viewJustification = async (overrideId) => {
-        const override = await DataStore.getById('manual_overrides', overrideId);
+        const override = await AppDataStore.getById('manual_overrides', overrideId);
         if (!override) return;
 
-        const prospect = await DataStore.getById('prospects', override.prospect_id);
+        const prospect = await AppDataStore.getById('prospects', override.prospect_id);
 
         const content = `
             <div style="padding: 10px;">
@@ -13798,22 +13798,22 @@ container.innerHTML = `
     };
 
     const getConversionRate = async (from, to) => {
-        const totalProspects = (await DataStore.getAll('prospects')).filter(p => p.created_at >= from && p.created_at <= to).length;
-        const convertedCount = (await DataStore.getAll('customers')).filter(c => c.customer_since >= from && c.customer_since <= to).length;
+        const totalProspects = (await AppDataStore.getAll('prospects')).filter(p => p.created_at >= from && p.created_at <= to).length;
+        const convertedCount = (await AppDataStore.getAll('customers')).filter(c => c.customer_since >= from && c.customer_since <= to).length;
         if (totalProspects === 0) return 0;
         return Math.round((convertedCount / totalProspects) * 100);
     };
 
 
 const getCPSCount = async (from, to) => {
-    const activities = await DataStore.getAll('activities');
+    const activities = await AppDataStore.getAll('activities');
     let count = 0;
     
     for (const a of activities) {
         if (a.activity_type !== 'CPS' || a.activity_date < from || a.activity_date > to) continue;
         
         if (_currentRoleFilter !== 'All') {
-            const agent = await DataStore.getById('users', a.agent_id);
+            const agent = await AppDataStore.getById('users', a.agent_id);
             if (!agent || agent.role !== _currentRoleFilter) continue;
         }
         
@@ -13824,14 +13824,14 @@ const getCPSCount = async (from, to) => {
 };
   
  const getTotalSales = async (from, to) => {
-    const purchases = await DataStore.getAll('purchases');
+    const purchases = await AppDataStore.getAll('purchases');
     let total = 0;
     
     for (const p of purchases) {
         if (p.date < from || p.date > to || p.is_agent_package) continue;
         
         if (_currentRoleFilter !== 'All') {
-            const agent = await DataStore.getById('users', p.agent_id);
+            const agent = await AppDataStore.getById('users', p.agent_id);
             if (!agent || agent.role !== _currentRoleFilter) continue;
         }
         
@@ -13842,14 +13842,14 @@ const getCPSCount = async (from, to) => {
 };
 
 const getPOPCaseCount = async (from, to) => {
-    const purchases = await DataStore.getAll('purchases');
+    const purchases = await AppDataStore.getAll('purchases');
     let count = 0;
     
     for (const p of purchases) {
         if (p.payment_method !== 'POP' || p.date < from || p.date > to) continue;
         
         if (_currentRoleFilter !== 'All') {
-            const agent = await DataStore.getById('users', p.agent_id);
+            const agent = await AppDataStore.getById('users', p.agent_id);
             if (!agent || agent.role !== _currentRoleFilter) continue;
         }
         
@@ -13860,12 +13860,12 @@ const getPOPCaseCount = async (from, to) => {
 };
 
   const getPOPSales = async (from, to) => {
-    const purchases = await DataStore.getAll('purchases');
+    const purchases = await AppDataStore.getAll('purchases');
     let total = 0;
     for (const p of purchases) {
         if (p.payment_method !== 'POP' || p.date < from || p.date > to) continue;
         if (_currentRoleFilter !== 'All') {
-            const agent = await DataStore.getById('users', p.agent_id);
+            const agent = await AppDataStore.getById('users', p.agent_id);
             if (!agent || agent.role !== _currentRoleFilter) continue;
         }
         total += p.amount || 0;
@@ -13874,12 +13874,12 @@ const getPOPCaseCount = async (from, to) => {
 };
 
 const getEPPCaseCount = async (from, to) => {
-    const purchases = await DataStore.getAll('purchases');
+    const purchases = await AppDataStore.getAll('purchases');
     let count = 0;
     for (const p of purchases) {
         if (p.payment_method !== 'EPP' || p.date < from || p.date > to) continue;
         if (_currentRoleFilter !== 'All') {
-            const agent = await DataStore.getById('users', p.agent_id);
+            const agent = await AppDataStore.getById('users', p.agent_id);
             if (!agent || agent.role !== _currentRoleFilter) continue;
         }
         count++;
@@ -13888,12 +13888,12 @@ const getEPPCaseCount = async (from, to) => {
 };
 
 const getEPPSales = async (from, to) => {
-    const purchases = await DataStore.getAll('purchases');
+    const purchases = await AppDataStore.getAll('purchases');
     let total = 0;
     for (const p of purchases) {
         if (p.payment_method !== 'EPP' || p.date < from || p.date > to) continue;
         if (_currentRoleFilter !== 'All') {
-            const agent = await DataStore.getById('users', p.agent_id);
+            const agent = await AppDataStore.getById('users', p.agent_id);
             if (!agent || agent.role !== _currentRoleFilter) continue;
         }
         total += p.amount || 0;
@@ -13902,7 +13902,7 @@ const getEPPSales = async (from, to) => {
 };
 
 const getNewAgents = async (from, to) => {
-    const users = await DataStore.getAll('users');
+    const users = await AppDataStore.getAll('users');
     let count = 0;
     for (const u of users) {
         if (u.join_date < from || u.join_date > to) continue;
@@ -13917,7 +13917,7 @@ const getNewAgents = async (from, to) => {
 };
 
 const getNewCustomers = async (from, to) => {
-    const customers = await DataStore.getAll('customers');
+    const customers = await AppDataStore.getAll('customers');
     let count = 0;
     for (const c of customers) {
         if (c.customer_since >= from && c.customer_since <= to) count++;
@@ -13926,12 +13926,12 @@ const getNewCustomers = async (from, to) => {
 };
 
 const getTotalMeetings = async (from, to) => {
-    const activities = await DataStore.getAll('activities');
+    const activities = await AppDataStore.getAll('activities');
     let count = 0;
     for (const a of activities) {
         if (a.activity_date < from || a.activity_date > to) continue;
         if (_currentRoleFilter !== 'All') {
-            const agent = await DataStore.getById('users', a.agent_id);
+            const agent = await AppDataStore.getById('users', a.agent_id);
             if (!agent || agent.role !== _currentRoleFilter) continue;
         }
         count++;
@@ -13940,12 +13940,12 @@ const getTotalMeetings = async (from, to) => {
 };
 
 const getActivityHeadcount = async (from, to) => {
-    const registrations = await DataStore.getAll('event_registrations');
+    const registrations = await AppDataStore.getAll('event_registrations');
     let count = 0;
     for (const r of registrations) {
         if (!r.checked_in || r.checked_in_at < from || r.checked_in_at > to) continue;
         if (_currentRoleFilter !== 'All') {
-            const agent = await DataStore.getById('users', r.agent_id);
+            const agent = await AppDataStore.getById('users', r.agent_id);
             if (!agent || agent.role !== _currentRoleFilter) continue;
         }
         count++;
@@ -14002,7 +14002,7 @@ const renderTargetOverview = async () => {
     if (!container) return;
 
     const year = 2026;
-    const quarterlyTargets = await DataStore.getAll('quarterly_targets');
+    const quarterlyTargets = await AppDataStore.getAll('quarterly_targets');
     const qTargets = quarterlyTargets.filter(t => t.year === year);
 
     // Build rows asynchronously
@@ -14012,7 +14012,7 @@ const renderTargetOverview = async () => {
         const qStart = `${year}-${((q - 1) * 3 + 1).toString().padStart(2, '0')}-01`;
         const qEnd = `${year}-${(q * 3).toString().padStart(2, '0')}-${new Date(year, q * 3, 0).getDate()}`;
         
-        const purchases = await DataStore.getAll('purchases');
+        const purchases = await AppDataStore.getAll('purchases');
         const actualSales = purchases
             .filter(p => p.date >= qStart && p.date <= qEnd && !p.is_agent_package)
             .reduce((sum, p) => sum + (p.amount || 0), 0);
@@ -14068,7 +14068,7 @@ const renderTargetOverview = async () => {
         const kpis = await calculateKPIs(ranges.current.from, ranges.current.to);
         const year = new Date().getFullYear();
         const quarter = Math.floor(new Date().getMonth() / 3) + 1;
-        const qTarget = (await DataStore.getAll('quarterly_targets')).find(t => t.year === year && t.quarter === quarter) || {};
+        const qTarget = (await AppDataStore.getAll('quarterly_targets')).find(t => t.year === year && t.quarter === quarter) || {};
 
         const metrics = [
             { name: 'CPS Count', target: qTarget.cps_count_target || 0, actual: kpis.cpsCount },
@@ -14121,12 +14121,12 @@ const renderAgentLeaderboard = async () => {
     const container = document.getElementById('agent-leaderboard-table');
     if (!container) return;
 
-    let agentsList = (await DataStore.getAll('users')).filter(isAgent);
+    let agentsList = (await AppDataStore.getAll('users')).filter(isAgent);
     if (_currentRoleFilter !== 'All') {
         agentsList = agentsList.filter(u => u.role === _currentRoleFilter);
     }
     const ranges = getDateRanges(_currentTimeFilter);
-    const allPurchases = await DataStore.getAll('purchases');
+    const allPurchases = await AppDataStore.getAll('purchases');
 
     // Build stats using for...of to avoid async map issues
     const agentStats = [];
@@ -14201,15 +14201,15 @@ const renderAgentLeaderboard = async () => {
         let targetData = [];
 
         const year = new Date().getFullYear();
-        const yTarget = (await DataStore.getAll('yearly_targets')).find(t => t.target_year === year) || {};
-        const qTargets = (await DataStore.getAll('quarterly_targets')).filter(t => t.year === year);
+        const yTarget = (await AppDataStore.getAll('yearly_targets')).find(t => t.target_year === year) || {};
+        const qTargets = (await AppDataStore.getAll('quarterly_targets')).filter(t => t.year === year);
 
         if (filter === 'weekly') {
             labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
             const dayMap = { 0: 6, 1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5 }; // Sunday is 0 in JS
             actualData = [0, 0, 0, 0, 0, 0, 0];
 
-            const currentWeekPurchases = (await DataStore.getAll('purchases')).filter(p =>
+            const currentWeekPurchases = (await AppDataStore.getAll('purchases')).filter(p =>
                 p.date >= range.from && p.date <= range.to && !p.is_agent_package
             );
 
@@ -14225,7 +14225,7 @@ const renderAgentLeaderboard = async () => {
             actualData = Array(12).fill(0);
             targetData = Array(12).fill(0);
 
-            const yearPurchases = (await DataStore.getAll('purchases')).filter(p =>
+            const yearPurchases = (await AppDataStore.getAll('purchases')).filter(p =>
                 p.date.startsWith(year.toString()) && !p.is_agent_package
             );
 
@@ -14247,7 +14247,7 @@ const renderAgentLeaderboard = async () => {
             actualData = Array(4).fill(0);
             targetData = [0, 0, 0, 0];
 
-            const yearPurchases = (await DataStore.getAll('purchases')).filter(p =>
+            const yearPurchases = (await AppDataStore.getAll('purchases')).filter(p =>
                 p.date.startsWith(year.toString()) && !p.is_agent_package
             );
 
@@ -14274,7 +14274,7 @@ const renderAgentLeaderboard = async () => {
                 const dStr = d.toISOString().split('T')[0];
                 labels.push(dStr.split('-').slice(1).join('/'));
 
-                actualData[i] = (await DataStore.getAll('purchases')).filter(p =>
+                actualData[i] = (await AppDataStore.getAll('purchases')).filter(p =>
                     p.date === dStr && !p.is_agent_package
                 ).reduce((sum, p) => sum + (p.amount || 0), 0);
             }
@@ -14335,7 +14335,7 @@ const renderAgentLeaderboard = async () => {
 
     const openTargetManagementModal = async () => {
         const year = new Date().getFullYear();
-        const existing = (await DataStore.getAll('yearly_targets')).find(t => t.target_year === year) || {};
+        const existing = (await AppDataStore.getAll('yearly_targets')).find(t => t.target_year === year) || {};
 
         const content = `
             <div class="target-form">
@@ -14398,11 +14398,11 @@ const renderAgentLeaderboard = async () => {
             seasonal_weighting: { q1: 0.9, q2: 1.0, q3: 1.1, q4: 1.2 }
         };
 
-        const existing = (await DataStore.getAll('yearly_targets')).find(t => t.target_year === data.target_year);
+        const existing = (await AppDataStore.getAll('yearly_targets')).find(t => t.target_year === data.target_year);
         if (existing) {
-            await DataStore.update('yearly_targets', existing.id, data);
+            await AppDataStore.update('yearly_targets', existing.id, data);
         } else {
-            await DataStore.create('yearly_targets', data);
+            await AppDataStore.create('yearly_targets', data);
         }
 
         // Auto-calculate quarterly
@@ -14434,12 +14434,12 @@ const calculateQuarterlyBreakdown = async (yearlyTarget) => {
             seasonal_factor: factors[q]
         };
 
-        const allQuarterly = await DataStore.getAll('quarterly_targets');
+        const allQuarterly = await AppDataStore.getAll('quarterly_targets');
         const existing = allQuarterly.find(t => t.year === qTarget.year && t.quarter === q);
         if (existing) {
-            await DataStore.update('quarterly_targets', existing.id, qTarget);
+            await AppDataStore.update('quarterly_targets', existing.id, qTarget);
         } else {
-            await DataStore.create('quarterly_targets', qTarget);
+            await AppDataStore.create('quarterly_targets', qTarget);
         }
     }
 };
@@ -14554,7 +14554,7 @@ const exportKPIReport = async (format) => {
     };
 
     const renderMarketingListTable = async () => {
-        const data = await DataStore.getAll(_currentMarketingListTab);
+        const data = await AppDataStore.getAll(_currentMarketingListTab);
 
         if (_currentMarketingListTab === 'products') {
             return `
@@ -14697,7 +14697,7 @@ const exportKPIReport = async (format) => {
     };
 
     const openMarketingListEditModal = async (id) => {
-        const item = await DataStore.getById(_currentMarketingListTab, id);
+        const item = await AppDataStore.getById(_currentMarketingListTab, id);
         if (!item) return;
 
         let content = '';
@@ -14769,11 +14769,11 @@ const exportKPIReport = async (format) => {
         }
 
         if (id) {
-            await DataStore.update(type, id, data);
+            await AppDataStore.update(type, id, data);
             UI.toast.success('Record updated successfully');
         } else {
             data.created_by = _currentUser ? _currentUser.id : null;
-            await DataStore.create(type, data);
+            await AppDataStore.create(type, data);
             UI.toast.success('Record added successfully');
         }
 
@@ -14784,7 +14784,7 @@ const exportKPIReport = async (format) => {
 
     const deleteMarketingListItem = async (id) => {
         if (confirm('Are you sure you want to delete this record? This action cannot be undone.')) {
-            await DataStore.delete(_currentMarketingListTab, id);
+            await AppDataStore.delete(_currentMarketingListTab, id);
             UI.toast.success('Record deleted');
             const viewport = document.getElementById('content-viewport');
             await showMarketingListsView(viewport);
@@ -14886,7 +14886,7 @@ const exportKPIReport = async (format) => {
 
     // ========== PRODUCTS TAB ==========
     const renderProductsTab = async () => {
-        const products =await  await DataStore.getAll('products');
+        const products =await  await AppDataStore.getAll('products');
         return `
             <div class="products-layout" style="padding: 24px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
@@ -14927,7 +14927,7 @@ const exportKPIReport = async (format) => {
 
     const openAddProductModal = async (id = null) => {
         let p = { name: '', category: '', is_active: true };
-        if (id) p = await DataStore.getById('products', id);
+        if (id) p = await AppDataStore.getById('products', id);
 
         const content = `
             <div class="form-group">
@@ -14954,10 +14954,10 @@ const exportKPIReport = async (format) => {
         }
 
         if (id) {
-            await DataStore.update('products', id, { name, category });
+            await AppDataStore.update('products', id, { name, category });
             UI.toast.success("Product updated");
         } else {
-            await DataStore.create('products', { name, category, is_active: true });
+            await AppDataStore.create('products', { name, category, is_active: true });
             UI.toast.success("Product added");
         }
         UI.hideModal();
@@ -14965,14 +14965,14 @@ const exportKPIReport = async (format) => {
     };
 
     const toggleProductStatus = async (id, currentStatus) => {
-        await DataStore.update('products', id, { is_active: !currentStatus });
+        await AppDataStore.update('products', id, { is_active: !currentStatus });
         UI.toast.success("Product status updated");
         if (_currentMarketingTab === 'products') document.getElementById('marketing-tab-content').innerHTML = await renderProductsTab();
     };
 
     // ========== PROMOTION PACKAGES TAB ==========
     const renderPackagesTab = async () => {
-        const packages = await DataStore.getAll('promotions');
+        const packages = await AppDataStore.getAll('promotions');
         return `
             <div class="packages-layout" style="padding: 24px;">
                 <div class="packages-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
@@ -15017,7 +15017,7 @@ const exportKPIReport = async (format) => {
 
     const renderPackageRow = async (p) => {
         const productNamesList = await Promise.all((p.product_ids || []).map(async id => {
-            const prod = await DataStore.getById('products', id);
+            const prod = await AppDataStore.getById('products', id);
             return prod ? prod.name : 'Unknown Product';
         }));
         const productNames = productNamesList.join(', ');
@@ -15054,10 +15054,10 @@ const exportKPIReport = async (format) => {
         const search = document.getElementById('package-search')?.value.toLowerCase() || '';
         const status = document.getElementById('package-status-filter')?.value || 'all';
 
-        const packages = await DataStore.getAll('promotions');
+        const packages = await AppDataStore.getAll('promotions');
         const filteredResults = await Promise.all(packages.map(async p => {
             // Pre-fetch all products for this package to check search keyword
-            const products = await Promise.all((p.product_ids || []).map(id => DataStore.getById('products', id)));
+            const products = await Promise.all((p.product_ids || []).map(id => AppDataStore.getById('products', id)));
             const matchesSearch = (p.package_name || p.name || '').toLowerCase().includes(search) ||
                 products.some(prod => prod && (prod.name || '').toLowerCase().includes(search));
             const matchesStatus = status === 'all' || (status === 'active' ? p.is_active : !p.is_active);
@@ -15076,7 +15076,7 @@ const exportKPIReport = async (format) => {
 
     const openCreatePackageModal = async (id = null) => {
         const isEdit = !!id;
-        const pkg = isEdit ? await DataStore.getById('promotions', id) : {
+        const pkg = isEdit ? await AppDataStore.getById('promotions', id) : {
             package_name: '',
             product_ids: [],
             price: 0,
@@ -15086,7 +15086,7 @@ const exportKPIReport = async (format) => {
             is_active: true
         };
 
-        const allProducts =await  (await DataStore.getAll('products')).filter(p => p.is_active !== false);
+        const allProducts =await  (await AppDataStore.getAll('products')).filter(p => p.is_active !== false);
         const paymentOptions = ['Cash', 'Credit Card', 'Bank Transfer', 'EPP', 'POP', 'Cheque'];
 
         const content = `
@@ -15169,12 +15169,12 @@ const exportKPIReport = async (format) => {
         };
 
         if (id) {
-            await DataStore.update('promotions', id, data);
+            await AppDataStore.update('promotions', id, data);
             UI.toast.success("Package updated successfully");
         } else {
             data.created_by = _currentUser ? _currentUser.id : null;
             data.created_at = new Date().toISOString();
-            await DataStore.create('promotions', data);
+            await AppDataStore.create('promotions', data);
             UI.toast.success("Package created successfully");
         }
 
@@ -15184,18 +15184,18 @@ const exportKPIReport = async (format) => {
 
     const deletePackage = async (id) => {
         if (confirm("Are you sure you want to delete this promotion package? This action cannot be undone.")) {
-            await DataStore.delete('promotions', id);
+            await AppDataStore.delete('promotions', id);
             UI.toast.success("Package deleted");
             if (_currentMarketingTab === 'packages') await app. switchMarketingTab('packages');
         }
     };
 
    const viewPackageCustomers = async (packageId) => {
-    const pkg = await DataStore.getById('promotions', packageId);
+    const pkg = await AppDataStore.getById('promotions', packageId);
     if (!pkg) return;
 
     // Get all purchases (once)
-    const allPurchases = await DataStore.getAll('purchases');
+    const allPurchases = await AppDataStore.getAll('purchases');
     
     // Filter purchases that have matching package_id
     let purchases = allPurchases.filter(p => p.package_id == packageId);
@@ -15204,7 +15204,7 @@ const exportKPIReport = async (format) => {
     if (purchases.length === 0 && pkg.product_ids && pkg.product_ids.length) {
         // Fetch product names in parallel
         const products = await Promise.all(
-            pkg.product_ids.map(id => DataStore.getById('products', id))
+            pkg.product_ids.map(id => AppDataStore.getById('products', id))
         );
         const productNames = products.map(prod => prod ? prod.name : null).filter(n => n);
 
@@ -15219,10 +15219,10 @@ const exportKPIReport = async (format) => {
     // Build table rows asynchronously
     const rows = [];
     for (const p of purchases) {
-        let customer = await DataStore.getById('customers', p.customer_id);
+        let customer = await AppDataStore.getById('customers', p.customer_id);
         let customerType = 'customer';
         if (!customer) {
-            customer = await DataStore.getById('prospects', p.customer_id);
+            customer = await AppDataStore.getById('prospects', p.customer_id);
             customerType = 'prospect';
         }
         
@@ -15279,7 +15279,7 @@ const exportKPIReport = async (format) => {
     // ========== TEMPLATES TAB ==========
 
     const renderTemplatesTab = async () => {
-        const templates = await DataStore.getAll('whatsapp_templates');
+        const templates = await AppDataStore.getAll('whatsapp_templates');
         const templatesHtml = templates.length > 0 
             ? (await Promise.all(templates.map(t => renderTemplateCard(t)))).join('') 
             : await renderSampleTemplates();
@@ -15373,7 +15373,7 @@ const exportKPIReport = async (format) => {
 
     const openCreateTemplateModal = async (templateId = null) => {
         const isEdit = !!templateId;
-        const template = isEdit ? await DataStore.getById('whatsapp_templates', templateId) : null;
+        const template = isEdit ? await AppDataStore.getById('whatsapp_templates', templateId) : null;
 
         const content = `
             <div class="template-modal">
@@ -15511,10 +15511,10 @@ const exportKPIReport = async (format) => {
         };
 
         if (templateId) {
-            await DataStore.update('whatsapp_templates', templateId, template);
+            await AppDataStore.update('whatsapp_templates', templateId, template);
             UI.toast.success('Template updated successfully');
         } else {
-            await DataStore.create('whatsapp_templates', template);
+            await AppDataStore.create('whatsapp_templates', template);
             UI.toast.success('Template created successfully');
         }
 
@@ -15532,7 +15532,7 @@ const exportKPIReport = async (format) => {
     };
 
     const previewTemplate = async (templateId) => {
-        const template = await DataStore.getById('whatsapp_templates', templateId);
+        const template = await AppDataStore.getById('whatsapp_templates', templateId);
         if (!template) return;
 
         const previewData = {
@@ -15601,7 +15601,7 @@ const exportKPIReport = async (format) => {
 
     const searchTemplates = async () => {
         const search = document.getElementById('template-search').value.toLowerCase();
-        const templates = await DataStore.getAll('whatsapp_templates');
+        const templates = await AppDataStore.getAll('whatsapp_templates');
         const filtered = templates.filter(t =>
             t.template_name.toLowerCase().includes(search) ||
             t.category.toLowerCase().includes(search)
@@ -15615,16 +15615,16 @@ const exportKPIReport = async (format) => {
 
     const editTemplate = async (id) => await openCreateTemplateModal(id);
     const copyTemplate = async (id) => {
-        const t = await DataStore.getById('whatsapp_templates', id);
+        const t = await AppDataStore.getById('whatsapp_templates', id);
         if (t) {
             const copy = { ...t, id: undefined, template_name: t.template_name + ' (Copy)' };
-            await DataStore.create('whatsapp_templates', copy);
+            await AppDataStore.create('whatsapp_templates', copy);
             await refreshTemplatesTab();
         }
     };
     const deleteTemplate = async (id) => {
         if (confirm('Delete this template?')) {
-            await DataStore.delete('whatsapp_templates', id);
+            await AppDataStore.delete('whatsapp_templates', id);
             await refreshTemplatesTab();
         }
     };
@@ -15642,7 +15642,7 @@ const exportKPIReport = async (format) => {
     // ========== CAMPAIGNS TAB ==========
 
     const renderCampaignsTab = async () => {
-        const campaigns =await  await DataStore.getAll('whatsapp_campaigns');
+        const campaigns =await  await AppDataStore.getAll('whatsapp_campaigns');
 
         return `
             <div class="campaigns-filters">
@@ -15688,7 +15688,7 @@ const exportKPIReport = async (format) => {
     };
 
     const renderCampaignRow = async (campaign) => {
-        const template = await DataStore.getById('whatsapp_templates', campaign.template_id);
+        const template = await AppDataStore.getById('whatsapp_templates', campaign.template_id);
         const openRate = campaign.sent_count > 0 ? Math.round((campaign.opened_count / campaign.sent_count) * 100) : 0;
         const responseRate = campaign.sent_count > 0 ? Math.round((campaign.replied_count / campaign.sent_count) * 100) : 0;
 
@@ -15723,7 +15723,7 @@ const exportKPIReport = async (format) => {
 
     const openCreateCampaignModal = async (campaignId = null) => {
         const isEdit = !!campaignId;
-        const campaign = isEdit ? await DataStore.getById('whatsapp_campaigns', campaignId) : null;
+        const campaign = isEdit ? await AppDataStore.getById('whatsapp_campaigns', campaignId) : null;
 
         const content = `
             <div class="campaign-modal">
@@ -15865,7 +15865,7 @@ const exportKPIReport = async (format) => {
                 </div>
             `;
         } else if (_currentCampaignStep === 2) {
-            const templates = await DataStore.getAll('whatsapp_templates');
+            const templates = await AppDataStore.getAll('whatsapp_templates');
             container.innerHTML = `
                 <div class="campaign-step" id="step-2">
                     <div class="templates-grid small">
@@ -15883,8 +15883,8 @@ const exportKPIReport = async (format) => {
                 </div>
             `;
         } else if (_currentCampaignStep === 3) {
-            const tags = await DataStore.getAll('tags');
-            const agents = (await DataStore.getAll('users')).filter(isAgent);
+            const tags = await AppDataStore.getAll('tags');
+            const agents = (await AppDataStore.getAll('users')).filter(isAgent);
 
             container.innerHTML = `
                 <div class="campaign-step" id="step-3">
@@ -15934,7 +15934,7 @@ const exportKPIReport = async (format) => {
                     <div class="campaign-summary-box" style="background:var(--gray-50); padding:16px; border-radius:8px; margin-top:20px;">
                         <h5>Campaign Summary</h5>
                         <p><strong>Name:</strong> ${_campaignData.campaign_name}</p>
-                        <p><strong>Template:</strong> ${await DataStore.getById('whatsapp_templates', _campaignData.template_id)?.template_name}</p>
+                        <p><strong>Template:</strong> ${await AppDataStore.getById('whatsapp_templates', _campaignData.template_id)?.template_name}</p>
                         <p><strong>Estimated Audience:</strong> <span id="final-audience-size">...</span></p>
                     </div>
                 </div>
@@ -16018,7 +16018,7 @@ const exportKPIReport = async (format) => {
     const saveCampaignDraft = async () => {
         _campaignData.campaign_name = document.getElementById('campaign-name')?.value || 'Untitled Campaign';
         _campaignData.status = 'draft';
-        await DataStore.create('whatsapp_campaigns', _campaignData);
+        await AppDataStore.create('whatsapp_campaigns', _campaignData);
         UI.toast.success('Campaign saved as draft');
         UI.hideModal();
         await refreshCampaignsTab();
@@ -16050,11 +16050,11 @@ const exportKPIReport = async (format) => {
         _campaignData.created_by = _currentUser ? _currentUser.id : 5;
         _campaignData.created_at = new Date().toISOString();
 
-        const campaign = await DataStore.create('whatsapp_campaigns', _campaignData);
+        const campaign = await AppDataStore.create('whatsapp_campaigns', _campaignData);
 
         // Create initial message tracking for each recipient
         for (const rpId of recipients) {
-            await DataStore.create('campaign_messages', {
+            await AppDataStore.create('campaign_messages', {
                 campaign_id: campaign.id,
                 prospect_id: rpId,
                 status: launchType === 'now' ? 'queued' : 'scheduled',
@@ -16077,13 +16077,13 @@ const exportKPIReport = async (format) => {
     };
 
 const simulateCampaignSending = async (campaignId) => {
-    const messages = (await DataStore.getAll('campaign_messages')).filter(m => m.campaign_id === campaignId);
+    const messages = (await AppDataStore.getAll('campaign_messages')).filter(m => m.campaign_id === campaignId);
     let sent = 0;
 
     const intervalId = setInterval(async () => {
         if (sent >= messages.length) {
             clearInterval(intervalId);
-            await DataStore.update('whatsapp_campaigns', campaignId, { status: 'completed', completed_date: new Date().toISOString() });
+            await AppDataStore.update('whatsapp_campaigns', campaignId, { status: 'completed', completed_date: new Date().toISOString() });
             await refreshCampaignsTab();
             return;
         }
@@ -16095,19 +16095,19 @@ const simulateCampaignSending = async (campaignId) => {
         if (statusRoll > 0.4) status = 'opened';
         if (statusRoll > 0.8) status = 'replied';
 
-        await DataStore.update('campaign_messages', msg.id, {
+        await AppDataStore.update('campaign_messages', msg.id, {
             status: status,
             sent_at: new Date().toISOString()
         });
 
         // Update campaign stats
-        const campaign = await DataStore.getById('whatsapp_campaigns', campaignId);
+        const campaign = await AppDataStore.getById('whatsapp_campaigns', campaignId);
         const updates = { sent_count: (campaign.sent_count || 0) + 1 };
         if (['delivered', 'opened', 'replied'].includes(status)) updates.delivered_count = (campaign.delivered_count || 0) + 1;
         if (['opened', 'replied'].includes(status)) updates.opened_count = (campaign.opened_count || 0) + 1;
         if (status === 'replied') updates.replied_count = (campaign.replied_count || 0) + 1;
 
-        await DataStore.update('whatsapp_campaigns', campaignId, updates);
+        await AppDataStore.update('whatsapp_campaigns', campaignId, updates);
         sent++;
     }, 500);
 };
@@ -16125,7 +16125,7 @@ const simulateCampaignSending = async (campaignId) => {
         const status = document.getElementById('campaign-status-filter').value;
         const sort = document.getElementById('campaign-sort').value;
 
-        let campaigns = await DataStore.getAll('whatsapp_campaigns');
+        let campaigns = await AppDataStore.getAll('whatsapp_campaigns');
 
         if (status !== 'all') {
             campaigns = campaigns.filter(c => c.status === status);
@@ -16148,21 +16148,21 @@ const simulateCampaignSending = async (campaignId) => {
 
     const editCampaign = async (id) => await openCreateCampaignModal(id);
     const pauseCampaign = async (id) => {
-        await DataStore.update('whatsapp_campaigns', id, { status: 'paused' });
+        await AppDataStore.update('whatsapp_campaigns', id, { status: 'paused' });
         await refreshCampaignsTab();
     };
     const resumeCampaign = async (id) => {
-        await DataStore.update('whatsapp_campaigns', id, { status: 'active' });
+        await AppDataStore.update('whatsapp_campaigns', id, { status: 'active' });
         await refreshCampaignsTab();
     };
     const cancelCampaign = async (id) => {
         if (confirm('Cancel this campaign? Active messages will stop.')) {
-            await DataStore.update('whatsapp_campaigns', id, { status: 'cancelled' });
+            await AppDataStore.update('whatsapp_campaigns', id, { status: 'cancelled' });
             await refreshCampaignsTab();
         }
     };
     const duplicateCampaign = async (id) => {
-        const c = await DataStore.getById('whatsapp_campaigns', id);
+        const c = await AppDataStore.getById('whatsapp_campaigns', id);
         if (c) {
             const copy = {
                 ...c,
@@ -16171,16 +16171,16 @@ const simulateCampaignSending = async (campaignId) => {
                 status: 'draft',
                 sent_count: 0, delivered_count: 0, opened_count: 0, replied_count: 0
             };
-            await DataStore.create('whatsapp_campaigns', copy);
+            await AppDataStore.create('whatsapp_campaigns', copy);
             await refreshCampaignsTab();
         }
     };
     const deleteCampaign = async (id) => {
         if (confirm('Delete this campaign and all its tracking data?')) {
-            await DataStore.delete('whatsapp_campaigns', id);
+            await AppDataStore.delete('whatsapp_campaigns', id);
             // Delete messages
-            const messages = (await DataStore.getAll('campaign_messages')).filter(m => m.campaign_id === id);
-            await Promise.all(messages.map(m => DataStore.delete('campaign_messages', m.id)));
+            const messages = (await AppDataStore.getAll('campaign_messages')).filter(m => m.campaign_id === id);
+            await Promise.all(messages.map(m => AppDataStore.delete('campaign_messages', m.id)));
             await refreshCampaignsTab();
         }
     };
@@ -16270,7 +16270,7 @@ const simulateCampaignSending = async (campaignId) => {
     };
 
     const getRealAnalyticsData = async () => {
-        const campaigns = (await DataStore.getAll('whatsapp_campaigns')).filter(c => c.status === 'completed' || c.status === 'active');
+        const campaigns = (await AppDataStore.getAll('whatsapp_campaigns')).filter(c => c.status === 'completed' || c.status === 'active');
 
         const totalCampaigns = campaigns.length;
         let totalSent = 0;
@@ -16302,7 +16302,7 @@ const simulateCampaignSending = async (campaignId) => {
     };
 
     const initMarketingCharts = async () => {
-        const campaigns = (await DataStore.getAll('whatsapp_campaigns')).filter(c => c.status === 'completed' || c.status === 'active').slice(-5);
+        const campaigns = (await AppDataStore.getAll('whatsapp_campaigns')).filter(c => c.status === 'completed' || c.status === 'active').slice(-5);
 
         // Message Volume Chart
         const volumeCtx = document.getElementById('message-volume-chart')?.getContext('2d');
@@ -16371,7 +16371,7 @@ const simulateCampaignSending = async (campaignId) => {
         csv += `Avg Conversion Rate, ${data.avgConversionRate}%\n\n`;
         csv += "Campaign Name,Sent,Opened,Replied,Converted\n";
 
-        const campaigns = await DataStore.getAll('whatsapp_campaigns');
+        const campaigns = await AppDataStore.getAll('whatsapp_campaigns');
         campaigns.forEach(c => {
             csv += `${c.campaign_name},${c.sent_count},${c.opened_count},${c.replied_count},${c.converted_count} \n`;
         });
@@ -16390,11 +16390,11 @@ const simulateCampaignSending = async (campaignId) => {
     // ========== CAMPAIGN DETAILS VIEW ==========
 
     const viewCampaignDetails = async (campaignId) => {
-        const campaign = await DataStore.getById('whatsapp_campaigns', campaignId);
+        const campaign = await AppDataStore.getById('whatsapp_campaigns', campaignId);
         if (!campaign) return;
 
-        const template = await DataStore.getById('whatsapp_templates', campaign.template_id);
-        const messages = (await DataStore.getAll('campaign_messages')).filter(m => m.campaign_id === campaignId);
+        const template = await AppDataStore.getById('whatsapp_templates', campaign.template_id);
+        const messages = (await AppDataStore.getAll('campaign_messages')).filter(m => m.campaign_id === campaignId);
 
         // Calculate metrics
         const sent = messages.filter(m => ['sent', 'delivered', 'opened', 'replied'].includes(m.status)).length;
@@ -16517,7 +16517,7 @@ const simulateCampaignSending = async (campaignId) => {
     };
 
     const renderRecipientRow = async (msg) => {
-        const prospect = await DataStore.getById('prospects', msg.prospect_id);
+        const prospect = await AppDataStore.getById('prospects', msg.prospect_id);
         return `
             <tr>
                 <td><strong>${prospect?.full_name || 'Unknown'}</strong></td>
@@ -16535,10 +16535,10 @@ const simulateCampaignSending = async (campaignId) => {
     const filterRecipients = async (campaignId) => {
         const search = document.getElementById('recipient-search').value.toLowerCase();
         const status = document.getElementById('recipient-status-filter').value;
-        const messages = (await DataStore.getAll('campaign_messages')).filter(m => m.campaign_id === campaignId);
+        const messages = (await AppDataStore.getAll('campaign_messages')).filter(m => m.campaign_id === campaignId);
 
         const filteredResults = await Promise.all(messages.map(async m => {
-            const prospect = await DataStore.getById('prospects', m.prospect_id);
+            const prospect = await AppDataStore.getById('prospects', m.prospect_id);
             const nameMatch = prospect?.full_name?.toLowerCase().includes(search);
             const statusMatch = status === 'all' || m.status === status;
             return nameMatch && statusMatch;
@@ -16554,9 +16554,9 @@ const simulateCampaignSending = async (campaignId) => {
     };
 
     const viewRecipientHistory = async (messageId) => {
-        const msg = await DataStore.getById('campaign_messages', messageId);
+        const msg = await AppDataStore.getById('campaign_messages', messageId);
         if (!msg) return;
-        const prospect = await DataStore.getById('prospects', msg.prospect_id);
+        const prospect = await AppDataStore.getById('prospects', msg.prospect_id);
 
         const content = `
             <div class="recipient-history">
@@ -16594,21 +16594,21 @@ const simulateCampaignSending = async (campaignId) => {
     };
 
     const retryMessage = async (messageId) => {
-        const msg = await DataStore.getById('campaign_messages', messageId);
+        const msg = await AppDataStore.getById('campaign_messages', messageId);
         if (msg) {
-            await DataStore.update('campaign_messages', messageId, { status: 'queued', retry_count: (msg.retry_count || 0) + 1 });
+            await AppDataStore.update('campaign_messages', messageId, { status: 'queued', retry_count: (msg.retry_count || 0) + 1 });
             UI.toast.success('Message queued for retry');
             await app. viewCampaignDetails(msg.campaign_id);
         }
     };
 
     const exportCampaignReport = async (campaignId) => {
-        const campaign = await DataStore.getById('whatsapp_campaigns', campaignId);
-        const messages = (await DataStore.getAll('campaign_messages')).filter(m => m.campaign_id === campaignId);
+        const campaign = await AppDataStore.getById('whatsapp_campaigns', campaignId);
+        const messages = (await AppDataStore.getAll('campaign_messages')).filter(m => m.campaign_id === campaignId);
 
         let csv = "Recipient,Phone,Status,SentAt,DeliveredAt,OpenedAt,RepliedAt\n";
         for (const m of messages) {
-            const p = await DataStore.getById('prospects', m.prospect_id);
+            const p = await AppDataStore.getById('prospects', m.prospect_id);
             csv += `"${p?.full_name || 'Unknown'}", "${p?.phone || ''}", ${m.status}, "${m.sent_at || ''}", "${m.delivered_at || ''}", "${m.opened_at || ''}", "${m.replied_at || ''}"\n`;
         }
 
@@ -16624,7 +16624,7 @@ const simulateCampaignSending = async (campaignId) => {
     };
 
     const getEntityName = async (table, id) => {
-        const item = await DataStore.getById(table, id);
+        const item = await AppDataStore.getById(table, id);
         if (!item) return 'Unknown';
         if (table === 'users' || table === 'agents') return item.full_name || item.username;
         if (table === 'prospects' || table === 'customers') return item.full_name;
@@ -16651,13 +16651,13 @@ const simulateCampaignSending = async (campaignId) => {
     };
 
     const expireOldOverrides = async () => {
-        const overrides = await DataStore.getAll('manual_overrides');
+        const overrides = await AppDataStore.getAll('manual_overrides');
         const now = new Date();
         let expiredCount = 0;
 
         for (const o of overrides) {
             if (o.status === 'active' && o.expires_at && new Date(o.expires_at) < now) {
-                await DataStore.update('manual_overrides', o.id, { status: 'expired' });
+                await AppDataStore.update('manual_overrides', o.id, { status: 'expired' });
                 expiredCount++;
             }
         }
@@ -16671,13 +16671,13 @@ const simulateCampaignSending = async (campaignId) => {
     const confirmRenameFolder = async (folderId) => {
         const name = document.getElementById('rename-folder-input')?.value;
         if (!name) return;
-        await DataStore.update('folders', folderId, { name, updated_at: new Date().toISOString() });
+        await AppDataStore.update('folders', folderId, { name, updated_at: new Date().toISOString() });
         UI.hideModal(); UI.toast.success('Folder renamed');
         if (typeof renderFolderTree === 'function') await renderFolderTree();
         if (typeof loadFolderContents === 'function') await loadFolderContents();
     };
     const confirmDeleteFolder = async (folderId) => {
-        await DataStore.delete('folders', folderId);
+        await AppDataStore.delete('folders', folderId);
         UI.hideModal(); UI.toast.success('Folder deleted');
         if (typeof renderFolderTree === 'function') await renderFolderTree();
         if (typeof loadFolderContents === 'function') await loadFolderContents();
@@ -16690,7 +16690,7 @@ const simulateCampaignSending = async (campaignId) => {
 
         if (!currentUser) {
             // Guest mode - show demo users
-            const users = await DataStore.getAll('users') || [];
+            const users = await AppDataStore.getAll('users') || [];
             // Filter for demo users
             const demoUsers = users.slice(0, 8); // Just show first 8 as demo
 
@@ -16742,7 +16742,7 @@ const simulateCampaignSending = async (campaignId) => {
     };
 
     const loginAs = async (userId) => {
-        const user = await DataStore.getById('users', userId);
+        const user = await AppDataStore.getById('users', userId);
         if (user) {
             // Auth.setUser removed – Supabase manages session; _currentUser set directly below
             _currentUser = user;
@@ -16790,7 +16790,7 @@ const simulateCampaignSending = async (campaignId) => {
     };
 
     const renderRecentImports = async () => {
-        const imports = (await DataStore.getAll('import_jobs')).sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 10);
+        const imports = (await AppDataStore.getAll('import_jobs')).sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 10);
         if (imports.length === 0) return `<tr><td colspan="7" style="text-align:center;padding:40px;"><i class="fas fa-cloud-upload-alt" style="font-size:48px;color:var(--gray-300);display:block;margin-bottom:16px;"></i><h3>No imports yet</h3><p>Click "IMPORT NEW DATA" to start your first import</p></td></tr>`;
         return imports.map(imp => {
             const pct = imp.total_rows > 0 ? Math.round((imp.valid_rows / imp.total_rows) * 100) : 0;
@@ -17074,7 +17074,7 @@ const startImport = async () => {
             setTimeout(async () => {
                 UI.hideModal();
                 UI.toast.success('Import completed! 217 new records created.');
-                await DataStore.create('import_jobs', {
+                await AppDataStore.create('import_jobs', {
                     file_name: _importData.fileName || 'import.xlsx',
                     import_type: _importData.importType,
                     total_rows: 250,
@@ -17099,7 +17099,7 @@ const startImport = async () => {
 };
 
     const viewImportDetails = async (id) => {
-        const job = await DataStore.getById('import_jobs', id);
+        const job = await AppDataStore.getById('import_jobs', id);
         if (!job) return;
         const content = `<div><div style="background:var(--gray-50);padding:16px;border-radius:8px;margin-bottom:16px"><div><strong>File:</strong> ${job.file_name}</div><div><strong>Type:</strong> ${job.import_type}</div><div><strong>Status:</strong> ${job.status}</div><div><strong>Date:</strong> ${UI.formatDate(job.created_at)}</div></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"><div><strong>Total rows:</strong> ${job.total_rows}</div><div><strong>Valid rows:</strong> ${job.valid_rows}</div><div><strong>New records:</strong> ${job.created_records}</div><div><strong>Updated:</strong> ${job.updated_records}</div><div><strong>Skipped:</strong> ${job.skipped_records}</div><div><strong>Errors:</strong> ${job.error_rows}</div></div></div>`;
         UI.showModal(`Import Details: ${job.file_name}`, content, [{ label: 'Close', type: 'primary', action: 'UI.hideModal()' }]);
@@ -17129,7 +17129,7 @@ const startImport = async () => {
     };
 
     const showImportHistory = async () => {
-        const jobs = (await DataStore.getAll('import_jobs')).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        const jobs = (await AppDataStore.getAll('import_jobs')).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
         const rows = jobs.length === 0 ? '<tr><td colspan="6" style="text-align:center;padding:20px">No import history</td></tr>' :
             jobs.map(j => `<tr><td>${j.file_name}</td><td>${j.import_type}</td><td>${j.total_rows}</td><td><span class="import-status status-${j.status}">${j.status.toUpperCase()}</span></td><td>${UI.formatDate(j.created_at)}</td><td><button class="btn-icon" onclick="app. viewImportDetails(${j.id})"><i class="fas fa-eye"></i></button></td></tr>`).join('');
         const content = `<table style="width:100%;border-collapse:collapse"><thead><tr style="background:var(--gray-50)"><th style="padding:10px;text-align:left">File</th><th style="padding:10px;text-align:left">Type</th><th style="padding:10px;text-align:left">Records</th><th style="padding:10px;text-align:left">Status</th><th style="padding:10px;text-align:left">Date</th><th style="padding:10px;text-align:left">Actions</th></tr></thead><tbody>${rows}</tbody></table>`;
@@ -17213,9 +17213,9 @@ const startImport = async () => {
     };
 
     const renderReassignmentHistory = async () => {
-        const history = (await DataStore.getAll('reassignment_history')).sort((a, b) => new Date(b.reassignment_date) - new Date(a.reassignment_date));
+        const history = (await AppDataStore.getAll('reassignment_history')).sort((a, b) => new Date(b.reassignment_date) - new Date(a.reassignment_date));
         if (history.length === 0) return '<p style="padding:16px;color:var(--gray-500)">No reassignment history yet.</p>';
-        const getAgentNameById = async (id) => { const u = await DataStore.getById('users', id); return u?.full_name || `Agent #${id}`; };
+        const getAgentNameById = async (id) => { const u = await AppDataStore.getById('users', id); return u?.full_name || `Agent #${id}`; };
         
         const rows = await Promise.all(history.map(async r => `<tr><td>${UI.formatDate(r.reassignment_date)}</td><td>#${r.prospect_id}</td><td>${await getAgentNameById(r.from_agent_id)}</td><td>${await getAgentNameById(r.to_agent_id)}</td><td>${r.reassignment_reason}</td><td>${await getAgentNameById(r.reassigned_by)}</td></tr>`));
         
@@ -17267,7 +17267,7 @@ const startImport = async () => {
     };
 
     const confirmReassignment = async () => {
-        await DataStore.create('reassignment_history', { prospect_id: Date.now(), from_agent_id: 8, to_agent_id: 6, reassigned_by: _currentUser?.id || 5, reassignment_date: new Date().toISOString(), reassignment_reason: document.querySelector('input[name="reassign-reason"]:checked')?.value || 'inactive', reason_notes: document.getElementById('reassign-justification')?.value || '', days_inactive: 14, protection_deadline: '2026-03-17', created_at: new Date().toISOString() });
+        await AppDataStore.create('reassignment_history', { prospect_id: Date.now(), from_agent_id: 8, to_agent_id: 6, reassigned_by: _currentUser?.id || 5, reassignment_date: new Date().toISOString(), reassignment_reason: document.querySelector('input[name="reassign-reason"]:checked')?.value || 'inactive', reason_notes: document.getElementById('reassign-justification')?.value || '', days_inactive: 14, protection_deadline: '2026-03-17', created_at: new Date().toISOString() });
         UI.hideModal(); UI.toast.success('Prospect reassigned successfully');
     };
 
@@ -17314,14 +17314,14 @@ const initImportDemoData = async () => {
     if (window.location.search.includes('resetDemo=true')) {
         const tables = ['import_jobs', 'reassignment_history'];
         for (const table of tables) {
-            const all = await DataStore.getAll(table);
+            const all = await AppDataStore.getAll(table);
             const nonDemo = all.filter(item => !item.is_demo);
             localStorage.setItem(`fs_crm_${table}`, JSON.stringify(nonDemo));
         }
         UI.toast.info('Demo data cleared.');
     }
 
-    const importJobs = await DataStore.getAll('import_jobs');
+    const importJobs = await AppDataStore.getAll('import_jobs');
     if (importJobs.length === 0) {
         const jobs = [
             { id: 9001, is_demo: true, file_name: 'leads_march_2026.xlsx', import_type: 'prospects', total_rows: 250, valid_rows: 235, error_rows: 15, created_records: 217, updated_records: 18, skipped_records: 15, status: 'completed', mapping_config: {}, duplicate_handling: 'skip', assignment_config: { assignTo: 'myself' }, created_by: 5, created_at: '2026-03-05T14:30:00Z', completed_at: '2026-03-05T14:32:35Z' },
@@ -17330,11 +17330,11 @@ const initImportDemoData = async () => {
             { id: 9004, is_demo: true, file_name: 'product_catalog.xlsx', import_type: 'products', total_rows: 45, valid_rows: 0, error_rows: 45, created_records: 0, updated_records: 0, skipped_records: 0, status: 'failed', mapping_config: {}, duplicate_handling: 'skip', assignment_config: {}, created_by: 5, created_at: '2026-02-10T09:45:00Z', completed_at: '2026-02-10T09:45:30Z' }
         ];
         for (const j of jobs) {
-            await DataStore.create('import_jobs', j);
+            await AppDataStore.create('import_jobs', j);
         }
     }
 
-    const reassignmentsAll = await DataStore.getAll('reassignment_history');
+    const reassignmentsAll = await AppDataStore.getAll('reassignment_history');
     if (reassignmentsAll.length === 0) {
         const reassignments = [
             { id: 8001, is_demo: true, prospect_id: 101, from_agent_id: 8, to_agent_id: 6, reassigned_by: 5, reassignment_date: '2026-03-06T10:23:00Z', reassignment_reason: 'inactive', reason_notes: 'Raj Kumar unresponsive', days_inactive: 14, protection_deadline: '2026-03-17', created_at: '2026-03-06T10:23:00Z' },
@@ -17342,7 +17342,7 @@ const initImportDemoData = async () => {
             { id: 8003, is_demo: true, prospect_id: 103, from_agent_id: 6, to_agent_id: 7, reassigned_by: 3, reassignment_date: '2026-03-04T09:30:00Z', reassignment_reason: 'workload', reason_notes: 'Balancing workload', days_inactive: 12, protection_deadline: '2026-03-20', created_at: '2026-03-04T09:30:00Z' }
         ];
         for (const r of reassignments) {
-            await DataStore.create('reassignment_history', r);
+            await AppDataStore.create('reassignment_history', r);
         }
     }
 };
@@ -18041,11 +18041,11 @@ const monitorLoginAttempts = () => {
 };
 
 const checkForSecurityIncidents = async () => {
-console.log('DataStore value:', DataStore);
-console.log('DataStore.getAll type:', typeof DataStore.getAll);
-console.log('Property descriptor:', Object.getOwnPropertyDescriptor(window, 'DataStore'));
-    if (!window.DataStore) return;
-    const incidents = (await DataStore.getAll('security_incidents')).filter(i => i.status === 'new' && !i.acknowledged);
+console.log('AppDataStore value:', AppDataStore);
+console.log('AppDataStore.getAll type:', typeof AppDataStore.getAll);
+console.log('Property descriptor:', Object.getOwnPropertyDescriptor(window, 'AppDataStore'));
+    if (!window.AppDataStore) return;
+    const incidents = (await AppDataStore.getAll('security_incidents')).filter(i => i.status === 'new' && !i.acknowledged);
     if (incidents.length > 0) {
         const critical = incidents.filter(i => i.severity === 'critical');
         if (critical.length > 0) {
@@ -18068,8 +18068,8 @@ const addSecurityAlertIcon = async () => {
 };
 
 const checkExpiredConsents = async () => {
-    if (!window.DataStore || typeof ConsentManager === 'undefined') return;
-    const users = await DataStore.getAll('users');
+    if (!window.AppDataStore || typeof ConsentManager === 'undefined') return;
+    const users = await AppDataStore.getAll('users');
     const now = new Date();
     users.forEach(user => {
         if (user.consent_preferences) {
@@ -18096,7 +18096,7 @@ const scheduleRetentionJobs = async () => {
 };
 
 const showSecurityDashboard = async () => {
-    const incidents = await DataStore.getAll('security_incidents') || [];
+    const incidents = await AppDataStore.getAll('security_incidents') || [];
 
     let content = `
         <div class="security-dashboard">
@@ -18126,7 +18126,7 @@ const showSecurityDashboard = async () => {
 };
 
 const showAuditLogs = async () => {
-    const logs = (await DataStore.getAll('audit_logs') || [])
+    const logs = (await AppDataStore.getAll('audit_logs') || [])
         .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
         .slice(0, 50);
 

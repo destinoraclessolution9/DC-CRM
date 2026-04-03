@@ -40,7 +40,7 @@ const PerformanceMonitor = {
             session_id: getSessionId()
         };
 
-        DataStore.create('performance_metrics', metric);
+        AppDataStore.create('performance_metrics', metric);
 
         // Keep in memory for quick access
         if (!PerformanceMetrics[name]) {
@@ -109,7 +109,7 @@ const PerformanceMonitor = {
     // Get performance summary
     getSummary: (minutes = 60) => {
         const cutoff = new Date(Date.now() - minutes * 60 * 1000);
-        const metrics = DataStore.getAll('performance_metrics')
+        const metrics = AppDataStore.getAll('performance_metrics')
             .filter(m => new Date(m.timestamp) >= cutoff);
 
         // Group by name
@@ -148,7 +148,7 @@ const PerformanceMonitor = {
         const threshold = thresholds[name];
         if (threshold && value > threshold) {
             // Log slow operation
-            DataStore.create('performance_warnings', {
+            AppDataStore.create('performance_warnings', {
                 id: `warn_${Date.now()}`,
                 name,
                 value,
@@ -166,7 +166,7 @@ const PerformanceMonitor = {
     // Get performance warnings
     getWarnings: (hours = 24) => {
         const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000);
-        return DataStore.getAll('performance_warnings')
+        return AppDataStore.getAll('performance_warnings')
             .filter(w => new Date(w.timestamp) >= cutoff)
             .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
     },
@@ -195,35 +195,35 @@ const PerformanceMonitor = {
     }
 };
 
-// Wrap DataStore with performance monitoring
+// Wrap AppDataStore with performance monitoring
 const MonitoredDataStore = {
     getAll: PerformanceMonitor.measureQuery(
-        (table) => DataStore.getAll(table),
+        (table) => AppDataStore.getAll(table),
         'getAll'
     ),
 
     getById: PerformanceMonitor.measureQuery(
-        (table, id) => DataStore.getById(table, id),
+        (table, id) => AppDataStore.getById(table, id),
         'getById'
     ),
 
     query: PerformanceMonitor.measureQuery(
-        (table, conditions) => DataStore.query(table, conditions),
+        (table, conditions) => AppDataStore.query(table, conditions),
         'query'
     ),
 
     create: PerformanceMonitor.measureQuery(
-        (table, data) => DataStore.create(table, data),
+        (table, data) => AppDataStore.create(table, data),
         'create'
     ),
 
     update: PerformanceMonitor.measureQuery(
-        (table, id, data) => DataStore.update(table, id, data),
+        (table, id, data) => AppDataStore.update(table, id, data),
         'update'
     ),
 
     delete: PerformanceMonitor.measureQuery(
-        (table, id) => DataStore.delete(table, id),
+        (table, id) => AppDataStore.delete(table, id),
         'delete'
     )
 };

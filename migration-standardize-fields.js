@@ -10,8 +10,8 @@
  * 5. Change 'const dryRun = true;' to 'false' to apply changes.
  */
 (function() {
-    if (!window.DataStore) {
-        console.error('DataStore not found. Please ensure data.js is loaded.');
+    if (!window.AppDataStore) {
+        console.error('AppDataStore not found. Please ensure data.js is loaded.');
         return;
     }
 
@@ -121,7 +121,7 @@
     console.log(`%c[MIGRATION] Starting ${dryRun ? 'DRY RUN' : 'PRODUCTION'} migration...`, 'color: #0d9488; font-weight: bold;');
 
     function migrateTable(tableName, mapping) {
-        const records = DataStore.getAll(tableName);
+        const records = AppDataStore.getAll(tableName);
         if (!records || records.length === 0) {
             console.log(`[${tableName}] No records found. Skipping.`);
             return;
@@ -156,7 +156,7 @@
             if (updated) {
                 migratedCount++;
                 if (!dryRun) {
-                    DataStore.update(tableName, record.id, newRecord);
+                    AppDataStore.update(tableName, record.id, newRecord);
                 }
             }
         });

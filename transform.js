@@ -4,11 +4,11 @@ module.exports = function(fileInfo, api) {
 
     const dataStoreMethods = ['getAll', 'getById', 'create', 'update', 'delete', 'query'];
 
-    // 1. Find DataStore calls and add await, then make parent async
+    // 1. Find AppDataStore calls and add await, then make parent async
     root.find(j.CallExpression, {
         callee: {
             type: 'MemberExpression',
-            object: { name: 'DataStore' }
+            object: { name: 'AppDataStore' }
         }
     }).forEach(path => {
         if (path.node.callee.property && dataStoreMethods.includes(path.node.callee.property.name)) {

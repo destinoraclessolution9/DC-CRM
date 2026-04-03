@@ -28,7 +28,7 @@ const TOTPManager = {
 
     // Enable TOTP for user
     enableTOTP: async (userId, secret) => {
-        const user = DataStore.getById('users', userId);
+        const user = AppDataStore.getById('users', userId);
         if (!user) return false;
 
         // Encrypt and store secret
@@ -39,12 +39,12 @@ const TOTPManager = {
         user.mfa_method = TwoFactorMethod.TOTP;
         user.mfa_enabled_at = new Date().toISOString();
 
-        DataStore.update('users', userId, user);
+        AppDataStore.update('users', userId, user);
 
         // Generate backup codes
         const backupCodes = TOTPManager.generateBackupCodes();
         user.mfa_backup_codes = backupCodes;
-        DataStore.update('users', userId, user);
+        AppDataStore.update('users', userId, user);
 
         AuditLogger.info(
             AuditCategory.SECURITY,
@@ -69,14 +69,14 @@ const TOTPManager = {
 
     // Disable MFA
     disableMFA: (userId) => {
-        const user = DataStore.getById('users', userId);
+        const user = AppDataStore.getById('users', userId);
         if (!user) return false;
 
         user.mfa_enabled = false;
         user.mfa_secret = null;
         user.mfa_backup_codes = null;
 
-        DataStore.update('users', userId, user);
+        AppDataStore.update('users', userId, user);
 
         AuditLogger.warn(
             AuditCategory.SECURITY,
@@ -255,7 +255,7 @@ const verifyTwoFactorLogin = async (username, password) => {
 
     // In production, verify with server endpoint.
     // Since we're client-side, check user mock data.
-    const user = DataStore.getAll('users').find(u => u.username === username);
+    const user = AppDataStore.getAll('users').find(u => u.username === username);
 
     if (user && TOTPManager.verifyTOTP("dummy_secret_for_demo", code)) {
         UI.hideModal();

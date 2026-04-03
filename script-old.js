@@ -204,7 +204,7 @@ const appLogic = (() => {
             return 'all'; // special marker
         }
         // For team leaders and consultants, traverse down the reporting tree
-        const allUsers = DataStore.getAll('users');
+        const allUsers = AppDataStore.getAll('users');
         const result = [];
         const collect = (uid) => {
             result.push(uid);
@@ -225,7 +225,7 @@ const appLogic = (() => {
 
     // Get all prospects visible to current user
     const getVisibleProspects = () => {
-        const all = DataStore.getAll('prospects');
+        const all = AppDataStore.getAll('prospects');
         const user = _currentUser;
         if (!user) return [];
         const visibleIds = getVisibleUserIds(user);
@@ -243,7 +243,7 @@ const appLogic = (() => {
     };
 
     const getVisibleCustomers = () => {
-        const all = DataStore.getAll('customers');
+        const all = AppDataStore.getAll('customers');
         const user = _currentUser;
         if (!user) return [];
         const visibleIds = getVisibleUserIds(user);
@@ -262,7 +262,7 @@ const appLogic = (() => {
 
         if (activity.visibility === 'open') return true;
 
-        // Use core comparison helper to handle potential string/number mismatches from DataStore
+        // Use core comparison helper to handle potential string/number mismatches from AppDataStore
         const isLead = compareIds(activity.lead_agent_id, user.id);
         const isCoAgent = activity.co_agents && activity.co_agents.some(ca => compareIds(ca.id, user.id));
         if (isLead || isCoAgent) return true;
@@ -272,7 +272,7 @@ const appLogic = (() => {
 
         // EVENT ATTENDEE Check: If user is registered for this event
         if (activity.activity_type === 'EVENT') {
-            const registrations = DataStore.getAll('event_registrations') || [];
+            const registrations = AppDataStore.getAll('event_registrations') || [];
             if (registrations.some(r => r.event_id === activity.id && r.attendee_type === 'user' && compareIds(r.attendee_id, user.id))) return true;
         }
 
@@ -280,7 +280,7 @@ const appLogic = (() => {
     };
 
     const getVisibleActivities = () => {
-        const all = DataStore.getAll('activities');
+        const all = AppDataStore.getAll('activities');
         console.log('Total activities:', all.length);
         const filtered = all.filter(a => canViewActivity(a));
         console.log('Filtered activities:', filtered.length);
@@ -288,7 +288,7 @@ const appLogic = (() => {
     };
 
     const getVisiblePurchases = () => {
-        const purchases = DataStore.getAll('purchases');
+        const purchases = AppDataStore.getAll('purchases');
         if (isManager()) return purchases;
         const visibleProspectIds = getVisibleProspects().map(p => p.id);
         const visibleCustomerIds = getVisibleCustomers().map(c => c.id);
@@ -299,7 +299,7 @@ const appLogic = (() => {
     };
 
     const getVisibleEvents = () => {
-        const all = DataStore.getAll('events');
+        const all = AppDataStore.getAll('events');
         const user = _currentUser;
         if (!user) return [];
         if (isManager()) return all;
@@ -316,7 +316,7 @@ const appLogic = (() => {
     };
 
     const getVisibleReferrals = () => {
-        const all = DataStore.getAll('referrals');
+        const all = AppDataStore.getAll('referrals');
         const user = _currentUser;
         if (!user) return [];
 
@@ -812,14 +812,14 @@ const appLogic = (() => {
                     <label>Has Purchased</label>
                     <select id="filter-prospect-has-purchased" class="form-control">
                         <option value="">Select Product</option>
-                        ${DataStore.getAll('products').filter(p => p.is_active !== false).map(p => `<option value="${p.name}">${p.name}</option>`).join('')}
+                        ${AppDataStore.getAll('products').filter(p => p.is_active !== false).map(p => `<option value="${p.name}">${p.name}</option>`).join('')}
                     </select>
                 </div>
                 <div class="filter-group">
                     <label>Has Not Purchased</label>
                     <select id="filter-prospect-not-purchased" class="form-control">
                         <option value="">Select Product</option>
-                        ${DataStore.getAll('products').filter(p => p.is_active !== false).map(p => `<option value="${p.name}">${p.name}</option>`).join('')}
+                        ${AppDataStore.getAll('products').filter(p => p.is_active !== false).map(p => `<option value="${p.name}">${p.name}</option>`).join('')}
                     </select>
                 </div>
             </div>
@@ -1164,7 +1164,7 @@ const appLogic = (() => {
     };
 
     const performAgentSearch = (filters) => {
-        let items = DataStore.getAll('users').filter(u => u.role === 'consultant' || u.role === 'team_leader');
+        let items = AppDataStore.getAll('users').filter(u => u.role === 'consultant' || u.role === 'team_leader');
 
         // Basic filters
         if (filters.basic.name) {
@@ -1389,7 +1389,7 @@ const appLogic = (() => {
                     ${pageItems.map(item => {
             let agentName = '-';
             if (item.lead_agent_id || item.responsible_agent_id) {
-                const agent = DataStore.getById('users', item.lead_agent_id || item.responsible_agent_id);
+                const agent = AppDataStore.getById('users', item.lead_agent_id || item.responsible_agent_id);
                 if (agent) agentName = agent.full_name;
             }
 
@@ -1449,7 +1449,7 @@ const appLogic = (() => {
         const container = document.getElementById('saved-searches-list');
         if (!container) return;
 
-        const searches = DataStore.getAll('saved_searches');
+        const searches = AppDataStore.getAll('saved_searches');
         if (searches.length === 0) {
             container.innerHTML = '<p class="text-muted" style="font-size: 12px; margin: 12px 0;">No saved searches yet.</p>';
             return;
@@ -1486,13 +1486,13 @@ const appLogic = (() => {
             created_at: new Date().toISOString()
         };
 
-        DataStore.create('saved_searches', savedSearch);
+        AppDataStore.create('saved_searches', savedSearch);
         UI.toast.success('Search saved successfully');
         renderSavedSearches();
     };
 
     const loadSavedSearch = (id) => {
-        const search = DataStore.getById('saved_searches', id);
+        const search = AppDataStore.getById('saved_searches', id);
         if (!search) return;
 
         UI.toast.info(`Loading search: ${search.search_name}`);
@@ -1514,7 +1514,7 @@ const appLogic = (() => {
 
     const deleteSavedSearch = (id) => {
         if (confirm('Are you sure you want to delete this saved search?')) {
-            DataStore.delete('saved_searches', id);
+            AppDataStore.delete('saved_searches', id);
             UI.toast.success('Search deleted');
             renderSavedSearches();
         }
@@ -1669,12 +1669,12 @@ const appLogic = (() => {
         if (!treeContainer) return;
         if (parentId === null) treeContainer.innerHTML = '';
 
-        const folders = DataStore.getAll('folders')
+        const folders = AppDataStore.getAll('folders')
             .filter(f => f.parent_id === parentId)
             .sort((a, b) => a.name.localeCompare(b.name));
 
         folders.forEach(folder => {
-            const hasChildren = DataStore.getAll('folders').some(f => f.parent_id === folder.id);
+            const hasChildren = AppDataStore.getAll('folders').some(f => f.parent_id === folder.id);
             const isActive = _currentFolder === folder.id;
 
             const div = document.createElement('div');
@@ -1703,8 +1703,8 @@ const appLogic = (() => {
         const container = document.getElementById('breadcrumb');
         if (!container) return;
         const path = [];
-        let curr = _currentFolder ? DataStore.getById('folders', _currentFolder) : null;
-        while (curr) { path.unshift(curr); curr = curr.parent_id ? DataStore.getById('folders', curr.parent_id) : null; }
+        let curr = _currentFolder ? AppDataStore.getById('folders', _currentFolder) : null;
+        while (curr) { path.unshift(curr); curr = curr.parent_id ? AppDataStore.getById('folders', curr.parent_id) : null; }
 
         let html = '<span class="breadcrumb-item" onclick="app.navigateToFolder(null)">Root</span>';
         path.forEach(f => { html += `<span class="breadcrumb-separator">/</span><span class="breadcrumb-item" onclick="app.navigateToFolder(${f.id})">${f.name}</span>`; });
@@ -1727,39 +1727,39 @@ const appLogic = (() => {
     const createFolder = () => {
         const name = document.getElementById('new-folder-name')?.value;
         if (!name) return UI.toast.error('Name required');
-        DataStore.create('folders', { id: Date.now(), name, parent_id: _currentFolder, color: document.getElementById('new-folder-color').value, created_by: _currentUser?.id, created_at: new Date().toISOString() });
+        AppDataStore.create('folders', { id: Date.now(), name, parent_id: _currentFolder, color: document.getElementById('new-folder-color').value, created_by: _currentUser?.id, created_at: new Date().toISOString() });
         UI.hideModal(); UI.toast.success('Folder created'); renderFolderTree();
     };
 
     const renameFolder = (id) => {
-        const folder = DataStore.getById('folders', id);
+        const folder = AppDataStore.getById('folders', id);
         UI.showModal('Rename Folder', `<div class="form-group"><label>New Name</label><input type="text" id="rename-folder-input" class="form-control" value="${folder.name}"></div>`,
             [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Rename', type: 'primary', action: `app.confirmRenameFolder(${id})` }]);
     };
     window.app.confirmRenameFolder = (id) => {
         const name = document.getElementById('rename-folder-input')?.value;
         if (!name) return;
-        DataStore.update('folders', id, { name }); UI.hideModal(); renderFolderTree(); renderBreadcrumb();
+        AppDataStore.update('folders', id, { name }); UI.hideModal(); renderFolderTree(); renderBreadcrumb();
     };
 
     const deleteFolder = (id) => {
-        const hasSub = DataStore.getAll('folders').some(f => f.parent_id === id);
-        const hasFiles = DataStore.getAll('documents').some(d => d.folder_id === id);
+        const hasSub = AppDataStore.getAll('folders').some(f => f.parent_id === id);
+        const hasFiles = AppDataStore.getAll('documents').some(d => d.folder_id === id);
         if (hasSub || hasFiles) return UI.toast.error('Cannot delete: Folder is not empty');
         UI.showModal('Delete Folder', '<p>Are you sure?</p>', [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Delete', type: 'primary', action: `app.confirmDeleteFolder(${id})` }]);
     };
-    window.app.confirmDeleteFolder = (id) => { DataStore.delete('folders', id); UI.hideModal(); if (_currentFolder === id) _currentFolder = null; renderFolderTree(); loadFolderContents(); };
+    window.app.confirmDeleteFolder = (id) => { AppDataStore.delete('folders', id); UI.hideModal(); if (_currentFolder === id) _currentFolder = null; renderFolderTree(); loadFolderContents(); };
 
     const showRecentFiles = () => {
-        const allFiles = DataStore.getAll('documents').sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at));
+        const allFiles = AppDataStore.getAll('documents').sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at));
         renderFileListView(allFiles.slice(0, 20)); // Show top 20
         _currentFolder = 'recent'; renderBreadcrumb();
     };
 
-    const showAllFiles = () => { renderFileListView(DataStore.getAll('documents')); _currentFolder = 'all'; renderBreadcrumb(); };
-    const showStarredFiles = () => { renderFileListView(DataStore.getAll('documents').filter(d => d.is_starred)); _currentFolder = 'starred'; renderBreadcrumb(); };
+    const showAllFiles = () => { renderFileListView(AppDataStore.getAll('documents')); _currentFolder = 'all'; renderBreadcrumb(); };
+    const showStarredFiles = () => { renderFileListView(AppDataStore.getAll('documents').filter(d => d.is_starred)); _currentFolder = 'starred'; renderBreadcrumb(); };
 
-    const toggleStar = (id) => { const f = DataStore.getById('documents', id); DataStore.update('documents', id, { is_starred: !f.is_starred }); loadFolderContents(); };
+    const toggleStar = (id) => { const f = AppDataStore.getById('documents', id); AppDataStore.update('documents', id, { is_starred: !f.is_starred }); loadFolderContents(); };
 
     const downloadFile = (id) => { UI.toast.info('Starting download...'); /* Implementation depends on environment */ };
 
@@ -1768,12 +1768,12 @@ const appLogic = (() => {
     const handleDropOnFolder = (e, folderId) => {
         e.preventDefault();
         const fileId = parseInt(e.dataTransfer.getData('text/plain'));
-        if (fileId) { DataStore.update('documents', fileId, { folder_id: folderId }); UI.toast.success('Moved successfully'); loadFolderContents(); renderFolderTree(); }
+        if (fileId) { AppDataStore.update('documents', fileId, { folder_id: folderId }); UI.toast.success('Moved successfully'); loadFolderContents(); renderFolderTree(); }
     };
 
     const showVersionHistory = (fileId) => {
-        const file = DataStore.getById('documents', fileId);
-        const versions = DataStore.getAll('document_versions').filter(v => v.document_id === fileId).sort((a, b) => b.version_number - a.version_number);
+        const file = AppDataStore.getById('documents', fileId);
+        const versions = AppDataStore.getAll('document_versions').filter(v => v.document_id === fileId).sort((a, b) => b.version_number - a.version_number);
         const content = `
             <div class="version-history">
                 <div class="version-header"><h3>Version History: ${file.filename}</h3><p>Current: v${file.current_version || 1}</p></div>
@@ -1785,7 +1785,7 @@ const appLogic = (() => {
                                 <td>v${v.version_number}</td>
                                 <td>${new Date(v.created_at).toLocaleString()}</td>
                                 <td>${formatFileSize(v.size)}</td>
-                                <td>${DataStore.getById('users', v.created_by)?.full_name || 'System'}</td>
+                                <td>${AppDataStore.getById('users', v.created_by)?.full_name || 'System'}</td>
                                 <td>${v.change_note || '-'}</td>
                                 <td>
                                     <button class="btn-icon" onclick="app.downloadVersion(${v.id})"><i class="fas fa-download"></i></button>
@@ -1802,7 +1802,7 @@ const appLogic = (() => {
     };
 
     const showCompareTool = (fileId) => {
-        const versions = DataStore.getAll('document_versions').filter(v => v.document_id === fileId);
+        const versions = AppDataStore.getAll('document_versions').filter(v => v.document_id === fileId);
         UI.showModal('Compare Versions', `
             <div class="compare-setup">
                 <select id="v1" class="form-control">${versions.map(v => `<option value="${v.id}">Version ${v.version_number}</option>`).join('')}</select>
@@ -1813,22 +1813,22 @@ const appLogic = (() => {
     };
 
     const compareVersions = (fileId) => {
-        const v1 = DataStore.getById('document_versions', parseInt(document.getElementById('v1').value));
-        const v2 = DataStore.getById('document_versions', parseInt(document.getElementById('v2').value));
+        const v1 = AppDataStore.getById('document_versions', parseInt(document.getElementById('v1').value));
+        const v2 = AppDataStore.getById('document_versions', parseInt(document.getElementById('v2').value));
         UI.showModal('Comparison', `<div class="diff-view"><pre>${v1.data || ''}</pre><pre>${v2.data || ''}</pre></div>`, [{ label: 'Close', type: 'primary', action: 'UI.hideModal()' }]);
     };
 
     const downloadVersion = (versionId) => { UI.toast.info(`Downloading version ${versionId}...`); };
     const restoreVersion = (versionId) => {
-        const ver = DataStore.getById('document_versions', versionId);
-        DataStore.update('documents', ver.document_id, { current_version: ver.version_number, updatedAt: new Date().toISOString() });
+        const ver = AppDataStore.getById('document_versions', versionId);
+        AppDataStore.update('documents', ver.document_id, { current_version: ver.version_number, updatedAt: new Date().toISOString() });
         UI.toast.success(`Restored to version ${ver.version_number}`); UI.hideModal(); loadFolderContents();
     };
 
     const openShareModal = (fileId) => {
-        const file = DataStore.getById('documents', fileId);
-        const users = DataStore.getAll('users').filter(u => u.id !== _currentUser?.id);
-        const shares = DataStore.getAll('document_shares').filter(s => s.document_id === fileId);
+        const file = AppDataStore.getById('documents', fileId);
+        const users = AppDataStore.getAll('users').filter(u => u.id !== _currentUser?.id);
+        const shares = AppDataStore.getAll('document_shares').filter(s => s.document_id === fileId);
         const content = `
             <div class="share-modal">
                 <h3>Share: ${file.filename}</h3>
@@ -1837,7 +1837,7 @@ const appLogic = (() => {
                     <button class="btn primary" onclick="app.createShare(${fileId})">Add Share</button>
                 </div>
                 <div class="share-list">
-                    ${shares.map(s => `<div class="share-item">${DataStore.getById('users', s.shared_with)?.full_name} (${s.permission}) <button onclick="app.removeShare(${s.id})">x</button></div>`).join('')}
+                    ${shares.map(s => `<div class="share-item">${AppDataStore.getById('users', s.shared_with)?.full_name} (${s.permission}) <button onclick="app.removeShare(${s.id})">x</button></div>`).join('')}
                 </div>
             </div>
         `;
@@ -1847,33 +1847,33 @@ const appLogic = (() => {
     const createShare = (fileId) => {
         const userId = parseInt(document.getElementById('share-user').value);
         if (!userId) return;
-        DataStore.create('document_shares', { id: Date.now(), document_id: fileId, shared_with: userId, permission: 'view', shared_by: _currentUser?.id });
+        AppDataStore.create('document_shares', { id: Date.now(), document_id: fileId, shared_with: userId, permission: 'view', shared_by: _currentUser?.id });
         openShareModal(fileId);
     };
 
-    const removeShare = (id) => { DataStore.delete('document_shares', id); UI.toast.success('Share removed'); UI.hideModal(); };
+    const removeShare = (id) => { AppDataStore.delete('document_shares', id); UI.toast.success('Share removed'); UI.hideModal(); };
 
     const initDefaultFolders = () => {
-        if (DataStore.getAll('folders').length === 0) {
+        if (AppDataStore.getAll('folders').length === 0) {
             const defaults = [
                 { id: 1, name: 'Company Policies', color: '#3b82f6', parent_id: null },
                 { id: 2, name: 'Customer Documents', color: '#10b981', parent_id: null },
                 { id: 3, name: 'Agent Agreements', color: '#f59e0b', parent_id: null },
                 { id: 4, name: 'Marketing Materials', color: '#ef4444', parent_id: null }
             ];
-            defaults.forEach(f => DataStore.create('folders', f));
+            defaults.forEach(f => AppDataStore.create('folders', f));
         }
     };
 
     const initSampleDocuments = () => {
-        if (DataStore.getAll('documents').length === 0) {
-            DataStore.create('documents', { id: 101, filename: 'Welcome Guide.pdf', folder_id: 1, size: 1024 * 500, created_at: new Date().toISOString() });
-            DataStore.create('documents', { id: 102, filename: 'Privacy Policy.docx', folder_id: 1, size: 1024 * 200, created_at: new Date().toISOString() });
+        if (AppDataStore.getAll('documents').length === 0) {
+            AppDataStore.create('documents', { id: 101, filename: 'Welcome Guide.pdf', folder_id: 1, size: 1024 * 500, created_at: new Date().toISOString() });
+            AppDataStore.create('documents', { id: 102, filename: 'Privacy Policy.docx', folder_id: 1, size: 1024 * 200, created_at: new Date().toISOString() });
         }
     };
 
     const getFilesInCurrentFolder = () => {
-        let files = DataStore.getAll('documents');
+        let files = AppDataStore.getAll('documents');
 
         // Filter by current folder
         if (_currentFolder && _currentFolder !== 'recent' && _currentFolder !== 'all' && _currentFolder !== 'starred') {
@@ -2166,7 +2166,7 @@ const appLogic = (() => {
 
     const confirmDeleteSelected = () => {
         _selectedFiles.forEach(fileId => {
-            DataStore.delete('documents', fileId);
+            AppDataStore.delete('documents', fileId);
         });
         _selectedFiles = [];
         loadFolderContents();
@@ -2304,7 +2304,7 @@ const appLogic = (() => {
                     is_starred: false
                 };
 
-                DataStore.create('documents', newDoc);
+                AppDataStore.create('documents', newDoc);
 
                 uploaded++;
                 const percent = (uploaded / total) * 100;
@@ -2323,7 +2323,7 @@ const appLogic = (() => {
     };
 
     const previewFile = (fileId) => {
-        const file = DataStore.getById('documents', fileId);
+        const file = AppDataStore.getById('documents', fileId);
         if (!file) return;
 
         const filename = file.filename;
@@ -2380,11 +2380,11 @@ In a production system, this would show the actual file contents.
     };
 
     const showFileMetadata = (fileId) => {
-        const file = DataStore.getById('documents', fileId);
+        const file = AppDataStore.getById('documents', fileId);
         if (!file) return;
 
-        const creator = file.created_by ? DataStore.getById('users', file.created_by) : null;
-        const versions = DataStore.getAll('document_versions').filter(v => v.document_id === fileId);
+        const creator = file.created_by ? AppDataStore.getById('users', file.created_by) : null;
+        const versions = AppDataStore.getAll('document_versions').filter(v => v.document_id === fileId);
 
         const content = `
             <div class="file-metadata">
@@ -2464,20 +2464,20 @@ In a production system, this would show the actual file contents.
     const getFolderPath = (folderId) => {
         if (!folderId) return 'Root';
         const path = [];
-        let current = DataStore.getById('folders', folderId);
-        while (current) { path.unshift(current.name); current = current.parent_id ? DataStore.getById('folders', current.parent_id) : null; }
+        let current = AppDataStore.getById('folders', folderId);
+        while (current) { path.unshift(current.name); current = current.parent_id ? AppDataStore.getById('folders', current.parent_id) : null; }
         return path.join(' / ');
     };
 
     const editFileDescription = (fileId) => {
-        const file = DataStore.getById('documents', fileId);
+        const file = AppDataStore.getById('documents', fileId);
         UI.showModal('Edit Description', `<div class="form-group"><label>Description</label><textarea id="edit-file-desc" class="form-control" rows="4">${file.description || ''}</textarea></div>`,
             [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Save', type: 'primary', action: `app.saveFileDescription(${fileId})` }]);
     };
 
     const saveFileDescription = (fileId) => {
         const description = document.getElementById('edit-file-desc')?.value;
-        DataStore.update('documents', fileId, { description }); UI.hideModal(); UI.toast.success('Description updated'); showFileMetadata(fileId);
+        AppDataStore.update('documents', fileId, { description }); UI.hideModal(); UI.toast.success('Description updated'); showFileMetadata(fileId);
     };
 
     console.log('App initializing...');
@@ -2488,7 +2488,7 @@ In a production system, this would show the actual file contents.
         const text = document.getElementById('customer-note-text')?.value?.trim();
         if (!text) { UI.toast.error('Please enter a note'); return; }
         const currentUser = Auth.getCurrentUser();
-        DataStore.create('notes', {
+        AppDataStore.create('notes', {
             id: Date.now(),
             customer_id: customerId,
             text,
@@ -2502,7 +2502,7 @@ In a production system, this would show the actual file contents.
 
     const deleteCustomerNote = (customerId, noteId) => {
         UI.confirm('Delete Note?', 'Are you sure?', () => {
-            DataStore.delete('notes', noteId);
+            AppDataStore.delete('notes', noteId);
             UI.toast.success('Note deleted');
             showCustomerDetail(customerId);
         });
@@ -2512,7 +2512,7 @@ In a production system, this would show the actual file contents.
         const text = document.getElementById(`agent-note-text-${agentId}`)?.value?.trim();
         if (!text) { UI.toast.error('Please enter a note'); return; }
         const currentUser = Auth.getCurrentUser();
-        DataStore.create('notes', {
+        AppDataStore.create('notes', {
             id: Date.now(),
             agent_id: agentId,
             text,
@@ -2526,7 +2526,7 @@ In a production system, this would show the actual file contents.
 
     const deleteAgentNote = (agentId, noteId) => {
         UI.confirm('Delete Note?', 'Are you sure?', () => {
-            DataStore.delete('notes', noteId);
+            AppDataStore.delete('notes', noteId);
             UI.toast.success('Note deleted');
             showAgentDetail(agentId);
         });
@@ -2729,18 +2729,18 @@ In a production system, this would show the actual file contents.
 
         if (entityType === 'prospect') {
             noteData.prospect_id = entityId;
-            DataStore.create('notes', noteData);
+            AppDataStore.create('notes', noteData);
             if (entityId) showProspectDetail(entityId);
         } else if (entityType === 'customer') {
             noteData.customer_id = entityId;
-            DataStore.create('notes', noteData);
+            AppDataStore.create('notes', noteData);
             if (entityId) showCustomerDetail(entityId);
         } else if (entityType === 'agent') {
             noteData.agent_id = entityId;
-            DataStore.create('notes', noteData);
+            AppDataStore.create('notes', noteData);
             if (entityId) showAgentDetail(entityId);
         } else {
-            DataStore.create('notes', noteData);
+            AppDataStore.create('notes', noteData);
         }
     };
 
@@ -2996,9 +2996,9 @@ In a production system, this would show the actual file contents.
         for (const item of queue) {
             try {
                 if (item.action.startsWith('create_')) {
-                    DataStore.create(item.action.replace('create_', ''), item.data);
+                    AppDataStore.create(item.action.replace('create_', ''), item.data);
                 } else if (item.action.startsWith('update_')) {
-                    DataStore.update(item.action.replace('update_', ''), item.data.id, item.data);
+                    AppDataStore.update(item.action.replace('update_', ''), item.data.id, item.data);
                 }
                 success++;
             } catch (e) {
@@ -3014,13 +3014,13 @@ In a production system, this would show the actual file contents.
     };
 
     const offlineCreate = (tableName, data) => {
-        if (_isOnline) return DataStore.create(tableName, data);
+        if (_isOnline) return AppDataStore.create(tableName, data);
         addToOfflineQueue('create_' + tableName, data);
         return { ...data, id: 'offline-' + Date.now(), offline: true };
     };
 
     const offlineUpdate = (tableName, id, data) => {
-        if (_isOnline) return DataStore.update(tableName, id, data);
+        if (_isOnline) return AppDataStore.update(tableName, id, data);
         addToOfflineQueue('update_' + tableName, { ...data, id });
         return { ...data, id, offline: true };
     };
@@ -3208,7 +3208,7 @@ In a production system, this would show the actual file contents.
             // Also add to sync_history table
             const connection = getGoogleConnection();
             if (connection && _currentUser) {
-                DataStore.create('sync_history', {
+                AppDataStore.create('sync_history', {
                     integration_id: connection.integration_id,
                     user_id: _currentUser.id,
                     activity_id: activityId,
@@ -3237,7 +3237,7 @@ In a production system, this would show the actual file contents.
 
             const connection = getGoogleConnection();
             if (connection && _currentUser) {
-                DataStore.create('sync_history', {
+                AppDataStore.create('sync_history', {
                     integration_id: connection.integration_id,
                     user_id: _currentUser.id,
                     activity_id: activityId,
@@ -3340,7 +3340,7 @@ In a production system, this would show the actual file contents.
     };
 
     const getConnectionStatus = (integrationId) => {
-        const connections = DataStore.query('integration_connections', {
+        const connections = AppDataStore.query('integration_connections', {
             integration_id: getIntegrationId(integrationId),
             user_id: _currentUser?.id || 1
         });
@@ -3356,7 +3356,7 @@ In a production system, this would show the actual file contents.
     };
 
     const getIntegrationId = (provider) => {
-        const integrations = DataStore.getAll('integrations');
+        const integrations = AppDataStore.getAll('integrations');
         const integration = integrations.find(i => i.provider === provider);
         return integration ? integration.id : null;
     };
@@ -3475,7 +3475,7 @@ In a production system, this would show the actual file contents.
         const integrationId = getIntegrationId('google');
         if (!integrationId) return null;
 
-        const connections = DataStore.query('integration_connections', {
+        const connections = AppDataStore.query('integration_connections', {
             integration_id: integrationId,
             user_id: _currentUser?.id || 1
         });
@@ -3515,9 +3515,9 @@ In a production system, this would show the actual file contents.
 
     const simulateGoogleConnection = () => {
         UI.hideModal();
-        let integration = DataStore.getAll('integrations').find(i => i.provider === 'google');
+        let integration = AppDataStore.getAll('integrations').find(i => i.provider === 'google');
         if (!integration) {
-            integration = DataStore.create('integrations', {
+            integration = AppDataStore.create('integrations', {
                 integration_name: 'Google Calendar',
                 provider: 'google',
                 type: 'calendar',
@@ -3529,13 +3529,13 @@ In a production system, this would show the actual file contents.
 
         const oldConn = getGoogleConnection();
         if (oldConn) {
-            DataStore.update('integration_connections', oldConn.id, {
+            AppDataStore.update('integration_connections', oldConn.id, {
                 status: 'connected',
                 token_expires_at: new Date(Date.now() + 3600 * 1000).toISOString(),
                 updated_at: new Date().toISOString()
             });
         } else {
-            DataStore.create('integration_connections', {
+            AppDataStore.create('integration_connections', {
                 integration_id: integration.id,
                 user_id: _currentUser?.id || 1,
                 access_token: 'encrypted_mock_token',
@@ -3574,7 +3574,7 @@ In a production system, this would show the actual file contents.
             reminder: document.getElementById('default-reminder')?.value || '15'
         };
 
-        DataStore.update('integration_connections', connection.id, {
+        AppDataStore.update('integration_connections', connection.id, {
             sync_settings: settings,
             updated_at: new Date().toISOString()
         });
@@ -3594,7 +3594,7 @@ In a production system, this would show the actual file contents.
 
         const connection = getGoogleConnection();
         if (connection) {
-            DataStore.update('integration_connections', connection.id, {
+            AppDataStore.update('integration_connections', connection.id, {
                 last_sync: new Date().toISOString()
             });
         }
@@ -3602,7 +3602,7 @@ In a production system, this would show the actual file contents.
     };
 
     const viewSyncHistory = () => {
-        const syncHistory = DataStore.getAll('sync_history').filter(
+        const syncHistory = AppDataStore.getAll('sync_history').filter(
             h => h.user_id === (_currentUser?.id || 1)
         ).sort((a, b) => new Date(b.synced_at) - new Date(a.synced_at));
 
@@ -3642,7 +3642,7 @@ In a production system, this would show the actual file contents.
             `;
         } else {
             syncHistory.slice(0, 10).forEach((item, index) => {
-                const activity = DataStore.getById('activities', item.activity_id);
+                const activity = AppDataStore.getById('activities', item.activity_id);
                 const directionIcon = item.direction === 'crm_to_google' ? '→' : '←';
                 const statusIcon = item.status === 'success' ? '✓' : item.status === 'conflict' ? '⚠' : '✗';
                 const statusColor = item.status === 'success' ? '#10b981' : item.status === 'conflict' ? '#f59e0b' : '#ef4444';
@@ -3677,7 +3677,7 @@ In a production system, this would show the actual file contents.
 
     const exportSyncHistory = () => { UI.toast.info('Exporting sync history...'); };
     const clearSyncHistory = () => {
-        const logs = DataStore.getAll('sync_history').filter(h => h.user_id !== (_currentUser?.id || 1));
+        const logs = AppDataStore.getAll('sync_history').filter(h => h.user_id !== (_currentUser?.id || 1));
         safeLocalStorage.set('fs_crm_sync_history', logs);
         UI.toast.success('Sync history cleared');
         viewSyncHistory();
@@ -3698,7 +3698,7 @@ In a production system, this would show the actual file contents.
     const confirmDisconnectGoogle = () => {
         const connection = getGoogleConnection();
         if (connection) {
-            DataStore.update('integration_connections', connection.id, {
+            AppDataStore.update('integration_connections', connection.id, {
                 status: 'disconnected',
                 updated_at: new Date().toISOString()
             });
@@ -3713,11 +3713,11 @@ In a production system, this would show the actual file contents.
     };
 
     // Hook into activity CRUD for auto-sync
-    const originalCreateActivity = DataStore.create;
-    const originalUpdateActivity = DataStore.update;
-    const originalDeleteActivity = DataStore.delete;
+    const originalCreateActivity = AppDataStore.create;
+    const originalUpdateActivity = AppDataStore.update;
+    const originalDeleteActivity = AppDataStore.delete;
 
-    DataStore.create = function (tableName, data) {
+    AppDataStore.create = function (tableName, data) {
         const result = originalCreateActivity.call(this, tableName, data);
         if (tableName === 'activities' && _syncManager) {
             setTimeout(() => {
@@ -3730,12 +3730,12 @@ In a production system, this would show the actual file contents.
         return result;
     };
 
-    DataStore.update = function (tableName, id, data) {
+    AppDataStore.update = function (tableName, id, data) {
         const result = originalUpdateActivity.call(this, tableName, id, data);
         if (tableName === 'activities' && _syncManager) {
             setTimeout(() => {
                 const connection = getGoogleConnection();
-                const activity = DataStore.getById('activities', id);
+                const activity = AppDataStore.getById('activities', id);
                 if (connection && activity && connection.sync_settings?.syncTypes[activity.activity_type?.toLowerCase()]) {
                     _syncManager.syncCRMtoGoogle().catch(console.error);
                 }
@@ -3744,7 +3744,7 @@ In a production system, this would show the actual file contents.
         return result;
     };
 
-    DataStore.delete = function (tableName, id) {
+    AppDataStore.delete = function (tableName, id) {
         const result = originalDeleteActivity.call(this, tableName, id);
         if (tableName === 'activities' && _syncManager) {
             setTimeout(() => {
@@ -3772,12 +3772,12 @@ In a production system, this would show the actual file contents.
 
     // Get WhatsApp connection
     const getWhatsAppConnection = () => {
-        const integrations = DataStore.getAll('integrations');
+        const integrations = AppDataStore.getAll('integrations');
         const whatsappIntegration = integrations.find(i => i.provider === 'whatsapp');
 
         if (!whatsappIntegration) return null;
 
-        const connections = DataStore.query('integration_connections', {
+        const connections = AppDataStore.query('integration_connections', {
             integration_id: whatsappIntegration.id,
             user_id: _currentUser?.id || 1
         });
@@ -3894,9 +3894,9 @@ In a production system, this would show the actual file contents.
             return;
         }
 
-        let integration = DataStore.getAll('integrations').find(i => i.provider === 'whatsapp');
+        let integration = AppDataStore.getAll('integrations').find(i => i.provider === 'whatsapp');
         if (!integration) {
-            integration = DataStore.create('integrations', {
+            integration = AppDataStore.create('integrations', {
                 integration_name: 'WhatsApp Business',
                 provider: 'whatsapp',
                 type: 'messaging',
@@ -3920,9 +3920,9 @@ In a production system, this would show the actual file contents.
         };
 
         if (existingConnection) {
-            DataStore.update('integration_connections', existingConnection.id, connectionData);
+            AppDataStore.update('integration_connections', existingConnection.id, connectionData);
         } else {
-            DataStore.create('integration_connections', {
+            AppDataStore.create('integration_connections', {
                 ...connectionData,
                 created_at: new Date().toISOString()
             });
@@ -3944,7 +3944,7 @@ In a production system, this would show the actual file contents.
         UI.toast.success('Webhook verified successfully');
         const connection = getWhatsAppConnection();
         if (connection) {
-            DataStore.update('integration_connections', connection.id, {
+            AppDataStore.update('integration_connections', connection.id, {
                 webhook_verified: true,
                 updated_at: new Date().toISOString()
             });
@@ -3971,7 +3971,7 @@ In a production system, this would show the actual file contents.
     const confirmDisconnectWhatsApp = () => {
         const connection = getWhatsAppConnection();
         if (connection) {
-            DataStore.update('integration_connections', connection.id, {
+            AppDataStore.update('integration_connections', connection.id, {
                 status: 'disconnected',
                 updated_at: new Date().toISOString()
             });
@@ -3983,16 +3983,16 @@ In a production system, this would show the actual file contents.
 
     const openSendWhatsAppModal = (entityType, entityId) => {
         const entity = entityType === 'prospect'
-            ? DataStore.getById('prospects', entityId)
-            : DataStore.getById('customers', entityId);
+            ? AppDataStore.getById('prospects', entityId)
+            : AppDataStore.getById('customers', entityId);
         if (!entity) return;
 
         // Create demo templates if empty
-        let templates = DataStore.getAll('whatsapp_templates');
+        let templates = AppDataStore.getAll('whatsapp_templates');
         if (templates.length === 0) {
             templates = [
-                DataStore.create('whatsapp_templates', { template_name: 'Birthday Greeting', status: 'APPROVED', content: 'Hi {{name}}, wishing you a very happy birthday!' }),
-                DataStore.create('whatsapp_templates', { template_name: 'Appointment Reminder', status: 'APPROVED', content: 'Hi {{name}}, your appointment is confirmed.' })
+                AppDataStore.create('whatsapp_templates', { template_name: 'Birthday Greeting', status: 'APPROVED', content: 'Hi {{name}}, wishing you a very happy birthday!' }),
+                AppDataStore.create('whatsapp_templates', { template_name: 'Appointment Reminder', status: 'APPROVED', content: 'Hi {{name}}, your appointment is confirmed.' })
             ];
         }
 
@@ -4051,9 +4051,9 @@ In a production system, this would show the actual file contents.
         if (isTemplate) {
             const templateId = document.getElementById('template-select')?.value;
             if (!templateId) { UI.toast.error('Please select a template'); return; }
-            const template = DataStore.getById('whatsapp_templates', parseInt(templateId));
+            const template = AppDataStore.getById('whatsapp_templates', parseInt(templateId));
             setTimeout(() => {
-                DataStore.create('whatsapp_messages', {
+                AppDataStore.create('whatsapp_messages', {
                     id: 'wamid_' + Date.now(),
                     entity_type: entityType,
                     entity_id: entityId,
@@ -4073,7 +4073,7 @@ In a production system, this would show the actual file contents.
             const message = document.getElementById('free-message')?.value;
             if (!message) { UI.toast.error('Please enter a message'); return; }
             setTimeout(() => {
-                DataStore.create('whatsapp_messages', {
+                AppDataStore.create('whatsapp_messages', {
                     id: 'wamid_' + Date.now(),
                     entity_type: entityType,
                     entity_id: entityId,
@@ -4092,7 +4092,7 @@ In a production system, this would show the actual file contents.
     };
 
     const renderWhatsAppHistoryTab = (entityType, entityId) => {
-        const messages = DataStore.getAll('whatsapp_messages')
+        const messages = AppDataStore.getAll('whatsapp_messages')
             .filter(m => m.entity_type === entityType && m.entity_id == entityId)
             .sort((a, b) => new Date(b.sent_at || b.created_at) - new Date(a.sent_at || a.created_at));
 
@@ -4147,7 +4147,7 @@ In a production system, this would show the actual file contents.
     };
 
     const viewMessageDetails = (messageId) => {
-        const message = DataStore.getAll('whatsapp_messages').find(m => m.id === messageId);
+        const message = AppDataStore.getAll('whatsapp_messages').find(m => m.id === messageId);
         if (!message) return;
         const content = `
             <div class="message-details">
@@ -4206,9 +4206,9 @@ In a production system, this would show the actual file contents.
         }, 2000);
     };
 
-    // Ensure AI models exist in DataStore
+    // Ensure AI models exist in AppDataStore
     const ensureAIModelsExist = () => {
-        const models = DataStore.getAll('ai_models');
+        const models = AppDataStore.getAll('ai_models');
 
         if (models.length === 0) {
             // Create default models
@@ -4270,7 +4270,7 @@ In a production system, this would show the actual file contents.
             ];
 
             defaultModels.forEach(model => {
-                DataStore.create('ai_models', model);
+                AppDataStore.create('ai_models', model);
             });
 
             console.log('Default AI models created');
@@ -4360,7 +4360,7 @@ In a production system, this would show the actual file contents.
     // Render AI Stats Cards
     const renderAIStatsCards = () => {
         // Get forecast data
-        const forecasts = DataStore.getAll('forecast_history')
+        const forecasts = AppDataStore.getAll('forecast_history')
             .filter(f => new Date(f.forecast_date) > new Date(Date.now() - 30 * 24 * 60 * 60 * 1000))
             .sort((a, b) => new Date(b.forecast_date) - new Date(a.forecast_date));
 
@@ -4368,7 +4368,7 @@ In a production system, this would show the actual file contents.
 
         // Get lead scores
         const visibleProspectIds = getVisibleProspects().map(p => p.id);
-        const leadScores = DataStore.getAll('lead_scores')
+        const leadScores = AppDataStore.getAll('lead_scores')
             .filter(l => visibleProspectIds.includes(l.prospect_id) && new Date(l.score_date) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000));
 
         const highValueLeads = leadScores.filter(l => l.overall_score >= 80).length;
@@ -4379,7 +4379,7 @@ In a production system, this would show the actual file contents.
 
         // Get churn risks
         const visibleCustomerIds = getVisibleCustomers().map(c => c.id);
-        const churnRisks = DataStore.getAll('churn_risk')
+        const churnRisks = AppDataStore.getAll('churn_risk')
             .filter(c => visibleCustomerIds.includes(c.customer_id) && c.risk_level === 'high');
 
         return `
@@ -4463,13 +4463,13 @@ In a production system, this would show the actual file contents.
 
         // Add top lead scores
         const visibleProspectIds = getVisibleProspects().map(p => p.id);
-        const leadScores = DataStore.getAll('lead_scores')
+        const leadScores = AppDataStore.getAll('lead_scores')
             .filter(l => l.prospect_id && visibleProspectIds.includes(l.prospect_id))
             .sort((a, b) => b.overall_score - a.overall_score)
             .slice(0, 3);
 
         leadScores.forEach(score => {
-            const prospect = DataStore.getById('prospects', score.prospect_id);
+            const prospect = AppDataStore.getById('prospects', score.prospect_id);
             if (prospect) {
                 predictions.push({
                     name: prospect.full_name,
@@ -4484,13 +4484,13 @@ In a production system, this would show the actual file contents.
 
         // Add top churn risks
         const visibleCustomerIds = getVisibleCustomers().map(c => c.id);
-        const churnRisks = DataStore.getAll('churn_risk')
+        const churnRisks = AppDataStore.getAll('churn_risk')
             .filter(c => c.customer_id && visibleCustomerIds.includes(c.customer_id))
             .sort((a, b) => b.risk_score - a.risk_score)
             .slice(0, 2);
 
         churnRisks.forEach(risk => {
-            const customer = DataStore.getById('customers', risk.customer_id);
+            const customer = AppDataStore.getById('customers', risk.customer_id);
             if (customer) {
                 predictions.push({
                     name: customer.full_name,
@@ -4527,18 +4527,18 @@ In a production system, this would show the actual file contents.
     // Show Lead Scoring Interface
     const showLeadScoring = () => {
         // Get active model
-        const model = DataStore.getAll('ai_models').find(m => m.model_name === 'lead_scoring' && m.is_active);
+        const model = AppDataStore.getAll('ai_models').find(m => m.model_name === 'lead_scoring' && m.is_active);
 
         // Get recent lead scores
         const visibleProspectIds = getVisibleProspects().map(p => p.id);
-        const leadScores = DataStore.getAll('lead_scores')
+        const leadScores = AppDataStore.getAll('lead_scores')
             .filter(l => l.prospect_id && visibleProspectIds.includes(l.prospect_id))
             .sort((a, b) => new Date(b.score_date) - new Date(a.score_date))
             .slice(0, 10);
 
         let scoresHTML = '';
         leadScores.forEach(score => {
-            const prospect = DataStore.getById('prospects', score.prospect_id);
+            const prospect = AppDataStore.getById('prospects', score.prospect_id);
             if (!prospect) return;
 
             const trendIcon = score.trend === 'up' ? '⬆️' : score.trend === 'down' ? '⬇️' : '➡️';
@@ -4669,11 +4669,11 @@ In a production system, this would show the actual file contents.
 
     // Predict lead score for a prospect
     const predictLeadScore = (prospectId) => {
-        const prospect = DataStore.getById('prospects', prospectId);
+        const prospect = AppDataStore.getById('prospects', prospectId);
         if (!prospect) return null;
 
         // Get activities for this prospect
-        const activities = DataStore.query('activities', { prospect_id: prospectId });
+        const activities = AppDataStore.query('activities', { prospect_id: prospectId });
 
         // Calculate engagement score (0-100)
         const recentActivities = activities.filter(a =>
@@ -4725,7 +4725,7 @@ In a production system, this would show the actual file contents.
         );
 
         // Determine trend (compare with last score)
-        const lastScore = DataStore.getAll('lead_scores')
+        const lastScore = AppDataStore.getAll('lead_scores')
             .filter(l => l.prospect_id === prospectId)
             .sort((a, b) => new Date(b.score_date) - new Date(a.score_date))[0];
 
@@ -4770,7 +4770,7 @@ In a production system, this would show the actual file contents.
             created_at: new Date().toISOString()
         };
 
-        DataStore.create('lead_scores', leadScore);
+        AppDataStore.create('lead_scores', leadScore);
 
         return leadScore;
     };
@@ -4950,7 +4950,7 @@ In a production system, this would show the actual file contents.
             created_at: new Date().toISOString()
         };
 
-        DataStore.create('forecast_history', forecast);
+        AppDataStore.create('forecast_history', forecast);
 
         return {
             predicted_amount: predictedAmount,
@@ -5014,7 +5014,7 @@ In a production system, this would show the actual file contents.
     const showChurnRiskAnalysis = () => {
         // Get all churn risks
         const visibleCustomerIds = getVisibleCustomers().map(c => c.id);
-        const churnRisks = DataStore.getAll('churn_risk')
+        const churnRisks = AppDataStore.getAll('churn_risk')
             .filter(c => c.customer_id && visibleCustomerIds.includes(c.customer_id))
             .sort((a, b) => b.risk_score - a.risk_score);
 
@@ -5025,7 +5025,7 @@ In a production system, this would show the actual file contents.
 
         let risksHTML = '';
         churnRisks.slice(0, 5).forEach(risk => {
-            const customer = DataStore.getById('customers', risk.customer_id);
+            const customer = AppDataStore.getById('customers', risk.customer_id);
             if (!customer) return;
 
             const riskClass = risk.risk_level === 'high' ? 'high' : risk.risk_level === 'medium' ? 'medium' : 'low';
@@ -5135,11 +5135,11 @@ In a production system, this would show the actual file contents.
 
     // Calculate churn risk for a customer
     const calculateChurnRisk = (customerId) => {
-        const customer = DataStore.getById('customers', customerId);
+        const customer = AppDataStore.getById('customers', customerId);
         if (!customer) return null;
 
         // Get customer activities
-        const activities = DataStore.query('activities', { customer_id: customerId });
+        const activities = AppDataStore.query('activities', { customer_id: customerId });
 
         // Calculate activity recency
         const lastActivity = activities.sort((a, b) =>
@@ -5240,14 +5240,14 @@ In a production system, this would show the actual file contents.
             updated_at: new Date().toISOString()
         };
 
-        DataStore.create('churn_risk', churnRisk);
+        AppDataStore.create('churn_risk', churnRisk);
 
         return churnRisk;
     };
 
     // Batch update all churn risks
     const batchUpdateChurnRisks = () => {
-        const customers = DataStore.getAll('customers').filter(c => c.status === 'active');
+        const customers = AppDataStore.getAll('customers').filter(c => c.status === 'active');
 
         customers.forEach(customer => {
             calculateChurnRisk(customer.id);
@@ -5262,7 +5262,7 @@ In a production system, this would show the actual file contents.
         const user = _currentUser;
         const visibleUserIds = getVisibleUserIds(user);
         
-        let agents = DataStore.getAll('users').filter(u => u.role === 'agent');
+        let agents = AppDataStore.getAll('users').filter(u => u.role === 'agent');
         if (visibleUserIds !== 'all') {
             agents = agents.filter(a => visibleUserIds.includes(a.id));
         }
@@ -5383,11 +5383,11 @@ In a production system, this would show the actual file contents.
     // Generate insights for an agent
     const generateAgentInsights = (agentId) => {
         // Get agent stats
-        const stats = DataStore.query('agent_stats', { agent_id: agentId })[0];
+        const stats = AppDataStore.query('agent_stats', { agent_id: agentId })[0];
         if (!stats) return null;
 
         // Get agent targets
-        const target = DataStore.query('monthly_targets', { agent_id: agentId })[0];
+        const target = AppDataStore.query('monthly_targets', { agent_id: agentId })[0];
 
         // Mock data for demo
         const actual = 435000 + Math.floor(Math.random() * 150000);
@@ -5426,7 +5426,7 @@ In a production system, this would show the actual file contents.
             created_at: new Date().toISOString()
         };
 
-        DataStore.create('performance_insights', insight);
+        AppDataStore.create('performance_insights', insight);
 
         return {
             target: targetValue,
@@ -5439,7 +5439,7 @@ In a production system, this would show the actual file contents.
     };
 
     const initAppointmentLocations = () => {
-        if (DataStore.getAll('appointment_locations').length === 0) {
+        if (AppDataStore.getAll('appointment_locations').length === 0) {
             const defaultLocations = [
                 { office: 'MBB', location: 'KL', is_active: true },
                 { office: 'Monalisa', location: 'KL', is_active: true },
@@ -5448,7 +5448,7 @@ In a production system, this would show the actual file contents.
                 { office: 'Centrium Square', location: 'SG', is_active: true },
                 { office: 'Others', location: '', is_active: true }
             ];
-            defaultLocations.forEach(loc => DataStore.create('appointment_locations', loc));
+            defaultLocations.forEach(loc => AppDataStore.create('appointment_locations', loc));
         }
     };
 
@@ -5491,7 +5491,7 @@ In a production system, this would show the actual file contents.
                 clearInterval(interval);
 
                 // Update model versions and accuracy
-                const models = DataStore.getAll('ai_models');
+                const models = AppDataStore.getAll('ai_models');
                 models.forEach(model => {
                     model.model_version = '1.1.0';
                     model.accuracy += Math.random() * 3 - 1; // Random change
@@ -5499,7 +5499,7 @@ In a production system, this would show the actual file contents.
                     model.trained_on_records += Math.floor(Math.random() * 100);
                     model.updated_at = new Date().toISOString();
 
-                    DataStore.update('ai_models', model.id, model);
+                    AppDataStore.update('ai_models', model.id, model);
                 });
 
                 UI.toast.success('AI models trained successfully! Accuracy improved.');
@@ -5517,7 +5517,7 @@ In a production system, this would show the actual file contents.
         console.log("populateLoginDropdown called");
         const select = document.getElementById('login-user-select');
         if (!select) return;
-        const users = DataStore.getAll('users');
+        const users = AppDataStore.getAll('users');
         select.innerHTML = '<option value="">-- Select User --</option>' +
             users.map(u => `<option value="${u.id}">${u.full_name} (${u.role})</option>`).join('');
     }
@@ -5574,15 +5574,15 @@ In a production system, this would show the actual file contents.
         }
         console.log('App initializing...');
 
-        if (typeof DataStore === 'undefined') {
-            console.error('Critical Error: DataStore is not defined!');
-            if (window.UI && window.UI.toast) window.UI.toast.error('DataStore missing. App may not work.');
+        if (typeof AppDataStore === 'undefined') {
+            console.error('Critical Error: AppDataStore is not defined!');
+            if (window.UI && window.UI.toast) window.UI.toast.error('AppDataStore missing. App may not work.');
             return;
         }
 
         try {
             // Check if tables exist, if not init demo data
-            if (!DataStore.getAll('users').length) {
+            if (!AppDataStore.getAll('users').length) {
                 initDemoData();
                 initDefaultFolders();
                 initSampleDocuments();
@@ -5649,7 +5649,7 @@ In a production system, this would show the actual file contents.
     };
 
     const openAddNameModal = (prospectId, nameId = null) => {
-        const nameData = nameId ? DataStore.getById('names', nameId) : null;
+        const nameData = nameId ? AppDataStore.getById('names', nameId) : null;
         const isEdit = !!nameData;
 
         const content = `
@@ -5705,10 +5705,10 @@ In a production system, this would show the actual file contents.
         };
 
         if (nameId) {
-            DataStore.update('names', parseInt(nameId), data);
+            AppDataStore.update('names', parseInt(nameId), data);
             UI.toast.success('Name updated successfully');
         } else {
-            DataStore.create('names', data);
+            AppDataStore.create('names', data);
             UI.toast.success('Name added successfully');
         }
 
@@ -5724,7 +5724,7 @@ In a production system, this would show the actual file contents.
     };
 
     const confirmDeleteName = (prospectId, nameId) => {
-        DataStore.delete('names', nameId);
+        AppDataStore.delete('names', nameId);
         UI.hideModal();
         UI.toast.success('Name deleted');
         app.showProspectDetail(prospectId);
@@ -5733,7 +5733,7 @@ In a production system, this would show the actual file contents.
 
     const initDemoData = () => {
         // Seed appointment locations
-        if (DataStore.getAll('appointment_locations').length === 0) {
+        if (AppDataStore.getAll('appointment_locations').length === 0) {
             const defaultLocations = [
                 { office: 'MBB', location: 'KL', is_active: true },
                 { office: 'Monalisa', location: 'KL', is_active: true },
@@ -5742,10 +5742,10 @@ In a production system, this would show the actual file contents.
                 { office: 'Centrium Square', location: 'SG', is_active: true },
                 { office: 'Others', location: '', is_active: true }
             ];
-            defaultLocations.forEach(loc => DataStore.create('appointment_locations', loc));
+            defaultLocations.forEach(loc => AppDataStore.create('appointment_locations', loc));
         }
 
-        if (DataStore.getAll('users').length === 0) {
+        if (AppDataStore.getAll('users').length === 0) {
             console.log('Loading demo data...');
 
             // Roles
@@ -5755,10 +5755,10 @@ In a production system, this would show the actual file contents.
                 { role_name: 'team_leader', permissions: { 'view-dashboard': true, 'view-team-data': true } },
                 { role_name: 'consultant', permissions: { 'view-dashboard': true, 'manage-self-prospects': true } }
             ];
-            roles.forEach(r => DataStore.create('roles', r));
+            roles.forEach(r => AppDataStore.create('roles', r));
 
             // Teams
-            const teamA = DataStore.create('teams', { team_name: 'Team A' });
+            const teamA = AppDataStore.create('teams', { team_name: 'Team A' });
 
             // Users/Agents
             const users = [
@@ -5772,7 +5772,7 @@ In a production system, this would show the actual file contents.
                 { id: 8, username: 'raj', password: 'raj123', full_name: 'Raj Kumar', role: 'consultant', team_id: teamA.id, reporting_to: 3 },
                 { id: 10, username: 'manager', password: 'manager123', full_name: 'Manager', role: 'manager', team_id: teamA.id, reporting_to: null }
             ];
-            users.forEach(u => DataStore.create('users', u));
+            users.forEach(u => AppDataStore.create('users', u));
 
 
             // Tags
@@ -5784,7 +5784,7 @@ In a production system, this would show the actual file contents.
                 { id: 5, name: 'Business Owner', color: 'teal' },
                 { id: 6, name: 'Event Attendee', color: 'gray' }
             ];
-            tags.forEach(t => DataStore.create('tags', t));
+            tags.forEach(t => AppDataStore.create('tags', t));
 
             // Prospects
             const prospects = [
@@ -5847,7 +5847,7 @@ In a production system, this would show the actual file contents.
                     ming_gua: 'MG3'
                 }
             ];
-            prospects.forEach(p => DataStore.create('prospects', p));
+            prospects.forEach(p => AppDataStore.create('prospects', p));
 
             // Entity Tags for Tan Ah Kow
             const entityTags = [
@@ -5858,14 +5858,14 @@ In a production system, this would show the actual file contents.
                 { entity_type: 'prospect', entity_id: 1, tag_id: 5 },
                 { entity_type: 'prospect', entity_id: 1, tag_id: 6 }
             ];
-            entityTags.forEach(et => DataStore.create('entity_tags', et));
+            entityTags.forEach(et => AppDataStore.create('entity_tags', et));
 
             // Proposed Solutions for Tan Ah Kow
             const solutions = [
                 { prospect_id: 1, solution: 'PR4 Power Ring', proposed_date: '2026-03-04', status: 'Proposed', notes: '' },
                 { prospect_id: 1, solution: 'Office Audit', proposed_date: '2026-03-04', status: 'Proposed', notes: '' }
             ];
-            solutions.forEach(s => DataStore.create('proposed_solutions', s));
+            solutions.forEach(s => AppDataStore.create('proposed_solutions', s));
 
             // Activities - FIXED with proper end_time for all
             const activities = [
@@ -5915,7 +5915,7 @@ In a production system, this would show the actual file contents.
                     summary: 'Public lecture on Feng Shui'
                 }
             ];
-            activities.forEach(ac => DataStore.create('activities', ac));
+            activities.forEach(ac => AppDataStore.create('activities', ac));
 
             // Notes for Tan Ah Kow
             const notes = [
@@ -5923,7 +5923,7 @@ In a production system, this would show the actual file contents.
                 { prospect_id: 1, author: 'Michelle Tan', date: '2026-03-02', text: 'Customer is knowledgeable about Feng Shui, already reads books on the subject.' },
                 { prospect_id: 1, author: 'Michelle Tan', date: '2026-03-04', text: 'Office facing North-West. Need compass reading for accurate assessment.' }
             ];
-            notes.forEach(n => DataStore.create('notes', n));
+            notes.forEach(n => AppDataStore.create('notes', n));
 
             // Names (Family/Referrals) for Tan Ah Kow
             const names = [
@@ -5933,7 +5933,7 @@ In a production system, this would show the actual file contents.
                 { prospect_id: 1, relation: 'Parent', full_name: 'Tan Ah Hock', date_of_birth: '1960-06-05', notes: 'Lives with family' },
                 { prospect_id: 1, relation: 'Business Partner', full_name: 'Lee Meng Chew', date_of_birth: '', notes: 'Co-owner of construction company' }
             ];
-            names.forEach(n => DataStore.create('names', n));
+            names.forEach(n => AppDataStore.create('names', n));
 
             // Phase 6: Pipeline Demo Data
             // Manual overrides
@@ -5978,7 +5978,7 @@ In a production system, this would show the actual file contents.
                     expires_at: '2026-03-08T09:00:00Z'
                 }
             ];
-            overrides.forEach(o => DataStore.create('manual_overrides', o));
+            overrides.forEach(o => AppDataStore.create('manual_overrides', o));
 
             // My potential list
             const potentialList = [
@@ -6028,9 +6028,9 @@ In a production system, this would show the actual file contents.
                     status: 'active'
                 }
             ];
-            potentialList.forEach(p => DataStore.create('my_potential_list', p));
+            potentialList.forEach(p => AppDataStore.create('my_potential_list', p));
 
-            potentialList.forEach(p => DataStore.create('my_potential_list', p));
+            potentialList.forEach(p => AppDataStore.create('my_potential_list', p));
 
             UI.toast.success('Demo data loaded successfully.');
         } else {
@@ -6088,13 +6088,13 @@ In a production system, this would show the actual file contents.
             ];
 
             // Clear existing and re-add
-            const existingActivities = DataStore.getAll('activities');
-            existingActivities.forEach(a => DataStore.delete('activities', a.id));
-            activities.forEach(ac => DataStore.create('activities', ac));
+            const existingActivities = AppDataStore.getAll('activities');
+            existingActivities.forEach(a => AppDataStore.delete('activities', a.id));
+            activities.forEach(ac => AppDataStore.create('activities', ac));
         }
 
         // Additional Phase 4 Demo Data - Ensure it exists
-        if (DataStore.getAll('customers').length === 0) {
+        if (AppDataStore.getAll('customers').length === 0) {
             // Customers
             const customers = [
                 {
@@ -6125,7 +6125,7 @@ In a production system, this would show the actual file contents.
                     customer_since: '2026-02-20'
                 }
             ];
-            customers.forEach(c => DataStore.create('customers', c));
+            customers.forEach(c => AppDataStore.create('customers', c));
 
             // Platform IDs
             const platformIds = [
@@ -6137,7 +6137,7 @@ In a production system, this would show the actual file contents.
                 { id: 1006, customer_id: 101, platform: 'Far Coffee', platform_id: 'FC-44332211' },
                 { id: 1007, customer_id: 101, platform: 'Patiseri', platform_id: 'PT-77889900' }
             ];
-            platformIds.forEach(p => DataStore.create('platform_ids', p));
+            platformIds.forEach(p => AppDataStore.create('platform_ids', p));
 
             // Purchases
             const purchases = [
@@ -6180,7 +6180,7 @@ In a production system, this would show the actual file contents.
                     status: 'PENDING'
                 }
             ];
-            purchases.forEach(p => DataStore.create('purchases', p));
+            purchases.forEach(p => AppDataStore.create('purchases', p));
 
             // Referrals
             const referrals = [
@@ -6218,19 +6218,19 @@ In a production system, this would show the actual file contents.
                     source_id: null
                 }
             ];
-            referrals.forEach(r => DataStore.create('referrals', r));
+            referrals.forEach(r => AppDataStore.create('referrals', r));
 
             // Add original_source to existing prospects
-            const p1 = DataStore.getById('prospects', 1);
-            if (p1 && !p1.original_source) DataStore.update('prospects', 1, { original_source: 'CPS' });
-            const p4 = DataStore.getById('prospects', 4);
-            if (p4 && !p4.original_source) DataStore.update('prospects', 4, { original_source: 'EVENT', source_id: 'EVT-001' });
+            const p1 = AppDataStore.getById('prospects', 1);
+            if (p1 && !p1.original_source) AppDataStore.update('prospects', 1, { original_source: 'CPS' });
+            const p4 = AppDataStore.getById('prospects', 4);
+            if (p4 && !p4.original_source) AppDataStore.update('prospects', 4, { original_source: 'EVENT', source_id: 'EVT-001' });
         }
 
         // Phase 5 Agent Management Demo Data
-        if (DataStore.getAll('agent_stats').length === 0) {
+        if (AppDataStore.getAll('agent_stats').length === 0) {
             // Agents (users already exist, but need additional agent fields)
-            const teamA = DataStore.query('teams', { team_name: 'Team A' })[0];
+            const teamA = AppDataStore.query('teams', { team_name: 'Team A' })[0];
 
             const agentUpdates = [
                 {
@@ -6300,9 +6300,9 @@ In a production system, this would show the actual file contents.
             ];
 
             agentUpdates.forEach(update => {
-                const user = DataStore.getById('users', update.id);
+                const user = AppDataStore.getById('users', update.id);
                 if (user) {
-                    DataStore.update('users', update.id, { ...user, ...update });
+                    AppDataStore.update('users', update.id, { ...user, ...update });
                 }
             });
 
@@ -6335,12 +6335,12 @@ In a production system, this would show the actual file contents.
                 company_name: 'Bee Ling Fashion Boutique'
             };
 
-            DataStore.create('users', ongBeeLingAgent);
+            AppDataStore.create('users', ongBeeLingAgent);
 
             // Update customer to mark as converted to agent
-            const customer = DataStore.getById('customers', 101);
+            const customer = AppDataStore.getById('customers', 101);
             if (customer) {
-                DataStore.update('customers', 101, {
+                AppDataStore.update('customers', 101, {
                     converted_to_agent: true,
                     converted_to_agent_id: 9,
                     agent_package_purchased: 'Premium Package',
@@ -6370,7 +6370,7 @@ In a production system, this would show the actual file contents.
                     followup_rate: 62
                 }
             ];
-            followupStats.forEach(s => DataStore.create('agent_stats', s));
+            followupStats.forEach(s => AppDataStore.create('agent_stats', s));
 
             // Add current assignments
             const assignments = [
@@ -6379,24 +6379,24 @@ In a production system, this would show the actual file contents.
                 { agent_id: 5, prospect_id: 5, status: 'Cold', next_action: 'ASAP' },
                 { agent_id: 6, prospect_id: 2, status: 'Active', next_action: '2026-03-04' }
             ];
-            assignments.forEach(a => DataStore.create('assignments', a));
+            assignments.forEach(a => AppDataStore.create('assignments', a));
 
             // Add performance targets
             const targets = [
                 { agent_id: 5, month: '2026-03', target_amount: 20000, current_amount: 12500, target_cps: 15, current_cps: 8, target_meetings: 20, current_meetings: 12, target_conversion: 25, current_conversion: 18 }
             ];
-            targets.forEach(t => DataStore.create('agent_targets', t));
+            targets.forEach(t => AppDataStore.create('agent_targets', t));
         }
 
         // Phase 8 Event Demo Data
-        if (DataStore.getAll('event_categories').length === 0) {
+        if (AppDataStore.getAll('event_categories').length === 0) {
             const eventCategories = [
                 { id: 1, category_name: 'Lecture', base_score: 10, score_multiplier: 1.0, color_code: '#3b82f6' },
                 { id: 2, category_name: 'Workshop', base_score: 15, score_multiplier: 1.2, color_code: '#f59e0b' },
                 { id: 3, category_name: 'Course', base_score: 20, score_multiplier: 1.5, color_code: '#10b981' },
                 { id: 4, category_name: 'Museum Tour', base_score: 12, score_multiplier: 1.0, color_code: '#8b5cf6' }
             ];
-            eventCategories.forEach(c => DataStore.create('event_categories', c));
+            eventCategories.forEach(c => AppDataStore.create('event_categories', c));
 
             const events = [
                 {
@@ -6499,7 +6499,7 @@ In a production system, this would show the actual file contents.
                     created_at: '2026-02-25T09:15:00Z'
                 }
             ];
-            events.forEach(e => DataStore.create('events', e));
+            events.forEach(e => AppDataStore.create('events', e));
 
             const registrations = [
                 {
@@ -6537,11 +6537,11 @@ In a production system, this would show the actual file contents.
                     scoring_processed: false
                 }
             ];
-            registrations.forEach(r => DataStore.create('event_registrations', r));
+            registrations.forEach(r => AppDataStore.create('event_registrations', r));
         }
 
         // Phase 9: Reporting & KPI Dashboard Demo Data
-        if (DataStore.getAll('yearly_targets').length === 0) {
+        if (AppDataStore.getAll('yearly_targets').length === 0) {
             // Yearly Targets
             const yearlyTargets = [
                 {
@@ -6562,7 +6562,7 @@ In a production system, this would show the actual file contents.
                     created_at: '2026-01-01T00:00:00Z'
                 }
             ];
-            yearlyTargets.forEach(t => DataStore.create('yearly_targets', t));
+            yearlyTargets.forEach(t => AppDataStore.create('yearly_targets', t));
 
             // Quarterly Targets
             const quarterlyTargets = [
@@ -6571,7 +6571,7 @@ In a production system, this would show the actual file contents.
                 { id: 3, yearly_target_id: 1, quarter: 3, year: 2026, cps_count_target: 220, total_sales_target: 440000, pop_case_count_target: 26, pop_sales_target: 65000, epp_case_count_target: 21, epp_sales_target: 52500, new_agents_target: 12, new_customers_target: 60, total_meetings_target: 310, activity_headcount_target: 155, seasonal_factor: 1.1 },
                 { id: 4, yearly_target_id: 1, quarter: 4, year: 2026, cps_count_target: 240, total_sales_target: 480000, pop_case_count_target: 28, pop_sales_target: 70000, epp_case_count_target: 21, epp_sales_target: 52500, new_agents_target: 12, new_customers_target: 60, total_meetings_target: 310, activity_headcount_target: 155, seasonal_factor: 1.2 }
             ];
-            quarterlyTargets.forEach(t => DataStore.create('quarterly_targets', t));
+            quarterlyTargets.forEach(t => AppDataStore.create('quarterly_targets', t));
 
             // Monthly Targets (sample for Q1)
             const monthlyTargets = [
@@ -6579,7 +6579,7 @@ In a production system, this would show the actual file contents.
                 { id: 2, quarterly_target_id: 1, month: 2, year: 2026, cps_count_target: 60, total_sales_target: 120000, working_days: 20 },
                 { id: 3, quarterly_target_id: 1, month: 3, year: 2026, cps_count_target: 62, total_sales_target: 124000, working_days: 23 }
             ];
-            monthlyTargets.forEach(t => DataStore.create('monthly_targets', t));
+            monthlyTargets.forEach(t => AppDataStore.create('monthly_targets', t));
 
             // Weekly Targets (sample for March)
             const weeklyTargets = [
@@ -6587,11 +6587,11 @@ In a production system, this would show the actual file contents.
                 { id: 2, monthly_target_id: 3, week_number: 2, week_start_date: '2026-03-08', week_end_date: '2026-03-14', cps_count_target: 16, total_sales_target: 32000 },
                 { id: 4, monthly_target_id: 3, week_number: 4, week_start_date: '2026-03-22', week_end_date: '2026-03-28', cps_count_target: 15, total_sales_target: 30000 }
             ];
-            weeklyTargets.forEach(t => DataStore.create('weekly_targets', t));
+            weeklyTargets.forEach(t => AppDataStore.create('weekly_targets', t));
         }
 
         // Phase 12: WhatsApp Marketing Demo Data
-        if (DataStore.getAll('whatsapp_templates').length === 0) {
+        if (AppDataStore.getAll('whatsapp_templates').length === 0) {
             const templates = [
                 {
                     id: 1,
@@ -6633,10 +6633,10 @@ In a production system, this would show the actual file contents.
                     created_at: '2026-02-25T09:15:00Z'
                 }
             ];
-            templates.forEach(t => DataStore.create('whatsapp_templates', t));
+            templates.forEach(t => AppDataStore.create('whatsapp_templates', t));
         }
 
-        if (DataStore.getAll('whatsapp_campaigns').length === 0) {
+        if (AppDataStore.getAll('whatsapp_campaigns').length === 0) {
             const campaigns = [
                 {
                     id: 1,
@@ -6691,11 +6691,11 @@ In a production system, this would show the actual file contents.
                     completed_date: '2026-03-03T10:00:00Z'
                 }
             ];
-            campaigns.forEach(c => DataStore.create('whatsapp_campaigns', c));
+            campaigns.forEach(c => AppDataStore.create('whatsapp_campaigns', c));
         }
 
         // Phase: Marketing Manager Listings - Seed Products
-        if (DataStore.getAll('products').length === 0) {
+        if (AppDataStore.getAll('products').length === 0) {
             const productNames = [
                 "PR1", "PR2", "PR3", "PR4", "PR5", "PR6", "PR7", "PR8", "PR9", "PRH",
                 "简易", "灵活", "专案", "商业", "润雷益德", "源禄晋富", "黄离元吉",
@@ -6710,7 +6710,7 @@ In a production system, this would show the actual file contents.
                 "生命蓝图3年", "生命蓝图5年", "择日生子", "新生儿取名", "个人测名"
             ];
             productNames.forEach(name => {
-                DataStore.create('products', {
+                AppDataStore.create('products', {
                     name,
                     price: 0,
                     remarks: "",
@@ -6721,7 +6721,7 @@ In a production system, this would show the actual file contents.
         }
 
         // Phase: Marketing Manager Listings - Seed Events
-        if (DataStore.getAll('events').length === 0) {
+        if (AppDataStore.getAll('events').length === 0) {
             const eventTitles = [
                 "9-Stars", "Fengshui DIY", "Museum", "Sharing- PR", "Sharing- Calligraphy",
                 "Sharing - FengShui JY", "Sharing - FengShui Flexi", "Sharing - FengShui ZhuanAn",
@@ -6729,7 +6729,7 @@ In a production system, this would show the actual file contents.
                 "CNY Event", "Annual Prediction Talk", "Special Topic", "916 Event"
             ];
             eventTitles.forEach(title => {
-                DataStore.create('events', {
+                AppDataStore.create('events', {
                     title,
                     ticket_price: 0,
                     duration: "",
@@ -6948,7 +6948,7 @@ In a production system, this would show the actual file contents.
             const isHidden = hiddenIds.includes(item.id);
             if (isHidden && !showHidden) return '';
 
-            const customer = DataStore.getById('customers', item.id) || DataStore.getById('prospects', item.id);
+            const customer = AppDataStore.getById('customers', item.id) || AppDataStore.getById('prospects', item.id);
             const name = customer?.full_name || `User ${item.id}`;
 
             return `
@@ -7100,14 +7100,14 @@ In a production system, this would show the actual file contents.
         const toDate = document.getElementById('filter-case-to')?.value;
 
         // SPEC: Global visualization (All can view all)
-        let allCases = DataStore.getAll('case_studies');
+        let allCases = AppDataStore.getAll('case_studies');
         allCases.sort((a, b) => new Date(b.closing_date) - new Date(a.closing_date));
 
         const filtered = allCases.filter(cs => {
             // Global Search (across multiple snapshot fields)
-            const prospect = cs.prospect_id ? DataStore.getById('prospects', cs.prospect_id) : null;
+            const prospect = cs.prospect_id ? AppDataStore.getById('prospects', cs.prospect_id) : null;
             const pName = prospect ? (prospect.full_name || prospect.name || '').toLowerCase() : '';
-            const consultant = DataStore.getById('users', cs.consultant_id);
+            const consultant = AppDataStore.getById('users', cs.consultant_id);
             const cName = consultant ? (consultant.full_name || '').toLowerCase() : '';
             
             const matchSearch = !search || 
@@ -7149,7 +7149,7 @@ In a production system, this would show the actual file contents.
         }
 
         invBody.innerHTML = pageData.map((cs, idx) => {
-            const prospect = cs.prospect_id ? DataStore.getById('prospects', cs.prospect_id) : null;
+            const prospect = cs.prospect_id ? AppDataStore.getById('prospects', cs.prospect_id) : null;
             return `
                 <tr style="border-bottom: 1px solid var(--gray-50);">
                     <td style="padding: 12px; font-size: 13px;">${startIdx + idx + 1}</td>
@@ -7258,7 +7258,7 @@ In a production system, this would show the actual file contents.
         document.getElementById('referral-tree-svg').style.display = 'block';
         document.getElementById('tree-zoom-controls').style.display = 'flex';
 
-        const person = DataStore.getById('customers', personId) || DataStore.getById('prospects', personId);
+        const person = AppDataStore.getById('customers', personId) || AppDataStore.getById('prospects', personId);
         if (!person) return;
 
         // Build Tree Data
@@ -7269,13 +7269,13 @@ In a production system, this would show the actual file contents.
     };
 
     const buildTreeData = (rootId) => {
-        const person = DataStore.getById('customers', rootId) || DataStore.getById('prospects', rootId);
+        const person = AppDataStore.getById('customers', rootId) || AppDataStore.getById('prospects', rootId);
         if (!person) return null;
 
         const node = {
             id: person.id,
             name: person.full_name,
-            type: DataStore.getById('customers', rootId) ? 'Customer' : 'Prospect',
+            type: AppDataStore.getById('customers', rootId) ? 'Customer' : 'Prospect',
             origin: person.original_source || person.referral_source || 'MANUAL',
             children: []
         };
@@ -7385,7 +7385,7 @@ In a production system, this would show the actual file contents.
 
         // Parent indicator
         if (data.parentInfo) {
-            const parent = DataStore.getById('customers', data.parentInfo.id) || DataStore.getById('prospects', data.parentInfo.id);
+            const parent = AppDataStore.getById('customers', data.parentInfo.id) || AppDataStore.getById('prospects', data.parentInfo.id);
             if (parent) {
                 nodes.filter(d => d.depth === 0)
                     .append("text")
@@ -7549,12 +7549,12 @@ In a production system, this would show the actual file contents.
             dayActivities.forEach(a => {
                 if (!seenIds.has(a.id)) {
                     seenIds.add(a.id);
-                    const prospect = a.prospect_id ? DataStore.getById('prospects', a.prospect_id) : null;
-                    const customer = a.customer_id ? DataStore.getById('customers', a.customer_id) : null;
+                    const prospect = a.prospect_id ? AppDataStore.getById('prospects', a.prospect_id) : null;
+                    const customer = a.customer_id ? AppDataStore.getById('customers', a.customer_id) : null;
                     const entityName = prospect ? prospect.full_name : (customer ? customer.full_name : (a.activity_title || a.customer_name || 'Event'));
 
                     if (entityName) {
-                        const agent = a.lead_agent_id ? DataStore.getById('users', a.lead_agent_id) : null;
+                        const agent = a.lead_agent_id ? AppDataStore.getById('users', a.lead_agent_id) : null;
                         const agentName = agent ? agent.full_name : 'No Agent';
 
                         activityHtml += `
@@ -7608,7 +7608,7 @@ In a production system, this would show the actual file contents.
     };
 
     const openCalendarFilterModal = () => {
-        const agents = DataStore.getAll('users').filter(u => u.role === 'consultant' || u.role === 'team_leader');
+        const agents = AppDataStore.getAll('users').filter(u => u.role === 'consultant' || u.role === 'team_leader');
         const types = ['CPS', 'FTF', 'FSA', 'EVENT', 'CALL', 'EMAIL', 'WHATSAPP'];
 
         const content = `
@@ -7737,9 +7737,9 @@ In a production system, this would show the actual file contents.
             `;
 
         activities.forEach(a => {
-            const agent = DataStore.getById('users', a.lead_agent_id) || { full_name: 'Unknown Agent' };
-            const prospect = a.prospect_id ? DataStore.getById('prospects', a.prospect_id) : null;
-            const customer = a.customer_id ? DataStore.getById('customers', a.customer_id) : null;
+            const agent = AppDataStore.getById('users', a.lead_agent_id) || { full_name: 'Unknown Agent' };
+            const prospect = a.prospect_id ? AppDataStore.getById('prospects', a.prospect_id) : null;
+            const customer = a.customer_id ? AppDataStore.getById('customers', a.customer_id) : null;
             const entityName = prospect ? prospect.full_name : (customer ? customer.full_name : (a.customer_name || 'N/A'));
 
             html += `
@@ -7811,7 +7811,7 @@ In a production system, this would show the actual file contents.
         const all = [...prospects, ...customers];
 
         const getBdayInfo = (p) => {
-            const agent = DataStore.getById('users', p.responsible_agent_id || p.lead_agent_id);
+            const agent = AppDataStore.getById('users', p.responsible_agent_id || p.lead_agent_id);
             return {
                 name: p.full_name,
                 info: `Agent: ${agent?.full_name || 'Michelle Tan'} · ${p.customer_since ? 'Customer' : 'Prospect'} `,
@@ -7959,7 +7959,7 @@ In a production system, this would show the actual file contents.
         html += '<div class="week-body">';
 
         // Get all activities
-        const activities = DataStore.getAll('activities');
+        const activities = AppDataStore.getAll('activities');
 
         // Time slots (8 AM to 8 PM)
         for (let hour = 8; hour <= 20; hour++) {
@@ -7980,8 +7980,8 @@ In a production system, this would show the actual file contents.
 
                 html += '<div class="week-hour-cell">';
                 dayActivities.forEach(a => {
-                    const prospect = a.prospect_id ? DataStore.getById('prospects', a.prospect_id) : null;
-                    const customer = a.customer_id ? DataStore.getById('customers', a.customer_id) : null;
+                    const prospect = a.prospect_id ? AppDataStore.getById('prospects', a.prospect_id) : null;
+                    const customer = a.customer_id ? AppDataStore.getById('customers', a.customer_id) : null;
                     const name = prospect?.full_name || customer?.full_name || 'Activity';
 
                     html += `
@@ -8002,7 +8002,7 @@ In a production system, this would show the actual file contents.
     const renderDayView = () => {
         const grid = document.getElementById('calendar-grid');
         const todayStr = _currentDate.toISOString().split('T')[0];
-        const dayActivities = DataStore.getAll('activities').filter(a => a.activity_date === todayStr);
+        const dayActivities = AppDataStore.getAll('activities').filter(a => a.activity_date === todayStr);
 
         // Calculate summary stats
         const totalMeetings = dayActivities.filter(a => a.activity_type === 'FTF').length;
@@ -8047,10 +8047,10 @@ In a production system, this would show the actual file contents.
             `;
 
             hourActivities.forEach(a => {
-                const prospect = a.prospect_id ? DataStore.getById('prospects', a.prospect_id) : null;
-                const customer = a.customer_id ? DataStore.getById('customers', a.customer_id) : null;
+                const prospect = a.prospect_id ? AppDataStore.getById('prospects', a.prospect_id) : null;
+                const customer = a.customer_id ? AppDataStore.getById('customers', a.customer_id) : null;
                 const name = prospect?.full_name || customer?.full_name || '';
-                const agent = DataStore.getById('users', a.lead_agent_id);
+                const agent = AppDataStore.getById('users', a.lead_agent_id);
 
                 html += `
                     <div class="timeline-activity ${a.activity_type.toLowerCase()}" onclick="app.viewActivityDetails(${a.id})">
@@ -8071,7 +8071,7 @@ In a production system, this would show the actual file contents.
     const generateDayHours = () => {
         let hoursHtml = '';
         const todayStr = _currentDate.toISOString().split('T')[0];
-        const dayActs = DataStore.getAll('activities').filter(a => a.activity_date === todayStr);
+        const dayActs = AppDataStore.getAll('activities').filter(a => a.activity_date === todayStr);
 
         for (let i = 8; i <= 20; i++) {
             const hourStr = `${i.toString().padStart(2, '0')}:00`;
@@ -8084,7 +8084,7 @@ In a production system, this would show the actual file contents.
                         ${actsAtHour.map(a => `
                             <div class="day-act-item">
                                 <strong>${a.activity_type}</strong>: ${a.activity_title}
-                                ${a.prospect_id ? `(${DataStore.getById('prospects', a.prospect_id)?.full_name})` : ''}
+                                ${a.prospect_id ? `(${AppDataStore.getById('prospects', a.prospect_id)?.full_name})` : ''}
                             </div>
                         `).join('')}
                     </div>
@@ -8175,17 +8175,17 @@ In a production system, this would show the actual file contents.
 
     const viewActivityDetails = (activityId) => {
         _currentActivityId = activityId;
-        const activity = DataStore.getById('activities', activityId);
+        const activity = AppDataStore.getById('activities', activityId);
         if (!activity) return;
 
-        const prospect = activity.prospect_id ? DataStore.getById('prospects', activity.prospect_id) : null;
-        const customer = activity.customer_id ? DataStore.getById('customers', activity.customer_id) : null;
+        const prospect = activity.prospect_id ? AppDataStore.getById('prospects', activity.prospect_id) : null;
+        const customer = activity.customer_id ? AppDataStore.getById('customers', activity.customer_id) : null;
         const entityName = prospect?.full_name || customer?.full_name || 'Unknown';
 
         let attendeeHtml = '';
         let eventDetailsHtml = '';
         if (activity.event_id) {
-            const event = DataStore.getById('events', activity.event_id);
+            const event = AppDataStore.getById('events', activity.event_id);
             if (event) {
                 eventDetailsHtml = `
                     <div class="detail-section">
@@ -8208,9 +8208,9 @@ In a production system, this would show the actual file contents.
         }
 
         if (activity.activity_type === 'EVENT' && activity.event_id) {
-            const attendees = DataStore.getAll('event_attendees').filter(a => a.event_id === activity.event_id);
-            const prospects = DataStore.getAll('prospects');
-            const customers = DataStore.getAll('customers');
+            const attendees = AppDataStore.getAll('event_attendees').filter(a => a.event_id === activity.event_id);
+            const prospects = AppDataStore.getAll('prospects');
+            const customers = AppDataStore.getAll('customers');
             const all = [...prospects, ...customers];
 
             let rows = '';
@@ -8218,7 +8218,7 @@ In a production system, this would show the actual file contents.
                 rows = attendees.map(att => {
                     const person = all.find(p => p.id === att.attendee_id);
                     const name = person ? person.full_name : 'Unknown';
-                    const agent = DataStore.getById('users', att.added_by_agent_id);
+                    const agent = AppDataStore.getById('users', att.added_by_agent_id);
                     const agentName = agent ? agent.full_name : 'Unknown';
 
                     const paidChecked = att.paid ? 'checked' : '';
@@ -8263,7 +8263,7 @@ In a production system, this would show the actual file contents.
         }
 
         const getNotesForActivity = (activityId) => {
-            return DataStore.getAll('notes').filter(n => n.activity_id === activityId);
+            return AppDataStore.getAll('notes').filter(n => n.activity_id === activityId);
         };
 
         const activityNotes = getNotesForActivity(activityId);
@@ -8292,7 +8292,7 @@ In a production system, this would show the actual file contents.
                     <div class="info-row"><span class="info-label">Date:</span> <span>${activity.activity_date}</span></div>
                     <div class="info-row"><span class="info-label">Time:</span> <span>${activity.start_time} - ${activity.end_time}</span></div>
                     ${activity.activity_type !== 'EVENT' ? `<div class="info-row"><span class="info-label">Entity:</span> <span>${entityName}</span></div>` : ''}
-                    ${activity.location_id ? `<div class="info-row"><span class="info-label">Location:</span> <span>${DataStore.getById('appointment_locations', activity.location_id)?.office} - ${DataStore.getById('appointment_locations', activity.location_id)?.location}</span></div>` : ''}
+                    ${activity.location_id ? `<div class="info-row"><span class="info-label">Location:</span> <span>${AppDataStore.getById('appointment_locations', activity.location_id)?.office} - ${AppDataStore.getById('appointment_locations', activity.location_id)?.location}</span></div>` : ''}
                     ${activity.venue ? `<div class="info-row"><span class="info-label">Venue:</span> <span>${activity.venue}</span></div>` : ''}
                     ${activity.summary ? `<div class="info-row"><span class="info-label">Summary:</span> <span>${activity.summary}</span></div>` : ''}
                 </div>
@@ -8364,7 +8364,7 @@ In a production system, this would show the actual file contents.
     };
 
     const openAddPurchaseFromActivity = (activityId) => {
-        const activity = DataStore.getById('activities', activityId);
+        const activity = AppDataStore.getById('activities', activityId);
         if (!activity) {
             UI.toast.error('Activity not found');
             return;
@@ -8382,7 +8382,7 @@ In a production system, this would show the actual file contents.
         }
 
         // Get case study for this activity
-        const caseStudy = DataStore.getAll('case_studies').find(cs => cs.activity_id === activityId);
+        const caseStudy = AppDataStore.getAll('case_studies').find(cs => cs.activity_id === activityId);
         // Merge case study fields into activity object for pre-fill
         if (caseStudy) {
             activity.case_sales_idea = caseStudy.sales_idea;
@@ -8395,7 +8395,7 @@ In a production system, this would show the actual file contents.
     };
 
     const editActivity = (activityId) => {
-        const activity = DataStore.getById('activities', activityId);
+        const activity = AppDataStore.getById('activities', activityId);
         if (!activity) return;
         UI.hideModal(); // close any open modal
         openActivityModal(null, null, activity);
@@ -8412,7 +8412,7 @@ In a production system, this would show the actual file contents.
     };
 
     const confirmDeleteActivity = (activityId) => {
-        DataStore.delete('activities', activityId);
+        AppDataStore.delete('activities', activityId);
         UI.hideModal();
         UI.toast.success('Activity deleted');
         if (document.querySelector('.calendar-view-container')) {
@@ -8422,12 +8422,12 @@ In a production system, this would show the actual file contents.
     };
 
     const markActivityComplete = (activityId) => {
-        const activity = DataStore.getById('activities', activityId);
+        const activity = AppDataStore.getById('activities', activityId);
         if (!activity) return;
 
         activity.status = 'completed';
         activity.completed_at = new Date().toISOString();
-        DataStore.update('activities', activityId, activity);
+        AppDataStore.update('activities', activityId, activity);
 
         UI.toast.success('Activity marked as complete');
         if (document.querySelector('.calendar-view-container')) {
@@ -8441,12 +8441,12 @@ In a production system, this would show the actual file contents.
     };
 
     const showActivityNotesTable = (activityId) => {
-        const activity = DataStore.getById('activities', activityId);
+        const activity = AppDataStore.getById('activities', activityId);
         if (!activity) {
             UI.toast.error('Activity not found');
             return;
         }
-        const notes = DataStore.getAll('notes').filter(n => n.activity_id === activityId);
+        const notes = AppDataStore.getAll('notes').filter(n => n.activity_id === activityId);
         
         let tableRows = '';
         if (notes.length === 0) {
@@ -8499,7 +8499,7 @@ In a production system, this would show the actual file contents.
     };
 
     const showProspectDetailWithNotes = (activityId) => {
-        const activity = DataStore.getById('activities', activityId);
+        const activity = AppDataStore.getById('activities', activityId);
         if (!activity) {
             UI.toast.error('Activity not found');
             return;
@@ -8530,10 +8530,10 @@ In a production system, this would show the actual file contents.
 
     const postEventFollowUp = (eventId, entityId) => {
         UI.hideModal();
-        const ev = DataStore.getById('events', eventId);
+        const ev = AppDataStore.getById('events', eventId);
         app.openActivityModal();
         setTimeout(() => {
-            const all = [...DataStore.getAll('prospects'), ...DataStore.getAll('customers')];
+            const all = [...AppDataStore.getAll('prospects'), ...AppDataStore.getAll('customers')];
             const p = all.find(x => x.id === entityId);
             if (p) app.selectEntity(entityId, p.is_customer ? 'customer' : 'prospect');
 
@@ -8552,10 +8552,10 @@ In a production system, this would show the actual file contents.
 
     const openAttendeeOutcomeModal = (attendeeId, attendeeType, activityId) => {
         const attendee = attendeeType === 'agent'
-            ? DataStore.getById('users', attendeeId)
-            : (attendeeType === 'prospect' ? DataStore.getById('prospects', attendeeId) : DataStore.getById('customers', attendeeId));
+            ? AppDataStore.getById('users', attendeeId)
+            : (attendeeType === 'prospect' ? AppDataStore.getById('prospects', attendeeId) : AppDataStore.getById('customers', attendeeId));
 
-        const existingNote = DataStore.getAll('notes').find(n => n.activity_id === activityId && n.note_type === 'outcome' &&
+        const existingNote = AppDataStore.getAll('notes').find(n => n.activity_id === activityId && n.note_type === 'outcome' &&
             ((attendeeType === 'agent' && n.agent_id === attendeeId) ||
                 (attendeeType === 'prospect' && n.prospect_id === attendeeId) ||
                 (attendeeType === 'customer' && n.customer_id === attendeeId)));
@@ -8575,10 +8575,10 @@ In a production system, this would show the actual file contents.
 
     const openAttendeeNotesModal = (attendeeId, attendeeType, activityId) => {
         const attendee = attendeeType === 'agent'
-            ? DataStore.getById('users', attendeeId)
-            : (attendeeType === 'prospect' ? DataStore.getById('prospects', attendeeId) : DataStore.getById('customers', attendeeId));
+            ? AppDataStore.getById('users', attendeeId)
+            : (attendeeType === 'prospect' ? AppDataStore.getById('prospects', attendeeId) : AppDataStore.getById('customers', attendeeId));
 
-        const existingNote = DataStore.getAll('notes').find(n => n.activity_id === activityId && n.note_type === 'post_meetup' &&
+        const existingNote = AppDataStore.getAll('notes').find(n => n.activity_id === activityId && n.note_type === 'post_meetup' &&
             ((attendeeType === 'agent' && n.agent_id === attendeeId) ||
                 (attendeeType === 'prospect' && n.prospect_id === attendeeId) ||
                 (attendeeType === 'customer' && n.customer_id === attendeeId)));
@@ -8619,15 +8619,15 @@ In a production system, this would show the actual file contents.
         else if (attendeeType === 'customer') noteData.customer_id = attendeeId;
 
         // Check if note already exists to update
-        const existingNote = DataStore.getAll('notes').find(n => n.activity_id === activityId && n.note_type === noteType &&
+        const existingNote = AppDataStore.getAll('notes').find(n => n.activity_id === activityId && n.note_type === noteType &&
             ((attendeeType === 'agent' && n.agent_id === attendeeId) ||
                 (attendeeType === 'prospect' && n.prospect_id === attendeeId) ||
                 (attendeeType === 'customer' && n.customer_id === attendeeId)));
 
         if (existingNote) {
-            DataStore.update('notes', existingNote.id, noteData);
+            AppDataStore.update('notes', existingNote.id, noteData);
         } else {
-            DataStore.create('notes', noteData);
+            AppDataStore.create('notes', noteData);
         }
 
         UI.toast.success('Note saved successfully');
@@ -8648,13 +8648,13 @@ In a production system, this would show the actual file contents.
     };
 
     const getAgentName = (agentId) => {
-        const agent = DataStore.getById('users', agentId);
+        const agent = AppDataStore.getById('users', agentId);
         return agent?.full_name || 'Unknown';
     };
 
     // Helper to render location dropdown
     const renderLocationDropdown = (selectedLocationId = null, showLabel = false) => {
-        const locations = DataStore.getAll('appointment_locations');
+        const locations = AppDataStore.getAll('appointment_locations');
         let optionsHtml = '<option value="">Select Location...</option>';
         locations.forEach(loc => {
             const selected = selectedLocationId == loc.id ? 'selected' : '';
@@ -8892,7 +8892,7 @@ In a production system, this would show the actual file contents.
         // If prospectId is provided, pre-select it
         if (prospectId) {
             setTimeout(() => {
-                const prospect = DataStore.getById('prospects', prospectId);
+                const prospect = AppDataStore.getById('prospects', prospectId);
                 if (prospect) {
                     _selectedEntity = { id: prospectId, type: 'Prospect' };
                     const infoDiv = document.getElementById('selected-entity-info');
@@ -8941,7 +8941,7 @@ In a production system, this would show the actual file contents.
         // 4. Restore selected entity (store in module variable)
         // 4. Restore selected entity
         if (activity.prospect_id) {
-            const prospect = DataStore.getById('prospects', activity.prospect_id);
+            const prospect = AppDataStore.getById('prospects', activity.prospect_id);
             if (prospect) {
                 _selectedEntity = { id: prospect.id, type: 'Prospect' };
                 const entityInfoDiv = document.getElementById('selected-entity-info');
@@ -8954,7 +8954,7 @@ In a production system, this would show the actual file contents.
                 }
             }
         } else if (activity.customer_id) {
-            const customer = DataStore.getById('customers', activity.customer_id);
+            const customer = AppDataStore.getById('customers', activity.customer_id);
             if (customer) {
                 _selectedEntity = { id: customer.id, type: 'Customer' };
                 const entityInfoDiv = document.getElementById('selected-entity-info');
@@ -8994,7 +8994,7 @@ In a production system, this would show the actual file contents.
 
         // 8. If this is a CPS activity, poll for CPS‑specific fields
         if (activity.activity_type === 'CPS' && activity.prospect_id) {
-            const prospect = DataStore.getById('prospects', activity.prospect_id);
+            const prospect = AppDataStore.getById('prospects', activity.prospect_id);
             if (!prospect) {
                 console.error('Prospect not found for ID:', activity.prospect_id);
                 return;
@@ -9038,7 +9038,7 @@ In a production system, this would show the actual file contents.
 };
 
     const updateActivity = (activityId) => {
-    const activity = DataStore.getById('activities', activityId);
+    const activity = AppDataStore.getById('activities', activityId);
     if (!activity) return;
 
     const updatedData = {
@@ -9068,7 +9068,7 @@ In a production system, this would show the actual file contents.
         console.log('No entity selected – clearing IDs');
     }
 
-    DataStore.update('activities', activityId, { ...activity, ...updatedData });
+    AppDataStore.update('activities', activityId, { ...activity, ...updatedData });
     UI.hideModal();
     UI.toast.success('Activity updated');
     if (typeof renderCalendar === 'function') renderCalendar();
@@ -9326,7 +9326,7 @@ In a production system, this would show the actual file contents.
                                 <label>Choose ${type.includes('AGENT') ? 'Meeting/Training' : 'Event'}</label>
                                 <select id="existing-event" class="form-control">
                                     <option value="">-- Select --</option>
-                                    ${DataStore.getAll('events').filter(e => e.is_active !== false)
+                                    ${AppDataStore.getAll('events').filter(e => e.is_active !== false)
                                         .sort((a, b) => new Date(b.event_date) - new Date(a.event_date))
                                         .map(e => `<option value="${e.id}">${e.title} (${e.event_date || 'No date'})</option>`)
                                         .join('')}
@@ -9446,7 +9446,7 @@ In a production system, this would show the actual file contents.
 
                 let matches = [];
                 if (type === 'CPS' || type === 'EVENT') {
-                    const all = [...DataStore.getAll('prospects'), ...DataStore.getAll('customers')];
+                    const all = [...AppDataStore.getAll('prospects'), ...AppDataStore.getAll('customers')];
                     const available = all.filter(p => !_selectedAttendees.find(a => a.id === p.id && a.type !== 'agent'));
                     matches = available.filter(p =>
                         (p.full_name && p.full_name.toLowerCase().includes(searchTerm)) ||
@@ -9456,7 +9456,7 @@ In a production system, this would show the actual file contents.
                 }
 
                 if (isAgentRelevant) {
-                    const agents = DataStore.getAll('users').filter(u =>
+                    const agents = AppDataStore.getAll('users').filter(u =>
                         (u.role === 'consultant' || u.role === 'agent') &&
                         !_selectedAttendees.find(a => a.id === u.id && a.type === 'agent')
                     );
@@ -9552,9 +9552,9 @@ In a production system, this would show the actual file contents.
                 return;
             }
 
-            const prospects = DataStore.getAll('prospects').filter(p => !p.status || p.status === 'active');
-            const customers = DataStore.getAll('customers').filter(c => !c.status || c.status === 'active');
-            const agents = DataStore.getAll('users').filter(u => u.role === 'consultant' || u.role === 'team_leader');
+            const prospects = AppDataStore.getAll('prospects').filter(p => !p.status || p.status === 'active');
+            const customers = AppDataStore.getAll('customers').filter(c => !c.status || c.status === 'active');
+            const agents = AppDataStore.getAll('users').filter(u => u.role === 'consultant' || u.role === 'team_leader');
 
             const all = [
                 ...prospects.map(p => ({ id: p.id, name: p.full_name, type: 'Prospect' })),
@@ -9630,8 +9630,8 @@ In a production system, this would show the actual file contents.
     const selectEntity = (id, type) => {
         _selectedEntity = { id, type };
         const entity = type === 'Prospect'
-            ? DataStore.getById('prospects', id)
-            : DataStore.getById('customers', id);
+            ? AppDataStore.getById('prospects', id)
+            : AppDataStore.getById('customers', id);
 
         const infoDiv = document.getElementById('selected-entity-info');
         if (infoDiv) {
@@ -9658,10 +9658,10 @@ In a production system, this would show the actual file contents.
     // If the prospect was already converted, returns the existing customer ID.
     // Otherwise creates a new customer from prospect data and marks the prospect as converted.
     const ensureCustomerFromProspect = (prospectId) => {
-        const existingCustomer = DataStore.getAll('customers').find(c => c.converted_from_prospect_id == prospectId);
+        const existingCustomer = AppDataStore.getAll('customers').find(c => c.converted_from_prospect_id == prospectId);
         if (existingCustomer) return existingCustomer.id;
 
-        const prospect = DataStore.getById('prospects', prospectId);
+        const prospect = AppDataStore.getById('prospects', prospectId);
         if (!prospect) return null;
 
         const newCustomer = {
@@ -9691,8 +9691,8 @@ In a production system, this would show the actual file contents.
             referred_by_type: prospect.referred_by_type,
             referral_relationship: prospect.referral_relationship
         };
-        const created = DataStore.create('customers', newCustomer);
-        DataStore.update('prospects', prospect.id, { status: 'converted' });
+        const created = AppDataStore.create('customers', newCustomer);
+        AppDataStore.update('prospects', prospect.id, { status: 'converted' });
         return created.id;
     };
 
@@ -9706,7 +9706,7 @@ In a production system, this would show the actual file contents.
             return;
         }
 
-        const users = DataStore.getAll('users').filter(u => u.role === 'consultant' || u.role === 'agent');
+        const users = AppDataStore.getAll('users').filter(u => u.role === 'consultant' || u.role === 'agent');
         const matches = users.filter(u => 
             (u.full_name && u.full_name.toLowerCase().includes(term)) ||
             (u.agent_code && u.agent_code.toLowerCase().includes(term)) ||
@@ -9820,7 +9820,7 @@ In a production system, this would show the actual file contents.
 
             // Phase X: Duplicate checking
             if (activity.activity_type === 'CPS' && !window._cpsDuplicateConfirmed) {
-                const existing = DataStore.getAll('activities').filter(a => a.activity_type === 'CPS' && a.prospect_id == activity.prospect_id && a.id !== activity.id);
+                const existing = AppDataStore.getAll('activities').filter(a => a.activity_type === 'CPS' && a.prospect_id == activity.prospect_id && a.id !== activity.id);
                 if (existing.length > 0) {
                     UI.showModal('Duplicate CPS', 'A CPS activity already exists for this prospect. Do you want to continue?', [
                         { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
@@ -9862,7 +9862,7 @@ In a production system, this would show the actual file contents.
                 prospectData.lunar_birth = document.getElementById('cps-lunar')?.value;
             }
 
-            const prospect = DataStore.create('prospects', prospectData);
+            const prospect = AppDataStore.create('prospects', prospectData);
             activity.prospect_id = prospect.id;
             activity.activity_title = `CPS With ${name}`;
 
@@ -9898,7 +9898,7 @@ In a production system, this would show the actual file contents.
                 if (type === 'AGENT_MEETING') category = 'Meeting';
                 if (type === 'AGENT_TRAINING') category = 'Training';
 
-                const newEvent = DataStore.create('events', {
+                const newEvent = AppDataStore.create('events', {
                     title: title,
                     date: date,
                     time: start,
@@ -9920,7 +9920,7 @@ In a production system, this would show the actual file contents.
                     UI.toast.error('Please select an event.');
                     return;
                 }
-                const ev = DataStore.getById('events', eventId);
+                const ev = AppDataStore.getById('events', eventId);
                 activity.activity_title = ev ? ev.title : 'Existing Event';
                 // Update visibility on existing event if needed (optional, keeping it simple for now)
             }
@@ -9935,7 +9935,7 @@ In a production system, this would show the actual file contents.
 
             // Save attendees
             _selectedAttendees.forEach(att => {
-                DataStore.create('event_attendees', {
+                AppDataStore.create('event_attendees', {
                     event_id: parseInt(eventId),
                     attendee_id: att.id,
                     attendee_type: att.type,
@@ -9948,9 +9948,9 @@ In a production system, this would show the actual file contents.
 
                 // Create a placeholder note for each prospect attendee
                 if (att.type === 'prospect') {
-                    const existingNote = DataStore.getAll('notes').find(n => n.event_id == eventId && n.prospect_id == att.id);
+                    const existingNote = AppDataStore.getAll('notes').find(n => n.event_id == eventId && n.prospect_id == att.id);
                     if (!existingNote) {
-                        DataStore.create('notes', {
+                        AppDataStore.create('notes', {
                             id: Date.now() + Math.random(),
                             event_id: parseInt(eventId),
                             prospect_id: att.id,
@@ -10041,27 +10041,27 @@ In a production system, this would show the actual file contents.
             }
         }
 
-        const savedActivity = DataStore.create('activities', activity);
+        const savedActivity = AppDataStore.create('activities', activity);
 
         // If a closing purchase was prepared, create it now that we have the activity ID.
         if (savedActivity._pendingPurchase) {
             const pd = savedActivity._pendingPurchase;
             pd.activity_id = savedActivity.id;
-            DataStore.create('purchases', pd);
+            AppDataStore.create('purchases', pd);
             
             // Update prospect score after creating purchase
             if (pd.prospect_id) {
-                const totalPurchases = DataStore.getAll('purchases')
+                const totalPurchases = AppDataStore.getAll('purchases')
                     .filter(p => p.prospect_id == pd.prospect_id)
                     .reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
                 const newScore = Math.min(1000, totalPurchases / 10);
-                DataStore.update('prospects', pd.prospect_id, { score: newScore });
+                AppDataStore.update('prospects', pd.prospect_id, { score: newScore });
             }
 
-            const customer = DataStore.getById('customers', pd.customer_id);
+            const customer = AppDataStore.getById('customers', pd.customer_id);
             if (customer) {
                 const newLTV = (customer.lifetime_value || 0) + pd.amount;
-                DataStore.update('customers', customer.id, {
+                AppDataStore.update('customers', customer.id, {
                     lifetime_value: newLTV
                 });
             }
@@ -10074,7 +10074,7 @@ In a production system, this would show the actual file contents.
             const successStory = document.getElementById('case-success-story')?.value;
 
             if (salesIdea || planDetails || successStory) {
-                DataStore.create('case_studies', {
+                AppDataStore.create('case_studies', {
                     title: `Case Study: ${activity.activity_title}`,
                     prospect_id: activity.prospect_id || null,
                     customer_id: activity.customer_id || null,
@@ -10190,7 +10190,7 @@ In a production system, this would show the actual file contents.
                          </select>
                          <select id="filter-location" onchange="app.filterProspects()">
                              <option value="">All Locations</option>
-                             ${DataStore.getAll('appointment_locations').map(loc => `<option value="${loc.id}">${loc.office} - ${loc.location}</option>`).join('')}
+                             ${AppDataStore.getAll('appointment_locations').map(loc => `<option value="${loc.id}">${loc.office} - ${loc.location}</option>`).join('')}
                          </select>
                          <button class="btn primary" onclick="app.filterProspects()">Apply Filters</button>
                     </div>
@@ -10449,7 +10449,7 @@ In a production system, this would show the actual file contents.
                     </td>
                     <td>${p.ming_gua || 'MG4'}</td>
                     <td>${p.occupation || ''}${p.company_name ? ' · ' + p.company_name : ''}</td>
-                    <td>${p.location_id ? (DataStore.getById('appointment_locations', p.location_id)?.office + ' - ' + DataStore.getById('appointment_locations', p.location_id)?.location) : '-'}</td>
+                    <td>${p.location_id ? (AppDataStore.getById('appointment_locations', p.location_id)?.office + ' - ' + AppDataStore.getById('appointment_locations', p.location_id)?.location) : '-'}</td>
                     <td>${lastActivityText}</td>
                     <td>
                         <div>${daysLeft} days left</div>
@@ -10501,7 +10501,7 @@ In a production system, this would show the actual file contents.
     const openProspectModal = (id = null, type = 'prospect') => {
         const table = type === 'customer' ? 'customers' : 'prospects';
         if (id) {
-            const entity = DataStore.getById(table, id);
+            const entity = AppDataStore.getById(table, id);
             if (!entity) return;
             const currentUser = _currentUser || Auth.getCurrentUser();
             const isAdmin = ['super_admin', 'admin', 'manager', 'marketing_manager', 'team_leader'].includes(currentUser.role?.toLowerCase());
@@ -10511,7 +10511,7 @@ In a production system, this would show the actual file contents.
                 return;
             }
         }
-        const prospect = id ? DataStore.getById(table, id) : null;
+        const prospect = id ? AppDataStore.getById(table, id) : null;
         const isEdit = !!prospect;
 
         const content = `
@@ -10787,14 +10787,14 @@ In a production system, this would show the actual file contents.
         };
 
         if (editId) {
-            DataStore.update(table, parseInt(editId), data);
+            AppDataStore.update(table, parseInt(editId), data);
             UI.toast.success(`${type === 'customer' ? 'Customer' : 'Prospect'} updated successfully`);
         } else {
             data.id = Date.now();
             data.protection_deadline = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
             data.score = 5;
             data.created_at = new Date().toISOString();
-            DataStore.create('prospects', data);
+            AppDataStore.create('prospects', data);
             UI.toast.success('Prospect created successfully');
         }
 
@@ -10821,7 +10821,7 @@ In a production system, this would show the actual file contents.
     };
 
     const showCustomerDetail = (customerId, initialTab = 'basic') => {
-        const customer = DataStore.getById('customers', customerId);
+        const customer = AppDataStore.getById('customers', customerId);
         if (!customer || !canViewCustomer(customer)) {
             UI.toast.error('You do not have permission to view this customer.');
             navigateTo('prospects');
@@ -10932,7 +10932,7 @@ In a production system, this would show the actual file contents.
         if (btn) btn.classList.add('active');
 
         const customerId = cId || 101; // Mocking fallback
-        const customer = DataStore.getById('customers', customerId);
+        const customer = AppDataStore.getById('customers', customerId);
         if (!customer) return;
 
         if (tabName === 'basic') renderBasicBankTab(customer);
@@ -10941,7 +10941,7 @@ In a production system, this would show the actual file contents.
         else if (tabName === 'activity') renderCustomerActivityTab(customer);
         else if (tabName === 'referrals') renderReferralsTab(customer);
         else if (tabName === 'events') {
-            const registrations = DataStore.getAll('event_registrations').filter(
+            const registrations = AppDataStore.getAll('event_registrations').filter(
                 r => r.attendee_type === 'customer' && r.attendee_id == customerId
             );
             let html = '<h4>Events Attended</h4>';
@@ -10950,7 +10950,7 @@ In a production system, this would show the actual file contents.
             } else {
                 html += '<table class="events-table"><thead><tr><th>Event</th><th>Date</th><th>Status</th><th>Points</th></tr></thead><tbody>';
                 registrations.forEach(r => {
-                    const event = DataStore.getById('events', r.event_id);
+                    const event = AppDataStore.getById('events', r.event_id);
                     html += `<tr><td>${event?.title || 'Unknown'}</td><td>${r.event_date || '-'}</td><td>${r.attendance_status}</td><td>${r.points_awarded || 0}</td></tr>`;
                 });
                 html += '</tbody></table>';
@@ -11027,7 +11027,7 @@ In a production system, this would show the actual file contents.
         `;
 
         // Phase 14: Append Internal Notes section
-        const customerNotes = DataStore.query('notes', { customer_id: customer.id });
+        const customerNotes = AppDataStore.query('notes', { customer_id: customer.id });
         container.insertAdjacentHTML('beforeend', `
             <div class="profile-section" style="margin-top:24px; border:1px solid var(--gray-200); border-radius:12px; padding:20px; background:var(--white);">
                 <h4 style="font-size:16px; font-weight:600; margin-bottom:16px; color:var(--primary);"><i class="fas fa-sticky-note"></i> Internal Notes</h4>
@@ -11052,7 +11052,7 @@ In a production system, this would show the actual file contents.
     };
 
     const renderPlatformIdsTab = (customer, containerId = 'profile-tab-content') => {
-        const platformData = DataStore.query('platform_ids', { customer_id: customer.id });
+        const platformData = AppDataStore.query('platform_ids', { customer_id: customer.id });
         const internal = platformData.slice(0, 4);
         const external = platformData.slice(4);
 
@@ -11091,7 +11091,7 @@ In a production system, this would show the actual file contents.
     };
 
     const renderPurchaseHistoryTab = (customer, containerId = 'profile-tab-content') => {
-        const purchases = DataStore.query('purchases', { customer_id: customer.id });
+        const purchases = AppDataStore.query('purchases', { customer_id: customer.id });
         const container = document.getElementById(containerId);
 
         let totalPaid = 0;
@@ -11145,7 +11145,7 @@ In a production system, this would show the actual file contents.
     };
 
     const renderReferralsTab = (customer, containerId = 'profile-tab-content') => {
-        const refs = DataStore.query('referrals', { referrer_customer_id: customer.id });
+        const refs = AppDataStore.query('referrals', { referrer_customer_id: customer.id });
         const container = document.getElementById(containerId);
 
         container.innerHTML = `
@@ -11162,7 +11162,7 @@ In a production system, this would show the actual file contents.
                 </thead>
                 <tbody>
                     ${refs.map(r => {
-            const prospect = DataStore.getById('prospects', r.referred_prospect_id);
+            const prospect = AppDataStore.getById('prospects', r.referred_prospect_id);
             return `
                         <tr>
                             <td><strong>${prospect?.full_name || 'N/A'}</strong></td>
@@ -11229,7 +11229,7 @@ In a production system, this would show the actual file contents.
     const renderCustomerActivityTab = (customer, containerId = 'profile-tab-content') => {
         const container = document.getElementById(containerId);
         // Combine activities linked to this customer OR original prospect
-        const activities = DataStore.getAll('activities').filter(a =>
+        const activities = AppDataStore.getAll('activities').filter(a =>
             a.customer_id == customer.id ||
             (customer.converted_from_prospect_id && a.prospect_id == customer.converted_from_prospect_id)
         ).sort((a, b) => new Date(b.date || b.created_at) - new Date(a.date || a.created_at));
@@ -11267,14 +11267,14 @@ In a production system, this would show the actual file contents.
 
     const renderCustomerTags = (customer) => {
         const container = document.getElementById('customer-tags-section');
-        const entityTags = DataStore.query('entity_tags', { entity_type: 'customer', entity_id: customer.id });
+        const entityTags = AppDataStore.query('entity_tags', { entity_type: 'customer', entity_id: customer.id });
 
         container.innerHTML = `
             <div style="background:var(--white); padding:16px; border-radius:12px; border:1px solid var(--gray-200);">
                 <h4 style="font-size:13px; font-weight:700; color:var(--gray-500); margin-bottom:12px;">TAGS</h4>
                 <div style="display:flex; flex-wrap:wrap; gap:8px;">
                     ${entityTags.length > 0 ? entityTags.map(et => {
-            const tag = DataStore.getById('tags', et.tag_id);
+            const tag = AppDataStore.getById('tags', et.tag_id);
             return tag ? `
                             <span class="score-badge" style="background:${tag.color || 'var(--primary)'}; color:white; display:flex; align-items:center; gap:4px; font-size:11px;">
                                 ${tag.name} <span style="cursor:pointer;" onclick="app.removeTagFromCustomer(${customer.id}, ${tag.id})">&times;</span>
@@ -11289,7 +11289,7 @@ In a production system, this would show the actual file contents.
 
     const showProspectDetail = (prospectId, initialTab = 'info') => {
         _currentProspectId = prospectId; // Track currently viewed prospect
-        const prospect = DataStore.getById('prospects', prospectId);
+        const prospect = AppDataStore.getById('prospects', prospectId);
         if (!prospect || !canViewProspect(prospect)) {
             UI.toast.error('You do not have permission to view this prospect.');
             navigateTo('prospects');
@@ -11311,10 +11311,10 @@ In a production system, this would show the actual file contents.
         const container = document.getElementById('content-viewport');
         if (!container) return;
 
-        const solutions = DataStore.query('proposed_solutions', { prospect_id: prospectId });
-        const activities = DataStore.getAll('activities').filter(a => a.prospect_id == prospectId);
-        const notes = DataStore.query('notes', { prospect_id: prospectId });
-        const names = DataStore.query('names', { prospect_id: prospectId });
+        const solutions = AppDataStore.query('proposed_solutions', { prospect_id: prospectId });
+        const activities = AppDataStore.getAll('activities').filter(a => a.prospect_id == prospectId);
+        const notes = AppDataStore.query('notes', { prospect_id: prospectId });
+        const names = AppDataStore.query('names', { prospect_id: prospectId });
 
         const daysLeft = calculateProtectionDays(prospect);
         const protectionStatus = getProtectionStatus(daysLeft);
@@ -11400,7 +11400,7 @@ In a production system, this would show the actual file contents.
                                 </tr>
                             </thead>
                             <tbody>
-                                ${DataStore.query('names', { prospect_id: prospect.id }).length > 0 ? DataStore.query('names', { prospect_id: prospect.id }).map(n => `
+                                ${AppDataStore.query('names', { prospect_id: prospect.id }).length > 0 ? AppDataStore.query('names', { prospect_id: prospect.id }).map(n => `
                                     <tr>
                                         <td>${n.relation}</td>
                                         <td>${n.full_name}</td>
@@ -11435,7 +11435,7 @@ In a production system, this would show the actual file contents.
                         <h3><i class="fas fa-shield-alt"></i> Protection Period</h3>
                         <div class="protection-stats">
                             <div><strong>Responsible Agent:</strong> ${(() => {
-                                const agent = DataStore.getById('users', prospect.responsible_agent_id);
+                                const agent = AppDataStore.getById('users', prospect.responsible_agent_id);
                                 return agent ? agent.full_name : 'Unassigned';
                             })()} (Assigned: ${prospect.cps_assignment_date || '15 Feb 2026'})</div>
                             <div><strong>Deadline:</strong> ${prospect.protection_deadline || '17 Mar 2026'}</div>
@@ -11464,9 +11464,9 @@ In a production system, this would show the actual file contents.
                         </h2>
                         <div class="tags-container" id="prospect-tags-container">
                             ${(() => {
-                                const mappings = DataStore.query('entity_tags', { entity_type: 'prospect', entity_id: prospect.id });
+                                const mappings = AppDataStore.query('entity_tags', { entity_type: 'prospect', entity_id: prospect.id });
                                 return mappings.length > 0 ? mappings.map(m => {
-                                    const tag = DataStore.getById('tags', m.tag_id);
+                                    const tag = AppDataStore.getById('tags', m.tag_id);
                                     return tag ? `<span class="tag ${tag.color}">${tag.name} <i class="fas fa-times remove" onclick="app.removeTagFromProspect(${prospect.id}, ${tag.id})"></i></span>` : '';
                                 }).join('') : '<span>No tags yet</span>';
                             })()}
@@ -11505,7 +11505,7 @@ In a production system, this would show the actual file contents.
             btn.style.fontWeight = '600';
         }
 
-        const prospect = DataStore.getById('prospects', prospectId);
+        const prospect = AppDataStore.getById('prospects', prospectId);
         const container = document.getElementById('prospect-tab-content');
         if (!container || !prospect) return;
 
@@ -11568,7 +11568,7 @@ In a production system, this would show the actual file contents.
     `;
         }
         else if (tab === 'names') {
-            const names = DataStore.query('names', { prospect_id: prospectId });
+            const names = AppDataStore.query('names', { prospect_id: prospectId });
             container.innerHTML = `
     <div class="profile-section">
                     <h2>
@@ -11608,10 +11608,10 @@ In a production system, this would show the actual file contents.
     `;
         }
         else if (tab === 'activity') {
-            const activities = DataStore.getAll('activities').filter(a => a.prospect_id == prospectId).sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
+            const activities = AppDataStore.getAll('activities').filter(a => a.prospect_id == prospectId).sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
 
             // Get all consultants (role = 'consultant') for the dropdown
-            const consultants = DataStore.getAll('users').filter(u => u.role === 'consultant').sort((a, b) => a.full_name.localeCompare(b.full_name));
+            const consultants = AppDataStore.getAll('users').filter(u => u.role === 'consultant').sort((a, b) => a.full_name.localeCompare(b.full_name));
 
             // --- Activity History Table ---
             let activityRows = '';
@@ -11619,7 +11619,7 @@ In a production system, this would show the actual file contents.
                 activityRows = '<tr><td colspan="11" style="text-align:center;padding:20px;color:var(--gray-500);">No activity history. Add an activity to get started.</td></tr>';
             } else {
                 activities.forEach(act => {
-                    const note = DataStore.getAll('notes').find(n => n.activity_id === act.id) || {};
+                    const note = AppDataStore.getAll('notes').find(n => n.activity_id === act.id) || {};
                     const photos = note.photos || [];
                     let photosHtml = '<div class="photo-thumbnails">';
                     photos.forEach(photo => {
@@ -11657,7 +11657,7 @@ In a production system, this would show the actual file contents.
             }
 
             // --- Event History Table ---
-            const registrations = DataStore.getAll('event_registrations')
+            const registrations = AppDataStore.getAll('event_registrations')
                 .filter(r => r.attendee_type === 'prospect' && r.attendee_id == prospectId)
                 .sort((a, b) => new Date(b.event_date || b.registered_at) - new Date(a.event_date || a.registered_at));
 
@@ -11666,12 +11666,12 @@ In a production system, this would show the actual file contents.
                 eventRows = '<tr><td colspan="10" style="text-align:center;padding:20px;color:var(--gray-500);">No events attended.</td></tr>';
             } else {
                 registrations.forEach(reg => {
-                    const event = DataStore.getById('events', reg.event_id);
+                    const event = AppDataStore.getById('events', reg.event_id);
                     const eventTitle = event ? event.title : 'Unknown Event';
                     const eventDate = event ? event.event_date : (reg.registered_at ? reg.registered_at.split('T')[0] : '');
 
                     // Find or create a note for this event+prospect
-                    let note = DataStore.getAll('notes').find(n => n.event_id === reg.event_id && n.prospect_id == prospectId);
+                    let note = AppDataStore.getAll('notes').find(n => n.event_id === reg.event_id && n.prospect_id == prospectId);
                     if (!note) {
                         // Create a placeholder note if it doesn't exist (will be saved on first edit)
                         note = {
@@ -11779,7 +11779,7 @@ In a production system, this would show the actual file contents.
             `;
         }
         else if (tab === 'notes') {
-            const notes = DataStore.query('notes', { prospect_id: prospectId });
+            const notes = AppDataStore.query('notes', { prospect_id: prospectId });
             container.innerHTML = `
     <div class="profile-section" style="margin-bottom: 24px;">
                 <h2><i class="fas fa-sticky-note"></i> Notes</h2>
@@ -11822,7 +11822,7 @@ In a production system, this would show the actual file contents.
         const text = document.getElementById('new-note-text')?.value?.trim();
         if (!text) return;
         const currentUser = Auth.getCurrentUser();
-        DataStore.create('notes', {
+        AppDataStore.create('notes', {
             id: Date.now(),
             prospect_id: prospectId,
             text: text,
@@ -11836,7 +11836,7 @@ In a production system, this would show the actual file contents.
 
     const deleteNote = (prospectId, noteId) => {
         UI.confirm('Delete Note?', 'Are you sure you want to delete this note?', () => {
-            DataStore.delete('notes', noteId);
+            AppDataStore.delete('notes', noteId);
             UI.toast.success('Note deleted');
             app.switchProspectTab('notes', prospectId, document.querySelector('.profile-tab.active'));
         });
@@ -11844,11 +11844,11 @@ In a production system, this would show the actual file contents.
 
     // Save or update structured note fields for a given activity
     const saveActivityNotes = (activityId, notesData) => {
-        const existing = DataStore.getAll('notes').find(n => n.activity_id === activityId);
+        const existing = AppDataStore.getAll('notes').find(n => n.activity_id === activityId);
         const currentUser = Auth.getCurrentUser();
         if (existing) {
             // Update existing note record with new structured fields
-            DataStore.update('notes', existing.id, {
+            AppDataStore.update('notes', existing.id, {
                 ...existing,
                 key_presenter_id: notesData.key_presenter_id,
                 key_points: notesData.key_points,
@@ -11862,8 +11862,8 @@ In a production system, this would show the actual file contents.
             });
         } else {
             // Create a new note record
-            const activity = DataStore.getById('activities', activityId);
-            DataStore.create('notes', {
+            const activity = AppDataStore.getById('activities', activityId);
+            AppDataStore.create('notes', {
                 id: Date.now(),
                 activity_id: activityId,
                 prospect_id: activity ? activity.prospect_id : null,
@@ -11891,7 +11891,7 @@ In a production system, this would show the actual file contents.
             notesData[input.dataset.field] = input.value.trim();
         });
         // Preserve existing photos when saving text fields
-        const existingNote = DataStore.getAll('notes').find(n => n.activity_id === activityId);
+        const existingNote = AppDataStore.getAll('notes').find(n => n.activity_id === activityId);
         if (existingNote) notesData.photos = existingNote.photos || [];
         saveActivityNotes(activityId, notesData);
         UI.toast.success('Notes saved!');
@@ -11905,7 +11905,7 @@ In a production system, this would show the actual file contents.
     };
 
     const respondToCoAgentInvite = (activityId, coAgentId, newStatus) => {
-        const activity = DataStore.getById('activities', activityId);
+        const activity = AppDataStore.getById('activities', activityId);
         if (!activity) return;
 
         const coAgents = activity.co_agents || [];
@@ -11913,7 +11913,7 @@ In a production system, this would show the actual file contents.
         if (index === -1) return;
 
         coAgents[index].status = newStatus;
-        DataStore.update('activities', activityId, { co_agents: coAgents });
+        AppDataStore.update('activities', activityId, { co_agents: coAgents });
 
         UI.toast.success(`Invite ${newStatus}`);
         // Refresh the modal
@@ -11921,26 +11921,26 @@ In a production system, this would show the actual file contents.
     };
 
     const toggleAttendeePaid = (attendeeId, checked) => {
-        const attendee = DataStore.getById('event_attendees', attendeeId);
+        const attendee = AppDataStore.getById('event_attendees', attendeeId);
         if (attendee) {
-            DataStore.update('event_attendees', attendeeId, { paid: checked });
+            AppDataStore.update('event_attendees', attendeeId, { paid: checked });
         }
     };
 
     const toggleAttendeeTicket = (attendeeId, checked) => {
-        const attendee = DataStore.getById('event_attendees', attendeeId);
+        const attendee = AppDataStore.getById('event_attendees', attendeeId);
         if (attendee) {
-            DataStore.update('event_attendees', attendeeId, { ticket_created: checked });
+            AppDataStore.update('event_attendees', attendeeId, { ticket_created: checked });
         }
     };
 
     const toggleAttendeeAttended = (attendeeId, checked) => {
-        const attendee = DataStore.getById('event_attendees', attendeeId);
+        const attendee = AppDataStore.getById('event_attendees', attendeeId);
         if (attendee) {
-            DataStore.update('event_attendees', attendeeId, { attended: checked });
+            AppDataStore.update('event_attendees', attendeeId, { attended: checked });
             // Optionally update attendance_status for backward compatibility
             attendee.attendance_status = checked ? 'Attended' : 'Registered';
-            DataStore.update('event_attendees', attendeeId, attendee);
+            AppDataStore.update('event_attendees', attendeeId, attendee);
         }
     };
 
@@ -12033,7 +12033,7 @@ In a production system, this would show the actual file contents.
         }
 
         // Check if already an attendee
-        const existing = DataStore.getAll('event_attendees').find(a => 
+        const existing = AppDataStore.getAll('event_attendees').find(a => 
             a.event_id == eventId && a.attendee_id == _tempSelectedProspectId && a.attendee_type === 'prospect'
         );
         if (existing) {
@@ -12054,12 +12054,12 @@ In a production system, this would show the actual file contents.
             attended: false,
             added_by_agent_id: _currentUser ? _currentUser.id : 5
         };
-        DataStore.create('event_attendees', newAttendee);
+        AppDataStore.create('event_attendees', newAttendee);
 
         // Create placeholder note for this prospect if not exists
-        const existingNote = DataStore.getAll('notes').find(n => n.event_id == eventId && n.prospect_id == _tempSelectedProspectId);
+        const existingNote = AppDataStore.getAll('notes').find(n => n.event_id == eventId && n.prospect_id == _tempSelectedProspectId);
         if (!existingNote) {
-            DataStore.create('notes', {
+            AppDataStore.create('notes', {
                 id: Date.now() + 1,
                 event_id: eventId,
                 prospect_id: _tempSelectedProspectId,
@@ -12096,11 +12096,11 @@ In a production system, this would show the actual file contents.
 
     // Ensure a structured note record exists for an activity and return it
     const getOrCreateNoteForActivity = (activityId) => {
-        let note = DataStore.getAll('notes').find(n => n.activity_id === activityId);
+        let note = AppDataStore.getAll('notes').find(n => n.activity_id === activityId);
         if (!note) {
-            const activity = DataStore.getById('activities', activityId);
+            const activity = AppDataStore.getById('activities', activityId);
             const currentUser = Auth.getCurrentUser();
-            note = DataStore.create('notes', {
+            note = AppDataStore.create('notes', {
                 activity_id: activityId,
                 prospect_id: activity ? activity.prospect_id : null,
                 key_points: '', solution_proposed: '', next_action: '',
@@ -12128,7 +12128,7 @@ In a production system, this would show the actual file contents.
             photos.push({ id: Date.now() + Math.random(), name: file.name, data: dataUrl });
         }
         note.photos = photos;
-        DataStore.update('notes', note.id, note);
+        AppDataStore.update('notes', note.id, note);
 
         // Instead of reloading whole tab, update the photo thumbnails in the row
         const row = document.querySelector(`tr[data-activity-id="${activityId}"]`);
@@ -12161,12 +12161,12 @@ In a production system, this would show the actual file contents.
         });
 
         // Find existing note or create new
-        let note = DataStore.getAll('notes').find(n => n.event_id === eventId && n.prospect_id == prospectId);
+        let note = AppDataStore.getAll('notes').find(n => n.event_id === eventId && n.prospect_id == prospectId);
         const currentUser = Auth.getCurrentUser();
 
         if (note) {
             // Update existing note
-            DataStore.update('notes', note.id, {
+            AppDataStore.update('notes', note.id, {
                 ...note,
                 key_points: notesData.key_points,
                 solution_proposed: notesData.solution_proposed,
@@ -12178,7 +12178,7 @@ In a production system, this would show the actual file contents.
             });
         } else {
             // Create new note
-            note = DataStore.create('notes', {
+            note = AppDataStore.create('notes', {
                 id: Date.now(),
                 event_id: eventId,
                 prospect_id: prospectId,
@@ -12206,7 +12206,7 @@ In a production system, this would show the actual file contents.
     const uploadEventPhotos = async (eventId, prospectId, files) => {
         if (!files || files.length === 0) return;
 
-        let note = DataStore.getAll('notes').find(n => n.event_id === eventId && n.prospect_id == prospectId);
+        let note = AppDataStore.getAll('notes').find(n => n.event_id === eventId && n.prospect_id == prospectId);
         if (!note) {
             // Create a temporary note to hold photos (will be fully saved later)
             note = {
@@ -12215,7 +12215,7 @@ In a production system, this would show the actual file contents.
                 prospect_id: prospectId,
                 photos: []
             };
-            DataStore.create('notes', note);
+            AppDataStore.create('notes', note);
         }
 
         const photos = note.photos || [];
@@ -12228,7 +12228,7 @@ In a production system, this would show the actual file contents.
             photos.push({ id: Date.now() + Math.random(), name: file.name, data: dataUrl });
         }
         note.photos = photos;
-        DataStore.update('notes', note.id, note);
+        AppDataStore.update('notes', note.id, note);
 
         // Instead of reloading whole tab, update the photo thumbnails in the row
         const row = document.querySelector(`tr[data-event-id="${eventId}"][data-prospect-id="${prospectId}"]`);
@@ -12277,7 +12277,7 @@ In a production system, this would show the actual file contents.
     const saveCustomer = () => {
         const name = document.getElementById('cust-name')?.value;
         if (!name) return UI.toast.error('Name is required');
-        DataStore.create('customers', {
+        AppDataStore.create('customers', {
             full_name: name,
             phone: document.getElementById('cust-phone')?.value,
             email: document.getElementById('cust-email')?.value,
@@ -12293,7 +12293,7 @@ In a production system, this would show the actual file contents.
     };
 
     const openAddPurchaseModal = (customerId, activity = null) => {
-        const customer = DataStore.getById('customers', customerId);
+        const customer = AppDataStore.getById('customers', customerId);
         const content = `
     <div class="form-section">
         <div class="form-group">
@@ -12409,13 +12409,13 @@ In a production system, this would show the actual file contents.
             pur.pop_down_payment = document.getElementById('pur-pop-down-payment')?.value;
         }
 
-        const newPurchase = DataStore.create('purchases', pur);
+        const newPurchase = AppDataStore.create('purchases', pur);
 
         // Capture Case Study Snapshot
-        const customer = DataStore.getById('customers', customerId);
+        const customer = AppDataStore.getById('customers', customerId);
         
         // Find corresponding prospect for historical invitation info
-        const prospect = DataStore.getAll('prospects').find(p => p.full_name === customer.full_name) || {};
+        const prospect = AppDataStore.getAll('prospects').find(p => p.full_name === customer.full_name) || {};
         const invitationActivity = findLatestInvitationActivity(prospect.id);
 
         const salesIdea = document.getElementById('pur-sales-idea')?.value;
@@ -12445,7 +12445,7 @@ In a production system, this would show the actual file contents.
         }
 
         // Update lifetime value
-        DataStore.update('customers', customerId, { lifetime_value: (customer.lifetime_value || 0) + amt });
+        AppDataStore.update('customers', customerId, { lifetime_value: (customer.lifetime_value || 0) + amt });
 
         UI.hideModal();
         UI.toast.success('Purchase added');
@@ -12454,7 +12454,7 @@ In a production system, this would show the actual file contents.
     };
 
     const openRecruitModal = (customerId) => {
-        const customer = DataStore.getById('customers', customerId);
+        const customer = AppDataStore.getById('customers', customerId);
         const content = `
     <div class="form-section">
                     <h4 style="margin-bottom:12px;">Package Selection</h4>
@@ -12502,7 +12502,7 @@ In a production system, this would show the actual file contents.
 
     const executeDelete = (id) => {
         UI.hideModal();
-        DataStore.delete('prospects', id);
+        AppDataStore.delete('prospects', id);
         UI.toast.success('Prospect deleted successfully');
         showProspectsView(document.getElementById('content-viewport'));
     };
@@ -12516,8 +12516,8 @@ In a production system, this would show the actual file contents.
 
     // Tag Functions
     const openAddTagModal = (entityId, entityType = 'prospect') => {
-        const allTags = DataStore.getAll('tags');
-        const existingTagMappings = DataStore.query('entity_tags', { entity_type: entityType, entity_id: entityId });
+        const allTags = AppDataStore.getAll('tags');
+        const existingTagMappings = AppDataStore.query('entity_tags', { entity_type: entityType, entity_id: entityId });
         const existingTagIds = existingTagMappings.map(et => et.tag_id);
         const availableTags = allTags.filter(t => !existingTagIds.includes(t.id));
 
@@ -12562,7 +12562,7 @@ In a production system, this would show the actual file contents.
         if (tagSelect && tagSelect.value) {
             tagId = parseInt(tagSelect.value);
         } else if (newTagName) {
-            const newTag = DataStore.create('tags', {
+            const newTag = AppDataStore.create('tags', {
                 name: newTagName,
                 color: newTagColor || 'blue'
             });
@@ -12572,7 +12572,7 @@ In a production system, this would show the actual file contents.
             return;
         }
 
-        DataStore.create('entity_tags', {
+        AppDataStore.create('entity_tags', {
             entity_type: entityType,
             entity_id: entityId,
             tag_id: tagId
@@ -12588,26 +12588,26 @@ In a production system, this would show the actual file contents.
     };
 
     const removeTagFromCustomer = (customerId, tagId) => {
-        const mappings = DataStore.query('entity_tags', {
+        const mappings = AppDataStore.query('entity_tags', {
             entity_type: 'customer',
             entity_id: customerId,
             tag_id: tagId
         });
         if (mappings.length > 0) {
-            DataStore.delete('entity_tags', mappings[0].id);
+            AppDataStore.delete('entity_tags', mappings[0].id);
             app.showCustomerDetail(customerId);
             UI.toast.success('Tag removed');
         }
     };
 
     const removeTagFromProspect = (prospectId, tagId) => {
-        const mappings = DataStore.query('entity_tags', {
+        const mappings = AppDataStore.query('entity_tags', {
             entity_type: 'prospect',
             entity_id: prospectId,
             tag_id: tagId
         });
         if (mappings.length > 0) {
-            DataStore.delete('entity_tags', mappings[0].id);
+            AppDataStore.delete('entity_tags', mappings[0].id);
             app.showProspectDetail(prospectId);
             UI.toast.success('Tag removed');
         }
@@ -12646,7 +12646,7 @@ In a production system, this would show the actual file contents.
                 <label>Solution Proposed</label>
                 <select name="activity-outcome" class="form-control">
                     <option value="">-- Select Solution --</option>
-                    ${(DataStore.get('products') || []).map(p => `
+                    ${(AppDataStore.get('products') || []).map(p => `
                         <option value="${escapeHtml(p.name)}">${escapeHtml(p.name)}</option>
                     `).join('')}
                     <option value="No Solution Needed">No Solution Needed</option>
@@ -12672,7 +12672,7 @@ In a production system, this would show the actual file contents.
             return;
         }
 
-        DataStore.create('proposed_solutions', {
+        AppDataStore.create('proposed_solutions', {
             prospect_id: prospectId,
             solution: solution,
             proposed_date: date,
@@ -12687,11 +12687,11 @@ In a production system, this would show the actual file contents.
 
     // Name List Functions
     const confirmConvertToCustomer = (prospectId, isManual = false) => {
-        const prospect = DataStore.getById('prospects', prospectId);
+        const prospect = AppDataStore.getById('prospects', prospectId);
         if (!prospect) return;
 
         // Check if a customer already exists for this prospect
-        const existingCustomer = DataStore.getAll('customers').find(c => c.converted_from_prospect_id === prospectId);
+        const existingCustomer = AppDataStore.getAll('customers').find(c => c.converted_from_prospect_id === prospectId);
 
         let amount = 0;
         let date = new Date().toISOString().split('T')[0];
@@ -12701,7 +12701,7 @@ In a production system, this would show the actual file contents.
             date = document.getElementById('manual-customer-since')?.value || date;
         } else {
             // Get total purchases for this prospect (including those from closing activities)
-            const purchases = DataStore.getAll('purchases').filter(p => p.prospect_id === prospectId);
+            const purchases = AppDataStore.getAll('purchases').filter(p => p.prospect_id === prospectId);
             amount = purchases.reduce((sum, p) => sum + (p.amount || 0), 0);
             // Also include any deal_value set on the prospect (if manually entered)
             if (prospect.deal_value) amount += prospect.deal_value;
@@ -12718,7 +12718,7 @@ In a production system, this would show the actual file contents.
             else if (newLifetimeValue >= 400) grade = 'B';
             else if (newLifetimeValue >= 200) grade = 'C';
 
-            DataStore.update('customers', existingCustomer.id, { 
+            AppDataStore.update('customers', existingCustomer.id, { 
                 lifetime_value: newLifetimeValue,
                 grade: grade
             });
@@ -12765,12 +12765,12 @@ In a production system, this would show the actual file contents.
             grade: grade
         };
 
-        const newCustomer = DataStore.create('customers', customer);
-        DataStore.update('prospects', prospectId, { status: 'converted', deal_value: amount });
+        const newCustomer = AppDataStore.create('customers', customer);
+        AppDataStore.update('prospects', prospectId, { status: 'converted', deal_value: amount });
 
         // Create purchase record for conversion amount if manual and amount > 0
         if (isManual && amount > 0) {
-            DataStore.create('purchases', {
+            AppDataStore.create('purchases', {
                 customer_id: newCustomer.id,
                 prospect_id: prospectId,
                 date: customer.customer_since,
@@ -12789,20 +12789,20 @@ In a production system, this would show the actual file contents.
     };
 
     const extendProtection = (prospectId) => {
-        const prospect = DataStore.getById('prospects', prospectId);
+        const prospect = AppDataStore.getById('prospects', prospectId);
         if (!prospect) return;
         const currentDeadline = new Date(prospect.protection_deadline || Date.now());
         const newDeadline = new Date(currentDeadline.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-        DataStore.update('prospects', prospectId, { protection_deadline: newDeadline });
+        AppDataStore.update('prospects', prospectId, { protection_deadline: newDeadline });
         UI.toast.success('Protection extended by 30 days');
         app.showProspectDetail(prospectId);
     };
 
     const transferProspect = (prospectId) => {
-        const prospect = DataStore.getById('prospects', prospectId);
+        const prospect = AppDataStore.getById('prospects', prospectId);
         if (!prospect) return;
 
-        const users = DataStore.getAll('users').filter(u => u.role !== 'customer');
+        const users = AppDataStore.getAll('users').filter(u => u.role !== 'customer');
         const content = `
             <div class="form-group">
                 <label>Select Receiver Agent</label>
@@ -12827,7 +12827,7 @@ In a production system, this would show the actual file contents.
         const reason = document.getElementById('transfer-reason').value;
         if (!agentId) return UI.toast.error('Please select an agent');
 
-        DataStore.update('prospects', prospectId, {
+        AppDataStore.update('prospects', prospectId, {
             responsible_agent_id: agentId,
             transfer_reason: reason,
             transfer_date: new Date().toISOString()
@@ -12839,10 +12839,10 @@ In a production system, this would show the actual file contents.
     };
 
     const reassignProspect = (prospectId) => {
-        const prospect = DataStore.getById('prospects', prospectId);
+        const prospect = AppDataStore.getById('prospects', prospectId);
         if (!prospect) return;
 
-        const users = DataStore.getAll('users').filter(u => u.role !== 'customer');
+        const users = AppDataStore.getAll('users').filter(u => u.role !== 'customer');
         const content = `
             <div class="form-group">
                 <label>Reassign to Agent</label>
@@ -12862,7 +12862,7 @@ In a production system, this would show the actual file contents.
         const agentId = parseInt(document.getElementById('reassign-agent-id').value);
         if (!agentId) return UI.toast.error('Please select an agent');
 
-        DataStore.update('prospects', prospectId, {
+        AppDataStore.update('prospects', prospectId, {
             responsible_agent_id: agentId,
             reassigned_at: new Date().toISOString()
         });
@@ -12874,10 +12874,10 @@ In a production system, this would show the actual file contents.
 
 
     const convertToCustomer = (prospectId) => {
-        const prospect = DataStore.getById('prospects', prospectId);
+        const prospect = AppDataStore.getById('prospects', prospectId);
         if (!prospect) return;
 
-        const totalPurchases = DataStore.getAll('purchases')
+        const totalPurchases = AppDataStore.getAll('purchases')
             .filter(p => p.prospect_id === prospectId)
             .reduce((sum, p) => sum + (p.amount || 0), 0);
 
@@ -12990,7 +12990,7 @@ In a production system, this would show the actual file contents.
         if (!tbody) return;
 
         const currentUser = _currentUser;
-        let visibleAgents = DataStore.getAll('users').filter(u => u.role === 'consultant' || u.role === 'team_leader');
+        let visibleAgents = AppDataStore.getAll('users').filter(u => u.role === 'consultant' || u.role === 'team_leader');
         if (currentUser) {
             const visibleIds = getVisibleUserIds(currentUser);
             if (visibleIds !== 'all') {
@@ -13009,17 +13009,17 @@ In a production system, this would show the actual file contents.
             if (teamFilter && agent.team !== teamFilter) return;
             if (statusFilter && agent.status !== statusFilter) return;
 
-            const stats = DataStore.query('agent_stats', { agent_id: agent.id })[0] || { total_assigned: 0, followup_rate: 0 };
+            const stats = AppDataStore.query('agent_stats', { agent_id: agent.id })[0] || { total_assigned: 0, followup_rate: 0 };
             const rateClass = stats.followup_rate >= 90 ? 'rate-good' : (stats.followup_rate >= 70 ? 'rate-warning' : 'rate-critical');
 
             let teamLeaderName = 'N/A';
             let managerName = 'N/A';
             if (agent.reporting_to) {
-                const teamLeader = DataStore.getById('users', agent.reporting_to);
+                const teamLeader = AppDataStore.getById('users', agent.reporting_to);
                 if (teamLeader && teamLeader.role === 'team_leader') {
                     teamLeaderName = teamLeader.full_name;
                     if (teamLeader.reporting_to) {
-                        const manager = DataStore.getById('users', teamLeader.reporting_to);
+                        const manager = AppDataStore.getById('users', teamLeader.reporting_to);
                         if (manager && manager.role === 'manager') {
                             managerName = manager.full_name;
                         }
@@ -13062,7 +13062,7 @@ In a production system, this would show the actual file contents.
     const filterAgents = () => renderAgentsTable();
 
     const showAgentDetail = (agentId) => {
-        const agent = DataStore.getById('users', agentId);
+        const agent = AppDataStore.getById('users', agentId);
         if (!agent) return;
 
         // --- NEW: Permission check ---
@@ -13211,7 +13211,7 @@ In a production system, this would show the actual file contents.
                         </div>
                         <div id="agent-notes-list-${agent.id}" style="margin-top:12px;">
                             ${(() => {
-                const agentNotes = DataStore.query('notes', { agent_id: agent.id });
+                const agentNotes = AppDataStore.query('notes', { agent_id: agent.id });
                 if (!agentNotes.length) return '<p style="color:var(--gray-400); font-size:13px;">No notes yet.</p>';
                 return agentNotes.map(n => `
                                     <div class="notes-item" style="margin-top:8px;">
@@ -13278,9 +13278,9 @@ In a production system, this would show the actual file contents.
     };
 
     const executeRenewal = (agentId) => {
-        const agent = DataStore.getById('users', agentId);
+        const agent = AppDataStore.getById('users', agentId);
         if (agent) {
-            DataStore.update('users', agentId, {
+            AppDataStore.update('users', agentId, {
                 renewal_status: 'PENDING_REVIEW',
                 license_renewal_requested: true,
                 license_renewal_date: new Date().toISOString().split('T')[0]
@@ -13300,7 +13300,7 @@ In a production system, this would show the actual file contents.
     };
 
     const renderFollowupStats = (agentId) => {
-        const stats = DataStore.query('agent_stats', { agent_id: agentId })[0];
+        const stats = AppDataStore.query('agent_stats', { agent_id: agentId })[0];
         if (!stats) return '<p>No performance data available.</p>';
 
         return `
@@ -13334,13 +13334,13 @@ In a production system, this would show the actual file contents.
     };
 
     const renderCurrentAssignments = (agentId) => {
-        const assignments = DataStore.query('assignments', { agent_id: agentId });
+        const assignments = AppDataStore.query('assignments', { agent_id: agentId });
         if (assignments.length === 0) return '<p>No active assignments.</p>';
 
         return `
     <div class="assignments-list">
         ${assignments.map(a => {
-            const p = DataStore.getById('prospects', a.prospect_id);
+            const p = AppDataStore.getById('prospects', a.prospect_id);
             return `
                     <div class="assignment-item" onclick="app.showProspectDetail(${a.prospect_id})">
                         <div>
@@ -13358,7 +13358,7 @@ In a production system, this would show the actual file contents.
     };
 
     const renderPerformanceTargets = (agentId) => {
-        const target = DataStore.query('agent_targets', { agent_id: agentId })[0];
+        const target = AppDataStore.query('agent_targets', { agent_id: agentId })[0];
         if (!target) return '<p>No targets set for this month.</p>';
 
         return `
@@ -13476,17 +13476,17 @@ In a production system, this would show the actual file contents.
             join_date: new Date().toISOString().split('T')[0]
         };
 
-        DataStore.create('users', newAgent);
+        AppDataStore.create('users', newAgent);
         UI.hideModal();
         UI.toast.success('Agent account created successfully');
         renderAgentsTable();
     };
 
     const openEditAgentModal = (agentId) => {
-        const agent = DataStore.getById('users', agentId);
+        const agent = AppDataStore.getById('users', agentId);
         if (!agent) return UI.toast.error('Agent not found');
 
-        const allUsers = DataStore.getAll('users');
+        const allUsers = AppDataStore.getAll('users');
 
         const content = `
             <div class="edit-agent-form">
@@ -13611,7 +13611,7 @@ In a production system, this would show the actual file contents.
             return;
         }
 
-        const options = DataStore.getAll('users').filter(u => u.role === reportingRole);
+        const options = AppDataStore.getAll('users').filter(u => u.role === reportingRole);
         let optionsHtml = `<label>Reporting To (${reportingRole})</label><select id="edit-agent-reporting" class="form-control">`;
         optionsHtml += '<option value="">-- No Assignment --</option>';
         options.forEach(u => {
@@ -13640,7 +13640,7 @@ In a production system, this would show the actual file contents.
 
         if (password) updatedData.password = password;
 
-        DataStore.update('users', agentId, updatedData);
+        AppDataStore.update('users', agentId, updatedData);
         UI.hideModal();
         UI.toast.success('Agent updated successfully');
         renderAgentsTable();
@@ -13656,7 +13656,7 @@ In a production system, this would show the actual file contents.
 
 
     const updateAgentTargets = (agentId) => {
-        const target = DataStore.query('agent_targets', { agent_id: agentId })[0];
+        const target = AppDataStore.query('agent_targets', { agent_id: agentId })[0];
         const content = `
     <div class="form-group" style="margin-bottom:15px;">
                 <label>Monthly Sales target (RM)</label>
@@ -13678,20 +13678,20 @@ In a production system, this would show the actual file contents.
     };
 
     const saveAgentTargets = (agentId) => {
-        const target = DataStore.query('agent_targets', { agent_id: agentId })[0];
+        const target = AppDataStore.query('agent_targets', { agent_id: agentId })[0];
         const data = {
             target_amount: parseInt(document.getElementById('target-sales').value),
             target_cps: parseInt(document.getElementById('target-cps').value),
             target_meetings: parseInt(document.getElementById('target-meetings').value)
         };
         if (target) {
-            DataStore.update('agent_targets', target.id, data);
+            AppDataStore.update('agent_targets', target.id, data);
         } else {
             data.agent_id = agentId;
             data.current_amount = 0;
             data.current_cps = 0;
             data.current_meetings = 0;
-            DataStore.create('agent_targets', data);
+            AppDataStore.create('agent_targets', data);
         }
         UI.hideModal();
         UI.toast.success('Agent targets updated');
@@ -13700,7 +13700,7 @@ In a production system, this would show the actual file contents.
 
     const deactivateAgent = (agentId) => {
         UI.confirm('Deactivate Agent?', 'This will prevent the agent from logging in. You should reassign their active prospects first.', () => {
-            DataStore.update('users', agentId, { status: 'inactive' });
+            AppDataStore.update('users', agentId, { status: 'inactive' });
             UI.toast.success('Agent deactivated');
             const main = document.getElementById('main-content');
             if (main) showAgentsView(main);
@@ -13708,7 +13708,7 @@ In a production system, this would show the actual file contents.
     };
 
     const assignProspectToAgent = (prospectId, agentId) => {
-        DataStore.update('prospects', prospectId, { responsible_agent_id: agentId });
+        AppDataStore.update('prospects', prospectId, { responsible_agent_id: agentId });
         UI.toast.success('Prospect reassigned');
         app.showProspectDetail(prospectId);
     };
@@ -13780,7 +13780,7 @@ In a production system, this would show the actual file contents.
     };
 
     const getProposedProduct = (prospectId) => {
-        const solutions = DataStore.query('proposed_solutions', { prospect_id: prospectId });
+        const solutions = AppDataStore.query('proposed_solutions', { prospect_id: prospectId });
         if (solutions.length > 0) {
             return {
                 name: solutions[0].product_name || 'Standard Consultation',
@@ -13791,15 +13791,15 @@ In a production system, this would show the actual file contents.
     };
 
     const getNoteCount = (prospectId) => {
-        return DataStore.query('notes', { prospect_id: prospectId }).length +
-            DataStore.query('activities', { prospect_id: prospectId }).length;
+        return AppDataStore.query('notes', { prospect_id: prospectId }).length +
+            AppDataStore.query('activities', { prospect_id: prospectId }).length;
     };
 
     const getProspectOutcome = (prospect) => {
         if (prospect.status === 'converted') return 'Won';
         if (prospect.status === 'lost') return 'Lost';
 
-        const purchases = DataStore.query('purchases', { prospect_id: prospect.id });
+        const purchases = AppDataStore.query('purchases', { prospect_id: prospect.id });
         if (purchases.length > 0) return 'Won';
 
         return 'Open';
@@ -13813,7 +13813,7 @@ In a production system, this would show the actual file contents.
         const userId = _currentUser?.id || 5;
         const allActivities = getVisibleActivities();
         let prospects = getVisibleProspects();
-        const agents = DataStore.getAll('users').filter(u => u.role === 'consultant' || u.role === 'agent' || u.role === 'team_leader');
+        const agents = AppDataStore.getAll('users').filter(u => u.role === 'consultant' || u.role === 'agent' || u.role === 'team_leader');
 
         // --- NEW: Apply Filters ---
         if (_pipelineAgentFilter !== 'all') {
@@ -13823,7 +13823,7 @@ In a production system, this would show the actual file contents.
             prospects = prospects.filter(p => p.status === _pipelineStatusFilter);
         }
 
-        const focusList = DataStore.query('my_potential_list', { user_id: userId })
+        const focusList = AppDataStore.query('my_potential_list', { user_id: userId })
             .filter(rec => prospects.some(p => p.id == rec.prospect_id)) // Filter focus list too
             .sort((a, b) => a.priority_order - b.priority_order);
 
@@ -13938,7 +13938,7 @@ In a production system, this would show the actual file contents.
     };
 
     const renderFocusRow = (rec, idx, allActivities) => {
-        const prospect = DataStore.getById('prospects', rec.prospect_id);
+        const prospect = AppDataStore.getById('prospects', rec.prospect_id);
         if (!prospect) return '';
 
         const readiness = calculateReadiness(prospect, allActivities);
@@ -13958,7 +13958,7 @@ In a production system, this would show the actual file contents.
                     <div style="font-size: 12px; color: #6B7280; margin-top: 2px;">Created: ${prospect.created_at || 'N/A'}</div>
                 </td>
                 <td style="padding: 16px;">
-                    <div style="font-size: 13px;">${escapeHtml(DataStore.getById('users', prospect.responsible_agent_id)?.full_name || 'Unassigned')}</div>
+                    <div style="font-size: 13px;">${escapeHtml(AppDataStore.getById('users', prospect.responsible_agent_id)?.full_name || 'Unassigned')}</div>
                 </td>
                 <td style="padding: 16px;">
                     <div style="font-weight: 500;">${escapeHtml(productInfo.name)}</div>
@@ -14011,7 +14011,7 @@ In a production system, this would show the actual file contents.
                     </div>
                 </td>
                 <td style="padding: 16px;">
-                    <div style="font-size: 13px;">${escapeHtml(DataStore.getById('users', prospect.responsible_agent_id)?.full_name || 'Unassigned')}</div>
+                    <div style="font-size: 13px;">${escapeHtml(AppDataStore.getById('users', prospect.responsible_agent_id)?.full_name || 'Unassigned')}</div>
                 </td>
                 <td style="padding: 16px;">
                     <div style="font-weight: 500;">${escapeHtml(productInfo.name)}</div>
@@ -14065,7 +14065,7 @@ In a production system, this would show the actual file contents.
 
     const addToFocusList = (prospectId) => {
         const userId = _currentUser?.id || 5;
-        const currentList = DataStore.query('my_potential_list', { user_id: userId });
+        const currentList = AppDataStore.query('my_potential_list', { user_id: userId });
 
         // Check if already in list
         if (currentList.some(item => item.prospect_id == prospectId)) {
@@ -14075,7 +14075,7 @@ In a production system, this would show the actual file contents.
 
         const nextPriority = currentList.length + 1;
 
-        DataStore.create('my_potential_list', {
+        AppDataStore.create('my_potential_list', {
             user_id: userId,
             prospect_id: prospectId,
             priority_order: nextPriority
@@ -14086,18 +14086,18 @@ In a production system, this would show the actual file contents.
     };
 
     const removeFromFocusList = (listItemId) => {
-        const item = DataStore.getById('my_potential_list', listItemId);
+        const item = AppDataStore.getById('my_potential_list', listItemId);
         if (!item) return;
 
         const userId = item.user_id;
-        DataStore.delete('my_potential_list', listItemId);
+        AppDataStore.delete('my_potential_list', listItemId);
 
         // Re-compact
-        const remaining = DataStore.query('my_potential_list', { user_id: userId })
+        const remaining = AppDataStore.query('my_potential_list', { user_id: userId })
             .sort((a, b) => a.priority_order - b.priority_order);
 
         remaining.forEach((rec, idx) => {
-            DataStore.update('my_potential_list', rec.id, { priority_order: idx + 1 });
+            AppDataStore.update('my_potential_list', rec.id, { priority_order: idx + 1 });
         });
 
         UI.toast.info('Removed from Focus List');
@@ -14211,10 +14211,10 @@ In a production system, this would show the actual file contents.
     };
 
     const showComments = (prospectId) => {
-        const prospect = DataStore.getById('prospects', prospectId);
-        const notes = DataStore.query('notes', { prospect_id: prospectId })
+        const prospect = AppDataStore.getById('prospects', prospectId);
+        const notes = AppDataStore.query('notes', { prospect_id: prospectId })
             .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-        const activities = DataStore.query('activities', { prospect_id: prospectId })
+        const activities = AppDataStore.query('activities', { prospect_id: prospectId })
             .sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
 
         const content = `
@@ -14259,7 +14259,7 @@ In a production system, this would show the actual file contents.
             return;
         }
 
-        DataStore.create('notes', {
+        AppDataStore.create('notes', {
             prospect_id: prospectId,
             content: content.trim(),
             created_at: new Date().toISOString(),
@@ -14301,7 +14301,7 @@ In a production system, this would show the actual file contents.
     const handleStageDrop = (e, stageId) => {
         e.preventDefault();
         const prospectId = e.dataTransfer.getData('text/plain');
-        const prospect = DataStore.getById('prospects', parseInt(prospectId));
+        const prospect = AppDataStore.getById('prospects', parseInt(prospectId));
 
         if (!prospect) return;
 
@@ -14354,7 +14354,7 @@ In a production system, this would show the actual file contents.
         // Normal stage move
         else {
             prospect.pipeline_stage = stageId;
-            DataStore.update('prospects', prospect.id, prospect);
+            AppDataStore.update('prospects', prospect.id, prospect);
 
             // Log to audit
             if (typeof AuditLogger !== 'undefined') {
@@ -14371,7 +14371,7 @@ In a production system, this would show the actual file contents.
     };
 
     const closeDealWon = (prospectId) => {
-        const prospect = DataStore.getById('prospects', prospectId);
+        const prospect = AppDataStore.getById('prospects', prospectId);
         const amount = parseFloat(document.getElementById('deal-amount')?.value || prospect.deal_value || 5000);
         const closeDate = document.getElementById('close-date')?.value || new Date().toISOString().split('T')[0];
 
@@ -14398,7 +14398,7 @@ In a production system, this would show the actual file contents.
             conversion_date: closeDate
         };
 
-        DataStore.create('customers', customer);
+        AppDataStore.create('customers', customer);
 
         // Update prospect
         prospect.status = 'converted';
@@ -14406,7 +14406,7 @@ In a production system, this would show the actual file contents.
         prospect.deal_value = amount;
         prospect.closed_at = new Date().toISOString();
         prospect.closed_date = closeDate;
-        DataStore.update('prospects', prospect.id, prospect);
+        AppDataStore.update('prospects', prospect.id, prospect);
 
         // Log to audit
         if (typeof AuditLogger !== 'undefined') {
@@ -14424,7 +14424,7 @@ In a production system, this would show the actual file contents.
     };
 
     const closeDealLost = (prospectId) => {
-        const prospect = DataStore.getById('prospects', prospectId);
+        const prospect = AppDataStore.getById('prospects', prospectId);
         const reason = document.getElementById('lost-reason')?.value || 'Not specified';
         const notes = document.getElementById('lost-notes')?.value || '';
 
@@ -14433,7 +14433,7 @@ In a production system, this would show the actual file contents.
         prospect.lost_notes = notes;
         prospect.lost_at = new Date().toISOString();
         prospect.status = 'lost';
-        DataStore.update('prospects', prospect.id, prospect);
+        AppDataStore.update('prospects', prospect.id, prospect);
 
         // Log to audit
         if (typeof AuditLogger !== 'undefined') {
@@ -14475,9 +14475,9 @@ In a production system, this would show the actual file contents.
 
     const renderManualPriority = () => {
         const userId = _currentUser?.id || 5;
-        const potentialRecords = DataStore.query('my_potential_list', { user_id: userId })
+        const potentialRecords = AppDataStore.query('my_potential_list', { user_id: userId })
             .filter(rec => {
-                const p = DataStore.getById('prospects', rec.prospect_id);
+                const p = AppDataStore.getById('prospects', rec.prospect_id);
                 return p && p.status !== 'converted' && p.status !== 'lost';
             })
             .sort((a, b) => a.priority_order - b.priority_order);
@@ -14507,7 +14507,7 @@ In a production system, this would show the actual file contents.
         if (_draggedId === targetId) return;
 
         const userId = _currentUser?.id || 5;
-        const list = DataStore.query('my_potential_list', { user_id: userId })
+        const list = AppDataStore.query('my_potential_list', { user_id: userId })
             .sort((a, b) => a.priority_order - b.priority_order);
 
         const draggedIndex = list.findIndex(i => i.id === _draggedId);
@@ -14521,7 +14521,7 @@ In a production system, this would show the actual file contents.
 
         // Update priority_order and PERSIST
         list.forEach((item, idx) => {
-            DataStore.update('my_potential_list', item.id, { priority_order: idx + 1 });
+            AppDataStore.update('my_potential_list', item.id, { priority_order: idx + 1 });
         });
 
         UI.toast.info('Order rearranged.');
@@ -14538,7 +14538,7 @@ In a production system, this would show the actual file contents.
         const container = document.getElementById('recent-overrides-table');
         if (!container) return;
 
-        const overrides = DataStore.query('manual_overrides', { user_id: _currentUser?.id || 5 })
+        const overrides = AppDataStore.query('manual_overrides', { user_id: _currentUser?.id || 5 })
             .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
             .slice(0, 3);
 
@@ -14560,7 +14560,7 @@ In a production system, this would show the actual file contents.
                 </thead>
                 <tbody>
                     ${overrides.map(o => {
-            const prospect = DataStore.getById('prospects', o.prospect_id);
+            const prospect = AppDataStore.getById('prospects', o.prospect_id);
             const date = new Date(o.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
             return `
                             <tr>
@@ -14581,7 +14581,7 @@ In a production system, this would show the actual file contents.
     // Boost Logic
     const openBoostModal = () => {
         const prospects = getVisibleProspects();
-        const manualList = DataStore.query('my_potential_list', { user_id: _currentUser?.id || 5 });
+        const manualList = AppDataStore.query('my_potential_list', { user_id: _currentUser?.id || 5 });
 
         const options = manualList.map(item => {
             const p = prospects.find(pro => pro.id === item.prospect_id);
@@ -14628,7 +14628,7 @@ In a production system, this would show the actual file contents.
             return;
         }
 
-        const manualList = DataStore.query('my_potential_list', { user_id: _currentUser?.id || 5 })
+        const manualList = AppDataStore.query('my_potential_list', { user_id: _currentUser?.id || 5 })
             .sort((a, b) => a.priority_order - b.priority_order);
 
         const currentItem = manualList.find(i => i.prospect_id === prospectId);
@@ -14639,10 +14639,10 @@ In a production system, this would show the actual file contents.
         manualList.forEach(item => {
             if (item.priority_order < oldRank) {
                 item.priority_order += 1;
-                DataStore.update('my_potential_list', item.id, { priority_order: item.priority_order });
+                AppDataStore.update('my_potential_list', item.id, { priority_order: item.priority_order });
             }
         });
-        DataStore.update('my_potential_list', currentItem.id, { priority_order: 1 });
+        AppDataStore.update('my_potential_list', currentItem.id, { priority_order: 1 });
 
         // Log override
         const override = {
@@ -14656,7 +14656,7 @@ In a production system, this would show the actual file contents.
             status: 'active',
             expires_at: expires ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString() : null
         };
-        DataStore.create('manual_overrides', override);
+        AppDataStore.create('manual_overrides', override);
 
         UI.hideModal();
         renderManualPriority();
@@ -14715,7 +14715,7 @@ In a production system, this would show the actual file contents.
         const type = document.getElementById('hist-type').value;
         const status = document.getElementById('hist-status').value;
 
-        let overrides = DataStore.query('manual_overrides', { user_id: _currentUser?.id || 5 });
+        let overrides = AppDataStore.query('manual_overrides', { user_id: _currentUser?.id || 5 });
 
         if (type !== 'all') overrides = overrides.filter(o => o.override_type === type);
         if (status !== 'all') overrides = overrides.filter(o => o.status === status);
@@ -14737,7 +14737,7 @@ In a production system, this would show the actual file contents.
                 </thead>
                 <tbody>
                     ${overrides.map(o => {
-            const prospect = DataStore.getById('prospects', o.prospect_id);
+            const prospect = AppDataStore.getById('prospects', o.prospect_id);
             const date = new Date(o.created_at).toLocaleDateString();
             return `
                             <tr>
@@ -14756,10 +14756,10 @@ In a production system, this would show the actual file contents.
     };
 
     const viewJustification = (overrideId) => {
-        const override = DataStore.getById('manual_overrides', overrideId);
+        const override = AppDataStore.getById('manual_overrides', overrideId);
         if (!override) return;
 
-        const prospect = DataStore.getById('prospects', override.prospect_id);
+        const prospect = AppDataStore.getById('prospects', override.prospect_id);
 
         const content = `
             <div style="padding: 10px;">
@@ -14978,7 +14978,7 @@ In a production system, this would show the actual file contents.
     };
 
     const getTotalSales = (from, to) => {
-        let purchases = DataStore.getAll('purchases');
+        let purchases = AppDataStore.getAll('purchases');
         if (!isManager()) {
             const visibleProspects = getVisibleProspects().map(p => p.id);
             const visibleCustomers = getVisibleCustomers().map(c => c.id);
@@ -14993,7 +14993,7 @@ In a production system, this would show the actual file contents.
     };
 
     const getPOPCaseCount = (from, to) => {
-        let purchases = DataStore.getAll('purchases');
+        let purchases = AppDataStore.getAll('purchases');
         if (!isManager()) {
             const visibleProspects = getVisibleProspects().map(p => p.id);
             const visibleCustomers = getVisibleCustomers().map(c => c.id);
@@ -15008,7 +15008,7 @@ In a production system, this would show the actual file contents.
     };
 
     const getPOPSales = (from, to) => {
-        let purchases = DataStore.getAll('purchases');
+        let purchases = AppDataStore.getAll('purchases');
         if (!isManager()) {
             const visibleProspects = getVisibleProspects().map(p => p.id);
             const visibleCustomers = getVisibleCustomers().map(c => c.id);
@@ -15023,7 +15023,7 @@ In a production system, this would show the actual file contents.
     };
 
     const getEPPCaseCount = (from, to) => {
-        let purchases = DataStore.getAll('purchases');
+        let purchases = AppDataStore.getAll('purchases');
         if (!isManager()) {
             const visibleProspects = getVisibleProspects().map(p => p.id);
             const visibleCustomers = getVisibleCustomers().map(c => c.id);
@@ -15038,7 +15038,7 @@ In a production system, this would show the actual file contents.
     };
 
     const getEPPSales = (from, to) => {
-        let purchases = DataStore.getAll('purchases');
+        let purchases = AppDataStore.getAll('purchases');
         if (!isManager()) {
             const visibleProspects = getVisibleProspects().map(p => p.id);
             const visibleCustomers = getVisibleCustomers().map(c => c.id);
@@ -15053,7 +15053,7 @@ In a production system, this would show the actual file contents.
     };
 
     const getNewAgents = (from, to) => {
-        return DataStore.getAll('users').filter(u =>
+        return AppDataStore.getAll('users').filter(u =>
             u.role === 'consultant' && u.join_date >= from && u.join_date <= to
         ).length;
     };
@@ -15071,7 +15071,7 @@ In a production system, this would show the actual file contents.
     };
 
     const getActivityHeadcount = (from, to) => {
-        let registrations = DataStore.getAll('event_registrations');
+        let registrations = AppDataStore.getAll('event_registrations');
         if (!isManager()) {
             const visibleProspects = getVisibleProspects().map(p => p.id);
             const visibleCustomers = getVisibleCustomers().map(c => c.id);
@@ -15135,7 +15135,7 @@ In a production system, this would show the actual file contents.
         if (!container) return;
 
         const year = 2026;
-        const qTargets = DataStore.getAll('quarterly_targets').filter(t => t.year === year);
+        const qTargets = AppDataStore.getAll('quarterly_targets').filter(t => t.year === year);
 
         container.innerHTML = `
             <div class="targets-card">
@@ -15157,7 +15157,7 @@ In a production system, this would show the actual file contents.
             // Sum actual sales for this quarter
             const qStart = `${year}-${((q - 1) * 3 + 1).toString().padStart(2, '0')}-01`;
             const qEnd = `${year}-${(q * 3).toString().padStart(2, '0')}-${new Date(year, q * 3, 0).getDate()}`;
-            let purchases = DataStore.getAll('purchases');
+            let purchases = AppDataStore.getAll('purchases');
             if (!isManager()) {
                 const visibleProspects = getVisibleProspects().map(p => p.id);
                 const visibleCustomers = getVisibleCustomers().map(c => c.id);
@@ -15203,7 +15203,7 @@ In a production system, this would show the actual file contents.
         const kpis = calculateKPIs(ranges.current.from, ranges.current.to);
         const year = new Date().getFullYear();
         const quarter = Math.floor(new Date().getMonth() / 3) + 1;
-        const qTarget = DataStore.getAll('quarterly_targets').find(t => t.year === year && t.quarter === quarter) || {};
+        const qTarget = AppDataStore.getAll('quarterly_targets').find(t => t.year === year && t.quarter === quarter) || {};
 
         const metrics = [
             { name: 'CPS Count', target: qTarget.cps_count_target || 0, actual: kpis.cpsCount },
@@ -15257,7 +15257,7 @@ In a production system, this would show the actual file contents.
 
         // Get visible agents
         const visibleIds = getVisibleUserIds(_currentUser);
-        const agentsList = DataStore.getAll('users').filter(u => 
+        const agentsList = AppDataStore.getAll('users').filter(u => 
             (u.role === 'consultant' || u.role === 'agent' || u.role === 'team_leader') && 
             (visibleIds === 'all' || visibleIds.includes(u.id))
         );
@@ -15331,8 +15331,8 @@ In a production system, this would show the actual file contents.
         let targetData = [];
 
         const year = new Date().getFullYear();
-        const yTarget = DataStore.getAll('yearly_targets').find(t => t.target_year === year) || {};
-        const qTargets = DataStore.getAll('quarterly_targets').filter(t => t.year === year);
+        const yTarget = AppDataStore.getAll('yearly_targets').find(t => t.target_year === year) || {};
+        const qTargets = AppDataStore.getAll('quarterly_targets').filter(t => t.year === year);
 
         if (filter === 'weekly') {
             labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -15465,7 +15465,7 @@ In a production system, this would show the actual file contents.
 
     const openTargetManagementModal = () => {
         const year = new Date().getFullYear();
-        const existing = DataStore.getAll('yearly_targets').find(t => t.target_year === year) || {};
+        const existing = AppDataStore.getAll('yearly_targets').find(t => t.target_year === year) || {};
 
         const content = `
             <div class="target-form">
@@ -15528,11 +15528,11 @@ In a production system, this would show the actual file contents.
             seasonal_weighting: { q1: 0.9, q2: 1.0, q3: 1.1, q4: 1.2 }
         };
 
-        const existing = DataStore.getAll('yearly_targets').find(t => t.target_year === data.target_year);
+        const existing = AppDataStore.getAll('yearly_targets').find(t => t.target_year === data.target_year);
         if (existing) {
-            DataStore.update('yearly_targets', existing.id, data);
+            AppDataStore.update('yearly_targets', existing.id, data);
         } else {
-            DataStore.create('yearly_targets', data);
+            AppDataStore.create('yearly_targets', data);
         }
 
         // Auto-calculate quarterly
@@ -15563,11 +15563,11 @@ In a production system, this would show the actual file contents.
                 seasonal_factor: factors[q]
             };
 
-            const existing = DataStore.getAll('quarterly_targets').find(t => t.year === qTarget.year && t.quarter === q);
+            const existing = AppDataStore.getAll('quarterly_targets').find(t => t.year === qTarget.year && t.quarter === q);
             if (existing) {
-                DataStore.update('quarterly_targets', existing.id, qTarget);
+                AppDataStore.update('quarterly_targets', existing.id, qTarget);
             } else {
-                DataStore.create('quarterly_targets', qTarget);
+                AppDataStore.create('quarterly_targets', qTarget);
             }
         });
     };
@@ -15673,7 +15673,7 @@ In a production system, this would show the actual file contents.
     };
 
     const renderMarketingListTable = () => {
-        const data = DataStore.getAll(_currentMarketingListTab);
+        const data = AppDataStore.getAll(_currentMarketingListTab);
 
         if (_currentMarketingListTab === 'appointment_locations') {
             return `
@@ -15875,7 +15875,7 @@ In a production system, this would show the actual file contents.
     };
 
     const openMarketingListEditModal = (id) => {
-        const item = DataStore.getById(_currentMarketingListTab, id);
+        const item = AppDataStore.getById(_currentMarketingListTab, id);
         if (!item) return;
 
         let content = '';
@@ -15971,11 +15971,11 @@ In a production system, this would show the actual file contents.
         }
 
         if (id) {
-            DataStore.update(type, id, data);
+            AppDataStore.update(type, id, data);
             UI.toast.success('Record updated successfully');
         } else {
             data.created_by = _currentUser ? _currentUser.id : null;
-            DataStore.create(type, data);
+            AppDataStore.create(type, data);
             UI.toast.success('Record added successfully');
         }
 
@@ -15988,8 +15988,8 @@ In a production system, this would show the actual file contents.
         const type = _currentMarketingListTab;
         
         if (type === 'appointment_locations') {
-            const inUseProspects = DataStore.getAll('prospects').some(p => p.location_id == id);
-            const inUseActivities = DataStore.getAll('activities').some(ac => ac.location_id == id);
+            const inUseProspects = AppDataStore.getAll('prospects').some(p => p.location_id == id);
+            const inUseActivities = AppDataStore.getAll('activities').some(ac => ac.location_id == id);
             
             if (inUseProspects || inUseActivities) {
                 UI.toast.error('Cannot delete: This location is currently in use by prospects or appointments.');
@@ -15998,7 +15998,7 @@ In a production system, this would show the actual file contents.
         }
 
         if (confirm('Are you sure you want to delete this record? This action cannot be undone.')) {
-            DataStore.delete(type, id);
+            AppDataStore.delete(type, id);
             UI.toast.success('Record deleted');
             const viewport = document.getElementById('content-viewport');
             showMarketingListsView(viewport);
@@ -16095,7 +16095,7 @@ In a production system, this would show the actual file contents.
 
     // ========== PRODUCTS TAB ==========
     const renderProductsTab = () => {
-        const products = DataStore.getAll('products');
+        const products = AppDataStore.getAll('products');
         return `
     < div class="products-layout" style = "padding: 24px;" >
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
@@ -16136,7 +16136,7 @@ In a production system, this would show the actual file contents.
 
     const openAddProductModal = (id = null) => {
         let p = { name: '', category: '', is_active: true };
-        if (id) p = DataStore.getById('products', id);
+        if (id) p = AppDataStore.getById('products', id);
 
         const content = `
             <div class="form-group">
@@ -16163,10 +16163,10 @@ In a production system, this would show the actual file contents.
         }
 
         if (id) {
-            DataStore.update('products', id, { name, category });
+            AppDataStore.update('products', id, { name, category });
             UI.toast.success("Product updated");
         } else {
-            DataStore.create('products', { name, category, is_active: true });
+            AppDataStore.create('products', { name, category, is_active: true });
             UI.toast.success("Product added");
         }
         UI.hideModal();
@@ -16174,14 +16174,14 @@ In a production system, this would show the actual file contents.
     };
 
     const toggleProductStatus = (id, currentStatus) => {
-        DataStore.update('products', id, { is_active: !currentStatus });
+        AppDataStore.update('products', id, { is_active: !currentStatus });
         UI.toast.success("Product status updated");
         if (_currentMarketingTab === 'products') document.getElementById('marketing-tab-content').innerHTML = renderProductsTab();
     };
 
     // ========== PROMOTION PACKAGES TAB ==========
     const renderPackagesTab = () => {
-        const packages = DataStore.getAll('promotions');
+        const packages = AppDataStore.getAll('promotions');
         return `
             <div class="packages-layout" style="padding: 24px;">
                 <div class="packages-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
@@ -16226,7 +16226,7 @@ In a production system, this would show the actual file contents.
 
     const renderPackageRow = (p) => {
         const productNames = (p.product_ids || []).map(id => {
-            const prod = DataStore.getById('products', id);
+            const prod = AppDataStore.getById('products', id);
             return prod ? prod.name : 'Unknown Product';
         }).join(', ');
 
@@ -16262,11 +16262,11 @@ In a production system, this would show the actual file contents.
         const search = document.getElementById('package-search')?.value.toLowerCase() || '';
         const status = document.getElementById('package-status-filter')?.value || 'all';
 
-        const packages = DataStore.getAll('promotions');
+        const packages = AppDataStore.getAll('promotions');
         const filtered = packages.filter(p => {
             const matchesSearch = (p.package_name || p.name || '').toLowerCase().includes(search) ||
                 (p.product_ids || []).some(id => {
-                    const prod = DataStore.getById('products', id);
+                    const prod = AppDataStore.getById('products', id);
                     return prod && (prod.name || '').toLowerCase().includes(search);
                 });
             const matchesStatus = status === 'all' || (status === 'active' ? p.is_active : !p.is_active);
@@ -16282,7 +16282,7 @@ In a production system, this would show the actual file contents.
 
     const openCreatePackageModal = (id = null) => {
         const isEdit = !!id;
-        const pkg = isEdit ? DataStore.getById('promotions', id) : {
+        const pkg = isEdit ? AppDataStore.getById('promotions', id) : {
             package_name: '',
             product_ids: [],
             price: 0,
@@ -16292,7 +16292,7 @@ In a production system, this would show the actual file contents.
             is_active: true
         };
 
-        const allProducts = DataStore.getAll('products').filter(p => p.is_active !== false);
+        const allProducts = AppDataStore.getAll('products').filter(p => p.is_active !== false);
         const paymentOptions = ['Cash', 'Credit Card', 'Bank Transfer', 'EPP', 'POP', 'Cheque'];
 
         const content = `
@@ -16375,12 +16375,12 @@ In a production system, this would show the actual file contents.
         };
 
         if (id) {
-            DataStore.update('promotions', id, data);
+            AppDataStore.update('promotions', id, data);
             UI.toast.success("Package updated successfully");
         } else {
             data.created_by = _currentUser ? _currentUser.id : null;
             data.created_at = new Date().toISOString();
-            DataStore.create('promotions', data);
+            AppDataStore.create('promotions', data);
             UI.toast.success("Package created successfully");
         }
 
@@ -16390,26 +16390,26 @@ In a production system, this would show the actual file contents.
 
     const deletePackage = (id) => {
         if (confirm("Are you sure you want to delete this promotion package? This action cannot be undone.")) {
-            DataStore.delete('promotions', id);
+            AppDataStore.delete('promotions', id);
             UI.toast.success("Package deleted");
             if (_currentMarketingTab === 'packages') app.switchMarketingTab('packages');
         }
     };
 
     const viewPackageCustomers = (packageId) => {
-        const pkg = DataStore.getById('promotions', packageId);
+        const pkg = AppDataStore.getById('promotions', packageId);
         if (!pkg) return;
 
-        const purchases = DataStore.getAll('purchases').filter(p => p.package_id == packageId);
+        const purchases = AppDataStore.getAll('purchases').filter(p => p.package_id == packageId);
 
         // Fallback: match by product name if package_id is not set
         if (purchases.length === 0) {
             const productNames = pkg.product_ids.map(id => {
-                const prod = DataStore.getById('products', id);
+                const prod = AppDataStore.getById('products', id);
                 return prod ? prod.name : null;
             }).filter(n => n);
 
-            const allPurchases = DataStore.getAll('purchases');
+            const allPurchases = AppDataStore.getAll('purchases');
             allPurchases.forEach(p => {
                 if (!p.package_id && productNames.includes(p.item)) {
                     purchases.push(p);
@@ -16435,7 +16435,7 @@ In a production system, this would show the actual file contents.
                     </thead>
                     <tbody>
                         ${purchases.map(p => {
-            const customer = DataStore.getById('customers', p.customer_id) || DataStore.getById('prospects', p.customer_id);
+            const customer = AppDataStore.getById('customers', p.customer_id) || AppDataStore.getById('prospects', p.customer_id);
             return `
                                 <tr>
                                     <td style="padding: 10px; border-bottom: 1px solid var(--gray-200);">
@@ -16465,7 +16465,7 @@ In a production system, this would show the actual file contents.
     // ========== TEMPLATES TAB ==========
 
     const renderTemplatesTab = () => {
-        const templates = DataStore.getAll('whatsapp_templates');
+        const templates = AppDataStore.getAll('whatsapp_templates');
 
         return `
             <div class="templates-layout">
@@ -16555,7 +16555,7 @@ In a production system, this would show the actual file contents.
 
     const openCreateTemplateModal = (templateId = null) => {
         const isEdit = !!templateId;
-        const template = isEdit ? DataStore.getById('whatsapp_templates', templateId) : null;
+        const template = isEdit ? AppDataStore.getById('whatsapp_templates', templateId) : null;
 
         const content = `
             <div class="template-modal">
@@ -16693,10 +16693,10 @@ In a production system, this would show the actual file contents.
         };
 
         if (templateId) {
-            DataStore.update('whatsapp_templates', templateId, template);
+            AppDataStore.update('whatsapp_templates', templateId, template);
             UI.toast.success('Template updated successfully');
         } else {
-            DataStore.create('whatsapp_templates', template);
+            AppDataStore.create('whatsapp_templates', template);
             UI.toast.success('Template created successfully');
         }
 
@@ -16714,7 +16714,7 @@ In a production system, this would show the actual file contents.
     };
 
     const previewTemplate = (templateId) => {
-        const template = DataStore.getById('whatsapp_templates', templateId);
+        const template = AppDataStore.getById('whatsapp_templates', templateId);
         if (!template) return;
 
         const previewData = {
@@ -16783,7 +16783,7 @@ In a production system, this would show the actual file contents.
 
     const searchTemplates = () => {
         const search = document.getElementById('template-search').value.toLowerCase();
-        const templates = DataStore.getAll('whatsapp_templates');
+        const templates = AppDataStore.getAll('whatsapp_templates');
         const filtered = templates.filter(t =>
             t.template_name.toLowerCase().includes(search) ||
             t.category.toLowerCase().includes(search)
@@ -16794,16 +16794,16 @@ In a production system, this would show the actual file contents.
 
     const editTemplate = (id) => openCreateTemplateModal(id);
     const copyTemplate = (id) => {
-        const t = DataStore.getById('whatsapp_templates', id);
+        const t = AppDataStore.getById('whatsapp_templates', id);
         if (t) {
             const copy = { ...t, id: undefined, template_name: t.template_name + ' (Copy)' };
-            DataStore.create('whatsapp_templates', copy);
+            AppDataStore.create('whatsapp_templates', copy);
             refreshTemplatesTab();
         }
     };
     const deleteTemplate = (id) => {
         if (confirm('Delete this template?')) {
-            DataStore.delete('whatsapp_templates', id);
+            AppDataStore.delete('whatsapp_templates', id);
             refreshTemplatesTab();
         }
     };
@@ -16821,7 +16821,7 @@ In a production system, this would show the actual file contents.
     // ========== CAMPAIGNS TAB ==========
 
     const renderCampaignsTab = () => {
-        const campaigns = DataStore.getAll('whatsapp_campaigns');
+        const campaigns = AppDataStore.getAll('whatsapp_campaigns');
 
         return `
             <div class="campaigns-filters">
@@ -16867,7 +16867,7 @@ In a production system, this would show the actual file contents.
     };
 
     const renderCampaignRow = (campaign) => {
-        const template = DataStore.getById('whatsapp_templates', campaign.template_id);
+        const template = AppDataStore.getById('whatsapp_templates', campaign.template_id);
         const openRate = campaign.sent_count > 0 ? Math.round((campaign.opened_count / campaign.sent_count) * 100) : 0;
         const responseRate = campaign.sent_count > 0 ? Math.round((campaign.replied_count / campaign.sent_count) * 100) : 0;
 
@@ -16902,7 +16902,7 @@ In a production system, this would show the actual file contents.
 
     const openCreateCampaignModal = (campaignId = null) => {
         const isEdit = !!campaignId;
-        const campaign = isEdit ? DataStore.getById('whatsapp_campaigns', campaignId) : null;
+        const campaign = isEdit ? AppDataStore.getById('whatsapp_campaigns', campaignId) : null;
 
         const content = `
     < div class="campaign-modal" >
@@ -17044,7 +17044,7 @@ In a production system, this would show the actual file contents.
                 </div>
             `;
         } else if (_currentCampaignStep === 2) {
-            const templates = DataStore.getAll('whatsapp_templates');
+            const templates = AppDataStore.getAll('whatsapp_templates');
             container.innerHTML = `
                 <div class="campaign-step" id="step-2">
                     <div class="templates-grid small">
@@ -17062,8 +17062,8 @@ In a production system, this would show the actual file contents.
                 </div>
             `;
         } else if (_currentCampaignStep === 3) {
-            const tags = DataStore.getAll('tags');
-            const agents = DataStore.getAll('users').filter(u => u.role === 'consultant');
+            const tags = AppDataStore.getAll('tags');
+            const agents = AppDataStore.getAll('users').filter(u => u.role === 'consultant');
 
             container.innerHTML = `
                 <div class="campaign-step" id="step-3">
@@ -17113,7 +17113,7 @@ In a production system, this would show the actual file contents.
                     <div class="campaign-summary-box" style="background:var(--gray-50); padding:16px; border-radius:8px; margin-top:20px;">
                         <h5>Campaign Summary</h5>
                         <p><strong>Name:</strong> ${_campaignData.campaign_name}</p>
-                        <p><strong>Template:</strong> ${DataStore.getById('whatsapp_templates', _campaignData.template_id)?.template_name}</p>
+                        <p><strong>Template:</strong> ${AppDataStore.getById('whatsapp_templates', _campaignData.template_id)?.template_name}</p>
                         <p><strong>Estimated Audience:</strong> <span id="final-audience-size">...</span></p>
                     </div>
                 </div>
@@ -17197,7 +17197,7 @@ In a production system, this would show the actual file contents.
     const saveCampaignDraft = () => {
         _campaignData.campaign_name = document.getElementById('campaign-name')?.value || 'Untitled Campaign';
         _campaignData.status = 'draft';
-        DataStore.create('whatsapp_campaigns', _campaignData);
+        AppDataStore.create('whatsapp_campaigns', _campaignData);
         UI.toast.success('Campaign saved as draft');
         UI.hideModal();
         refreshCampaignsTab();
@@ -17229,11 +17229,11 @@ In a production system, this would show the actual file contents.
         _campaignData.created_by = _currentUser ? _currentUser.id : 5;
         _campaignData.created_at = new Date().toISOString();
 
-        const campaign = DataStore.create('whatsapp_campaigns', _campaignData);
+        const campaign = AppDataStore.create('whatsapp_campaigns', _campaignData);
 
         // Create initial message tracking for each recipient
         recipients.forEach(rpId => {
-            DataStore.create('campaign_messages', {
+            AppDataStore.create('campaign_messages', {
                 campaign_id: campaign.id,
                 prospect_id: rpId,
                 status: launchType === 'now' ? 'queued' : 'scheduled',
@@ -17256,13 +17256,13 @@ In a production system, this would show the actual file contents.
     };
 
     const simulateCampaignSending = (campaignId) => {
-        const messages = DataStore.getAll('campaign_messages').filter(m => m.campaign_id === campaignId);
+        const messages = AppDataStore.getAll('campaign_messages').filter(m => m.campaign_id === campaignId);
         let sent = 0;
 
         const interval = setInterval(() => {
             if (sent >= messages.length) {
                 clearInterval(interval);
-                DataStore.update('whatsapp_campaigns', campaignId, { status: 'completed', completed_date: new Date().toISOString() });
+                AppDataStore.update('whatsapp_campaigns', campaignId, { status: 'completed', completed_date: new Date().toISOString() });
                 refreshCampaignsTab();
                 return;
             }
@@ -17274,19 +17274,19 @@ In a production system, this would show the actual file contents.
             if (statusRoll > 0.4) status = 'opened';
             if (statusRoll > 0.8) status = 'replied';
 
-            DataStore.update('campaign_messages', msg.id, {
+            AppDataStore.update('campaign_messages', msg.id, {
                 status: status,
                 sent_at: new Date().toISOString()
             });
 
             // Update campaign stats
-            const campaign = DataStore.getById('whatsapp_campaigns', campaignId);
+            const campaign = AppDataStore.getById('whatsapp_campaigns', campaignId);
             const updates = { sent_count: (campaign.sent_count || 0) + 1 };
             if (['delivered', 'opened', 'replied'].includes(status)) updates.delivered_count = (campaign.delivered_count || 0) + 1;
             if (['opened', 'replied'].includes(status)) updates.opened_count = (campaign.opened_count || 0) + 1;
             if (status === 'replied') updates.replied_count = (campaign.replied_count || 0) + 1;
 
-            DataStore.update('whatsapp_campaigns', campaignId, updates);
+            AppDataStore.update('whatsapp_campaigns', campaignId, updates);
             sent++;
         }, 500);
     };
@@ -17304,7 +17304,7 @@ In a production system, this would show the actual file contents.
         const status = document.getElementById('campaign-status-filter').value;
         const sort = document.getElementById('campaign-sort').value;
 
-        let campaigns = DataStore.getAll('whatsapp_campaigns');
+        let campaigns = AppDataStore.getAll('whatsapp_campaigns');
 
         if (status !== 'all') {
             campaigns = campaigns.filter(c => c.status === status);
@@ -17326,21 +17326,21 @@ In a production system, this would show the actual file contents.
 
     const editCampaign = (id) => openCreateCampaignModal(id);
     const pauseCampaign = (id) => {
-        DataStore.update('whatsapp_campaigns', id, { status: 'paused' });
+        AppDataStore.update('whatsapp_campaigns', id, { status: 'paused' });
         refreshCampaignsTab();
     };
     const resumeCampaign = (id) => {
-        DataStore.update('whatsapp_campaigns', id, { status: 'active' });
+        AppDataStore.update('whatsapp_campaigns', id, { status: 'active' });
         refreshCampaignsTab();
     };
     const cancelCampaign = (id) => {
         if (confirm('Cancel this campaign? Active messages will stop.')) {
-            DataStore.update('whatsapp_campaigns', id, { status: 'cancelled' });
+            AppDataStore.update('whatsapp_campaigns', id, { status: 'cancelled' });
             refreshCampaignsTab();
         }
     };
     const duplicateCampaign = (id) => {
-        const c = DataStore.getById('whatsapp_campaigns', id);
+        const c = AppDataStore.getById('whatsapp_campaigns', id);
         if (c) {
             const copy = {
                 ...c,
@@ -17349,16 +17349,16 @@ In a production system, this would show the actual file contents.
                 status: 'draft',
                 sent_count: 0, delivered_count: 0, opened_count: 0, replied_count: 0
             };
-            DataStore.create('whatsapp_campaigns', copy);
+            AppDataStore.create('whatsapp_campaigns', copy);
             refreshCampaignsTab();
         }
     };
     const deleteCampaign = (id) => {
         if (confirm('Delete this campaign and all its tracking data?')) {
-            DataStore.delete('whatsapp_campaigns', id);
+            AppDataStore.delete('whatsapp_campaigns', id);
             // Delete messages
-            const messages = DataStore.getAll('campaign_messages').filter(m => m.campaign_id === id);
-            messages.forEach(m => DataStore.delete('campaign_messages', m.id));
+            const messages = AppDataStore.getAll('campaign_messages').filter(m => m.campaign_id === id);
+            messages.forEach(m => AppDataStore.delete('campaign_messages', m.id));
             refreshCampaignsTab();
         }
     };
@@ -17448,7 +17448,7 @@ In a production system, this would show the actual file contents.
     };
 
     const getRealAnalyticsData = () => {
-        const campaigns = DataStore.getAll('whatsapp_campaigns').filter(c => c.status === 'completed' || c.status === 'active');
+        const campaigns = AppDataStore.getAll('whatsapp_campaigns').filter(c => c.status === 'completed' || c.status === 'active');
 
         const totalCampaigns = campaigns.length;
         let totalSent = 0;
@@ -17480,7 +17480,7 @@ In a production system, this would show the actual file contents.
     };
 
     const initMarketingCharts = () => {
-        const campaigns = DataStore.getAll('whatsapp_campaigns').filter(c => c.status === 'completed' || c.status === 'active').slice(-5);
+        const campaigns = AppDataStore.getAll('whatsapp_campaigns').filter(c => c.status === 'completed' || c.status === 'active').slice(-5);
 
         // Message Volume Chart
         const volumeCtx = document.getElementById('message-volume-chart')?.getContext('2d');
@@ -17549,7 +17549,7 @@ In a production system, this would show the actual file contents.
         csv += `Avg Conversion Rate, ${data.avgConversionRate}%\n\n`;
         csv += "Campaign Name,Sent,Opened,Replied,Converted\n";
 
-        const campaigns = DataStore.getAll('whatsapp_campaigns');
+        const campaigns = AppDataStore.getAll('whatsapp_campaigns');
         campaigns.forEach(c => {
             csv += `${c.campaign_name},${c.sent_count},${c.opened_count},${c.replied_count},${c.converted_count} \n`;
         });
@@ -17568,11 +17568,11 @@ In a production system, this would show the actual file contents.
     // ========== CAMPAIGN DETAILS VIEW ==========
 
     const viewCampaignDetails = (campaignId) => {
-        const campaign = DataStore.getById('whatsapp_campaigns', campaignId);
+        const campaign = AppDataStore.getById('whatsapp_campaigns', campaignId);
         if (!campaign) return;
 
-        const template = DataStore.getById('whatsapp_templates', campaign.template_id);
-        const messages = DataStore.getAll('campaign_messages').filter(m => m.campaign_id === campaignId);
+        const template = AppDataStore.getById('whatsapp_templates', campaign.template_id);
+        const messages = AppDataStore.getAll('campaign_messages').filter(m => m.campaign_id === campaignId);
 
         // Calculate metrics
         const sent = messages.filter(m => ['sent', 'delivered', 'opened', 'replied'].includes(m.status)).length;
@@ -17695,7 +17695,7 @@ In a production system, this would show the actual file contents.
     };
 
     const renderRecipientRow = (msg) => {
-        const prospect = DataStore.getById('prospects', msg.prospect_id);
+        const prospect = AppDataStore.getById('prospects', msg.prospect_id);
         return `
             <tr>
                 <td><strong>${prospect?.full_name || 'Unknown'}</strong></td>
@@ -17713,10 +17713,10 @@ In a production system, this would show the actual file contents.
     const filterRecipients = (campaignId) => {
         const search = document.getElementById('recipient-search').value.toLowerCase();
         const status = document.getElementById('recipient-status-filter').value;
-        const messages = DataStore.getAll('campaign_messages').filter(m => m.campaign_id === campaignId);
+        const messages = AppDataStore.getAll('campaign_messages').filter(m => m.campaign_id === campaignId);
 
         const filtered = messages.filter(m => {
-            const prospect = DataStore.getById('prospects', m.prospect_id);
+            const prospect = AppDataStore.getById('prospects', m.prospect_id);
             const nameMatch = prospect?.full_name?.toLowerCase().includes(search);
             const statusMatch = status === 'all' || m.status === status;
             return nameMatch && statusMatch;
@@ -17729,9 +17729,9 @@ In a production system, this would show the actual file contents.
     };
 
     const viewRecipientHistory = (messageId) => {
-        const msg = DataStore.getById('campaign_messages', messageId);
+        const msg = AppDataStore.getById('campaign_messages', messageId);
         if (!msg) return;
-        const prospect = DataStore.getById('prospects', msg.prospect_id);
+        const prospect = AppDataStore.getById('prospects', msg.prospect_id);
 
         const content = `
             <div class="recipient-history">
@@ -17769,21 +17769,21 @@ In a production system, this would show the actual file contents.
     };
 
     const retryMessage = (messageId) => {
-        const msg = DataStore.getById('campaign_messages', messageId);
+        const msg = AppDataStore.getById('campaign_messages', messageId);
         if (msg) {
-            DataStore.update('campaign_messages', messageId, { status: 'queued', retry_count: (msg.retry_count || 0) + 1 });
+            AppDataStore.update('campaign_messages', messageId, { status: 'queued', retry_count: (msg.retry_count || 0) + 1 });
             UI.toast.success('Message queued for retry');
             app.viewCampaignDetails(msg.campaign_id);
         }
     };
 
     const exportCampaignReport = (campaignId) => {
-        const campaign = DataStore.getById('whatsapp_campaigns', campaignId);
-        const messages = DataStore.getAll('campaign_messages').filter(m => m.campaign_id === campaignId);
+        const campaign = AppDataStore.getById('whatsapp_campaigns', campaignId);
+        const messages = AppDataStore.getAll('campaign_messages').filter(m => m.campaign_id === campaignId);
 
         let csv = "Recipient,Phone,Status,SentAt,DeliveredAt,OpenedAt,RepliedAt\n";
         messages.forEach(m => {
-            const p = DataStore.getById('prospects', m.prospect_id);
+            const p = AppDataStore.getById('prospects', m.prospect_id);
             csv += `"${p?.full_name || 'Unknown'}", "${p?.phone || ''}", ${m.status}, "${m.sent_at || ''}", "${m.delivered_at || ''}", "${m.opened_at || ''}", "${m.replied_at || ''}"\n`;
         });
 
@@ -17799,7 +17799,7 @@ In a production system, this would show the actual file contents.
     };
 
     const getEntityName = (table, id) => {
-        const item = DataStore.getById(table, id);
+        const item = AppDataStore.getById(table, id);
         if (!item) return 'Unknown';
         if (table === 'users' || table === 'agents') return item.full_name || item.username;
         if (table === 'prospects' || table === 'customers') return item.full_name;
@@ -17828,7 +17828,7 @@ In a production system, this would show the actual file contents.
     // Case Study Helpers
     const findLatestInvitationActivity = (prospectId) => {
         if (!prospectId) return null;
-        const activities = DataStore.getAll('activities');
+        const activities = AppDataStore.getAll('activities');
         const invitations = activities.filter(a =>
             a.prospect_id == prospectId &&
             (a.activity_type === 'CPS' || a.cps_invitation_method)
@@ -17841,26 +17841,26 @@ In a production system, this would show the actual file contents.
     };
 
     const internalUpsertCaseStudy = (data) => {
-        const existing = DataStore.getAll('case_studies').find(cs => cs.purchase_id == data.purchase_id);
+        const existing = AppDataStore.getAll('case_studies').find(cs => cs.purchase_id == data.purchase_id);
         if (existing) {
-            return DataStore.update('case_studies', existing.id, data);
+            return AppDataStore.update('case_studies', existing.id, data);
         } else {
-            return DataStore.create('case_studies', data);
+            return AppDataStore.create('case_studies', data);
         }
     };
 
     const getCaseStudyFilterOptions = () => {
-        const allCS = DataStore.getAll('case_studies');
+        const allCS = AppDataStore.getAll('case_studies');
         
         // Extract distinct authors from case studies
         const authorIds = [...new Set(allCS.map(cs => cs.consultant_id).filter(Boolean))];
         const consultants = authorIds.map(id => {
-            const u = DataStore.getById('users', id);
+            const u = AppDataStore.getById('users', id);
             return { id, name: u ? u.full_name : `User ${id}` };
         });
 
         // Also include all current active consultants/TLs/Managers just in case they haven't authored yet but are useful in filters
-        const allRelevantUsers = DataStore.getAll('users').filter(u => ['consultant', 'team_leader', 'manager', 'marketing_manager', 'super_admin'].includes(u.role));
+        const allRelevantUsers = AppDataStore.getAll('users').filter(u => ['consultant', 'team_leader', 'manager', 'marketing_manager', 'super_admin'].includes(u.role));
         allRelevantUsers.forEach(u => {
             if (!consultants.find(c => c.id === u.id)) {
                 consultants.push({ id: u.id, name: u.full_name });
@@ -17878,13 +17878,13 @@ In a production system, this would show the actual file contents.
     const confirmRenameFolder = (folderId) => {
         const name = document.getElementById('rename-folder-input')?.value;
         if (!name) return;
-        DataStore.update('folders', folderId, { name, updated_at: new Date().toISOString() });
+        AppDataStore.update('folders', folderId, { name, updated_at: new Date().toISOString() });
         UI.hideModal(); UI.toast.success('Folder renamed');
         if (typeof renderFolderTree === 'function') renderFolderTree();
         if (typeof loadFolderContents === 'function') loadFolderContents();
     };
     const confirmDeleteFolder = (folderId) => {
-        DataStore.delete('folders', folderId);
+        AppDataStore.delete('folders', folderId);
         UI.hideModal(); UI.toast.success('Folder deleted');
         if (typeof renderFolderTree === 'function') renderFolderTree();
         if (typeof loadFolderContents === 'function') loadFolderContents();
@@ -17897,7 +17897,7 @@ In a production system, this would show the actual file contents.
 
         if (!currentUser) {
             // Guest mode - show demo users
-            const users = DataStore.getAll('users') || [];
+            const users = AppDataStore.getAll('users') || [];
             // Filter for demo users
             const demoUsers = users.slice(0, 8); // Just show first 8 as demo
 
@@ -17949,7 +17949,7 @@ In a production system, this would show the actual file contents.
     };
 
     const loginAs = (userId) => {
-        const user = DataStore.getById('users', userId);
+        const user = AppDataStore.getById('users', userId);
         if (user) {
             Auth.setUser(user);
             _currentUser = user;
@@ -17995,7 +17995,7 @@ In a production system, this would show the actual file contents.
     };
 
     const renderRecentImports = () => {
-        const imports = DataStore.getAll('import_jobs').sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 10);
+        const imports = AppDataStore.getAll('import_jobs').sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 10);
         if (imports.length === 0) return `<tr><td colspan="7" style="text-align:center;padding:40px;"><i class="fas fa-cloud-upload-alt" style="font-size:48px;color:var(--gray-300);display:block;margin-bottom:16px;"></i><h3>No imports yet</h3><p>Click "IMPORT NEW DATA" to start your first import</p></td></tr>`;
         return imports.map(imp => {
             const pct = imp.total_rows > 0 ? Math.round((imp.valid_rows / imp.total_rows) * 100) : 0;
@@ -18271,7 +18271,7 @@ In a production system, this would show the actual file contents.
                 setTimeout(() => {
                     UI.hideModal();
                     UI.toast.success('Import completed! 217 new records created.');
-                    DataStore.create('import_jobs', { file_name: _importData.fileName || 'import.xlsx', import_type: _importData.importType, total_rows: 250, valid_rows: 235, error_rows: 15, created_records: 217, updated_records: 18, skipped_records: 15, status: 'completed', mapping_config: {}, duplicate_handling: document.querySelector('input[name="duplicate-action"]:checked')?.value || 'skip', assignment_config: { assignTo: document.querySelector('input[name="assign-to"]:checked')?.value || 'myself' }, created_by: _currentUser?.id, created_at: new Date().toISOString(), completed_at: new Date().toISOString() });
+                    AppDataStore.create('import_jobs', { file_name: _importData.fileName || 'import.xlsx', import_type: _importData.importType, total_rows: 250, valid_rows: 235, error_rows: 15, created_records: 217, updated_records: 18, skipped_records: 15, status: 'completed', mapping_config: {}, duplicate_handling: document.querySelector('input[name="duplicate-action"]:checked')?.value || 'skip', assignment_config: { assignTo: document.querySelector('input[name="assign-to"]:checked')?.value || 'myself' }, created_by: _currentUser?.id, created_at: new Date().toISOString(), completed_at: new Date().toISOString() });
                     const vp = document.getElementById('content-viewport'); if (vp) showImportDashboard(vp);
                 }, 500);
             }
@@ -18279,7 +18279,7 @@ In a production system, this would show the actual file contents.
     };
 
     const viewImportDetails = (id) => {
-        const job = DataStore.getById('import_jobs', id);
+        const job = AppDataStore.getById('import_jobs', id);
         if (!job) return;
         const content = `<div><div style="background:var(--gray-50);padding:16px;border-radius:8px;margin-bottom:16px"><div><strong>File:</strong> ${job.file_name}</div><div><strong>Type:</strong> ${job.import_type}</div><div><strong>Status:</strong> ${job.status}</div><div><strong>Date:</strong> ${UI.formatDate(job.created_at)}</div></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"><div><strong>Total rows:</strong> ${job.total_rows}</div><div><strong>Valid rows:</strong> ${job.valid_rows}</div><div><strong>New records:</strong> ${job.created_records}</div><div><strong>Updated:</strong> ${job.updated_records}</div><div><strong>Skipped:</strong> ${job.skipped_records}</div><div><strong>Errors:</strong> ${job.error_rows}</div></div></div>`;
         UI.showModal(`Import Details: ${job.file_name}`, content, [{ label: 'Close', type: 'primary', action: 'UI.hideModal()' }]);
@@ -18309,7 +18309,7 @@ In a production system, this would show the actual file contents.
     };
 
     const showImportHistory = () => {
-        const jobs = DataStore.getAll('import_jobs').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        const jobs = AppDataStore.getAll('import_jobs').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
         const rows = jobs.length === 0 ? '<tr><td colspan="6" style="text-align:center;padding:20px">No import history</td></tr>' :
             jobs.map(j => `<tr><td>${j.file_name}</td><td>${j.import_type}</td><td>${j.total_rows}</td><td><span class="import-status status-${j.status}">${j.status.toUpperCase()}</span></td><td>${UI.formatDate(j.created_at)}</td><td><button class="btn-icon" onclick="app.viewImportDetails(${j.id})"><i class="fas fa-eye"></i></button></td></tr>`).join('');
         const content = `<table style="width:100%;border-collapse:collapse"><thead><tr style="background:var(--gray-50)"><th style="padding:10px;text-align:left">File</th><th style="padding:10px;text-align:left">Type</th><th style="padding:10px;text-align:left">Records</th><th style="padding:10px;text-align:left">Status</th><th style="padding:10px;text-align:left">Date</th><th style="padding:10px;text-align:left">Actions</th></tr></thead><tbody>${rows}</tbody></table>`;
@@ -18368,7 +18368,7 @@ In a production system, this would show the actual file contents.
             critical: 0
         };
 
-        const activities = DataStore.getAll('activities');
+        const activities = AppDataStore.getAll('activities');
 
         prospects.forEach(p => {
             const pActs = activities.filter(a => a.prospect_id === p.id);
@@ -18397,11 +18397,11 @@ In a production system, this would show the actual file contents.
         if (!user) return '';
         
         const visibleIds = getVisibleUserIds(user);
-        const allUsers = DataStore.getAll('users');
+        const allUsers = AppDataStore.getAll('users');
         const agents = visibleIds === 'all' ? allUsers : allUsers.filter(u => visibleIds.includes(u.id));
         
         const prospects = getVisibleProspects();
-        const activities = DataStore.getAll('activities');
+        const activities = AppDataStore.getAll('activities');
         const now = new Date();
         const getDaysDiff = (d1, d2) => Math.floor((d1 - d2) / (1000 * 60 * 60 * 24));
 
@@ -18432,7 +18432,7 @@ In a production system, this would show the actual file contents.
 
     const renderInactiveProspectsRows = () => {
         const prospects = getVisibleProspects();
-        const activities = DataStore.getAll('activities');
+        const activities = AppDataStore.getAll('activities');
         const now = new Date();
         const getDaysDiff = (d1, d2) => Math.floor((d1 - d2) / (1000 * 60 * 60 * 24));
 
@@ -18443,7 +18443,7 @@ In a production system, this would show the actual file contents.
                 pActs.sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
                 days = getDaysDiff(now, new Date(pActs[0].activity_date));
             }
-            const agent = DataStore.getById('users', p.responsible_agent_id) || { full_name: 'Unknown' };
+            const agent = AppDataStore.getById('users', p.responsible_agent_id) || { full_name: 'Unknown' };
             return { ...p, days, agentName: agent.full_name };
         }).filter(p => p.days > 7).sort((a, b) => b.days - a.days);
 
@@ -18457,9 +18457,9 @@ In a production system, this would show the actual file contents.
     };
 
     const renderReassignmentHistory = () => {
-        const history = DataStore.getAll('reassignment_history').sort((a, b) => new Date(b.reassignment_date) - new Date(a.reassignment_date));
+        const history = AppDataStore.getAll('reassignment_history').sort((a, b) => new Date(b.reassignment_date) - new Date(a.reassignment_date));
         if (history.length === 0) return '<p style="padding:16px;color:var(--gray-500)">No reassignment history yet.</p>';
-        const getAgentNameById = (id) => { const u = DataStore.getById('users', id); return u?.full_name || `Agent #${id}`; };
+        const getAgentNameById = (id) => { const u = AppDataStore.getById('users', id); return u?.full_name || `Agent #${id}`; };
         return `<table class="agent-performance-table"><thead><tr><th>Date</th><th>Prospect ID</th><th>From Agent</th><th>To Agent</th><th>Reason</th><th>By</th></tr></thead><tbody>${history.map(r => `<tr><td>${UI.formatDate(r.reassignment_date)}</td><td>#${r.prospect_id}</td><td>${getAgentNameById(r.from_agent_id)}</td><td>${getAgentNameById(r.to_agent_id)}</td><td>${r.reassignment_reason}</td><td>${getAgentNameById(r.reassigned_by)}</td></tr>`).join('')}</tbody></table>`;
     };
 
@@ -18508,7 +18508,7 @@ In a production system, this would show the actual file contents.
     };
 
     const confirmReassignment = () => {
-        DataStore.create('reassignment_history', { prospect_id: Date.now(), from_agent_id: 8, to_agent_id: 6, reassigned_by: _currentUser?.id || 5, reassignment_date: new Date().toISOString(), reassignment_reason: document.querySelector('input[name="reassign-reason"]:checked')?.value || 'inactive', reason_notes: document.getElementById('reassign-justification')?.value || '', days_inactive: 14, protection_deadline: '2026-03-17', created_at: new Date().toISOString() });
+        AppDataStore.create('reassignment_history', { prospect_id: Date.now(), from_agent_id: 8, to_agent_id: 6, reassigned_by: _currentUser?.id || 5, reassignment_date: new Date().toISOString(), reassignment_reason: document.querySelector('input[name="reassign-reason"]:checked')?.value || 'inactive', reason_notes: document.getElementById('reassign-justification')?.value || '', days_inactive: 14, protection_deadline: '2026-03-17', created_at: new Date().toISOString() });
         UI.hideModal(); UI.toast.success('Prospect reassigned successfully');
     };
 
@@ -18552,38 +18552,38 @@ In a production system, this would show the actual file contents.
         // NEW: Clear only demo data if requested
         if (window.location.search.includes('resetDemo=true')) {
             ['import_jobs', 'reassignment_history'].forEach(table => {
-                const all = DataStore.getAll(table);
+                const all = AppDataStore.getAll(table);
                 const nonDemo = all.filter(item => !item.is_demo);
                 localStorage.setItem(`fs_crm_${table}`, JSON.stringify(nonDemo));
             });
             UI.toast.info('Demo data cleared.');
         }
 
-        if (DataStore.getAll('import_jobs').length === 0) {
+        if (AppDataStore.getAll('import_jobs').length === 0) {
             const jobs = [
                 { id: 9001, is_demo: true, file_name: 'leads_march_2026.xlsx', import_type: 'prospects', total_rows: 250, valid_rows: 235, error_rows: 15, created_records: 217, updated_records: 18, skipped_records: 15, status: 'completed', mapping_config: {}, duplicate_handling: 'skip', assignment_config: { assignTo: 'myself' }, created_by: 5, created_at: '2026-03-05T14:30:00Z', completed_at: '2026-03-05T14:32:35Z' },
                 { id: 9002, is_demo: true, file_name: 'customers_feb.xlsx', import_type: 'customers', total_rows: 128, valid_rows: 122, error_rows: 6, created_records: 115, updated_records: 7, skipped_records: 6, status: 'completed', mapping_config: {}, duplicate_handling: 'update', assignment_config: { assignTo: 'team' }, created_by: 5, created_at: '2026-02-28T10:15:00Z', completed_at: '2026-02-28T10:17:22Z' },
                 { id: 9003, is_demo: true, file_name: 'agents_2026.xlsx', import_type: 'agents', total_rows: 15, valid_rows: 15, error_rows: 0, created_records: 15, updated_records: 0, skipped_records: 0, status: 'completed', mapping_config: {}, duplicate_handling: 'skip', assignment_config: {}, created_by: 1, created_at: '2026-02-15T09:00:00Z', completed_at: '2026-02-15T09:01:00Z' },
                 { id: 9004, is_demo: true, file_name: 'product_catalog.xlsx', import_type: 'products', total_rows: 45, valid_rows: 0, error_rows: 45, created_records: 0, updated_records: 0, skipped_records: 0, status: 'failed', mapping_config: {}, duplicate_handling: 'skip', assignment_config: {}, created_by: 5, created_at: '2026-02-10T09:45:00Z', completed_at: '2026-02-10T09:45:30Z' }
             ];
-            jobs.forEach(j => DataStore.create('import_jobs', j));
+            jobs.forEach(j => AppDataStore.create('import_jobs', j));
         }
-        if (DataStore.getAll('reassignment_history').length === 0) {
+        if (AppDataStore.getAll('reassignment_history').length === 0) {
             const reassignments = [
                 { id: 8001, is_demo: true, prospect_id: 101, from_agent_id: 8, to_agent_id: 6, reassigned_by: 5, reassignment_date: '2026-03-06T10:23:00Z', reassignment_reason: 'inactive', reason_notes: 'Raj Kumar unresponsive', days_inactive: 14, protection_deadline: '2026-03-17', created_at: '2026-03-06T10:23:00Z' },
                 { id: 8002, is_demo: true, prospect_id: 102, from_agent_id: 8, to_agent_id: 5, reassigned_by: 5, reassignment_date: '2026-03-05T15:45:00Z', reassignment_reason: 'inactive', reason_notes: 'High score prospect', days_inactive: 16, protection_deadline: '2026-03-15', created_at: '2026-03-05T15:45:00Z' },
                 { id: 8003, is_demo: true, prospect_id: 103, from_agent_id: 6, to_agent_id: 7, reassigned_by: 3, reassignment_date: '2026-03-04T09:30:00Z', reassignment_reason: 'workload', reason_notes: 'Balancing workload', days_inactive: 12, protection_deadline: '2026-03-20', created_at: '2026-03-04T09:30:00Z' }
             ];
-            reassignments.forEach(r => DataStore.create('reassignment_history', r));
+            reassignments.forEach(r => AppDataStore.create('reassignment_history', r));
         }
     };
 
     const expireOldOverrides = () => {
         const now = new Date().toISOString();
-        const overrides = DataStore.getAll('manual_overrides');
+        const overrides = AppDataStore.getAll('manual_overrides');
         overrides.forEach(o => {
             if (o.status === 'active' && o.expires_at && o.expires_at < now) {
-                DataStore.update('manual_overrides', o.id, { status: 'expired' });
+                AppDataStore.update('manual_overrides', o.id, { status: 'expired' });
             }
         });
     };
@@ -18666,7 +18666,7 @@ In a production system, this would show the actual file contents.
     };
 
     const goToProspectNotes = (id) => {
-        const activity = DataStore.getById('activities', id);
+        const activity = AppDataStore.getById('activities', id);
         if (activity) {
             if (activity.prospect_id) {
                 showProspectDetail(activity.prospect_id, 'notes');
@@ -18677,7 +18677,7 @@ In a production system, this would show the actual file contents.
     };
 
     const goToProspectNotesFromActivity = (id) => {
-        const activity = DataStore.getById('activities', id);
+        const activity = AppDataStore.getById('activities', id);
         if (activity) {
             if (activity.prospect_id) {
                 showProspectDetail(activity.prospect_id, 'activity');
@@ -18689,7 +18689,7 @@ In a production system, this would show the actual file contents.
 
     const goToProspectProfile = (id) => {
         UI.hideModal();
-        const activity = DataStore.getById('activities', id);
+        const activity = AppDataStore.getById('activities', id);
         if (activity) {
             if (activity.prospect_id) {
                 showProspectDetail(activity.prospect_id, 'info');
@@ -18705,7 +18705,7 @@ In a production system, this would show the actual file contents.
 
     // Navigate from Activity Details modal -> prospect profile activity tab, then scroll/highlight the row
     const openEditEventModal = (eventId, activityId) => {
-        const event = DataStore.getById('events', eventId);
+        const event = AppDataStore.getById('events', eventId);
         if (!event) return;
 
         const content = `
@@ -18749,10 +18749,10 @@ In a production system, this would show the actual file contents.
             updated_at: new Date().toISOString()
         };
 
-        DataStore.update('events', eventId, data);
+        AppDataStore.update('events', eventId, data);
         
         // Update activity denormalized venue if changed
-        DataStore.update('activities', activityId, { venue: data.venue, activity_title: data.title });
+        AppDataStore.update('activities', activityId, { venue: data.venue, activity_title: data.title });
 
         UI.hideModal();
         UI.toast.success('Event master updated');
@@ -18760,7 +18760,7 @@ In a production system, this would show the actual file contents.
     };
 
     const goToProspectActivityTable = (activityId) => {
-        const activity = DataStore.getById('activities', activityId);
+        const activity = AppDataStore.getById('activities', activityId);
         if (!activity) { UI.toast.error('Activity not found'); return; }
         if (!activity.prospect_id) { UI.toast.error('No prospect linked to this activity'); return; }
         UI.hideModal();
@@ -19402,8 +19402,8 @@ const monitorLoginAttempts = () => {
 };
 
 const checkForSecurityIncidents = () => {
-    if (!window.DataStore) return;
-    const incidents = DataStore.getAll('security_incidents').filter(i => i.status === 'new' && !i.acknowledged);
+    if (!window.AppDataStore) return;
+    const incidents = AppDataStore.getAll('security_incidents').filter(i => i.status === 'new' && !i.acknowledged);
     if (incidents.length > 0) {
         const critical = incidents.filter(i => i.severity === 'critical');
         if (critical.length > 0) {
@@ -19440,8 +19440,8 @@ const renderBackButton = () => {
 };
 
 const checkExpiredConsents = () => {
-    if (!window.DataStore || typeof ConsentManager === 'undefined') return;
-    const users = DataStore.getAll('users');
+    if (!window.AppDataStore || typeof ConsentManager === 'undefined') return;
+    const users = AppDataStore.getAll('users');
     const now = new Date();
     users.forEach(user => {
         if (user.consent_preferences) {
@@ -19468,7 +19468,7 @@ const scheduleRetentionJobs = () => {
 };
 
 const showSecurityDashboard = () => {
-    const incidents = DataStore.getAll('security_incidents') || [];
+    const incidents = AppDataStore.getAll('security_incidents') || [];
 
     let content = `
         <div class="security-dashboard">
@@ -19498,7 +19498,7 @@ const showSecurityDashboard = () => {
 };
 
 const showAuditLogs = () => {
-    const logs = (DataStore.getAll('audit_logs') || [])
+    const logs = (AppDataStore.getAll('audit_logs') || [])
         .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
         .slice(0, 50);
 
