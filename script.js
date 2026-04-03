@@ -1,6 +1,22 @@
 // Ensure app object exists globally - MUST BE FIRST LINE
 window.app = window.app || {};
 window.DataStore = window.AppDataStore; // Alias for backward compatibility
+// Patch to prevent the "undefined .call" error and map missing .create to .add
+if (!window.AppDataStore._patched) {
+    const originalCreate = window.AppDataStore.create || window.AppDataStore.add;
+    window.AppDataStore.create = function(...args) {
+        try {
+            if (!originalCreate) throw new Error("Method doesn't exist!");
+            return originalCreate.apply(this, args);
+        } catch (e) {
+            if (e.message && e.message.includes("reading 'call'")) {
+                console.error("Missing function in create. Available keys:", Object.keys(this));
+            }
+            throw e;
+        }
+    };
+    window.AppDataStore._patched = true;
+}
 (async function() {
 console.log("!!! ANTIGRAVITY v2 LOADED !!!");
 
