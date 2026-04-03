@@ -7282,9 +7282,9 @@ function _wireLoginBtn() {
         }
         // Phase 21: Case Status filter (Closed/Open)
         if (_filters.caseStatus === 'closed') {
-            activities = activities.filter(a => a.closing_amount && parseFloat(a.closing_amount) > 0);
+            activities = activities.filter(a => a.amount_closed && parseFloat(a.amount_closed) > 0);
         } else if (_filters.caseStatus === 'open') {
-            activities = activities.filter(a => !a.closing_amount || parseFloat(a.closing_amount) <= 0);
+            activities = activities.filter(a => !a.amount_closed || parseFloat(a.amount_closed) <= 0);
         }
 
         const todayDate = new Date();
@@ -7308,19 +7308,23 @@ function _wireLoginBtn() {
                     if (entityName) {
                         const agent = a.lead_agent_id ? await AppDataStore.getById('users', a.lead_agent_id) : null;
                         const agentName = agent ? agent.full_name : 'No Agent';
+                        const isCoAgentView = _currentUser && a.co_agents && a.co_agents.some(ca => ca.id === _currentUser.id);
+                        const coAgentBadge = isCoAgentView
+                            ? '<small style="color:var(--primary-color)">(Joined)</small>'
+                            : (a.co_agents && a.co_agents.length > 0 ? '<small>+1</small>' : '');
 
                         activityHtml += `
-                            <div class="calendar-appointment ${a.activity_type.toLowerCase()} ${a.closing_amount ? 'closed-case' : ''}" 
+                            <div class="calendar-appointment ${a.activity_type.toLowerCase()} ${a.amount_closed ? 'closed-case' : ''}"
                                 onclick="app. viewActivityDetails(${a.id})">
                                 <div class="appointment-time">${a.start_time || '00:00'} - ${a.end_time || '00:00'}</div>
-                                <div class="appointment-agent">👤 ${agentName} ${a.co_agents && a.co_agents.length > 0 ? '<small>+1</small>' : ''}</div>
+                                <div class="appointment-agent">👤 ${agentName} ${coAgentBadge}</div>
                                 <div class="appointment-customer">📋 ${entityName}</div>
                                 <div class="appointment-type">🏷️ ${a.activity_type}</div>
-                                ${a.closing_amount ? `
+                                ${a.amount_closed ? `
                                 <div class="appointment-closed">
                                     <div class="closed-badge">✓ CLOSED</div>
                                     <div class="closed-product">📦 ${a.solution_sold || 'Product'}</div>
-                                    <div class="closed-amount">💰 RM ${a.closing_amount}</div>
+                                    <div class="closed-amount">💰 RM ${a.amount_closed}</div>
                                 </div>
                                 ` : ''}
                             </div>
@@ -7460,9 +7464,9 @@ function _wireLoginBtn() {
             activities = activities.filter(a => a.activity_type === _filters.type);
         }
         if (_filters && _filters.caseStatus === 'closed') {
-            activities = activities.filter(a => a.closing_amount && parseFloat(a.closing_amount) > 0);
+            activities = activities.filter(a => a.amount_closed && parseFloat(a.amount_closed) > 0);
         } else if (_filters && _filters.caseStatus === 'open') {
-            activities = activities.filter(a => !a.closing_amount || parseFloat(a.closing_amount) <= 0);
+            activities = activities.filter(a => !a.amount_closed || parseFloat(a.amount_closed) <= 0);
         }
 
         activities.sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
@@ -7500,7 +7504,7 @@ function _wireLoginBtn() {
                         <td>${entityName}</td>
                         <td>${a.activity_type}</td>
                         <td>${a.status || 'scheduled'}
-                            ${a.closing_amount ? '<br><small style="color:green;">Closed</small>' : ''}
+                            ${a.amount_closed ? '<br><small style="color:green;">Closed</small>' : ''}
                         </td>
                         <td>
                             <button class="btn btn-sm secondary" onclick="app. viewActivityDetails(${a.id})">View</button>
@@ -7709,9 +7713,10 @@ function _wireLoginBtn() {
                     const customer = a.customer_id ? await AppDataStore.getById('customers', a.customer_id) : null;
                     const name = prospect?.full_name || customer?.full_name || 'Activity';
 
+                    const isWeekCoAgent = _currentUser && a.co_agents && a.co_agents.some(ca => ca.id === _currentUser.id);
                     html += `
     <div class="week-activity ${a.activity_type.toLowerCase()}" onclick="app. viewActivityDetails(${a.id})">
-        ${a.start_time} ${name}
+        ${a.start_time} ${name}${isWeekCoAgent ? ' <span style="font-size:10px;color:var(--primary-color)">(Joined)</span>' : ''}
     </div>
     `;
                 }
@@ -7777,11 +7782,12 @@ function _wireLoginBtn() {
                 const name = prospect?.full_name || customer?.full_name || '';
                 const agent = await AppDataStore.getById('users', a.lead_agent_id);
 
+                const isDayCoAgent = _currentUser && a.co_agents && a.co_agents.some(ca => ca.id === _currentUser.id);
                 html += `
                     <div class="timeline-activity ${a.activity_type.toLowerCase()}" onclick="app. viewActivityDetails(${a.id})">
                         <div class="activity-time">${a.start_time} - ${a.end_time || '?'}</div>
                         <div class="activity-title"><strong>${a.activity_title || a.activity_type}</strong> ${name}</div>
-                        <div class="activity-agent">Agent: ${agent?.full_name || 'Unknown'}</div>
+                        <div class="activity-agent">Agent: ${agent?.full_name || 'Unknown'}${isDayCoAgent ? ' <span style="font-size:11px;color:var(--primary-color)">— Joined</span>' : ''}</div>
                     </div>
                 `;
             }
@@ -7977,11 +7983,25 @@ function _wireLoginBtn() {
                     <h4>Agents</h4>
                     <div class="info-row"><span class="info-label">Lead:</span> <span>${await getAgentName(activity.lead_agent_id)}</span></div>
                     ${activity.co_agents?.length ? `
-                        <div class="info-row"><span class="info-label">Co-Agents:</span> 
+                        <div class="info-row"><span class="info-label">Co-Agents:</span>
                             <span>${activity.co_agents.map(a => a.name).join(', ')}</span>
                         </div>
                     ` : ''}
                 </div>
+                ${activity.is_closing ? `
+                <div class="detail-section">
+                    <h4>✅ Closing Details</h4>
+                    <div class="info-row"><span class="info-label">Solution Sold:</span><span>${activity.solution_sold || 'N/A'}</span></div>
+                    <div class="info-row"><span class="info-label">Amount (RM):</span><span>${activity.amount_closed || 'N/A'}</span></div>
+                    <div class="info-row"><span class="info-label">Payment:</span><span>${activity.payment_method || 'N/A'}</span></div>
+                </div>
+                ` : ''}
+                ${activity.unable_to_serve ? `
+                <div class="detail-section">
+                    <h4>🚫 Unable to Serve</h4>
+                    <div class="info-row"><span class="info-label">Reason:</span><span>${activity.unable_reason || 'No reason given'}</span></div>
+                </div>
+                ` : ''}
                 ${attendeeHtml}
             </div>
         `;
@@ -8484,6 +8504,30 @@ function _wireLoginBtn() {
         setField('note-pain-points', activity.note_pain_points);
         setField('location-address', activity.location_address);
 
+        if (activity.is_closing) {
+            const closingChk = document.getElementById('is-closing');
+            if (closingChk) {
+                closingChk.checked = true;
+                const closingFields = document.getElementById('closing-fields');
+                if (closingFields) closingFields.style.display = 'block';
+            }
+            setField('solution-sold', activity.solution_sold);
+            setField('amount-closed', activity.amount_closed);
+            setField('payment-method', activity.payment_method);
+            setField('invoice-number', activity.invoice_number);
+            setField('collection-date', activity.collection_date);
+        }
+
+        if (activity.unable_to_serve) {
+            const utsChk = document.getElementById('unable-to-serve');
+            if (utsChk) {
+                utsChk.checked = true;
+                const utsFields = document.getElementById('unable-to-serve-fields');
+                if (utsFields) utsFields.style.display = 'block';
+            }
+            setField('unable-reason', activity.unable_reason);
+        }
+
         // 4. Restore selected entity (store in module variable)
         let entityRestored = false;
         if (activity.prospect_id) {
@@ -8609,6 +8653,25 @@ function _wireLoginBtn() {
         // Type‑specific fields
         activity_title: document.getElementById('meeting-title')?.value
     };
+
+    if (document.getElementById('is-closing')?.checked) {
+        updatedData.is_closing = true;
+        updatedData.solution_sold = document.getElementById('solution-sold')?.value;
+        updatedData.amount_closed = document.getElementById('amount-closed')?.value;
+        updatedData.payment_method = document.getElementById('payment-method')?.value;
+        updatedData.invoice_number = document.getElementById('invoice-number')?.value;
+        updatedData.collection_date = document.getElementById('collection-date')?.value;
+    } else {
+        updatedData.is_closing = false;
+    }
+
+    if (document.getElementById('unable-to-serve')?.checked) {
+        updatedData.unable_to_serve = true;
+        updatedData.unable_reason = document.getElementById('unable-reason')?.value;
+    } else {
+        updatedData.unable_to_serve = false;
+        updatedData.unable_reason = null;
+    }
 
     // Update entity IDs based on current _selectedEntity
     if (_selectedEntity) {
