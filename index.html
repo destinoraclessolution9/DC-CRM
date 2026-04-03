@@ -279,10 +279,13 @@
             }
 
             // Fallback: ensure login button always has a handler
-            const loginBtn = document.getElementById('loginBtn');
-            if (loginBtn && !loginBtn._supabaseSetup && window.app && window.app._wireLoginBtn) {
-                window.app._wireLoginBtn();
-            }
+            setTimeout(() => {
+                const loginBtn = document.getElementById('loginBtn');
+                if (loginBtn && window.app && window.app._wireLoginBtn && !loginBtn._supabaseSetup) {
+                    console.log('Manually wiring login button (fallback)');
+                    window.app._wireLoginBtn();
+                }
+            }, 1000);
         });
 
         // Fallback if scripts load after DOM

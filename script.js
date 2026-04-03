@@ -5766,9 +5766,6 @@ function _wireLoginBtn() {
 
 
     const initDemoData = async () => {
-        // Skip demo data seeding to prevent foreign key errors
-        return;
-        
         console.log('Checking for demo data seeding...');
 
         // 1. Roles
@@ -17352,7 +17349,7 @@ const startImport = async () => {
 
 
 const initImportDemoData = async () => {
-    // NEW: Clear only demo data if requested
+    // Clear demo data if requested (optional)
     if (window.location.search.includes('resetDemo=true')) {
         const tables = ['import_jobs', 'reassignment_history'];
         for (const table of tables) {
@@ -17363,28 +17360,55 @@ const initImportDemoData = async () => {
         UI.toast.info('Demo data cleared.');
     }
 
+    // --- Helper to check if a user exists ---
+    const userExists = async (userId) => {
+        const user = await AppDataStore.getById('users', userId);
+        return !!user;
+    };
+
+    // --- Import Jobs ---
     const importJobs = await AppDataStore.getAll('import_jobs');
     if (importJobs.length === 0) {
-        const jobs = [
-            { id: 9001, file_name: 'leads_march_2026.xlsx', import_type: 'prospects', total_rows: 250, valid_rows: 235, error_rows: 15, created_records: 217, updated_records: 18, skipped_records: 15, status: 'completed', mapping_config: {}, duplicate_handling: 'skip', assignment_config: { assignTo: 'myself' }, created_by: 5, created_at: '2026-03-05T14:30:00Z', completed_at: '2026-03-05T14:32:35Z' },
-            { id: 9002, file_name: 'customers_feb.xlsx', import_type: 'customers', total_rows: 128, valid_rows: 122, error_rows: 6, created_records: 115, updated_records: 7, skipped_records: 6, status: 'completed', mapping_config: {}, duplicate_handling: 'update', assignment_config: { assignTo: 'team' }, created_by: 5, created_at: '2026-02-28T10:15:00Z', completed_at: '2026-02-28T10:17:22Z' },
-            { id: 9003, file_name: 'agents_2026.xlsx', import_type: 'agents', total_rows: 15, valid_rows: 15, error_rows: 0, created_records: 15, updated_records: 0, skipped_records: 0, status: 'completed', mapping_config: {}, duplicate_handling: 'skip', assignment_config: {}, created_by: 1, created_at: '2026-02-15T09:00:00Z', completed_at: '2026-02-15T09:01:00Z' },
-            { id: 9004, file_name: 'product_catalog.xlsx', import_type: 'products', total_rows: 45, valid_rows: 0, error_rows: 45, created_records: 0, updated_records: 0, skipped_records: 0, status: 'failed', mapping_config: {}, duplicate_handling: 'skip', assignment_config: {}, created_by: 5, created_at: '2026-02-10T09:45:00Z', completed_at: '2026-02-10T09:45:30Z' }
-        ];
-        for (const j of jobs) {
-            await AppDataStore.create('import_jobs', j);
+        // Only create jobs if user 5 exists
+        if (await userExists(5)) {
+            const jobs = [
+                { id: 9001, file_name: 'leads_march_2026.xlsx', import_type: 'prospects', total_rows: 250, valid_rows: 235, error_rows: 15, created_records: 217, updated_records: 18, skipped_records: 15, status: 'completed', mapping_config: {}, duplicate_handling: 'skip', assignment_config: { assignTo: 'myself' }, created_by: 5, created_at: '2026-03-05T14:30:00Z', completed_at: '2026-03-05T14:32:35Z' },
+                { id: 9002, file_name: 'customers_feb.xlsx', import_type: 'customers', total_rows: 128, valid_rows: 122, error_rows: 6, created_records: 115, updated_records: 7, skipped_records: 6, status: 'completed', mapping_config: {}, duplicate_handling: 'update', assignment_config: { assignTo: 'team' }, created_by: 5, created_at: '2026-02-28T10:15:00Z', completed_at: '2026-02-28T10:17:22Z' },
+                { id: 9003, file_name: 'agents_2026.xlsx', import_type: 'agents', total_rows: 15, valid_rows: 15, error_rows: 0, created_records: 15, updated_records: 0, skipped_records: 0, status: 'completed', mapping_config: {}, duplicate_handling: 'skip', assignment_config: {}, created_by: 1, created_at: '2026-02-15T09:00:00Z', completed_at: '2026-02-15T09:01:00Z' },
+                { id: 9004, file_name: 'product_catalog.xlsx', import_type: 'products', total_rows: 45, valid_rows: 0, error_rows: 45, created_records: 0, updated_records: 0, skipped_records: 0, status: 'failed', mapping_config: {}, duplicate_handling: 'skip', assignment_config: {}, created_by: 5, created_at: '2026-02-10T09:45:00Z', completed_at: '2026-02-10T09:45:30Z' }
+            ];
+            for (const j of jobs) {
+                try {
+                    await AppDataStore.create('import_jobs', j);
+                } catch (err) {
+                    console.warn(`Skipping import_job ${j.id}:`, err.message);
+                }
+            }
+        } else {
+            console.log('Skipping import_jobs seeding: user 5 does not exist');
         }
     }
 
+    // --- Reassignment History ---
     const reassignmentsAll = await AppDataStore.getAll('reassignment_history');
     if (reassignmentsAll.length === 0) {
-        const reassignments = [
-            { id: 8001, prospect_id: 101, from_agent_id: 8, to_agent_id: 6, reassigned_by: 5, reassignment_date: '2026-03-06T10:23:00Z', reassignment_reason: 'inactive', reason_notes: 'Raj Kumar unresponsive', days_inactive: 14, protection_deadline: '2026-03-17', created_at: '2026-03-06T10:23:00Z' },
-            { id: 8002, prospect_id: 102, from_agent_id: 8, to_agent_id: 5, reassigned_by: 5, reassignment_date: '2026-03-05T15:45:00Z', reassignment_reason: 'inactive', reason_notes: 'High score prospect', days_inactive: 16, protection_deadline: '2026-03-15', created_at: '2026-03-05T15:45:00Z' },
-            { id: 8003, prospect_id: 103, from_agent_id: 6, to_agent_id: 7, reassigned_by: 3, reassignment_date: '2026-03-04T09:30:00Z', reassignment_reason: 'workload', reason_notes: 'Balancing workload', days_inactive: 12, protection_deadline: '2026-03-20', created_at: '2026-03-04T09:30:00Z' }
-        ];
-        for (const r of reassignments) {
-            await AppDataStore.create('reassignment_history', r);
+        // Check that all referenced users exist
+        const usersExist = await Promise.all([userExists(8), userExists(6), userExists(5), userExists(7), userExists(3)]);
+        if (usersExist.every(v => v === true)) {
+            const reassignments = [
+                { id: 8001, prospect_id: 101, from_agent_id: 8, to_agent_id: 6, reassigned_by: 5, reassignment_date: '2026-03-06T10:23:00Z', reassignment_reason: 'inactive', reason_notes: 'Raj Kumar unresponsive', days_inactive: 14, protection_deadline: '2026-03-17', created_at: '2026-03-06T10:23:00Z' },
+                { id: 8002, prospect_id: 102, from_agent_id: 8, to_agent_id: 5, reassigned_by: 5, reassignment_date: '2026-03-05T15:45:00Z', reassignment_reason: 'inactive', reason_notes: 'High score prospect', days_inactive: 16, protection_deadline: '2026-03-15', created_at: '2026-03-05T15:45:00Z' },
+                { id: 8003, prospect_id: 103, from_agent_id: 6, to_agent_id: 7, reassigned_by: 3, reassignment_date: '2026-03-04T09:30:00Z', reassignment_reason: 'workload', reason_notes: 'Balancing workload', days_inactive: 12, protection_deadline: '2026-03-20', created_at: '2026-03-04T09:30:00Z' }
+            ];
+            for (const r of reassignments) {
+                try {
+                    await AppDataStore.create('reassignment_history', r);
+                } catch (err) {
+                    console.warn(`Skipping reassignment_history ${r.id}:`, err.message);
+                }
+            }
+        } else {
+            console.log('Skipping reassignment_history seeding: some referenced users missing');
         }
     }
 };
