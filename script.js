@@ -5577,112 +5577,89 @@ function _wireLoginBtn() {
     // ==================== INIT ====================
 
     const init = async () => {
-        await AppDataStore.init();
-        console.log('App initializing...');
+    await AppDataStore.init();
+    console.log('App initializing...');
 
+    try {
+        // Check and seed demo data if needed
+        if (!await AppDataStore.getAll('users').length) {
+            console.log('No users found. Initializing demo data...');
+            await initDemoData();
+            await initDefaultFolders();
+            await initSampleDocuments();
+            await initImportDemoData();
+        }
+
+        // Try to get current user – if session missing, just set _currentUser = null
         try {
-            // Check if tables exist, if not init demo data
-            if (!await AppDataStore.getAll('users').length) {
-                console.log('No users found. Initializing demo data...');
-                await initDemoData();
-                await initDefaultFolders();
-                await initSampleDocuments();
-                await initImportDemoData();
-                
-                // Explicitly populate dropdown after data init
-                await populateLoginDropdown();
-            }
-
             _currentUser = await Auth.getCurrentUser();
             console.log('User loaded:', _currentUser?.email ?? _currentUser?.username);
-
-            if (!_currentUser) {
-                // Show login screen
-                document.getElementById('login-container').style.display = 'flex';
-                document.getElementById('app-shell').style.display = 'none';
-                // Wire up Supabase login button
-                _wireLoginBtn();
-            } else {
-                // Show app shell
-                document.getElementById('login-container').style.display = 'none';
-                document.getElementById('app-shell').style.display = 'block';
-                updateUserDisplay();
-                updateNavVisibility();
-                await expireOldOverrides();
-
-                // Initialize other modules
-                initGoogleIntegration();
-                initWhatsAppIntegration();
-                await initAIAnalytics();
-
-                await navigateTo('calendar');
-
-                // Phase 14: Initialize offline support and mobile features
-                initOfflineSupport();
-                if (isMobile()) {
-                    await renderMobileBottomNav();
-                    initSwipeActions();
-                    await initPullToRefresh();
-                }
-
-                // Phase 18: Initialize Mobile App Features
-                if (typeof initMobileApp === 'function') {
-                    await initMobileApp();
-                }
-
-                // Step 1: Migration for referrals
-                await ensureReferralFields();
-            }
-
-            // Phase 20: System Administration
-            if (typeof SystemHealth !== 'undefined' && typeof SystemHealth.init === 'function') {
-                await SystemHealth.init();
-            }
-            if (typeof ConfigManager !== 'undefined' && typeof ConfigManager.init === 'function') {
-                await ConfigManager.init();
-            }
-
-            // Phase 5 Agent Table Event Delegation
-            document.addEventListener('click', async (e) => {
-                // Edit button handler
-                const editBtn = e.target.closest('.edit-agent-btn');
-                if (editBtn) {
-                    e.stopPropagation();
-                    const agentId = editBtn.dataset.agentId;
-                    console.log('Edit agent clicked:', agentId);
-                    app.todo('Edit Agent Form'); // or open an edit modal
-                    return;
-                }
-
-                // View button handler
-                const viewBtn = e.target.closest('.view-detail-btn');
-                if (viewBtn) {
-                    e.stopPropagation();
-                    const agentId = viewBtn.dataset.agentId;
-                    await app. showAgentDetail(agentId);
-                    return;
-                }
-
-                // Row click handler – only if click is not on a button or inside the actions column
-                const row = e.target.closest('.agent-row');
-                if (row && !e.target.closest('.btn-icon')) {
-                    const agentId = row.dataset.agentId;
-                    await app. showAgentDetail(agentId);
-                }
-            });
-
-            // Mark app as ready
-            window.app.ready = true;
-            window.app.initialized = true;
-
-            // Dispatch event for other scripts
-            window.dispatchEvent(new Event('appReady'));
-
-            console.log('App initialized successfully.');
         } catch (err) {
-            console.error('App init failed:', err);
+            if (err.message && err.message.includes('Auth session missing')) {
+                console.log('No active session – showing login screen');
+                _currentUser = null;
+            } else {
+                throw err; // re-throw other errors
+            }
         }
-    };
+
+        // If no user, show login screen and wire the button, then stop
+        if (!_currentUser) {
+            document.getElementById('login-container').style.display = 'flex';
+            document.getElementById('app-shell').style.display = 'none';
+            _wireLoginBtn();
+            return; // important: do not proceed with logged-in initialization
+        }
+
+        // --- User is logged in – continue with app initialization ---
+        document.getElementById('login-container').style.display = 'none';
+        document.getElementById('app-shell').style.display = 'block';
+        updateUserDisplay();
+        updateNavVisibility();
+        await expireOldOverrides();
+
+        // Initialize other modules
+        initGoogleIntegration();
+        initWhatsAppIntegration();
+        await initAIAnalytics();
+
+        await navigateTo('calendar');
+
+        // Phase 14: Offline & mobile features
+        initOfflineSupport();
+        if (isMobile()) {
+            await renderMobileBottomNav();
+            initSwipeActions();
+            await initPullToRefresh();
+        }
+
+        if (typeof initMobileApp === 'function') {
+            await initMobileApp();
+        }
+
+        await ensureReferralFields();
+
+        // Phase 20: System Administration
+        if (typeof SystemHealth !== 'undefined' && typeof SystemHealth.init === 'function') {
+            await SystemHealth.init();
+        }
+        if (typeof ConfigManager !== 'undefined' && typeof ConfigManager.init === 'function') {
+            await ConfigManager.init();
+        }
+
+        // Mark app as ready
+        window.app.ready = true;
+        window.app.initialized = true;
+        window.dispatchEvent(new Event('appReady'));
+        console.log('App initialized successfully.');
+    } catch (err) {
+        console.error('App init failed:', err);
+        // Fallback: show login screen again
+        document.getElementById('login-container').style.display = 'flex';
+        document.getElementById('app-shell').style.display = 'none';
+        _wireLoginBtn();
+    }
+};
 
     const openAddNameModal = async (prospectId, nameId = null) => {
         const nameData = nameId ? await AppDataStore.getById('names', nameId) : null;
@@ -5813,8 +5790,8 @@ function _wireLoginBtn() {
 
     // ----- 3. Activities (depend on prospects) -----
     const demoActivities = [
-        { id: 1001, activity_type: 'CPS', activity_title: 'Initial Consultation', activity_date: '2026-03-04', start_time: '09:00', end_time: '10:00', prospect_id: 1, lead_agent_id: 5, summary: 'Initial consultation scheduling' },
-        { id: 1002, activity_type: 'FTF', activity_title: 'Face to Face Meeting', activity_date: '2026-03-04', start_time: '11:00', end_time: '12:00', prospect_id: 2, lead_agent_id: 5, summary: 'Discussed career advancement' }
+        { id: 1001, activity_type: 'CPS', activity_title: 'Initial Consultation', activity_date: '2026-03-04', start_time: '09:00', end_time: '10:00', prospect_id: 1, lead_agent_id: 5 },
+        { id: 1002, activity_type: 'FTF', activity_title: 'Face to Face Meeting', activity_date: '2026-03-04', start_time: '11:00', end_time: '12:00', prospect_id: 2, lead_agent_id: 5 }
     ];
     for (const a of demoActivities) {
         await safeInsert('activities', a);

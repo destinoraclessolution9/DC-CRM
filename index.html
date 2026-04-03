@@ -280,7 +280,9 @@
 
             // Fallback: ensure login button always has a handler
             setTimeout(() => {
-                if (window.app && window.app._wireLoginBtn) {
+                const loginBtn = document.getElementById('loginBtn');
+                if (loginBtn && window.app && window.app._wireLoginBtn && !loginBtn._supabaseSetup) {
+                    console.log('Fallback: wiring login button');
                     window.app._wireLoginBtn();
                 }
             }, 1500);
