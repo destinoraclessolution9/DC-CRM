@@ -7355,17 +7355,25 @@ function _wireLoginBtn() {
 
     const getDotColor = (type) => {
         switch (type) {
-            case 'CPS': return 'green';
-            case 'FTF': return 'blue';
-            case 'FSA': return 'orange';
-            case 'EVENT': return 'red';
-            default: return 'blue';
+            case 'CPS': return '#10b981';
+            case 'FTF': return '#3b82f6';
+            case 'FSA': return '#f59e0b';
+            case 'EVENT': return '#ef4444';
+            case 'GR': return '#8b5cf6';
+            case 'SITE': return '#92400e';
+            case 'XG': return '#b45309';
+            case 'CALL': return '#0891b2';
+            case 'EMAIL': return '#64748b';
+            case 'WHATSAPP': return '#16a34a';
+            case 'AGENT_MEETING': return '#7c3aed';
+            case 'AGENT_TRAINING': return '#be185d';
+            default: return '#3b82f6';
         }
     };
 
     const openCalendarFilterModal = async () => {
         const agents = (await AppDataStore.getAll('users')).filter(u => isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'));
-        const types = ['CPS', 'FTF', 'FSA', 'EVENT', 'CALL', 'EMAIL', 'WHATSAPP'];
+        const types = ['CPS', 'FTF', 'FSA', 'GR', 'SITE', 'XG', 'EVENT', 'CALL', 'EMAIL', 'WHATSAPP', 'AGENT_MEETING', 'AGENT_TRAINING'];
 
         const content = `
                 <div class="form-group">
@@ -7687,8 +7695,10 @@ function _wireLoginBtn() {
         html += '</div>';
         html += '<div class="week-body">';
 
-        // Get all activities
-        const activities = await AppDataStore.getAll('activities');
+        // Get all activities (filtered by visibility)
+        let activities = await AppDataStore.getAll('activities');
+        const weekVisibility = await Promise.all(activities.map(a => canViewActivity(a)));
+        activities = activities.filter((_, i) => weekVisibility[i]);
 
         // Time async slots (8 AM to 8 PM)
         for (let hour = 8; hour <= 20; hour++) {
@@ -7732,7 +7742,9 @@ function _wireLoginBtn() {
     const renderDayView = async () => {
         const grid = document.getElementById('calendar-grid');
         const todayStr = _currentDate.toISOString().split('T')[0];
-        const dayActivities = (await AppDataStore.getAll('activities')).filter(a => a.activity_date === todayStr);
+        const allDayActivities = await AppDataStore.getAll('activities');
+        const dayVisibility = await Promise.all(allDayActivities.map(a => canViewActivity(a)));
+        const dayActivities = allDayActivities.filter((a, i) => dayVisibility[i] && a.activity_date === todayStr);
 
         // Calculate summary stats
         const totalMeetings = dayActivities.filter(a => a.activity_type === 'FTF').length;
@@ -8069,9 +8081,14 @@ function _wireLoginBtn() {
 
     const postMeetupNotes = async (activityId) => {
         await app. editActivity(activityId);
-        (() => {
-            document.getElementById('note-key-points')?.focus();
-        }, 350);
+        setTimeout(() => {
+            const el = document.getElementById('note-key-points');
+            if (el) {
+                el.focus();
+                el.style.boxShadow = '0 0 0 2px var(--primary-color)';
+                setTimeout(() => { el.style.boxShadow = ''; }, 2000);
+            }
+        }, 500);
     };
 
     const rescheduleActivity = async (activityId) => {
