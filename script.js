@@ -11724,8 +11724,8 @@ const openAddSolutionModal = async (prospectId) => {
                         </div>
                     </td>
                     <td onclick="event.stopPropagation()">
-                        <button class="btn-icon view-detail-btn" data-agent-id="${agent.id}" title="View Detail"><i class="fas fa-eye"></i></button>
-                        <button class="btn-icon edit-agent-btn" data-agent-id="${agent.id}" title="Edit Agent"><i class="fas fa-edit"></i></button>
+                        <button class="btn-icon view-detail-btn" onclick="event.stopPropagation(); app.showAgentProfile('${agent.id}')" title="View Detail"><i class="fas fa-eye"></i></button>
+                        <button class="btn-icon edit-agent-btn" onclick="event.stopPropagation(); app.openEditAgentModal('${agent.id}')" title="Edit Agent"><i class="fas fa-edit"></i></button>
                     </td>
                 </tr>
             `;
@@ -12299,29 +12299,33 @@ const renderCurrentAssignments = async (agentId) => {
     `;
     };
 
-    const openAddAgentModal = async () => {
+    const openAddAgentModal = async (agentId = null) => {
+        const agent = agentId ? await AppDataStore.getById('users', agentId) : null;
+        const isEdit = !!agent;
+
         const content = `
     <div class="add-agent-form">
+                <input type="hidden" id="edit-agent-id" value="${isEdit ? agent.id : ''}">
                 <div class="form-section">
                     <h4>Basic Information</h4>
                     <div class="form-row">
                         <div class="form-group half">
                             <label>Full Name <span class="required">*</span></label>
-                            <input type="text" id="agent-name" class="form-control" required>
+                            <input type="text" id="agent-name" class="form-control" required value="${isEdit ? (agent.full_name || '') : ''}">
                         </div>
                         <div class="form-group half">
                             <label>IC Number <span class="required">*</span></label>
-                            <input type="text" id="agent-ic" class="form-control" required>
+                            <input type="text" id="agent-ic" class="form-control" required value="${isEdit ? (agent.ic_number || '') : ''}">
                         </div>
                     </div>
                     <div class="form-row">
                         <div class="form-group half">
                             <label>Phone <span class="required">*</span></label>
-                            <input type="tel" id="agent-phone" class="form-control" required>
+                            <input type="tel" id="agent-phone" class="form-control" required value="${isEdit ? (agent.phone || '') : ''}">
                         </div>
                         <div class="form-group half">
                             <label>Email <span class="required">*</span></label>
-                            <input type="email" id="agent-email" class="form-control" required>
+                            <input type="email" id="agent-email" class="form-control" required value="${isEdit ? (agent.email || '') : ''}">
                         </div>
                     </div>
                 </div>
@@ -12332,18 +12336,18 @@ const renderCurrentAssignments = async (agentId) => {
                         <div class="form-group half">
                             <label>Agent Role <span class="required">*</span></label>
                             <select id="agent-role-select" class="form-control" required>
-                                ${USER_ROLES.map(r => `<option value="${r}">${r}</option>`).join('')}
+                                ${USER_ROLES.map(r => `<option value="${r}" ${isEdit && agent.role === r ? 'selected' : ''}>${r}</option>`).join('')}
                             </select>
                         </div>
                         <div class="form-group half">
                             <label>Agent Code</label>
-                            <input type="text" id="agent-code-new" class="form-control" placeholder="AGN-2026-XXX">
+                            <input type="text" id="agent-code-new" class="form-control" placeholder="AGN-2026-XXX" value="${isEdit ? (agent.agent_code || '') : ''}">
                         </div>
                     </div>
                     <div class="form-row">
                         <div class="form-group half">
                             <label>Commission Rate (%)</label>
-                            <input type="number" id="agent-comm" class="form-control" value="30">
+                            <input type="number" id="agent-comm" class="form-control" value="${isEdit ? (agent.commission_rate ?? 30) : 30}">
                         </div>
                     </div>
                 </div>
@@ -12353,31 +12357,31 @@ const renderCurrentAssignments = async (agentId) => {
                     <div class="form-row">
                         <div class="form-group half">
                             <label>License Start Date</label>
-                            <input type="date" id="agent-license-start" class="form-control">
+                            <input type="date" id="agent-license-start" class="form-control" value="${isEdit ? (agent.license_start || '') : ''}">
                         </div>
                         <div class="form-group half">
                             <label>License Expiry Date</label>
-                            <input type="date" id="agent-license-expiry" class="form-control">
+                            <input type="date" id="agent-license-expiry" class="form-control" value="${isEdit ? (agent.license_expiry || '') : ''}">
                         </div>
                     </div>
                 </div>
             </div>
     `;
 
-        UI.showModal('Add New Agent', content, [
+        UI.showModal(isEdit ? 'Edit Agent' : 'Add New Agent', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Create Agent Account', type: 'primary', action: '(async () => { await app.saveAgent(); })()' }
+            { label: isEdit ? 'Save Changes' : 'Create Agent Account', type: 'primary', action: '(async () => { await app.saveAgent(); })()' }
         ]);
     };
+
+    const openEditAgentModal = (agentId) => openAddAgentModal(agentId);
 
     const saveAgent = async () => {
         const name = document.getElementById('agent-name').value;
         if (!name) return UI.toast.error('Agent name is required');
 
-        const newAgent = {
-            id: Date.now(),
-            username: name.toLowerCase().replace(' ', '.'),
-            password: 'agent123',
+        const editId = document.getElementById('edit-agent-id')?.value;
+        const fields = {
             full_name: name,
             role: document.getElementById('agent-role-select').value,
             agent_code: document.getElementById('agent-code-new').value,
@@ -12387,13 +12391,25 @@ const renderCurrentAssignments = async (agentId) => {
             commission_rate: parseInt(document.getElementById('agent-comm').value),
             license_start: document.getElementById('agent-license-start').value,
             license_expiry: document.getElementById('agent-license-expiry').value,
-            status: 'probation',
-            join_date: new Date().toISOString().split('T')[0]
         };
 
-        await AppDataStore.create('users', newAgent);
-        UI.hideModal();
-        UI.toast.success('Agent account created successfully');
+        if (editId) {
+            await AppDataStore.update('users', editId, fields);
+            UI.hideModal();
+            UI.toast.success('Agent updated successfully');
+        } else {
+            const newAgent = {
+                id: Date.now(),
+                username: name.toLowerCase().replace(' ', '.'),
+                password: 'agent123',
+                status: 'probation',
+                join_date: new Date().toISOString().split('T')[0],
+                ...fields
+            };
+            await AppDataStore.create('users', newAgent);
+            UI.hideModal();
+            UI.toast.success('Agent account created successfully');
+        }
         await renderAgentsTable();
     };
 
@@ -17543,7 +17559,9 @@ const initImportDemoData = async () => {
         renderAgentsTable,
         //filterAgents,
         //showAgentDetail,
+        showAgentProfile,
         openAddAgentModal,
+        openEditAgentModal,
         saveAgent,
         renewLicense,
         executeRenewal,
