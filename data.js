@@ -30,7 +30,8 @@ class DataStore {
             'performance_warnings', 'backups', 'backup_schedules', 'deployments', 'system_config',
             'system_logs', 'maintenance_windows', 'audit_logs_archive',
             'event_attendees', 'agent_event_attendees', 'case_studies',
-            'promotion_packages', 'products', 'promotions', 'appointment_locations'
+            'promotion_packages', 'products', 'promotions', 'appointment_locations',
+            'monthly_promotions'
         ];
         this.initialized = false;
         this._events = {};
