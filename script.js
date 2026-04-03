@@ -10257,46 +10257,50 @@ function _wireLoginBtn() {
             return;
         }
 
+        const d = (id) => document.getElementById(id)?.value || null;
         const data = {
-            title: document.getElementById('prospect-title')?.value,
+            title: d('prospect-title'),
             full_name: name,
-            gender: document.getElementById('prospect-gender')?.value,
-            nationality: document.getElementById('prospect-nationality')?.value,
+            gender: d('prospect-gender'),
+            nationality: d('prospect-nationality'),
             phone: phone,
-            email: document.getElementById('prospect-email')?.value,
-            ic_number: document.getElementById('prospect-ic')?.value,
-            date_of_birth: document.getElementById('prospect-dob')?.value,
-            lunar_birth: document.getElementById('prospect-lunar')?.value,
-            occupation: document.getElementById('prospect-occupation')?.value,
-            company_name: document.getElementById('prospect-company')?.value,
-            income_range: document.getElementById('prospect-income')?.value,
-            address: document.getElementById('prospect-address')?.value,
-            city: document.getElementById('prospect-city')?.value,
-            state: document.getElementById('prospect-state')?.value,
-            postal_code: document.getElementById('prospect-postal')?.value,
-            ming_gua: document.getElementById('prospect-minggua')?.value || 'MG4',
-            referred_by: document.getElementById('prospect-referred')?.value,
-            referral_relationship: document.getElementById('prospect-relationship')?.value,
+            email: d('prospect-email') || null,
+            ic_number: d('prospect-ic') || null,
+            date_of_birth: d('prospect-dob') || null,
+            lunar_birth: d('prospect-lunar') || null,
+            occupation: d('prospect-occupation') || null,
+            company_name: d('prospect-company') || null,
+            income_range: d('prospect-income') || null,
+            address: d('prospect-address') || null,
+            city: d('prospect-city') || null,
+            state: d('prospect-state') || null,
+            postal_code: d('prospect-postal') || null,
+            ming_gua: d('prospect-minggua') || null,
+            referred_by: d('prospect-referred') || null,
+            referral_relationship: d('prospect-relationship') || null,
             responsible_agent_id: parseInt(document.getElementById('prospect-agent')?.value) || null,
-            cps_assignment_date: document.getElementById('prospect-cps-date')?.value || new Date().toISOString().split('T')[0],
-            pipeline_stage: document.getElementById('prospect-stage')?.value || 'new',
-            expected_close_date: document.getElementById('prospect-close-date')?.value,
+            cps_assignment_date: d('prospect-cps-date') || new Date().toISOString().split('T')[0],
+            pipeline_stage: d('prospect-stage') || 'new',
+            expected_close_date: d('prospect-close-date') || null,
             deal_value: parseFloat(document.getElementById('prospect-deal-value')?.value) || 0
         };
 
-        if (editId) {
-            await AppDataStore.update('prospects', parseInt(editId), data);
-            UI.toast.success('Prospect updated successfully');
-        } else {
-            data.id = Date.now();
-            data.protection_deadline = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-            data.score = 5;
-            data.created_at = new Date().toISOString();
-            await AppDataStore.create('prospects', data);
-            UI.toast.success('Prospect created successfully');
-
-            // Step 8: Trigger event for referral modal
-            document.dispatchEvent(new CustomEvent('prospectCreated', { detail: data }));
+        try {
+            if (editId) {
+                await AppDataStore.update('prospects', parseInt(editId), data);
+                UI.toast.success('Prospect updated successfully');
+            } else {
+                data.id = Date.now();
+                data.protection_deadline = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+                data.score = 5;
+                data.created_at = new Date().toISOString();
+                await AppDataStore.create('prospects', data);
+                UI.toast.success('Prospect created successfully');
+                document.dispatchEvent(new CustomEvent('prospectCreated', { detail: data }));
+            }
+        } catch (err) {
+            UI.toast.error('Save failed: ' + (err.message || 'Unknown error'));
+            return;
         }
 
         UI.hideModal();
