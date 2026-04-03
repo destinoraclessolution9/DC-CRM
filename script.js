@@ -5744,6 +5744,9 @@ function _wireLoginBtn() {
 
 
     const initDemoData = async () => {
+        // Skip demo data seeding to prevent foreign key errors
+        return;
+        
         console.log('Checking for demo data seeding...');
 
         // 1. Roles
