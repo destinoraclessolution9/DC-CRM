@@ -5586,12 +5586,15 @@ function _wireLoginBtn() {
     // ==================== INIT ====================
 
     const init = async () => {
+    if (window.app._initRunning) return;
+    window.app._initRunning = true;
     await AppDataStore.init();
     console.log('App initializing...');
 
     try {
         // Check and seed demo data if needed
-        if (!await AppDataStore.getAll('users').length) {
+        const existingUsers = await AppDataStore.getAll('users');
+        if (!existingUsers.length) {
             console.log('No users found. Initializing demo data...');
             await initDemoData();
             await initDefaultFolders();
@@ -5790,8 +5793,8 @@ function _wireLoginBtn() {
 
     // ----- 2. Prospects (depend on users) -----
     const demoProspects = [
-        { id: 1, full_name: 'Tan Ah Kow', phone: '012-3456789', score: 850, responsible_agent_id: 5, ming_gua: 'MG4', element: 'Wood', status: 'active', house_audit_status: 'Completed', needs: 'Wealth,Career' },
-        { id: 2, full_name: 'Ong Bee Ling', phone: '012-9876543', score: 720, responsible_agent_id: 5, protection_deadline: '2026-03-20', ming_gua: 'MG2', status: 'active', house_audit_status: 'Pending', needs: 'Health,Relationship' }
+        { id: 1, full_name: 'Tan Ah Kow', phone: '012-3456789', score: 850, responsible_agent_id: 5, ming_gua: 'MG4', element: 'Wood', status: 'active', needs: 'Wealth,Career' },
+        { id: 2, full_name: 'Ong Bee Ling', phone: '012-9876543', score: 720, responsible_agent_id: 5, protection_deadline: '2026-03-20', ming_gua: 'MG2', status: 'active', needs: 'Health,Relationship' }
     ];
     for (const p of demoProspects) {
         await safeInsert('prospects', p);
