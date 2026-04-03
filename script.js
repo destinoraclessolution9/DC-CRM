@@ -5396,19 +5396,18 @@ In a production system, this would show the actual file contents.
 
     // ========== AUTHENTICATION & NAVIGATION ==========
     const USER_ROLES = [
-        "Level 1 super admin",
+        "Level 1 Super Admin",
         "Level 2 Marketing Manager",
-        "Level 3 Marketing Admin",
-        "Level 4 Teacher",
-        "Level 5 Content Creator",
-        "Level 6 Event Coordinator",
-        "Level 7 Team Leader",
-        "Level 8 Consultant Manager",
-        "Level 9 Senior Consultant",
-        "Level 10 Junior Consultant",
-        "Level 11 Senior Agent",
-        "Level 12 Agent",
-        "Level 13 Junior Agent"
+        "Level 3 Senior Managers",
+        "Level 4 Managers",
+        "Level 5 Team Leader",
+        "Level 6 Senior Consultant",
+        "Level 7 Consultant",
+        "Level 8 Junior Consultant",
+        "Level 9 Senior Agent",
+        "Level 10 Agent",
+        "Level 11 Junior Agent",
+        "Level 12 Ambassador"
     ];
 
 
@@ -5422,25 +5421,24 @@ In a production system, this would show the actual file contents.
         const user = _currentUser;
         if (!user) return;
 
-        // Map Level 1-13 to visible nav IDs (suffix after 'nav-')
+        // Map Level 1-12 to visible nav IDs (suffix after 'nav-')
         const levelPermissions = {
             1: ['calendar', 'pipeline', 'protection', 'agents', 'prospects', 'referrals', 'cases', 'documents', 'import', 'promotions', 'marketing-lists', 'performance', 'reports', 'risk', 'ai-insights', 'security', 'admin', 'integrations', 'settings'],
             2: ['calendar', 'pipeline', 'protection', 'agents', 'prospects', 'referrals', 'cases', 'documents', 'import', 'promotions', 'marketing-lists', 'performance', 'reports', 'risk', 'ai-insights', 'security', 'admin', 'integrations', 'settings'],
-            3: ['calendar', 'protection', 'prospects', 'referrals', 'cases', 'documents', 'import', 'promotions', 'marketing-lists', 'settings'],
-            4: ['calendar', 'pipeline', 'protection', 'agents', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'performance', 'reports', 'settings'],
-            5: ['calendar', 'pipeline', 'protection', 'agents', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'performance', 'reports', 'settings'],
-            6: ['calendar', 'pipeline', 'protection', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'performance', 'reports', 'settings'],
-            7: ['calendar', 'pipeline', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'performance', 'reports', 'settings'],
-            8: ['calendar', 'pipeline', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'performance', 'reports', 'settings'],
-            9: ['calendar', 'pipeline', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'performance', 'reports', 'settings'],
-            10: ['calendar', 'pipeline', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'performance', 'reports', 'settings'],
-            11: ['calendar', 'pipeline', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'settings'],
-            12: ['calendar', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'settings'],
-            13: ['calendar', 'prospects', 'referrals', 'cases', 'promotions', 'settings']
+            3: ['calendar', 'pipeline', 'protection', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'reports', 'risk', 'settings'],
+            4: ['calendar', 'pipeline', 'protection', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'reports', 'risk', 'settings'],
+            5: ['calendar', 'pipeline', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'settings'],
+            6: ['calendar', 'pipeline', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'settings'],
+            7: ['calendar', 'pipeline', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'settings'],
+            8: ['calendar', 'pipeline', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'settings'],
+            9: ['calendar', 'pipeline', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'settings'],
+            10: ['calendar', 'pipeline', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'settings'],
+            11: ['calendar', 'prospects', 'referrals', 'cases', 'promotions', 'settings'],
+            12: ['calendar', 'prospects', 'referrals', 'cases']
         };
 
-        // Determine level from role (e.g., "Level 1 super admin" -> 1)
-        let level = 13; // default to lowest level
+        // Determine level from role (e.g., "Level 1 Super Admin" -> 1)
+        let level = 12; // default to lowest level
         if (user.role) {
             const match = user.role.match(/Level\s+(\d+)/i);
             if (match) {
@@ -5449,14 +5447,15 @@ In a production system, this would show the actual file contents.
                 // Backward compatibility with old roles
                 const roleLower = user.role.toLowerCase();
                 if (roleLower === 'super_admin' || roleLower === 'admin') level = 1;
-                else if (roleLower === 'marketing_manager' || roleLower === 'manager') level = 2;
-                else if (roleLower === 'team_leader') level = 7;
-                else if (roleLower === 'consultant') level = 9;
-                else if (roleLower === 'agent') level = 12;
+                else if (roleLower === 'marketing_manager') level = 2;
+                else if (roleLower === 'manager') level = 4;
+                else if (roleLower === 'team_leader') level = 5;
+                else if (roleLower === 'consultant') level = 7;
+                else if (roleLower === 'agent') level = 10;
             }
         }
 
-        const allowed = levelPermissions[level] || levelPermissions[13];
+        const allowed = levelPermissions[level] || levelPermissions[12];
         
         // List of all nav item suffixes
         const allNavIds = [
@@ -5769,12 +5768,12 @@ function _wireLoginBtn() {
 
     // ----- 1. Users -----
     const demoUsers = [
-        { id: 1, username: 'admin', password: 'admin123', full_name: 'System Admin', role: 'Level 1 super admin', status: 'active' },
+        { id: 1, username: 'admin', password: 'admin123', full_name: 'System Admin', role: 'Level 1 Super Admin', status: 'active' },
         { id: 2, username: 'marketing', password: 'mkt123', full_name: 'Marketing Manager', role: 'Level 2 Marketing Manager', status: 'active' },
-        { id: 3, username: 'teamlead', password: 'tl123', full_name: 'Team Leader', role: 'Level 7 Team Leader', team_id: 1, reporting_to: 10, status: 'active' },
-        { id: 4, username: 'consultant', password: 'cons123', full_name: 'Consultant', role: 'Level 12 Agent', team_id: 1, status: 'active' },
-        { id: 5, username: 'michelle', password: 'michelle123', full_name: 'Michelle Tan', role: 'Level 9 Senior Consultant', team_id: 1, reporting_to: 3, status: 'active' },
-        { id: 10, username: 'manager', password: 'manager123', full_name: 'Manager', role: 'Level 8 Consultant Manager', team_id: 1, status: 'active' }
+        { id: 3, username: 'teamlead', password: 'tl123', full_name: 'Team Leader', role: 'Level 5 Team Leader', team_id: 1, reporting_to: 10, status: 'active' },
+        { id: 4, username: 'consultant', password: 'cons123', full_name: 'Consultant', role: 'Level 10 Agent', team_id: 1, status: 'active' },
+        { id: 5, username: 'michelle', password: 'michelle123', full_name: 'Michelle Tan', role: 'Level 6 Senior Consultant', team_id: 1, reporting_to: 3, status: 'active' },
+        { id: 10, username: 'manager', password: 'manager123', full_name: 'Manager', role: 'Level 4 Managers', team_id: 1, status: 'active' }
     ];
     for (const u of demoUsers) {
         await safeInsert('users', u);
@@ -11696,6 +11695,9 @@ const openAddSolutionModal = async (prospectId) => {
         const roleFilter = document.getElementById('filter-agent-role')?.value || '';
         const statusFilter = document.getElementById('filter-agent-status')?.value || '';
 
+        const curLvlMatch = _currentUser?.role?.match(/Level\s+(\d+)/i);
+        const canAssignUpline = curLvlMatch ? parseInt(curLvlMatch[1]) <= 4 : false;
+
         let html = '';
         for (const agent of agents) {
             if (searchQuery && !agent.full_name.toLowerCase().includes(searchQuery) && !agent.agent_code?.toLowerCase().includes(searchQuery)) return;
@@ -11726,6 +11728,7 @@ const openAddSolutionModal = async (prospectId) => {
                     <td onclick="event.stopPropagation()">
                         <button class="btn-icon view-detail-btn" onclick="event.stopPropagation(); app.showAgentProfile('${agent.id}')" title="View Detail"><i class="fas fa-eye"></i></button>
                         <button class="btn-icon edit-agent-btn" onclick="event.stopPropagation(); app.openEditAgentModal('${agent.id}')" title="Edit Agent"><i class="fas fa-edit"></i></button>
+                        ${canAssignUpline ? `<button class="btn-icon" onclick="event.stopPropagation(); app.openAssignUplineModal('${agent.id}')" title="Assign Upline"><i class="fas fa-sitemap"></i></button>` : ''}
                     </td>
                 </tr>
             `;
@@ -11742,7 +11745,13 @@ const showAgentProfile = async (agentId) => {
         return;
     }
 
-    const isAdminOrLead = _currentUser && ['Super Admin', 'Marketing Manager', 'Marketing Admin', 'Teacher', 'Manager', 'Senior Team Leader', 'Team Leader'].includes(_currentUser.role);
+    const lvlMatch = _currentUser?.role?.match(/Level\s+(\d+)/i);
+    const isAdminOrLead = lvlMatch ? parseInt(lvlMatch[1]) <= 4 : false;
+
+    // Resolve reporting_to name dynamically
+    const allUsers = await AppDataStore.getAll('users');
+    const reportingToUser = agent.reporting_to ? allUsers.find(u => u.id == agent.reporting_to) : null;
+    const reportingToName = reportingToUser ? reportingToUser.full_name : '—';
     const calculateDaysDiff = (expiryDate) => {
         if (!expiryDate) return 0;
         const diff = Math.ceil((new Date(expiryDate) - new Date()) / (1000 * 60 * 60 * 24));
@@ -11842,7 +11851,7 @@ const showAgentProfile = async (agentId) => {
                     </div>
                     <div class="stat-row">
                         <span class="stat-label">Reporting To:</span>
-                        <span class="stat-value">Michelle Tan</span>
+                        <span class="stat-value">${escapeHtml(reportingToName)}</span>
                     </div>
                 </div>
             </div>
@@ -12303,6 +12312,12 @@ const renderCurrentAssignments = async (agentId) => {
         const agent = agentId ? await AppDataStore.getById('users', agentId) : null;
         const isEdit = !!agent;
 
+        const allUsers = await AppDataStore.getAll('users');
+        const reportingOptions = allUsers
+            .filter(u => u.id != agentId)
+            .map(u => `<option value="${u.id}" ${isEdit && agent.reporting_to == u.id ? 'selected' : ''}>${escapeHtml(u.full_name)} (${u.role || 'Agent'})</option>`)
+            .join('');
+
         const content = `
     <div class="add-agent-form">
                 <input type="hidden" id="edit-agent-id" value="${isEdit ? agent.id : ''}">
@@ -12349,6 +12364,13 @@ const renderCurrentAssignments = async (agentId) => {
                             <label>Commission Rate (%)</label>
                             <input type="number" id="agent-comm" class="form-control" value="${isEdit ? (agent.commission_rate ?? 30) : 30}">
                         </div>
+                        <div class="form-group half">
+                            <label>Reporting To</label>
+                            <select id="agent-reporting-to" class="form-control">
+                                <option value="">— None —</option>
+                                ${reportingOptions}
+                            </select>
+                        </div>
                     </div>
                 </div>
 
@@ -12381,6 +12403,7 @@ const renderCurrentAssignments = async (agentId) => {
         if (!name) return UI.toast.error('Agent name is required');
 
         const editId = document.getElementById('edit-agent-id')?.value;
+        const reportingToVal = document.getElementById('agent-reporting-to').value;
         const fields = {
             full_name: name,
             role: document.getElementById('agent-role-select').value,
@@ -12391,6 +12414,7 @@ const renderCurrentAssignments = async (agentId) => {
             commission_rate: parseInt(document.getElementById('agent-comm').value),
             license_start: document.getElementById('agent-license-start').value,
             license_expiry: document.getElementById('agent-license-expiry').value,
+            reporting_to: reportingToVal ? parseInt(reportingToVal) : null,
         };
 
         if (editId) {
@@ -12413,6 +12437,39 @@ const renderCurrentAssignments = async (agentId) => {
         await renderAgentsTable();
     };
 
+    const openAssignUplineModal = async (agentId) => {
+        const agent = await AppDataStore.getById('users', agentId);
+        if (!agent) return UI.toast.error('Agent not found');
+
+        const allUsers = await AppDataStore.getAll('users');
+        const options = allUsers
+            .filter(u => u.id != agentId)
+            .map(u => `<option value="${u.id}" ${agent.reporting_to == u.id ? 'selected' : ''}>${escapeHtml(u.full_name)} (${u.role || 'Agent'})</option>`)
+            .join('');
+
+        const content = `
+            <div class="form-group">
+                <p style="margin-bottom:12px; color:var(--gray-600);">Assigning upline for <strong>${escapeHtml(agent.full_name)}</strong>. Same-level reporting is allowed.</p>
+                <label>Reports To</label>
+                <select id="upline-select" class="form-control">
+                    <option value="">— None —</option>
+                    ${options}
+                </select>
+            </div>`;
+
+        UI.showModal('Assign Upline', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save Assignment', type: 'primary', action: `(async () => { await app.saveUplineAssignment('${agentId}'); })()` }
+        ]);
+    };
+
+    const saveUplineAssignment = async (agentId) => {
+        const val = document.getElementById('upline-select').value;
+        await AppDataStore.update('users', agentId, { reporting_to: val ? parseInt(val) : null });
+        UI.hideModal();
+        UI.toast.success('Upline assignment saved');
+        await renderAgentsTable();
+    };
 
     const updateAgentTargets = async (agentId) => {
         const target = await AppDataStore.query('agent_targets', { agent_id: agentId })[0];
@@ -17563,6 +17620,8 @@ const initImportDemoData = async () => {
         openAddAgentModal,
         openEditAgentModal,
         saveAgent,
+        openAssignUplineModal,
+        saveUplineAssignment,
         renewLicense,
         executeRenewal,
         sendRenewalReminder,
