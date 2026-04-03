@@ -1,5 +1,6 @@
 // Ensure app object exists globally - MUST BE FIRST LINE
 window.app = window.app || {};
+window.DataStore = window.AppDataStore; // Alias for backward compatibility
 (async function() {
 console.log("!!! ANTIGRAVITY v2 LOADED !!!");
 
