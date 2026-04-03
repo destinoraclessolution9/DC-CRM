@@ -4623,7 +4623,8 @@ In a production system, this would show the actual file contents.
         );
 
         // Determine async trend (compare with last score)
-        const lastScore = await AppDataStore.getAll('lead_scores')
+        const allScores = await AppDataStore.getAll('lead_scores');
+        const lastScore = allScores
             .filter(l => l.prospect_id === prospectId)
             .sort((a, b) => new Date(b.score_date) - new Date(a.score_date))[0];
 
@@ -7449,7 +7450,7 @@ function _wireLoginBtn() {
         const today = new Date();
         const dateStr = `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, '0')}-${today.getDate().toString().padStart(2, '0')}`;
 
-        let activities = await getVisibleActivities().filter(a => a.activity_date === dateStr);
+        let activities = (await getVisibleActivities()).filter(a => a.activity_date === dateStr);
 
         // Apply filters
         if (_filters && _filters.agent && _filters.agent !== 'all') {
@@ -12114,7 +12115,7 @@ const html = `
 
                 
     const renderCustomerHistory = async (agentId) => {
-        const customers = await getVisibleCustomers().filter(c => c.responsible_agent_id === agentId);
+        const customers = (await getVisibleCustomers()).filter(c => c.responsible_agent_id === agentId);
         if (customers.length === 0) return '<p>No converted customers yet.</p>';
 
         return `
