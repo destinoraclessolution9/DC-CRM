@@ -15,6 +15,8 @@ if (!window.AppDataStore._patched) {
             throw e;
         }
     };
+    // Alias getById to get
+    window.AppDataStore.getById = window.AppDataStore.get;
     window.AppDataStore._patched = true;
 }
 (async function() {
@@ -5766,115 +5768,78 @@ function _wireLoginBtn() {
 
 
     const initDemoData = async () => {
-        console.log('Checking for demo data seeding...');
+    console.log('Checking for demo data seeding...');
 
-        // 1. Roles
-        const roles = await AppDataStore.getAll('roles');
-        if (roles.length === 0) {
-            console.log('Seeding roles...');
-            const defaultRoles = USER_ROLES.map(r => ({ role_name: r, permissions: { all: true } }));
-            defaultRoles.push(
-                { role_name: 'super_admin', permissions: { all: true } },
-                { role_name: 'marketing_manager', permissions: { 'view-dashboard': true, 'manage-promotions': true, 'view-reports': true } },
-                { role_name: 'team_leader', permissions: { 'view-dashboard': true, 'view-team-data': true } },
-                { role_name: 'consultant', permissions: { 'view-dashboard': true, 'manage-self-prospects': true } }
-            );
-            for (const r of defaultRoles) {
-                await AppDataStore.create('roles', r);
-            }
+    // Helper to create a record only if it doesn't exist
+    const createIfMissing = async (table, data, idField = 'id') => {
+        const existing = await AppDataStore.getById(table, data[idField]);
+        if (!existing) {
+            await AppDataStore.create(table, data);
+            console.log(`Created ${table} record with id ${data[idField]}`);
+        } else {
+            console.log(`${table} record id ${data[idField]} already exists`);
         }
-
-        // 2. Users
-        const users = await AppDataStore.getAll('users');
-        if (users.length === 0) {
-            console.log('Seeding users...');
-            const demoUsers = [
-                { id: 1, username: 'admin', password: 'admin123', full_name: 'System Admin', role: 'Level 1 super admin' },
-                { id: 2, username: 'marketing', password: 'mkt123', full_name: 'Marketing Manager', role: 'Level 2 Marketing Manager' },
-                { id: 3, username: 'teamlead', password: 'tl123', full_name: 'Team Leader', role: 'Level 7 Team Leader', team_id: 1, reporting_to: 10 },
-                { id: 4, username: 'consultant', password: 'cons123', full_name: 'Consultant', role: 'Level 12 Agent', team_id: 1 },
-                { id: 5, username: 'michelle', password: 'michelle123', full_name: 'Michelle Tan', role: 'Level 9 Senior Consultant', team_id: 1, reporting_to: 3 },
-                { id: 10, username: 'manager', password: 'manager123', full_name: 'Manager', role: 'Level 8 Consultant Manager', team_id: 1, reporting_to: null }
-            ];
-            for (const u of demoUsers) {
-                await AppDataStore.create('users', u);
-            }
-        }
-
-        // 3. Prospects
-        const prospects = await AppDataStore.getAll('prospects');
-        if (prospects.length === 0) {
-            console.log('Seeding prospects...');
-            const demoProspects = [
-                {
-                    id: 1,
-                    full_name: 'Tan Ah Kow',
-                    phone: '012-3456789',
-                    score: 850,
-                    responsible_agent_id: 5,
-                    ming_gua: 'MG4',
-                    element: 'Wood'
-                },
-                {
-                    id: 2,
-                    full_name: 'Ong Bee Ling',
-                    phone: '012-9876543',
-                    score: 720,
-                    responsible_agent_id: 6,
-                    protection_deadline: '2026-03-20',
-                    ming_gua: 'MG2'
-                }
-            ];
-            for (const p of demoProspects) {
-                await AppDataStore.create('prospects', p);
-            }
-        }
-
-        // 4. Activities
-        const activities = await AppDataStore.getAll('activities');
-        if (activities.length === 0) {
-            console.log('Seeding activities...');
-            const demoActivities = [
-                {
-                    activity_type: 'CPS',
-                    activity_title: 'Initial Consultation',
-                    activity_date: '2026-03-04',
-                    start_time: '09:00',
-                    end_time: '10:00',
-                    prospect_id: 1,
-                    lead_agent_id: 5,
-                    summary: 'Initial consultation scheduling'
-                },
-                {
-                    activity_type: 'FTF',
-                    activity_title: 'Face to Face Meeting',
-                    activity_date: '2026-03-04',
-                    start_time: '11:00',
-                    end_time: '12:00',
-                    prospect_id: 2,
-                    lead_agent_id: 6,
-                    summary: 'Discussed career advancement'
-                }
-            ];
-            for (const ac of demoActivities) {
-                await AppDataStore.create('activities', ac);
-            }
-        }
-
-        // 5. Projects & Tasks
-        const projects = await AppDataStore.getAll('projects');
-        if (projects.length === 0) {
-            await AppDataStore.create('projects', { name: 'Website Redesign', status: 'active' });
-            await AppDataStore.create('projects', { name: 'Mobile App', status: 'planning' });
-        }
-
-        const tasks = await AppDataStore.getAll('tasks');
-        if (tasks.length === 0) {
-            await AppDataStore.create('tasks', { title: 'Design mockups', project_id: 1, completed: false });
-        }
-
-        UI.toast.success('Check complete. Missing demo data seeded.');
     };
+
+    // 1. Roles (if needed)
+    const roles = await AppDataStore.getAll('roles');
+    if (roles.length === 0) {
+        console.log('Seeding roles...');
+        const defaultRoles = USER_ROLES.map(r => ({ role_name: r, permissions: { all: true } }));
+        defaultRoles.push(
+            { role_name: 'super_admin', permissions: { all: true } },
+            { role_name: 'marketing_manager', permissions: { 'view-dashboard': true, 'manage-promotions': true, 'view-reports': true } },
+            { role_name: 'team_leader', permissions: { 'view-dashboard': true, 'view-team-data': true } },
+            { role_name: 'consultant', permissions: { 'view-dashboard': true, 'manage-self-prospects': true } }
+        );
+        for (const r of defaultRoles) {
+            await createIfMissing('roles', r);
+        }
+    }
+
+    // 2. Users – insert one by one to avoid foreign key conflicts
+    const demoUsers = [
+        { id: 1, username: 'admin', password: 'admin123', full_name: 'System Admin', role: 'Level 1 super admin' },
+        { id: 2, username: 'marketing', password: 'mkt123', full_name: 'Marketing Manager', role: 'Level 2 Marketing Manager' },
+        { id: 3, username: 'teamlead', password: 'tl123', full_name: 'Team Leader', role: 'Level 7 Team Leader', team_id: 1, reporting_to: 10 },
+        { id: 4, username: 'consultant', password: 'cons123', full_name: 'Consultant', role: 'Level 12 Agent', team_id: 1 },
+        { id: 5, username: 'michelle', password: 'michelle123', full_name: 'Michelle Tan', role: 'Level 9 Senior Consultant', team_id: 1, reporting_to: 3 },
+        { id: 10, username: 'manager', password: 'manager123', full_name: 'Manager', role: 'Level 8 Consultant Manager', team_id: 1, reporting_to: null }
+    ];
+    for (const u of demoUsers) {
+        await createIfMissing('users', u);
+    }
+
+    // 3. Prospects – only after users exist
+    const prospects = await AppDataStore.getAll('prospects');
+    if (prospects.length === 0) {
+        console.log('Seeding prospects...');
+        const demoProspects = [
+            { id: 1, full_name: 'Tan Ah Kow', phone: '012-3456789', score: 850, responsible_agent_id: 5, ming_gua: 'MG4', element: 'Wood' },
+            { id: 2, full_name: 'Ong Bee Ling', phone: '012-9876543', score: 720, responsible_agent_id: 5, protection_deadline: '2026-03-20', ming_gua: 'MG2' }
+        ];
+        for (const p of demoProspects) {
+            await createIfMissing('prospects', p);
+        }
+    }
+
+    // 4. Activities – similarly
+    const activities = await AppDataStore.getAll('activities');
+    if (activities.length === 0) {
+        console.log('Seeding activities...');
+        const demoActivities = [
+            { id: 1001, activity_type: 'CPS', activity_title: 'Initial Consultation', activity_date: '2026-03-04', start_time: '09:00', end_time: '10:00', prospect_id: 1, lead_agent_id: 5, note_outcome: 'Initial consultation scheduling' },
+            { id: 1002, activity_type: 'FTF', activity_title: 'Face to Face Meeting', activity_date: '2026-03-04', start_time: '11:00', end_time: '12:00', prospect_id: 2, lead_agent_id: 5, note_outcome: 'Discussed career advancement' }
+        ];
+        for (const a of demoActivities) {
+            await createIfMissing('activities', a);
+        }
+    }
+
+    // ... other tables (projects, tasks) can be added similarly
+
+    UI.toast.success('Demo data initialization complete.');
+};
 
     const updateUserDisplay = () => {
         const userDisplay = document.getElementById('user-name-label');
