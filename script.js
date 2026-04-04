@@ -2965,10 +2965,14 @@ In a production system, this would show the actual file contents.
             };
 
             try {
-                // In a real implementation this would call the API
-                // For demo, we simulate success and return a mock event ID
-                console.log('Mocking Google Calendar Event Creation', event);
-                return 'mock_event_id_' + Date.now();
+                const response = await fetch(`${this.baseUrl}/calendars/primary/events`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify(event)
+                });
+                if (!response.ok) throw new Error('Calendar API error: ' + response.status);
+                const data = await response.json();
+                return data.id;
             } catch (error) {
                 console.error('Error creating Google Calendar event:', error);
                 return null;
@@ -2980,9 +2984,17 @@ In a production system, this would show the actual file contents.
             if (!token) return false;
 
             try {
-                // For demo, simulate success
-                console.log('Mocking Google Calendar Event Update', googleEventId);
-                return true;
+                const response = await fetch(`${this.baseUrl}/calendars/primary/events/${googleEventId}`, {
+                    method: 'PUT',
+                    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        summary: activity.activity_title || `${activity.activity_type} Meeting`,
+                        description: activity.discussion_summary || '',
+                        start: { dateTime: `${activity.activity_date}T${activity.start_time}:00`, timeZone: 'Asia/Kuala_Lumpur' },
+                        end: { dateTime: `${activity.activity_date}T${activity.end_time}:00`, timeZone: 'Asia/Kuala_Lumpur' }
+                    })
+                });
+                return response.ok;
             } catch (error) {
                 console.error('Error updating Google Calendar event:', error);
                 return false;
@@ -2994,9 +3006,11 @@ In a production system, this would show the actual file contents.
             if (!token) return false;
 
             try {
-                // For demo, simulate success
-                console.log('Mocking Google Calendar Event Deletion', googleEventId);
-                return true;
+                const response = await fetch(`${this.baseUrl}/calendars/primary/events/${googleEventId}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                return response.ok || response.status === 204;
             } catch (error) {
                 console.error('Error deleting Google Calendar event:', error);
                 return false;
@@ -3008,9 +3022,16 @@ In a production system, this would show the actual file contents.
             if (!token) return [];
 
             try {
-                // For demo, simulate empty events list
-                console.log('Mocking Google Calendar Event List fetch');
-                return [];
+                const params = new URLSearchParams({
+                    timeMin: timeMin.toISOString(), timeMax: timeMax.toISOString(),
+                    singleEvents: 'true', orderBy: 'startTime'
+                });
+                const response = await fetch(`${this.baseUrl}/calendars/primary/events?${params}`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (!response.ok) throw new Error('Calendar API error: ' + response.status);
+                const data = await response.json();
+                return data.items || [];
             } catch (error) {
                 console.error('Error listing Google Calendar events:', error);
                 return [];
@@ -3075,12 +3096,46 @@ In a production system, this would show the actual file contents.
         async syncGoogleToCRM() {
             if (this.syncInProgress) return;
             this.syncInProgress = true;
-
             try {
-                // For demo purposes, we will not fetch Google events, just finish.
-                this.syncInProgress = false;
+                const timeMin = new Date(Date.now() - 30 * 86400000);
+                const timeMax = new Date(Date.now() + 30 * 86400000);
+                const googleEvents = await this.googleCalendar.listEvents(timeMin, timeMax);
+                if (!googleEvents.length) { this.syncInProgress = false; return; }
+
+                const syncLog = this.getSyncLog();
+                let imported = 0;
+                for (const gEvent of googleEvents) {
+                    // Skip events that originated from CRM
+                    if (gEvent.extendedProperties?.private?.crm_activity_id) continue;
+                    // Skip already-synced events
+                    if (syncLog.find(s => s.google_event_id === gEvent.id)) continue;
+
+                    const startDate = gEvent.start?.date || gEvent.start?.dateTime?.split('T')[0];
+                    const startTime = gEvent.start?.dateTime?.split('T')[1]?.substring(0, 5) || '09:00';
+                    const endTime = gEvent.end?.dateTime?.split('T')[1]?.substring(0, 5) || '10:00';
+
+                    await AppDataStore.create('activities', {
+                        activity_title: gEvent.summary || 'Google Calendar Event',
+                        activity_type: 'Call',
+                        activity_date: startDate,
+                        start_time: startTime,
+                        end_time: endTime,
+                        status: 'completed',
+                        discussion_summary: gEvent.description || '',
+                        lead_agent_id: _currentUser?.id || 1,
+                        source: 'google_calendar',
+                        google_event_id: gEvent.id,
+                        created_at: new Date().toISOString()
+                    });
+
+                    syncLog.push({ google_event_id: gEvent.id, last_synced_at: new Date().toISOString() });
+                    imported++;
+                }
+                localStorage.setItem('google_sync_log', JSON.stringify(syncLog));
+                if (imported > 0) UI.toast.success(`Imported ${imported} events from Google Calendar`);
             } catch (error) {
                 console.error('Import error:', error);
+            } finally {
                 this.syncInProgress = false;
             }
         }
@@ -5852,6 +5907,853 @@ function _wireLoginBtn() {
         return phaseMap[viewId] || '?';
     };
 
+    // ========== CUSTOMER HEALTH SCORE ==========
+
+    const calculateCustomerHealthScore = async (customer) => {
+        let score = 0;
+        const activities = await AppDataStore.query('activities', { customer_id: customer.id }).catch(() => []);
+        if (activities.length > 0) {
+            const last = activities.sort((a, b) => (b.activity_date || '').localeCompare(a.activity_date || ''))[0];
+            const days = Math.floor((Date.now() - new Date(last.activity_date)) / 86400000);
+            if (days <= 30) score += 40;
+            else if (days <= 60) score += 25;
+            else if (days <= 90) score += 10;
+        }
+        const purchases = await AppDataStore.query('purchases', { customer_id: customer.id }).catch(() => []);
+        if (purchases.length > 0) {
+            const last = purchases.sort((a, b) => (b.purchase_date || '').localeCompare(a.purchase_date || ''))[0];
+            const days = Math.floor((Date.now() - new Date(last.purchase_date)) / 86400000);
+            if (days <= 90) score += 30;
+            else if (days <= 180) score += 15;
+        }
+        score += Math.min(30, Math.floor((customer.score || 0) / 10));
+        const grade = score >= 70 ? 'green' : score >= 40 ? 'yellow' : 'red';
+        const label = score >= 70 ? 'Healthy' : score >= 40 ? 'At Risk' : 'Churning';
+        return { score, grade, label };
+    };
+
+    const renderHealthBadge = (health) => {
+        const bg = health.grade === 'green' ? '#10b981' : health.grade === 'yellow' ? '#f59e0b' : '#ef4444';
+        return `<span class="score-badge" style="background:${bg}; color:white;" title="Health Score: ${health.score}/100">${health.label} ${health.score}</span>`;
+    };
+
+    const renderQuickHealthBadge = (customer) => {
+        const score = customer.score || 0;
+        const grade = score >= 70 ? 'green' : score >= 40 ? 'yellow' : 'red';
+        const label = score >= 70 ? 'Healthy' : score >= 40 ? 'At Risk' : 'Churning';
+        const bg = grade === 'green' ? '#10b981' : grade === 'yellow' ? '#f59e0b' : '#ef4444';
+        return `<span class="score-badge" style="background:${bg}; color:white; font-size:11px;" title="Quick health estimate">${label}</span>`;
+    };
+
+    // ========== MEETING SCHEDULER / BOOKING LINKS ==========
+
+    const showBookingSettingsView = async (container) => {
+        _currentView = 'booking_settings';
+        const allSlots = await AppDataStore.getAll('booking_slots').catch(() => []);
+        const agentSlots = allSlots.filter(s => s.agent_id === (_currentUser?.id || 1));
+        const allAppts = await AppDataStore.getAll('booking_appointments').catch(() => []);
+        const appointments = allAppts.filter(a => a.agent_id === (_currentUser?.id || 1))
+            .sort((a, b) => (b.booking_date || '').localeCompare(a.booking_date || ''));
+        const bookingUrl = `${window.location.origin}/booking.html?agent=${_currentUser?.id || 1}`;
+        const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+
+        container.innerHTML = `
+            <div style="padding:24px; max-width:1000px; margin:0 auto;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px;">
+                    <div>
+                        <h1 style="font-size:24px; font-weight:700; margin:0;">Meeting Scheduler</h1>
+                        <p style="color:var(--gray-500); margin:4px 0 0;">Let prospects book appointments directly via a shareable link.</p>
+                    </div>
+                    <button class="btn primary" onclick="app.openAddSlotModal()"><i class="fas fa-plus"></i> Add Time Slot</button>
+                </div>
+                <div style="background:var(--gray-50); border:1px solid var(--gray-200); border-radius:12px; padding:20px; margin-bottom:24px;">
+                    <h3 style="margin:0 0 8px; font-size:15px;">Your Booking Link</h3>
+                    <div style="display:flex; align-items:center; gap:12px;">
+                        <input type="text" value="${bookingUrl}" readonly style="flex:1; padding:8px 12px; border:1px solid var(--border); border-radius:6px; background:white; font-size:13px;">
+                        <button class="btn secondary" onclick="app.copyBookingLink()"><i class="fas fa-copy"></i> Copy</button>
+                        <a href="${bookingUrl}" target="_blank" class="btn secondary"><i class="fas fa-external-link-alt"></i> Preview</a>
+                    </div>
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:24px;">
+                    <div>
+                        <h3 style="font-size:16px; font-weight:600; margin-bottom:12px;">Availability Slots</h3>
+                        ${agentSlots.length === 0 ? `
+                            <div style="text-align:center; padding:40px; background:white; border:1px solid var(--gray-200); border-radius:8px; color:var(--gray-400);">
+                                <i class="fas fa-clock" style="font-size:32px; display:block; margin-bottom:8px;"></i>
+                                No slots configured yet.
+                            </div>
+                        ` : agentSlots.map(slot => `
+                            <div style="display:flex; align-items:center; justify-content:space-between; background:white; border:1px solid var(--gray-200); border-radius:8px; padding:12px 16px; margin-bottom:8px;">
+                                <div>
+                                    <strong>${dayNames[slot.day_of_week]}</strong>
+                                    <span style="color:var(--gray-500); margin-left:8px;">${slot.start_time} – ${slot.end_time}</span>
+                                    <span style="color:var(--gray-400); font-size:12px; margin-left:8px;">${slot.duration_minutes}min slots</span>
+                                </div>
+                                <div style="display:flex; gap:8px; align-items:center;">
+                                    <label style="display:flex; align-items:center; gap:6px; font-size:13px; cursor:pointer;">
+                                        <input type="checkbox" ${slot.is_active ? 'checked' : ''} onchange="app.toggleSlotActive(${slot.id}, this.checked)"> Active
+                                    </label>
+                                    <button class="btn-icon" onclick="app.deleteBookingSlot(${slot.id})" style="color:var(--error);"><i class="fas fa-trash"></i></button>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                    <div>
+                        <h3 style="font-size:16px; font-weight:600; margin-bottom:12px;">Appointments <span style="font-size:13px; font-weight:400; color:var(--gray-400);">(${appointments.filter(a => a.status !== 'cancelled').length})</span></h3>
+                        ${appointments.length === 0 ? `
+                            <div style="text-align:center; padding:40px; background:white; border:1px solid var(--gray-200); border-radius:8px; color:var(--gray-400);">
+                                <i class="fas fa-calendar" style="font-size:32px; display:block; margin-bottom:8px;"></i>
+                                No bookings yet. Share your link to get started.
+                            </div>
+                        ` : appointments.slice(0, 10).map(appt => `
+                            <div style="background:white; border:1px solid var(--gray-200); border-radius:8px; padding:12px 16px; margin-bottom:8px;">
+                                <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                                    <div>
+                                        <strong>${appt.prospect_name}</strong>
+                                        <div style="font-size:12px; color:var(--gray-500);">${appt.booking_date} ${appt.start_time} · ${appt.prospect_phone || appt.prospect_email || ''}</div>
+                                    </div>
+                                    <div style="display:flex; gap:6px;">
+                                        ${appt.status === 'pending' ? `
+                                            <button class="btn primary" style="padding:4px 10px; font-size:12px;" onclick="app.confirmBookingAppointment(${appt.id})">Confirm</button>
+                                            <button class="btn secondary" style="padding:4px 10px; font-size:12px;" onclick="app.cancelBookingAppointment(${appt.id})">Cancel</button>
+                                        ` : `<span style="font-size:12px; padding:4px 10px; border-radius:20px; background:${appt.status==='confirmed'?'#d1fae5':'#fee2e2'}; color:${appt.status==='confirmed'?'#065f46':'#991b1b'};">${appt.status}</span>`}
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            </div>
+        `;
+    };
+
+    const openAddSlotModal = () => {
+        UI.showModal('Add Availability Slot', `
+            <div style="display:flex; flex-direction:column; gap:16px;">
+                <div>
+                    <label style="display:block; font-weight:500; margin-bottom:6px;">Day of Week</label>
+                    <select id="slot-day" class="form-control">
+                        <option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option>
+                        <option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option><option value="0">Sunday</option>
+                    </select>
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                    <div><label style="display:block; font-weight:500; margin-bottom:6px;">Start Time</label><input type="time" id="slot-start" class="form-control" value="09:00"></div>
+                    <div><label style="display:block; font-weight:500; margin-bottom:6px;">End Time</label><input type="time" id="slot-end" class="form-control" value="17:00"></div>
+                </div>
+                <div>
+                    <label style="display:block; font-weight:500; margin-bottom:6px;">Duration per Slot (minutes)</label>
+                    <select id="slot-duration" class="form-control">
+                        <option value="30">30 minutes</option><option value="45">45 minutes</option>
+                        <option value="60" selected>60 minutes</option><option value="90">90 minutes</option>
+                    </select>
+                </div>
+            </div>
+        `, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save Slot', type: 'primary', action: '(async () => { await app.saveBookingSlot(); })()' }
+        ]);
+    };
+
+    const saveBookingSlot = async () => {
+        const start = document.getElementById('slot-start').value;
+        const end = document.getElementById('slot-end').value;
+        if (!start || !end || start >= end) { UI.toast.error('End time must be after start time.'); return; }
+        await AppDataStore.create('booking_slots', {
+            agent_id: _currentUser?.id || 1,
+            day_of_week: parseInt(document.getElementById('slot-day').value),
+            start_time: start, end_time: end,
+            duration_minutes: parseInt(document.getElementById('slot-duration').value),
+            is_active: true, created_at: new Date().toISOString()
+        });
+        UI.hideModal();
+        UI.toast.success('Availability slot added.');
+        await showBookingSettingsView(document.getElementById('content-viewport'));
+    };
+
+    const deleteBookingSlot = async (slotId) => {
+        await AppDataStore.delete('booking_slots', slotId);
+        UI.toast.success('Slot removed.');
+        await showBookingSettingsView(document.getElementById('content-viewport'));
+    };
+
+    const toggleSlotActive = async (slotId, isActive) => {
+        await AppDataStore.update('booking_slots', slotId, { is_active: isActive });
+        UI.toast.success(isActive ? 'Slot activated.' : 'Slot deactivated.');
+    };
+
+    const copyBookingLink = () => {
+        const url = `${window.location.origin}/booking.html?agent=${_currentUser?.id || 1}`;
+        navigator.clipboard.writeText(url).then(() => UI.toast.success('Booking link copied!')).catch(() => UI.toast.info(`Link: ${url}`));
+    };
+
+    const confirmBookingAppointment = async (apptId) => {
+        await AppDataStore.update('booking_appointments', apptId, { status: 'confirmed' });
+        UI.toast.success('Appointment confirmed.');
+        await showBookingSettingsView(document.getElementById('content-viewport'));
+    };
+
+    const cancelBookingAppointment = async (apptId) => {
+        await AppDataStore.update('booking_appointments', apptId, { status: 'cancelled' });
+        UI.toast.success('Appointment cancelled.');
+        await showBookingSettingsView(document.getElementById('content-viewport'));
+    };
+
+    // ========== LEAD CAPTURE FORMS ==========
+
+    const showLeadFormsView = async (container) => {
+        _currentView = 'lead_forms';
+        const forms = await AppDataStore.getAll('lead_forms').catch(() => []);
+        container.innerHTML = `
+            <div style="padding:24px; max-width:1000px; margin:0 auto;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px;">
+                    <div>
+                        <h1 style="font-size:24px; font-weight:700; margin:0;">Lead Capture Forms</h1>
+                        <p style="color:var(--gray-500); margin:4px 0 0;">Shareable forms that auto-create prospects when submitted.</p>
+                    </div>
+                    <button class="btn primary" onclick="app.openFormBuilderModal()"><i class="fas fa-plus"></i> New Form</button>
+                </div>
+                ${forms.length === 0 ? `
+                    <div style="text-align:center; padding:60px; background:white; border:1px solid var(--gray-200); border-radius:12px; color:var(--gray-400);">
+                        <i class="fas fa-wpforms" style="font-size:48px; display:block; margin-bottom:12px;"></i>
+                        <h3 style="color:var(--gray-500);">No forms yet</h3>
+                        <p>Create your first lead capture form to start collecting prospects automatically.</p>
+                        <button class="btn primary" onclick="app.openFormBuilderModal()">Create Form</button>
+                    </div>
+                ` : `
+                    <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:16px;">
+                        ${forms.map(form => `
+                            <div style="background:white; border:1px solid var(--gray-200); border-radius:12px; padding:20px;">
+                                <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px;">
+                                    <div>
+                                        <h3 style="margin:0; font-size:16px;">${form.name}</h3>
+                                        <p style="margin:4px 0 0; color:var(--gray-500); font-size:13px;">${form.description || 'No description'}</p>
+                                    </div>
+                                    <span style="padding:3px 10px; border-radius:20px; font-size:12px; background:${form.is_active ? '#d1fae5' : '#f3f4f6'}; color:${form.is_active ? '#065f46' : '#6b7280'};">${form.is_active ? 'Active' : 'Inactive'}</span>
+                                </div>
+                                <div style="font-size:12px; color:var(--gray-400); margin-bottom:16px;">${(form.fields || []).length} fields</div>
+                                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                                    <button class="btn secondary" style="flex:1; font-size:12px; padding:6px;" onclick="app.copyFormLink(${form.id})"><i class="fas fa-copy"></i> Copy Link</button>
+                                    <button class="btn secondary" style="flex:1; font-size:12px; padding:6px;" onclick="app.showFormSubmissions(${form.id})"><i class="fas fa-inbox"></i> Submissions</button>
+                                    <button class="btn-icon" style="color:var(--error);" onclick="app.deleteLeadForm(${form.id})"><i class="fas fa-trash"></i></button>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                `}
+            </div>
+        `;
+    };
+
+    const openFormBuilderModal = () => {
+        UI.showModal('Create Lead Capture Form', `
+            <div style="display:flex; flex-direction:column; gap:16px;">
+                <div><label style="display:block; font-weight:500; margin-bottom:6px;">Form Name</label>
+                <input type="text" id="form-name" class="form-control" placeholder="e.g. Free Consultation Request"></div>
+                <div><label style="display:block; font-weight:500; margin-bottom:6px;">Description</label>
+                <textarea id="form-description" class="form-control" rows="2" placeholder="Brief description shown on the form..."></textarea></div>
+                <div>
+                    <label style="display:block; font-weight:500; margin-bottom:8px;">Form Fields</label>
+                    <div id="form-fields-list" style="display:flex; flex-direction:column; gap:8px; margin-bottom:10px;">
+                        <div class="form-field-row" style="display:flex; gap:8px; align-items:center;">
+                            <input type="text" class="form-control field-label" value="Full Name" style="flex:1;">
+                            <select class="form-control field-type" style="width:110px;"><option value="text" selected>Text</option><option value="email">Email</option><option value="tel">Phone</option><option value="textarea">Long Text</option><option value="date">Date</option></select>
+                            <label style="display:flex; align-items:center; gap:4px; font-size:12px; white-space:nowrap;"><input type="checkbox" class="field-required" checked> Req</label>
+                            <button class="btn-icon" style="color:var(--error);" onclick="this.closest('.form-field-row').remove()"><i class="fas fa-times"></i></button>
+                        </div>
+                        <div class="form-field-row" style="display:flex; gap:8px; align-items:center;">
+                            <input type="text" class="form-control field-label" value="Phone" style="flex:1;">
+                            <select class="form-control field-type" style="width:110px;"><option value="text">Text</option><option value="email">Email</option><option value="tel" selected>Phone</option><option value="textarea">Long Text</option><option value="date">Date</option></select>
+                            <label style="display:flex; align-items:center; gap:4px; font-size:12px; white-space:nowrap;"><input type="checkbox" class="field-required" checked> Req</label>
+                            <button class="btn-icon" style="color:var(--error);" onclick="this.closest('.form-field-row').remove()"><i class="fas fa-times"></i></button>
+                        </div>
+                    </div>
+                    <button class="btn secondary" style="font-size:13px;" onclick="app.addFormField()"><i class="fas fa-plus"></i> Add Field</button>
+                </div>
+            </div>
+        `, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save Form', type: 'primary', action: '(async () => { await app.saveLeadForm(); })()' }
+        ]);
+    };
+
+    const addFormField = () => {
+        const list = document.getElementById('form-fields-list');
+        const row = document.createElement('div');
+        row.className = 'form-field-row';
+        row.style.cssText = 'display:flex; gap:8px; align-items:center;';
+        row.innerHTML = `
+            <input type="text" class="form-control field-label" placeholder="Field label" style="flex:1;">
+            <select class="form-control field-type" style="width:110px;"><option value="text" selected>Text</option><option value="email">Email</option><option value="tel">Phone</option><option value="textarea">Long Text</option><option value="date">Date</option></select>
+            <label style="display:flex; align-items:center; gap:4px; font-size:12px; white-space:nowrap;"><input type="checkbox" class="field-required"> Req</label>
+            <button class="btn-icon" style="color:var(--error);" onclick="this.closest('.form-field-row').remove()"><i class="fas fa-times"></i></button>
+        `;
+        list.appendChild(row);
+    };
+
+    const saveLeadForm = async () => {
+        const name = document.getElementById('form-name').value.trim();
+        if (!name) { UI.toast.error('Form name is required.'); return; }
+        const fields = [];
+        document.querySelectorAll('#form-fields-list .form-field-row').forEach((row, i) => {
+            const label = row.querySelector('.field-label').value.trim();
+            const type = row.querySelector('.field-type').value;
+            const required = row.querySelector('.field-required').checked;
+            if (label) fields.push({ id: `field_${i}`, label, type, required });
+        });
+        if (fields.length === 0) { UI.toast.error('Add at least one field.'); return; }
+        const slug = name.toLowerCase().replace(/[^a-z0-9]/g, '-') + '-' + Date.now();
+        await AppDataStore.create('lead_forms', {
+            name, slug, title: name,
+            description: document.getElementById('form-description').value.trim(),
+            fields, assigned_agent_id: _currentUser?.id || 1,
+            is_active: true, created_at: new Date().toISOString()
+        });
+        UI.hideModal();
+        UI.toast.success('Lead form created!');
+        await showLeadFormsView(document.getElementById('content-viewport'));
+    };
+
+    const deleteLeadForm = async (formId) => {
+        await AppDataStore.delete('lead_forms', formId);
+        UI.toast.success('Form deleted.');
+        await showLeadFormsView(document.getElementById('content-viewport'));
+    };
+
+    const copyFormLink = (formId) => {
+        const url = `${window.location.origin}/form.html?id=${formId}`;
+        navigator.clipboard.writeText(url).then(() => UI.toast.success('Form link copied!')).catch(() => UI.toast.info(`Link: ${url}`));
+    };
+
+    const showFormSubmissions = async (formId) => {
+        const submissions = (await AppDataStore.getAll('lead_submissions').catch(() => [])).filter(s => s.form_id == formId);
+        const html = `
+            <div>
+                <p style="color:var(--gray-500); margin:0 0 16px;">${submissions.length} total submissions</p>
+                ${submissions.length === 0 ? '<p style="text-align:center; color:var(--gray-400); padding:40px 0;">No submissions yet.</p>' : `
+                    <table style="width:100%; border-collapse:collapse;">
+                        <thead><tr style="background:var(--gray-50); border-bottom:2px solid var(--gray-200);">
+                            <th style="padding:10px; text-align:left;">Name</th>
+                            <th style="padding:10px; text-align:left;">Date</th>
+                            <th style="padding:10px; text-align:left;">Status</th>
+                            <th style="padding:10px; text-align:left;">Action</th>
+                        </tr></thead>
+                        <tbody>${submissions.map(s => {
+                            const data = s.data || {};
+                            const name = data['Full Name'] || data.name || 'Unknown';
+                            return `<tr style="border-bottom:1px solid var(--gray-100);">
+                                <td style="padding:10px;">${name}</td>
+                                <td style="padding:10px; color:var(--gray-500); font-size:13px;">${s.created_at ? new Date(s.created_at).toLocaleDateString() : '—'}</td>
+                                <td style="padding:10px;"><span style="padding:2px 8px; border-radius:10px; font-size:12px; background:${s.status==='processed'?'#d1fae5':'#fef3c7'}; color:${s.status==='processed'?'#065f46':'#92400e'};">${s.status || 'new'}</span></td>
+                                <td style="padding:10px;">${s.status !== 'processed' ? `<button class="btn secondary" style="font-size:12px; padding:4px 10px;" onclick="app.processFormSubmission(${s.id})">Create Prospect</button>` : '<span style="color:var(--gray-400); font-size:12px;">Done</span>'}</td>
+                            </tr>`;
+                        }).join('')}</tbody>
+                    </table>
+                `}
+            </div>
+        `;
+        UI.showModal('Form Submissions', html, [{ label: 'Close', type: 'secondary', action: 'UI.hideModal()' }]);
+    };
+
+    const processFormSubmission = async (submissionId) => {
+        const submission = await AppDataStore.getById('lead_submissions', submissionId);
+        if (!submission) return;
+        const data = submission.data || {};
+        const name = data['Full Name'] || data.name || 'Lead Form Prospect';
+        const prospect = await AppDataStore.create('prospects', {
+            full_name: name, phone: data['Phone'] || data.phone || '',
+            email: data['Email'] || data.email || '',
+            status: 'New', source: 'lead_form',
+            lead_agent_id: _currentUser?.id || 1, created_at: new Date().toISOString()
+        });
+        await AppDataStore.update('lead_submissions', submissionId, { status: 'processed', prospect_id: prospect?.id });
+        UI.toast.success(`Prospect "${name}" created.`);
+        UI.hideModal();
+    };
+
+    // ========== NPS / SATISFACTION SURVEYS ==========
+
+    const showSurveysView = async (container) => {
+        _currentView = 'surveys';
+        const surveys = await AppDataStore.getAll('surveys').catch(() => []);
+        container.innerHTML = `
+            <div style="padding:24px; max-width:1000px; margin:0 auto;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px;">
+                    <div>
+                        <h1 style="font-size:24px; font-weight:700; margin:0;">NPS & Satisfaction Surveys</h1>
+                        <p style="color:var(--gray-500); margin:4px 0 0;">Measure customer satisfaction with shareable survey links.</p>
+                    </div>
+                    <button class="btn primary" onclick="app.openSurveyBuilderModal()"><i class="fas fa-plus"></i> New Survey</button>
+                </div>
+                ${surveys.length === 0 ? `
+                    <div style="text-align:center; padding:60px; background:white; border:1px solid var(--gray-200); border-radius:12px; color:var(--gray-400);">
+                        <i class="fas fa-star" style="font-size:48px; display:block; margin-bottom:12px;"></i>
+                        <h3 style="color:var(--gray-500);">No surveys yet</h3>
+                        <button class="btn primary" onclick="app.openSurveyBuilderModal()">Create Survey</button>
+                    </div>
+                ` : `
+                    <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); gap:16px;">
+                        ${surveys.map(survey => `
+                            <div style="background:white; border:1px solid var(--gray-200); border-radius:12px; padding:20px;">
+                                <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+                                    <div>
+                                        <h3 style="margin:0; font-size:16px;">${survey.name}</h3>
+                                        <span style="font-size:12px; color:var(--gray-400); text-transform:uppercase;">${survey.type}</span>
+                                    </div>
+                                    <span style="padding:3px 10px; border-radius:20px; font-size:12px; background:${survey.is_active ? '#d1fae5' : '#f3f4f6'}; color:${survey.is_active ? '#065f46' : '#6b7280'};">${survey.is_active ? 'Active' : 'Inactive'}</span>
+                                </div>
+                                <p style="color:var(--gray-600); font-size:13px; margin:0 0 16px;">${survey.question}</p>
+                                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                                    <button class="btn secondary" style="flex:1; font-size:12px; padding:6px;" onclick="app.copySurveyLink(${survey.id})"><i class="fas fa-copy"></i> Copy Link</button>
+                                    <button class="btn secondary" style="flex:1; font-size:12px; padding:6px;" onclick="app.showSurveyResults(${survey.id})"><i class="fas fa-chart-bar"></i> Results</button>
+                                    <button class="btn-icon" style="color:var(--error);" onclick="app.deleteSurvey(${survey.id})"><i class="fas fa-trash"></i></button>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                `}
+            </div>
+        `;
+    };
+
+    const openSurveyBuilderModal = () => {
+        UI.showModal('Create Survey', `
+            <div style="display:flex; flex-direction:column; gap:16px;">
+                <div><label style="display:block; font-weight:500; margin-bottom:6px;">Survey Name</label>
+                <input type="text" id="survey-name" class="form-control" placeholder="e.g. Q2 Customer Satisfaction"></div>
+                <div><label style="display:block; font-weight:500; margin-bottom:6px;">Type</label>
+                <select id="survey-type" class="form-control" onchange="app.updateSurveyQuestion(this.value)">
+                    <option value="nps">NPS (Net Promoter Score)</option>
+                    <option value="csat">CSAT (Customer Satisfaction)</option>
+                    <option value="custom">Custom Question</option>
+                </select></div>
+                <div><label style="display:block; font-weight:500; margin-bottom:6px;">Question</label>
+                <input type="text" id="survey-question" class="form-control" value="How likely are you to recommend us to a friend or colleague?"></div>
+                <div><label style="display:block; font-weight:500; margin-bottom:6px;">Description (optional)</label>
+                <textarea id="survey-description" class="form-control" rows="2" placeholder="Additional context shown to respondents..."></textarea></div>
+            </div>
+        `, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save Survey', type: 'primary', action: '(async () => { await app.saveSurvey(); })()' }
+        ]);
+    };
+
+    const updateSurveyQuestion = (type) => {
+        const q = document.getElementById('survey-question');
+        if (!q) return;
+        if (type === 'nps') q.value = 'How likely are you to recommend us to a friend or colleague?';
+        else if (type === 'csat') q.value = 'How satisfied are you with our service today?';
+    };
+
+    const saveSurvey = async () => {
+        const name = document.getElementById('survey-name').value.trim();
+        if (!name) { UI.toast.error('Survey name is required.'); return; }
+        await AppDataStore.create('surveys', {
+            name, type: document.getElementById('survey-type').value,
+            question: document.getElementById('survey-question').value.trim(),
+            description: document.getElementById('survey-description').value.trim(),
+            created_by: _currentUser?.id || 1, is_active: true, created_at: new Date().toISOString()
+        });
+        UI.hideModal();
+        UI.toast.success('Survey created!');
+        await showSurveysView(document.getElementById('content-viewport'));
+    };
+
+    const deleteSurvey = async (surveyId) => {
+        await AppDataStore.delete('surveys', surveyId);
+        UI.toast.success('Survey deleted.');
+        await showSurveysView(document.getElementById('content-viewport'));
+    };
+
+    const copySurveyLink = (surveyId) => {
+        const url = `${window.location.origin}/survey.html?id=${surveyId}`;
+        navigator.clipboard.writeText(url).then(() => UI.toast.success('Survey link copied!')).catch(() => UI.toast.info(`Link: ${url}`));
+    };
+
+    const showSurveyResults = async (surveyId) => {
+        const survey = await AppDataStore.getById('surveys', surveyId);
+        const responses = (await AppDataStore.getAll('survey_responses').catch(() => [])).filter(r => r.survey_id == surveyId);
+        const promoters = responses.filter(r => r.score >= 9).length;
+        const passives = responses.filter(r => r.score >= 7 && r.score <= 8).length;
+        const detractors = responses.filter(r => r.score <= 6).length;
+        const total = responses.length;
+        const nps = total > 0 ? Math.round(((promoters - detractors) / total) * 100) : null;
+        const npsColor = nps === null ? '#9ca3af' : nps >= 50 ? '#10b981' : nps >= 0 ? '#f59e0b' : '#ef4444';
+        const html = `
+            <div>
+                <p style="color:var(--gray-600); margin:0 0 20px;">${survey?.question}</p>
+                <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:20px;">
+                    <div style="text-align:center; padding:16px; background:var(--gray-50); border-radius:8px;">
+                        <div style="font-size:28px; font-weight:700; color:${npsColor};">${nps !== null ? nps : '—'}</div>
+                        <div style="font-size:12px; color:var(--gray-500);">NPS Score</div>
+                    </div>
+                    <div style="text-align:center; padding:16px; background:#f0fdf4; border-radius:8px;">
+                        <div style="font-size:28px; font-weight:700; color:#10b981;">${promoters}</div>
+                        <div style="font-size:12px; color:var(--gray-500);">Promoters (9-10)</div>
+                    </div>
+                    <div style="text-align:center; padding:16px; background:#fffbeb; border-radius:8px;">
+                        <div style="font-size:28px; font-weight:700; color:#f59e0b;">${passives}</div>
+                        <div style="font-size:12px; color:var(--gray-500);">Passives (7-8)</div>
+                    </div>
+                    <div style="text-align:center; padding:16px; background:#fef2f2; border-radius:8px;">
+                        <div style="font-size:28px; font-weight:700; color:#ef4444;">${detractors}</div>
+                        <div style="font-size:12px; color:var(--gray-500);">Detractors (0-6)</div>
+                    </div>
+                </div>
+                ${responses.length === 0 ? '<p style="text-align:center; color:var(--gray-400);">No responses yet. Share your survey link.</p>' : `
+                    <table style="width:100%; border-collapse:collapse;">
+                        <thead><tr style="background:var(--gray-50); border-bottom:2px solid var(--gray-200);">
+                            <th style="padding:10px; text-align:left;">Respondent</th>
+                            <th style="padding:10px; text-align:left;">Score</th>
+                            <th style="padding:10px; text-align:left;">Feedback</th>
+                            <th style="padding:10px; text-align:left;">Date</th>
+                        </tr></thead>
+                        <tbody>${responses.slice(0,20).map(r => `
+                            <tr style="border-bottom:1px solid var(--gray-100);">
+                                <td style="padding:10px;">${r.respondent_name || 'Anonymous'}</td>
+                                <td style="padding:10px;"><span style="font-weight:700; color:${r.score>=9?'#10b981':r.score>=7?'#f59e0b':'#ef4444'};">${r.score}/10</span></td>
+                                <td style="padding:10px; color:var(--gray-600); font-size:13px;">${r.feedback || '—'}</td>
+                                <td style="padding:10px; color:var(--gray-400); font-size:12px;">${r.submitted_at ? new Date(r.submitted_at).toLocaleDateString() : '—'}</td>
+                            </tr>
+                        `).join('')}</tbody>
+                    </table>
+                `}
+            </div>
+        `;
+        UI.showModal(`Survey Results — ${survey?.name}`, html, [{ label: 'Close', type: 'secondary', action: 'UI.hideModal()' }]);
+    };
+
+    // ========== CONTRACTS / E-SIGNATURE ==========
+
+    const renderContractStatusBadge = (status) => {
+        const map = { draft:{bg:'#f3f4f6',color:'#6b7280',label:'Draft'}, sent:{bg:'#dbeafe',color:'#1e40af',label:'Sent'}, signed:{bg:'#d1fae5',color:'#065f46',label:'Signed'}, declined:{bg:'#fee2e2',color:'#991b1b',label:'Declined'} };
+        const s = map[status] || map.draft;
+        return `<span style="padding:3px 10px; border-radius:20px; font-size:12px; background:${s.bg}; color:${s.color};">${s.label}</span>`;
+    };
+
+    const showContractsView = async (container) => {
+        _currentView = 'contracts';
+        const contracts = await AppDataStore.getAll('contracts').catch(() => []);
+        container.innerHTML = `
+            <div style="padding:24px; max-width:1000px; margin:0 auto;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px;">
+                    <div>
+                        <h1 style="font-size:24px; font-weight:700; margin:0;">Contract Management</h1>
+                        <p style="color:var(--gray-500); margin:4px 0 0;">Upload contracts and collect e-signatures from customers.</p>
+                    </div>
+                    <button class="btn primary" onclick="app.openUploadContractModal()"><i class="fas fa-plus"></i> Upload Contract</button>
+                </div>
+                ${contracts.length === 0 ? `
+                    <div style="text-align:center; padding:60px; background:white; border:1px solid var(--gray-200); border-radius:12px; color:var(--gray-400);">
+                        <i class="fas fa-file-signature" style="font-size:48px; display:block; margin-bottom:12px;"></i>
+                        <h3 style="color:var(--gray-500);">No contracts yet</h3>
+                        <p>Upload a contract to send for e-signature.</p>
+                        <button class="btn primary" onclick="app.openUploadContractModal()">Upload Contract</button>
+                    </div>
+                ` : `
+                    <table style="width:100%; border-collapse:collapse; background:white; border:1px solid var(--gray-200); border-radius:12px; overflow:hidden;">
+                        <thead><tr style="background:var(--gray-50); border-bottom:2px solid var(--gray-200);">
+                            <th style="padding:12px 16px; text-align:left;">Title</th>
+                            <th style="padding:12px 16px; text-align:left;">Customer</th>
+                            <th style="padding:12px 16px; text-align:left;">Status</th>
+                            <th style="padding:12px 16px; text-align:left;">Date</th>
+                            <th style="padding:12px 16px; text-align:left;">Actions</th>
+                        </tr></thead>
+                        <tbody>${contracts.map(c => `
+                            <tr style="border-bottom:1px solid var(--gray-100);">
+                                <td style="padding:12px 16px;"><i class="fas fa-file-contract" style="color:var(--primary); margin-right:8px;"></i>${c.title}</td>
+                                <td style="padding:12px 16px; color:var(--gray-600);">${c.signer_name || (c.customer_id ? `Customer #${c.customer_id}` : '—')}</td>
+                                <td style="padding:12px 16px;">${renderContractStatusBadge(c.status)}</td>
+                                <td style="padding:12px 16px; color:var(--gray-400); font-size:13px;">${c.created_at ? new Date(c.created_at).toLocaleDateString() : '—'}</td>
+                                <td style="padding:12px 16px;">
+                                    ${c.status === 'draft' ? `<button class="btn secondary" style="font-size:12px; padding:4px 10px;" onclick="app.sendContractForSigning(${c.id})"><i class="fas fa-paper-plane"></i> Send</button>` : ''}
+                                    ${c.status === 'sent' ? `<button class="btn secondary" style="font-size:12px; padding:4px 10px;" onclick="app.copySigningLink(${c.id})"><i class="fas fa-copy"></i> Copy Link</button>` : ''}
+                                    ${c.status === 'signed' ? `<button class="btn secondary" style="font-size:12px; padding:4px 10px;" onclick="app.showContractDetail(${c.id})"><i class="fas fa-eye"></i> View</button>` : ''}
+                                </td>
+                            </tr>
+                        `).join('')}</tbody>
+                    </table>
+                `}
+            </div>
+        `;
+    };
+
+    const openUploadContractModal = (entityType = null, entityId = null) => {
+        UI.showModal('Upload Contract', `
+            <div style="display:flex; flex-direction:column; gap:16px;">
+                <div><label style="display:block; font-weight:500; margin-bottom:6px;">Contract Title</label>
+                <input type="text" id="contract-title" class="form-control" placeholder="e.g. Service Agreement - John Doe"></div>
+                <div><label style="display:block; font-weight:500; margin-bottom:6px;">Link to Customer (optional — enter ID)</label>
+                <input type="number" id="contract-customer-id" class="form-control" placeholder="Customer ID" value="${entityType === 'customer' && entityId ? entityId : ''}"></div>
+                <div><label style="display:block; font-weight:500; margin-bottom:6px;">Contract File</label>
+                <input type="file" id="contract-file" class="form-control" accept=".pdf,.doc,.docx">
+                <p style="font-size:12px; color:var(--gray-400); margin:4px 0 0;">File reference is stored. Upload to Supabase Storage for production use.</p></div>
+            </div>
+        `, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Upload', type: 'primary', action: '(async () => { await app.uploadContract(); })()' }
+        ]);
+    };
+
+    const uploadContract = async () => {
+        const title = document.getElementById('contract-title').value.trim();
+        if (!title) { UI.toast.error('Contract title is required.'); return; }
+        const customerId = document.getElementById('contract-customer-id').value.trim();
+        const fileInput = document.getElementById('contract-file');
+        const fileName = fileInput.files?.[0]?.name || null;
+        await AppDataStore.create('contracts', {
+            title, customer_id: customerId ? parseInt(customerId) : null,
+            file_name: fileName, file_url: fileName ? `local:${fileName}` : null,
+            status: 'draft', created_by: _currentUser?.id || 1, created_at: new Date().toISOString()
+        });
+        UI.hideModal();
+        UI.toast.success('Contract uploaded.');
+        await showContractsView(document.getElementById('content-viewport'));
+    };
+
+    const sendContractForSigning = async (contractId) => {
+        const token = 'tok-' + Math.random().toString(36).substr(2, 16) + Date.now().toString(36);
+        await AppDataStore.update('contracts', contractId, { status: 'sent', signing_token: token, sent_at: new Date().toISOString() });
+        const signingUrl = `${window.location.origin}/sign.html?token=${token}`;
+        UI.showModal('Contract Sent for Signing', `
+            <div>
+                <p>Share this signing link with the customer:</p>
+                <div style="display:flex; gap:8px;">
+                    <input type="text" value="${signingUrl}" readonly id="signing-url-display" style="flex:1; padding:8px; border:1px solid var(--border); border-radius:6px; font-size:13px;">
+                    <button class="btn primary" onclick="navigator.clipboard.writeText(document.getElementById('signing-url-display').value).then(()=>UI.toast.success('Copied!'))">Copy</button>
+                </div>
+            </div>
+        `, [{ label: 'Done', type: 'primary', action: 'UI.hideModal()' }]);
+    };
+
+    const copySigningLink = async (contractId) => {
+        const contract = await AppDataStore.getById('contracts', contractId);
+        if (!contract?.signing_token) { UI.toast.error('No signing token found.'); return; }
+        const url = `${window.location.origin}/sign.html?token=${contract.signing_token}`;
+        navigator.clipboard.writeText(url).then(() => UI.toast.success('Signing link copied!')).catch(() => UI.toast.info(`Link: ${url}`));
+    };
+
+    const showContractDetail = async (contractId) => {
+        const c = await AppDataStore.getById('contracts', contractId);
+        if (!c) return;
+        UI.showModal(`Contract: ${c.title}`, `
+            <div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px;">
+                    <div><span style="color:var(--gray-500);">Status:</span> ${renderContractStatusBadge(c.status)}</div>
+                    <div><span style="color:var(--gray-500);">Signed by:</span> <strong>${c.signer_name || '—'}</strong></div>
+                    <div><span style="color:var(--gray-500);">Signed at:</span> <span>${c.signed_at ? new Date(c.signed_at).toLocaleString() : '—'}</span></div>
+                    <div><span style="color:var(--gray-500);">File:</span> ${c.file_name || '—'}</div>
+                </div>
+                ${c.signature_data_url ? `
+                    <div>
+                        <p style="font-weight:500; margin-bottom:8px;">Signature:</p>
+                        <div style="border:1px solid var(--gray-200); border-radius:8px; padding:8px; background:#fafafa;">
+                            <img src="${c.signature_data_url}" style="max-width:100%; height:auto; max-height:150px;">
+                        </div>
+                    </div>
+                ` : ''}
+            </div>
+        `, [{ label: 'Close', type: 'secondary', action: 'UI.hideModal()' }]);
+    };
+
+    const renderCustomerContractsTab = async (customer) => {
+        const contracts = (await AppDataStore.getAll('contracts').catch(() => [])).filter(c => c.customer_id == customer.id);
+        const container = document.getElementById('profile-tab-content');
+        container.innerHTML = `
+            <div>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+                    <h4 style="margin:0;">Contracts</h4>
+                    <button class="btn secondary" onclick="app.openUploadContractModal('customer', ${customer.id})"><i class="fas fa-plus"></i> Upload Contract</button>
+                </div>
+                ${contracts.length === 0 ? '<p style="color:var(--gray-400); text-align:center; padding:40px 0;">No contracts yet.</p>' : `
+                    <div style="display:flex; flex-direction:column; gap:8px;">
+                        ${contracts.map(c => `
+                            <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 16px; background:var(--gray-50); border-radius:8px; border:1px solid var(--gray-200);">
+                                <div>
+                                    <strong>${c.title}</strong>
+                                    <span style="margin-left:8px;">${renderContractStatusBadge(c.status)}</span>
+                                    <div style="font-size:12px; color:var(--gray-400); margin-top:2px;">${c.file_name || ''} ${c.created_at ? '· '+new Date(c.created_at).toLocaleDateString() : ''}</div>
+                                </div>
+                                <div style="display:flex; gap:6px;">
+                                    ${c.status === 'draft' ? `<button class="btn secondary" style="font-size:12px; padding:4px 10px;" onclick="app.sendContractForSigning(${c.id})">Send</button>` : ''}
+                                    ${c.status === 'sent' ? `<button class="btn secondary" style="font-size:12px; padding:4px 10px;" onclick="app.copySigningLink(${c.id})">Copy Link</button>` : ''}
+                                    ${c.status === 'signed' ? `<button class="btn secondary" style="font-size:12px; padding:4px 10px;" onclick="app.showContractDetail(${c.id})">View</button>` : ''}
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                `}
+            </div>
+        `;
+    };
+
+    // ========== CUSTOM FIELDS ==========
+
+    const showCustomFieldsAdmin = async (container) => {
+        _currentView = 'custom_fields';
+        const defs = await AppDataStore.getAll('custom_field_definitions').catch(() => []);
+        const prospectFields = defs.filter(d => d.entity_type === 'prospect');
+        const customerFields = defs.filter(d => d.entity_type === 'customer');
+        const renderFieldList = (fields) => fields.length === 0
+            ? '<p style="color:var(--gray-400); font-size:13px; padding:8px 0;">No custom fields yet.</p>'
+            : fields.map(f => `
+                <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; background:white; border:1px solid var(--gray-200); border-radius:8px; margin-bottom:6px;">
+                    <div><strong style="font-size:14px;">${f.label}</strong><span style="color:var(--gray-400); font-size:12px; margin-left:8px;">${f.type}${f.is_required ? ' · required' : ''}</span></div>
+                    <button class="btn-icon" style="color:var(--error);" onclick="app.deleteCustomFieldDefinition(${f.id})"><i class="fas fa-trash"></i></button>
+                </div>
+            `).join('');
+        container.innerHTML = `
+            <div style="padding:24px; max-width:800px; margin:0 auto;">
+                <div style="margin-bottom:24px;">
+                    <h1 style="font-size:24px; font-weight:700; margin:0;">Custom Fields</h1>
+                    <p style="color:var(--gray-500); margin:4px 0 0;">Add custom data fields to prospects and customers. Fields appear in all create/edit forms.</p>
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:24px;">
+                    <div style="background:var(--gray-50); border:1px solid var(--gray-200); border-radius:12px; padding:20px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+                            <h3 style="margin:0; font-size:16px;">Prospect Fields</h3>
+                            <button class="btn secondary" style="font-size:13px; padding:6px 12px;" onclick="app.openCustomFieldModal('prospect')"><i class="fas fa-plus"></i> Add</button>
+                        </div>
+                        ${renderFieldList(prospectFields)}
+                    </div>
+                    <div style="background:var(--gray-50); border:1px solid var(--gray-200); border-radius:12px; padding:20px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+                            <h3 style="margin:0; font-size:16px;">Customer Fields</h3>
+                            <button class="btn secondary" style="font-size:13px; padding:6px 12px;" onclick="app.openCustomFieldModal('customer')"><i class="fas fa-plus"></i> Add</button>
+                        </div>
+                        ${renderFieldList(customerFields)}
+                    </div>
+                </div>
+                <div style="margin-top:24px; padding:16px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; font-size:13px; color:#1e40af;">
+                    <i class="fas fa-info-circle"></i> Custom field values appear in the Basic & Info tab of each customer/prospect profile.
+                </div>
+            </div>
+        `;
+    };
+
+    const openCustomFieldModal = (entityType) => {
+        UI.showModal(`Add Custom Field — ${entityType === 'prospect' ? 'Prospects' : 'Customers'}`, `
+            <input type="hidden" id="cf-entity-type" value="${entityType}">
+            <div style="display:flex; flex-direction:column; gap:16px;">
+                <div><label style="display:block; font-weight:500; margin-bottom:6px;">Field Label</label>
+                <input type="text" id="cf-label" class="form-control" placeholder="e.g. Preferred Language, Budget Range"></div>
+                <div><label style="display:block; font-weight:500; margin-bottom:6px;">Field Type</label>
+                <select id="cf-type" class="form-control" onchange="app.toggleDropdownOptions(this.value)">
+                    <option value="text">Text</option><option value="number">Number</option><option value="date">Date</option><option value="dropdown">Dropdown</option>
+                </select></div>
+                <div id="cf-options-row" style="display:none;"><label style="display:block; font-weight:500; margin-bottom:6px;">Options (comma-separated)</label>
+                <input type="text" id="cf-options" class="form-control" placeholder="Option A, Option B, Option C"></div>
+                <label style="display:flex; align-items:center; gap:8px; cursor:pointer;"><input type="checkbox" id="cf-required"> <span>Required field</span></label>
+            </div>
+        `, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Add Field', type: 'primary', action: '(async () => { await app.saveCustomFieldDefinition(); })()' }
+        ]);
+    };
+
+    const toggleDropdownOptions = (type) => {
+        const row = document.getElementById('cf-options-row');
+        if (row) row.style.display = type === 'dropdown' ? 'block' : 'none';
+    };
+
+    const saveCustomFieldDefinition = async () => {
+        const label = document.getElementById('cf-label').value.trim();
+        if (!label) { UI.toast.error('Field label is required.'); return; }
+        const entityType = document.getElementById('cf-entity-type').value;
+        const type = document.getElementById('cf-type').value;
+        const fieldKey = label.toLowerCase().replace(/[^a-z0-9]/g, '_');
+        const optionsRaw = document.getElementById('cf-options')?.value || '';
+        const options = type === 'dropdown' ? optionsRaw.split(',').map(o => o.trim()).filter(Boolean) : [];
+        await AppDataStore.create('custom_field_definitions', {
+            entity_type: entityType, label, field_key: fieldKey, type, options,
+            is_required: document.getElementById('cf-required').checked,
+            sort_order: 0, created_at: new Date().toISOString()
+        });
+        UI.hideModal();
+        UI.toast.success('Custom field added.');
+        await showCustomFieldsAdmin(document.getElementById('content-viewport'));
+    };
+
+    const deleteCustomFieldDefinition = async (fieldId) => {
+        await AppDataStore.delete('custom_field_definitions', fieldId);
+        UI.toast.success('Field removed.');
+        await showCustomFieldsAdmin(document.getElementById('content-viewport'));
+    };
+
+    const renderCustomFieldInputs = async (entityType, entityId = null) => {
+        const defs = (await AppDataStore.getAll('custom_field_definitions').catch(() => [])).filter(d => d.entity_type === entityType);
+        if (defs.length === 0) return '';
+        let values = {};
+        if (entityId) {
+            const vals = (await AppDataStore.getAll('custom_field_values').catch(() => [])).filter(v => v.entity_type === entityType && v.entity_id == entityId);
+            vals.forEach(v => { values[v.field_key] = v.value; });
+        }
+        const inputs = defs.map(def => {
+            const val = values[def.field_key] || '';
+            let input = '';
+            if (def.type === 'dropdown') {
+                input = `<select id="cf-input-${def.field_key}" class="form-control">${(def.options||[]).map(o=>`<option value="${o}" ${val===o?'selected':''}>${o}</option>`).join('')}</select>`;
+            } else if (def.type === 'number') {
+                input = `<input type="number" id="cf-input-${def.field_key}" class="form-control" value="${val}">`;
+            } else if (def.type === 'date') {
+                input = `<input type="date" id="cf-input-${def.field_key}" class="form-control" value="${val}">`;
+            } else {
+                input = `<input type="text" id="cf-input-${def.field_key}" class="form-control" value="${val}">`;
+            }
+            return `<div style="margin-bottom:12px;"><label style="display:block; font-weight:500; margin-bottom:4px; font-size:14px;">${def.label}${def.is_required?' <span style="color:var(--error);">*</span>':''}</label>${input}</div>`;
+        }).join('');
+        return `<div style="border-top:1px solid var(--gray-200); margin-top:16px; padding-top:16px;"><h4 style="font-size:13px; text-transform:uppercase; color:var(--gray-400); letter-spacing:0.5px; margin:0 0 12px;">Custom Fields</h4>${inputs}</div>`;
+    };
+
+    const saveCustomFieldValues = async (entityType, entityId) => {
+        const defs = (await AppDataStore.getAll('custom_field_definitions').catch(() => [])).filter(d => d.entity_type === entityType);
+        const existingVals = (await AppDataStore.getAll('custom_field_values').catch(() => [])).filter(v => v.entity_type === entityType && v.entity_id == entityId);
+        for (const def of defs) {
+            const input = document.getElementById(`cf-input-${def.field_key}`);
+            if (!input) continue;
+            const existing = existingVals.find(v => v.field_key === def.field_key);
+            if (existing) {
+                await AppDataStore.update('custom_field_values', existing.id, { value: input.value, updated_at: new Date().toISOString() });
+            } else {
+                await AppDataStore.create('custom_field_values', { entity_type: entityType, entity_id: entityId, field_key: def.field_key, value: input.value, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+            }
+        }
+    };
+
+    const renderCustomFieldDisplay = async (entityType, entityId) => {
+        const defs = (await AppDataStore.getAll('custom_field_definitions').catch(() => [])).filter(d => d.entity_type === entityType);
+        if (defs.length === 0) return '';
+        const vals = (await AppDataStore.getAll('custom_field_values').catch(() => [])).filter(v => v.entity_type === entityType && v.entity_id == entityId);
+        const valueMap = {};
+        vals.forEach(v => { valueMap[v.field_key] = v.value; });
+        const rows = defs.map(def => `<div style="display:flex; justify-content:space-between; margin-bottom:8px;"><span style="color:var(--gray-500);">${def.label}:</span><strong>${valueMap[def.field_key] || '—'}</strong></div>`).join('');
+        return `<div style="border-top:1px solid var(--gray-100); margin-top:16px; padding-top:16px;"><h5 style="font-size:13px; text-transform:uppercase; color:var(--gray-400); letter-spacing:0.5px; margin:0 0 12px;">Custom Fields</h5>${rows}</div>`;
+    };
+
+    // ========== CUSTOMER SELF-SERVICE PORTAL ==========
+
+    const sendPortalLink = async (customerId) => {
+        const customer = await AppDataStore.getById('customers', customerId);
+        if (!customer) return;
+        const token = 'portal-' + Math.random().toString(36).substr(2, 16) + '-' + Date.now().toString(36);
+        const expires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+        await AppDataStore.create('portal_sessions', {
+            customer_id: customerId, email: customer.email, token,
+            expires_at: expires, created_at: new Date().toISOString()
+        });
+        const portalUrl = `${window.location.origin}/portal.html?token=${token}`;
+        UI.showModal('Customer Portal Link', `
+            <div>
+                <p>Share this link with <strong>${customer.full_name}</strong>. It expires in 7 days.</p>
+                <div style="display:flex; gap:8px; margin-bottom:12px;">
+                    <input type="text" id="portal-link-input" value="${portalUrl}" readonly style="flex:1; padding:8px; border:1px solid var(--border); border-radius:6px; font-size:13px; background:var(--gray-50);">
+                    <button class="btn primary" onclick="navigator.clipboard.writeText(document.getElementById('portal-link-input').value).then(()=>UI.toast.success('Copied!'))"><i class="fas fa-copy"></i></button>
+                </div>
+                <p style="font-size:12px; color:var(--gray-400);">The customer can view their activities, purchases, documents, and upcoming appointments.</p>
+            </div>
+        `, [{ label: 'Close', type: 'secondary', action: 'UI.hideModal()' }]);
+    };
+
     const navigateTo = async (viewId) => {
         UI.hideModal();
         document.querySelectorAll('.nav-links li').forEach(li => {
@@ -5905,6 +6807,21 @@ function _wireLoginBtn() {
         } else if (viewId === 'workflows') {
             _currentView = 'workflows';
             await showWorkflowAutomationView(viewport);
+        } else if (viewId === 'booking_settings') {
+            _currentView = 'booking_settings';
+            await showBookingSettingsView(viewport);
+        } else if (viewId === 'lead_forms') {
+            _currentView = 'lead_forms';
+            await showLeadFormsView(viewport);
+        } else if (viewId === 'surveys') {
+            _currentView = 'surveys';
+            await showSurveysView(viewport);
+        } else if (viewId === 'contracts') {
+            _currentView = 'contracts';
+            await showContractsView(viewport);
+        } else if (viewId === 'custom_fields') {
+            _currentView = 'custom_fields';
+            await showCustomFieldsAdmin(viewport);
         } else if (viewId === 'settings') {
             _currentView = 'settings';
             showSettingsView(viewport);
@@ -9973,6 +10890,7 @@ function _wireLoginBtn() {
                                 <th>Customer Since</th>
                                 <th>Ming Gua</th>
                                 <th>Agent</th>
+                                <th>Health</th>
                                 <th>Status</th>
                                 <th>Actions</th>
                             </tr>
@@ -10037,6 +10955,7 @@ function _wireLoginBtn() {
                     <td>${c.customer_since}</td>
                     <td>${c.ming_gua}</td>
                     <td>Michelle Tan</td>
+                    <td>${renderQuickHealthBadge(c)}</td>
                     <td><span class="score-badge score-A+">${c.status.toUpperCase()}</span></td>
                     <td onclick="event.stopPropagation()">
                         <button class="btn-icon" title="Edit"><i class="fas fa-edit"></i></button>
@@ -10543,6 +11462,8 @@ function _wireLoginBtn() {
             await addWhatsAppButtonToProfile('customer', customerId);
         }, 100);
 
+        const health = await calculateCustomerHealthScore(customer);
+
         const container = document.getElementById('content-viewport');
         container.innerHTML = `
             <div class="customer-profile-view">
@@ -10555,7 +11476,7 @@ function _wireLoginBtn() {
                     <div>
                         <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
                             <h1 style="font-size:32px; font-weight:700;">${customer.full_name}</h1>
-                            <span class="score-badge score-A+" style="background:#10b981; color:white;">ACTIVE</span>
+                            ${renderHealthBadge(health)}
                         </div>
                         <div style="display:flex; gap:12px; color:var(--gray-500); font-size:14px;">
                             <span>ID: C${customer.id}</span>
@@ -10568,6 +11489,7 @@ function _wireLoginBtn() {
                         <button class="btn secondary" onclick="app.openAddPurchaseModal(${customer.id})"><i class="fas fa-plus"></i> Add Purchase</button>
                         <button class="btn secondary" onclick="app.todo('Refer a Friend')"><i class="fas fa-user-plus"></i> Refer a Friend</button>
                         <button class="btn secondary" onclick="app.openSendWhatsAppModal('customer', ${customer.id})"><i class="fab fa-whatsapp"></i> WhatsApp</button>
+                        <button class="btn secondary" onclick="app.sendPortalLink(${customer.id})"><i class="fas fa-external-link-alt"></i> Portal Link</button>
                         <button class="btn primary" style="background:#6b21a8;" onclick="app.openRecruitModal(${customer.id})"><i class="fas fa-user-tie"></i> Recruit as Agent</button>
                     </div>
                 </div>
@@ -10585,6 +11507,7 @@ function _wireLoginBtn() {
                             <button class="profile-tab-btn" onclick="app.switchProfileTab(this, 'activity', ${customer.id})">Activity History</button>
                             <button class="profile-tab-btn" onclick="app.switchProfileTab(this, 'referrals', ${customer.id})">Referrals Made</button>
                             <button class="profile-tab-btn" onclick="app.switchProfileTab(this, 'events', ${customer.id})">Events Attended</button>
+                            <button class="profile-tab-btn" onclick="app.switchProfileTab(this, 'contracts', ${customer.id})">Contracts</button>
                         </div>
 
                         <div id="profile-tab-content" style="background:var(--white); padding:24px; border-radius:12px; border:1px solid var(--gray-200);">
@@ -10647,6 +11570,7 @@ function _wireLoginBtn() {
         else if (tabName === 'purchases') await renderPurchaseHistoryTab(customer);
         else if (tabName === 'activity') await renderCustomerActivityTab(customer);
         else if (tabName === 'referrals') await renderReferralsTab(customer);
+        else if (tabName === 'contracts') await renderCustomerContractsTab(customer);
         else if (tabName === 'events') {
             const registrations = (await AppDataStore.getAll('event_registrations')).filter(
                 r => r.attendee_type === 'customer' && r.attendee_id == customerId
@@ -10732,6 +11656,10 @@ function _wireLoginBtn() {
                 </div>
             </div>
         `;
+
+        // Append custom field values
+        const cfDisplay = await renderCustomFieldDisplay('customer', customer.id);
+        if (cfDisplay) container.insertAdjacentHTML('beforeend', cfDisplay);
 
         // Phase 14: Append Internal Notes section
         const customerNotes = await AppDataStore.query('notes', { customer_id: customer.id });
@@ -19942,6 +20870,63 @@ const initImportDemoData = async () => {
         editWorkflow,
         deleteWorkflow,
         executeWorkflows,
+
+        // Customer Health Score
+        calculateCustomerHealthScore,
+        renderHealthBadge,
+        renderQuickHealthBadge,
+
+        // Meeting Scheduler
+        showBookingSettingsView,
+        openAddSlotModal,
+        saveBookingSlot,
+        deleteBookingSlot,
+        toggleSlotActive,
+        copyBookingLink,
+        confirmBookingAppointment,
+        cancelBookingAppointment,
+
+        // Lead Capture Forms
+        showLeadFormsView,
+        openFormBuilderModal,
+        addFormField,
+        saveLeadForm,
+        deleteLeadForm,
+        copyFormLink,
+        showFormSubmissions,
+        processFormSubmission,
+
+        // NPS Surveys
+        showSurveysView,
+        openSurveyBuilderModal,
+        updateSurveyQuestion,
+        saveSurvey,
+        deleteSurvey,
+        copySurveyLink,
+        showSurveyResults,
+
+        // Contracts / E-Signature
+        showContractsView,
+        renderContractStatusBadge,
+        openUploadContractModal,
+        uploadContract,
+        sendContractForSigning,
+        copySigningLink,
+        showContractDetail,
+        renderCustomerContractsTab,
+
+        // Custom Fields
+        showCustomFieldsAdmin,
+        openCustomFieldModal,
+        toggleDropdownOptions,
+        saveCustomFieldDefinition,
+        deleteCustomFieldDefinition,
+        renderCustomFieldInputs,
+        saveCustomFieldValues,
+        renderCustomFieldDisplay,
+
+        // Customer Self-Service Portal
+        sendPortalLink,
 
         // Auth exports
         login,

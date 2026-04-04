@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign Contract — Feng Shui CRM</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Inter', sans-serif; background: #f9fafb; color: #111827; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+        .card { background: white; border-radius: 16px; box-shadow: 0 4px 24px rgba(0,0,0,0.08); max-width: 560px; width: 100%; padding: 40px; }
+        .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 32px; }
+        .brand-icon { width: 48px; height: 48px; background: #7c3aed; border-radius: 12px; display: flex; align-items: center; justify-content: center; color: white; font-size: 22px; }
+        h1 { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+        .subtitle { color: #6b7280; font-size: 14px; margin-bottom: 28px; }
+        label { display: block; font-weight: 500; font-size: 14px; margin-bottom: 6px; color: #374151; }
+        input { width: 100%; padding: 10px 14px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; font-family: inherit; color: #111827; margin-bottom: 16px; transition: border-color 0.2s; }
+        input:focus { outline: none; border-color: #7c3aed; box-shadow: 0 0 0 3px rgba(124,58,237,0.1); }
+        .sig-area { border: 2px dashed #d1d5db; border-radius: 8px; margin-bottom: 8px; cursor: crosshair; background: #fafafa; touch-action: none; display: block; }
+        .sig-controls { display: flex; gap: 8px; margin-bottom: 20px; }
+        .btn { width: 100%; padding: 12px; background: #7c3aed; color: white; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; }
+        .btn:hover { background: #6d28d9; }
+        .btn-clear { background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; flex: 1; padding: 8px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+        .btn-clear:hover { background: #e5e7eb; }
+        .contract-info { background: #f5f3ff; border: 1px solid #ddd6fe; border-radius: 8px; padding: 16px; margin-bottom: 24px; }
+        .contract-info h3 { font-size: 16px; color: #5b21b6; margin-bottom: 4px; }
+        .contract-info p { font-size: 13px; color: #6b7280; }
+        .success-state { text-align: center; padding: 20px 0; }
+        .success-icon { font-size: 56px; color: #10b981; margin-bottom: 16px; }
+        .error-msg { color: #ef4444; font-size: 13px; margin-bottom: 12px; }
+        .sig-hint { font-size: 12px; color: #9ca3af; margin-bottom: 16px; }
+    </style>
+</head>
+<body>
+<div class="card">
+    <div class="brand">
+        <div class="brand-icon"><i class="fas fa-dharmachakra"></i></div>
+        <div style="font-size:18px; font-weight:700;">Feng Shui CRM</div>
+    </div>
+
+    <div id="loading-state"><p style="color:#6b7280;">Loading contract...</p></div>
+
+    <div id="sign-view" style="display:none;">
+        <h1>Sign Contract</h1>
+        <p class="subtitle">Please review and provide your e-signature below.</p>
+        <div class="contract-info">
+            <h3 id="contract-title-display"></h3>
+            <p>By signing, you agree to the terms set out in this contract.</p>
+        </div>
+        <label>Your Full Name <span style="color:#ef4444;">*</span></label>
+        <input type="text" id="signer-name" placeholder="Enter your full legal name">
+        <label>Signature <span style="color:#ef4444;">*</span></label>
+        <p class="sig-hint">Draw your signature in the box below using your mouse or finger.</p>
+        <canvas id="sig-canvas" class="sig-area" width="480" height="160"></canvas>
+        <div class="sig-controls">
+            <button class="btn-clear" onclick="clearSignature()"><i class="fas fa-eraser"></i> Clear</button>
+        </div>
+        <p id="error-msg" class="error-msg" style="display:none;"></p>
+        <button class="btn" onclick="submitSignature()"><i class="fas fa-pen-nib"></i> Sign Contract</button>
+        <p style="font-size:11px; color:#9ca3af; text-align:center; margin-top:12px;">This is a legally binding electronic signature.</p>
+    </div>
+
+    <div id="success-state" style="display:none;">
+        <div class="success-state">
+            <div class="success-icon"><i class="fas fa-file-signature"></i></div>
+            <h2 style="margin-bottom:8px;">Contract Signed!</h2>
+            <p style="color:#6b7280;" id="signed-msg">Your signature has been recorded. You will receive a copy via email.</p>
+        </div>
+    </div>
+
+    <div id="already-signed" style="display:none;">
+        <div class="success-state">
+            <div style="font-size:56px; color:#3b82f6; margin-bottom:16px;"><i class="fas fa-check-double"></i></div>
+            <h2 style="margin-bottom:8px;">Already Signed</h2>
+            <p style="color:#6b7280;">This contract has already been signed.</p>
+        </div>
+    </div>
+
+    <div id="error-state" style="display:none;">
+        <div class="success-state">
+            <div style="font-size:56px; color:#ef4444; margin-bottom:16px;"><i class="fas fa-exclamation-circle"></i></div>
+            <h2 style="margin-bottom:8px;">Invalid Link</h2>
+            <p style="color:#6b7280;">This signing link is invalid or has expired.</p>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const supabase = window.supabase.createClient(
+    'https://remuwhxvzkzjtgbzqjaa.supabase.co',
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJlbXV3aHh2emt6anRnYnpxamFhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQzNjczMDMsImV4cCI6MjA4OTk0MzMwM30.L8yISXnOd1CxzyAbRyFLQXIYviyBrxQC_J19egNtUbs'
+);
+
+const params = new URLSearchParams(window.location.search);
+const token = params.get('token');
+let contractData = null;
+let isDrawing = false;
+let canvas, ctx;
+
+function show(id) {
+    ['loading-state','sign-view','success-state','already-signed','error-state'].forEach(s => {
+        document.getElementById(s).style.display = s === id ? 'block' : 'none';
+    });
+}
+
+async function init() {
+    if (!token) { show('error-state'); return; }
+    const { data } = await supabase.from('contracts').select('*').eq('signing_token', token).single();
+    if (!data) { show('error-state'); return; }
+    if (data.status === 'signed') { show('already-signed'); return; }
+    if (data.status !== 'sent') { show('error-state'); return; }
+    contractData = data;
+    document.getElementById('contract-title-display').textContent = data.title;
+    show('sign-view');
+    initCanvas();
+}
+
+function initCanvas() {
+    canvas = document.getElementById('sig-canvas');
+    ctx = canvas.getContext('2d');
+    ctx.strokeStyle = '#111827';
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    canvas.addEventListener('mousedown', e => { isDrawing = true; ctx.beginPath(); ctx.moveTo(...pos(e)); });
+    canvas.addEventListener('mousemove', e => { if (!isDrawing) return; ctx.lineTo(...pos(e)); ctx.stroke(); });
+    canvas.addEventListener('mouseup', () => isDrawing = false);
+    canvas.addEventListener('mouseleave', () => isDrawing = false);
+
+    canvas.addEventListener('touchstart', e => { e.preventDefault(); isDrawing = true; ctx.beginPath(); ctx.moveTo(...pos(e.touches[0])); });
+    canvas.addEventListener('touchmove', e => { e.preventDefault(); if (!isDrawing) return; ctx.lineTo(...pos(e.touches[0])); ctx.stroke(); });
+    canvas.addEventListener('touchend', () => isDrawing = false);
+}
+
+function pos(e) {
+    const rect = canvas.getBoundingClientRect();
+    return [e.clientX - rect.left, e.clientY - rect.top];
+}
+
+function clearSignature() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+
+function isEmpty() {
+    const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    return !data.some(v => v !== 0);
+}
+
+async function submitSignature() {
+    const signerName = document.getElementById('signer-name').value.trim();
+    const errEl = document.getElementById('error-msg');
+    if (!signerName) { errEl.textContent = 'Please enter your full name.'; errEl.style.display = 'block'; return; }
+    if (isEmpty()) { errEl.textContent = 'Please draw your signature.'; errEl.style.display = 'block'; return; }
+    errEl.style.display = 'none';
+
+    const signatureDataUrl = canvas.toDataURL('image/png');
+    const { error } = await supabase.from('contracts').update({
+        status: 'signed',
+        signer_name: signerName,
+        signature_data_url: signatureDataUrl,
+        signed_at: new Date().toISOString()
+    }).eq('signing_token', token);
+
+    if (error) { errEl.textContent = 'Failed to record signature. Please try again.'; errEl.style.display = 'block'; return; }
+
+    document.getElementById('signed-msg').textContent = `Thank you, ${signerName}. Your signature for "${contractData.title}" has been recorded.`;
+    show('success-state');
+}
+
+init();
+</script>
+</body>
+</html>

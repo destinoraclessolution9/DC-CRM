@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Survey — Feng Shui CRM</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Inter', sans-serif; background: #f9fafb; color: #111827; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+        .card { background: white; border-radius: 16px; box-shadow: 0 4px 24px rgba(0,0,0,0.08); max-width: 540px; width: 100%; padding: 40px; }
+        .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 32px; }
+        .brand-icon { width: 48px; height: 48px; background: #7c3aed; border-radius: 12px; display: flex; align-items: center; justify-content: center; color: white; font-size: 22px; }
+        h1 { font-size: 20px; font-weight: 700; margin-bottom: 8px; }
+        .question { font-size: 18px; font-weight: 600; color: #111827; margin-bottom: 24px; line-height: 1.4; }
+        label { display: block; font-weight: 500; font-size: 14px; margin-bottom: 6px; color: #374151; }
+        input, textarea { width: 100%; padding: 10px 14px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; font-family: inherit; color: #111827; margin-bottom: 16px; transition: border-color 0.2s; }
+        input:focus, textarea:focus { outline: none; border-color: #7c3aed; box-shadow: 0 0 0 3px rgba(124,58,237,0.1); }
+        .btn { width: 100%; padding: 12px; background: #7c3aed; color: white; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; }
+        .btn:hover { background: #6d28d9; }
+        .nps-scale { display: flex; gap: 6px; margin-bottom: 8px; }
+        .nps-btn { flex: 1; padding: 12px 4px; border: 1px solid #d1d5db; border-radius: 8px; background: white; cursor: pointer; font-size: 15px; font-weight: 600; text-align: center; transition: all 0.15s; }
+        .nps-btn:hover { border-color: #7c3aed; }
+        .nps-btn.selected { border-color: #7c3aed; background: #7c3aed; color: white; }
+        .nps-labels { display: flex; justify-content: space-between; font-size: 11px; color: #9ca3af; margin-bottom: 20px; }
+        .success-state { text-align: center; padding: 20px 0; }
+        .success-icon { font-size: 56px; color: #10b981; margin-bottom: 16px; }
+        .error-msg { color: #ef4444; font-size: 13px; margin-bottom: 12px; }
+    </style>
+</head>
+<body>
+<div class="card">
+    <div class="brand">
+        <div class="brand-icon"><i class="fas fa-dharmachakra"></i></div>
+        <div style="font-size:18px; font-weight:700;">Feng Shui CRM</div>
+    </div>
+
+    <div id="loading-state"><p style="color:#6b7280;">Loading survey...</p></div>
+
+    <div id="survey-view" style="display:none;">
+        <h1 id="survey-name-display"></h1>
+        <p id="survey-desc-display" style="color:#6b7280; margin-bottom:20px; font-size:14px;"></p>
+        <div class="question" id="survey-question-display"></div>
+
+        <div id="nps-section" style="display:none;">
+            <div class="nps-scale" id="nps-buttons"></div>
+            <div class="nps-labels"><span>Not at all likely</span><span>Extremely likely</span></div>
+        </div>
+
+        <label>Your Name (optional)</label>
+        <input type="text" id="resp-name" placeholder="Full Name">
+        <label>Your Email (optional)</label>
+        <input type="email" id="resp-email" placeholder="Email Address">
+        <label>Additional feedback (optional)</label>
+        <textarea id="resp-feedback" rows="3" placeholder="Tell us more..."></textarea>
+
+        <p id="error-msg" class="error-msg" style="display:none;"></p>
+        <button class="btn" onclick="submitSurvey()">Submit Response</button>
+    </div>
+
+    <div id="success-state" style="display:none;">
+        <div class="success-state">
+            <div class="success-icon"><i class="fas fa-star"></i></div>
+            <h2 style="margin-bottom:8px;">Thank you!</h2>
+            <p style="color:#6b7280;">Your feedback has been recorded. We appreciate you taking the time.</p>
+        </div>
+    </div>
+
+    <div id="error-state" style="display:none;">
+        <div class="success-state">
+            <div style="font-size:56px; color:#ef4444; margin-bottom:16px;"><i class="fas fa-exclamation-circle"></i></div>
+            <h2 style="margin-bottom:8px;">Invalid Survey</h2>
+            <p style="color:#6b7280;">This survey link is invalid or no longer active.</p>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const supabase = window.supabase.createClient(
+    'https://remuwhxvzkzjtgbzqjaa.supabase.co',
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJlbXV3aHh2emt6anRnYnpxamFhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQzNjczMDMsImV4cCI6MjA4OTk0MzMwM30.L8yISXnOd1CxzyAbRyFLQXIYviyBrxQC_J19egNtUbs'
+);
+
+const params = new URLSearchParams(window.location.search);
+const surveyId = params.get('id');
+let surveyData = null;
+let selectedScore = null;
+
+function show(id) {
+    ['loading-state','survey-view','success-state','error-state'].forEach(s => {
+        document.getElementById(s).style.display = s === id ? 'block' : 'none';
+    });
+}
+
+async function init() {
+    if (!surveyId) { show('error-state'); return; }
+    const { data } = await supabase.from('surveys').select('*').eq('id', surveyId).eq('is_active', true).single();
+    if (!data) { show('error-state'); return; }
+    surveyData = data;
+
+    document.title = data.name + ' — Feng Shui CRM';
+    document.getElementById('survey-name-display').textContent = data.name;
+    document.getElementById('survey-desc-display').textContent = data.description || '';
+    document.getElementById('survey-question-display').textContent = data.question;
+
+    if (data.type === 'nps' || data.type === 'csat') {
+        const npsSection = document.getElementById('nps-section');
+        const npsButtons = document.getElementById('nps-buttons');
+        npsSection.style.display = 'block';
+        for (let i = 0; i <= 10; i++) {
+            const btn = document.createElement('button');
+            btn.className = 'nps-btn';
+            btn.textContent = i;
+            btn.onclick = () => { selectedScore = i; document.querySelectorAll('.nps-btn').forEach(b => b.classList.remove('selected')); btn.classList.add('selected'); };
+            npsButtons.appendChild(btn);
+        }
+    }
+
+    show('survey-view');
+}
+
+async function submitSurvey() {
+    if (!surveyData) return;
+    const errEl = document.getElementById('error-msg');
+    if ((surveyData.type === 'nps' || surveyData.type === 'csat') && selectedScore === null) {
+        errEl.textContent = 'Please select a score.';
+        errEl.style.display = 'block';
+        return;
+    }
+    errEl.style.display = 'none';
+
+    const { error } = await supabase.from('survey_responses').insert({
+        survey_id: parseInt(surveyId),
+        respondent_name: document.getElementById('resp-name').value.trim() || null,
+        respondent_email: document.getElementById('resp-email').value.trim() || null,
+        score: selectedScore,
+        feedback: document.getElementById('resp-feedback').value.trim() || null,
+        source: 'link',
+        submitted_at: new Date().toISOString()
+    });
+
+    if (error) { errEl.textContent = 'Submission failed. Please try again.'; errEl.style.display = 'block'; return; }
+    show('success-state');
+}
+
+init();
+</script>
+</body>
+</html>

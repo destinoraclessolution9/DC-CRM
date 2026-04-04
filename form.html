@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Contact Form — Feng Shui CRM</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Inter', sans-serif; background: #f9fafb; color: #111827; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+        .card { background: white; border-radius: 16px; box-shadow: 0 4px 24px rgba(0,0,0,0.08); max-width: 500px; width: 100%; padding: 40px; }
+        .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 32px; }
+        .brand-icon { width: 48px; height: 48px; background: #7c3aed; border-radius: 12px; display: flex; align-items: center; justify-content: center; color: white; font-size: 22px; }
+        h1 { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+        .subtitle { color: #6b7280; font-size: 14px; margin-bottom: 28px; }
+        label { display: block; font-weight: 500; font-size: 14px; margin-bottom: 6px; color: #374151; }
+        input, select, textarea { width: 100%; padding: 10px 14px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; font-family: inherit; color: #111827; margin-bottom: 16px; transition: border-color 0.2s; }
+        input:focus, select:focus, textarea:focus { outline: none; border-color: #7c3aed; box-shadow: 0 0 0 3px rgba(124,58,237,0.1); }
+        .btn { width: 100%; padding: 12px; background: #7c3aed; color: white; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+        .btn:hover { background: #6d28d9; }
+        .required { color: #ef4444; }
+        .success-state { text-align: center; padding: 20px 0; }
+        .success-icon { font-size: 56px; color: #10b981; margin-bottom: 16px; }
+        .error-msg { color: #ef4444; font-size: 13px; margin-bottom: 12px; }
+    </style>
+</head>
+<body>
+<div class="card">
+    <div class="brand">
+        <div class="brand-icon"><i class="fas fa-dharmachakra"></i></div>
+        <div style="font-size:18px; font-weight:700;">Feng Shui CRM</div>
+    </div>
+
+    <div id="loading-state"><p style="color:#6b7280;">Loading form...</p></div>
+
+    <div id="form-view" style="display:none;">
+        <h1 id="form-title">Contact Us</h1>
+        <p class="subtitle" id="form-description"></p>
+        <div id="form-fields"></div>
+        <p id="error-msg" class="error-msg" style="display:none;"></p>
+        <button class="btn" onclick="submitForm()">Submit</button>
+    </div>
+
+    <div id="success-state" style="display:none;">
+        <div class="success-state">
+            <div class="success-icon"><i class="fas fa-check-circle"></i></div>
+            <h2 style="margin-bottom:8px;">Submitted!</h2>
+            <p style="color:#6b7280;">Thank you! We've received your details and will be in touch shortly.</p>
+        </div>
+    </div>
+
+    <div id="error-state" style="display:none;">
+        <div class="success-state">
+            <div style="font-size:56px; color:#ef4444; margin-bottom:16px;"><i class="fas fa-exclamation-circle"></i></div>
+            <h2 style="margin-bottom:8px;">Invalid Form</h2>
+            <p style="color:#6b7280;">This form link is invalid or has been deactivated.</p>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const supabase = window.supabase.createClient(
+    'https://remuwhxvzkzjtgbzqjaa.supabase.co',
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJlbXV3aHh2emt6anRnYnpxamFhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQzNjczMDMsImV4cCI6MjA4OTk0MzMwM30.L8yISXnOd1CxzyAbRyFLQXIYviyBrxQC_J19egNtUbs'
+);
+
+const params = new URLSearchParams(window.location.search);
+const formId = params.get('id');
+let formData = null;
+
+function show(id) {
+    ['loading-state','form-view','success-state','error-state'].forEach(s => {
+        document.getElementById(s).style.display = s === id ? 'block' : 'none';
+    });
+}
+
+async function init() {
+    if (!formId) { show('error-state'); return; }
+    const { data } = await supabase.from('lead_forms').select('*').eq('id', formId).eq('is_active', true).single();
+    if (!data) { show('error-state'); return; }
+    formData = data;
+
+    document.title = data.title + ' — Feng Shui CRM';
+    document.getElementById('form-title').textContent = data.title;
+    document.getElementById('form-description').textContent = data.description || '';
+
+    const fieldsContainer = document.getElementById('form-fields');
+    (data.fields || []).forEach(field => {
+        const wrapper = document.createElement('div');
+        const labelEl = document.createElement('label');
+        labelEl.innerHTML = field.label + (field.required ? ' <span class="required">*</span>' : '');
+        wrapper.appendChild(labelEl);
+
+        let input;
+        if (field.type === 'textarea') {
+            input = document.createElement('textarea');
+            input.rows = 3;
+        } else if (field.type === 'select') {
+            input = document.createElement('select');
+            (field.options || []).forEach(opt => {
+                const o = document.createElement('option');
+                o.value = opt; o.textContent = opt;
+                input.appendChild(o);
+            });
+        } else {
+            input = document.createElement('input');
+            input.type = field.type || 'text';
+        }
+        input.id = 'field-' + field.id;
+        input.placeholder = field.label;
+        if (field.required) input.required = true;
+        wrapper.appendChild(input);
+        fieldsContainer.appendChild(wrapper);
+    });
+
+    show('form-view');
+}
+
+async function submitForm() {
+    if (!formData) return;
+    const errEl = document.getElementById('error-msg');
+    const submission = {};
+
+    for (const field of formData.fields || []) {
+        const el = document.getElementById('field-' + field.id);
+        if (!el) continue;
+        if (field.required && !el.value.trim()) {
+            errEl.textContent = `"${field.label}" is required.`;
+            errEl.style.display = 'block';
+            el.focus();
+            return;
+        }
+        submission[field.label] = el.value.trim();
+    }
+    errEl.style.display = 'none';
+
+    const { error: subErr } = await supabase.from('lead_submissions').insert({
+        form_id: parseInt(formId),
+        data: submission,
+        status: 'new',
+        created_at: new Date().toISOString()
+    });
+    if (subErr) { errEl.textContent = 'Submission failed. Please try again.'; errEl.style.display = 'block'; return; }
+
+    // Auto-create prospect from form data
+    const name = submission['Full Name'] || submission.name || Object.values(submission)[0] || 'Form Lead';
+    const phone = submission['Phone'] || submission.phone || submission['Phone Number'] || '';
+    const email = submission['Email'] || submission.email || submission['Email Address'] || '';
+    await supabase.from('prospects').insert({
+        full_name: name, phone, email,
+        status: 'New', source: 'lead_form',
+        lead_agent_id: formData.assigned_agent_id || 1,
+        created_at: new Date().toISOString()
+    });
+
+    show('success-state');
+}
+
+init();
+</script>
+</body>
+</html>

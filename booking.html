@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Book an Appointment — Feng Shui CRM</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Inter', sans-serif; background: #f9fafb; color: #111827; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+        .card { background: white; border-radius: 16px; box-shadow: 0 4px 24px rgba(0,0,0,0.08); max-width: 520px; width: 100%; padding: 40px; }
+        .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 32px; }
+        .brand-icon { width: 48px; height: 48px; background: #7c3aed; border-radius: 12px; display: flex; align-items: center; justify-content: center; color: white; font-size: 22px; }
+        .brand-name { font-size: 18px; font-weight: 700; color: #111827; }
+        h1 { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+        .subtitle { color: #6b7280; font-size: 14px; margin-bottom: 28px; }
+        label { display: block; font-weight: 500; font-size: 14px; margin-bottom: 6px; color: #374151; }
+        input, select, textarea { width: 100%; padding: 10px 14px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; font-family: inherit; background: #fff; color: #111827; margin-bottom: 16px; transition: border-color 0.2s; }
+        input:focus, select:focus, textarea:focus { outline: none; border-color: #7c3aed; box-shadow: 0 0 0 3px rgba(124,58,237,0.1); }
+        .btn { width: 100%; padding: 12px; background: #7c3aed; color: white; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+        .btn:hover { background: #6d28d9; }
+        .btn:disabled { background: #d1d5db; cursor: not-allowed; }
+        .slot-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; }
+        .slot-btn { padding: 10px; border: 1px solid #d1d5db; border-radius: 8px; background: white; font-size: 13px; cursor: pointer; text-align: center; transition: all 0.2s; }
+        .slot-btn:hover { border-color: #7c3aed; background: #f5f3ff; }
+        .slot-btn.selected { border-color: #7c3aed; background: #7c3aed; color: white; }
+        .slot-btn.unavailable { background: #f3f4f6; color: #9ca3af; cursor: not-allowed; }
+        .success-state { text-align: center; padding: 20px 0; }
+        .success-icon { font-size: 56px; color: #10b981; margin-bottom: 16px; }
+        .error-msg { color: #ef4444; font-size: 13px; margin-bottom: 12px; }
+        .step-label { font-size: 12px; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+        hr { border: none; border-top: 1px solid #f3f4f6; margin: 20px 0; }
+    </style>
+</head>
+<body>
+<div class="card">
+    <div class="brand">
+        <div class="brand-icon"><i class="fas fa-dharmachakra"></i></div>
+        <div class="brand-name">Feng Shui CRM</div>
+    </div>
+
+    <div id="loading-state">
+        <p style="color:#6b7280;">Loading availability...</p>
+    </div>
+
+    <div id="booking-form" style="display:none;">
+        <h1 id="page-title">Book a Consultation</h1>
+        <p class="subtitle" id="page-subtitle">Select a date and time that works for you.</p>
+
+        <div class="step-label">Step 1 — Choose a date</div>
+        <input type="date" id="booking-date" min="" onchange="loadSlots(this.value)">
+
+        <div id="slots-section" style="display:none;">
+            <div class="step-label">Step 2 — Choose a time</div>
+            <div class="slot-grid" id="slot-grid"></div>
+        </div>
+
+        <hr>
+        <div class="step-label">Step 3 — Your details</div>
+        <input type="text" id="prospect-name" placeholder="Full Name *">
+        <input type="tel" id="prospect-phone" placeholder="Phone Number *">
+        <input type="email" id="prospect-email" placeholder="Email Address">
+        <textarea id="booking-notes" rows="3" placeholder="What would you like to discuss? (optional)"></textarea>
+
+        <p id="error-msg" class="error-msg" style="display:none;"></p>
+        <button class="btn" id="submit-btn" onclick="submitBooking()" disabled>Confirm Booking</button>
+    </div>
+
+    <div id="success-state" style="display:none;">
+        <div class="success-state">
+            <div class="success-icon"><i class="fas fa-check-circle"></i></div>
+            <h2 style="margin-bottom:8px;">You're booked!</h2>
+            <p style="color:#6b7280;" id="confirm-msg">Your appointment has been confirmed. We'll reach out to confirm the details.</p>
+        </div>
+    </div>
+
+    <div id="error-state" style="display:none;">
+        <div class="success-state">
+            <div style="font-size:56px; color:#ef4444; margin-bottom:16px;"><i class="fas fa-exclamation-circle"></i></div>
+            <h2 style="margin-bottom:8px;">Invalid Link</h2>
+            <p style="color:#6b7280;">This booking link is invalid or has expired. Please contact the consultant for a new link.</p>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const supabase = window.supabase.createClient(
+    'https://remuwhxvzkzjtgbzqjaa.supabase.co',
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJlbXV3aHh2emt6anRnYnpxamFhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQzNjczMDMsImV4cCI6MjA4OTk0MzMwM30.L8yISXnOd1CxzyAbRyFLQXIYviyBrxQC_J19egNtUbs'
+);
+
+const params = new URLSearchParams(window.location.search);
+const agentId = params.get('agent');
+let agentSlots = [];
+let selectedSlot = null;
+
+async function init() {
+    if (!agentId) { show('error-state'); return; }
+
+    const { data: slots } = await supabase.from('booking_slots').select('*').eq('agent_id', agentId).eq('is_active', true);
+    if (!slots || slots.length === 0) { show('error-state'); return; }
+    agentSlots = slots;
+
+    const today = new Date().toISOString().split('T')[0];
+    document.getElementById('booking-date').min = today;
+    document.getElementById('booking-date').value = today;
+
+    show('booking-form');
+    loadSlots(today);
+}
+
+function show(id) {
+    ['loading-state','booking-form','success-state','error-state'].forEach(s => {
+        document.getElementById(s).style.display = s === id ? 'block' : 'none';
+    });
+}
+
+function loadSlots(dateStr) {
+    if (!dateStr) return;
+    const dow = new Date(dateStr + 'T12:00:00').getDay();
+    const daySlots = agentSlots.filter(s => s.day_of_week == dow);
+    const grid = document.getElementById('slot-grid');
+    const section = document.getElementById('slots-section');
+
+    if (daySlots.length === 0) {
+        grid.innerHTML = '<p style="color:#9ca3af; font-size:13px; grid-column:span 3;">No availability on this day. Try another date.</p>';
+        section.style.display = 'block';
+        document.getElementById('submit-btn').disabled = true;
+        selectedSlot = null;
+        return;
+    }
+
+    // Generate time slots from each availability window
+    const timeSlots = [];
+    daySlots.forEach(slot => {
+        let [sh, sm] = slot.start_time.split(':').map(Number);
+        const [eh, em] = slot.end_time.split(':').map(Number);
+        const endMins = eh * 60 + em;
+        const dur = slot.duration_minutes || 60;
+        while (sh * 60 + sm + dur <= endMins) {
+            const startLabel = `${String(sh).padStart(2,'0')}:${String(sm).padStart(2,'0')}`;
+            const endM = sm + dur;
+            const endH = sh + Math.floor(endM / 60);
+            const endMin = endM % 60;
+            const endLabel = `${String(endH).padStart(2,'0')}:${String(endMin).padStart(2,'0')}`;
+            timeSlots.push({ start: startLabel, end: endLabel, slotId: slot.id });
+            sm += dur;
+            if (sm >= 60) { sh += Math.floor(sm/60); sm = sm % 60; }
+        }
+    });
+
+    grid.innerHTML = timeSlots.map(ts =>
+        `<button class="slot-btn" data-start="${ts.start}" data-end="${ts.end}" data-slot="${ts.slotId}" onclick="selectSlot(this, '${ts.start}', '${ts.end}', ${ts.slotId})">${ts.start}</button>`
+    ).join('');
+    section.style.display = 'block';
+    selectedSlot = null;
+    document.getElementById('submit-btn').disabled = true;
+}
+
+function selectSlot(btn, start, end, slotId) {
+    document.querySelectorAll('.slot-btn').forEach(b => b.classList.remove('selected'));
+    btn.classList.add('selected');
+    selectedSlot = { start, end, slotId };
+    document.getElementById('submit-btn').disabled = false;
+}
+
+async function submitBooking() {
+    const name = document.getElementById('prospect-name').value.trim();
+    const phone = document.getElementById('prospect-phone').value.trim();
+    const email = document.getElementById('prospect-email').value.trim();
+    const notes = document.getElementById('booking-notes').value.trim();
+    const date = document.getElementById('booking-date').value;
+    const errEl = document.getElementById('error-msg');
+
+    if (!name || !phone) { errEl.textContent = 'Please enter your name and phone number.'; errEl.style.display = 'block'; return; }
+    if (!selectedSlot) { errEl.textContent = 'Please select a time slot.'; errEl.style.display = 'block'; return; }
+    errEl.style.display = 'none';
+
+    document.getElementById('submit-btn').disabled = true;
+    document.getElementById('submit-btn').textContent = 'Booking...';
+
+    const { error: apptErr } = await supabase.from('booking_appointments').insert({
+        slot_id: selectedSlot.slotId,
+        agent_id: parseInt(agentId),
+        prospect_name: name,
+        prospect_email: email,
+        prospect_phone: phone,
+        booking_date: date,
+        start_time: selectedSlot.start,
+        end_time: selectedSlot.end,
+        status: 'pending',
+        notes,
+        created_at: new Date().toISOString()
+    });
+
+    if (apptErr) { errEl.textContent = 'Booking failed. Please try again.'; errEl.style.display = 'block'; document.getElementById('submit-btn').disabled = false; document.getElementById('submit-btn').textContent = 'Confirm Booking'; return; }
+
+    // Auto-create activity in CRM
+    await supabase.from('activities').insert({
+        activity_title: `Booking: ${name}`,
+        activity_type: 'FTF',
+        activity_date: date,
+        start_time: selectedSlot.start,
+        end_time: selectedSlot.end,
+        status: 'scheduled',
+        discussion_summary: notes || `Booked via scheduling link by ${name}`,
+        lead_agent_id: parseInt(agentId),
+        source: 'booking_link',
+        created_at: new Date().toISOString()
+    });
+
+    document.getElementById('confirm-msg').textContent = `Your appointment on ${date} at ${selectedSlot.start} has been received. We'll contact you at ${phone} to confirm.`;
+    show('success-state');
+}
+
+init();
+</script>
+</body>
+</html>
