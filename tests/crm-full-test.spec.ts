@@ -3,6 +3,9 @@ import { test, expect, Page } from '@playwright/test';
 // ----------------------------------------------------------------------
 // CONFIGURATION
 // ----------------------------------------------------------------------
+const CRM_EMAIL    = 'destinoraclessolution9@gmail.com';
+const CRM_PASSWORD = 'destinoraclessolution2026!';
+
 const TEST_AGENT = {
   name: 'TestAgent_Playwright',
   email: 'testagent_pw@example.com',
@@ -20,7 +23,7 @@ async function waitForToast(page: Page, text?: string) {
 }
 
 async function closeAnyModal(page: Page) {
-  const closeBtn = page.locator('.modal .close, .modal button:has-text("Cancel"), .modal button:has-text("Close"), button[aria-label="Close"]');
+  const closeBtn = page.locator('#global-modal-overlay .close, #global-modal-overlay button:has-text("Cancel"), #global-modal-overlay button:has-text("Close"), button[aria-label="Close"]');
   if (await closeBtn.first().isVisible({ timeout: 500 }).catch(() => false)) {
     await closeBtn.first().click();
     await page.waitForTimeout(300);
@@ -32,28 +35,47 @@ async function closeAnyModal(page: Page) {
 // ----------------------------------------------------------------------
 test.describe('DestinOraclesSolution CRM – Full Functional & Data Validation', () => {
 
-  test.beforeEach(async ({ page }) => {
+  async function goToAgents(page: Page) {
+    await page.click('#nav-agents');
+    await page.waitForSelector('button:has-text("Add Agent")', { timeout: 8000 });
+    await page.waitForTimeout(500);
+  }
+
+  async function login(page: Page) {
     await page.goto('/');
-    // Wait for app shell to render
     await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+
+    // Wait for login form
+    const emailInput = page.locator('#loginEmail, input[type="email"], input[name="email"]').first();
+    await emailInput.waitFor({ state: 'visible', timeout: 10000 });
+    await emailInput.fill(CRM_EMAIL);
+
+    const pwInput = page.locator('#loginPassword, input[type="password"]').first();
+    await pwInput.fill(CRM_PASSWORD);
+
+    const loginBtn = page.locator('#loginBtn, button:has-text("Login"), button[type="submit"]').first();
+    await loginBtn.click();
+
+    // Wait for app to load past the login screen
+    await page.waitForSelector('.nav-links, [data-view], nav li[data-view]', { timeout: 20000 });
     await page.waitForTimeout(1000);
+  }
+
+  test.beforeEach(async ({ page }) => {
+    await login(page);
   });
 
   // ------------------------------------------------------------------
   // LEVEL 1 – BUTTON PRESENCE
   // ------------------------------------------------------------------
   test('L1: Critical buttons are visible and enabled', async ({ page }) => {
-    // Navigate to agents section if needed
-    const agentsNav = page.locator('a:has-text("Agents"), button:has-text("Agents"), [data-section="agents"], nav *:has-text("Agents")');
-    if (await agentsNav.first().isVisible({ timeout: 2000 }).catch(() => false)) {
-      await agentsNav.first().click();
-      await page.waitForTimeout(500);
-    }
+    await goToAgents(page);
 
     const checks = [
-      { selector: 'button:has-text("Add Agent"), button:has-text("Add User"), button:has-text("New Agent")', label: 'Add Agent' },
-      { selector: 'button:has-text("Refresh"), button[title*="refresh" i], button[aria-label*="refresh" i]', label: 'Refresh' },
-      { selector: 'button:has-text("Export"), button:has-text("Download")', label: 'Export' },
+      { selector: 'button:has-text("Add Agent")', label: 'Add Agent' },
+      { selector: 'button[title="Reset Password"]', label: 'Reset Password' },
+      { selector: 'button[title="Edit Agent"]', label: 'Edit Agent' },
+      { selector: 'button[title="View Detail"]', label: 'View Detail' },
     ];
 
     for (const { selector, label } of checks) {
@@ -63,7 +85,7 @@ test.describe('DestinOraclesSolution CRM – Full Functional & Data Validation',
         await expect(btn).toBeEnabled();
         console.log(`  PASS  ${label} button present`);
       } else {
-        console.warn(`  WARN  ${label} button not found – selector may need updating`);
+        console.warn(`  WARN  ${label} button not found – no agents in list or selector mismatch`);
       }
     }
   });
@@ -74,7 +96,6 @@ test.describe('DestinOraclesSolution CRM – Full Functional & Data Validation',
   test('L2: Reset Password – no force_password_change error', async ({ page }) => {
     const errors: string[] = [];
 
-    // Capture any 4xx responses
     page.on('response', async response => {
       if (response.status() >= 400) {
         let body = '';
@@ -83,14 +104,9 @@ test.describe('DestinOraclesSolution CRM – Full Functional & Data Validation',
       }
     });
 
-    // Navigate to agents section
-    const agentsNav = page.locator('a:has-text("Agents"), [data-section="agents"]');
-    if (await agentsNav.first().isVisible({ timeout: 2000 }).catch(() => false)) {
-      await agentsNav.first().click();
-      await page.waitForTimeout(500);
-    }
+    await goToAgents(page);
 
-    const resetBtn = page.locator('button:has-text("Reset Password"), button:has-text("Reset Pwd")').first();
+    const resetBtn = page.locator('button[title="Reset Password"]').first();
 
     if (!(await resetBtn.isVisible({ timeout: 3000 }).catch(() => false))) {
       console.warn('  WARN  No Reset Password button found – skipping click test');
@@ -101,7 +117,7 @@ test.describe('DestinOraclesSolution CRM – Full Functional & Data Validation',
     await page.waitForTimeout(2000);
 
     // Accept confirmation modal if present
-    const confirmBtn = page.locator('.modal button:has-text("Confirm"), .modal button:has-text("Yes"), .modal button:has-text("OK")');
+    const confirmBtn = page.locator('#global-modal-overlay button:has-text("Confirm"), #global-modal-overlay button:has-text("Yes"), #global-modal-overlay button:has-text("OK")');
     if (await confirmBtn.first().isVisible({ timeout: 1500 }).catch(() => false)) {
       await confirmBtn.first().click();
       await page.waitForTimeout(2000);
@@ -130,20 +146,11 @@ test.describe('DestinOraclesSolution CRM – Full Functional & Data Validation',
   // LEVEL 2 – ADD AGENT MODAL OPEN / CANCEL
   // ------------------------------------------------------------------
   test('L2: Add Agent modal opens and cancels cleanly', async ({ page }) => {
-    const agentsNav = page.locator('a:has-text("Agents"), [data-section="agents"]');
-    if (await agentsNav.first().isVisible({ timeout: 2000 }).catch(() => false)) {
-      await agentsNav.first().click();
-      await page.waitForTimeout(500);
-    }
+    await goToAgents(page);
 
-    const addBtn = page.locator('button:has-text("Add Agent"), button:has-text("New Agent"), button:has-text("Add User")').first();
-    if (!(await addBtn.isVisible({ timeout: 3000 }).catch(() => false))) {
-      console.warn('  WARN  Add Agent button not found – skipping');
-      return;
-    }
-
+    const addBtn = page.locator('button:has-text("Add Agent")').first();
     await addBtn.click();
-    const modal = page.locator('.modal:visible, [role="dialog"]:visible');
+    const modal = page.locator('#global-modal-overlay:visible, .modal-box:visible');
     await expect(modal.first()).toBeVisible({ timeout: 4000 });
     console.log('  PASS  Modal opened');
 
@@ -192,36 +199,35 @@ test.describe('DestinOraclesSolution CRM – Full Functional & Data Validation',
   // LEVEL 3 – CHURN + BIRTHDAY DATA PRESENCE
   // ------------------------------------------------------------------
   test('L3: Churn risks and birthday data are present', async ({ page }) => {
-    // Navigate to dashboard / home
-    const homeLink = page.locator('a:has-text("Dashboard"), a:has-text("Home"), [data-section="dashboard"]');
-    if (await homeLink.first().isVisible({ timeout: 2000 }).catch(() => false)) {
-      await homeLink.first().click();
-      await page.waitForTimeout(800);
-    }
+    // Calendar view is the default landing page and shows birthday reminders
+    await page.click('#nav-calendar');
+    await page.waitForTimeout(1000);
 
-    // Churn risks
-    const churnEl = page.locator('*:has-text("churn")').first();
+    // Churn risks – look for the dedicated churn risk section heading
+    const churnEl = page.locator('h3:has-text("Churn"), h4:has-text("Churn"), .churn-risk, [class*="churn"]').first();
     if (await churnEl.isVisible({ timeout: 3000 }).catch(() => false)) {
       const txt = await churnEl.textContent();
-      console.log(`  INFO  Churn element text: "${txt?.trim()}"`);
-      // Pass regardless – we just want it visible; business logic decides threshold
+      console.log(`  INFO  Churn element: "${txt?.trim()}"`);
       expect(txt).not.toBeNull();
     } else {
-      console.warn('  WARN  No churn element found on current view');
+      console.warn('  WARN  No churn element found on calendar view – may be on AI Insights page');
     }
 
-    // Birthday data
-    const bdEl = page.locator('*:has-text("Birthday"), *:has-text("birthday")').first();
-    if (await bdEl.isVisible({ timeout: 3000 }).catch(() => false)) {
-      const txt = await bdEl.textContent();
-      console.log(`  INFO  Birthday element text: "${txt?.trim()}"`);
-      if (txt?.includes('[]') || txt?.toLowerCase().includes('no upcoming')) {
-        console.warn('  WARN  Birthday data appears empty');
-      } else {
-        console.log('  PASS  Birthday data non-empty');
-      }
+    // Birthday reminders section (visible on calendar view)
+    const bdSection = page.locator('.birthday-section, [class*="birthday"], h3:has-text("BIRTHDAY"), h4:has-text("Birthday")').first();
+    if (await bdSection.isVisible({ timeout: 3000 }).catch(() => false)) {
+      const txt = await bdSection.textContent();
+      console.log(`  INFO  Birthday section: "${txt?.trim().slice(0, 80)}"`);
+      console.log('  PASS  Birthday section visible');
     } else {
-      console.warn('  WARN  No birthday element found on current view');
+      console.warn('  WARN  Birthday section not found');
+    }
+
+    // Check birthday counts directly
+    const todayCount = page.locator('.birthday-section .count, [class*="birthday"] .count').first();
+    if (await todayCount.isVisible({ timeout: 2000 }).catch(() => false)) {
+      const count = await todayCount.textContent();
+      console.log(`  INFO  Birthday today count: ${count}`);
     }
   });
 
@@ -229,22 +235,13 @@ test.describe('DestinOraclesSolution CRM – Full Functional & Data Validation',
   // LEVEL 3 – AGENT CRUD (add → verify → edit → delete)
   // ------------------------------------------------------------------
   test('L3: Agent CRUD – create, verify, edit, delete', async ({ page }) => {
-    const agentsNav = page.locator('a:has-text("Agents"), [data-section="agents"]');
-    if (await agentsNav.first().isVisible({ timeout: 2000 }).catch(() => false)) {
-      await agentsNav.first().click();
-      await page.waitForTimeout(500);
-    }
+    await goToAgents(page);
 
     // --- CREATE ---
-    const addBtn = page.locator('button:has-text("Add Agent"), button:has-text("New Agent"), button:has-text("Add User")').first();
-    if (!(await addBtn.isVisible({ timeout: 3000 }).catch(() => false))) {
-      console.warn('  WARN  Add Agent button not found – skipping CRUD test');
-      test.skip();
-      return;
-    }
+    const addBtn = page.locator('button:has-text("Add Agent")').first();
 
     await addBtn.click();
-    await page.waitForSelector('.modal:visible, [role="dialog"]:visible', { timeout: 4000 });
+    await page.waitForSelector('#global-modal-overlay:visible, .modal-box:visible', { timeout: 4000 });
 
     // Fill form fields by common name attributes or labels
     const nameInput = page.locator('input[name="name"], input[placeholder*="name" i], input[id*="name" i]').first();
@@ -259,7 +256,7 @@ test.describe('DestinOraclesSolution CRM – Full Functional & Data Validation',
       await pwInput.fill(TEST_AGENT.password);
     }
 
-    await page.locator('.modal button:has-text("Save"), .modal button:has-text("Create"), .modal button[type="submit"]').first().click();
+    await page.locator('#global-modal-overlay button:has-text("Save"), #global-modal-overlay button:has-text("Create"), #global-modal-overlay button[type="submit"]').first().click();
     await page.waitForTimeout(2000);
 
     // Verify agent in table
@@ -277,11 +274,11 @@ test.describe('DestinOraclesSolution CRM – Full Functional & Data Validation',
       if (await editBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
         await editBtn.click();
         await page.waitForSelector('.modal:visible', { timeout: 3000 });
-        const nameField = page.locator('.modal input[name="name"], .modal input[placeholder*="name" i]').first();
+        const nameField = page.locator('#global-modal-overlay input[name="name"], #global-modal-overlay input[placeholder*="name" i]').first();
         if (await nameField.isVisible()) {
           await nameField.fill(TEST_AGENT.name + ' Edited');
         }
-        await page.locator('.modal button:has-text("Save"), .modal button:has-text("Update")').first().click();
+        await page.locator('#global-modal-overlay button:has-text("Save"), #global-modal-overlay button:has-text("Update")').first().click();
         await page.waitForTimeout(2000);
         const updatedRow = page.locator(`tr:has-text("${TEST_AGENT.name} Edited")`).first();
         if (await updatedRow.isVisible({ timeout: 3000 }).catch(() => false)) {
@@ -297,7 +294,7 @@ test.describe('DestinOraclesSolution CRM – Full Functional & Data Validation',
     const deleteBtn = page.locator(`tr:has-text("${finalName}") button:has-text("Delete")`).first();
     if (await deleteBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
       await deleteBtn.click();
-      const confirmBtn = page.locator('.modal button:has-text("Confirm"), .modal button:has-text("Yes"), .modal button:has-text("Delete")').first();
+      const confirmBtn = page.locator('#global-modal-overlay button:has-text("Confirm"), #global-modal-overlay button:has-text("Yes"), #global-modal-overlay button:has-text("Delete")').first();
       if (await confirmBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
         await confirmBtn.click();
       }
