@@ -9014,7 +9014,12 @@ function _wireLoginBtn() {
     };
 
     const viewActivityDetails = async (activityId) => {
-        const activity = await AppDataStore.getById('activities', activityId);
+        let activity = await AppDataStore.getById('activities', activityId);
+        if (!activity) {
+            // Fall back to getAll for records that exist only in localStorage
+            const all = await AppDataStore.getAll('activities');
+            activity = all.find(a => String(a.id) === String(activityId)) || null;
+        }
         if (!activity) return;
 
         const prospect = activity.prospect_id ? await AppDataStore.getById('prospects', activity.prospect_id) : null;
@@ -9097,7 +9102,7 @@ function _wireLoginBtn() {
             { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
             { label: '✏️ Edit', type: 'secondary', action: `UI.hideModal(); await app.editActivity(${activityId})` },
             { label: '📝 Post Meeting Update', type: 'secondary', action: `UI.hideModal(); await app.postMeetupNotes(${activityId})` },
-            { label: '✅ Mark Complete', type: 'secondary', action: `await app.markActivityComplete(${activityId})` },
+            { label: '✅ Case Closed', type: 'secondary', action: `await app.markActivityComplete(${activityId})` },
         ];
 
         if (activity.prospect_id) {
