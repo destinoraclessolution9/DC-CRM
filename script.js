@@ -8413,13 +8413,21 @@ function _wireLoginBtn() {
                         const agent = a.lead_agent_id ? await AppDataStore.getById('users', a.lead_agent_id) : null;
                         const agentName = agent ? agent.full_name : 'No Agent';
 
+                        const myCoAgentEntry = a.co_agents?.find(ca => ca.id === _currentUser?.id);
+                        const isPendingInvite = myCoAgentEntry?.invitation_status === 'pending';
                         activityHtml += `
-                            <div class="calendar-appointment ${a.activity_type.toLowerCase()} ${a.closing_amount ? 'closed-case' : ''}" 
+                            <div class="calendar-appointment ${a.activity_type.toLowerCase()} ${a.closing_amount ? 'closed-case' : ''} ${isPendingInvite ? 'invite-pending' : ''}"
                                 onclick="app.viewActivityDetails(${a.id})">
                                 <div class="appointment-time">${a.start_time || '00:00'} - ${a.end_time || '00:00'}</div>
-                                <div class="appointment-agent">👤 ${agentName} ${a.co_agents && a.co_agents.length > 0 ? '<small>+1</small>' : ''}</div>
+                                <div class="appointment-agent">👤 ${agentName} ${a.co_agents && a.co_agents.length > 0 ? '<small>+' + a.co_agents.length + '</small>' : ''}</div>
                                 <div class="appointment-customer">📋 ${entityName}</div>
                                 <div class="appointment-type">🏷️ ${a.activity_type}</div>
+                                ${isPendingInvite ? `
+                                <div style="display:flex; gap:4px; margin-top:4px;" onclick="event.stopPropagation()">
+                                    <button style="flex:1; padding:3px 6px; background:#22c55e; color:white; border:none; border-radius:4px; font-size:11px; font-weight:600; cursor:pointer;" onclick="event.stopPropagation(); app.joinActivity(${a.id})">✓ Join</button>
+                                    <button style="flex:1; padding:3px 6px; background:#ef4444; color:white; border:none; border-radius:4px; font-size:11px; font-weight:600; cursor:pointer;" onclick="event.stopPropagation(); app.rejectActivity(${a.id})">✕ Reject</button>
+                                </div>
+                                ` : ''}
                                 ${a.closing_amount ? `
                                 <div class="appointment-closed">
                                     <div class="closed-badge">✓ CLOSED</div>
@@ -10331,7 +10339,7 @@ function _wireLoginBtn() {
         }
         if (_selectedCoAgents.find(a => a.id === id)) return;
 
-        _selectedCoAgents.push({ id, name, co_role: 'Supporting' });
+        _selectedCoAgents.push({ id, name, co_role: 'Supporting', invitation_status: 'pending' });
         renderCoAgents();
         const aRes = document.getElementById('agent-search-results');
         if (aRes) aRes.style.display = 'none';
@@ -10347,6 +10355,28 @@ function _wireLoginBtn() {
     const updateCoAgentRole = (id, role) => {
         const agent = _selectedCoAgents.find(a => a.id === id);
         if (agent) agent.co_role = role;
+    };
+
+    const joinActivity = async (activityId) => {
+        const activity = await AppDataStore.getById('activities', activityId);
+        if (!activity) return;
+        const coAgents = (activity.co_agents || []).map(ca =>
+            ca.id === _currentUser?.id ? { ...ca, invitation_status: 'joined' } : ca
+        );
+        await AppDataStore.update('activities', activityId, { co_agents: coAgents });
+        UI.toast.success('You have joined this activity');
+        await renderCalendar();
+    };
+
+    const rejectActivity = async (activityId) => {
+        const activity = await AppDataStore.getById('activities', activityId);
+        if (!activity) return;
+        const coAgents = (activity.co_agents || []).map(ca =>
+            ca.id === _currentUser?.id ? { ...ca, invitation_status: 'rejected' } : ca
+        );
+        await AppDataStore.update('activities', activityId, { co_agents: coAgents });
+        UI.toast.success('You have declined this invitation');
+        await renderCalendar();
     };
 
     const renderCoAgents = () => {
@@ -20467,6 +20497,8 @@ const initImportDemoData = async () => {
         searchAgents,
         addCoAgent,
         removeCoAgent,
+        joinActivity,
+        rejectActivity,
         updateCoAgentRole,
         saveActivity,
         saveAndAddAnother,
