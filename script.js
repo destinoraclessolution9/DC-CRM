@@ -10979,6 +10979,7 @@ function _wireLoginBtn() {
                         <button class="btn-icon" title="Add Purchase" onclick="app.openAddPurchaseModal(${c.id})"><i class="fas fa-shopping-cart"></i></button>
                         <button class="btn-icon" title="Referral" onclick="app.todo('Referral workflow')"><i class="fas fa-user-plus"></i></button>
                         <button class="btn-icon" title="Recruit" onclick="app.openRecruitModal(${c.id})"><i class="fas fa-user-tie"></i></button>
+                        ${isManagement(_currentUser) ? `<button class="btn-icon" style="color:#ef4444;" title="Delete Customer" onclick="event.stopPropagation(); app.deleteCustomer(${c.id})"><i class="fas fa-trash"></i></button>` : ''}
                     </td>
                 </tr>
             `;
@@ -11126,6 +11127,7 @@ function _wireLoginBtn() {
                         <button class="btn-icon" title="Edit" onclick="app.openProspectModal(${p.id})"><i class="fas fa-edit"></i></button>
                         <button class="btn-icon" title="Add Activity" onclick="app.openActivityModal('', ${p.id})"><i class="fas fa-calendar-plus"></i></button>
                         <button class="btn-icon" title="Convert to Customer" onclick="app.convertToCustomer(${p.id})"><i class="fas fa-user-check"></i></button>
+                        ${isManagement(_currentUser) ? `<button class="btn-icon" style="color:#ef4444;" title="Delete Prospect" onclick="event.stopPropagation(); app.deleteProspect(${p.id})"><i class="fas fa-trash"></i></button>` : ''}
                     </td>
                 </tr>
             `;
@@ -12894,7 +12896,8 @@ const openAddSolutionModal = async (prospectId) => {
         const prospect = await AppDataStore.getById('prospects', prospectId);
         if (!prospect) return;
 
-        const totalPurchases = await AppDataStore.getAll('purchases')
+        const allPurchases = await AppDataStore.getAll('purchases');
+        const totalPurchases = allPurchases
             .filter(p => p.prospect_id === prospectId)
             .reduce((sum, p) => sum + (p.amount || 0), 0);
 
@@ -12936,6 +12939,46 @@ const openAddSolutionModal = async (prospectId) => {
         UI.showModal('Convert to Customer', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
             { label: 'Convert', type: 'primary', action: `await app.confirmConvertToCustomer(${prospectId})` }
+        ]);
+    };
+
+    const deleteProspect = async (prospectId) => {
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) return UI.toast.error('Prospect not found');
+        UI.showModal('Delete Prospect', `
+            <div style="text-align:center; padding:8px 0;">
+                <i class="fas fa-exclamation-triangle" style="font-size:48px; color:#ef4444; margin-bottom:16px;"></i>
+                <p>Are you sure you want to delete <strong>${escapeHtml(prospect.full_name)}</strong>?</p>
+                <p style="color:var(--gray-500); font-size:13px; margin-top:8px;">This cannot be undone.</p>
+            </div>
+        `, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Delete', type: 'primary', action: `(async () => {
+                await AppDataStore.delete('prospects', '${prospectId}');
+                UI.hideModal();
+                UI.toast.success('Prospect deleted');
+                await app.renderProspectsTable();
+            })()` }
+        ]);
+    };
+
+    const deleteCustomer = async (customerId) => {
+        const customer = await AppDataStore.getById('customers', customerId);
+        if (!customer) return UI.toast.error('Customer not found');
+        UI.showModal('Delete Customer', `
+            <div style="text-align:center; padding:8px 0;">
+                <i class="fas fa-exclamation-triangle" style="font-size:48px; color:#ef4444; margin-bottom:16px;"></i>
+                <p>Are you sure you want to delete <strong>${escapeHtml(customer.full_name)}</strong>?</p>
+                <p style="color:var(--gray-500); font-size:13px; margin-top:8px;">This cannot be undone.</p>
+            </div>
+        `, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Delete', type: 'primary', action: `(async () => {
+                await AppDataStore.delete('customers', '${customerId}');
+                UI.hideModal();
+                UI.toast.success('Customer deleted');
+                await app.renderCustomersTable();
+            })()` }
         ]);
     };
 
@@ -20464,6 +20507,8 @@ const initImportDemoData = async () => {
         reassignProspect,
         convertToCustomer,
         confirmConvertToCustomer,
+        deleteProspect,
+        deleteCustomer,
 
         // Phase 4 Customer Management Functions
         switchCustomerTab,
