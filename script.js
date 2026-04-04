@@ -79,6 +79,8 @@ const appLogic = (() => {
     let _treeZoom = null;
     let _treeSvg = null;
     let _currentTreeData = null;
+    let _treeNavStack = [];                 // [{id, type}] for back navigation
+    let _treeActiveFilter = 'all';          // 'all' | 'new' | 'expected_drop' | 'lost'
 
     // Phase 11: DMS State
     let _currentFolder = null; // Current folder ID
@@ -6877,20 +6879,33 @@ function _wireLoginBtn() {
 
                     <div class="ref-v2-tree-section">
                         <div class="tree-header">
-                            <h3><i class="fas fa-network-wired"></i> Relationship Tree</h3>
+                            <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap">
+                                <h3><i class="fas fa-network-wired"></i> Relationship Tree</h3>
+                                <div class="tree-filter-chips">
+                                    <button class="tree-filter-chip active" data-filter="all" onclick="app.applyTreeFilters('all')">All</button>
+                                    <button class="tree-filter-chip" data-filter="new" onclick="app.applyTreeFilters('new')">New (&lt;30d)</button>
+                                    <button class="tree-filter-chip" data-filter="expected_drop" onclick="app.applyTreeFilters('expected_drop')">Expected to Drop</button>
+                                    <button class="tree-filter-chip" data-filter="lost" onclick="app.applyTreeFilters('lost')">Lost</button>
+                                </div>
+                            </div>
                             <div class="tree-tools">
+                                <button class="tool-btn" id="tree-back-btn" onclick="app.treeNavBack()" title="Go Back" style="display:none"><i class="fas fa-arrow-left"></i></button>
                                 <button class="tool-btn" onclick="app.treeZoomIn()" title="Zoom In"><i class="fas fa-plus"></i></button>
                                 <button class="tool-btn" onclick="app.treeZoomOut()" title="Zoom Out"><i class="fas fa-minus"></i></button>
                                 <button class="tool-btn" onclick="app.treeResetZoom()" title="Reset"><i class="fas fa-compress-arrows-alt"></i></button>
+                                <button class="tool-btn" onclick="app.showTreeBookmarks()" title="Bookmarks"><i class="fas fa-heart"></i></button>
                                 <button class="tool-btn" onclick="app.todo('Export Tree')" title="Export"><i class="fas fa-download"></i></button>
                             </div>
                         </div>
-                        <div id="referral-tree-container" class="tree-visualization">
-                            <div id="referral-tree-placeholder" class="tree-empty">
-                                <i class="fas fa-search"></i>
-                                <p>Search for a person above to view their referral network.</p>
+                        <div class="tree-workspace">
+                            <div id="referral-tree-container" class="tree-visualization">
+                                <div id="referral-tree-placeholder" class="tree-empty">
+                                    <i class="fas fa-search"></i>
+                                    <p>Search for a person above to view their referral network.</p>
+                                </div>
+                                <svg id="referral-tree-svg" style="width:100%; height:100%; display:none;"></svg>
                             </div>
-                            <svg id="referral-tree-svg" style="width:100%; height:100%; display:none;"></svg>
+                            <div id="tree-node-sidebar" class="tree-node-sidebar" style="display:none"></div>
                         </div>
                     </div>
                 </div>
@@ -6961,9 +6976,27 @@ function _wireLoginBtn() {
                 .tool-btn { width: 32px; height: 32px; border-radius: 6px; border: 1px solid var(--gray-200); background: white; color: var(--gray-600); cursor: pointer; display: flex; align-items: center; justify-content: center; }
                 .tool-btn:hover { background: var(--gray-50); color: #3b82f6; border-color: #3b82f6; }
                 
-                .tree-visualization { flex-grow: 1; position: relative; background: #f8fafc; overflow: hidden; border-radius: 0 0 12px 12px; }
+                .tree-workspace { display: flex; flex-grow: 1; min-height: 0; overflow: hidden; border-radius: 0 0 12px 12px; }
+                .tree-visualization { flex: 1; min-width: 0; position: relative; background: #f8fafc; overflow: hidden; }
                 .tree-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--gray-400); gap: 16px; }
                 .tree-empty i { font-size: 48px; }
+
+                /* Filter Chips */
+                .tree-filter-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+                .tree-filter-chip { padding: 4px 12px; border-radius: 20px; font-size: 12px; border: 1px solid var(--gray-200); cursor: pointer; background: white; color: var(--gray-600); transition: all 0.15s; }
+                .tree-filter-chip:hover { border-color: #3b82f6; color: #3b82f6; }
+                .tree-filter-chip.active { background: #3b82f6; color: white; border-color: #3b82f6; }
+
+                /* Node Sidebar */
+                .tree-node-sidebar { width: 280px; flex-shrink: 0; border-left: 1px solid var(--gray-200); padding: 16px; overflow-y: auto; background: white; display: flex; flex-direction: column; gap: 4px; }
+                .sidebar-field { margin-bottom: 10px; }
+                .sidebar-field label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--gray-400); display: block; margin-bottom: 2px; font-weight: 600; }
+                .sidebar-field .value { font-size: 13px; font-weight: 500; color: var(--gray-800); word-break: break-word; }
+                .sidebar-ancestor-path { font-size: 11px; color: var(--gray-600); line-height: 1.9; word-break: break-word; }
+                .interested-heart-btn { background: none; border: none; font-size: 18px; cursor: pointer; padding: 4px 6px; border-radius: 6px; transition: background 0.15s; flex-shrink: 0; }
+                .interested-heart-btn:hover { background: #fef2f2; }
+                .sidebar-copy-btn { font-size: 11px; background: #f1f5f9; border: none; border-radius: 4px; padding: 2px 8px; cursor: pointer; color: #64748b; transition: background 0.15s; }
+                .sidebar-copy-btn:hover { background: #e2e8f0; }
                 
                 /* D3 Tree Custom Styles */
                 .node circle { transition: r 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
@@ -7226,12 +7259,25 @@ function _wireLoginBtn() {
         }
     };
 
-    const showReferralTree = async (personId, personType) => {
+    const showReferralTree = async (personId, personType, pushToStack = false) => {
+        // Manage back-navigation stack
+        if (pushToStack && _currentSelectedPerson) {
+            _treeNavStack.push({ ..._currentSelectedPerson });
+        } else if (!pushToStack) {
+            _treeNavStack = []; // Fresh navigation resets the stack
+        }
+        const backBtn = document.getElementById('tree-back-btn');
+        if (backBtn) backBtn.style.display = _treeNavStack.length > 0 ? 'flex' : 'none';
+
         _currentSelectedPerson = { id: personId, type: personType };
-        document.getElementById('tree-search-results').style.display = 'none';
-        document.getElementById('tree-search-input').value = '';
-        document.getElementById('referral-tree-placeholder').style.display = 'none';
-        document.getElementById('referral-tree-svg').style.display = 'block';
+        const searchResults = document.getElementById('tree-search-results');
+        const searchInput = document.getElementById('tree-search-input');
+        const placeholder = document.getElementById('referral-tree-placeholder');
+        const svg = document.getElementById('referral-tree-svg');
+        if (searchResults) searchResults.style.display = 'none';
+        if (searchInput) searchInput.value = '';
+        if (placeholder) placeholder.style.display = 'none';
+        if (svg) svg.style.display = 'block';
 
         _currentTreeData = await buildTreeData(personId, personType);
         if (!_currentTreeData) {
@@ -7250,6 +7296,9 @@ function _wireLoginBtn() {
             name: person.full_name,
             type: rootType,
             role: person.role || 'Guest',
+            pipeline_stage: person.pipeline_stage,
+            last_activity_date: person.last_activity_date,
+            join_date: person.join_date || person.created_at,
             children: []
         };
 
@@ -7273,8 +7322,16 @@ function _wireLoginBtn() {
     const getProspectColour = async (prospectId) => {
         const prospect = await AppDataStore.getById('prospects', prospectId);
         if (!prospect) return "#cbd5e1"; // Gray default
+
+        // Expected to Drop: no activity in 180+ days (shown before stage color)
+        if (prospect.last_activity_date) {
+            const daysSinceActivity = (new Date() - new Date(prospect.last_activity_date)) / (1000 * 60 * 60 * 24);
+            if (daysSinceActivity > 180 && prospect.pipeline_stage?.toLowerCase() !== 'lost') {
+                return "#d97706"; // Amber — Expected to Drop
+            }
+        }
+
         const status = prospect.pipeline_stage?.toLowerCase();
-        
         switch(status) {
             case 'new': return "#10b981"; // Emerald Green
             case 'contacted': return "#3b82f6"; // Blue
@@ -7403,19 +7460,35 @@ function _wireLoginBtn() {
                 await app.openMemoModal(d.data.id, d.data.type);
             });
 
-        // Click async Handler (View Profile)
+        // Click: open node details in sidebar (no navigation away)
         nodes.on("click", async (e, d) => {
-            if (d.data.type === 'customer') {
-                await app.showCustomerDetail(d.data.id);
-            } else {
-                await app.showProspectDetail(d.data.id);
-            }
+            e.stopPropagation();
+            await app.showTreeNodeSidebar(d.data.id, d.data.type);
         });
 
-        // Expand/collapse on double-click
+        // Double-click: re-root the tree from this node (pushes to nav stack)
         nodes.on("dblclick", async (e, d) => {
             e.stopPropagation();
-            await app.showReferralTree(d.data.id, d.data.type);
+            await showReferralTree(d.data.id, d.data.type, true);
+        });
+
+        // Apply active filter as opacity overlay
+        const now = new Date();
+        nodes.attr("opacity", d => {
+            if (_treeActiveFilter === 'all') return 1;
+            const data = d.data;
+            if (_treeActiveFilter === 'new') {
+                const joinDate = data.join_date ? new Date(data.join_date) : null;
+                return (joinDate && (now - joinDate) / (1000 * 60 * 60 * 24) <= 30) ? 1 : 0.2;
+            }
+            if (_treeActiveFilter === 'expected_drop') {
+                const lastActivity = data.last_activity_date ? new Date(data.last_activity_date) : null;
+                return (lastActivity && (now - lastActivity) / (1000 * 60 * 60 * 24) > 180 && data.pipeline_stage?.toLowerCase() !== 'lost') ? 1 : 0.2;
+            }
+            if (_treeActiveFilter === 'lost') {
+                return data.pipeline_stage?.toLowerCase() === 'lost' ? 1 : 0.2;
+            }
+            return 1;
         });
 
         // Center the tree
@@ -7445,8 +7518,227 @@ function _wireLoginBtn() {
         }
     };
 
+    // ========== TREE SIDEBAR & NAVIGATION ==========
+
+    // Walk up referrals table to build ancestor chain (max 15 levels)
+    const getAncestorPath = async (id) => {
+        const referrals = await AppDataStore.getAll('referrals');
+        const path = [];
+        let currentId = String(id);
+        const MAX_DEPTH = 15;
+        const visited = new Set();
+
+        for (let depth = 0; depth < MAX_DEPTH; depth++) {
+            if (visited.has(currentId)) break;
+            visited.add(currentId);
+
+            const ref = referrals.find(r => String(r.referred_prospect_id) === currentId);
+            if (!ref) break;
+
+            const referrerId = ref.referrer_id;
+            const referrerType = ref.referrer_type || 'prospect';
+            const person = await AppDataStore.getById(referrerType === 'customer' ? 'customers' : 'prospects', referrerId);
+            if (!person) break;
+
+            path.unshift({ id: referrerId, type: referrerType, name: person.full_name });
+            currentId = String(referrerId);
+        }
+
+        return path;
+    };
+
+    // Show node details in the right sidebar panel
+    const showTreeNodeSidebar = async (id, type) => {
+        const sidebar = document.getElementById('tree-node-sidebar');
+        if (!sidebar) return;
+
+        const person = await AppDataStore.getById(type === 'customer' ? 'customers' : 'prospects', id);
+        if (!person) return;
+
+        // Ancestor path
+        const ancestors = await getAncestorPath(id);
+        const pathHtml = ancestors.length > 0
+            ? ancestors.map(a => `<span>${a.name}</span>`).join(' <span style="color:var(--gray-300)">›</span> ') + ` <span style="color:var(--gray-300)">›</span> <strong>${person.full_name}</strong>`
+            : `<strong>${person.full_name}</strong> <span style="color:var(--gray-400); font-size:10px">(root)</span>`;
+
+        // Check bookmark status in Supabase
+        const currentUserId = _currentUser?.id;
+        let isInterested = false;
+        if (currentUserId) {
+            try {
+                const existing = await AppDataStore.query('tree_interested', {
+                    user_id: currentUserId,
+                    interested_person_id: id,
+                    interested_person_type: type
+                });
+                isInterested = existing.length > 0;
+            } catch (_) {}
+        }
+
+        // Referral stats
+        const allReferrals = await AppDataStore.getAll('referrals');
+        const made = allReferrals.filter(r => String(r.referrer_id) === String(id));
+        const converted = made.filter(r => r.is_converted || r.status === 'Active').length;
+
+        // Stage badge color
+        const stageColors = { new: '#10b981', contacted: '#3b82f6', meeting: '#f59e0b', proposal: '#eab308', negotiation: '#6366f1', lost: '#ef4444' };
+        const stageName = type === 'customer' ? 'Customer' : (person.pipeline_stage || 'Prospect');
+        const stageColor = type === 'customer' ? '#0d9488' : (stageColors[person.pipeline_stage?.toLowerCase()] || '#94a3b8');
+
+        sidebar.style.display = 'flex';
+        sidebar.innerHTML = `
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px">
+                <div style="flex:1; min-width:0">
+                    <div style="font-size:15px; font-weight:700; color:var(--gray-800); white-space:normal; word-break:break-word">${person.full_name}</div>
+                    <span style="background:${stageColor}; color:white; font-size:10px; padding:2px 8px; border-radius:10px; text-transform:uppercase; display:inline-block; margin-top:4px">${stageName}</span>
+                </div>
+                <button onclick="app.toggleTreeInterested(${id}, '${type}')" class="interested-heart-btn" id="heart-btn-${id}" title="${isInterested ? 'Remove bookmark' : 'Add bookmark'}">
+                    ${isInterested ? '❤️' : '🤍'}
+                </button>
+            </div>
+
+            <div class="sidebar-field">
+                <label>ID</label>
+                <div style="display:flex; align-items:center; gap:8px">
+                    <span class="value">${id}</span>
+                    <button class="sidebar-copy-btn" onclick="navigator.clipboard.writeText('${id}'); UI.toast.success('ID copied!')">Copy</button>
+                </div>
+            </div>
+
+            ${person.phone ? `<div class="sidebar-field"><label>Phone</label><div class="value">${person.phone}</div></div>` : ''}
+            ${person.email ? `<div class="sidebar-field"><label>Email</label><div class="value" style="font-size:12px">${person.email}</div></div>` : ''}
+            ${person.occupation ? `<div class="sidebar-field"><label>Occupation</label><div class="value">${person.occupation}</div></div>` : ''}
+
+            <div class="sidebar-field">
+                <label>Referrals Made</label>
+                <div class="value">${made.length} total &nbsp;·&nbsp; <span style="color:#10b981; font-weight:600">${converted} converted</span></div>
+            </div>
+
+            ${(person.join_date || person.created_at) ? `
+            <div class="sidebar-field">
+                <label>Joined</label>
+                <div class="value">${UI.formatDate(person.join_date || person.created_at)}</div>
+            </div>` : ''}
+
+            <div style="margin:12px 0; padding:10px 12px; background:#f8fafc; border-radius:8px; border-left:3px solid #3b82f6">
+                <div style="font-size:10px; text-transform:uppercase; letter-spacing:0.06em; color:var(--gray-400); font-weight:600; margin-bottom:6px">Referral Chain</div>
+                <div class="sidebar-ancestor-path">${pathHtml}</div>
+            </div>
+
+            <div style="display:flex; flex-direction:column; gap:8px; margin-top:auto; padding-top:8px; border-top:1px solid var(--gray-100)">
+                <button class="btn primary btn-sm" onclick="app.showReferralTree(${id}, '${type}', true)">
+                    <i class="fas fa-sitemap"></i> View Their Tree
+                </button>
+                <button class="btn secondary btn-sm" onclick="app.${type === 'customer' ? 'showCustomerDetail' : 'showProspectDetail'}(${id})">
+                    <i class="fas fa-user"></i> Full Profile
+                </button>
+            </div>
+        `;
+    };
+
+    // Toggle bookmark for a tree node — persisted in Supabase tree_interested table
+    const toggleTreeInterested = async (id, type) => {
+        const currentUserId = _currentUser?.id;
+        if (!currentUserId) { UI.toast.error('You must be logged in'); return; }
+
+        let existing = [];
+        try {
+            existing = await AppDataStore.query('tree_interested', {
+                user_id: currentUserId,
+                interested_person_id: id,
+                interested_person_type: type
+            });
+        } catch (_) {}
+
+        const heartBtn = document.getElementById(`heart-btn-${id}`);
+
+        if (existing.length > 0) {
+            await AppDataStore.delete('tree_interested', existing[0].id);
+            if (heartBtn) heartBtn.innerHTML = '🤍';
+            if (heartBtn) heartBtn.title = 'Add bookmark';
+            UI.toast.info('Removed from bookmarks');
+        } else {
+            // Enforce per-user limit of 100
+            let allInterested = [];
+            try { allInterested = await AppDataStore.query('tree_interested', { user_id: currentUserId }); } catch (_) {}
+            if (allInterested.length >= 100) {
+                UI.toast.error('Maximum 100 bookmarks reached. Remove some first.');
+                return;
+            }
+
+            const person = await AppDataStore.getById(type === 'customer' ? 'customers' : 'prospects', id);
+            await AppDataStore.create('tree_interested', {
+                id: Date.now(),
+                user_id: currentUserId,
+                interested_person_id: id,
+                interested_person_type: type,
+                interested_person_name: person?.full_name || '',
+                created_at: new Date().toISOString()
+            });
+            if (heartBtn) heartBtn.innerHTML = '❤️';
+            if (heartBtn) heartBtn.title = 'Remove bookmark';
+            UI.toast.success('Bookmarked!');
+        }
+    };
+
+    // Show all bookmarked nodes in a modal
+    const showTreeBookmarks = async () => {
+        const currentUserId = _currentUser?.id;
+        if (!currentUserId) { UI.toast.error('Login required'); return; }
+
+        let bookmarks = [];
+        try { bookmarks = await AppDataStore.query('tree_interested', { user_id: currentUserId }); } catch (_) {}
+
+        if (bookmarks.length === 0) {
+            UI.toast.info('No bookmarks yet. Click ❤️ on any node in the sidebar to bookmark.');
+            return;
+        }
+
+        const rows = bookmarks.map(b => `
+            <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 4px; border-bottom:1px solid var(--gray-100); gap:8px">
+                <div style="flex:1; min-width:0">
+                    <div style="font-weight:600; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">${b.interested_person_name || 'ID: ' + b.interested_person_id}</div>
+                    <div style="font-size:11px; color:var(--gray-500); text-transform:uppercase">${b.interested_person_type}</div>
+                </div>
+                <div style="display:flex; gap:6px; flex-shrink:0">
+                    <button class="btn secondary btn-sm" onclick="UI.hideModal(); app.showReferralTree(${b.interested_person_id}, '${b.interested_person_type}')">
+                        <i class="fas fa-sitemap"></i> Go
+                    </button>
+                    <button class="btn-icon" title="Remove" onclick="(async () => { await app.toggleTreeInterested(${b.interested_person_id}, '${b.interested_person_type}'); UI.hideModal(); await app.showTreeBookmarks(); })()">
+                        <i class="fas fa-times" style="color:#ef4444"></i>
+                    </button>
+                </div>
+            </div>
+        `).join('');
+
+        UI.showModal(`Bookmarks (${bookmarks.length})`, `
+            <div style="max-height:420px; overflow-y:auto; padding:0 4px">${rows}</div>
+        `);
+    };
+
+    // Apply a filter chip — dims non-matching nodes, re-renders tree
+    const applyTreeFilters = async (filter) => {
+        _treeActiveFilter = filter;
+        document.querySelectorAll('.tree-filter-chip').forEach(chip => {
+            chip.classList.toggle('active', chip.dataset.filter === filter);
+        });
+        if (_currentTreeData) await renderD3Tree(_currentTreeData);
+    };
+
+    // Navigate back to the previous tree root
+    const treeNavBack = async () => {
+        if (_treeNavStack.length === 0) return;
+        const prev = _treeNavStack.pop();
+        const backBtn = document.getElementById('tree-back-btn');
+        if (backBtn) backBtn.style.display = _treeNavStack.length > 0 ? 'flex' : 'none';
+
+        _currentSelectedPerson = prev;
+        _currentTreeData = await buildTreeData(prev.id, prev.type);
+        if (_currentTreeData) await renderD3Tree(_currentTreeData);
+    };
+
     // ========== ADD REFERRAL MODAL & FLOW ==========
- 
+
     let _modalSelectedReferrer = null;
     let _modalSelectedReferred = null;
  
@@ -20461,6 +20753,12 @@ const initImportDemoData = async () => {
         resetHiddenReferrers,
         searchTreePerson,
         showReferralTree,
+        getAncestorPath,
+        showTreeNodeSidebar,
+        toggleTreeInterested,
+        showTreeBookmarks,
+        applyTreeFilters,
+        treeNavBack,
 
         // Phase 10: Search Panel functions
         toggleSearchPanel: typeof toggleSearchPanel !== 'undefined' ? toggleSearchPanel : null,

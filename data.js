@@ -37,7 +37,8 @@ class DataStore {
             'surveys', 'survey_responses',
             'contracts',
             'custom_field_definitions', 'custom_field_values',
-            'portal_sessions'
+            'portal_sessions',
+            'tree_interested'
         ];
         this.initialized = false;
         this._events = {};
