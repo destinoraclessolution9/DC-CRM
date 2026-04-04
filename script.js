@@ -4025,7 +4025,7 @@ In a production system, this would show the actual file contents.
                             </span>
                             <div class="message-actions">
                                 <button class="btn-icon" onclick="app. viewMessageDetails('${msg.id}')"><i class="fas fa-eye"></i></button>
-                                <button class="btn-icon" onclick="app.todo('Resend Message')"><i class="fas fa-redo"></i></button>
+                                <button class="btn-icon" onclick="app.resendMessage('${msg.id}')"><i class="fas fa-redo"></i></button>
                             </div>
                         </div>
                     </div>
@@ -4071,7 +4071,41 @@ In a production system, this would show the actual file contents.
 
     // Mock functions for missing references
     //const previewTemplate = () => {};
-    const resendMessage = () => { };
+    const resendMessage = async (messageId) => {
+        const messages = await AppDataStore.getAll('whatsapp_messages');
+        const message = messages.find(m => String(m.id) === String(messageId));
+        if (!message) { UI.toast.error('Message not found.'); return; }
+        const content = `
+            <div class="form-section">
+                <p>Resend this message?</p>
+                <div style="background:#e5ddd5; padding:16px; border-radius:8px; margin-top:12px; font-size:13px;">
+                    ${escapeHtml(message.content || message.template_name || '')}
+                </div>
+            </div>
+        `;
+        UI.showModal('Resend Message', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Resend', type: 'primary', action: `(async () => { await app.executeResendMessage('${messageId}'); })()` }
+        ]);
+    };
+
+    const executeResendMessage = async (messageId) => {
+        const messages = await AppDataStore.getAll('whatsapp_messages');
+        const message = messages.find(m => String(m.id) === String(messageId));
+        if (!message) { UI.toast.error('Message not found.'); return; }
+        await AppDataStore.create('whatsapp_messages', {
+            entity_type: message.entity_type,
+            entity_id: message.entity_id,
+            direction: message.direction,
+            to: message.to,
+            content: message.content,
+            template_name: message.template_name,
+            status: 'sent',
+            sent_at: new Date().toISOString()
+        });
+        UI.hideModal();
+        UI.toast.success('Message resent successfully.');
+    };
     const replyToMessage = () => { };
     const forwardMessage = () => { };
     const createTaskFromMessage = () => { };
@@ -6665,6 +6699,82 @@ function _wireLoginBtn() {
         }
     };
 
+    const openReferralFromProfile = async (entityId, entityType) => {
+        await openAddReferralModal();
+        await selectReferrerForModal(entityId, entityType, 'referrer');
+    };
+
+    const viewReferralDetails = async (referralId) => {
+        const r = await AppDataStore.getById('referrals', referralId);
+        if (!r) return;
+        const prospect = await AppDataStore.getById('prospects', r.referred_prospect_id);
+        const referrer = await AppDataStore.getById('customers', r.referrer_customer_id);
+        const content = `
+            <div class="form-section">
+                <div style="display:grid; gap:8px;">
+                    <div class="info-row"><div class="info-label">Referrer</div><div class="info-value">${referrer?.full_name || 'N/A'}</div></div>
+                    <div class="info-row"><div class="info-label">Referred Person</div><div class="info-value">${prospect?.full_name || 'N/A'}</div></div>
+                    <div class="info-row"><div class="info-label">Relationship</div><div class="info-value">${r.relationship || '-'}</div></div>
+                    <div class="info-row"><div class="info-label">Date</div><div class="info-value">${r.date || '-'}</div></div>
+                    <div class="info-row"><div class="info-label">Source</div><div class="info-value">${r.source || '-'}</div></div>
+                    <div class="info-row"><div class="info-label">Status</div><div class="info-value"><span class="score-badge ${r.status === 'Active' ? 'score-A+' : 'score-A'}">${r.status}</span></div></div>
+                    <div class="info-row"><div class="info-label">Reward Status</div><div class="info-value">${r.reward_status || '-'}</div></div>
+                    ${r.notes ? `<div class="info-row"><div class="info-label">Notes</div><div class="info-value">${escapeHtml(r.notes)}</div></div>` : ''}
+                </div>
+            </div>
+        `;
+        UI.showModal('Referral Details', content, [
+            { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Update', type: 'primary', action: `app.openUpdateReferralModal(${referralId})` }
+        ]);
+    };
+
+    const openUpdateReferralModal = async (referralId) => {
+        const r = await AppDataStore.getById('referrals', referralId);
+        if (!r) return;
+        const prospect = await AppDataStore.getById('prospects', r.referred_prospect_id);
+        const content = `
+            <div class="form-section">
+                <p style="margin-bottom:16px; color:var(--gray-600);">Referred: <strong>${prospect?.full_name || 'N/A'}</strong></p>
+                <div class="form-group">
+                    <label>Status</label>
+                    <select id="ref-update-status" class="form-control">
+                        <option ${r.status === 'Active' ? 'selected' : ''}>Active</option>
+                        <option ${r.status === 'Converted' ? 'selected' : ''}>Converted</option>
+                        <option ${r.status === 'Inactive' ? 'selected' : ''}>Inactive</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Reward Status</label>
+                    <select id="ref-update-reward" class="form-control">
+                        <option ${r.reward_status === 'Pending' ? 'selected' : ''}>Pending</option>
+                        <option ${r.reward_status === 'Paid' ? 'selected' : ''}>Paid</option>
+                        <option ${r.reward_status === 'Not Applicable' ? 'selected' : ''}>Not Applicable</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Notes</label>
+                    <textarea id="ref-update-notes" class="form-control" rows="3">${escapeHtml(r.notes || '')}</textarea>
+                </div>
+            </div>
+        `;
+        UI.showModal('Update Referral', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save', type: 'primary', action: `(async () => { await app.saveReferralUpdate(${referralId}); })()` }
+        ]);
+    };
+
+    const saveReferralUpdate = async (referralId) => {
+        const data = {
+            status: document.getElementById('ref-update-status').value,
+            reward_status: document.getElementById('ref-update-reward').value,
+            notes: document.getElementById('ref-update-notes').value.trim()
+        };
+        await AppDataStore.update('referrals', referralId, data);
+        UI.toast.success('Referral updated.');
+        UI.hideModal();
+    };
+
     const openMemoModal = async (id, type) => {
         const notesArr = await AppDataStore.getAll('notes');
         const notes = (notesArr || []).filter(n => n.entity_type === type && n.entity_id == id);
@@ -7555,6 +7665,8 @@ function _wireLoginBtn() {
         const getBdayInfo = async (p) => {
             const agent = await AppDataStore.getById('users', p.responsible_agent_id || p.lead_agent_id);
             return {
+                id: p.id,
+                entityType: p.customer_since ? 'customer' : 'prospect',
                 name: p.full_name,
                 info: `Agent: ${agent?.full_name || 'Michelle Tan'} · ${p.customer_since ? 'Customer' : 'Prospect'}`,
                 dob: p.date_of_birth ? p.date_of_birth.substring(5) : '' // MM-DD
@@ -7579,8 +7691,8 @@ function _wireLoginBtn() {
                     <div class="bday-name">${b.name} 🎂</div>
                     <div class="bday-info">${b.info}</div>
                     <div class="act-actions" style="border-top:none; margin-top:4px; padding-top:0;">
-                        <button class="btn btn-sm secondary" style="font-size:11px" onclick="app.todo('Send wish')">Send Wish</button>
-                        <button class="btn btn-sm secondary" style="font-size:11px" onclick="app.todo('Gift workflow')">Prepare Gift</button>
+                        <button class="btn btn-sm secondary" style="font-size:11px" onclick="app.openSendBirthdayWish(${b.id}, '${b.entityType}')">Send Wish</button>
+                        <button class="btn btn-sm secondary" style="font-size:11px" onclick="app.openPrepareGiftModal(${b.id}, '${b.entityType}')">Prepare Gift</button>
                     </div>
                 </div>
             `).join('');
@@ -7596,6 +7708,93 @@ function _wireLoginBtn() {
         upcomingList.innerHTML = renderBday(upcomingBdays);
     };
 
+
+    const openSendBirthdayWish = async (id, entityType) => {
+        const table = entityType === 'customer' ? 'customers' : 'prospects';
+        const person = await AppDataStore.getById(table, id);
+        if (!person) return;
+        const content = `
+            <div class="form-section">
+                <p>Send a birthday wish to <strong>${escapeHtml(person.full_name)}</strong>.</p>
+                <div class="form-group" style="margin-top:12px;">
+                    <label>Message</label>
+                    <textarea id="bday-wish-msg" class="form-control" rows="4">Happy Birthday, ${escapeHtml(person.full_name)}! 🎂 Wishing you a wonderful year ahead filled with joy and prosperity. Best regards, DestinOraclesSolution Team</textarea>
+                </div>
+                <div class="form-group">
+                    <label>Channel</label>
+                    <select id="bday-wish-channel" class="form-control">
+                        <option>WhatsApp</option>
+                        <option>Email</option>
+                        <option>SMS</option>
+                    </select>
+                </div>
+            </div>
+        `;
+        UI.showModal('Send Birthday Wish', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Send Wish', type: 'primary', action: `(async () => { await app.executeSendBirthdayWish(${id}, '${entityType}'); })()` }
+        ]);
+    };
+
+    const executeSendBirthdayWish = async (id, entityType) => {
+        const msg = document.getElementById('bday-wish-msg')?.value?.trim();
+        const channel = document.getElementById('bday-wish-channel')?.value;
+        if (!msg) { UI.toast.error('Message cannot be empty.'); return; }
+        await AppDataStore.create('activities', {
+            entity_type: entityType,
+            entity_id: id,
+            type: 'Birthday Wish',
+            notes: `Sent via ${channel}: ${msg}`,
+            date: new Date().toISOString().split('T')[0],
+            created_by: _currentUser?.id
+        });
+        UI.hideModal();
+        UI.toast.success('Birthday wish logged.');
+    };
+
+    const openPrepareGiftModal = async (id, entityType) => {
+        const table = entityType === 'customer' ? 'customers' : 'prospects';
+        const person = await AppDataStore.getById(table, id);
+        if (!person) return;
+        const content = `
+            <div class="form-section">
+                <p>Log a birthday gift for <strong>${escapeHtml(person.full_name)}</strong>.</p>
+                <div class="form-group" style="margin-top:12px;">
+                    <label>Gift Description</label>
+                    <input type="text" id="bday-gift-desc" class="form-control" placeholder="e.g. Mooncake box, RM50 voucher">
+                </div>
+                <div class="form-group">
+                    <label>Estimated Value (RM)</label>
+                    <input type="number" id="bday-gift-value" class="form-control" placeholder="50">
+                </div>
+                <div class="form-group">
+                    <label>Notes</label>
+                    <textarea id="bday-gift-notes" class="form-control" rows="2" placeholder="Delivery method, special instructions..."></textarea>
+                </div>
+            </div>
+        `;
+        UI.showModal('Prepare Birthday Gift', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Log Gift', type: 'primary', action: `(async () => { await app.logBirthdayGift(${id}, '${entityType}'); })()` }
+        ]);
+    };
+
+    const logBirthdayGift = async (id, entityType) => {
+        const desc = document.getElementById('bday-gift-desc')?.value?.trim();
+        const value = document.getElementById('bday-gift-value')?.value?.trim();
+        const notes = document.getElementById('bday-gift-notes')?.value?.trim();
+        if (!desc) { UI.toast.error('Gift description is required.'); return; }
+        await AppDataStore.create('activities', {
+            entity_type: entityType,
+            entity_id: id,
+            type: 'Birthday Gift',
+            notes: `Gift: ${desc}${value ? ` (RM ${value})` : ''}${notes ? ` — ${notes}` : ''}`,
+            date: new Date().toISOString().split('T')[0],
+            created_by: _currentUser?.id
+        });
+        UI.hideModal();
+        UI.toast.success('Birthday gift logged.');
+    };
 
     // --- Phase 7 Navigation & Filter Functions ---
     const switchView = async (view) => {
@@ -9843,7 +10042,7 @@ function _wireLoginBtn() {
                     <td onclick="event.stopPropagation()">
                         <button class="btn-icon" title="Edit"><i class="fas fa-edit"></i></button>
                         <button class="btn-icon" title="Add Purchase" onclick="app. openAddPurchaseModal(${c.id})"><i class="fas fa-shopping-cart"></i></button>
-                        <button class="btn-icon" title="Referral" onclick="app.todo('Referral workflow')"><i class="fas fa-user-plus"></i></button>
+                        <button class="btn-icon" title="Referral" onclick="app.openReferralFromProfile(${c.id}, 'customer')"><i class="fas fa-user-plus"></i></button>
                         <button class="btn-icon" title="Recruit" onclick="app. openRecruitModal(${c.id})"><i class="fas fa-user-tie"></i></button>
                     </td>
                 </tr>
@@ -10366,7 +10565,7 @@ function _wireLoginBtn() {
                     <div class="header-actions">
                         <button class="btn secondary" onclick="app. openProspectModal(${customer.id})"><i class="fas fa-edit"></i> Edit</button>
                         <button class="btn secondary" onclick="app. openAddPurchaseModal(${customer.id})"><i class="fas fa-plus"></i> Add Purchase</button>
-                        <button class="btn secondary" onclick="app.todo('Refer a Friend')"><i class="fas fa-user-plus"></i> Refer a Friend</button>
+                        <button class="btn secondary" onclick="app.openReferralFromProfile(${customer.id}, 'customer')"><i class="fas fa-user-plus"></i> Refer a Friend</button>
                         <button class="btn secondary" onclick="app. openSendWhatsAppModal('customer', ${customer.id})"><i class="fab fa-whatsapp"></i> WhatsApp</button>
                         <button class="btn primary" style="background:#6b21a8;" onclick="app. openRecruitModal(${customer.id})"><i class="fas fa-user-tie"></i> Recruit as Agent</button>
                     </div>
@@ -10636,6 +10835,90 @@ function _wireLoginBtn() {
         UI.hideModal();
     };
 
+    const openUploadRedemptionImageModal = async (purchaseId) => {
+        const content = `
+            <div class="form-section">
+                <div class="form-group">
+                    <label>Payment Proof / Receipt URL</label>
+                    <input type="text" id="upload-proof-url" class="form-control" placeholder="Paste image or PDF URL here">
+                </div>
+                <p style="font-size:12px; color:var(--gray-500); margin-top:8px;">Paste a URL to the image or PDF uploaded to Google Drive or cloud storage.</p>
+            </div>
+        `;
+        UI.showModal('Upload Payment Proof', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save', type: 'primary', action: `(async () => { await app.saveRedemptionImage(${purchaseId}); })()` }
+        ]);
+    };
+
+    const saveRedemptionImage = async (purchaseId) => {
+        const url = document.getElementById('upload-proof-url')?.value?.trim();
+        if (!url) { UI.toast.error('Please enter a URL.'); return; }
+        await AppDataStore.update('purchases', purchaseId, { proof: url });
+        UI.hideModal();
+        UI.toast.success('Payment proof saved.');
+        const purchase = await AppDataStore.getById('purchases', purchaseId);
+        if (purchase?.customer_id) {
+            const customer = await AppDataStore.getById('customers', purchase.customer_id);
+            if (customer && document.getElementById('profile-tab-content')) {
+                await renderPurchaseHistoryTab(customer);
+            }
+        }
+    };
+
+    const openUploadDocumentModal = async (entityId, entityType) => {
+        const content = `
+            <div class="form-section">
+                <div class="form-group">
+                    <label>Document Name</label>
+                    <input type="text" id="doc-name" class="form-control" placeholder="e.g. IC Copy, Signed Agreement">
+                </div>
+                <div class="form-group">
+                    <label>Document Type</label>
+                    <select id="doc-type" class="form-control">
+                        <option>IC / Passport</option>
+                        <option>Agreement</option>
+                        <option>Proof of Payment</option>
+                        <option>Medical Report</option>
+                        <option>Other</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>File URL</label>
+                    <input type="text" id="doc-url" class="form-control" placeholder="Paste Google Drive or cloud storage URL">
+                </div>
+                <div class="form-group">
+                    <label>Notes</label>
+                    <textarea id="doc-notes" class="form-control" rows="2" placeholder="Optional notes..."></textarea>
+                </div>
+            </div>
+        `;
+        UI.showModal('Upload Document', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save Document', type: 'primary', action: `(async () => { await app.saveDocument(${entityId}, '${entityType}'); })()` }
+        ]);
+    };
+
+    const saveDocument = async (entityId, entityType) => {
+        const name = document.getElementById('doc-name')?.value?.trim();
+        const type = document.getElementById('doc-type')?.value;
+        const url = document.getElementById('doc-url')?.value?.trim();
+        const notes = document.getElementById('doc-notes')?.value?.trim();
+        if (!name) { UI.toast.error('Document name is required.'); return; }
+        await AppDataStore.create('documents', {
+            entity_id: entityId,
+            entity_type: entityType,
+            name,
+            type,
+            url,
+            notes,
+            uploaded_at: new Date().toISOString(),
+            uploaded_by: _currentUser?.id
+        });
+        UI.hideModal();
+        UI.toast.success('Document saved.');
+    };
+
     const copyToClipboard = (text) => {
         navigator.clipboard.writeText(text).then(() => {
             UI.toast.success('Copied!');
@@ -10675,7 +10958,7 @@ function _wireLoginBtn() {
                                 <td>${p.item}</td>
                                 <td>RM ${p.amount.toLocaleString()}</td>
                                 <td><span class="score-badge ${badgeClass}" style="font-size:11px;">${p.status}</span></td>
-                                <td>${p.proof ? `<a href="#" style="color:var(--primary);">${p.proof.endsWith('.pdf') ? 'View Report' : 'View Image'}</a>` : '<button class="btn-sm secondary" onclick="app.todo(\'Upload Image\')">Upload Image</button>'}</td>
+                                <td>${p.proof ? `<a href="#" style="color:var(--primary);">${p.proof.endsWith('.pdf') ? 'View Report' : 'View Image'}</a>` : `<button class="btn-sm secondary" onclick="app.openUploadRedemptionImageModal(${p.id})">Upload Image</button>`}</td>
                                 <td>
                                     <button class="btn-icon"><i class="fas fa-download"></i></button>
                                     ${p.status === 'PENDING' ? '<button class="btn-icon"><i class="fas fa-edit"></i></button><button class="btn-icon"><i class="fas fa-trash"></i></button>' : ''}
@@ -10710,8 +10993,8 @@ function _wireLoginBtn() {
                     <td><span class="score-badge ${r.status === 'Active' ? 'score-A+' : 'score-A'}">${r.status}</span></td>
                     <td>${r.reward_status}</td>
                     <td>
-                        <button class="btn-sm secondary" onclick="app.todo('View Referral')">View</button>
-                        <button class="btn-sm secondary" onclick="app.todo('Update Referral')">Update</button>
+                        <button class="btn-sm secondary" onclick="app.viewReferralDetails(${r.id})">View</button>
+                        <button class="btn-sm secondary" onclick="app.openUpdateReferralModal(${r.id})">Update</button>
                     </td>
                 </tr>
             `;
@@ -10736,7 +11019,7 @@ function _wireLoginBtn() {
                 </tbody>
             </table>
             <div style="margin-top:16px;">
-                <button class="btn primary" onclick="app.todo('Refer a Friend')">Refer a Friend</button>
+                <button class="btn primary" onclick="app.openReferralFromProfile(${customer.id}, 'customer')">Refer a Friend</button>
             </div>
         `;
     };
@@ -11225,7 +11508,7 @@ function _wireLoginBtn() {
         <h2>
             <i class="fas fa-folder"></i> Documents
             <span class="section-actions">
-                <button class="btn primary btn-sm" onclick="app.todo('Upload document')"><i class="fas fa-upload"></i> Upload</button>
+                <button class="btn primary btn-sm" onclick="app.openUploadDocumentModal(${prospect.id}, 'prospect')"><i class="fas fa-upload"></i> Upload</button>
             </span>
         </h2>
         <p style="text-align:center; padding:20px; color:var(--gray-500);">No documents uploaded.</p>
@@ -11472,10 +11755,25 @@ for (const p of allPackages) {
     `;
         UI.showModal('Convert Customer to Agent', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Submit for Approval', type: 'primary', action: `app.todo('Recruitment approval workflow submitted')` }
+            { label: 'Submit for Approval', type: 'primary', action: `(async () => { await app.submitRecruitmentApproval(${customerId}); })()` }
         ]);
     };
 
+
+    const submitRecruitmentApproval = async (customerId) => {
+        const customer = await AppDataStore.getById('customers', customerId);
+        await AppDataStore.create('recruitment_approvals', {
+            customer_id: customerId,
+            customer_name: customer?.full_name || 'Unknown',
+            package_type: document.getElementById('rec-pkg')?.value || 'Standard',
+            package_amount: parseInt(document.getElementById('rec-amt')?.value || 3000),
+            status: 'Pending',
+            submitted_at: new Date().toISOString(),
+            submitted_by: _currentUser?.id
+        });
+        UI.hideModal();
+        UI.toast.success('Recruitment submitted for Super Admin approval.');
+    };
 
     const confirmDelete = async (id) => {
         UI.showModal('Delete Confirmation',
@@ -12491,7 +12789,7 @@ const renderCurrentAssignments = async (agentId) => {
                     <div class="fill" style="width: ${(target.current_meetings / target.target_meetings) * 100}%"></div>
                 </div>
                 
-                <button class="btn primary btn-sm" style="margin-top:12px;" onclick="app.todo('Update Targets')">Update Targets</button>
+                <button class="btn primary btn-sm" style="margin-top:12px;" onclick="app.updateAgentTargets(${agentId})">Update Targets</button>
             </div>
     `;
     };
@@ -17980,6 +18278,7 @@ const initImportDemoData = async () => {
         sendWhatsApp,
         viewMessageDetails,
         resendMessage,
+        executeResendMessage,
         replyToMessage,
         forwardMessage,
         createTaskFromMessage,
@@ -18073,7 +18372,12 @@ const initImportDemoData = async () => {
         openEditPlatformIdsModal,
         savePlatformIds,
         copyToClipboard,
+        openUploadRedemptionImageModal,
+        saveRedemptionImage,
+        openUploadDocumentModal,
+        saveDocument,
         openRecruitModal,
+        submitRecruitmentApproval,
         switchProfileTab,
 
         // Phase 5 Agent Management Functions
@@ -18143,6 +18447,10 @@ const initImportDemoData = async () => {
         renderReferralSummaryAndLeaderboard,
         toggleLeaderboard,
         openAddReferralModal,
+        openReferralFromProfile,
+        viewReferralDetails,
+        openUpdateReferralModal,
+        saveReferralUpdate,
         submitReferral,
         searchReferrersForModal,
         selectReferrerForModal,
@@ -18175,6 +18483,12 @@ const initImportDemoData = async () => {
         loadSavedSearch: typeof loadSavedSearch !== 'undefined' ? loadSavedSearch : null,
         deleteSavedSearch: typeof deleteSavedSearch !== 'undefined' ? deleteSavedSearch : null,
         loadPreset: typeof loadPreset !== 'undefined' ? loadPreset : null,
+
+        // Birthday functions
+        openSendBirthdayWish,
+        executeSendBirthdayWish,
+        openPrepareGiftModal,
+        logBirthdayGift,
 
         // Calendar functions
         goToPrevious,
