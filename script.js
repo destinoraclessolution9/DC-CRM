@@ -14457,11 +14457,11 @@ const deactivateAgent = async (agentId) => {
                     <div class="drag-handle" style="cursor: grab; color: #9CA3AF;"><i class="fas fa-bars"></i></div>
                 </td>
                 <td style="padding: 16px;">
-                    <div style="font-weight: 600; color: #111827;">${await escapeHtml(prospect.name)}</div>
+                    <div style="font-weight: 600; color: #111827;">${await escapeHtml(prospect.full_name || prospect.name || '')}</div>
                     <div style="font-size: 12px; color: #6B7280; margin-top: 2px;">Created: ${prospect.created_at || 'N/A'}</div>
                 </td>
                 <td style="padding: 16px;">
-                    <div style="font-size: 13px;">${await escapeHtml(await AppDataStore.getById('users', prospect.responsible_agent_id)?.full_name || 'Unassigned')}</div>
+                    <div style="font-size: 13px;">${await escapeHtml((prospect.responsible_agent_id ? (await AppDataStore.getById('users', prospect.responsible_agent_id))?.full_name : null) || 'Unassigned')}</div>
                 </td>
                 <td style="padding: 16px;">
                     <div style="font-weight: 500;">${await escapeHtml(productInfo.name)}</div>
@@ -14505,7 +14505,7 @@ const deactivateAgent = async (agentId) => {
         const readinessColor = readiness.label === 'HOT' ? '#DC2626' : (readiness.label === 'WARM' ? '#F59E0B' : '#6B7280');
 
         const prospectName = await escapeHtml(prospect.full_name || prospect.name || '');
-        const agentUser = await AppDataStore.getById('users', prospect.responsible_agent_id);
+        const agentUser = prospect.responsible_agent_id ? await AppDataStore.getById('users', prospect.responsible_agent_id) : null;
         const agentName = await escapeHtml(agentUser?.full_name || 'Unassigned');
         const productNameHtml = await escapeHtml(productInfo.name);
         const tagsHtml = prospect.tags
