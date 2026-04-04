@@ -5607,7 +5607,19 @@ function _wireLoginBtn() {
 
         // Try to get current user – if session missing, just set _currentUser = null
         try {
-            _currentUser = await Auth.getCurrentUser();
+            const authUser = await Auth.getCurrentUser();
+            if (authUser) {
+                // Fetch the full profile from the users table (has integer id + role),
+                // same as the login flow – avoids using the raw Auth UUID as _currentUser.id
+                const { data: profile } = await window.supabase
+                    .from('users')
+                    .select('*')
+                    .eq('email', authUser.email)
+                    .single();
+                _currentUser = profile || authUser;
+            } else {
+                _currentUser = null;
+            }
             console.log('User loaded:', _currentUser?.email ?? _currentUser?.username);
         } catch (err) {
             if (err.message && err.message.includes('Auth session missing')) {
