@@ -12999,6 +12999,7 @@ const openAddSolutionModal = async (prospectId) => {
 
         const curLvlMatch = _currentUser?.role?.match(/Level\s+(\d+)/i);
         const canAssignUpline = curLvlMatch ? parseInt(curLvlMatch[1]) <= 4 : false;
+        const canDeleteAgent = isSystemAdmin(_currentUser) || isMarketingManager(_currentUser);
 
         let html = '';
         for (const agent of agents) {
@@ -13032,6 +13033,7 @@ const openAddSolutionModal = async (prospectId) => {
                         <button class="btn-icon edit-agent-btn" onclick="event.stopPropagation(); app.openEditAgentModal('${agent.id}')" title="Edit Agent"><i class="fas fa-edit"></i></button>
                         ${canAssignUpline ? `<button class="btn-icon" onclick="event.stopPropagation(); app.openAssignUplineModal('${agent.id}')" title="Assign Upline"><i class="fas fa-sitemap"></i></button>` : ''}
                         ${canAssignUpline ? `<button class="btn-icon" onclick="event.stopPropagation(); app.openResetPasswordModal('${agent.id}')" title="Reset Password"><i class="fas fa-key"></i></button>` : ''}
+                        ${canDeleteAgent ? `<button class="btn-icon" style="color:#ef4444;" onclick="event.stopPropagation(); app.deleteAgent('${agent.id}')" title="Delete Agent"><i class="fas fa-trash"></i></button>` : ''}
                     </td>
                 </tr>
             `;
@@ -13692,6 +13694,22 @@ const renderCurrentAssignments = async (agentId) => {
                 </div>
 
                 <div class="form-section">
+                    <h4>Status &amp; Team</h4>
+                    <div class="form-row">
+                        <div class="form-group half">
+                            <label>Status</label>
+                            <select id="agent-status" class="form-control">
+                                ${['active','probation','inactive','suspended'].map(s => `<option value="${s}" ${isEdit && (agent.status || 'probation') === s ? 'selected' : ''}>${s.charAt(0).toUpperCase() + s.slice(1)}</option>`).join('')}
+                            </select>
+                        </div>
+                        <div class="form-group half">
+                            <label>Team</label>
+                            <input type="text" id="agent-team" class="form-control" placeholder="e.g. Team Alpha" value="${isEdit ? (agent.team || '') : ''}">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-section">
                     <h4>License Information</h4>
                     <div class="form-row">
                         <div class="form-group half">
@@ -13740,6 +13758,30 @@ const renderCurrentAssignments = async (agentId) => {
 
     const openEditAgentModal = (agentId) => openAddAgentModal(agentId);
 
+    const deleteAgent = async (agentId) => {
+        const agent = await AppDataStore.getById('users', agentId);
+        if (!agent) return UI.toast.error('Agent not found');
+        UI.showModal('Delete Agent', `
+            <div style="text-align:center; padding:8px 0;">
+                <i class="fas fa-exclamation-triangle" style="font-size:48px; color:#ef4444; margin-bottom:16px;"></i>
+                <p>Are you sure you want to delete <strong>${escapeHtml(agent.full_name)}</strong>?</p>
+                <p style="color:var(--gray-500); font-size:13px; margin-top:8px;">This will permanently remove the agent and cannot be undone.</p>
+            </div>
+        `, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Delete Agent', type: 'danger', action: `(async () => {
+                try {
+                    await AppDataStore.delete('users', '${agentId}');
+                    UI.hideModal();
+                    UI.toast.success('Agent deleted');
+                    await app.renderAgentsTable();
+                } catch(e) {
+                    UI.toast.error('Failed to delete agent: ' + e.message);
+                }
+            })()` }
+        ]);
+    };
+
     const saveAgent = async () => {
         const name = document.getElementById('agent-name').value;
         if (!name) return UI.toast.error('Agent name is required');
@@ -13757,6 +13799,8 @@ const renderCurrentAssignments = async (agentId) => {
             license_start: document.getElementById('agent-license-start').value,
             license_expiry: document.getElementById('agent-license-expiry').value,
             reporting_to: reportingToVal ? parseInt(reportingToVal) : null,
+            status: document.getElementById('agent-status').value,
+            team: document.getElementById('agent-team').value.trim() || null,
         };
 
         if (editId) {
@@ -20433,6 +20477,7 @@ const initImportDemoData = async () => {
         showAgentProfile,
         openAddAgentModal,
         openEditAgentModal,
+        deleteAgent,
         saveAgent,
         openAssignUplineModal,
         saveUplineAssignment,
