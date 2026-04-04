@@ -10586,9 +10586,54 @@ function _wireLoginBtn() {
                 </div>
             </div>
             <div style="margin-top:20px; text-align:center;">
-                <button class="btn secondary" onclick="app.todo('Edit Platform IDs')">Edit Platform IDs</button>
+                <button class="btn secondary" onclick="app.openEditPlatformIdsModal(${customer.id})">Edit Platform IDs</button>
             </div>
         `;
+    };
+
+    const PLATFORM_LIST = ['Bujishu', 'Metapoint', 'Formula', 'Monalisa', 'Florida', 'Far Coffee', 'Patiseri'];
+
+    const openEditPlatformIdsModal = async (customerId) => {
+        const existing = await AppDataStore.query('platform_ids', { customer_id: customerId });
+        const getVal = (name) => existing.find(p => p.platform === name)?.platform_id || '';
+
+        const fields = PLATFORM_LIST.map(name => `
+            <div class="form-group">
+                <label>${name} ID</label>
+                <input type="text" id="pid-${name.replace(/\s/g,'-').toLowerCase()}" class="form-control"
+                    placeholder="Enter ${name} ID" value="${escapeHtml(getVal(name))}">
+            </div>
+        `).join('');
+
+        const content = `<div class="form-section">${fields}</div>`;
+
+        UI.showModal('Edit Platform IDs', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save', type: 'primary', action: `(async () => { await app.savePlatformIds(${customerId}); })()` }
+        ]);
+    };
+
+    const savePlatformIds = async (customerId) => {
+        const existing = await AppDataStore.query('platform_ids', { customer_id: customerId });
+
+        for (const name of PLATFORM_LIST) {
+            const inputId = `pid-${name.replace(/\s/g, '-').toLowerCase()}`;
+            const value = document.getElementById(inputId)?.value?.trim() || '';
+            const record = existing.find(p => p.platform === name);
+
+            if (record) {
+                await AppDataStore.update('platform_ids', record.id, { platform_id: value });
+            } else if (value) {
+                await AppDataStore.create('platform_ids', {
+                    customer_id: customerId,
+                    platform: name,
+                    platform_id: value
+                });
+            }
+        }
+
+        UI.toast.success('Platform IDs updated.');
+        UI.hideModal();
     };
 
     const copyToClipboard = (text) => {
@@ -11112,7 +11157,7 @@ function _wireLoginBtn() {
                                     <td>${n.date_of_birth || '-'}</td>
                                     <td>${n.notes || '-'}</td>
                                     <td>
-                                        <button class="btn-icon" onclick="app.todo('Edit name')"><i class="fas fa-edit"></i></button>
+                                        <button class="btn-icon" onclick="app.openAddNameModal(${prospect.id}, ${n.id})"><i class="fas fa-edit"></i></button>
                                         <button class="btn-icon" onclick="app. deleteName(${prospect.id}, ${n.id})"><i class="fas fa-trash"></i></button>
                                     </td>
                                 </tr>
@@ -11935,9 +11980,9 @@ const showAgentProfile = async (agentId) => {
                 </div>
             </div>
             <div class="header-actions">
-                <button class="btn secondary" onclick="app.todo('Reset Password')">Reset Password</button>
-                <button class="btn secondary" onclick="app.todo('Edit Agent')">Edit Profile</button>
-                <button class="btn error" onclick="app.todo('Deactivate Agent')">Deactivate</button>
+                <button class="btn secondary" onclick="app.openResetPasswordModal('${agent.id}')">Reset Password</button>
+                <button class="btn secondary" onclick="app.openEditAgentModal('${agent.id}')">Edit Profile</button>
+                <button class="btn error" onclick="app.deactivateAgent('${agent.id}')">Deactivate</button>
             </div>
         </div>
 
@@ -12114,9 +12159,9 @@ const showAgentProfile = async (agentId) => {
                         </div>
                     </div>
                     <div class="header-actions">
-                        <button class="btn secondary" onclick="app.todo('Reset Password')">Reset Password</button>
-                        <button class="btn secondary" onclick="app.todo('Edit Agent')">Edit Profile</button>
-                        <button class="btn error" onclick="app.todo('Deactivate Agent')">Deactivate</button>
+                        <button class="btn secondary" onclick="app.openResetPasswordModal('${agent.id}')">Reset Password</button>
+                        <button class="btn secondary" onclick="app.openEditAgentModal('${agent.id}')">Edit Profile</button>
+                        <button class="btn error" onclick="app.deactivateAgent('${agent.id}')">Deactivate</button>
                     </div>
                 </div>
 
@@ -18025,6 +18070,8 @@ const initImportDemoData = async () => {
         renderAgentEligibility,
         openAddPurchaseModal,
         savePurchase,
+        openEditPlatformIdsModal,
+        savePlatformIds,
         copyToClipboard,
         openRecruitModal,
         switchProfileTab,
