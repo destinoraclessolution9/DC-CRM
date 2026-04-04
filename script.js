@@ -14338,7 +14338,7 @@ const deactivateAgent = async (agentId) => {
 
         container.innerHTML = `
     <div class="pipeline-dual-view">
-    < !--HEADER SECTION-->
+    <!--HEADER SECTION-->
     <div class="pipeline-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
         <div>
             <h1 style="font-size: 24px; font-weight: 700; margin: 0;">Sales Pipeline</h1>
