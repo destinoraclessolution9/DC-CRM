@@ -74,12 +74,29 @@ window.UI = (() => {
         const overlay = document.getElementById('global-modal-overlay');
         if (overlay) {
             overlay.classList.remove('active');
+            overlay.innerHTML = '';
         }
+    };
+
+    // --- Formatters ---
+    const formatDate = (d) => {
+        if (!d) return '—';
+        const date = new Date(d);
+        if (isNaN(date.getTime())) return d;
+        return date.toLocaleDateString('en-MY', { year: 'numeric', month: 'short', day: 'numeric' });
+    };
+
+    const formatNumber = (n) => {
+        const num = parseFloat(n);
+        if (isNaN(num)) return '0';
+        return num.toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     };
 
     return {
         toast,
         showModal,
-        hideModal
+        hideModal,
+        formatDate,
+        formatNumber
     };
 })();
