@@ -10828,7 +10828,7 @@ function _wireLoginBtn() {
         if (!container) return;
 
         const solutions = await AppDataStore.query('proposed_solutions', { prospect_id: prospectId });
-        const activities =await  (await AppDataStore.getAll('activities')).filter(a => a.prospect_id == prospectId);
+        const activities = (await AppDataStore.getAll('activities')).filter(a => a.prospect_id == prospectId);
         const notes = await AppDataStore.query('notes', { prospect_id: prospectId });
         const names = await AppDataStore.query('names', { prospect_id: prospectId });
 
@@ -11125,7 +11125,7 @@ function _wireLoginBtn() {
     `;
         }
         else if (tab === 'activity') {
-            const activities =await  (await AppDataStore.getAll('activities')).filter(a => a.prospect_id == prospectId);
+            const activities = (await AppDataStore.getAll('activities')).filter(a => a.prospect_id == prospectId);
             container.innerHTML = `
     <div class="profile-section">
                     <h2>
@@ -11188,7 +11188,7 @@ function _wireLoginBtn() {
 `;
         }
         else if (tab === 'events') {
-            const registrations =await  (await AppDataStore.getAll('event_registrations')).filter(
+            const registrations = (await AppDataStore.getAll('event_registrations')).filter(
                 r => r.attendee_type === 'prospect' && r.attendee_id == prospectId
             );
             let html = '<h2>Events Attended</h2>';
@@ -15544,7 +15544,7 @@ const exportKPIReport = async (format) => {
             is_active: true
         };
 
-        const allProducts =await  (await AppDataStore.getAll('products')).filter(p => p.is_active !== false);
+        const allProducts = (await AppDataStore.getAll('products')).filter(p => p.is_active !== false);
         const paymentOptions = ['Cash', 'Credit Card', 'Bank Transfer', 'EPP', 'POP', 'Cheque'];
 
         const content = `

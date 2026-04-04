@@ -203,7 +203,7 @@ const AuditLogger = {
         const cutoff = new Date();
         cutoff.setDate(cutoff.getDate() - days);
 
-        const logs = AppDataStore.getAll('audit_logs').filter(
+        const logs = (await AppDataStore.getAll('audit_logs')).filter(
             log => new Date(log.timestamp) >= cutoff
         );
 
