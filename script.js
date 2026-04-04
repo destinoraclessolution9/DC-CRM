@@ -21089,7 +21089,8 @@ const initImportDemoData = async () => {
         setTimeFilter,
         setCustomDateRange,
         refreshKPIDashboard,
-        exportKPIReport
+        exportKPIReport,
+        printDashboard
 
     };
 
