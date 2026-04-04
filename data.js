@@ -30,7 +30,14 @@ class DataStore {
             'performance_warnings', 'backups', 'backup_schedules', 'deployments', 'system_config',
             'system_logs', 'maintenance_windows', 'audit_logs_archive',
             'event_attendees', 'agent_event_attendees', 'case_studies',
-            'promotion_packages', 'products', 'promotions', 'appointment_locations'
+            'promotion_packages', 'products', 'promotions', 'appointment_locations',
+            // New features
+            'booking_slots', 'booking_appointments', 'booking_pages',
+            'lead_forms', 'lead_submissions',
+            'surveys', 'survey_responses',
+            'contracts',
+            'custom_field_definitions', 'custom_field_values',
+            'portal_sessions'
         ];
         this.initialized = false;
         this._events = {};

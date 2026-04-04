@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Customer Portal — Feng Shui CRM</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Inter', sans-serif; background: #f9fafb; color: #111827; min-height: 100vh; }
+        .top-bar { background: white; border-bottom: 1px solid #e5e7eb; padding: 0 24px; height: 60px; display: flex; align-items: center; justify-content: space-between; }
+        .brand { display: flex; align-items: center; gap: 10px; }
+        .brand-icon { width: 36px; height: 36px; background: #7c3aed; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: white; font-size: 16px; }
+        .brand-name { font-size: 16px; font-weight: 700; }
+        .content { max-width: 900px; margin: 0 auto; padding: 32px 24px; }
+        .card { background: white; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); padding: 32px; margin-bottom: 24px; }
+        .login-card { max-width: 420px; margin: 80px auto; }
+        h1 { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+        .subtitle { color: #6b7280; font-size: 14px; margin-bottom: 24px; }
+        label { display: block; font-weight: 500; font-size: 14px; margin-bottom: 6px; color: #374151; }
+        input { width: 100%; padding: 10px 14px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; font-family: inherit; margin-bottom: 16px; }
+        input:focus { outline: none; border-color: #7c3aed; }
+        .btn { width: 100%; padding: 12px; background: #7c3aed; color: white; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; }
+        .btn:hover { background: #6d28d9; }
+        .btn-sm { width: auto; padding: 6px 14px; font-size: 13px; }
+        .btn-outline { background: white; color: #374151; border: 1px solid #d1d5db; }
+        .btn-outline:hover { background: #f9fafb; }
+        .tab-bar { display: flex; gap: 4px; border-bottom: 1px solid #e5e7eb; margin-bottom: 24px; }
+        .tab-btn { padding: 10px 18px; background: none; border: none; cursor: pointer; font-size: 14px; font-weight: 500; color: #6b7280; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+        .tab-btn.active { color: #7c3aed; border-bottom-color: #7c3aed; }
+        table { width: 100%; border-collapse: collapse; }
+        th { padding: 10px; text-align: left; background: #f9fafb; font-size: 13px; color: #6b7280; border-bottom: 1px solid #e5e7eb; }
+        td { padding: 12px 10px; border-bottom: 1px solid #f3f4f6; font-size: 14px; }
+        .badge { padding: 3px 10px; border-radius: 20px; font-size: 12px; font-weight: 500; }
+        .badge-green { background: #d1fae5; color: #065f46; }
+        .badge-blue { background: #dbeafe; color: #1e40af; }
+        .badge-gray { background: #f3f4f6; color: #6b7280; }
+        .empty-state { text-align: center; padding: 48px; color: #9ca3af; }
+        .empty-state i { font-size: 40px; display: block; margin-bottom: 12px; }
+        .welcome-banner { background: linear-gradient(135deg, #7c3aed, #4f46e5); color: white; border-radius: 12px; padding: 24px; margin-bottom: 24px; }
+        .welcome-banner h2 { font-size: 20px; margin-bottom: 4px; }
+        .welcome-banner p { opacity: 0.85; font-size: 14px; }
+        .error-msg { color: #ef4444; font-size: 13px; margin-bottom: 12px; }
+        .info-box { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 16px; font-size: 13px; color: #1e40af; margin-bottom: 16px; }
+    </style>
+</head>
+<body>
+
+<div id="loading-view" style="display:flex; align-items:center; justify-content:center; min-height:100vh;">
+    <p style="color:#6b7280;">Loading portal...</p>
+</div>
+
+<div id="login-view" style="display:none;">
+    <div class="top-bar">
+        <div class="brand"><div class="brand-icon"><i class="fas fa-dharmachakra"></i></div><div class="brand-name">Feng Shui CRM</div></div>
+    </div>
+    <div class="content">
+        <div class="card login-card">
+            <h1>Customer Portal</h1>
+            <p class="subtitle">Access your consultations, purchases, and documents.</p>
+            <div class="info-box"><i class="fas fa-info-circle"></i> Enter the email associated with your customer account. Your consultant will provide your access link.</div>
+            <label>Email Address</label>
+            <input type="email" id="login-email" placeholder="your@email.com">
+            <p id="login-error" class="error-msg" style="display:none;"></p>
+            <button class="btn" onclick="loginWithToken()">Access Portal</button>
+        </div>
+    </div>
+</div>
+
+<div id="portal-view" style="display:none;">
+    <div class="top-bar">
+        <div class="brand"><div class="brand-icon"><i class="fas fa-dharmachakra"></i></div><div class="brand-name">Feng Shui CRM — My Portal</div></div>
+        <div style="display:flex; align-items:center; gap:12px;">
+            <span id="portal-user-name" style="font-size:14px; color:#374151;"></span>
+            <button class="btn btn-sm btn-outline" onclick="logout()"><i class="fas fa-sign-out-alt"></i> Logout</button>
+        </div>
+    </div>
+    <div class="content">
+        <div class="welcome-banner">
+            <h2 id="welcome-msg">Welcome back!</h2>
+            <p>Here you can view your consultation history, purchases, and upcoming appointments.</p>
+        </div>
+        <div class="tab-bar">
+            <button class="tab-btn active" onclick="switchTab('activities', this)"><i class="fas fa-calendar-alt"></i> Activities</button>
+            <button class="tab-btn" onclick="switchTab('purchases', this)"><i class="fas fa-shopping-bag"></i> Purchases</button>
+            <button class="tab-btn" onclick="switchTab('documents', this)"><i class="fas fa-file"></i> Documents</button>
+            <button class="tab-btn" onclick="switchTab('upcoming', this)"><i class="fas fa-clock"></i> Upcoming</button>
+        </div>
+        <div id="tab-content"></div>
+    </div>
+</div>
+
+<div id="expired-view" style="display:none; align-items:center; justify-content:center; min-height:100vh;">
+    <div class="card" style="max-width:420px; text-align:center; padding:48px;">
+        <div style="font-size:56px; color:#f59e0b; margin-bottom:16px;"><i class="fas fa-clock"></i></div>
+        <h2 style="margin-bottom:8px;">Link Expired</h2>
+        <p style="color:#6b7280;">This portal link has expired. Please contact your consultant for a new access link.</p>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const supabase = window.supabase.createClient(
+    'https://remuwhxvzkzjtgbzqjaa.supabase.co',
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJlbXV3aHh2emt6anRnYnpxamFhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQzNjczMDMsImV4cCI6MjA4OTk0MzMwM30.L8yISXnOd1CxzyAbRyFLQXIYviyBrxQC_J19egNtUbs'
+);
+
+const params = new URLSearchParams(window.location.search);
+const urlToken = params.get('token');
+let portalCustomer = null;
+
+function show(id) {
+    ['loading-view','login-view','portal-view','expired-view'].forEach(s => {
+        const el = document.getElementById(s);
+        el.style.display = s === id ? (s === 'portal-view' ? 'block' : 'flex') : 'none';
+    });
+    if (id === 'portal-view') document.getElementById('portal-view').style.display = 'block';
+}
+
+async function init() {
+    // If URL has a token, validate it immediately
+    if (urlToken) {
+        const valid = await validateToken(urlToken);
+        if (valid) {
+            localStorage.setItem('portal_token', urlToken);
+            await loadPortal();
+        } else {
+            localStorage.removeItem('portal_token');
+            show('expired-view');
+        }
+        return;
+    }
+    // Check stored token
+    const storedToken = localStorage.getItem('portal_token');
+    if (storedToken) {
+        const valid = await validateToken(storedToken);
+        if (valid) { await loadPortal(); return; }
+        localStorage.removeItem('portal_token');
+    }
+    show('login-view');
+}
+
+async function validateToken(token) {
+    const { data } = await supabase.from('portal_sessions').select('*, customers(*)').eq('token', token).gt('expires_at', new Date().toISOString()).single();
+    if (!data) return false;
+    portalCustomer = data.customers || { full_name: data.email, id: data.customer_id };
+    return true;
+}
+
+async function loginWithToken() {
+    const email = document.getElementById('login-email').value.trim();
+    const errEl = document.getElementById('login-error');
+    if (!email) { errEl.textContent = 'Please enter your email.'; errEl.style.display = 'block'; return; }
+    errEl.style.display = 'none';
+
+    // Look up a valid session for this email
+    const { data } = await supabase.from('portal_sessions').select('*').eq('email', email).gt('expires_at', new Date().toISOString()).order('created_at', { ascending: false }).limit(1);
+    if (!data || data.length === 0) {
+        errEl.textContent = 'No active portal session found for this email. Please contact your consultant.';
+        errEl.style.display = 'block';
+        return;
+    }
+    localStorage.setItem('portal_token', data[0].token);
+    const valid = await validateToken(data[0].token);
+    if (valid) await loadPortal();
+}
+
+async function loadPortal() {
+    show('portal-view');
+    document.getElementById('welcome-msg').textContent = `Welcome, ${portalCustomer.full_name}!`;
+    document.getElementById('portal-user-name').textContent = portalCustomer.full_name;
+    await renderActivities();
+}
+
+function logout() {
+    localStorage.removeItem('portal_token');
+    portalCustomer = null;
+    show('login-view');
+}
+
+function switchTab(tab, btn) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    if (tab === 'activities') renderActivities();
+    else if (tab === 'purchases') renderPurchases();
+    else if (tab === 'documents') renderDocuments();
+    else if (tab === 'upcoming') renderUpcoming();
+}
+
+async function renderActivities() {
+    const container = document.getElementById('tab-content');
+    container.innerHTML = '<p style="color:#6b7280; padding:16px 0;">Loading...</p>';
+    const { data } = await supabase.from('activities').select('*').eq('customer_id', portalCustomer.id).order('activity_date', { ascending: false }).limit(20);
+    if (!data || data.length === 0) {
+        container.innerHTML = `<div class="empty-state"><i class="fas fa-calendar-alt"></i><p>No activity history yet.</p></div>`;
+        return;
+    }
+    container.innerHTML = `
+        <table>
+            <thead><tr><th>Activity</th><th>Type</th><th>Date</th><th>Status</th></tr></thead>
+            <tbody>${data.map(a => `
+                <tr>
+                    <td><strong>${a.activity_title || a.activity_type}</strong>${a.discussion_summary ? `<div style="font-size:12px; color:#9ca3af; margin-top:2px;">${a.discussion_summary.substring(0,80)}${a.discussion_summary.length>80?'...':''}</div>` : ''}</td>
+                    <td>${a.activity_type}</td>
+                    <td>${a.activity_date || '—'}</td>
+                    <td><span class="badge ${a.status==='completed'?'badge-green':a.status==='scheduled'?'badge-blue':'badge-gray'}">${a.status}</span></td>
+                </tr>
+            `).join('')}</tbody>
+        </table>
+    `;
+}
+
+async function renderPurchases() {
+    const container = document.getElementById('tab-content');
+    container.innerHTML = '<p style="color:#6b7280; padding:16px 0;">Loading...</p>';
+    const { data } = await supabase.from('purchases').select('*').eq('customer_id', portalCustomer.id).order('purchase_date', { ascending: false });
+    if (!data || data.length === 0) {
+        container.innerHTML = `<div class="empty-state"><i class="fas fa-shopping-bag"></i><p>No purchases on record.</p></div>`;
+        return;
+    }
+    container.innerHTML = `
+        <table>
+            <thead><tr><th>Item</th><th>Amount</th><th>Date</th><th>Status</th></tr></thead>
+            <tbody>${data.map(p => `
+                <tr>
+                    <td><strong>${p.product_name || p.package_name || 'Service'}</strong></td>
+                    <td style="font-weight:600;">RM ${(p.amount||0).toLocaleString()}</td>
+                    <td>${p.purchase_date || '—'}</td>
+                    <td><span class="badge badge-green">${p.status || 'Completed'}</span></td>
+                </tr>
+            `).join('')}</tbody>
+        </table>
+    `;
+}
+
+async function renderDocuments() {
+    const container = document.getElementById('tab-content');
+    container.innerHTML = '<p style="color:#6b7280; padding:16px 0;">Loading...</p>';
+    const { data } = await supabase.from('documents').select('*').eq('customer_id', portalCustomer.id).order('created_at', { ascending: false });
+    if (!data || data.length === 0) {
+        container.innerHTML = `<div class="empty-state"><i class="fas fa-file"></i><p>No documents shared yet.</p></div>`;
+        return;
+    }
+    container.innerHTML = `
+        <table>
+            <thead><tr><th>Document</th><th>Type</th><th>Date</th></tr></thead>
+            <tbody>${data.map(d => `
+                <tr>
+                    <td><i class="fas fa-file-alt" style="color:#7c3aed; margin-right:8px;"></i><strong>${d.file_name || d.title || 'Document'}</strong></td>
+                    <td>${d.file_type || '—'}</td>
+                    <td>${d.created_at ? new Date(d.created_at).toLocaleDateString() : '—'}</td>
+                </tr>
+            `).join('')}</tbody>
+        </table>
+    `;
+}
+
+async function renderUpcoming() {
+    const container = document.getElementById('tab-content');
+    container.innerHTML = '<p style="color:#6b7280; padding:16px 0;">Loading...</p>';
+    const today = new Date().toISOString().split('T')[0];
+    const { data } = await supabase.from('activities').select('*').eq('customer_id', portalCustomer.id).eq('status', 'scheduled').gte('activity_date', today).order('activity_date', { ascending: true }).limit(10);
+    if (!data || data.length === 0) {
+        container.innerHTML = `<div class="empty-state"><i class="fas fa-clock"></i><p>No upcoming appointments.</p></div>`;
+        return;
+    }
+    container.innerHTML = `
+        <table>
+            <thead><tr><th>Appointment</th><th>Date</th><th>Time</th><th>Type</th></tr></thead>
+            <tbody>${data.map(a => `
+                <tr>
+                    <td><strong>${a.activity_title || a.activity_type}</strong></td>
+                    <td>${a.activity_date}</td>
+                    <td>${a.start_time || '—'} ${a.end_time ? '– '+a.end_time : ''}</td>
+                    <td><span class="badge badge-blue">${a.activity_type}</span></td>
+                </tr>
+            `).join('')}</tbody>
+        </table>
+    `;
+}
+
+init();
+</script>
+</body>
+</html>
