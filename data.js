@@ -88,6 +88,21 @@ class DataStore {
             const { data, error } = await window.supabase.from(tableName).select('*');
             if (error) throw error;
             const result = data || [];
+            // Merge with any locally-saved records that didn't make it to Supabase
+            // (e.g. schema mismatch fallback in add()). These have IDs not in Supabase.
+            const localRaw = localStorage.getItem(`fs_crm_${tableName}`);
+            if (localRaw) {
+                try {
+                    const local = JSON.parse(localRaw);
+                    const supabaseIds = new Set(result.map(r => String(r.id)));
+                    const localOnly = local.filter(r => !supabaseIds.has(String(r.id)));
+                    if (localOnly.length > 0) {
+                        const merged = [...result, ...localOnly];
+                        try { localStorage.setItem(`fs_crm_${tableName}`, JSON.stringify(merged)); } catch (_) {}
+                        return merged;
+                    }
+                } catch (_) {}
+            }
             try { localStorage.setItem(`fs_crm_${tableName}`, JSON.stringify(result)); } catch (_) {}
             return result;
         } catch (e) {
