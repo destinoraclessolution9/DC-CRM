@@ -11064,92 +11064,94 @@ function _wireLoginBtn() {
                 </div>
 
                 <div class="scroll-container">
-                    <!-- Basic Information Section -->
-                    <div class="profile-section" id="section-basic">
-                        <h2>
-                            <span><i class="fas fa-info-circle"></i> Basic Information</span>
-                            <button class="btn-section-edit" onclick="app.openProspectModal(${prospect.id})"><i class="fas fa-edit"></i> Edit</button>
-                        </h2>
-                        <div class="detail-grid">
-                            <div class="info-row"><div class="info-label">Title</div><div class="info-value">${prospect.title || '-'}</div></div>
-                            <div class="info-row"><div class="info-label">Gender</div><div class="info-value">${prospect.gender || '-'}</div></div>
-                            <div class="info-row"><div class="info-label">Nationality</div><div class="info-value">${prospect.nationality || '-'}</div></div>
-                            <div class="info-row"><div class="info-label">Phone</div><div class="info-value">${prospect.phone}</div></div>
-                            <div class="info-row"><div class="info-label">Email</div><div class="info-value">${prospect.email || '-'}</div></div>
-                            <div class="info-row"><div class="info-label">Referrer</div><div class="info-value">${prospect.referred_by || '-'}</div></div>
-                        </div>
-                    </div>
+                    <style>
+                        .acc-container{display:flex;flex-direction:column;gap:10px;margin-top:4px}
+                        .acc-item{border:1px solid var(--gray-200);border-radius:10px;overflow:hidden}
+                        .acc-hdr{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;cursor:pointer;background:var(--gray-50);font-weight:600;font-size:15px;user-select:none;-webkit-tap-highlight-color:transparent;gap:8px}
+                        .acc-hdr:active{opacity:.85}
+                        .acc-item.open>.acc-hdr{background:var(--primary);color:#fff}
+                        .acc-item.open>.acc-hdr .acc-chev{color:#fff;transform:rotate(180deg)}
+                        .acc-chev{transition:transform .25s;color:var(--gray-500);flex-shrink:0}
+                        .acc-body{padding:16px;background:#fff}
+                        .acc-loading{text-align:center;padding:24px;color:var(--gray-400);font-size:14px}
+                        .acc-names-section{border:1px solid var(--gray-200);border-radius:10px;overflow:hidden;padding:0}
+                        .acc-names-header{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;background:var(--gray-50);font-weight:600;font-size:15px}
+                    </style>
 
-                    <!-- Personal Details Section -->
-                    <div class="profile-section" id="section-personal">
-                        <h2>
-                            <span><i class="fas fa-user-shield"></i> Personal Details</span>
-                            <button class="btn-section-edit" onclick="app.openProspectModal(${prospect.id})"><i class="fas fa-edit"></i> Edit</button>
-                        </h2>
-                        <div class="detail-grid">
-                            <div class="info-row"><div class="info-label">Date of Birth</div><div class="info-value">${prospect.date_of_birth || '-'}</div></div>
-                            <div class="info-row"><div class="info-label">Lunar Birth</div><div class="info-value">${prospect.lunar_birth || '-'}</div></div>
-                            <div class="info-row"><div class="info-label">IC Number</div><div class="info-value">${prospect.ic_number || '-'}</div></div>
-                            <div class="info-row"><div class="info-label">Ming Gua</div><div class="info-value"><span class="badge info">${prospect.ming_gua || '-'}</span></div></div>
-                            <div class="info-row"><div class="info-label">Occupation</div><div class="info-value">${prospect.occupation || '-'}</div></div>
-                            <div class="info-row"><div class="info-label">Company</div><div class="info-value">${prospect.company_name || '-'}</div></div>
-                            <div class="info-row"><div class="info-label">Income</div><div class="info-value">${prospect.income_range || '-'}</div></div>
-                            <div class="info-row"><div class="info-label">Address</div><div class="info-value">${prospect.address || '-'} ${prospect.city || ''} ${prospect.state || ''} ${prospect.postal_code || ''}</div></div>
-                        </div>
-                    </div>
+                    <div class="acc-container" id="acc-container-${prospect.id}">
 
-                    <!-- Name List Section -->
-                    <div class="profile-section" id="section-names">
-                        <h2>
-                            <span><i class="fas fa-users"></i> Name List</span>
-                            <span class="section-actions">
+                        <!-- ① Basic Information — open by default -->
+                        <div class="acc-item open" id="acc-info-${prospect.id}">
+                            <div class="acc-hdr" onclick="app.toggleAccordion('info',${prospect.id},this.parentElement)">
+                                <span><i class="fas fa-info-circle"></i> Basic Information</span>
+                                <i class="fas fa-chevron-down acc-chev"></i>
+                            </div>
+                            <div class="acc-body" id="acc-body-info-${prospect.id}">
+                                <div class="acc-loading"><i class="fas fa-spinner fa-spin"></i> Loading…</div>
+                            </div>
+                        </div>
+
+                        <!-- ② Personal Details — collapsed -->
+                        <div class="acc-item" id="acc-personal-${prospect.id}">
+                            <div class="acc-hdr" onclick="app.toggleAccordion('personal',${prospect.id},this.parentElement)">
+                                <span><i class="fas fa-user"></i> Personal Details</span>
+                                <i class="fas fa-chevron-down acc-chev"></i>
+                            </div>
+                            <div class="acc-body" id="acc-body-personal-${prospect.id}" style="display:none" data-loaded="false"></div>
+                        </div>
+
+                        <!-- ③ Name List — always visible, no collapse -->
+                        <div class="acc-names-section" id="section-names">
+                            <div class="acc-names-header">
+                                <span><i class="fas fa-users"></i> Name List</span>
                                 <button class="btn primary btn-sm" onclick="app.openAddNameModal(${prospect.id})"><i class="fas fa-plus"></i> Add Name</button>
-                            </span>
-                        </h2>
-                        <table class="name-list-table">
-                            <thead>
-                                <tr>
-                                    <th>Relation</th>
-                                    <th>Name</th>
-                                    <th>DOB</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${names.length > 0 ? names.map(n => `
-                                    <tr>
-                                        <td>${n.relation}</td>
-                                        <td>${n.full_name}</td>
-                                        <td>${n.date_of_birth || '-'}</td>
-                                        <td>
-                                            <button class="btn-icon" onclick="app.openAddNameModal(${prospect.id}, ${n.id})"><i class="fas fa-edit"></i></button>
-                                            <button class="btn-icon" onclick="app.deleteName(${prospect.id}, ${n.id})"><i class="fas fa-trash"></i></button>
-                                        </td>
-                                    </tr>
-                                `).join('') : '<tr><td colspan="4" style="text-align:center; padding:20px;">No names added.</td></tr>'}
-                            </tbody>
-                        </table>
-                    </div>
+                            </div>
+                            <div style="padding:0 16px 16px;">
+                                <table class="name-list-table" style="margin-top:8px">
+                                    <thead><tr><th>Relation</th><th>Name</th><th>DOB</th><th>Actions</th></tr></thead>
+                                    <tbody>
+                                        ${names.length > 0 ? names.map(n => `
+                                            <tr>
+                                                <td>${n.relation}</td>
+                                                <td>${n.full_name}</td>
+                                                <td>${n.date_of_birth || '-'}</td>
+                                                <td>
+                                                    <button class="btn-icon" onclick="app.openAddNameModal(${prospect.id},${n.id})"><i class="fas fa-edit"></i></button>
+                                                    <button class="btn-icon" onclick="app.deleteName(${prospect.id},${n.id})"><i class="fas fa-trash"></i></button>
+                                                </td>
+                                            </tr>`).join('') : '<tr><td colspan="4" style="text-align:center;padding:20px;">No names added.</td></tr>'}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
 
-                    <!-- Activity History Section with Tabs -->
-                    <div class="profile-section" id="section-history" style="margin-top:24px;">
-                        <h2>
-                            <span><i class="fas fa-history"></i> Activity & Information</span>
-                            <span class="section-actions">
-                                <button class="btn primary btn-sm" onclick="app.openActivityModal('', ${prospect.id})"><i class="fas fa-plus"></i> Add Activity</button>
-                            </span>
-                        </h2>
-                        <div class="profile-tabs" style="margin-bottom:15px; border-bottom:1px solid var(--gray-200);">
-                            <button class="profile-tab active" onclick="app.switchProspectTab('info', ${prospect.id}, this)">Info</button>
-                            <button class="profile-tab" onclick="app.switchProspectTab('personal', ${prospect.id}, this)">Personal</button>
-                            <button class="profile-tab" onclick="app.switchProspectTab('names', ${prospect.id}, this)">Names</button>
-                            <button class="profile-tab" onclick="app.switchProspectTab('activity', ${prospect.id}, this)">Activity</button>
-                            <button class="profile-tab" onclick="app.switchProspectTab('events', ${prospect.id}, this)">Events</button>
-                            <button class="profile-tab" onclick="app.switchProspectTab('notes', ${prospect.id}, this)">Notes</button>
+                        <!-- ④ Activity History — collapsed -->
+                        <div class="acc-item" id="acc-activity-${prospect.id}">
+                            <div class="acc-hdr" onclick="app.toggleAccordion('activity',${prospect.id},this.parentElement)">
+                                <span><i class="fas fa-history"></i> Activity History</span>
+                                <i class="fas fa-chevron-down acc-chev"></i>
+                            </div>
+                            <div class="acc-body" id="acc-body-activity-${prospect.id}" style="display:none" data-loaded="false"></div>
                         </div>
-                        <div id="prospect-tab-content">
-                            <!-- Populated by switchProspectTab -->
+
+                        <!-- ⑤ Events — collapsed -->
+                        <div class="acc-item" id="acc-events-${prospect.id}">
+                            <div class="acc-hdr" onclick="app.toggleAccordion('events',${prospect.id},this.parentElement)">
+                                <span><i class="fas fa-calendar-alt"></i> Events</span>
+                                <i class="fas fa-chevron-down acc-chev"></i>
+                            </div>
+                            <div class="acc-body" id="acc-body-events-${prospect.id}" style="display:none" data-loaded="false"></div>
                         </div>
+
+                        <!-- ⑥ Notes — collapsed -->
+                        <div class="acc-item" id="acc-notes-${prospect.id}">
+                            <div class="acc-hdr" onclick="app.toggleAccordion('notes',${prospect.id},this.parentElement)">
+                                <span><i class="fas fa-sticky-note"></i> Notes</span>
+                                <i class="fas fa-chevron-down acc-chev"></i>
+                            </div>
+                            <div class="acc-body" id="acc-body-notes-${prospect.id}" style="display:none" data-loaded="false"></div>
+                        </div>
+
                     </div>
                 </div>
 
@@ -11215,24 +11217,25 @@ function _wireLoginBtn() {
                 </div>
             </div>
         `;
-        // Load the default tab content
-        await app.switchProspectTab('info', prospectId, document.querySelector('.profile-tabs .profile-tab.active'));
+        // Pre-load the Info accordion body (open by default)
+        await switchProspectTab('info', prospectId, null, document.getElementById(`acc-body-info-${prospectId}`));
     };
 
-    const switchProspectTab = async (tab, prospectId, btn) => {
+    const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
+        // Legacy tab-button styling (harmless no-op in accordion mode)
         document.querySelectorAll('.profile-tab').forEach(t => {
             t.classList.remove('active');
             t.style.color = 'var(--gray-800)';
             t.style.fontWeight = 'normal';
         });
-        if (btn) {
+        if (btn && btn.classList?.contains('profile-tab')) {
             btn.classList.add('active');
             btn.style.color = 'var(--primary)';
             btn.style.fontWeight = '600';
         }
 
         const prospect = await AppDataStore.getById('prospects', prospectId);
-        const container = document.getElementById('prospect-tab-content');
+        const container = containerOverride || document.getElementById('prospect-tab-content');
         if (!container || !prospect) return;
 
         if (tab === 'info') {
@@ -11415,6 +11418,26 @@ function _wireLoginBtn() {
         }
     };
 
+    // Accordion toggle — expand/collapse a prospect profile section.
+    // Content is lazy-loaded on first open via switchProspectTab.
+    const toggleAccordion = async (tab, prospectId, itemEl) => {
+        const bodyEl = document.getElementById(`acc-body-${tab}-${prospectId}`);
+        if (!bodyEl) return;
+        const isOpen = itemEl.classList.contains('open');
+        if (isOpen) {
+            bodyEl.style.display = 'none';
+            itemEl.classList.remove('open');
+        } else {
+            bodyEl.style.display = 'block';
+            itemEl.classList.add('open');
+            if (bodyEl.dataset.loaded === 'false') {
+                bodyEl.dataset.loaded = 'true';
+                bodyEl.innerHTML = '<div class="acc-loading"><i class="fas fa-spinner fa-spin"></i> Loading…</div>';
+                await switchProspectTab(tab, prospectId, null, bodyEl);
+            }
+        }
+    };
+
     const editProspect = async (prospectId) => await openProspectModal(prospectId);
 
     const addNote = async (prospectId) => {
@@ -11430,7 +11453,7 @@ function _wireLoginBtn() {
         });
         document.getElementById('new-note-text').value = '';
         UI.toast.success('Note added');
-        await app.switchProspectTab('notes', prospectId, document.querySelector('.profile-tab.active'));
+        await switchProspectTab('notes', prospectId, null, document.getElementById(`acc-body-notes-${prospectId}`));
     };
 
     
@@ -11438,7 +11461,7 @@ const deleteNote = async (prospectId, noteId) => {
     UI.confirm('Delete Note?', 'Are you sure you want to delete this note?', async () => {
         await AppDataStore.delete('notes', noteId);
         UI.toast.success('Note deleted');
-        await app.switchProspectTab('notes', prospectId, document.querySelector('.profile-tab.active'));
+        await switchProspectTab('notes', prospectId, null, document.getElementById(`acc-body-notes-${prospectId}`));
     });
 };
 
@@ -19437,6 +19460,7 @@ const initImportDemoData = async () => {
         filterProspects,
         sortProspects,
         switchProspectTab,
+        toggleAccordion,
 
         // Fix scoping for these functions
         openAddNameModal,
