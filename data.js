@@ -113,6 +113,7 @@ class DataStore {
     }
 
     async get(tableName, id) {
+        if (id == null) return null;
         const { data, error } = await window.supabase
             .from(tableName)
             .select('*')

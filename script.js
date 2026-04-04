@@ -14293,8 +14293,9 @@ const deactivateAgent = async (agentId) => {
     };
 
     const getNoteCount = async (prospectId) => {
-        return await AppDataStore.query('notes', { prospect_id: prospectId }).length +
-            await AppDataStore.query('activities', { prospect_id: prospectId }).length;
+        const notes = await AppDataStore.query('notes', { prospect_id: prospectId });
+        const acts = await AppDataStore.query('activities', { prospect_id: prospectId });
+        return notes.length + acts.length;
     };
 
     const getProspectOutcome = async (prospect) => {
@@ -14503,7 +14504,7 @@ const deactivateAgent = async (agentId) => {
 
         const readinessColor = readiness.label === 'HOT' ? '#DC2626' : (readiness.label === 'WARM' ? '#F59E0B' : '#6B7280');
 
-        const prospectName = await escapeHtml(prospect.name);
+        const prospectName = await escapeHtml(prospect.full_name || prospect.name || '');
         const agentUser = await AppDataStore.getById('users', prospect.responsible_agent_id);
         const agentName = await escapeHtml(agentUser?.full_name || 'Unassigned');
         const productNameHtml = await escapeHtml(productInfo.name);
