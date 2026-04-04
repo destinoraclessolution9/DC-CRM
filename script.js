@@ -9425,12 +9425,13 @@ function _wireLoginBtn() {
                             </div>
                             <div class="form-group half">
                                 <label>Payment Method</label>
-                                <select id="payment-method" class="form-control" onchange="document.getElementById('pop-fields').style.display = this.value === 'POP' ? 'block' : 'none'">
+                                <select id="payment-method" class="form-control" onchange="document.getElementById('pop-fields').style.display = this.value === 'POP' ? 'block' : 'none'; document.getElementById('epp-fields').style.display = this.value === 'EPP' ? 'block' : 'none';">
                                     <option value="Cash">Cash</option>
                                     <option value="Bank Transfer">Bank Transfer</option>
                                     <option value="Credit Card">Credit Card</option>
                                     <option value="Cheque">Cheque</option>
                                     <option value="POP">POP</option>
+                                    <option value="EPP">EPP</option>
                                 </select>
                             </div>
                         </div>
@@ -9450,6 +9451,25 @@ function _wireLoginBtn() {
                                     <label>Down Payment Collected (RM)</label>
                                     <input type="number" id="pop-down-payment" class="form-control" placeholder="0.00">
                                 </div>
+                            </div>
+                        </div>
+                        <div id="epp-fields" style="display: none; background: var(--gray-50); padding: 12px; border-radius: 6px; margin-bottom: 12px;">
+                            <div class="form-row">
+                                <div class="form-group half">
+                                    <label>Bank Name <span class="required">*</span></label>
+                                    <input type="text" id="epp-bank" class="form-control" placeholder="e.g. Maybank, CIMB, Public Bank">
+                                </div>
+                                <div class="form-group half">
+                                    <label>Instalment Tenure (months) <span class="required">*</span></label>
+                                    <select id="epp-months" class="form-control">
+                                        <option value="">Select months</option>
+                                        ${[3,6,12,18,24,36,48,60].map(m => `<option value="${m}">${m} months</option>`).join('')}
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>EPP Remarks</label>
+                                <textarea id="epp-remarks" class="form-control" rows="2" placeholder="e.g. Card number ending, branch, any special conditions..."></textarea>
                             </div>
                         </div>
                         <div class="form-row">
@@ -10606,6 +10626,11 @@ function _wireLoginBtn() {
                 if (amount) activity.pop_monthly_amount = amount;
                 if (tenure) activity.pop_tenure = tenure;
                 if (downPayment) activity.pop_down_payment = downPayment;
+            }
+            if (activity.payment_method === 'EPP') {
+                activity.epp_bank = document.getElementById('epp-bank')?.value || '';
+                activity.epp_months = document.getElementById('epp-months')?.value || '';
+                activity.epp_remarks = document.getElementById('epp-remarks')?.value || '';
             }
         }
 
