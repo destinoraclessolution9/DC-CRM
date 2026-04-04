@@ -6699,52 +6699,117 @@ function _wireLoginBtn() {
 
     // ========== PHASE 18: CASES MODULE IMPLEMENTATION ==========
 
-    let _caseFilters = { search: '', product: 'all', from: '', to: '', visibility: 'all' };
+    let _caseFilters = { search: '', product: 'all', from: '', to: '', visibility: 'all', agent: 'all', tag: 'all' };
+    let _caseActiveTab = 'cps'; // 'cps' | 'closed'
 
 
 
     const showCasesView = async (container) => {
+        const products = ((await AppDataStore.getAll('products')) || []).filter(p => p.is_active !== false);
+        const allUsers = (await AppDataStore.getAll('users')) || [];
+        const agents = allUsers.filter(u => u.status !== 'inactive');
+        const allTags = (await AppDataStore.getAll('tags')) || [];
+
+        const isCps = _caseActiveTab === 'cps';
+
+        const cpsFilterBar = `
+            <div class="filter-bar">
+                <div class="filter-group">
+                    <i class="fas fa-search"></i>
+                    <input type="text" id="case-search" placeholder="Search title or prospect/customer..." value="${_caseFilters.search}" onkeyup="app.handleCaseSearch(event)">
+                </div>
+                <div class="filter-group">
+                    <label>Product</label>
+                    <select id="case-product-filter" onchange="app.handleCaseFilterChange()">
+                        <option value="all">All Products</option>
+                        ${products.map(p => `<option value="${p.name}" ${_caseFilters.product === p.name ? 'selected' : ''}>${p.name}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>From</label>
+                    <input type="date" id="case-date-from" value="${_caseFilters.from}" onchange="app.handleCaseFilterChange()">
+                </div>
+                <div class="filter-group">
+                    <label>To</label>
+                    <input type="date" id="case-date-to" value="${_caseFilters.to}" onchange="app.handleCaseFilterChange()">
+                </div>
+                <div class="filter-group">
+                    <label>Visibility</label>
+                    <select id="case-visibility-filter" onchange="app.handleCaseFilterChange()">
+                        <option value="all" ${_caseFilters.visibility === 'all' ? 'selected' : ''}>All</option>
+                        <option value="public" ${_caseFilters.visibility === 'public' ? 'selected' : ''}>Public Only</option>
+                        <option value="mine" ${_caseFilters.visibility === 'mine' ? 'selected' : ''}>My Cases</option>
+                    </select>
+                </div>
+            </div>`;
+
+        const closedFilterBar = `
+            <div class="filter-bar">
+                <div class="filter-group">
+                    <i class="fas fa-search"></i>
+                    <input type="text" id="case-search" placeholder="Search title or prospect/customer..." value="${_caseFilters.search}" onkeyup="app.handleCaseSearch(event)">
+                </div>
+                <div class="filter-group">
+                    <label>Product</label>
+                    <select id="case-product-filter" onchange="app.handleCaseFilterChange()">
+                        <option value="all">All Products</option>
+                        ${products.map(p => `<option value="${p.name}" ${_caseFilters.product === p.name ? 'selected' : ''}>${p.name}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>Agent</label>
+                    <select id="case-agent-filter" onchange="app.handleCaseFilterChange()">
+                        <option value="all">All Agents</option>
+                        ${agents.map(u => `<option value="${u.id}" ${_caseFilters.agent === String(u.id) ? 'selected' : ''}>${u.full_name || u.username}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>From</label>
+                    <input type="date" id="case-date-from" value="${_caseFilters.from}" onchange="app.handleCaseFilterChange()">
+                </div>
+                <div class="filter-group">
+                    <label>To</label>
+                    <input type="date" id="case-date-to" value="${_caseFilters.to}" onchange="app.handleCaseFilterChange()">
+                </div>
+                <div class="filter-group">
+                    <label>Tag</label>
+                    <select id="case-tag-filter" onchange="app.handleCaseFilterChange()">
+                        <option value="all">All Tags</option>
+                        ${allTags.map(t => `<option value="${t.id}" ${_caseFilters.tag === String(t.id) ? 'selected' : ''}>${t.name}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>Visibility</label>
+                    <select id="case-visibility-filter" onchange="app.handleCaseFilterChange()">
+                        <option value="all" ${_caseFilters.visibility === 'all' ? 'selected' : ''}>All</option>
+                        <option value="public" ${_caseFilters.visibility === 'public' ? 'selected' : ''}>Public Only</option>
+                        <option value="mine" ${_caseFilters.visibility === 'mine' ? 'selected' : ''}>My Cases</option>
+                    </select>
+                </div>
+            </div>`;
+
         container.innerHTML = `
             <div class="cases-view">
                 <div class="prospects-header">
                     <div>
-                        <h1>Case Studies Repository</h1>
+                        <h1>Success Case Library</h1>
                         <p>Document and share success stories, sales ideas, and closing strategies.</p>
                     </div>
                     <button class="btn primary" onclick="(async () => { await app.openCaseStudyModal(); })()">
-                        <i class="fas fa-plus"></i> New Case Study
+                        <i class="fas fa-plus"></i> New Case
                     </button>
                 </div>
 
-                <div class="filter-bar">
-                    <div class="filter-group">
-                        <i class="fas fa-search"></i>
-                        <input type="text" id="case-search" placeholder="Search title or prospect/customer..." value="${_caseFilters.search}" onkeyup="app. async handleCaseSearch(event)">
-                    </div>
-                    <div class="filter-group">
-                        <label>Product</label>
-                        <select id="case-product-filter" onchange="app. async handleCaseFilterChange()">
-                            <option value="all">All Products</option>
-                            ${((await AppDataStore.getAll('products')) || []).filter(p => p.is_active !== false).map(p => `<option value="${p.name}" ${_caseFilters.product === p.name ? 'selected' : ''}>${p.name}</option>`).join('')}
-                        </select>
-                    </div>
-                    <div class="filter-group">
-                        <label>From</label>
-                        <input type="date" id="case-date-from" value="${_caseFilters.from}" onchange="app. async handleCaseFilterChange()">
-                    </div>
-                    <div class="filter-group">
-                        <label>To</label>
-                        <input type="date" id="case-date-to" value="${_caseFilters.to}" onchange="app. async handleCaseFilterChange()">
-                    </div>
-                    <div class="filter-group">
-                        <label>Visibility</label>
-                        <select id="case-visibility-filter" onchange="app. async handleCaseFilterChange()">
-                            <option value="all" ${_caseFilters.visibility === 'all' ? 'selected' : ''}>All</option>
-                            <option value="public" ${_caseFilters.visibility === 'public' ? 'selected' : ''}>Public Only</option>
-                            <option value="mine" ${_caseFilters.visibility === 'mine' ? 'selected' : ''}>My Cases</option>
-                        </select>
-                    </div>
+                <div style="display:flex; gap:8px; margin-bottom:12px;">
+                    <button class="btn ${isCps ? 'primary' : 'secondary'}" onclick="app.switchCaseTab('cps')">
+                        <i class="fas fa-handshake"></i> CPS Invitation Cases
+                    </button>
+                    <button class="btn ${!isCps ? 'primary' : 'secondary'}" onclick="app.switchCaseTab('closed')">
+                        <i class="fas fa-check-circle"></i> Closed Cases
+                    </button>
                 </div>
+
+                ${isCps ? cpsFilterBar : closedFilterBar}
 
                 <div class="table-container">
                     <table class="crm-table">
@@ -6755,16 +6820,16 @@ function _wireLoginBtn() {
                                 <th>Product</th>
                                 <th>Amount (RM)</th>
                                 <th>Closing Date</th>
+                                <th>Tags</th>
                                 <th class="text-right">Actions</th>
                             </tr>
                         </thead>
                         <tbody id="cases-list-body">
-                            <!-- Rows rendered by await renderCasesList() -->
                         </tbody>
                     </table>
                     <div id="cases-empty-state" style="display: none; padding: 40px; text-align: center; color: var(--gray-400);">
                         <i class="fas fa-folder-open" style="font-size: 48px; margin-bottom: 16px;"></i>
-                        <p>No case studies found matching your criteria.</p>
+                        <p>No cases found matching your criteria.</p>
                     </div>
                 </div>
             </div>
@@ -6773,16 +6838,26 @@ function _wireLoginBtn() {
         await renderCasesList();
     };
 
+    const switchCaseTab = async (type) => {
+        _caseActiveTab = type;
+        _caseFilters.agent = 'all';
+        _caseFilters.tag = 'all';
+        _caseFilters.search = '';
+        await showCasesView(document.getElementById('content-viewport'));
+    };
+
     const handleCaseSearch = async (e) => {
         _caseFilters.search = e.target.value;
         await renderCasesList();
     };
 
     const handleCaseFilterChange = async () => {
-        _caseFilters.product = document.getElementById('case-product-filter').value;
-        _caseFilters.from = document.getElementById('case-date-from').value;
-        _caseFilters.to = document.getElementById('case-date-to').value;
-        _caseFilters.visibility = document.getElementById('case-visibility-filter').value;
+        _caseFilters.product = document.getElementById('case-product-filter')?.value || 'all';
+        _caseFilters.from = document.getElementById('case-date-from')?.value || '';
+        _caseFilters.to = document.getElementById('case-date-to')?.value || '';
+        _caseFilters.visibility = document.getElementById('case-visibility-filter')?.value || 'all';
+        _caseFilters.agent = document.getElementById('case-agent-filter')?.value || 'all';
+        _caseFilters.tag = document.getElementById('case-tag-filter')?.value || 'all';
         await renderCasesList();
     };
 
@@ -6794,6 +6869,9 @@ function _wireLoginBtn() {
         let cases = await AppDataStore.getAll('case_studies');
         const currentUser = _currentUser;
 
+        // Filter by active tab (case_type)
+        cases = cases.filter(c => (c.case_type || 'cps') === _caseActiveTab);
+
         // Apply Permission/Visibility Filters
         cases = cases.filter(c => {
             const isOwner = c.created_by === currentUser?.id;
@@ -6802,11 +6880,24 @@ function _wireLoginBtn() {
             if (_caseFilters.visibility === 'public') return c.is_public;
             if (_caseFilters.visibility === 'mine') return isOwner;
 
-            // Default "all" view: show public ones OR mine OR if I'm admin
             return c.is_public || isOwner || isAdmin;
         });
 
-        // Apply Search/Filter logic
+        // Agent filter (Closed tab only)
+        if (_caseActiveTab === 'closed' && _caseFilters.agent !== 'all') {
+            cases = cases.filter(c => String(c.created_by) === String(_caseFilters.agent));
+        }
+
+        // Tag filter
+        if (_caseFilters.tag !== 'all') {
+            const tagMappings = (await AppDataStore.getAll('entity_tags')) || [];
+            const caseIdsWithTag = tagMappings
+                .filter(et => et.entity_type === 'case_study' && String(et.tag_id) === String(_caseFilters.tag))
+                .map(et => et.entity_id);
+            cases = cases.filter(c => caseIdsWithTag.includes(c.id));
+        }
+
+        // Search filter
         if (_caseFilters.search) {
             const q = _caseFilters.search.toLowerCase();
             const filteredCases = [];
@@ -6845,25 +6936,34 @@ function _wireLoginBtn() {
             return;
         }
 
+        // Pre-fetch all tags & mappings for batch display
+        const allTags = (await AppDataStore.getAll('tags')) || [];
+        const allTagMappings = (await AppDataStore.getAll('entity_tags')) || [];
+
         emptyState.style.display = 'none';
         const caseRows = await Promise.all(cases.map(async c => {
             let entityName = '-';
-            let entityLink = '#';
+            let entityLink = 'return false';
             if (c.customer_id) {
                 const cust = await AppDataStore.getById('customers', c.customer_id);
                 entityName = cust ? `<i class="fas fa-user-check" title="Customer"></i> ${cust.full_name}` : 'Unknown Customer';
-                entityLink = `await app. showCustomerDetail(${c.customer_id})`;
+                entityLink = `app.showCustomerDetail(${c.customer_id})`;
             } else if (c.prospect_id) {
                 const pros = await AppDataStore.getById('prospects', c.prospect_id);
                 entityName = pros ? `<i class="fas fa-user" title="Prospect"></i> ${pros.full_name}` : 'Unknown Prospect';
-                entityLink = `await app. showProspectDetail(${c.prospect_id})`;
+                entityLink = `app.showProspectDetail(${c.prospect_id})`;
             }
 
             const isOwner = c.created_by === currentUser?.id;
             const isAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || currentUser?.role?.includes('Level 3') || currentUser?.role?.includes('Level 7') || currentUser?.role === 'team_leader' || currentUser?.role === 'admin';
 
+            // Build tag badges for this case
+            const caseMappings = allTagMappings.filter(et => et.entity_type === 'case_study' && et.entity_id === c.id);
+            const caseTags = caseMappings.map(m => allTags.find(t => t.id === m.tag_id)).filter(Boolean);
+            const tagBadges = caseTags.map(t => `<span class="badge" style="background:${t.color || '#e5e7eb'};color:#1f2937;margin-right:4px;font-size:11px;">${t.name}</span>`).join('');
+
             return `
-                <tr class="clickable" onclick="app. showCaseStudyDetail(${c.id})">
+                <tr class="clickable" onclick="app.showCaseStudyDetail(${c.id})">
                     <td>
                         <div class="case-title">
                             <strong>${c.title}</strong>
@@ -6874,12 +6974,16 @@ function _wireLoginBtn() {
                     <td>${c.product || '-'}</td>
                     <td>RM ${parseFloat(c.amount || 0).toLocaleString()}</td>
                     <td>${c.closing_date || '-'}</td>
+                    <td>
+                        ${tagBadges}
+                        <button class="btn-icon" title="Add Tag" style="font-size:11px;" onclick="event.stopPropagation(); app.addTagToCase(${c.id})"><i class="fas fa-tag"></i></button>
+                    </td>
                     <td class="text-right">
                         <div class="actions">
-                            <button class="btn-icon" title="View" onclick="event.stopPropagation(); app. showCaseStudyDetail(${c.id})"><i class="fas fa-eye"></i></button>
+                            <button class="btn-icon" title="View" onclick="event.stopPropagation(); app.showCaseStudyDetail(${c.id})"><i class="fas fa-eye"></i></button>
                             ${(isOwner || isAdmin) ? `
-                                <button class="btn-icon" title="Edit" onclick="event.stopPropagation(); app. openCaseStudyModal(${c.id})"><i class="fas fa-edit"></i></button>
-                                <button class="btn-icon text-danger" title="Delete" onclick="event.stopPropagation(); app. deleteCaseStudy(${c.id})"><i class="fas fa-trash"></i></button>
+                                <button class="btn-icon" title="Edit" onclick="event.stopPropagation(); app.openCaseStudyModal(${c.id})"><i class="fas fa-edit"></i></button>
+                                <button class="btn-icon text-danger" title="Delete" onclick="event.stopPropagation(); app.deleteCaseStudy(${c.id})"><i class="fas fa-trash"></i></button>
                             ` : ''}
                         </div>
                     </td>
@@ -6893,12 +6997,11 @@ function _wireLoginBtn() {
         const c = await AppDataStore.getById('case_studies', id);
         if (!c) return;
 
-        const viewport = document.getElementById('content-viewport');
         const currentUser = _currentUser;
         const isOwner = c.created_by === currentUser?.id;
         const isAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || currentUser?.role?.includes('Level 3') || currentUser?.role?.includes('Level 7') || currentUser?.role === 'team_leader' || currentUser?.role === 'admin';
 
-        let entityInfo = 'Generic Case Study';
+        let entityInfo = 'Generic Case';
         if (c.customer_id) {
             const cust = await AppDataStore.getById('customers', c.customer_id);
             entityInfo = cust ? `Customer: ${cust.full_name}` : 'Unknown Customer';
@@ -6910,70 +7013,100 @@ function _wireLoginBtn() {
         const creator = await AppDataStore.getById('users', c.created_by);
         const creatorName = creator ? (creator.full_name || creator.username) : 'System';
 
-        viewport.innerHTML = `
-            <div class="case-detail-view">
-                <div class="detail-header">
-                    <div class="header-left">
-                        <button class="btn-back" onclick="app. navigateTo('cases')"><i class="fas fa-arrow-left"></i> Back to List</button>
-                        <h1>${c.title}</h1>
-                        <div class="case-meta-header">
-                            <span><i class="fas fa-user-circle"></i> ${entityInfo}</span>
-                            <span><i class="fas fa-calendar-alt"></i> Closed: ${c.closing_date || 'N/A'}</span>
-                            <span><i class="fas fa-tags"></i> Product: ${c.product || 'N/A'}</span>
-                            <span><i class="fas fa-money-bill-wave"></i> RM ${parseFloat(c.amount || 0).toLocaleString()}</span>
-                        </div>
-                    </div>
-                    <div class="header-actions">
-                        ${(isOwner || isAdmin) ? `
-                            <button class="btn secondary" onclick="app. toggleCasePublic(${c.id})">
-                                <i class="fas ${c.is_public ? 'fa-lock' : 'fa-share'}"></i> ${c.is_public ? 'Make Private' : 'Share Publicly'}
-                            </button>
-                            <button class="btn secondary" onclick="app. openCaseStudyModal(${c.id})"><i class="fas fa-edit"></i> Edit</button>
-                            <button class="btn-icon text-danger" onclick="app. deleteCaseStudy(${c.id})"><i class="fas fa-trash"></i></button>
-                        ` : ''}
-                        <button class="btn secondary" onclick="app.copyCaseLink(${c.id})"><i class="fas fa-link"></i> Copy Link</button>
+        // Fetch tags for this case
+        const allTagMappings = (await AppDataStore.getAll('entity_tags')) || [];
+        const allTags = (await AppDataStore.getAll('tags')) || [];
+        const caseMappings = allTagMappings.filter(et => et.entity_type === 'case_study' && et.entity_id === c.id);
+        const caseTags = caseMappings.map(m => allTags.find(t => t.id === m.tag_id)).filter(Boolean);
+        const tagPills = caseTags.map(t => `
+            <span class="badge" style="background:${t.color || '#e5e7eb'};color:#1f2937;margin-right:4px;">
+                ${t.name}
+                <span style="cursor:pointer;margin-left:4px;" onclick="app.removeTagFromCase(${c.id}, ${t.id})">&times;</span>
+            </span>`).join('');
+
+        const typeLabel = (c.case_type || 'cps') === 'cps' ? 'CPS Invitation Case' : 'Closed Case';
+
+        const contentHtml = `
+            <div style="padding:0 4px;">
+                <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px;color:var(--gray-500);font-size:13px;">
+                    <span><i class="fas fa-tag"></i> ${typeLabel}</span>
+                    <span><i class="fas fa-user-circle"></i> ${entityInfo}</span>
+                    <span><i class="fas fa-calendar-alt"></i> Closed: ${c.closing_date || 'N/A'}</span>
+                    <span><i class="fas fa-box"></i> ${c.product || 'N/A'}</span>
+                    <span><i class="fas fa-money-bill-wave"></i> RM ${parseFloat(c.amount || 0).toLocaleString()}</span>
+                    ${c.is_public ? '<span class="badge badge-success">Public</span>' : ''}
+                </div>
+
+                <div style="margin-bottom:16px;">
+                    <strong style="font-size:12px;color:var(--gray-500);text-transform:uppercase;letter-spacing:.05em;">Tags</strong>
+                    <div style="margin-top:6px;">
+                        ${tagPills || '<em style="color:var(--gray-400);font-size:13px;">No tags</em>'}
+                        <button class="btn secondary btn-sm" style="margin-left:8px;" onclick="app.addTagToCase(${c.id})"><i class="fas fa-tag"></i> Add Tag</button>
                     </div>
                 </div>
 
-                <div class="detail-content scroll-y">
-                    <div class="case-section card">
-                        <h3><i class="fas fa-handshake"></i> Part 1: CPS Invitation</h3>
-                        <div class="section-content">
-                            <p>${c.cps_invitation_details || '<em class="text-muted">No details provided.</em>'}</p>
+                <div class="case-section card" style="margin-bottom:12px;">
+                    <h3 style="font-size:14px;font-weight:600;margin-bottom:8px;"><i class="fas fa-handshake"></i> Part 1: CPS Invitation</h3>
+                    <p style="white-space:pre-wrap;">${c.cps_invitation_details || '<em style="color:var(--gray-400);">No details provided.</em>'}</p>
+                </div>
+
+                <div class="case-section card" style="margin-bottom:12px;">
+                    <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;"><i class="fas fa-check-double"></i> Part 2: Closing & Strategy</h3>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                        <div>
+                            <h4 style="font-size:12px;font-weight:600;color:var(--gray-500);text-transform:uppercase;margin-bottom:4px;">Closing Details</h4>
+                            <p style="white-space:pre-wrap;">${c.closing_details || '-'}</p>
+                        </div>
+                        <div>
+                            <h4 style="font-size:12px;font-weight:600;color:var(--gray-500);text-transform:uppercase;margin-bottom:4px;">The Sales Idea</h4>
+                            <p style="white-space:pre-wrap;">${c.sales_idea || '-'}</p>
+                        </div>
+                        <div>
+                            <h4 style="font-size:12px;font-weight:600;color:var(--gray-500);text-transform:uppercase;margin-bottom:4px;">Execution Plan</h4>
+                            <p style="white-space:pre-wrap;">${c.plan_details || '-'}</p>
+                        </div>
+                        <div>
+                            <h4 style="font-size:12px;font-weight:600;color:var(--gray-500);text-transform:uppercase;margin-bottom:4px;">Success Story & Lessons</h4>
+                            <p style="white-space:pre-wrap;">${c.success_story || '-'}</p>
                         </div>
                     </div>
+                </div>
 
-                    <div class="case-section card">
-                        <h3><i class="fas fa-check-double"></i> Part 2: Closing & Strategy</h3>
-                        <div class="strategy-grid">
-                            <div class="strategy-item">
-                                <h4>Closing Details</h4>
-                                <p>${c.closing_details || '-'}</p>
-                            </div>
-                            <div class="strategy-item">
-                                <h4>The Sales Idea</h4>
-                                <div class="highlight-box">
-                                    <p>${c.sales_idea || '-'}</p>
-                                </div>
-                            </div>
-                            <div class="strategy-item">
-                                <h4>Execution Plan</h4>
-                                <p>${c.plan_details || '-'}</p>
-                            </div>
-                            <div class="strategy-item">
-                                <h4>Success Story & Lessons</h4>
-                                <p>${c.success_story || '-'}</p>
-                            </div>
+                ${(c.key_success_factor || c.script) ? `
+                <div class="case-section card" style="margin-bottom:12px;">
+                    <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;"><i class="fas fa-star"></i> Part 3: Key Factors & Script</h3>
+                    ${c.key_success_factor ? `
+                    <div style="margin-bottom:12px;">
+                        <h4 style="font-size:12px;font-weight:600;color:var(--gray-500);text-transform:uppercase;margin-bottom:4px;">Key Success Factor</h4>
+                        <p style="white-space:pre-wrap;">${c.key_success_factor}</p>
+                    </div>` : ''}
+                    ${c.script ? `
+                    <div>
+                        <h4 style="font-size:12px;font-weight:600;color:var(--gray-500);text-transform:uppercase;margin-bottom:4px;">Sales Script</h4>
+                        <div style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:6px;padding:12px;">
+                            <p style="white-space:pre-wrap;font-family:monospace;font-size:13px;">${c.script}</p>
                         </div>
-                    </div>
+                    </div>` : ''}
+                </div>` : ''}
 
-                    <div class="case-footer">
-                        <p><strong>Created By:</strong> ${creatorName} on ${new Date(c.created_at).toLocaleDateString()}</p>
-                        ${c.updated_at ? `<p><strong>Last Updated:</strong> ${new Date(c.updated_at).toLocaleString()}</p>` : ''}
-                    </div>
+                <div style="font-size:12px;color:var(--gray-400);margin-top:8px;">
+                    <span>Created by <strong>${creatorName}</strong> on ${new Date(c.created_at).toLocaleDateString()}</span>
+                    ${c.updated_at ? ` &middot; Updated ${new Date(c.updated_at).toLocaleString()}` : ''}
                 </div>
             </div>
         `;
+
+        const footerButtons = [
+            { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Copy Link', type: 'secondary', action: `app.copyCaseLink(${c.id})` },
+            ...(isOwner || isAdmin ? [
+                { label: c.is_public ? 'Make Private' : 'Share Publicly', type: 'secondary', action: `(async () => { await app.toggleCasePublic(${c.id}); })()` },
+                { label: 'Edit', type: 'secondary', action: `UI.hideModal(); app.openCaseStudyModal(${c.id})` },
+                { label: 'Delete', type: 'danger', action: `(async () => { await app.deleteCaseStudy(${c.id}); UI.hideModal(); })()` }
+            ] : [])
+        ];
+
+        UI.showModal(c.title, contentHtml, footerButtons);
     };
 
     const toggleCasePublic = async (id) => {
@@ -6992,20 +7125,30 @@ function _wireLoginBtn() {
     };
 
     const deleteCaseStudy = async (id) => {
-        if (confirm("Are you sure you want to delete this case study? This action cannot be undone.")) {
+        if (confirm("Are you sure you want to delete this case? This action cannot be undone.")) {
             await AppDataStore.delete('case_studies', id);
-            UI.toast.success("Case study deleted.");
-            if (_currentView === 'cases') {
-                await renderCasesList();
-            } else {
-                await app. navigateTo('cases');
-            }
+            UI.toast.success("Case deleted.");
+            await renderCasesList();
+        }
+    };
+
+    const addTagToCase = (caseId) => {
+        openAddTagModal(caseId, 'case_study');
+    };
+
+    const removeTagFromCase = async (caseId, tagId) => {
+        const mappings = await AppDataStore.query('entity_tags', { entity_type: 'case_study', entity_id: caseId, tag_id: tagId });
+        if (mappings?.length) {
+            await AppDataStore.delete('entity_tags', mappings[0].id);
+            UI.toast.success('Tag removed');
+            await showCaseStudyDetail(caseId);
         }
     };
 
     const openCaseStudyModal = async (id = null) => {
         const c = id ? await AppDataStore.getById('case_studies', id) : null;
-        const title = id ? 'Edit Case Study' : 'New Case Study';
+        const title = id ? 'Edit Case' : 'New Case';
+        const caseType = c ? (c.case_type || 'cps') : _caseActiveTab;
 
         let entityName = '';
         if (c) {
@@ -7020,6 +7163,7 @@ function _wireLoginBtn() {
 
         const modalHtml = `
             <div class="case-study-form">
+                <input type="hidden" id="case-type" value="${caseType}">
                 <div class="modal-tabs">
                     <button class="tab-btn active" onclick="app.switchModalTab(event, 'basic')">Basic Info</button>
                     <button class="tab-btn" onclick="app.switchModalTab(event, 'cps')">CPS Invitation</button>
@@ -7031,12 +7175,12 @@ function _wireLoginBtn() {
                         <label>Title <span class="required">*</span></label>
                         <input type="text" id="case-title" class="form-control" value="${c ? c.title : ''}" placeholder="e.g. How I closed PR4 with career focus">
                     </div>
-                    
+
                     <div class="form-row">
                         <div class="form-group half">
                             <label>Link Prospect/Customer</label>
                             <div class="search-select-container">
-                                <input type="text" id="case-entity-search" class="form-control" placeholder="Type name..." value="${entityName}" onkeyup="app. async searchCaseEntities(this.value)">
+                                <input type="text" id="case-entity-search" class="form-control" placeholder="Type name..." value="${entityName}" onkeyup="app.searchCaseEntities(this.value)">
                                 <div id="case-entity-results" class="search-results-dropdown"></div>
                                 <input type="hidden" id="case-prospect-id" value="${c ? (c.prospect_id || '') : ''}">
                                 <input type="hidden" id="case-customer-id" value="${c ? (c.customer_id || '') : ''}">
@@ -7064,7 +7208,7 @@ function _wireLoginBtn() {
 
                     <div class="form-group">
                         <label class="checkbox-label">
-                            <input type="checkbox" id="case-is-public" ${c && c.is_public ? 'checked' : ''}> Make this case study public to other agents
+                            <input type="checkbox" id="case-is-public" ${c && c.is_public ? 'checked' : ''}> Make this case public to other agents
                         </label>
                     </div>
                 </div>
@@ -7073,34 +7217,42 @@ function _wireLoginBtn() {
                     <div class="form-group">
                         <label>CPS Invitation Details</label>
                         <p class="help-text">Who invited? Call/Event/Referral? Special circumstances?</p>
-                        <textarea id="case-cps-details" class="form-control" rows="8">${c ? c.cps_invitation_details : ''}</textarea>
+                        <textarea id="case-cps-details" class="form-control" rows="8">${c ? (c.cps_invitation_details || '') : ''}</textarea>
                     </div>
                 </div>
 
                 <div id="case-tab-closing" class="modal-tab-content">
                     <div class="form-group">
                         <label>Closing Details</label>
-                        <textarea id="case-closing-details" class="form-control" rows="3" placeholder="Key discussions, objections overcome...">${c ? c.closing_details : ''}</textarea>
+                        <textarea id="case-closing-details" class="form-control" rows="3" placeholder="Key discussions, objections overcome...">${c ? (c.closing_details || '') : ''}</textarea>
                     </div>
                     <div class="form-group">
                         <label>The Sales Idea</label>
-                        <textarea id="case-sales-idea" class="form-control" rows="3" placeholder="The core logic that worked...">${c ? c.sales_idea : ''}</textarea>
+                        <textarea id="case-sales-idea" class="form-control" rows="3" placeholder="The core logic that worked...">${c ? (c.sales_idea || '') : ''}</textarea>
                     </div>
                     <div class="form-group">
                         <label>Plan Details</label>
-                        <textarea id="case-plan-details" class="form-control" rows="3" placeholder="Follow-up sequence, bundling...">${c ? c.plan_details : ''}</textarea>
+                        <textarea id="case-plan-details" class="form-control" rows="3" placeholder="Follow-up sequence, bundling...">${c ? (c.plan_details || '') : ''}</textarea>
                     </div>
                     <div class="form-group">
                         <label>Overall Success Story</label>
-                        <textarea id="case-success-story" class="form-control" rows="4" placeholder="Testimonial, lessons learned...">${c ? c.success_story : ''}</textarea>
+                        <textarea id="case-success-story" class="form-control" rows="3" placeholder="Testimonial, lessons learned...">${c ? (c.success_story || '') : ''}</textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Key Success Factor</label>
+                        <textarea id="case-key-success-factor" class="form-control" rows="3" placeholder="The single most important factor that made this case succeed...">${c ? (c.key_success_factor || '') : ''}</textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Sales Script</label>
+                        <textarea id="case-script" class="form-control" rows="4" placeholder="The exact words, pitch, or script that worked...">${c ? (c.script || '') : ''}</textarea>
                     </div>
                 </div>
             </div>
         `;
 
-        UI.modal.show(title, modalHtml, [
-            { text: 'Cancel', class: 'secondary', onclick: 'UI.modal.hide()' },
-            { text: id ? 'Update Case' : 'Save Case Study', class: 'primary', onclick: `await app. saveCaseStudy(${id || 'null'})` }
+        UI.showModal(title, modalHtml, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: id ? 'Update Case' : 'Save Case', type: 'primary', action: `(async () => { await app.saveCaseStudy(${id || 'null'}); })()` }
         ]);
     };
 
@@ -7158,6 +7310,7 @@ function _wireLoginBtn() {
 
         const data = {
             title,
+            case_type: document.getElementById('case-type')?.value || _caseActiveTab,
             prospect_id: document.getElementById('case-prospect-id').value || null,
             customer_id: document.getElementById('case-customer-id').value || null,
             product: document.getElementById('case-product').value,
@@ -7169,26 +7322,24 @@ function _wireLoginBtn() {
             sales_idea: document.getElementById('case-sales-idea').value,
             plan_details: document.getElementById('case-plan-details').value,
             success_story: document.getElementById('case-success-story').value,
+            key_success_factor: document.getElementById('case-key-success-factor').value,
+            script: document.getElementById('case-script').value,
             updated_at: new Date().toISOString()
         };
 
         if (id) {
             await AppDataStore.update('case_studies', id, data);
-            UI.toast.success("Case study updated.");
+            UI.toast.success("Case updated.");
         } else {
             data.created_by = _currentUser?.id || 1;
             data.created_at = new Date().toISOString();
             const newCase = await AppDataStore.create('case_studies', data);
-            UI.toast.success("Case study created.");
+            UI.toast.success("Case created.");
             id = newCase.id;
         }
 
-        UI.modal.hide();
-        if (_currentView === 'cases') {
-            await renderCasesList();
-        } else {
-            await showCaseStudyDetail(id);
-        }
+        UI.hideModal();
+        await renderCasesList();
     };
 
     // ========== PHASE 1: FULL CALENDAR IMPLEMENTATION ==========
@@ -19591,6 +19742,7 @@ const initImportDemoData = async () => {
 
         // Phase 18: Cases Module Functions
         showCasesView,
+        switchCaseTab,
         handleCaseSearch,
         handleCaseFilterChange,
         renderCasesList,
@@ -19598,6 +19750,8 @@ const initImportDemoData = async () => {
         toggleCasePublic,
         copyCaseLink,
         deleteCaseStudy,
+        addTagToCase,
+        removeTagFromCase,
         openCaseStudyModal,
         switchModalTab,
         searchCaseEntities,
