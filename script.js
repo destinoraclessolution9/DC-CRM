@@ -470,16 +470,16 @@ const appLogic = (() => {
                 <div class="search-presets">
                     <h3>Quick Presets</h3>
                     <div class="preset-buttons">
-                        <button class="preset-btn" onclick="app. loadPreset('agent-monthly')">Agent Monthly Report</button>
-                        <button class="preset-btn" onclick="app. loadPreset('high-score')">High Score Prospects</button>
-                        <button class="preset-btn" onclick="app. loadPreset('recent-activities')">Recent Activities</button>
-                        <button class="preset-btn" onclick="app. loadPreset('cai-ku-not-purchased')">CAI KU Painting Not Purchased</button>
+                        <button class="preset-btn" onclick="app.loadPreset('agent-monthly')">Agent Monthly Report</button>
+                        <button class="preset-btn" onclick="app.loadPreset('high-score')">High Score Prospects</button>
+                        <button class="preset-btn" onclick="app.loadPreset('recent-activities')">Recent Activities</button>
+                        <button class="preset-btn" onclick="app.loadPreset('cai-ku-not-purchased')">CAI KU Painting Not Purchased</button>
                     </div>
                 </div>
                 
                 <div class="search-entity-selector">
                     <label>Search in:</label>
-                    <select id="search-entity" onchange="app. updateFilterSections()">
+                    <select id="search-entity" onchange="app.updateFilterSections()">
                         <option value="agents">Agents</option>
                         <option value="prospects" selected>Prospects</option>
                         <option value="customers">Customers</option>
@@ -1323,9 +1323,9 @@ const appLogic = (() => {
 
         container.innerHTML = `
             <div class="pagination-controls">
-                <button ${_currentPage === 1 ? 'disabled' : ''} onclick="app. goToPage(${_currentPage - 1})">Prev</button>
+                <button ${_currentPage === 1 ? 'disabled' : ''} onclick="app.goToPage(${_currentPage - 1})">Prev</button>
                 <span>Page ${_currentPage} of ${totalPages}</span>
-                <button ${_currentPage === totalPages ? 'disabled' : ''} onclick="app. goToPage(${_currentPage + 1})">Next</button>
+                <button ${_currentPage === totalPages ? 'disabled' : ''} onclick="app.goToPage(${_currentPage + 1})">Next</button>
             </div>
         `;
     };
@@ -1348,12 +1348,12 @@ const appLogic = (() => {
 
         container.innerHTML = searches.map(s => `
             <div class="saved-search-item">
-                <div class="saved-search-info" onclick="app. loadSavedSearch(${s.id})">
+                <div class="saved-search-info" onclick="app.loadSavedSearch(${s.id})">
                     <i class="fas fa-bookmark"></i>
                     <span>${s.search_name}</span>
                     <small>${s.entity}</small>
                 </div>
-                <button class="btn-icon" onclick="app. deleteSavedSearch(${s.id})">
+                <button class="btn-icon" onclick="app.deleteSavedSearch(${s.id})">
                     <i class="fas fa-trash"></i>
                 </button>
             </div>
@@ -1531,7 +1531,7 @@ const appLogic = (() => {
                                         <button class="btn-icon ${_viewMode === 'list' ? 'active' : ''}" onclick="(async () => { await app.setViewMode('list'); })()">
                                             <i class="fas fa-list"></i>
                                         </button>
-                                        <button class="btn-icon ${_viewMode === 'grid' ? 'active' : ''}" onclick="app. setViewMode('grid')">
+                                        <button class="btn-icon ${_viewMode === 'grid' ? 'active' : ''}" onclick="app.setViewMode('grid')">
                                             <i class="fas fa-th-large"></i>
                                         </button>
                                     </div>
@@ -1573,16 +1573,16 @@ const appLogic = (() => {
             div.style.paddingLeft = `${level * 20 + 10}px`;
 
             div.innerHTML = `
-                <div class="folder-content" onclick="app. navigateToFolder(${folder.id})" 
+                <div class="folder-content" onclick="app.navigateToFolder(${folder.id})" 
                      ondragover="event.preventDefault(); this.parentElement.classList.add('drag-over')"
                      ondragleave="this.parentElement.classList.remove('drag-over')"
-                     ondrop="app. handleDropOnFolder(event, ${folder.id})">
+                     ondrop="app.handleDropOnFolder(event, ${folder.id})">
                     <i class="fas fa-folder" style="color: ${folder.color || '#f59e0b'}"></i>
                     <span class="folder-name">${folder.name}</span>
                 </div>
                 <div class="folder-actions">
-                    <button class="btn-icon" onclick="app. renameFolder(${folder.id}); event.stopPropagation()"><i class="fas fa-edit"></i></button>
-                    <button class="btn-icon" onclick="app. deleteFolder(${folder.id}); event.stopPropagation()"><i class="fas fa-trash"></i></button>
+                    <button class="btn-icon" onclick="app.renameFolder(${folder.id}); event.stopPropagation()"><i class="fas fa-edit"></i></button>
+                    <button class="btn-icon" onclick="app.deleteFolder(${folder.id}); event.stopPropagation()"><i class="fas fa-trash"></i></button>
                 </div>
             `;
             treeContainer.appendChild(div);
@@ -1597,8 +1597,8 @@ const appLogic = (() => {
         let curr = _currentFolder ? await AppDataStore.getById('folders', _currentFolder) : null;
         while (curr) { path.unshift(curr); curr = curr.parent_id ? await AppDataStore.getById('folders', curr.parent_id) : null; }
 
-        let html = '<span class="breadcrumb-item" onclick="app. navigateToFolder(null)">Root</span>';
-        for (const f of path) { html += `<span class="breadcrumb-separator">/</span><span class="breadcrumb-item" onclick="app. navigateToFolder(${f.id})">${f.name}</span>`; }
+        let html = '<span class="breadcrumb-item" onclick="app.navigateToFolder(null)">Root</span>';
+        for (const f of path) { html += `<span class="breadcrumb-separator">/</span><span class="breadcrumb-item" onclick="app.navigateToFolder(${f.id})">${f.name}</span>`; }
         container.innerHTML = html;
     };
 
@@ -1680,13 +1680,13 @@ const appLogic = (() => {
                                 <td>${v.change_note || '-'}</td>
                                 <td>
                                     <button class="btn-icon" onclick="app.downloadVersion(${v.id})"><i class="fas fa-download"></i></button>
-                                    <button class="btn-icon" onclick="app. restoreVersion(${v.id})"><i class="fas fa-undo"></i></button>
+                                    <button class="btn-icon" onclick="app.restoreVersion(${v.id})"><i class="fas fa-undo"></i></button>
                                 </td>
                             </tr>
                         `))).join('')}
                     </tbody>
                 </table>
-                ${versions.length >= 2 ? `<div class="compare-row"><button class="btn secondary" onclick="app. showCompareTool(${fileId})">Compare Versions</button></div>` : ''}
+                ${versions.length >= 2 ? `<div class="compare-row"><button class="btn secondary" onclick="app.showCompareTool(${fileId})">Compare Versions</button></div>` : ''}
             </div>
         `;
         UI.showModal('Version History', content, [{ label: 'Close', type: 'primary', action: 'UI.hideModal()' }]);
@@ -1700,7 +1700,7 @@ const appLogic = (() => {
                 <span>vs</span>
                 <select id="v2" class="form-control">${versions.map(v => `<option value="${v.id}">Version ${v.version_number}</option>`).join('')}</select>
             </div>
-        `, [{ label: 'Compare', type: 'primary', action: `app. compareVersions(${fileId})` }]);
+        `, [{ label: 'Compare', type: 'primary', action: `app.compareVersions(${fileId})` }]);
     };
 
     const compareVersions = async (fileId) => {
@@ -1722,7 +1722,7 @@ const appLogic = (() => {
         const shares = (await AppDataStore.getAll('document_shares')).filter(s => s.document_id === fileId);
         const shareItems = await Promise.all(shares.map(async s => {
             const user = await AppDataStore.getById('users', s.shared_with);
-            return `<div class="share-item">${user?.full_name || 'Unknown'} (${s.permission}) <button onclick="app. removeShare(${s.id})">x</button></div>`;
+            return `<div class="share-item">${user?.full_name || 'Unknown'} (${s.permission}) <button onclick="app.removeShare(${s.id})">x</button></div>`;
         }));
 
         const content = `
@@ -1730,7 +1730,7 @@ const appLogic = (() => {
                 <h3>Share: ${file.filename}</h3>
                 <div class="share-form">
                     <select id="share-user" class="form-control"><option value="">Select User...</option>${users.map(u => `<option value="${u.id}">${u.full_name}</option>`).join('')}</select>
-                    <button class="btn primary" onclick="app. createShare(${fileId})">Add Share</button>
+                    <button class="btn primary" onclick="app.createShare(${fileId})">Add Share</button>
                 </div>
                 <div class="share-list">
                     ${shareItems.join('')}
@@ -1844,7 +1844,7 @@ const appLogic = (() => {
                     <i class="fas fa-folder-open fa-5x"></i>
                     <h3>This folder is empty</h3>
                     <p>Upload files or create a new folder to get started</p>
-                    <button class="btn primary" onclick="app. openUploadModal()">
+                    <button class="btn primary" onclick="app.openUploadModal()">
                         <i class="fas fa-upload"></i> Upload Files
                     </button>
                 </div>
@@ -1860,13 +1860,13 @@ const appLogic = (() => {
                             <input type="checkbox" onchange="(async () => { await app.selectAllFiles(); })()" 
                                    ${_selectedFiles.length === files.length && files.length > 0 ? 'checked' : ''}>
                         </th>
-                        <th onclick="app. sortFiles('name')" style="cursor: pointer;">
+                        <th onclick="app.sortFiles('name')" style="cursor: pointer;">
                             Name ${_fileSortBy === 'name' ? (_fileSortDirection === 'asc' ? '↑' : '↓') : ''}
                         </th>
-                        <th onclick="app. sortFiles('date')" style="cursor: pointer;">
+                        <th onclick="app.sortFiles('date')" style="cursor: pointer;">
                             Modified ${_fileSortBy === 'date' ? (_fileSortDirection === 'asc' ? '↑' : '↓') : ''}
                         </th>
-                        <th onclick="app. sortFiles('size')" style="cursor: pointer;">
+                        <th onclick="app.sortFiles('size')" style="cursor: pointer;">
                             Size ${_fileSortBy === 'size' ? (_fileSortDirection === 'asc' ? '↑' : '↓') : ''}
                         </th>
                         <th>Actions</th>
@@ -1880,10 +1880,10 @@ const appLogic = (() => {
                             ondragstart="app.handleFileDragStart(event, ${file.id})"
                             ondragend="app.handleFileDragEnd(event)">
                             <td onclick="event.stopPropagation()">
-                                <input type="checkbox" onchange="app. toggleFileSelection(${file.id})" 
+                                <input type="checkbox" onchange="app.toggleFileSelection(${file.id})" 
                                        ${_selectedFiles.includes(file.id) ? 'checked' : ''}>
                             </td>
-                            <td ondblclick="app. previewFile(${file.id})">
+                            <td ondblclick="app.previewFile(${file.id})">
                                 <i class="fas ${getFileIcon(file.filename)} file-icon"></i>
                                 <span class="file-name">${file.filename}</span>
                                 ${file.is_starred ? '<i class="fas fa-star starred"></i>' : ''}
@@ -1892,22 +1892,22 @@ const appLogic = (() => {
                             <td>${(file.size > 1048576 ? (file.size / 1048576).toFixed(1) + " MB" : (file.size / 1024).toFixed(0) + " KB")}</td>
                             <td>
                                 <div class="action-buttons" style="display: flex; gap: 4px;">
-                                    <button class="btn-icon" onclick="app. previewFile(${file.id}); event.stopPropagation();" title="Preview">
+                                    <button class="btn-icon" onclick="app.previewFile(${file.id}); event.stopPropagation();" title="Preview">
                                         <i class="fas fa-eye"></i>
                                     </button>
                                     <button class="btn-icon" onclick="app.downloadFile(${file.id}); event.stopPropagation();" title="Download">
                                         <i class="fas fa-download"></i>
                                     </button>
-                                    <button class="btn-icon" onclick="app. showVersionHistory(${file.id}); event.stopPropagation();" title="Versions">
+                                    <button class="btn-icon" onclick="app.showVersionHistory(${file.id}); event.stopPropagation();" title="Versions">
                                         <i class="fas fa-history"></i>
                                     </button>
-                                    <button class="btn-icon" onclick="app. openShareModal(${file.id}); event.stopPropagation();" title="Share">
+                                    <button class="btn-icon" onclick="app.openShareModal(${file.id}); event.stopPropagation();" title="Share">
                                         <i class="fas fa-share-alt"></i>
                                     </button>
-                                    <button class="btn-icon" onclick="app. showFileMetadata(${file.id}); event.stopPropagation();" title="Info">
+                                    <button class="btn-icon" onclick="app.showFileMetadata(${file.id}); event.stopPropagation();" title="Info">
                                         <i class="fas fa-info-circle"></i>
                                     </button>
-                                    <button class="btn-icon" onclick="app. toggleStar(${file.id}); event.stopPropagation();" title="Star">
+                                    <button class="btn-icon" onclick="app.toggleStar(${file.id}); event.stopPropagation();" title="Star">
                                         <i class="fas fa-star${file.is_starred ? '' : '-o'}"></i>
                                     </button>
                                     <button class="btn-icon" onclick="app.deleteFile(${file.id}); event.stopPropagation();" title="Delete">
@@ -1951,14 +1951,14 @@ const appLogic = (() => {
                      ondragstart="app.handleFileDragStart(event, ${file.id})"
                      ondragend="app.handleFileDragEnd(event)">
                     <div class="file-card-header">
-                        <input type="checkbox" onchange="app. toggleFileSelection(${file.id})" 
+                        <input type="checkbox" onchange="app.toggleFileSelection(${file.id})" 
                                ${_selectedFiles.includes(file.id) ? 'checked' : ''} 
                                onclick="event.stopPropagation()">
-                        <button class="btn-icon" onclick="app. toggleStar(${file.id}); event.stopPropagation();" title="Star">
+                        <button class="btn-icon" onclick="app.toggleStar(${file.id}); event.stopPropagation();" title="Star">
                             <i class="fas fa-star${file.is_starred ? '' : '-o'}"></i>
                         </button>
                     </div>
-                    <div class="file-card-icon" ondblclick="app. previewFile(${file.id})">
+                    <div class="file-card-icon" ondblclick="app.previewFile(${file.id})">
                         <i class="fas ${getFileIcon(file.filename)} fa-4x"></i>
                     </div>
                     <div class="file-card-name" title="${file.filename}">${truncateFilename(file.filename, 20)}</div>
@@ -1967,16 +1967,16 @@ const appLogic = (() => {
                         <span>${new Date(file.updated_at || file.created_at).toLocaleDateString()}</span>
                     </div>
                     <div class="file-card-actions">
-                        <button class="btn-icon" onclick="app. previewFile(${file.id}); event.stopPropagation();" title="Preview">
+                        <button class="btn-icon" onclick="app.previewFile(${file.id}); event.stopPropagation();" title="Preview">
                             <i class="fas fa-eye"></i>
                         </button>
                         <button class="btn-icon" onclick="app.downloadFile(${file.id}); event.stopPropagation();" title="Download">
                             <i class="fas fa-download"></i>
                         </button>
-                        <button class="btn-icon" onclick="app. showVersionHistory(${file.id}); event.stopPropagation();" title="Versions">
+                        <button class="btn-icon" onclick="app.showVersionHistory(${file.id}); event.stopPropagation();" title="Versions">
                             <i class="fas fa-history"></i>
                         </button>
-                        <button class="btn-icon" onclick="app. openShareModal(${file.id}); event.stopPropagation();" title="Share">
+                        <button class="btn-icon" onclick="app.openShareModal(${file.id}); event.stopPropagation();" title="Share">
                             <i class="fas fa-share-alt"></i>
                         </button>
                     </div>
@@ -2019,10 +2019,10 @@ const appLogic = (() => {
                 <button class="btn-icon" onclick="app.moveSelected()" title="Move Selected">
                     <i class="fas fa-cut"></i>
                 </button>
-                <button class="btn-icon" onclick="app. deleteSelected()" title="Delete Selected">
+                <button class="btn-icon" onclick="app.deleteSelected()" title="Delete Selected">
                     <i class="fas fa-trash"></i>
                 </button>
-                <button class="btn-icon" onclick="app. deselectAll()" title="Clear Selection">
+                <button class="btn-icon" onclick="app.deselectAll()" title="Clear Selection">
                     <i class="fas fa-times"></i>
                 </button>
             </div>
@@ -2444,7 +2444,7 @@ In a production system, this would show the actual file contents.
                 </div>
 
                 <div class="recorder-controls">
-                    <button class="btn primary btn-large" id="voice-record-btn" onclick="app. startRecording()">
+                    <button class="btn primary btn-large" id="voice-record-btn" onclick="app.startRecording()">
                         <i class="fas fa-circle" style="color:#ef4444;"></i> RECORD
                     </button>
                     <button class="btn error btn-large" id="voice-stop-btn" style="display:none;" onclick="app.stopRecording()">
@@ -2463,7 +2463,7 @@ In a production system, this would show the actual file contents.
                 </div>
 
                 <div class="recorder-actions" id="voice-recorder-actions" style="display:none;">
-                    <button class="btn primary" onclick="app. saveTranscription()">
+                    <button class="btn primary" onclick="app.saveTranscription()">
                         <i class="fas fa-save"></i> Save Text
                     </button>
                     <button class="btn secondary" onclick="app.editTranscription()">
@@ -2729,15 +2729,15 @@ In a production system, this would show the actual file contents.
         bottomNav.className = 'mobile-bottom-nav';
         bottomNav.id = 'mobile-bottom-nav';
         bottomNav.innerHTML = `
-            <div class="mobile-nav-item" onclick="app. navigateTo('calendar')">
+            <div class="mobile-nav-item" onclick="app.navigateTo('calendar')">
                 <i class="fas fa-calendar-alt"></i>
                 <span>Calendar</span>
             </div>
-            <div class="mobile-nav-item" onclick="app. navigateTo('prospects')">
+            <div class="mobile-nav-item" onclick="app.navigateTo('prospects')">
                 <i class="fas fa-users"></i>
                 <span>Prospects</span>
             </div>
-            <div class="mobile-nav-item" onclick="app. navigateTo('pipeline')">
+            <div class="mobile-nav-item" onclick="app.navigateTo('pipeline')">
                 <i class="fas fa-chart-line"></i>
                 <span>Pipeline</span>
             </div>
@@ -2762,7 +2762,7 @@ In a production system, this would show the actual file contents.
         const content = `
             <div class="mobile-menu">
                 ${menuItems.map(item => `
-                    <div class="mobile-menu-item" onclick="app. navigateTo('${item.view}'); UI.hideModal()">
+                    <div class="mobile-menu-item" onclick="app.navigateTo('${item.view}'); UI.hideModal()">
                         <i class="${item.icon}"></i>
                         <span>${item.label}</span>
                     </div>
@@ -3279,7 +3279,7 @@ In a production system, this would show the actual file contents.
         viewport.innerHTML = `
             <div class="integration-detail">
                 <div class="detail-header">
-                    <button class="btn secondary" onclick="app. showIntegrationHub(document.getElementById('content-viewport'))">
+                    <button class="btn secondary" onclick="app.showIntegrationHub(document.getElementById('content-viewport'))">
                         <i class="fas fa-arrow-left"></i> Back to Integrations
                     </button>
                     <h1>Google Calendar Integration</h1>
@@ -3365,7 +3365,7 @@ In a production system, this would show the actual file contents.
                             <button class="btn primary" onclick="(async () => { await app.saveGoogleSettings(); })()">Save Settings</button>
                             <button class="btn secondary" onclick="(async () => { await app.syncGoogleCalendar(); })()">Sync Now</button>
                             <button class="btn secondary" onclick="(async () => { await app.viewSyncHistory(); })()">View Sync History</button>
-                            <button class="btn error" onclick="app. disconnectGoogle()">Disconnect</button>
+                            <button class="btn error" onclick="app.disconnectGoogle()">Disconnect</button>
                         </div>
                     </div>
                 ` : ''}
@@ -3516,7 +3516,7 @@ In a production system, this would show the actual file contents.
                         <option value="30">Last 30 days</option>
                         <option value="90">Last 90 days</option>
                     </select>
-                    <button class="btn secondary" onclick="app. refreshSyncHistory()">Apply</button>
+                    <button class="btn secondary" onclick="app.refreshSyncHistory()">Apply</button>
                 </div>
                 
                 <table class="history-table" style="width:100%;border-collapse:collapse;margin-bottom:16px;">
@@ -3567,7 +3567,7 @@ In a production system, this would show the actual file contents.
                 
                 <div class="history-actions" style="display:flex;gap:12px;justify-content:flex-end;">
                     <button class="btn secondary" onclick="app.exportSyncHistory()">Export Log</button>
-                    <button class="btn secondary" onclick="app. clearSyncHistory()">Clear History</button>
+                    <button class="btn secondary" onclick="app.clearSyncHistory()">Clear History</button>
                 </div>
             </div>
         `;
@@ -3695,7 +3695,7 @@ In a production system, this would show the actual file contents.
         const content = `
             <div class="whatsapp-integration">
                 <div class="detail-header" style="margin-bottom: 24px; display: flex; align-items: center; gap: 16px;">
-                    <button class="btn secondary" onclick="app. showIntegrationHub(document.getElementById('content-viewport'))">
+                    <button class="btn secondary" onclick="app.showIntegrationHub(document.getElementById('content-viewport'))">
                         <i class="fas fa-arrow-left"></i> Back to Integrations
                     </button>
                     <h1 style="margin: 0; font-size: 24px;">WhatsApp Business Integration</h1>
@@ -3736,7 +3736,7 @@ In a production system, this would show the actual file contents.
                         <label>Access Token</label>
                         <div class="token-input">
                             <input type="password" id="access-token" class="form-control" value="${connection?.access_token ? '••••••••' : ''}" placeholder="Enter access token">
-                            <button class="btn secondary" onclick="app. testWhatsAppConnection()">Test Connection</button>
+                            <button class="btn secondary" onclick="app.testWhatsAppConnection()">Test Connection</button>
                         </div>
                     </div>
                     
@@ -3754,7 +3754,7 @@ In a production system, this would show the actual file contents.
                         <label>Verification Token</label>
                         <div class="token-input">
                             <input type="password" id="verify-token" class="form-control" value="${connection?.verify_token || ''}" placeholder="Enter verification token">
-                            <button class="btn secondary" onclick="app. verifyWebhook()">Verify</button>
+                            <button class="btn secondary" onclick="app.verifyWebhook()">Verify</button>
                         </div>
                     </div>
                     
@@ -3765,10 +3765,10 @@ In a production system, this would show the actual file contents.
                 </div>
                 
                 <div class="form-actions">
-                    <button class="btn primary" onclick="app. saveWhatsAppConnection()">Save Connection</button>
+                    <button class="btn primary" onclick="app.saveWhatsAppConnection()">Save Connection</button>
                     ${isConnected ? `
-                        <button class="btn secondary" onclick="app. testWhatsAppConnection()">Test Connection</button>
-                        <button class="btn error" onclick="app. disconnectWhatsApp()">Disconnect</button>
+                        <button class="btn secondary" onclick="app.testWhatsAppConnection()">Test Connection</button>
+                        <button class="btn error" onclick="app.disconnectWhatsApp()">Disconnect</button>
                     ` : ''}
                 </div>
             </div>
@@ -3913,7 +3913,7 @@ In a production system, this would show the actual file contents.
                 <div id="template-section">
                     <div class="form-group">
                         <label>Template</label>
-                        <select id="template-select" class="form-control" onchange="app. previewTemplate()">
+                        <select id="template-select" class="form-control" onchange="app.previewTemplate()">
                             <option value="">Select a template</option>
                             ${templates.map(t => `<option value="${t.id}">${t.template_name}</option>`).join('')}
                         </select>
@@ -3935,7 +3935,7 @@ In a production system, this would show the actual file contents.
         `;
         UI.showModal('Send WhatsApp Message', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Send', type: 'primary', action: `app. sendWhatsApp('${entityType}', ${entityId})` }
+            { label: 'Send', type: 'primary', action: `app.sendWhatsApp('${entityType}', ${entityId})` }
         ]);
         window._currentWhatsAppEntity = { type: entityType, id: entityId, phone: entity.phone };
     };
@@ -3968,8 +3968,8 @@ In a production system, this would show the actual file contents.
                 });
                 UI.hideModal();
                 UI.toast.success('Message sent successfully');
-                if (entityType === 'prospect') await app. showProspectDetail(entityId);
-                else await app. showCustomerDetail(entityId);
+                if (entityType === 'prospect') await app.showProspectDetail(entityId);
+                else await app.showCustomerDetail(entityId);
             }, 800);
         } else {
             const message = document.getElementById('free-message')?.value;
@@ -3987,8 +3987,8 @@ In a production system, this would show the actual file contents.
                 });
                 UI.hideModal();
                 UI.toast.success('Message sent successfully');
-                if (entityType === 'prospect') await app. showProspectDetail(entityId);
-                else await app. showCustomerDetail(entityId);
+                if (entityType === 'prospect') await app.showProspectDetail(entityId);
+                else await app.showCustomerDetail(entityId);
             }, 800);
         }
     };
@@ -4024,7 +4024,7 @@ In a production system, this would show the actual file contents.
                                 ${msg.status === 'sent' ? '✓ Sent' : msg.status === 'delivered' ? '✓✓ Delivered' : msg.status === 'read' ? '👁️ Read' : '❌ Failed'}
                             </span>
                             <div class="message-actions">
-                                <button class="btn-icon" onclick="app. viewMessageDetails('${msg.id}')"><i class="fas fa-eye"></i></button>
+                                <button class="btn-icon" onclick="app.viewMessageDetails('${msg.id}')"><i class="fas fa-eye"></i></button>
                                 <button class="btn-icon" onclick="app.todo('Resend Message')"><i class="fas fa-redo"></i></button>
                             </div>
                         </div>
@@ -4208,25 +4208,25 @@ In a production system, this would show the actual file contents.
                 </div>
                 
                 <div class="insights-grid">
-                    <div class="insight-card" onclick="app. showLeadScoring()">
+                    <div class="insight-card" onclick="app.showLeadScoring()">
                         <i class="fas fa-chart-line"></i>
                         <h4>Lead Scoring</h4>
                         <p>156 leads> 80 score</p>
                         <span class="trend up">+34 this week</span>
                     </div>
-                    <div class="insight-card" onclick="app. showSalesForecast()">
+                    <div class="insight-card" onclick="app.showSalesForecast()">
                         <i class="fas fa-dollar-sign"></i>
                         <h4>Sales Forecast</h4>
                         <p>$2.4M next 30 days</p>
                         <span class="trend down">-12% vs last month</span>
                     </div>
-                    <div class="insight-card" onclick="app. showChurnRiskAnalysis()">
+                    <div class="insight-card" onclick="app.showChurnRiskAnalysis()">
                         <i class="fas fa-exclamation-triangle"></i>
                         <h4>Churn Risk</h4>
                         <p>23 customers at risk</p>
                         <span class="trend up warning">+15% increase</span>
                     </div>
-                    <div class="insight-card" onclick="app. showPerformanceInsights()">
+                    <div class="insight-card" onclick="app.showPerformanceInsights()">
                         <i class="fas fa-users"></i>
                         <h4>Team Insights</h4>
                         <p>8 recommendations</p>
@@ -4462,7 +4462,7 @@ In a production system, this would show the actual file contents.
                     <h3>AI Lead Scoring</h3>
                     <div>
                         <span class="model-badge">Model v${model?.model_version || '1.0'} • Accuracy: ${model?.accuracy || 87.5}%</span>
-                        <button class="btn secondary" onclick="app. retrainAIModels()">
+                        <button class="btn secondary" onclick="app.retrainAIModels()">
                             <i class="fas fa-sync-alt"></i> Retrain
                         </button>
                     </div>
@@ -5357,7 +5357,7 @@ In a production system, this would show the actual file contents.
             </div>
         `, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Start Training', type: 'primary', action: 'app. startModelTraining()' }
+            { label: 'Start Training', type: 'primary', action: 'app.startModelTraining()' }
         ]);
     };
 
@@ -5499,7 +5499,7 @@ const Auth = {
 
     async function login() {
         // Login is now handled by the #loginBtn Supabase click handler
-        console.warn('app. login() called – use the loginBtn form instead');
+        console.warn('app.login() called – use the loginBtn form instead');
     }
 
     async function logout() {
@@ -5735,7 +5735,7 @@ function _wireLoginBtn() {
         }
 
         UI.hideModal();
-        await app. showProspectDetail(prospectId); // Refresh detail view
+        await app.showProspectDetail(prospectId); // Refresh detail view
     };
 
     const deleteName = async (prospectId, nameId) => {
@@ -5749,7 +5749,7 @@ function _wireLoginBtn() {
         await AppDataStore.delete('names', nameId);
         UI.hideModal();
         UI.toast.success('Name deleted');
-        await app. showProspectDetail(prospectId);
+        await app.showProspectDetail(prospectId);
     };
 
 
@@ -5911,10 +5911,10 @@ function _wireLoginBtn() {
                     <div class="ref-v2-actions">
                         <div class="search-box-v2">
                             <i class="fas fa-search"></i>
-                            <input type="text" id="tree-search-input" placeholder="Search person to view tree..." autocomplete="off" onkeyup="app. debounce(await app. searchTreePerson(this.value), 300)">
+                            <input type="text" id="tree-search-input" placeholder="Search person to view tree..." autocomplete="off" onkeyup="app.debounce(await app.searchTreePerson(this.value), 300)">
                             <div id="tree-search-results" class="search-results-v2"></div>
                         </div>
-                        <button class="btn primary" onclick="app. openAddReferralModal()">
+                        <button class="btn primary" onclick="app.openAddReferralModal()">
                             <i class="fas fa-plus"></i> Add Referral
                         </button>
                         <button class="btn secondary" onclick="app.refreshCurrentView()">
@@ -6055,7 +6055,7 @@ function _wireLoginBtn() {
                 // Show their own tree if they have any downline, else show placeholder
                 const rootPerson = await AppDataStore.getById('customers', user.id) || await AppDataStore.getById('prospects', user.id);
                 if (rootPerson) {
-                    await app. showReferralTree(rootPerson.id, rootPerson.id in await AppDataStore.getAll('customers') ? 'customer' : 'prospect');
+                    await app.showReferralTree(rootPerson.id, rootPerson.id in await AppDataStore.getAll('customers') ? 'customer' : 'prospect');
                 } else {
                     // Show placeholder – no data
                     const ph = document.getElementById('referral-tree-placeholder');
@@ -6173,14 +6173,14 @@ function _wireLoginBtn() {
             return `
                 <tr class="rank-${idx + 1}">
                     <td class="rank-cell">${idx + 1}</td>
-                    <td class="name-cell" onclick="app. showReferralTree(${item.id}, '${item.type}')">
+                    <td class="name-cell" onclick="app.showReferralTree(${item.id}, '${item.type}')">
                         ${person.full_name} ${item.type === 'customer' ? '<span class="badge" style="background:#dcfce7; color:#166534">C</span>' : ''}
                     </td>
                     <td>${item.count}</td>
                     <td><span style="color:#10b981; font-weight:600">${item.converted}</span></td>
                     <td>${UI.formatDate(item.latest)}</td>
                     <td class="text-right">
-                        <button class="btn-icon" onclick="app. toggleHideReferrer('${item.id}')" title="Hide from leaderboard">
+                        <button class="btn-icon" onclick="app.toggleHideReferrer('${item.id}')" title="Hide from leaderboard">
                             <i class="far fa-eye-slash"></i>
                         </button>
                     </td>
@@ -6196,7 +6196,7 @@ function _wireLoginBtn() {
                         <option>This Year</option>
                         <option>This Month</option>
                     </select>
-                    <button class="btn secondary btn-sm" onclick="app. resetHiddenReferrers()">Reset Hidden</button>
+                    <button class="btn secondary btn-sm" onclick="app.resetHiddenReferrers()">Reset Hidden</button>
                 </div>
                 <div class="text-muted" font-size="12px">Showing top contributors</div>
             </div>
@@ -6267,7 +6267,7 @@ function _wireLoginBtn() {
 
         if (filtered.length > 0) {
             results.innerHTML = filtered.map(p => `
-                <div class="result-item-v2" onclick="app. showReferralTree(${p.id}, '${p.type}')">
+                <div class="result-item-v2" onclick="app.showReferralTree(${p.id}, '${p.type}')">
                     <div style="background: ${p.type === 'customer' ? '#dcfce7' : '#f1f5f9'}; width:32px; height:32px; border-radius:50%; display:flex; align-items:center; justify-content:center;">
                         <i class="fas ${p.type === 'customer' ? 'fa-user-check' : 'fa-user'}" style="color:${p.type === 'customer' ? '#166534' : '#64748b'}; font-size:12px;"></i>
                     </div>
@@ -6459,22 +6459,22 @@ function _wireLoginBtn() {
             .text("\uf075") // fa-comment
             .on("click", async (e, d) => {
                 e.stopPropagation();
-                await app. openMemoModal(d.data.id, d.data.type);
+                await app.openMemoModal(d.data.id, d.data.type);
             });
 
         // Click async Handler (View Profile)
         nodes.on("click", async (e, d) => {
             if (d.data.type === 'customer') {
-                await app. showCustomerDetail(d.data.id);
+                await app.showCustomerDetail(d.data.id);
             } else {
-                await app. showProspectDetail(d.data.id);
+                await app.showProspectDetail(d.data.id);
             }
         });
 
         // Expand/collapse on double-click
         nodes.on("dblclick", async (e, d) => {
             e.stopPropagation();
-            await app. showReferralTree(d.data.id, d.data.type);
+            await app.showReferralTree(d.data.id, d.data.type);
         });
 
         // Center the tree
@@ -6518,7 +6518,7 @@ function _wireLoginBtn() {
                 <div class="ref-form-step">
                     <label>1. Who is the Referrer?</label>
                     <div class="search-field">
-                        <input type="text" id="referrer-search" class="form-control" placeholder="Search customer or prospect..." onkeyup="app. searchReferrersForModal(this.value, 'referrer')">
+                        <input type="text" id="referrer-search" class="form-control" placeholder="Search customer or prospect..." onkeyup="app.searchReferrersForModal(this.value, 'referrer')">
                         <div id="referrer-search-results" class="search-dropdown"></div>
                     </div>
                     <div id="selected-referrer-info" class="selected-entity-display"></div>
@@ -6529,7 +6529,7 @@ function _wireLoginBtn() {
                     <div class="search-field">
                         <div style="display:flex; gap:8px">
                             <input type="text" id="referred-search" class="form-control" placeholder="Search existing prospect..." onkeyup="(async () => { await app.searchReferrersForModal(this.value, 'referred'); })()">
-                            <button class="btn secondary" onclick="app. openCreateProspectForReferral()"><i class="fas fa-user-plus"></i> New</button>
+                            <button class="btn secondary" onclick="app.openCreateProspectForReferral()"><i class="fas fa-user-plus"></i> New</button>
                         </div>
                         <div id="referred-search-results" class="search-dropdown"></div>
                     </div>
@@ -6586,7 +6586,7 @@ function _wireLoginBtn() {
  
         if (filtered.length > 0) {
             resultsDiv.innerHTML = filtered.map(p => `
-                <div class="result-item-v2" onclick="app. selectReferrerForModal(${p.id}, '${p.type}', '${modalType}')">
+                <div class="result-item-v2" onclick="app.selectReferrerForModal(${p.id}, '${p.type}', '${modalType}')">
                     <div style="flex-grow:1">
                         <strong>${p.full_name}</strong>
                         <div style="font-size:10px">${p.type.toUpperCase()}</div>
@@ -6626,7 +6626,7 @@ function _wireLoginBtn() {
     };
  
     const openCreateProspectForReferral = async () => {
-        await app. openProspectModal();
+        await app.openProspectModal();
         // Listener for the custom event we added to saveProspect
         const handler = async (e) => {
             const newProspect = e.detail;
@@ -6840,18 +6840,18 @@ function _wireLoginBtn() {
             if (c.customer_id) {
                 const cust = await AppDataStore.getById('customers', c.customer_id);
                 entityName = cust ? `<i class="fas fa-user-check" title="Customer"></i> ${cust.full_name}` : 'Unknown Customer';
-                entityLink = `await app. showCustomerDetail(${c.customer_id})`;
+                entityLink = `await app.showCustomerDetail(${c.customer_id})`;
             } else if (c.prospect_id) {
                 const pros = await AppDataStore.getById('prospects', c.prospect_id);
                 entityName = pros ? `<i class="fas fa-user" title="Prospect"></i> ${pros.full_name}` : 'Unknown Prospect';
-                entityLink = `await app. showProspectDetail(${c.prospect_id})`;
+                entityLink = `await app.showProspectDetail(${c.prospect_id})`;
             }
 
             const isOwner = c.created_by === currentUser?.id;
             const isAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || currentUser?.role?.includes('Level 3') || currentUser?.role?.includes('Level 7') || currentUser?.role === 'team_leader' || currentUser?.role === 'admin';
 
             return `
-                <tr class="clickable" onclick="app. showCaseStudyDetail(${c.id})">
+                <tr class="clickable" onclick="app.showCaseStudyDetail(${c.id})">
                     <td>
                         <div class="case-title">
                             <strong>${c.title}</strong>
@@ -6864,10 +6864,10 @@ function _wireLoginBtn() {
                     <td>${c.closing_date || '-'}</td>
                     <td class="text-right">
                         <div class="actions">
-                            <button class="btn-icon" title="View" onclick="event.stopPropagation(); app. showCaseStudyDetail(${c.id})"><i class="fas fa-eye"></i></button>
+                            <button class="btn-icon" title="View" onclick="event.stopPropagation(); app.showCaseStudyDetail(${c.id})"><i class="fas fa-eye"></i></button>
                             ${(isOwner || isAdmin) ? `
-                                <button class="btn-icon" title="Edit" onclick="event.stopPropagation(); app. openCaseStudyModal(${c.id})"><i class="fas fa-edit"></i></button>
-                                <button class="btn-icon text-danger" title="Delete" onclick="event.stopPropagation(); app. deleteCaseStudy(${c.id})"><i class="fas fa-trash"></i></button>
+                                <button class="btn-icon" title="Edit" onclick="event.stopPropagation(); app.openCaseStudyModal(${c.id})"><i class="fas fa-edit"></i></button>
+                                <button class="btn-icon text-danger" title="Delete" onclick="event.stopPropagation(); app.deleteCaseStudy(${c.id})"><i class="fas fa-trash"></i></button>
                             ` : ''}
                         </div>
                     </td>
@@ -6902,7 +6902,7 @@ function _wireLoginBtn() {
             <div class="case-detail-view">
                 <div class="detail-header">
                     <div class="header-left">
-                        <button class="btn-back" onclick="app. navigateTo('cases')"><i class="fas fa-arrow-left"></i> Back to List</button>
+                        <button class="btn-back" onclick="app.navigateTo('cases')"><i class="fas fa-arrow-left"></i> Back to List</button>
                         <h1>${c.title}</h1>
                         <div class="case-meta-header">
                             <span><i class="fas fa-user-circle"></i> ${entityInfo}</span>
@@ -6913,11 +6913,11 @@ function _wireLoginBtn() {
                     </div>
                     <div class="header-actions">
                         ${(isOwner || isAdmin) ? `
-                            <button class="btn secondary" onclick="app. toggleCasePublic(${c.id})">
+                            <button class="btn secondary" onclick="app.toggleCasePublic(${c.id})">
                                 <i class="fas ${c.is_public ? 'fa-lock' : 'fa-share'}"></i> ${c.is_public ? 'Make Private' : 'Share Publicly'}
                             </button>
-                            <button class="btn secondary" onclick="app. openCaseStudyModal(${c.id})"><i class="fas fa-edit"></i> Edit</button>
-                            <button class="btn-icon text-danger" onclick="app. deleteCaseStudy(${c.id})"><i class="fas fa-trash"></i></button>
+                            <button class="btn secondary" onclick="app.openCaseStudyModal(${c.id})"><i class="fas fa-edit"></i> Edit</button>
+                            <button class="btn-icon text-danger" onclick="app.deleteCaseStudy(${c.id})"><i class="fas fa-trash"></i></button>
                         ` : ''}
                         <button class="btn secondary" onclick="app.copyCaseLink(${c.id})"><i class="fas fa-link"></i> Copy Link</button>
                     </div>
@@ -6986,7 +6986,7 @@ function _wireLoginBtn() {
             if (_currentView === 'cases') {
                 await renderCasesList();
             } else {
-                await app. navigateTo('cases');
+                await app.navigateTo('cases');
             }
         }
     };
@@ -7200,10 +7200,10 @@ function _wireLoginBtn() {
                             <!-- <button class="btn-toggle" onclick="(async () => { await app.switchView('week'); })()">Week</button> -->
                             <button class="btn-toggle active" onclick="(async () => { await app.switchView('month'); })()">Month</button>
                         </div>
-                        <button class="btn secondary" onclick="app. openCalendarFilterModal()">
+                        <button class="btn secondary" onclick="app.openCalendarFilterModal()">
                             Filter <i class="fas fa-chevron-down" style="font-size: 10px; margin-left: 4px;"></i>
                         </button>
-                        <button class="btn-quick-add" onclick="app. openActivityModal()" style="margin-left: 10px;">
+                        <button class="btn-quick-add" onclick="app.openActivityModal()" style="margin-left: 10px;">
                             <i class="fas fa-plus"></i> Quick Add Activity
                         </button>
                     </div>
@@ -7323,7 +7323,7 @@ function _wireLoginBtn() {
 
                         activityHtml += `
                             <div class="calendar-appointment ${a.activity_type.toLowerCase()} ${a.closing_amount ? 'closed-case' : ''}" 
-                                onclick="app. viewActivityDetails(${a.id})">
+                                onclick="app.viewActivityDetails(${a.id})">
                                 <div class="appointment-time">${a.start_time || '00:00'} - ${a.end_time || '00:00'}</div>
                                 <div class="appointment-agent">👤 ${agentName} ${a.co_agents && a.co_agents.length > 0 ? '<small>+1</small>' : ''}</div>
                                 <div class="appointment-customer">📋 ${entityName}</div>
@@ -7515,11 +7515,11 @@ function _wireLoginBtn() {
                             ${a.closing_amount ? '<br><small style="color:green;">Closed</small>' : ''}
                         </td>
                         <td>
-                            <button class="btn btn-sm secondary" onclick="app. viewActivityDetails(${a.id})">View</button>
-                            <button class="btn btn-sm secondary" onclick="app. postMeetupNotes(${a.id})">post MtUp</button>
-                            <button class="btn btn-sm secondary" onclick="app. editActivity(${a.id})">Edit</button>
-                            <button class="btn btn-sm secondary" onclick="app. rescheduleActivity(${a.id})">Reschedule</button>
-                            <button class="btn btn-sm secondary" onclick="app. addCoAgentToActivity(${a.id})">+ Add co</button>
+                            <button class="btn btn-sm secondary" onclick="app.viewActivityDetails(${a.id})">View</button>
+                            <button class="btn btn-sm secondary" onclick="app.postMeetupNotes(${a.id})">post MtUp</button>
+                            <button class="btn btn-sm secondary" onclick="app.editActivity(${a.id})">Edit</button>
+                            <button class="btn btn-sm secondary" onclick="app.rescheduleActivity(${a.id})">Reschedule</button>
+                            <button class="btn btn-sm secondary" onclick="app.addCoAgentToActivity(${a.id})">+ Add co</button>
                         </td>
                     </tr>
                 `;
@@ -7722,7 +7722,7 @@ function _wireLoginBtn() {
                     const name = prospect?.full_name || customer?.full_name || 'Activity';
 
                     html += `
-    <div class="week-activity ${a.activity_type.toLowerCase()}" onclick="app. viewActivityDetails(${a.id})">
+    <div class="week-activity ${a.activity_type.toLowerCase()}" onclick="app.viewActivityDetails(${a.id})">
         ${a.start_time} ${name}
     </div>
     `;
@@ -7749,7 +7749,7 @@ function _wireLoginBtn() {
         html += `
                 <div class="day-header">
                     <h2>${_currentDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</h2>
-                    <button class="btn primary btn-sm" onclick="app. openActivityModal('${todayStr}')">
+                    <button class="btn primary btn-sm" onclick="app.openActivityModal('${todayStr}')">
                         <i class="fas fa-plus"></i> Add Activity
                     </button>
                 </div>
@@ -7790,7 +7790,7 @@ function _wireLoginBtn() {
                 const agent = await AppDataStore.getById('users', a.lead_agent_id);
 
                 html += `
-                    <div class="timeline-activity ${a.activity_type.toLowerCase()}" onclick="app. viewActivityDetails(${a.id})">
+                    <div class="timeline-activity ${a.activity_type.toLowerCase()}" onclick="app.viewActivityDetails(${a.id})">
                         <div class="activity-time">${a.start_time} - ${a.end_time || '?'}</div>
                         <div class="activity-title"><strong>${a.activity_title || a.activity_type}</strong> ${name}</div>
                         <div class="activity-agent">Agent: ${agent?.full_name || 'Unknown'}</div>
@@ -7947,9 +7947,9 @@ function _wireLoginBtn() {
                                 <div style="font-size:11px; color:gray;">Added by: ${agentName}</div>
                             </div>
                             <div style="display:flex; gap:8px; align-items:center;">
-                                <button class="btn btn-sm secondary" title="Outcome" onclick="app. openAttendeeOutcomeModal(${att.entity_id}, '${att.attendee_type}', ${activity.id})">📝 Outcome</button>
-                                <button class="btn btn-sm secondary" title="Notes" onclick="app. openAttendeeNotesModal(${att.entity_id}, '${att.attendee_type}', ${activity.id})">📋 Notes</button>
-                                <button class="btn btn-sm secondary" onclick="app. postEventFollowUp(${activity.event_id}, ${att.entity_id})">Follow-up</button>
+                                <button class="btn btn-sm secondary" title="Outcome" onclick="app.openAttendeeOutcomeModal(${att.entity_id}, '${att.attendee_type}', ${activity.id})">📝 Outcome</button>
+                                <button class="btn btn-sm secondary" title="Notes" onclick="app.openAttendeeNotesModal(${att.entity_id}, '${att.attendee_type}', ${activity.id})">📋 Notes</button>
+                                <button class="btn btn-sm secondary" onclick="app.postEventFollowUp(${activity.event_id}, ${att.entity_id})">Follow-up</button>
                             </div>
                         </div>
                     `;
@@ -8008,7 +8008,7 @@ function _wireLoginBtn() {
             modalActions.push({
                 label: 'Complete Prospect Profile',
                 type: 'secondary',
-                action: `UI.hideModal(); await app. showProspectDetail(${activity.prospect_id})`
+                action: `UI.hideModal(); await app.showProspectDetail(${activity.prospect_id})`
             });
         }
 
@@ -8060,14 +8060,14 @@ function _wireLoginBtn() {
     };
 
     const postMeetupNotes = async (activityId) => {
-        await app. editActivity(activityId);
+        await app.editActivity(activityId);
         (() => {
             document.getElementById('note-key-points')?.focus();
         }, 350);
     };
 
     const rescheduleActivity = async (activityId) => {
-        await app. editActivity(activityId);
+        await app.editActivity(activityId);
         setTimeout(() => {
             const dateEl = document.getElementById('activity-date');
             if (dateEl) {
@@ -8081,16 +8081,16 @@ function _wireLoginBtn() {
     const postEventFollowUp = async (eventId, entityId) => {
         UI.hideModal();
         const ev = await AppDataStore.getById('events', eventId);
-        await app. openActivityModal();
+        await app.openActivityModal();
         setTimeout(async () => {
             const all = [...await AppDataStore.getAll('prospects'), ...await AppDataStore.getAll('customers')];
             const p = all.find(x => x.id === entityId);
-            if (p) app. selectEntity(entityId, p.is_customer ? 'customer' : 'prospect');
+            if (p) app.selectEntity(entityId, p.is_customer ? 'customer' : 'prospect');
 
             const typeEl = document.getElementById('modal-activity-type');
             if (typeEl) {
                 typeEl.value = 'CALL';
-                await app. updateActivityForm();
+                await app.updateActivityForm();
                 setTimeout(() => {
                     const titleEl = document.getElementById('meeting-title');
                     if (titleEl && ev) titleEl.value = `Follow-up from ${ev.title}`;
@@ -8119,7 +8119,7 @@ function _wireLoginBtn() {
 
         UI.showModal('Meeting Outcome', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save Outcome', type: 'primary', action: `await app. saveAttendeeNote(${attendeeId}, '${attendeeType}', ${activityId}, 'outcome')` }
+            { label: 'Save Outcome', type: 'primary', action: `await app.saveAttendeeNote(${attendeeId}, '${attendeeType}', ${activityId}, 'outcome')` }
         ]);
     };
 
@@ -8142,7 +8142,7 @@ function _wireLoginBtn() {
 
         UI.showModal('Post-Meetup Notes', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save Notes', type: 'primary', action: `await app. saveAttendeeNote(${attendeeId}, '${attendeeType}', ${activityId}, 'post_meetup')` }
+            { label: 'Save Notes', type: 'primary', action: `await app.saveAttendeeNote(${attendeeId}, '${attendeeType}', ${activityId}, 'post_meetup')` }
         ]);
     };
 
@@ -8187,7 +8187,7 @@ function _wireLoginBtn() {
     };
 
     const addCoAgentToActivity = async (activityId) => {
-        await app. editActivity(activityId);
+        await app.editActivity(activityId);
         (() => {
             const coSectionStr = document.getElementById('co-agent-section')?.style.display;
             if (coSectionStr === 'none' || !coSectionStr) {
@@ -8218,7 +8218,7 @@ function _wireLoginBtn() {
             <div class="activity-modal-form">
                 <div class="form-group">
                     <label>Activity Type <span class="required">*</span></label>
-                    <select id="modal-activity-type" class="form-control" onchange="app. updateActivityForm()">
+                    <select id="modal-activity-type" class="form-control" onchange="app.updateActivityForm()">
                         <option value="CPS">🟢 CPS - Consultation/Planning Session</option>
                         <option value="FTF">🔵 FTF - Face to Face Meeting</option>
                         <option value="FSA">🟠 FSA - Feng Shui Analysis</option>
@@ -8253,7 +8253,7 @@ function _wireLoginBtn() {
                         <label>Search and Add Co-Agents</label>
                         <div class="co-agent-search" style="display:flex; gap:8px;">
                             <input type="text" id="co-agent-search-input" class="form-control" placeholder="Type agent name..." onkeyup="(async () => { await app.searchAgents(); })()">
-                            <button class="btn secondary btn-sm" onclick="app. searchAgents()">Search</button>
+                            <button class="btn secondary btn-sm" onclick="app.searchAgents()">Search</button>
                         </div>
                         <div id="agent-search-results" class="search-results-dropdown"></div>
                     </div>
@@ -8389,35 +8389,35 @@ function _wireLoginBtn() {
                         <label>Key Points Discussed:</label>
                         <div style="display:flex; gap:8px;">
                             <textarea id="note-key-points" class="form-control" rows="2" placeholder="Main discussion points..."></textarea>
-                            <button class="btn-icon" onclick="app. openVoiceRecorder('note-key-points', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+                            <button class="btn-icon" onclick="app.openVoiceRecorder('note-key-points', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
                         </div>
                     </div>
                     <div class="form-group">
                         <label>Outcome:</label>
                         <div style="display:flex; gap:8px;">
                             <textarea id="note-outcome" class="form-control" rows="2" placeholder="What was the result?"></textarea>
-                            <button class="btn-icon" onclick="app. openVoiceRecorder('note-outcome', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+                            <button class="btn-icon" onclick="app.openVoiceRecorder('note-outcome', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
                         </div>
                     </div>
                     <div class="form-group">
                         <label>Next Steps:</label>
                         <div style="display:flex; gap:8px;">
                             <textarea id="note-next-steps" class="form-control" rows="2" placeholder="Action items..."></textarea>
-                            <button class="btn-icon" onclick="app. openVoiceRecorder('note-next-steps', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+                            <button class="btn-icon" onclick="app.openVoiceRecorder('note-next-steps', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
                         </div>
                     </div>
                     <div class="form-group">
                         <label>Customer Needs/Interests:</label>
                         <div style="display:flex; gap:8px;">
                             <textarea id="note-needs" class="form-control" rows="2" placeholder="What are they looking for?"></textarea>
-                            <button class="btn-icon" onclick="app. openVoiceRecorder('note-needs', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+                            <button class="btn-icon" onclick="app.openVoiceRecorder('note-needs', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
                         </div>
                     </div>
                     <div class="form-group">
                         <label>Pain Points:</label>
                         <div style="display:flex; gap:8px;">
                             <textarea id="note-pain-points" class="form-control" rows="2" placeholder="Dislikes or problems to solve..."></textarea>
-                            <button class="btn-icon" onclick="app. openVoiceRecorder('note-pain-points', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+                            <button class="btn-icon" onclick="app.openVoiceRecorder('note-pain-points', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
                         </div>
                     </div>
                 </div>
@@ -8755,7 +8755,7 @@ function _wireLoginBtn() {
                             <div class="form-group half">
                                 <label>Referrer</label>
                                 <div class="search-with-results" style="position: relative;">
-                                    <input type="text" id="cps-referrer" class="form-control" placeholder="Search referrer..." onkeyup="app. searchReferrers()">
+                                    <input type="text" id="cps-referrer" class="form-control" placeholder="Search referrer..." onkeyup="app.searchReferrers()">
                                     <div id="referrer-results" class="search-results-dropdown" style="display:none; position:absolute; z-index:1000; background:white; border:1px solid #ddd; width:100%;"></div>
                                 </div>
                                 <div id="selected-referrer-info" class="selected-entity-info" style="margin-top: 8px;"></div>
@@ -8826,7 +8826,7 @@ function _wireLoginBtn() {
                         <h4>🔍 Select ${type === 'CALL' || type === 'WHATSAPP' ? 'Prospect/Customer' : 'Existing Prospect/Customer'}</h4>
                         <div class="form-group">
                             <div class="search-with-results">
-                                <input type="text" id="entity-search" class="form-control" placeholder="Type name, phone, or email..." onkeyup="app. searchEntities()">
+                                <input type="text" id="entity-search" class="form-control" placeholder="Type name, phone, or email..." onkeyup="app.searchEntities()">
                                 <div id="search-results" class="search-results-dropdown"></div>
                             </div>
                         </div>
@@ -8846,7 +8846,7 @@ function _wireLoginBtn() {
                         <h4>🔍 Select Existing Prospect/Customer</h4>
                         <div class="form-group">
                             <div class="search-with-results">
-                                <input type="text" id="entity-search" class="form-control" placeholder="Type name, phone, or email..." onkeyup="app. searchEntities()">
+                                <input type="text" id="entity-search" class="form-control" placeholder="Type name, phone, or email..." onkeyup="app.searchEntities()">
                                 <div id="search-results" class="search-results-dropdown"></div>
                             </div>
                         </div>
@@ -9163,7 +9163,7 @@ function _wireLoginBtn() {
 
         if (resultsDiv) {
             resultsDiv.innerHTML = matches.map(m => `
-                <div class="search-result-item" onclick="app. selectEntity(${m.id}, '${m.type}')">
+                <div class="search-result-item" onclick="app.selectEntity(${m.id}, '${m.type}')">
                     <strong>${m.full_name}</strong> (${m.type})
                 </div>
             `).join('') || '<div class="search-result-item">No results</div>';
@@ -9320,7 +9320,7 @@ function _wireLoginBtn() {
 
                     UI.showModal('Potential Duplicate Found', `<p>${msg}</p>`, [
                         { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-                        { label: 'Continue', type: 'primary', action: `window._cpsDuplicateConfirmed = true; await app. saveActivity(${stayOpen})` }
+                        { label: 'Continue', type: 'primary', action: `window._cpsDuplicateConfirmed = true; await app.saveActivity(${stayOpen})` }
                     ]);
                     return;
                 }
@@ -9654,12 +9654,12 @@ function _wireLoginBtn() {
                     <table class="prospects-table" id="prospects-table">
                         <thead>
                             <tr>
-                                <th onclick="app. sortProspects('name')" style="cursor: pointer;">Name ${_sortField === 'name' ? (_sortDirection === 'asc' ? '↑' : '↓') : ''}</th>
-                                <th onclick="app. sortProspects('score')" style="cursor: pointer;">Score ${_sortField === 'score' ? (_sortDirection === 'asc' ? '↑' : '↓') : ''}</th>
+                                <th onclick="app.sortProspects('name')" style="cursor: pointer;">Name ${_sortField === 'name' ? (_sortDirection === 'asc' ? '↑' : '↓') : ''}</th>
+                                <th onclick="app.sortProspects('score')" style="cursor: pointer;">Score ${_sortField === 'score' ? (_sortDirection === 'asc' ? '↑' : '↓') : ''}</th>
                                 <th>Ming Gua</th>
                                 <th>Occupation/Company</th>
-                                <th onclick="app. sortProspects('activity')" style="cursor: pointer;">Last Activity ${_sortField === 'activity' ? (_sortDirection === 'asc' ? '↑' : '↓') : ''}</th>
-                                <th onclick="app. sortProspects('protection')" style="cursor: pointer;">Protection ${_sortField === 'protection' ? (_sortDirection === 'asc' ? '↑' : '↓') : ''}</th>
+                                <th onclick="app.sortProspects('activity')" style="cursor: pointer;">Last Activity ${_sortField === 'activity' ? (_sortDirection === 'asc' ? '↑' : '↓') : ''}</th>
+                                <th onclick="app.sortProspects('protection')" style="cursor: pointer;">Protection ${_sortField === 'protection' ? (_sortDirection === 'asc' ? '↑' : '↓') : ''}</th>
                                 <th>Actions</th>
                             </tr>
 
@@ -9706,7 +9706,7 @@ function _wireLoginBtn() {
                         <p>Manage converted customers and their lifecycle events. Customer records are permanent.</p>
                     </div>
                     <div class="header-actions">
-                        <button class="btn primary" onclick="app. openAddCustomerModal()">
+                        <button class="btn primary" onclick="app.openAddCustomerModal()">
                             <i class="fas fa-plus"></i> Add Customer
                         </button>
                     </div>
@@ -9833,7 +9833,7 @@ function _wireLoginBtn() {
             }
 
             html += `
-                <tr onclick="app. showCustomerDetail(${c.id})">
+                <tr onclick="app.showCustomerDetail(${c.id})">
                     <td><strong>${c.full_name}</strong></td>
                     <td>RM ${c.lifetime_value.toLocaleString()} <span style="color:var(--success); font-size:12px;"><i class="fas fa-caret-up"></i></span></td>
                     <td>${c.customer_since}</td>
@@ -9842,9 +9842,9 @@ function _wireLoginBtn() {
                     <td><span class="score-badge score-A+">${c.status.toUpperCase()}</span></td>
                     <td onclick="event.stopPropagation()">
                         <button class="btn-icon" title="Edit"><i class="fas fa-edit"></i></button>
-                        <button class="btn-icon" title="Add Purchase" onclick="app. openAddPurchaseModal(${c.id})"><i class="fas fa-shopping-cart"></i></button>
+                        <button class="btn-icon" title="Add Purchase" onclick="app.openAddPurchaseModal(${c.id})"><i class="fas fa-shopping-cart"></i></button>
                         <button class="btn-icon" title="Referral" onclick="app.todo('Referral workflow')"><i class="fas fa-user-plus"></i></button>
-                        <button class="btn-icon" title="Recruit" onclick="app. openRecruitModal(${c.id})"><i class="fas fa-user-tie"></i></button>
+                        <button class="btn-icon" title="Recruit" onclick="app.openRecruitModal(${c.id})"><i class="fas fa-user-tie"></i></button>
                     </td>
                 </tr>
             `;
@@ -9974,7 +9974,7 @@ function _wireLoginBtn() {
             }
 
             html += `
-                <tr onclick="app. showProspectDetail(${p.id})">
+                <tr onclick="app.showProspectDetail(${p.id})">
                     <td><strong>${p.full_name}</strong></td>
                     <td>
                         <span class="score-badge score-${grade.replace('+', '-plus')}">${p.score || 0} (${grade})</span>
@@ -9989,9 +9989,9 @@ function _wireLoginBtn() {
                         </div>
                     </td>
                     <td onclick="event.stopPropagation()">
-                        <button class="btn-icon" title="Edit" onclick="app. openProspectModal(${p.id})"><i class="fas fa-edit"></i></button>
-                        <button class="btn-icon" title="Add Activity" onclick="app. openActivityModal('', ${p.id})"><i class="fas fa-calendar-plus"></i></button>
-                        <button class="btn-icon" title="Convert to Customer" onclick="app. convertToCustomer(${p.id})"><i class="fas fa-user-check"></i></button>
+                        <button class="btn-icon" title="Edit" onclick="app.openProspectModal(${p.id})"><i class="fas fa-edit"></i></button>
+                        <button class="btn-icon" title="Add Activity" onclick="app.openActivityModal('', ${p.id})"><i class="fas fa-calendar-plus"></i></button>
+                        <button class="btn-icon" title="Convert to Customer" onclick="app.convertToCustomer(${p.id})"><i class="fas fa-user-check"></i></button>
                     </td>
                 </tr>
             `;
@@ -10364,11 +10364,11 @@ function _wireLoginBtn() {
                         </div>
                     </div>
                     <div class="header-actions">
-                        <button class="btn secondary" onclick="app. openProspectModal(${customer.id})"><i class="fas fa-edit"></i> Edit</button>
-                        <button class="btn secondary" onclick="app. openAddPurchaseModal(${customer.id})"><i class="fas fa-plus"></i> Add Purchase</button>
+                        <button class="btn secondary" onclick="app.openProspectModal(${customer.id})"><i class="fas fa-edit"></i> Edit</button>
+                        <button class="btn secondary" onclick="app.openAddPurchaseModal(${customer.id})"><i class="fas fa-plus"></i> Add Purchase</button>
                         <button class="btn secondary" onclick="app.todo('Refer a Friend')"><i class="fas fa-user-plus"></i> Refer a Friend</button>
-                        <button class="btn secondary" onclick="app. openSendWhatsAppModal('customer', ${customer.id})"><i class="fab fa-whatsapp"></i> WhatsApp</button>
-                        <button class="btn primary" style="background:#6b21a8;" onclick="app. openRecruitModal(${customer.id})"><i class="fas fa-user-tie"></i> Recruit as Agent</button>
+                        <button class="btn secondary" onclick="app.openSendWhatsAppModal('customer', ${customer.id})"><i class="fab fa-whatsapp"></i> WhatsApp</button>
+                        <button class="btn primary" style="background:#6b21a8;" onclick="app.openRecruitModal(${customer.id})"><i class="fas fa-user-tie"></i> Recruit as Agent</button>
                     </div>
                 </div>
 
@@ -10379,12 +10379,12 @@ function _wireLoginBtn() {
                 <div class="profile-content-grid" style="display:grid; grid-template-columns: 1fr 300px; gap:24px;">
                     <div class="profile-main-column">
                         <div class="tab-navigation">
-                            <button class="profile-tab-btn active" onclick="app. switchProfileTab(this, 'basic', ${customer.id})">Basic & Info</button>
-                            <button class="profile-tab-btn" onclick="app. switchProfileTab(this, 'platforms', ${customer.id})">Platform IDs</button>
-                             <button class="profile-tab-btn" onclick="app. switchProfileTab(this, 'purchases', ${customer.id})">Purchase History</button>
-                            <button class="profile-tab-btn" onclick="app. switchProfileTab(this, 'activity', ${customer.id})">Activity History</button>
-                            <button class="profile-tab-btn" onclick="app. switchProfileTab(this, 'referrals', ${customer.id})">Referrals Made</button>
-                            <button class="profile-tab-btn" onclick="app. switchProfileTab(this, 'events', ${customer.id})">Events Attended</button>
+                            <button class="profile-tab-btn active" onclick="app.switchProfileTab(this, 'basic', ${customer.id})">Basic & Info</button>
+                            <button class="profile-tab-btn" onclick="app.switchProfileTab(this, 'platforms', ${customer.id})">Platform IDs</button>
+                             <button class="profile-tab-btn" onclick="app.switchProfileTab(this, 'purchases', ${customer.id})">Purchase History</button>
+                            <button class="profile-tab-btn" onclick="app.switchProfileTab(this, 'activity', ${customer.id})">Activity History</button>
+                            <button class="profile-tab-btn" onclick="app.switchProfileTab(this, 'referrals', ${customer.id})">Referrals Made</button>
+                            <button class="profile-tab-btn" onclick="app.switchProfileTab(this, 'events', ${customer.id})">Events Attended</button>
                         </div>
 
                         <div id="profile-tab-content" style="background:var(--white); padding:24px; border-radius:12px; border:1px solid var(--gray-200);">
@@ -10541,15 +10541,15 @@ function _wireLoginBtn() {
                 <div class="add-note-section">
                     <textarea id="customer-note-text" class="form-control" rows="3" placeholder="Add a new note..."></textarea>
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
-                        <button class="btn-icon" onclick="app. openVoiceRecorder('customer-note-text', 'customer', ${customer.id})" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
-                        <button class="btn primary btn-sm" onclick="app. addCustomerNote(${customer.id})">Add Note</button>
+                        <button class="btn-icon" onclick="app.openVoiceRecorder('customer-note-text', 'customer', ${customer.id})" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+                        <button class="btn primary btn-sm" onclick="app.addCustomerNote(${customer.id})">Add Note</button>
                     </div>
                 </div>
                 ${customerNotes.length > 0 ? customerNotes.map(n => `
                     <div class="notes-item" style="margin-top:10px;">
                         <div class="notes-header">
                             <span>${n.date} - ${n.author}${n.is_voice_note ? ' <i class="fas fa-microphone voice-note-icon" title="Voice note"></i>' : ''}</span>
-                            <button class="btn-icon" onclick="app. deleteCustomerNote(${customer.id}, ${n.id})"><i class="fas fa-trash"></i></button>
+                            <button class="btn-icon" onclick="app.deleteCustomerNote(${customer.id}, ${n.id})"><i class="fas fa-trash"></i></button>
                         </div>
                         <div>"${n.text}"</div>
                     </div>
@@ -10646,7 +10646,7 @@ function _wireLoginBtn() {
                 <div style="font-size:18px;">Lifetime Total: <span style="color:var(--primary);">RM ${(totalPaid + totalPending).toLocaleString()}</span></div>
             </div>
             <div style="margin-top:16px;">
-                <button class="btn primary" onclick="app. openAddPurchaseModal(${customer.id})">Add Purchase</button>
+                <button class="btn primary" onclick="app.openAddPurchaseModal(${customer.id})">Add Purchase</button>
             </div>
         `;
     };
@@ -10732,7 +10732,7 @@ function _wireLoginBtn() {
                     Recommendations: Active participant, makes referrals, good purchase history.
                 </div>
                 
-                <button class="btn primary" style="width:100%; background:#6b21a8; border:none;" onclick="app. openRecruitModal(${customer.id})">Offer Agent Package</button>
+                <button class="btn primary" style="width:100%; background:#6b21a8; border:none;" onclick="app.openRecruitModal(${customer.id})">Offer Agent Package</button>
             </div>
         `;
     };
@@ -10748,7 +10748,7 @@ function _wireLoginBtn() {
         container.innerHTML = `
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
                 <h4 style="font-size:16px; font-weight:600; color:var(--primary); margin:0;">Activity History</h4>
-                <button class="btn primary btn-sm" onclick="app. openActivityModal(null, 'customer', ${customer.id})">+ Log Activity</button>
+                <button class="btn primary btn-sm" onclick="app.openActivityModal(null, 'customer', ${customer.id})">+ Log Activity</button>
             </div>
             ${activities.length > 0 ? `
                 <div class="activity-timeline">
@@ -10786,7 +10786,7 @@ function _wireLoginBtn() {
                 const tag = await AppDataStore.getById('tags', et.tag_id);
                 return tag ? `
                     <span class="score-badge" style="background:${tag.color || 'var(--primary)'}; color:white; display:flex; align-items:center; gap:4px; font-size:11px;">
-                        ${tag.name} <span style="cursor:pointer;" onclick="app. removeTagFromCustomer(${customer.id}, ${tag.id})">&times;</span>
+                        ${tag.name} <span style="cursor:pointer;" onclick="app.removeTagFromCustomer(${customer.id}, ${tag.id})">&times;</span>
                     </span>
                 ` : '';
             }));
@@ -10798,7 +10798,7 @@ function _wireLoginBtn() {
                 <h4 style="font-size:13px; font-weight:700; color:var(--gray-500); margin-bottom:12px;">TAGS</h4>
                 <div style="display:flex; flex-wrap:wrap; gap:8px;">
                     ${tagsHtml}
-                    <button class="btn-sm secondary" style="border-radius:20px; font-size:11px;" onclick="app. openAddTagModal(${customer.id}, 'customer')">+ Add Tag</button>
+                    <button class="btn-sm secondary" style="border-radius:20px; font-size:11px;" onclick="app.openAddTagModal(${customer.id}, 'customer')">+ Add Tag</button>
                 </div>
             </div>
         `;
@@ -10843,7 +10843,7 @@ function _wireLoginBtn() {
 
         container.innerHTML = `
             <div class="profile-view">
-                <button class="btn secondary btn-sm" onclick="app. showProspectsView(document.getElementById('content-viewport'))" style="margin-bottom: 20px;">
+                <button class="btn secondary btn-sm" onclick="app.showProspectsView(document.getElementById('content-viewport'))" style="margin-bottom: 20px;">
                     <i class="fas fa-arrow-left"></i> Back to List
                 </button>
 
@@ -10858,8 +10858,8 @@ function _wireLoginBtn() {
                         </div>
                     </div>
                     <div class="profile-actions">
-                        <button class="btn secondary" onclick="app. editProspect(${prospect.id})"><i class="fas fa-edit"></i> Edit</button>
-                        <button class="btn primary" onclick="app. convertToCustomer(${prospect.id})"><i class="fas fa-user-check"></i> Convert</button>
+                        <button class="btn secondary" onclick="app.editProspect(${prospect.id})"><i class="fas fa-edit"></i> Edit</button>
+                        <button class="btn primary" onclick="app.convertToCustomer(${prospect.id})"><i class="fas fa-user-check"></i> Convert</button>
                     </div>
                 </div>
 
@@ -10868,7 +10868,7 @@ function _wireLoginBtn() {
                     <div class="profile-section" id="section-basic">
                         <h2>
                             <span><i class="fas fa-info-circle"></i> Basic Information</span>
-                            <button class="btn-section-edit" onclick="app. openProspectModal(${prospect.id})"><i class="fas fa-edit"></i> Edit</button>
+                            <button class="btn-section-edit" onclick="app.openProspectModal(${prospect.id})"><i class="fas fa-edit"></i> Edit</button>
                         </h2>
                         <div class="detail-grid">
                             <div class="info-row"><div class="info-label">Title</div><div class="info-value">${prospect.title || '-'}</div></div>
@@ -10884,7 +10884,7 @@ function _wireLoginBtn() {
                     <div class="profile-section" id="section-personal">
                         <h2>
                             <span><i class="fas fa-user-shield"></i> Personal Details</span>
-                            <button class="btn-section-edit" onclick="app. openProspectModal(${prospect.id})"><i class="fas fa-edit"></i> Edit</button>
+                            <button class="btn-section-edit" onclick="app.openProspectModal(${prospect.id})"><i class="fas fa-edit"></i> Edit</button>
                         </h2>
                         <div class="detail-grid">
                             <div class="info-row"><div class="info-label">Date of Birth</div><div class="info-value">${prospect.date_of_birth || '-'}</div></div>
@@ -10903,7 +10903,7 @@ function _wireLoginBtn() {
                         <h2>
                             <span><i class="fas fa-users"></i> Name List</span>
                             <span class="section-actions">
-                                <button class="btn primary btn-sm" onclick="app. openAddNameModal(${prospect.id})"><i class="fas fa-plus"></i> Add Name</button>
+                                <button class="btn primary btn-sm" onclick="app.openAddNameModal(${prospect.id})"><i class="fas fa-plus"></i> Add Name</button>
                             </span>
                         </h2>
                         <table class="name-list-table">
@@ -10922,8 +10922,8 @@ function _wireLoginBtn() {
                                         <td>${n.full_name}</td>
                                         <td>${n.date_of_birth || '-'}</td>
                                         <td>
-                                            <button class="btn-icon" onclick="app. openAddNameModal(${prospect.id}, ${n.id})"><i class="fas fa-edit"></i></button>
-                                            <button class="btn-icon" onclick="app. deleteName(${prospect.id}, ${n.id})"><i class="fas fa-trash"></i></button>
+                                            <button class="btn-icon" onclick="app.openAddNameModal(${prospect.id}, ${n.id})"><i class="fas fa-edit"></i></button>
+                                            <button class="btn-icon" onclick="app.deleteName(${prospect.id}, ${n.id})"><i class="fas fa-trash"></i></button>
                                         </td>
                                     </tr>
                                 `).join('') : '<tr><td colspan="4" style="text-align:center; padding:20px;">No names added.</td></tr>'}
@@ -10936,16 +10936,16 @@ function _wireLoginBtn() {
                         <h2>
                             <span><i class="fas fa-history"></i> Activity & Information</span>
                             <span class="section-actions">
-                                <button class="btn primary btn-sm" onclick="app. openActivityModal('', ${prospect.id})"><i class="fas fa-plus"></i> Add Activity</button>
+                                <button class="btn primary btn-sm" onclick="app.openActivityModal('', ${prospect.id})"><i class="fas fa-plus"></i> Add Activity</button>
                             </span>
                         </h2>
                         <div class="profile-tabs" style="margin-bottom:15px; border-bottom:1px solid var(--gray-200);">
-                            <button class="profile-tab active" onclick="app. switchProspectTab('info', ${prospect.id}, this)">Info</button>
-                            <button class="profile-tab" onclick="app. switchProspectTab('personal', ${prospect.id}, this)">Personal</button>
-                            <button class="profile-tab" onclick="app. switchProspectTab('names', ${prospect.id}, this)">Names</button>
-                            <button class="profile-tab" onclick="app. switchProspectTab('activity', ${prospect.id}, this)">Activity</button>
-                            <button class="profile-tab" onclick="app. switchProspectTab('events', ${prospect.id}, this)">Events</button>
-                            <button class="profile-tab" onclick="app. switchProspectTab('notes', ${prospect.id}, this)">Notes</button>
+                            <button class="profile-tab active" onclick="app.switchProspectTab('info', ${prospect.id}, this)">Info</button>
+                            <button class="profile-tab" onclick="app.switchProspectTab('personal', ${prospect.id}, this)">Personal</button>
+                            <button class="profile-tab" onclick="app.switchProspectTab('names', ${prospect.id}, this)">Names</button>
+                            <button class="profile-tab" onclick="app.switchProspectTab('activity', ${prospect.id}, this)">Activity</button>
+                            <button class="profile-tab" onclick="app.switchProspectTab('events', ${prospect.id}, this)">Events</button>
+                            <button class="profile-tab" onclick="app.switchProspectTab('notes', ${prospect.id}, this)">Notes</button>
                         </div>
                         <div id="prospect-tab-content">
                             <!-- Populated by switchProspectTab -->
@@ -10969,7 +10969,7 @@ function _wireLoginBtn() {
                             <div class="fill" style="width: ${Math.min(100, (daysLeft / 30) * 100)}%; background: var(--${statusColor});"></div>
                         </div>
                         <div style="display: flex; gap: 12px; margin-top: 16px;">
-                            <button class="btn secondary btn-sm" onclick="app. extendProtection(${prospect.id})">Extend</button>
+                            <button class="btn secondary btn-sm" onclick="app.extendProtection(${prospect.id})">Extend</button>
                             <button class="btn secondary btn-sm" onclick="app.transferProspect(${prospect.id})">Transfer</button>
                             <button class="btn secondary btn-sm" onclick="app.reassignProspect(${prospect.id})">Reassign</button>
                         </div>
@@ -10980,12 +10980,12 @@ function _wireLoginBtn() {
                         <h2>
                             <i class="fas fa-tags"></i> Tags
                             <span class="section-actions">
-                                <button class="btn primary btn-sm" onclick="app. openAddTagModal(${prospect.id})"><i class="fas fa-plus"></i></button>
+                                <button class="btn primary btn-sm" onclick="app.openAddTagModal(${prospect.id})"><i class="fas fa-plus"></i></button>
                             </span>
                         </h2>
                         <div class="tags-container" id="prospect-tags-container">
                             ${prospect.tags && prospect.tags.length > 0 ? prospect.tags.map(t => `
-                                            <span class="tag ${t.color}">${t.name} <i class="fas fa-times remove" onclick="app. removeTagFromProspect(${prospect.id}, ${t.id})"></i></span>
+                                            <span class="tag ${t.color}">${t.name} <i class="fas fa-times remove" onclick="app.removeTagFromProspect(${prospect.id}, ${t.id})"></i></span>
                                         `).join('') : '<span>No tags yet</span>'}
                         </div>
                     </div>
@@ -11007,7 +11007,7 @@ function _wireLoginBtn() {
             </div>
         `;
         // Load the default tab content
-        await app. switchProspectTab('info', prospectId, document.querySelector('.profile-tabs .profile-tab.active'));
+        await app.switchProspectTab('info', prospectId, document.querySelector('.profile-tabs .profile-tab.active'));
     };
 
     const switchProspectTab = async (tab, prospectId, btn) => {
@@ -11091,7 +11091,7 @@ function _wireLoginBtn() {
                     <h2>
                         <i class="fas fa-users"></i> Name List
                         <span class="section-actions">
-                            <button class="btn primary btn-sm" onclick="app. openAddNameModal(${prospect.id})"><i class="fas fa-plus"></i> Add Name</button>
+                            <button class="btn primary btn-sm" onclick="app.openAddNameModal(${prospect.id})"><i class="fas fa-plus"></i> Add Name</button>
                         </span>
                     </h2>
                     <table class="name-list-table">
@@ -11113,7 +11113,7 @@ function _wireLoginBtn() {
                                     <td>${n.notes || '-'}</td>
                                     <td>
                                         <button class="btn-icon" onclick="app.todo('Edit name')"><i class="fas fa-edit"></i></button>
-                                        <button class="btn-icon" onclick="app. deleteName(${prospect.id}, ${n.id})"><i class="fas fa-trash"></i></button>
+                                        <button class="btn-icon" onclick="app.deleteName(${prospect.id}, ${n.id})"><i class="fas fa-trash"></i></button>
                                     </td>
                                 </tr>
                             `).join('') : `
@@ -11131,7 +11131,7 @@ function _wireLoginBtn() {
                     <h2>
                         <i class="fas fa-history"></i> Activity History
                         <span class="section-actions">
-                            <button class="btn primary btn-sm" onclick="app. openActivityModal('', ${prospect.id})"><i class="fas fa-plus"></i> Add Activity</button>
+                            <button class="btn primary btn-sm" onclick="app.openActivityModal('', ${prospect.id})"><i class="fas fa-plus"></i> Add Activity</button>
                         </span>
                     </h2>
                     <div class="history-timeline">
@@ -11142,7 +11142,7 @@ function _wireLoginBtn() {
                                     <h4>${a.activity_type} - ${a.activity_title || 'Meeting'}</h4>
                                     <p style="font-size:13px; color:var(--gray-500); margin-bottom:4px;">Agent: Michelle Tan ${a.score_value ? `| Score: +${a.score_value}` : ''}</p>
                                     <p style="font-size:14px; margin-bottom:8px;">${a.summary || a.location_address || ''}</p>
-                                    <button class="btn btn-sm secondary" onclick="app. viewActivityDetails(${a.id})">View Details</button>
+                                    <button class="btn btn-sm secondary" onclick="app.viewActivityDetails(${a.id})">View Details</button>
                                 </div>
                             </div>
                         `).join('') : `
@@ -11160,15 +11160,15 @@ function _wireLoginBtn() {
                     <div class="add-note-section">
                         <textarea id="new-note-text" class="form-control" rows="3" placeholder="Add a new note..."></textarea>
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
-                            <button class="btn-icon" onclick="app. openVoiceRecorder('new-note-text', 'prospect', ${prospect.id})" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
-                            <button class="btn primary btn-sm" onclick="app. addNote(${prospect.id})">Add Note</button>
+                            <button class="btn-icon" onclick="app.openVoiceRecorder('new-note-text', 'prospect', ${prospect.id})" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+                            <button class="btn primary btn-sm" onclick="app.addNote(${prospect.id})">Add Note</button>
                         </div>
                     </div>
                     ${notes.length > 0 ? notes.map(n => `
                         <div class="notes-item">
                             <div class="notes-header">
                                 <span>${n.date} - ${n.author}${n.is_voice_note ? ' <i class="fas fa-microphone voice-note-icon" title="Voice note"></i>' : ''}</span>
-                                <button class="btn-icon" onclick="app. deleteNote(${prospect.id}, ${n.id})"><i class="fas fa-trash"></i></button>
+                                <button class="btn-icon" onclick="app.deleteNote(${prospect.id}, ${n.id})"><i class="fas fa-trash"></i></button>
                             </div>
                             <div>"${n.text}"</div>
                         </div>
@@ -11221,7 +11221,7 @@ function _wireLoginBtn() {
         });
         document.getElementById('new-note-text').value = '';
         UI.toast.success('Note added');
-        await app. switchProspectTab('notes', prospectId, document.querySelector('.profile-tab.active'));
+        await app.switchProspectTab('notes', prospectId, document.querySelector('.profile-tab.active'));
     };
 
     
@@ -11229,7 +11229,7 @@ const deleteNote = async (prospectId, noteId) => {
     UI.confirm('Delete Note?', 'Are you sure you want to delete this note?', async () => {
         await AppDataStore.delete('notes', noteId);
         UI.toast.success('Note deleted');
-        await app. switchProspectTab('notes', prospectId, document.querySelector('.profile-tab.active'));
+        await app.switchProspectTab('notes', prospectId, document.querySelector('.profile-tab.active'));
     });
 };
 
@@ -11489,7 +11489,7 @@ for (const p of allPackages) {
 
         UI.showModal('Add Tag', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Add Tag', type: 'primary', action: `await app. addTagToEntity(${entityId}, '${entityType}')` }
+            { label: 'Add Tag', type: 'primary', action: `await app.addTagToEntity(${entityId}, '${entityType}')` }
         ]);
     };
 
@@ -11521,9 +11521,9 @@ for (const p of allPackages) {
 
         UI.hideModal();
         if (entityType === 'prospect') {
-            await app. showProspectDetail(entityId);
+            await app.showProspectDetail(entityId);
         } else if (entityType === 'customer') {
-            await app. showCustomerDetail(entityId);
+            await app.showCustomerDetail(entityId);
         }
         UI.toast.success('Tag added');
     };
@@ -11536,7 +11536,7 @@ for (const p of allPackages) {
         });
         if (mappings.length > 0) {
             await AppDataStore.delete('entity_tags', mappings[0].id);
-            await app. showCustomerDetail(customerId);
+            await app.showCustomerDetail(customerId);
             UI.toast.success('Tag removed');
         }
     };
@@ -11549,7 +11549,7 @@ for (const p of allPackages) {
         });
         if (mappings.length > 0) {
             await AppDataStore.delete('entity_tags', mappings[0].id);
-            await app. showProspectDetail(prospectId);
+            await app.showProspectDetail(prospectId);
             UI.toast.success('Tag removed');
         }
     };
@@ -11626,7 +11626,7 @@ const openAddSolutionModal = async (prospectId) => {
         });
 
         UI.hideModal();
-        await app. showProspectDetail(prospectId);
+        await app.showProspectDetail(prospectId);
         UI.toast.success('Solution added');
     };
 
@@ -11701,7 +11701,7 @@ const openAddSolutionModal = async (prospectId) => {
         const newDeadline = new Date(currentDeadline.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
         await AppDataStore.update('prospects', prospectId, { protection_deadline: newDeadline });
         UI.toast.success('Protection extended by 30 days');
-        await app. showProspectDetail(prospectId);
+        await app.showProspectDetail(prospectId);
     };
 
     const transferProspect = (prospectId) => {
@@ -11772,7 +11772,7 @@ const openAddSolutionModal = async (prospectId) => {
                         <p>Monitor agent performance, licenses, and assignments.</p>
                     </div>
                     <div class="header-actions">
-                        <button class="btn primary" onclick="app. openAddAgentModal()">
+                        <button class="btn primary" onclick="app.openAddAgentModal()">
                             <i class="fas fa-plus"></i> Add Agent
                         </button>
                     </div>
@@ -11781,18 +11781,18 @@ const openAddSolutionModal = async (prospectId) => {
                 <div class="agent-filters">
                     <div class="search-group" style="flex:1; min-width:200px; display:flex; align-items:center; gap:8px; background:var(--gray-50); padding:8px 12px; border-radius:6px; border:1px solid var(--gray-200);">
                         <i class="fas fa-search" style="color:var(--gray-400);"></i>
-                        <input type="text" id="agent-search" placeholder="Search agents by name, code, or phone" onkeyup="app. filterAgents()" style="border:none; background:transparent; outline:none; width:100%;">
+                        <input type="text" id="agent-search" placeholder="Search agents by name, code, or phone" onkeyup="app.filterAgents()" style="border:none; background:transparent; outline:none; width:100%;">
                     </div>
-                    <select id="filter-agent-team" onchange="app. filterAgents()" class="form-control" style="width:140px;">
+                    <select id="filter-agent-team" onchange="app.filterAgents()" class="form-control" style="width:140px;">
                         <option value="">All Teams</option>
                         <option value="Team A">Team A</option>
                         <option value="Team B">Team B</option>
                     </select>
-                    <select id="filter-agent-role" onchange="app. filterAgents()" class="form-control" style="width:160px;">
+                    <select id="filter-agent-role" onchange="app.filterAgents()" class="form-control" style="width:160px;">
                         <option value="">All Roles</option>
                         ${USER_ROLES.map(r => `<option value="${r}">${r}</option>`).join('')}
                     </select>
-                    <select id="filter-agent-status" onchange="app. filterAgents()" class="form-control" style="width:140px;">
+                    <select id="filter-agent-status" onchange="app.filterAgents()" class="form-control" style="width:140px;">
                         <option value="">All Status</option>
                         <option value="active">Active</option>
                         <option value="probation">Probation</option>
@@ -12098,7 +12098,7 @@ const showAgentProfile = async (agentId) => {
         viewport.innerHTML = `
     <div class="agent-profile-view">
                 <div class="header-actions" style="margin-bottom:16px;">
-                    <button class="btn secondary" onclick="app. navigateTo('agents')"><i class="fas fa-arrow-left"></i> Back to Agents</button>
+                    <button class="btn secondary" onclick="app.navigateTo('agents')"><i class="fas fa-arrow-left"></i> Back to Agents</button>
                 </div>
 
                 <div class="profile-header" style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:24px;">
@@ -12146,7 +12146,7 @@ const showAgentProfile = async (agentId) => {
                         </div>
                     </div>
                     <div class="license-actions">
-                        <button class="btn primary" onclick="app. renewLicense(${agent.id})" ${calculateDaysDiff(agent.license_expiry) > 60 ? 'disabled' : ''}>Renew Now</button>
+                        <button class="btn primary" onclick="app.renewLicense(${agent.id})" ${calculateDaysDiff(agent.license_expiry) > 60 ? 'disabled' : ''}>Renew Now</button>
                         <button class="btn secondary" onclick="app.sendRenewalReminder(${agent.id})">Send Reminder</button>
                     </div>
                 </div>
@@ -12273,7 +12273,7 @@ const html = `
         return `
     <div class="assignments-list">
         ${customers.map(c => `
-                    <div class="assignment-item" onclick="app. showCustomerDetail(${c.id})">
+                    <div class="assignment-item" onclick="app.showCustomerDetail(${c.id})">
                         <div>
                             <div class="assignment-prospect">${c.full_name}</div>
                             <div class="next-action">Customer Since: ${c.customer_since}</div>
@@ -12401,7 +12401,7 @@ const renderCurrentAssignments = async (agentId) => {
         ${assignments.map(a => {
             const p = await AppDataStore.getById('prospects', a.prospect_id);
             return `
-                    <div class="assignment-item" onclick="app. showProspectDetail(${a.prospect_id})">
+                    <div class="assignment-item" onclick="app.showProspectDetail(${a.prospect_id})">
                         <div>
                             <div class="assignment-prospect">${p.full_name}</div>
                             <div class="next-action">Next: ${a.next_action}</div>
@@ -12948,7 +12948,7 @@ const deactivateAgent = async (agentId) => {
     const assignProspectToAgent = async (prospectId, agentId) => {
         await AppDataStore.update('prospects', prospectId, { responsible_agent_id: agentId });
         UI.toast.success('Prospect reassigned');
-        await app. showProspectDetail(prospectId);
+        await app.showProspectDetail(prospectId);
     };
 
     const sendRenewalReminder = (agentId) => {
@@ -13081,7 +13081,7 @@ const deactivateAgent = async (agentId) => {
         </div>
         <div class="header-actions" style="display: flex; gap: 12px; align-items: center;">
             <div class="filter-group" style="display: flex; gap: 8px;">
-                <select class="form-control" style="width: 160px; height: 38px;" onchange="app. setPipelineFilter('agent', this.value)">
+                <select class="form-control" style="width: 160px; height: 38px;" onchange="app.setPipelineFilter('agent', this.value)">
                     <option value="all">All Agents</option>
                     ${agents.map(a => `<option value="${a.id}" ${_pipelineAgentFilter == a.id ? 'selected' : ''}>${a.full_name}</option>`).join('')}
                 </select>
@@ -13097,7 +13097,7 @@ const deactivateAgent = async (agentId) => {
             <button class="btn secondary" onclick="(async () => { await app.refreshPipeline(); })()">
                 <i class="fas fa-sync-alt"></i> Refresh
             </button>
-            <button class="btn primary" onclick="app. openPipelineConfigModal()">
+            <button class="btn primary" onclick="app.openPipelineConfigModal()">
                 <i class="fas fa-cog"></i> Configure Rules
             </button>
         </div>
@@ -13110,7 +13110,7 @@ const deactivateAgent = async (agentId) => {
                 <h2 style="font-size: 18px; font-weight: 600; margin: 0;">🔥 MONTH FOCUS - My Priority List</h2>
                 <span style="background: #F3F4F6; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600;" id="focus-count">${focusList.length} prospects</span>
             </div>
-            <button class="btn-icon" onclick="app. saveManualOrder()" title="Save Order">
+            <button class="btn-icon" onclick="app.saveManualOrder()" title="Save Order">
                 <i class="fas fa-save"></i>
             </button>
         </div>
@@ -13215,14 +13215,14 @@ const deactivateAgent = async (agentId) => {
                 </td>
                 <td style="padding: 16px;">
                     <div style="display: flex; align-items: center; gap: 8px;">
-                        <button class="btn-icon" onclick="event.stopPropagation(); app. showProspectMenu(${prospect.id})" title="Options">
+                        <button class="btn-icon" onclick="event.stopPropagation(); app.showProspectMenu(${prospect.id})" title="Options">
                             <i class="fas fa-ellipsis-v"></i>
                         </button>
-                        <button class="btn-icon" onclick="event.stopPropagation(); app. showComments(${prospect.id})" style="position: relative;" title="Comments">
+                        <button class="btn-icon" onclick="event.stopPropagation(); app.showComments(${prospect.id})" style="position: relative;" title="Comments">
                             <i class="fas fa-comment"></i>
                             <span style="position: absolute; top: -5px; right: -5px; background: #EF4444; color: white; border-radius: 50%; width: 16px; height: 16px; font-size: 10px; display: flex; align-items: center; justify-content: center;">${noteCount}</span>
                         </button>
-                        <button class="btn-icon text-danger" onclick="event.stopPropagation(); app. removeFromFocusList(${rec.id})" title="Remove from Focus">
+                        <button class="btn-icon text-danger" onclick="event.stopPropagation(); app.removeFromFocusList(${rec.id})" title="Remove from Focus">
                             <i class="fas fa-trash-alt"></i>
                         </button>
                     </div>
@@ -13288,13 +13288,13 @@ const deactivateAgent = async (agentId) => {
                 </td>
                 <td style="padding: 16px;">
                     <div style="display: flex; align-items: center; gap: 8px;">
-                        <button class="btn secondary btn-sm" style="padding: 4px 12px; font-size: 12px;" onclick="app. addToFocusList(${prospect.id})">
+                        <button class="btn secondary btn-sm" style="padding: 4px 12px; font-size: 12px;" onclick="app.addToFocusList(${prospect.id})">
                             <i class="fas fa-plus"></i> Add to Focus
                         </button>
-                        <button class="btn-icon" onclick="event.stopPropagation(); app. showProspectMenu(${prospect.id})" title="Options">
+                        <button class="btn-icon" onclick="event.stopPropagation(); app.showProspectMenu(${prospect.id})" title="Options">
                             <i class="fas fa-ellipsis-v"></i>
                         </button>
-                        <button class="btn-icon" onclick="event.stopPropagation(); app. showComments(${prospect.id})" style="position: relative;" title="Comments">
+                        <button class="btn-icon" onclick="event.stopPropagation(); app.showComments(${prospect.id})" style="position: relative;" title="Comments">
                             <i class="fas fa-comment"></i>
                             <span style="position: absolute; top: -5px; right: -5px; background: #3B82F6; color: white; border-radius: 50%; width: 16px; height: 16px; font-size: 10px; display: flex; align-items: center; justify-content: center;">${noteCount}</span>
                         </button>
@@ -13450,7 +13450,7 @@ const deactivateAgent = async (agentId) => {
 
     const showProspectMenu = async (prospectId) => {
         if (typeof app.showProspectDetail === 'function') {
-            await app. showProspectDetail(prospectId);
+            await app.showProspectDetail(prospectId);
         } else {
             UI.toast.info(`Viewing profile for prospect ID: ${prospectId} `);
         }
@@ -13468,7 +13468,7 @@ const deactivateAgent = async (agentId) => {
                 <div style="background: #F9FAFB; padding: 12px; border-radius: 8px; margin-bottom: 16px;">
                     <textarea id="new-note-content" class="form-control" placeholder="Add a new comment/note..." style="min-height: 80px;"></textarea>
                     <div style="display: flex; justify-content: flex-end; margin-top: 8px;">
-                        <button class="btn primary btn-sm" onclick="app. addPipelineNote(${prospectId})">Add Note</button>
+                        <button class="btn primary btn-sm" onclick="app.addPipelineNote(${prospectId})">Add Note</button>
                     </div>
                 </div>
 
@@ -14110,18 +14110,18 @@ container.innerHTML = `
                         <button class="time-toggle-btn ${_currentTimeFilter === 'weekly' ? 'active' : ''}" onclick="(async () => { await app.setTimeFilter('weekly'); })()">Weekly</button>
                         <button class="time-toggle-btn ${_currentTimeFilter === 'monthly' ? 'active' : ''}" onclick="(async () => { await app.setTimeFilter('monthly'); })()">Monthly</button>
                         <button class="time-toggle-btn ${_currentTimeFilter === 'quarterly' ? 'active' : ''}" onclick="(async () => { await app.setTimeFilter('quarterly'); })()">Quarterly</button>
-                        <button class="time-toggle-btn ${_currentTimeFilter === 'yearly' ? 'active' : ''}" onclick="app. setTimeFilter('yearly')">Yearly</button>
+                        <button class="time-toggle-btn ${_currentTimeFilter === 'yearly' ? 'active' : ''}" onclick="app.setTimeFilter('yearly')">Yearly</button>
                     </div>
                     <div class="role-filter-group" style="margin-left: 20px;">
-                        <select id="kpi-role-filter" class="form-control" onchange="app. setRoleFilter(this.value)" style="width: 200px;">
+                        <select id="kpi-role-filter" class="form-control" onchange="app.setRoleFilter(this.value)" style="width: 200px;">
                             <option value="All">All Roles</option>
                             ${USER_ROLES.map(r => `<option value="${r}" ${_currentRoleFilter === r ? 'selected' : ''}>${r}</option>`).join('')}
                         </select>
                     </div>
                     <div class="date-range-picker" style="margin-left: auto;">
-                        <input type="date" id="kpi-date-from" value="${_customDateFrom}" onchange="app. setCustomDateRange(this.value, document.getElementById('kpi-date-to').value)">
+                        <input type="date" id="kpi-date-from" value="${_customDateFrom}" onchange="app.setCustomDateRange(this.value, document.getElementById('kpi-date-to').value)">
                         <span>to</span>
-                        <input type="date" id="kpi-date-to" value="${_customDateTo}" onchange="app. setCustomDateRange(document.getElementById('kpi-date-from').value, this.value)">
+                        <input type="date" id="kpi-date-to" value="${_customDateTo}" onchange="app.setCustomDateRange(document.getElementById('kpi-date-from').value, this.value)">
                     </div>
                 </div>
 
@@ -14974,7 +14974,7 @@ const exportKPIReport = async (format) => {
                         <p class="text-muted">Manage master data for products, events, and monthly promotions.</p>
                     </div>
                     <div class="header-actions">
-                        <button class="btn primary" onclick="app. openMarketingListAddModal()">
+                        <button class="btn primary" onclick="app.openMarketingListAddModal()">
                             <i class="fas fa-plus"></i> New ${_currentMarketingListTab.charAt(0).toUpperCase() + _currentMarketingListTab.slice(1, -1)}
                         </button>
                     </div>
@@ -14982,17 +14982,17 @@ const exportKPIReport = async (format) => {
 
                 <div class="tabs-container" style="margin-bottom: 20px; border-bottom: 1px solid var(--gray-200); display: flex; gap: 20px;">
                     <div class="tab-item ${_currentMarketingListTab === 'products' ? 'active' : ''}" 
-                         onclick="app. switchMarketingListTab('products')" 
+                         onclick="app.switchMarketingListTab('products')" 
                          style="padding: 10px 16px; cursor: pointer; border-bottom: 2px solid ${_currentMarketingListTab === 'products' ? 'var(--primary-600)' : 'transparent'}; color: ${_currentMarketingListTab === 'products' ? 'var(--primary-600)' : 'var(--gray-600)'}; font-weight: 500;">
                         Products
                     </div>
                     <div class="tab-item ${_currentMarketingListTab === 'events' ? 'active' : ''}" 
-                         onclick="app. switchMarketingListTab('events')" 
+                         onclick="app.switchMarketingListTab('events')" 
                          style="padding: 10px 16px; cursor: pointer; border-bottom: 2px solid ${_currentMarketingListTab === 'events' ? 'var(--primary-600)' : 'transparent'}; color: ${_currentMarketingListTab === 'events' ? 'var(--primary-600)' : 'var(--gray-600)'}; font-weight: 500;">
                         Events
                     </div>
                     <div class="tab-item ${_currentMarketingListTab === 'promotions' ? 'active' : ''}" 
-                         onclick="app. switchMarketingListTab('promotions')" 
+                         onclick="app.switchMarketingListTab('promotions')" 
                          style="padding: 10px 16px; cursor: pointer; border-bottom: 2px solid ${_currentMarketingListTab === 'promotions' ? 'var(--primary-600)' : 'transparent'}; color: ${_currentMarketingListTab === 'promotions' ? 'var(--primary-600)' : 'var(--gray-600)'}; font-weight: 500;">
                         Promotions
                     </div>
@@ -15038,8 +15038,8 @@ const exportKPIReport = async (format) => {
                                     </span>
                                 </td>
                                 <td>
-                                    <button class="btn-icon" onclick="app. openMarketingListEditModal('${item.id}')" title="Edit"><i class="fas fa-pencil-alt"></i></button>
-                                    <button class="btn-icon text-danger" onclick="app. deleteMarketingListItem('${item.id}')" title="Delete"><i class="fas fa-trash-alt"></i></button>
+                                    <button class="btn-icon" onclick="app.openMarketingListEditModal('${item.id}')" title="Edit"><i class="fas fa-pencil-alt"></i></button>
+                                    <button class="btn-icon text-danger" onclick="app.deleteMarketingListItem('${item.id}')" title="Delete"><i class="fas fa-trash-alt"></i></button>
                                 </td>
                             </tr>
                         `).join('')}
@@ -15072,8 +15072,8 @@ const exportKPIReport = async (format) => {
                                     </span>
                                 </td>
                                 <td>
-                                    <button class="btn-icon" onclick="app. openMarketingListEditModal('${item.id}')" title="Edit"><i class="fas fa-pencil-alt"></i></button>
-                                    <button class="btn-icon text-danger" onclick="app. deleteMarketingListItem('${item.id}')" title="Delete"><i class="fas fa-trash-alt"></i></button>
+                                    <button class="btn-icon" onclick="app.openMarketingListEditModal('${item.id}')" title="Edit"><i class="fas fa-pencil-alt"></i></button>
+                                    <button class="btn-icon text-danger" onclick="app.deleteMarketingListItem('${item.id}')" title="Delete"><i class="fas fa-trash-alt"></i></button>
                                 </td>
                             </tr>
                         `).join('')}
@@ -15104,8 +15104,8 @@ const exportKPIReport = async (format) => {
                                     </span>
                                 </td>
                                 <td>
-                                    <button class="btn-icon" onclick="app. openMarketingListEditModal('${item.id}')" title="Edit"><i class="fas fa-pencil-alt"></i></button>
-                                    <button class="btn-icon text-danger" onclick="app. deleteMarketingListItem('${item.id}')" title="Delete"><i class="fas fa-trash-alt"></i></button>
+                                    <button class="btn-icon" onclick="app.openMarketingListEditModal('${item.id}')" title="Edit"><i class="fas fa-pencil-alt"></i></button>
+                                    <button class="btn-icon text-danger" onclick="app.deleteMarketingListItem('${item.id}')" title="Delete"><i class="fas fa-trash-alt"></i></button>
                                 </td>
                             </tr>
                         `).join('')}
@@ -15192,7 +15192,7 @@ const exportKPIReport = async (format) => {
 
         UI.showModal('Edit ' + type.slice(0, -1), content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save Changes', type: 'primary', action: `await app. saveMarketingListItem('${id}')` }
+            { label: 'Save Changes', type: 'primary', action: `await app.saveMarketingListItem('${id}')` }
         ]);
     };
 
@@ -15261,13 +15261,13 @@ const exportKPIReport = async (format) => {
                         <p>WhatsApp Focus - Create templates and manage campaigns</p>
                     </div>
                     <div class="marketing-header-actions">
-                        <button class="btn primary" onclick="app. openCreateTemplateModal()">
+                        <button class="btn primary" onclick="app.openCreateTemplateModal()">
                             <i class="fas fa-plus"></i> Create Template
                         </button>
-                        <button class="btn secondary" onclick="app. openCreateCampaignModal()">
+                        <button class="btn secondary" onclick="app.openCreateCampaignModal()">
                             <i class="fas fa-bullhorn"></i> New Campaign
                         </button>
-                        <button class="btn secondary" onclick="app. switchMarketingTab('analytics')">
+                        <button class="btn secondary" onclick="app.switchMarketingTab('analytics')">
                             <i class="fas fa-chart-bar"></i> Analytics
                         </button>
                         ${(isManagement(_currentUser) || isSystemAdmin(_currentUser)) ? `
@@ -15279,7 +15279,7 @@ const exportKPIReport = async (format) => {
                 </div>
                 
                 <div class="marketing-tabs">
-                    <button class="marketing-tab ${_currentMarketingTab === 'templates' ? 'active' : ''}" onclick="app. switchMarketingTab('templates')">
+                    <button class="marketing-tab ${_currentMarketingTab === 'templates' ? 'active' : ''}" onclick="app.switchMarketingTab('templates')">
                         <i class="fas fa-layer-group"></i> Message Templates
                     </button>
                     <button class="marketing-tab ${_currentMarketingTab === 'campaigns' ? 'active' : ''}" onclick="(async () => { await app.switchMarketingTab('campaigns'); })()">
@@ -15369,8 +15369,8 @@ const exportKPIReport = async (format) => {
                                     <span class="status-badge ${p.is_active !== false ? 'status-active' : 'status-inactive'}">${p.is_active !== false ? 'Active' : 'Inactive'}</span>
                                 </td>
                                 <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">
-                                    <button class="btn btn-sm secondary" onclick="app. openAddProductModal(${p.id})">Edit</button>
-                                    <button class="btn btn-sm ${p.is_active !== false ? 'danger' : 'primary'}" onclick="app. toggleProductStatus(${p.id}, ${p.is_active !== false})">
+                                    <button class="btn btn-sm secondary" onclick="app.openAddProductModal(${p.id})">Edit</button>
+                                    <button class="btn btn-sm ${p.is_active !== false ? 'danger' : 'primary'}" onclick="app.toggleProductStatus(${p.id}, ${p.is_active !== false})">
                                         ${p.is_active !== false ? 'Deactivate' : 'Activate'}
                                     </button>
                                 </td>
@@ -15399,7 +15399,7 @@ const exportKPIReport = async (format) => {
 `;
         UI.showModal(id ? 'Edit Product' : 'Add Product', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save', type: 'primary', action: `await app. saveProduct(${id || 'null'})` }
+            { label: 'Save', type: 'primary', action: `await app.saveProduct(${id || 'null'})` }
         ]);
     };
 
@@ -15438,15 +15438,15 @@ const exportKPIReport = async (format) => {
                         <h3>Promotion Packages</h3>
                         <p class="text-muted">Manage bundled offers and track customer purchases</p>
                     </div>
-                    <button class="btn primary" onclick="app. openCreatePackageModal()">+ New Package</button>
+                    <button class="btn primary" onclick="app.openCreatePackageModal()">+ New Package</button>
                 </div>
 
                 <div class="packages-filters" style="display: flex; gap: 15px; margin-bottom: 20px;">
                     <div class="search-box" style="position: relative; flex: 1;">
                         <i class="fas fa-search" style="position: absolute; left: 12px; top: 50%; transform: await translateY(-50%); color: var(--gray-400);"></i>
-                        <input type="text" id="package-search" class="form-control" placeholder="Search by package name or product..." style="padding-left: 35px;" onkeyup="app. filterPackages()">
+                        <input type="text" id="package-search" class="form-control" placeholder="Search by package name or product..." style="padding-left: 35px;" onkeyup="app.filterPackages()">
                     </div>
-                    <select id="package-status-filter" class="form-control" style="width: 150px;" onchange="app. filterPackages()">
+                    <select id="package-status-filter" class="form-control" style="width: 150px;" onchange="app.filterPackages()">
                         <option value="all">All Status</option>
                         <option value="active">Active</option>
                         <option value="inactive">Inactive</option>
@@ -15485,7 +15485,7 @@ const exportKPIReport = async (format) => {
         return `
             <tr>
                 <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">
-                    <a href="javascript:async void(0)" onclick="app. viewPackageCustomers(${p.id})"><strong>${p.package_name || p.name}</strong></a>
+                    <a href="javascript:async void(0)" onclick="app.viewPackageCustomers(${p.id})"><strong>${p.package_name || p.name}</strong></a>
                 </td>
                 <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);" title="${productNames}">${abbreviatedProducts}</td>
                 <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">RM ${UI.formatNumber(p.price)}</td>
@@ -15499,9 +15499,9 @@ const exportKPIReport = async (format) => {
                 </td>
                 <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">
                     <div class="table-actions">
-                        <button class="btn-icon" onclick="app. openCreatePackageModal(${p.id})" title="Edit"><i class="fas fa-edit"></i></button>
-                        <button class="btn-icon" onclick="app. viewPackageCustomers(${p.id})" title="View Customers"><i class="fas fa-users"></i></button>
-                        <button class="btn-icon text-danger" onclick="app. deletePackage(${p.id})" title="Delete"><i class="fas fa-trash"></i></button>
+                        <button class="btn-icon" onclick="app.openCreatePackageModal(${p.id})" title="Edit"><i class="fas fa-edit"></i></button>
+                        <button class="btn-icon" onclick="app.viewPackageCustomers(${p.id})" title="View Customers"><i class="fas fa-users"></i></button>
+                        <button class="btn-icon text-danger" onclick="app.deletePackage(${p.id})" title="Delete"><i class="fas fa-trash"></i></button>
                     </div>
                 </td>
             </tr>
@@ -15596,7 +15596,7 @@ const exportKPIReport = async (format) => {
 
         UI.showModal(isEdit ? 'Edit Promotion Package' : 'Create Promotion Package', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: isEdit ? 'Update Package' : 'Create Package', type: 'primary', action: `await app. savePackage(${id || 'null'})` }
+            { label: isEdit ? 'Update Package' : 'Create Package', type: 'primary', action: `await app.savePackage(${id || 'null'})` }
         ]);
     };
 
@@ -15637,14 +15637,14 @@ const exportKPIReport = async (format) => {
         }
 
         UI.hideModal();
-        if (_currentMarketingTab === 'packages') await app. switchMarketingTab('packages');
+        if (_currentMarketingTab === 'packages') await app.switchMarketingTab('packages');
     };
 
     const deletePackage = async (id) => {
         if (confirm("Are you sure you want to delete this promotion package? This action cannot be undone.")) {
             await AppDataStore.delete('promotions', id);
             UI.toast.success("Package deleted");
-            if (_currentMarketingTab === 'packages') await app. switchMarketingTab('packages');
+            if (_currentMarketingTab === 'packages') await app.switchMarketingTab('packages');
         }
     };
 
@@ -15747,7 +15747,7 @@ const exportKPIReport = async (format) => {
                 <div class="templates-list">
                     <div class="templates-search">
                         <i class="fas fa-search"></i>
-                        <input type="text" id="template-search" placeholder="Search templates..." onkeyup="app. searchTemplates()">
+                        <input type="text" id="template-search" placeholder="Search templates..." onkeyup="app.searchTemplates()">
                     </div>
                     <div class="templates-grid" id="templates-grid">
                         ${templatesHtml}
@@ -15811,13 +15811,13 @@ const exportKPIReport = async (format) => {
         const colorClass = categoryColors[template.category] || 'badge-gray';
 
         return `
-            <div class="template-card" onclick="app. previewTemplate(${template.id})">
+            <div class="template-card" onclick="app.previewTemplate(${template.id})">
                 <div class="template-card-header">
                     <span class="template-badge ${colorClass}">${template.category}</span>
                     <div class="template-card-actions">
-                        <button class="btn-icon" onclick="event.stopPropagation(); app. editTemplate(${template.id})" title="Edit"><i class="fas fa-edit"></i></button>
-                        <button class="btn-icon" onclick="event.stopPropagation(); app. copyTemplate(${template.id})" title="Copy"><i class="fas fa-copy"></i></button>
-                        <button class="btn-icon" onclick="event.stopPropagation(); app. deleteTemplate(${template.id})" title="Delete"><i class="fas fa-trash"></i></button>
+                        <button class="btn-icon" onclick="event.stopPropagation(); app.editTemplate(${template.id})" title="Edit"><i class="fas fa-edit"></i></button>
+                        <button class="btn-icon" onclick="event.stopPropagation(); app.copyTemplate(${template.id})" title="Copy"><i class="fas fa-copy"></i></button>
+                        <button class="btn-icon" onclick="event.stopPropagation(); app.deleteTemplate(${template.id})" title="Delete"><i class="fas fa-trash"></i></button>
                     </div>
                 </div>
                 <h4 class="template-title">${template.template_name}</h4>
@@ -15889,7 +15889,7 @@ const exportKPIReport = async (format) => {
 
         UI.showModal(isEdit ? 'Edit Template' : 'Create WhatsApp Template', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: isEdit ? 'Update Template' : 'Save Template', type: 'primary', action: `await app. saveTemplate(${isEdit ? templateId : 'null'})` }
+            { label: isEdit ? 'Update Template' : 'Save Template', type: 'primary', action: `await app.saveTemplate(${isEdit ? templateId : 'null'})` }
         ]);
     };
 
@@ -16151,7 +16151,7 @@ const exportKPIReport = async (format) => {
         const responseRate = campaign.sent_count > 0 ? Math.round((campaign.replied_count / campaign.sent_count) * 100) : 0;
 
         return `
-            <tr onclick="app. viewCampaignDetails(${campaign.id})">
+            <tr onclick="app.viewCampaignDetails(${campaign.id})">
                 <td>
                     <strong>${campaign.campaign_name}</strong><br>
                     <small class="text-muted">${template?.template_name || 'No Template'}</small>
@@ -16168,11 +16168,11 @@ const exportKPIReport = async (format) => {
                 <td>${responseRate}%</td>
                 <td>
                     <div class="table-actions">
-                        ${campaign.status === 'draft' ? `<button class="btn-icon" onclick="event.stopPropagation(); app. editCampaign(${campaign.id})" title="Edit"><i class="fas fa-edit"></i></button>` : ''}
-                        ${campaign.status === 'active' ? `<button class="btn-icon" onclick="event.stopPropagation(); app. pauseCampaign(${campaign.id})" title="Pause"><i class="fas fa-pause"></i></button>` : ''}
-                        ${campaign.status === 'paused' ? `<button class="btn-icon" onclick="event.stopPropagation(); app. resumeCampaign(${campaign.id})" title="Resume"><i class="fas fa-play"></i></button>` : ''}
-                        <button class="btn-icon" onclick="event.stopPropagation(); app. duplicateCampaign(${campaign.id})" title="Duplicate"><i class="fas fa-copy"></i></button>
-                        <button class="btn-icon" onclick="event.stopPropagation(); app. deleteCampaign(${campaign.id})" title="Delete"><i class="fas fa-trash"></i></button>
+                        ${campaign.status === 'draft' ? `<button class="btn-icon" onclick="event.stopPropagation(); app.editCampaign(${campaign.id})" title="Edit"><i class="fas fa-edit"></i></button>` : ''}
+                        ${campaign.status === 'active' ? `<button class="btn-icon" onclick="event.stopPropagation(); app.pauseCampaign(${campaign.id})" title="Pause"><i class="fas fa-pause"></i></button>` : ''}
+                        ${campaign.status === 'paused' ? `<button class="btn-icon" onclick="event.stopPropagation(); app.resumeCampaign(${campaign.id})" title="Resume"><i class="fas fa-play"></i></button>` : ''}
+                        <button class="btn-icon" onclick="event.stopPropagation(); app.duplicateCampaign(${campaign.id})" title="Duplicate"><i class="fas fa-copy"></i></button>
+                        <button class="btn-icon" onclick="event.stopPropagation(); app.deleteCampaign(${campaign.id})" title="Delete"><i class="fas fa-trash"></i></button>
                     </div>
                 </td>
             </tr>
@@ -16216,8 +16216,8 @@ const exportKPIReport = async (format) => {
                 <div class="step-navigation">
                     <span class="step-indicator">Step 1 of 4</span>
                     <div class="step-buttons">
-                        <button class="btn secondary" id="btn-prev" style="display:none;" onclick="app. prevCampaignStep()">Previous</button>
-                        <button class="btn primary" id="btn-next" onclick="app. nextCampaignStep()">Next</button>
+                        <button class="btn secondary" id="btn-prev" style="display:none;" onclick="app.prevCampaignStep()">Previous</button>
+                        <button class="btn primary" id="btn-next" onclick="app.nextCampaignStep()">Next</button>
                     </div>
                 </div>
             </div>
@@ -16300,9 +16300,9 @@ const exportKPIReport = async (format) => {
         btnPrev.style.display = _currentCampaignStep > 1 ? 'block' : 'none';
         btnNext.textContent = _currentCampaignStep === 4 ? 'Launch Campaign' : 'Next';
         if (_currentCampaignStep === 4) {
-            btnNext.onclick = async () => await app. saveCampaign();
+            btnNext.onclick = async () => await app.saveCampaign();
         } else {
-            btnNext.onclick = async () => await app. nextCampaignStep();
+            btnNext.onclick = async () => await app.nextCampaignStep();
         }
 
         if (_currentMarketingTab === 'analytics') {
@@ -16721,7 +16721,7 @@ const simulateCampaignSending = async (campaignId) => {
                             `).join('')}
                         </tbody>
                     </table>
-                    <button class="btn-sm secondary" style="width:100%; margin-top:12px;" onclick="app. exportAnalyticsReport()">Export Detailed Report</button>
+                    <button class="btn-sm secondary" style="width:100%; margin-top:12px;" onclick="app.exportAnalyticsReport()">Export Detailed Report</button>
                 </div>
             </div>
 `;
@@ -16879,9 +16879,9 @@ const simulateCampaignSending = async (campaignId) => {
                         </div>
                     </div>
                     <div class="campaign-actions">
-                        <button class="btn secondary" onclick="app. duplicateCampaign(${campaignId})"><i class="fas fa-copy"></i> Duplicate</button>
-                        <button class="btn secondary" onclick="app. exportCampaignReport(${campaignId})"><i class="fas fa-download"></i> Export Report</button>
-                        ${campaign.status === 'active' ? `<button class="btn warning" onclick="app. pauseCampaign(${campaignId})"><i class="fas fa-pause"></i> Pause</button>` : ''}
+                        <button class="btn secondary" onclick="app.duplicateCampaign(${campaignId})"><i class="fas fa-copy"></i> Duplicate</button>
+                        <button class="btn secondary" onclick="app.exportCampaignReport(${campaignId})"><i class="fas fa-download"></i> Export Report</button>
+                        ${campaign.status === 'active' ? `<button class="btn warning" onclick="app.pauseCampaign(${campaignId})"><i class="fas fa-pause"></i> Pause</button>` : ''}
                     </div>
                 </div>
 
@@ -16937,8 +16937,8 @@ const simulateCampaignSending = async (campaignId) => {
                         <div class="recipient-header">
                             <h3><i class="fas fa-users"></i> Recipient List</h3>
                             <div class="recipient-filters">
-                                <input type="text" id="recipient-search" placeholder="Search recipients..." onkeyup="app. filterRecipients(${campaignId})">
-                                <select id="recipient-status-filter" onchange="app. filterRecipients(${campaignId})">
+                                <input type="text" id="recipient-search" placeholder="Search recipients..." onkeyup="app.filterRecipients(${campaignId})">
+                                <select id="recipient-status-filter" onchange="app.filterRecipients(${campaignId})">
                                     <option value="all">All Status</option>
                                     <option value="sent">Sent</option>
                                     <option value="delivered">Delivered</option>
@@ -16983,8 +16983,8 @@ const simulateCampaignSending = async (campaignId) => {
                 <td><span class="status-badge status-${msg.status}">${msg.status}</span></td>
                 <td>${msg.sent_at ? UI.formatDate(msg.sent_at) : '-'}</td>
                 <td>
-                    <button class="btn-sm secondary" onclick="app. viewRecipientHistory(${msg.id})">History</button>
-                    ${msg.status === 'failed' ? `<button class="btn-sm primary" onclick="app. retryMessage(${msg.id})">Retry</button>` : ''}
+                    <button class="btn-sm secondary" onclick="app.viewRecipientHistory(${msg.id})">History</button>
+                    ${msg.status === 'failed' ? `<button class="btn-sm primary" onclick="app.retryMessage(${msg.id})">Retry</button>` : ''}
                 </td>
             </tr>
         `;
@@ -17056,7 +17056,7 @@ const simulateCampaignSending = async (campaignId) => {
         if (msg) {
             await AppDataStore.update('campaign_messages', messageId, { status: 'queued', retry_count: (msg.retry_count || 0) + 1 });
             UI.toast.success('Message queued for retry');
-            await app. viewCampaignDetails(msg.campaign_id);
+            await app.viewCampaignDetails(msg.campaign_id);
         }
     };
 
@@ -17157,7 +17157,7 @@ const simulateCampaignSending = async (campaignId) => {
                     <p style="margin-bottom: 20px; color: var(--gray-600); font-size: 14px;">Log in as a demo user to access CRM features:</p>
                     <div class="demo-users-list" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
                         ${demoUsers.map(u => `
-                            <div class="demo-user-item" onclick="app. loginAs('${u.id}')" style="padding: 12px; border: 1px solid var(--gray-200); border-radius: 8px; cursor: pointer; transition: all 0.2s; background: white; text-align: left;">
+                            <div class="demo-user-item" onclick="app.loginAs('${u.id}')" style="padding: 12px; border: 1px solid var(--gray-200); border-radius: 8px; cursor: pointer; transition: all 0.2s; background: white; text-align: left;">
                                 <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
                                     <div class="avatar-sm" style="width: 28px; height: 28px; background: var(--primary-color); color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 11px;">
                                         ${(u.full_name || 'U').split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2)}
@@ -17186,7 +17186,7 @@ const simulateCampaignSending = async (campaignId) => {
                     <p style="color: var(--gray-500); text-transform: capitalize; margin-bottom: 32px; font-weight: 500;">${currentUser.role}</p>
                     
                     <div style="border-top: 1px solid var(--gray-100); padding-top: 20px;">
-                        <button class="btn danger" onclick="app. logout()" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 10px; padding: 14px; font-weight: 600;">
+                        <button class="btn danger" onclick="app.logout()" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 10px; padding: 14px; font-weight: 600;">
                             <i class="fas fa-sign-out-alt"></i> LOGOUT FROM SYSTEM
                         </button>
                     </div>
@@ -17289,12 +17289,12 @@ const simulateCampaignSending = async (campaignId) => {
                 ${getWizardStepsHtml(1)}
                 <div class="step-content">
                     <h3>Step 1: Upload File</h3>
-                    <div class="upload-area-large" id="import-dropzone" ondragover="event.preventDefault()" ondrop="app. handleImportFileDrop(event)">
+                    <div class="upload-area-large" id="import-dropzone" ondragover="event.preventDefault()" ondrop="app.handleImportFileDrop(event)">
                         <i class="fas fa-cloud-upload-alt"></i>
                         <h4>Click or Drag Excel file to upload</h4>
                         <p>Supported formats: .xlsx, .xls, .csv</p>
                         <p class="file-limit">Max file size: 10MB</p>
-                        <input type="file" id="import-file-input" accept=".xlsx,.xls,.csv" style="display:none" onchange="app. handleImportFileSelect(event)">
+                        <input type="file" id="import-file-input" accept=".xlsx,.xls,.csv" style="display:none" onchange="app.handleImportFileSelect(event)">
                         <button class="btn primary" onclick="document.getElementById('import-file-input').click()">Browse Files</button>
                     </div>
                     <div id="file-info" style="display:none;margin-top:20px;"></div>
@@ -17302,7 +17302,7 @@ const simulateCampaignSending = async (campaignId) => {
                 </div>
                 <div class="wizard-footer">
                     <button class="btn secondary" onclick="UI.hideModal()">Cancel</button>
-                    <button class="btn primary" id="step1-next" onclick="app. importNextStep()" disabled>Next: Field Mapping</button>
+                    <button class="btn primary" id="step1-next" onclick="app.importNextStep()" disabled>Next: Field Mapping</button>
                 </div>
             </div>
         `;
@@ -17327,8 +17327,8 @@ const simulateCampaignSending = async (campaignId) => {
                     </div>
                 </div>
                 <div class="wizard-footer">
-                    <button class="btn secondary" onclick="app. importPrevStep()">Back</button>
-                    <button class="btn primary" onclick="app. importNextStep()">Next: Validation</button>
+                    <button class="btn secondary" onclick="app.importPrevStep()">Back</button>
+                    <button class="btn primary" onclick="app.importNextStep()">Next: Validation</button>
                 </div>
             </div>
         `;
@@ -17369,8 +17369,8 @@ const simulateCampaignSending = async (campaignId) => {
                     </div>
                 </div>
                 <div class="wizard-footer">
-                    <button class="btn secondary" onclick="app. importPrevStep()">Back</button>
-                    <button class="btn primary" onclick="app. importNextStep()">Next: Duplicate Handling</button>
+                    <button class="btn secondary" onclick="app.importPrevStep()">Back</button>
+                    <button class="btn primary" onclick="app.importNextStep()">Next: Duplicate Handling</button>
                 </div>
             </div>
         `;
@@ -17403,7 +17403,7 @@ const simulateCampaignSending = async (campaignId) => {
                 </div>
                 <div class="wizard-footer">
                     <button class="btn secondary" onclick="(async () => { await app.importPrevStep(); })()">Back</button>
-                    <button class="btn primary" onclick="app. importNextStep()">Next: Import</button>
+                    <button class="btn primary" onclick="app.importNextStep()">Next: Import</button>
                 </div>
             </div>
         `;
@@ -17440,8 +17440,8 @@ const simulateCampaignSending = async (campaignId) => {
                     </div>
                 </div>
                 <div class="wizard-footer">
-                    <button class="btn secondary" onclick="app. importPrevStep()">Back</button>
-                    <button class="btn primary" id="start-import-btn" onclick="app. startImport()"><i class="fas fa-play"></i> START IMPORT</button>
+                    <button class="btn secondary" onclick="app.importPrevStep()">Back</button>
+                    <button class="btn primary" id="start-import-btn" onclick="app.startImport()"><i class="fas fa-play"></i> START IMPORT</button>
                 </div>
             </div>
         `;
@@ -17605,7 +17605,7 @@ const startImport = async () => {
                         <button class="btn secondary" onclick="app.refreshFollowupStats()"><i class="fas fa-sync-alt"></i> Refresh Stats</button>
                         <button class="btn secondary" onclick="app.exportFollowupReport()"><i class="fas fa-download"></i> Export Report</button>
                         <button class="btn secondary" onclick="app.configureAlerts()"><i class="fas fa-bell"></i> Configure Alerts</button>
-                        <button class="btn primary" onclick="app. navigateTo('import')"><i class="fas fa-upload"></i> Bulk Import</button>
+                        <button class="btn primary" onclick="app.navigateTo('import')"><i class="fas fa-upload"></i> Bulk Import</button>
                     </div>
                 </div>
                 <div class="team-summary-cards">${renderTeamSummaryCards()}</div>
@@ -17655,7 +17655,7 @@ const startImport = async () => {
         return agents.map(a => {
             const rate = Math.round((a.followed / a.assigned) * 100);
             const cls = rate < 70 ? 'rate-bad' : rate < 90 ? 'rate-warning' : 'rate-good';
-            return `<tr><td><strong>${a.name}</strong></td><td>Team ${a.team}</td><td>${a.assigned}</td><td>${a.followed}</td><td><span class="rate-badge ${cls}">${rate}%</span></td><td>${a.i37}</td><td>${a.i814}</td><td>${a.i15}</td><td><button class="btn-icon" onclick="app.viewAgentDetails('${a.name}')" title="View"><i class="fas fa-eye"></i></button><button class="btn-icon" onclick="app. openReassignModal('${a.name}')" title="Reassign"><i class="fas fa-exchange-alt"></i></button><button class="btn-icon" onclick="app.bulkReassign('${a.name}')" title="Bulk Reassign"><i class="fas fa-users"></i></button></td></tr>`;
+            return `<tr><td><strong>${a.name}</strong></td><td>Team ${a.team}</td><td>${a.assigned}</td><td>${a.followed}</td><td><span class="rate-badge ${cls}">${rate}%</span></td><td>${a.i37}</td><td>${a.i814}</td><td>${a.i15}</td><td><button class="btn-icon" onclick="app.viewAgentDetails('${a.name}')" title="View"><i class="fas fa-eye"></i></button><button class="btn-icon" onclick="app.openReassignModal('${a.name}')" title="Reassign"><i class="fas fa-exchange-alt"></i></button><button class="btn-icon" onclick="app.bulkReassign('${a.name}')" title="Bulk Reassign"><i class="fas fa-users"></i></button></td></tr>`;
         }).join('');
     };
 
@@ -17667,7 +17667,7 @@ const startImport = async () => {
             { name: 'Wong Chee Meng', agent: 'Ah Seng', days: 9, score: 590, deadline: '25 Mar 2026', status: 'warning' },
             { name: 'Lim Siew Ling', agent: 'Mei Ling', days: 8, score: 710, deadline: '22 Mar 2026', status: 'warning' }
         ];
-        return prospects.map(p => `<tr><td><strong>${p.name}</strong></td><td>${p.agent}</td><td class="${p.days > 14 ? 'critical' : 'warning'}">${p.days} days</td><td>${p.score}</td><td>${p.deadline}</td><td><span class="status-badge status-${p.status}">${p.status === 'critical' ? '🔴 Critical' : '🟡 Warning'}</span></td><td><button class="btn-icon" onclick="app. openReassignModal('${p.name}')"><i class="fas fa-exchange-alt"></i></button><button class="btn-icon" onclick="app. contactProspect('${p.name}')"><i class="fas fa-phone"></i></button></td></tr>`).join('');
+        return prospects.map(p => `<tr><td><strong>${p.name}</strong></td><td>${p.agent}</td><td class="${p.days > 14 ? 'critical' : 'warning'}">${p.days} days</td><td>${p.score}</td><td>${p.deadline}</td><td><span class="status-badge status-${p.status}">${p.status === 'critical' ? '🔴 Critical' : '🟡 Warning'}</span></td><td><button class="btn-icon" onclick="app.openReassignModal('${p.name}')"><i class="fas fa-exchange-alt"></i></button><button class="btn-icon" onclick="app.contactProspect('${p.name}')"><i class="fas fa-phone"></i></button></td></tr>`).join('');
     };
 
     const renderReassignmentHistory = async () => {
@@ -18494,11 +18494,11 @@ Object.assign(window.app, appLogic);
 // ========== SECURITY INITIALIZATION ==========
 const initSecurity = async () => {
     console.log('Initializing security features...');
-    if (typeof window.app.checkForSecurityIncidents !== 'undefined') window.app. checkForSecurityIncidents();
+    if (typeof window.app.checkForSecurityIncidents !== 'undefined') window.app.checkForSecurityIncidents();
     if (typeof window.app.monitorLoginAttempts !== 'undefined') window.app.monitorLoginAttempts();
-    if (typeof window.app.initSessionTimeout !== 'undefined') window.app. initSessionTimeout();
-    if (typeof window.app.checkExpiredConsents !== 'undefined') window.app. checkExpiredConsents();
-    if (typeof window.app.scheduleRetentionJobs !== 'undefined') window.app. scheduleRetentionJobs();
+    if (typeof window.app.initSessionTimeout !== 'undefined') window.app.initSessionTimeout();
+    if (typeof window.app.checkExpiredConsents !== 'undefined') window.app.checkExpiredConsents();
+    if (typeof window.app.scheduleRetentionJobs !== 'undefined') window.app.scheduleRetentionJobs();
     console.log('Security features initialized');
 };
 
@@ -18519,7 +18519,7 @@ const logoutDueToInactivity = async () => {
     if (window.UI && window.UI.toast) window.UI.toast.warning('Session expired due to inactivity');
     if (typeof AuditLogger !== 'undefined') AuditLogger.warn("AUTH", "LOGOUT", { reason: 'session_timeout' });
     if (typeof window.app.logout === 'function') {
-        window.app. logout();
+        window.app.logout();
     } else if (typeof Auth !== 'undefined') {
         await Auth. logout();
         window.location.reload();
@@ -18546,7 +18546,7 @@ console.log('Property descriptor:', Object.getOwnPropertyDescriptor(window, 'App
         const critical = incidents.filter(i => i.severity === 'critical');
         if (critical.length > 0) {
             if (window.UI && window.UI.toast) window.UI.toast.error(`${critical.length} critical security incidents require attention`, 0);
-            window.app. addSecurityAlertIcon();
+            window.app.addSecurityAlertIcon();
         }
     }
 };
@@ -18558,7 +18558,7 @@ const addSecurityAlertIcon = async () => {
         alert.className = 'security-alert';
         alert.innerHTML = '<i class="fas fa-exclamation-triangle" style="color:red; cursor:pointer; font-size:20px; margin-right:15px;"></i>';
         alert.title = 'Security incidents require attention';
-        alert.onclick = () => window.app. showSecurityDashboard();
+        alert.onclick = () => window.app.showSecurityDashboard();
         header.insertBefore(alert, header.firstChild);
     }
 };
@@ -18745,7 +18745,7 @@ const showAdminDashboard = async () => {
                     <div class="kpi-title" style="color: var(--gray-600); font-size: 14px; margin-bottom: 8px;">Active Tenants</div>
                     <div class="kpi-value" style="font-size: 24px; font-weight: bold; color: var(--gray-900);">${activeTenants} / ${tenants.length}</div>
                 </div>
-                <div class="kpi-card" style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); cursor: pointer;" onclick="app. showDeploymentCenter()">
+                <div class="kpi-card" style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); cursor: pointer;" onclick="app.showDeploymentCenter()">
                     <div class="kpi-title" style="color: var(--gray-600); font-size: 14px; margin-bottom: 8px;">System Version</div>
                     <div class="kpi-value" style="font-size: 24px; font-weight: bold; color: var(--gray-900);">
                         ${updates && updates.hasUpdate ? '<span style="color: var(--warning-color); font-size:16px;">Update Available</span>' : 'Up to Date'}
@@ -18931,7 +18931,7 @@ const showBackupManager = async () => {
                 <h2>Backup & Restore</h2>
                 <div>
                     <button class="btn secondary" onclick="(async () => { await app.createBackup('INCREMENTAL'); })()">Incremental Backup</button>
-                    <button class="btn primary" onclick="app. createBackup('FULL')"><i class="fas fa-save"></i> Full Backup</button>
+                    <button class="btn primary" onclick="app.createBackup('FULL')"><i class="fas fa-save"></i> Full Backup</button>
                 </div>
             </div>
             <div class="data-table-container">
@@ -19021,7 +19021,7 @@ const showDeploymentCenter = async () => {
         <div class="deployment-center" style="padding: 24px;">
             <div class="header-actions" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
                 <h2>Deployment Center</h2>
-                <button class="btn primary" onclick="app. executeDeployment()"><i class="fas fa-rocket"></i> Deploy New Version</button>
+                <button class="btn primary" onclick="app.executeDeployment()"><i class="fas fa-rocket"></i> Deploy New Version</button>
             </div>
             
             <div class="data-table-container">
@@ -19043,7 +19043,7 @@ const showDeploymentCenter = async () => {
                                 <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);"><span class="status-badge status-${d.status.toLowerCase()}">${d.status}</span></td>
                                 <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">${new Date(d.deployed_at).toLocaleString()}</td>
                                 <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">
-                                    ${d.status === 'COMPLETED' ? `<button class="btn btn-sm warning" onclick="app. rollbackDeployment('${d.version}')">Rollback</button>` : '-'}
+                                    ${d.status === 'COMPLETED' ? `<button class="btn btn-sm warning" onclick="app.rollbackDeployment('${d.version}')">Rollback</button>` : '-'}
                                 </td>
                             </tr>
                         `).join('') : '<tr><td colspan="5" style="padding: 16px; text-align: center;">No deployment history.</td></tr>'}
