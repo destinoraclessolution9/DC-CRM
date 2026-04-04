@@ -520,13 +520,13 @@ const appLogic = (() => {
                 </div>
                 
                 <div class="search-actions">
-                    <button class="btn primary" onclick="app. async executeSearch()">
+                    <button class="btn primary" onclick="(async () => { await app.executeSearch(); })()">
                         <i class="fas fa-search"></i> Apply Filters
                     </button>
                     <button class="btn secondary" onclick="app.clearAllFilters()">
                         <i class="fas fa-times"></i> Clear All
                     </button>
-                    <button class="btn secondary" onclick="app. async openSaveSearchModal()">
+                    <button class="btn secondary" onclick="(async () => { await app.openSaveSearchModal(); })()">
                         <i class="fas fa-save"></i> Save Search
                     </button>
                     <button class="btn secondary" onclick="app.exportResults('csv')">
@@ -1494,10 +1494,10 @@ const appLogic = (() => {
                         <p>Manage, organize, and share your documents</p>
                     </div>
                     <div class="dms-actions">
-                        <button class="btn primary" onclick="app. async openUploadModal()">
+                        <button class="btn primary" onclick="(async () => { await app.openUploadModal(); })()">
                             <i class="fas fa-upload"></i> Upload File
                         </button>
-                        <button class="btn secondary" onclick="app. async openNewFolderModal()">
+                        <button class="btn secondary" onclick="(async () => { await app.openNewFolderModal(); })()">
                             <i class="fas fa-folder-plus"></i> New Folder
                         </button>
                     </div>
@@ -1507,7 +1507,7 @@ const appLogic = (() => {
                     <div class="folder-sidebar">
                         <div class="sidebar-header">
                             <h3>Folders</h3>
-                            <button class="btn-icon" onclick="app. async refreshFolderTree()" title="Refresh">
+                            <button class="btn-icon" onclick="(async () => { await app.refreshFolderTree(); })()" title="Refresh">
                                 <i class="fas fa-sync-alt"></i>
                             </button>
                         </div>
@@ -1521,14 +1521,14 @@ const appLogic = (() => {
                             <div class="explorer-controls">
                                 <div class="search-filter-bar">
                                     <i class="fas fa-search"></i>
-                                    <input type="text" id="file-search" placeholder="Search files..." onkeyup="app. async searchFiles(this.value)">
-                                    <select id="file-sort" class="form-control" onchange="app. async sortFiles(this.value)">
+                                    <input type="text" id="file-search" placeholder="Search files..." onkeyup="(async () => { await app.searchFiles(this.value); })()">
+                                    <select id="file-sort" class="form-control" onchange="(async () => { await app.sortFiles(this.value); })()">
                                         <option value="name">Sort by Name</option>
                                         <option value="date">Sort by Date</option>
                                         <option value="size">Sort by Size</option>
                                     </select>
                                     <div class="view-toggle">
-                                        <button class="btn-icon ${_viewMode === 'list' ? 'active' : ''}" onclick="app. async setViewMode('list')">
+                                        <button class="btn-icon ${_viewMode === 'list' ? 'active' : ''}" onclick="(async () => { await app.setViewMode('list'); })()">
                                             <i class="fas fa-list"></i>
                                         </button>
                                         <button class="btn-icon ${_viewMode === 'grid' ? 'active' : ''}" onclick="app. setViewMode('grid')">
@@ -1540,9 +1540,9 @@ const appLogic = (() => {
                             </div>
                             
                             <div class="special-filters" style="margin-top: 15px; display: flex; gap: 10px;">
-                                <button class="btn link-btn" onclick="app. async showRecentFiles()"><i class="fas fa-clock"></i> Recent</button>
-                                <button class="btn link-btn" onclick="app. async showAllFiles()"><i class="fas fa-copy"></i> All Files</button>
-                                <button class="btn link-btn" onclick="app. async showStarredFiles()"><i class="fas fa-star"></i> Starred</button>
+                                <button class="btn link-btn" onclick="(async () => { await app.showRecentFiles(); })()"><i class="fas fa-clock"></i> Recent</button>
+                                <button class="btn link-btn" onclick="(async () => { await app.showAllFiles(); })()"><i class="fas fa-copy"></i> All Files</button>
+                                <button class="btn link-btn" onclick="(async () => { await app.showStarredFiles(); })()"><i class="fas fa-star"></i> Starred</button>
                             </div>
                         </div>
                         
@@ -1560,7 +1560,7 @@ const appLogic = (() => {
         if (!treeContainer) return;
         if (parentId === null) treeContainer.innerHTML = '';
 
-        const folders = await AppDataStore.getAll('folders')
+        const folders = (await AppDataStore.getAll('folders'))
             .filter(f => f.parent_id === parentId)
             .sort((a, b) => a.name.localeCompare(b.name));
 
@@ -1612,7 +1612,7 @@ const appLogic = (() => {
         UI.showModal('New Folder', `
             <div class="form-group"><label>Folder Name</label><input type="text" id="new-folder-name" class="form-control" placeholder="Enter name..."></div>
             <div class="form-group"><label>Label Color</label><input type="color" id="new-folder-color" class="form-control" value="#f59e0b"></div>
-        `, [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Create', type: 'primary', action: 'await app. createFolder()' }]);
+        `, [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Create', type: 'primary', action: '(async () => { await app.createFolder(); })()' }]);
     };
 
     const createFolder = async () => {
@@ -1625,7 +1625,7 @@ const appLogic = (() => {
     const renameFolder = async (id) => {
         const folder = await AppDataStore.getById('folders', id);
         UI.showModal('Rename Folder', `<div class="form-group"><label>New Name</label><input type="text" id="rename-folder-input" class="form-control" value="${folder.name}"></div>`,
-            [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Rename', type: 'primary', action: `await app. confirmRenameFolder(${id})` }]);
+            [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Rename', type: 'primary', action: `(async () => { await app.confirmRenameFolder(${id}); })()` }]);
     };
     window.app.confirmRenameFolder = async (id) => {
         const name = document.getElementById('rename-folder-input')?.value;
@@ -1637,7 +1637,7 @@ const appLogic = (() => {
         const hasSub =(await AppDataStore.getAll('folders')).some(f => f.parent_id === id);
         const hasFiles = (await AppDataStore.getAll('documents')).some(d => d.folder_id === id);
         if (hasSub || hasFiles) return UI.toast.error('Cannot delete: Folder is not empty');
-        UI.showModal('Delete Folder', '<p>Are you sure?</p>', [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Delete', type: 'primary', action: `await app. confirmDeleteFolder(${id})` }]);
+        UI.showModal('Delete Folder', '<p>Are you sure?</p>', [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Delete', type: 'primary', action: `(async () => { await app.confirmDeleteFolder(${id}); })()` }]);
     };
     window.app.confirmDeleteFolder = async (id) => { await AppDataStore.delete('folders', id); UI.hideModal(); if (_currentFolder === id) _currentFolder = null; await renderFolderTree(); await loadFolderContents(); };
 
@@ -1857,7 +1857,7 @@ const appLogic = (() => {
                 <thead>
                     <tr>
                         <th style="width: 30px;">
-                            <input type="checkbox" onchange="app. async selectAllFiles()" 
+                            <input type="checkbox" onchange="(async () => { await app.selectAllFiles(); })()" 
                                    ${_selectedFiles.length === files.length && files.length > 0 ? 'checked' : ''}>
                         </th>
                         <th onclick="app. sortFiles('name')" style="cursor: pointer;">
@@ -1933,7 +1933,7 @@ const appLogic = (() => {
                     <i class="fas fa-folder-open fa-5x"></i>
                     <h3>This folder is empty</h3>
                     <p>Upload files or create a new folder to get started</p>
-                    <button class="btn primary" onclick="app. async openUploadModal()">
+                    <button class="btn primary" onclick="(async () => { await app.openUploadModal(); })()">
                         <i class="fas fa-upload"></i> Upload Files
                     </button>
                 </div>
@@ -2058,7 +2058,7 @@ const appLogic = (() => {
     <p class="text-error">This action cannot be undone.</p>`,
             [
                 { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-                { label: 'Delete', type: 'primary', action: 'await app. async confirmDeleteSelected()' }
+                { label: 'Delete', type: 'primary', action: '(async () => { await app.confirmDeleteSelected(); })()' }
             ]
         );
     };
@@ -2274,7 +2274,7 @@ In a production system, this would show the actual file contents.
 
         UI.showModal(`Preview: ${file.filename}`, previewContent, [
             { label: 'Download', type: 'secondary', action: `app.downloadFile(${fileId})` },
-            { label: 'Share', type: 'secondary', action: `await app. openShareModal(${fileId})` },
+            { label: 'Share', type: 'secondary', action: `(async () => { await app.openShareModal(${fileId}); })()` },
             { label: 'Close', type: 'primary', action: 'UI.hideModal()' }
         ], 'fullscreen');
     };
@@ -2356,7 +2356,7 @@ In a production system, this would show the actual file contents.
         `;
 
         UI.showModal('File Information', content, [
-            { label: 'Edit Description', type: 'secondary', action: `await app. editFileDescription(${fileId})` },
+            { label: 'Edit Description', type: 'secondary', action: `(async () => { await app.editFileDescription(${fileId}); })()` },
             { label: 'Close', type: 'primary', action: 'UI.hideModal()' }
         ]);
     };
@@ -2372,7 +2372,7 @@ In a production system, this would show the actual file contents.
     const editFileDescription = async (fileId) => {
         const file = await AppDataStore.getById('documents', fileId);
         UI.showModal('Edit Description', `<div class="form-group"><label>Description</label><textarea id="edit-file-desc" class="form-control" rows="4">${file.description || ''}</textarea></div>`,
-            [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Save', type: 'primary', action: `await app. saveFileDescription(${fileId})` }]);
+            [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Save', type: 'primary', action: `(async () => { await app.saveFileDescription(${fileId}); })()` }]);
     };
 
     const saveFileDescription = async (fileId) => {
@@ -2741,7 +2741,7 @@ In a production system, this would show the actual file contents.
                 <i class="fas fa-chart-line"></i>
                 <span>Pipeline</span>
             </div>
-            <div class="mobile-nav-item" onclick="app. async showMobileMenu()">
+            <div class="mobile-nav-item" onclick="(async () => { await app.showMobileMenu(); })()">
                 <i class="fas fa-ellipsis-h"></i>
                 <span>More</span>
             </div>
@@ -3187,7 +3187,7 @@ In a production system, this would show the actual file contents.
                         <h1>Integration Hub</h1>
                         <p>Connect your CRM with external services</p>
                     </div>
-                    <button class="btn secondary" onclick="app. navigateTo('settings')">
+                    <button class="btn secondary" onclick="app.navigateTo('settings')">
                         <i class="fas fa-arrow-left"></i> Back to Settings
                     </button>
                 </div>
@@ -3219,7 +3219,7 @@ In a production system, this would show the actual file contents.
         };
 
         return `
-            <div class="integration-card" onclick="app. showIntegrationDetails('${id}')">
+            <div class="integration-card" onclick="app.showIntegrationDetails('${id}')">
                 <div class="integration-icon ${type}">
                     <i class="${statusIcons[type] || 'fas fa-plug'}"></i>
                 </div>
@@ -3231,7 +3231,7 @@ In a production system, this would show the actual file contents.
                     </div>
                 </div>
                 <div class="integration-action">
-                    <button class="btn ${status === 'connected' ? 'secondary' : 'primary'}" onclick="event.stopPropagation(); id === 'whatsapp' ? await app. showWhatsAppIntegration() : app. showIntegrationDetails('${id}')">
+                    <button class="btn ${status === 'connected' ? 'secondary' : 'primary'}" onclick="event.stopPropagation(); id === 'whatsapp' ? (async()=>{ await app.showWhatsAppIntegration(); })() : app.showIntegrationDetails('${id}')">
                         ${status === 'connected' ? 'Configure' : 'Connect'}
                     </button>
                 </div>
@@ -3297,7 +3297,7 @@ In a production system, this would show the actual file contents.
                         `}
                     </div>
                     ${!isConnected ? `
-                        <button class="btn primary btn-large" onclick="app. async initiateGoogleOAuth()">
+                        <button class="btn primary btn-large" onclick="(async () => { await app.initiateGoogleOAuth(); })()">
                             <i class="fas fa-google"></i> Connect with Google
                         </button>
                     ` : ''}
@@ -3362,9 +3362,9 @@ In a production system, this would show the actual file contents.
                         </div>
                         
                         <div class="settings-actions">
-                            <button class="btn primary" onclick="app. async saveGoogleSettings()">Save Settings</button>
-                            <button class="btn secondary" onclick="app. async syncGoogleCalendar()">Sync Now</button>
-                            <button class="btn secondary" onclick="app. async viewSyncHistory()">View Sync History</button>
+                            <button class="btn primary" onclick="(async () => { await app.saveGoogleSettings(); })()">Save Settings</button>
+                            <button class="btn secondary" onclick="(async () => { await app.syncGoogleCalendar(); })()">Sync Now</button>
+                            <button class="btn secondary" onclick="(async () => { await app.viewSyncHistory(); })()">View Sync History</button>
                             <button class="btn error" onclick="app. disconnectGoogle()">Disconnect</button>
                         </div>
                     </div>
@@ -3411,7 +3411,7 @@ In a production system, this would show the actual file contents.
             </div>
         `, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Simulate Connection', type: 'primary', action: 'await app. simulateGoogleConnection()' }
+            { label: 'Simulate Connection', type: 'primary', action: '(async () => { await app.simulateGoogleConnection(); })()' }
         ]);
     };
 
@@ -3579,7 +3579,7 @@ In a production system, this would show the actual file contents.
 
     const exportSyncHistory = () => { UI.toast.info('Exporting sync history...'); };
     const clearSyncHistory = async () => {
-        const logs =await  (await AppDataStore.getAll('sync_history')).filter(h => h.user_id !== (_currentUser?.id || 1));
+        const logs = (await AppDataStore.getAll('sync_history')).filter(h => h.user_id !== (_currentUser?.id || 1));
         localStorage.setItem('fs_crm_sync_history', JSON.stringify(logs));
         UI.toast.success('Sync history cleared');
         await viewSyncHistory();
@@ -3593,7 +3593,7 @@ In a production system, this would show the actual file contents.
             <p class="warning-text" style="color:var(--error);font-weight:600;">Your existing activities will remain in both systems.</p>
         `, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Disconnect', type: 'error', action: 'await app. confirmDisconnectGoogle()' }
+            { label: 'Disconnect', type: 'error', action: '(async () => { await app.confirmDisconnectGoogle(); })()' }
         ]);
     };
 
@@ -3866,7 +3866,7 @@ In a production system, this would show the actual file contents.
             <p>This will stop all messaging and template sync.</p>
         `, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Disconnect', type: 'error', action: 'await app. async confirmDisconnectWhatsApp()' }
+            { label: 'Disconnect', type: 'error', action: '(async () => { await app.confirmDisconnectWhatsApp(); })()' }
         ]);
     };
 
@@ -5706,7 +5706,7 @@ function _wireLoginBtn() {
 
         UI.showModal(isEdit ? 'Edit Name' : 'Add Name', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save', type: 'primary', action: `await app. saveName(${prospectId})` }
+            { label: 'Save', type: 'primary', action: `(async () => { await app.saveName(${prospectId}); })()` }
         ]);
     };
 
@@ -5741,7 +5741,7 @@ function _wireLoginBtn() {
     const deleteName = async (prospectId, nameId) => {
         UI.showModal('Confirm Delete', 'Are you sure you want to delete this name?', [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Delete', type: 'primary', action: `await app. confirmDeleteName(${prospectId}, ${nameId})` }
+            { label: 'Delete', type: 'primary', action: `(async () => { await app.confirmDeleteName(${prospectId}, ${nameId}); })()` }
         ]);
     };
 
@@ -6528,7 +6528,7 @@ function _wireLoginBtn() {
                     <label>2. Who was Referred?</label>
                     <div class="search-field">
                         <div style="display:flex; gap:8px">
-                            <input type="text" id="referred-search" class="form-control" placeholder="Search existing prospect..." onkeyup="app. async searchReferrersForModal(this.value, 'referred')">
+                            <input type="text" id="referred-search" class="form-control" placeholder="Search existing prospect..." onkeyup="(async () => { await app.searchReferrersForModal(this.value, 'referred'); })()">
                             <button class="btn secondary" onclick="app. openCreateProspectForReferral()"><i class="fas fa-user-plus"></i> New</button>
                         </div>
                         <div id="referred-search-results" class="search-dropdown"></div>
@@ -6564,7 +6564,7 @@ function _wireLoginBtn() {
  
         UI.showModal("Add New Referral", content, [
             { label: "Cancel", type: "secondary", action: "UI.hideModal()" },
-            { label: "Create Referral", type: "primary", action: "await app. submitReferral()" }
+            { label: "Create Referral", type: "primary", action: "(async () => { await app.submitReferral(); })()" }
         ]);
     };
  
@@ -6707,26 +6707,26 @@ function _wireLoginBtn() {
                 <div class="filter-bar">
                     <div class="filter-group">
                         <i class="fas fa-search"></i>
-                        <input type="text" id="case-search" placeholder="Search title or prospect/customer..." value="${_caseFilters.search}" onkeyup="app. async handleCaseSearch(event)">
+                        <input type="text" id="case-search" placeholder="Search title or prospect/customer..." value="${_caseFilters.search}" onkeyup="(async () => { await app.handleCaseSearch(event); })()">
                     </div>
                     <div class="filter-group">
                         <label>Product</label>
-                        <select id="case-product-filter" onchange="app. async handleCaseFilterChange()">
+                        <select id="case-product-filter" onchange="(async () => { await app.handleCaseFilterChange(); })()">
                             <option value="all">All Products</option>
                             ${((await AppDataStore.getAll('products')) || []).filter(p => p.is_active !== false).map(p => `<option value="${p.name}" ${_caseFilters.product === p.name ? 'selected' : ''}>${p.name}</option>`).join('')}
                         </select>
                     </div>
                     <div class="filter-group">
                         <label>From</label>
-                        <input type="date" id="case-date-from" value="${_caseFilters.from}" onchange="app. async handleCaseFilterChange()">
+                        <input type="date" id="case-date-from" value="${_caseFilters.from}" onchange="(async () => { await app.handleCaseFilterChange(); })()">
                     </div>
                     <div class="filter-group">
                         <label>To</label>
-                        <input type="date" id="case-date-to" value="${_caseFilters.to}" onchange="app. async handleCaseFilterChange()">
+                        <input type="date" id="case-date-to" value="${_caseFilters.to}" onchange="(async () => { await app.handleCaseFilterChange(); })()">
                     </div>
                     <div class="filter-group">
                         <label>Visibility</label>
-                        <select id="case-visibility-filter" onchange="app. async handleCaseFilterChange()">
+                        <select id="case-visibility-filter" onchange="(async () => { await app.handleCaseFilterChange(); })()">
                             <option value="all" ${_caseFilters.visibility === 'all' ? 'selected' : ''}>All</option>
                             <option value="public" ${_caseFilters.visibility === 'public' ? 'selected' : ''}>Public Only</option>
                             <option value="mine" ${_caseFilters.visibility === 'mine' ? 'selected' : ''}>My Cases</option>
@@ -7024,7 +7024,7 @@ function _wireLoginBtn() {
                         <div class="form-group half">
                             <label>Link Prospect/Customer</label>
                             <div class="search-select-container">
-                                <input type="text" id="case-entity-search" class="form-control" placeholder="Type name..." value="${entityName}" onkeyup="app. async searchCaseEntities(this.value)">
+                                <input type="text" id="case-entity-search" class="form-control" placeholder="Type name..." value="${entityName}" onkeyup="(async () => { await app.searchCaseEntities(this.value); })()">
                                 <div id="case-entity-results" class="search-results-dropdown"></div>
                                 <input type="hidden" id="case-prospect-id" value="${c ? (c.prospect_id || '') : ''}">
                                 <input type="hidden" id="case-customer-id" value="${c ? (c.customer_id || '') : ''}">
@@ -7088,7 +7088,7 @@ function _wireLoginBtn() {
 
         UI.modal.show(title, modalHtml, [
             { text: 'Cancel', class: 'secondary', onclick: 'UI.modal.hide()' },
-            { text: id ? 'Update Case' : 'Save Case Study', class: 'primary', onclick: `await app. saveCaseStudy(${id || 'null'})` }
+            { text: id ? 'Update Case' : 'Save Case Study', class: 'primary', onclick: `(async () => { await app.saveCaseStudy(${id || 'null'}); })()` }
         ]);
     };
 
@@ -7189,16 +7189,16 @@ function _wireLoginBtn() {
                     <div class="calendar-title-nav">
                         <h2 id="calendar-month-title">Month Year</h2>
                         <div class="nav-arrows">
-                            <button class="btn-nav" onclick="app. async goToPrevious()"><i class="fas fa-chevron-left"></i></button>
-                            <button class="btn-nav" onclick="app. async goToNext()"><i class="fas fa-chevron-right"></i></button>
+                            <button class="btn-nav" onclick="(async () => { await app.goToPrevious(); })()"><i class="fas fa-chevron-left"></i></button>
+                            <button class="btn-nav" onclick="(async () => { await app.goToNext(); })()"><i class="fas fa-chevron-right"></i></button>
                         </div>
-                        <button class="btn secondary btn-sm" onclick="app. async goToToday()">Today</button>
+                        <button class="btn secondary btn-sm" onclick="(async () => { await app.goToToday(); })()">Today</button>
                     </div>
                     <div class="calendar-controls">
                         <div class="view-toggles">
-                            <!-- <button class="btn-toggle" onclick="app. async switchView('day')">Day</button> -->
-                            <!-- <button class="btn-toggle" onclick="app. async switchView('week')">Week</button> -->
-                            <button class="btn-toggle active" onclick="app. async switchView('month')">Month</button>
+                            <!-- <button class="btn-toggle" onclick="(async () => { await app.switchView('day'); })()">Day</button> -->
+                            <!-- <button class="btn-toggle" onclick="(async () => { await app.switchView('week'); })()">Week</button> -->
+                            <button class="btn-toggle active" onclick="(async () => { await app.switchView('month'); })()">Month</button>
                         </div>
                         <button class="btn secondary" onclick="app. openCalendarFilterModal()">
                             Filter <i class="fas fa-chevron-down" style="font-size: 10px; margin-left: 4px;"></i>
@@ -7415,8 +7415,8 @@ function _wireLoginBtn() {
             `;
 
         UI.showModal('Calendar Filters', content, [
-            { label: 'Clear Filters', type: 'secondary', action: 'await app. clearCalendarFilters()' },
-            { label: 'Apply', type: 'primary', action: 'await app. applyCalendarFilters()' }
+            { label: 'Clear Filters', type: 'secondary', action: '(async () => { await app.clearCalendarFilters(); })()' },
+            { label: 'Apply', type: 'primary', action: '(async () => { await app.applyCalendarFilters(); })()' }
         ]);
     };
 
@@ -7885,8 +7885,8 @@ function _wireLoginBtn() {
 
         UI.showModal('Filter Calendar', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Apply Filters', type: 'primary', action: 'await app. applyFilters()' },
-            { label: 'Clear Filters', type: 'secondary', action: 'await app. clearFilters()' }
+            { label: 'Apply Filters', type: 'primary', action: '(async () => { await app.applyFilters(); })()' },
+            { label: 'Clear Filters', type: 'secondary', action: '(async () => { await app.clearFilters(); })()' }
         ]);
     };
 
@@ -8000,8 +8000,8 @@ function _wireLoginBtn() {
 
         const modalActions = [
             { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Mark Complete', type: 'secondary', action: `await app. markActivityComplete(${activityId})` },
-            { label: 'Edit', type: 'secondary', action: `await app. editActivity(${activityId})` }
+            { label: 'Mark Complete', type: 'secondary', action: `(async () => { await app.markActivityComplete(${activityId}); })()` },
+            { label: 'Edit', type: 'secondary', action: `(async () => { await app.editActivity(${activityId}); })()` }
         ];
 
         if (activity.prospect_id) {
@@ -8012,7 +8012,7 @@ function _wireLoginBtn() {
             });
         }
 
-        modalActions.push({ label: 'Delete', type: 'primary', action: `await app. deleteActivity(${activityId})` });
+        modalActions.push({ label: 'Delete', type: 'primary', action: `(async () => { await app.deleteActivity(${activityId}); })()` });
 
         UI.showModal('Activity Details', content, modalActions);
     };
@@ -8029,7 +8029,7 @@ function _wireLoginBtn() {
             '<p>Are you sure you want to delete this activity? This action cannot be undone.</p>',
             [
                 { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-                { label: 'Delete', type: 'primary', action: `await app. confirmDeleteActivity(${activityId})` }
+                { label: 'Delete', type: 'primary', action: `(async () => { await app.confirmDeleteActivity(${activityId}); })()` }
             ]
         );
     };
@@ -8252,7 +8252,7 @@ function _wireLoginBtn() {
                     <div class="form-group">
                         <label>Search and Add Co-Agents</label>
                         <div class="co-agent-search" style="display:flex; gap:8px;">
-                            <input type="text" id="co-agent-search-input" class="form-control" placeholder="Type agent name..." onkeyup="app. async searchAgents()">
+                            <input type="text" id="co-agent-search-input" class="form-control" placeholder="Type agent name..." onkeyup="(async () => { await app.searchAgents(); })()">
                             <button class="btn secondary btn-sm" onclick="app. searchAgents()">Search</button>
                         </div>
                         <div id="agent-search-results" class="search-results-dropdown"></div>
@@ -8988,7 +8988,7 @@ function _wireLoginBtn() {
 
                 let matches = [];
                 if (type === 'CPS' || type === 'EVENT') {
-                    const all = [...AppDataStore.getAll('prospects'), ...AppDataStore.getAll('customers')];
+                    const all = [...(await AppDataStore.getAll('prospects')), ...(await AppDataStore.getAll('customers'))];
                     const available = all.filter(p => !_selectedAttendees.find(a => a.id === p.id && a.type !== 'agent'));
                     matches = available.filter(p =>
                         (p.full_name && p.full_name.toLowerCase().includes(searchTerm)) ||
@@ -9572,8 +9572,8 @@ function _wireLoginBtn() {
         container.innerHTML = `
             <div class="prospects-view">
                 <div class="tab-navigation">
-                    <button class="tab-btn active" onclick="app. async switchCustomerTab('prospects')">Prospects</button>
-                    <button class="tab-btn" onclick="app. async switchCustomerTab('customers')">Customers</button>
+                    <button class="tab-btn active" onclick="(async () => { await app.switchCustomerTab('prospects'); })()">Prospects</button>
+                    <button class="tab-btn" onclick="(async () => { await app.switchCustomerTab('customers'); })()">Customers</button>
                 </div>
 
                 <div id="prospects-tab-content">
@@ -9583,7 +9583,7 @@ function _wireLoginBtn() {
                             <p>Track and manage potential customers through the lifecycle.</p>
                         </div>
                         <div class="header-actions">
-                            <button class="btn secondary" onclick="app. openImportWizard()">
+                            <button class="btn secondary" onclick="(async () => { await app.openImportWizard(); })()">
                                 <i class="fas fa-file-import"></i> Bulk Import
                             </button>
                             <button class="btn primary" onclick="app.openAddProspectModal()">
@@ -9595,10 +9595,10 @@ function _wireLoginBtn() {
                 <div class="filter-bar">
                     <div class="search-group">
                         <i class="fas fa-search"></i>
-                        <input type="text" id="prospect-search" placeholder="Search by name, phone, email, or ID..." onkeyup="app. async filterProspects()">
+                        <input type="text" id="prospect-search" placeholder="Search by name, phone, email, or ID..." onkeyup="(async () => { await app.filterProspects(); })()">
                     </div>
                     <div class="filter-group">
-                        <select id="filter-score" onchange="app. async filterProspects()">
+                        <select id="filter-score" onchange="(async () => { await app.filterProspects(); })()">
                             <option value="">All Scores</option>
                             <option value="A+">Grade A+ (800-1000)</option>
                             <option value="A">Grade A (600-799)</option>
@@ -9606,7 +9606,7 @@ function _wireLoginBtn() {
                             <option value="C">Grade C (200-399)</option>
                             <option value="D">Grade D (0-199)</option>
                         </select>
-                        <select id="filter-gua" onchange="app. async filterProspects()">
+                        <select id="filter-gua" onchange="(async () => { await app.filterProspects(); })()">
                             <option value="">All Ming Gua</option>
                             <option value="MG1">MG1 (Kan)</option>
                             <option value="MG2">MG2 (Kun)</option>
@@ -9618,35 +9618,35 @@ function _wireLoginBtn() {
                             <option value="MG8">MG8 (Gen)</option>
                             <option value="MG9">MG9 (Li)</option>
                         </select>
-                        <select id="filter-status" onchange="app. async filterProspects()">
+                        <select id="filter-status" onchange="(async () => { await app.filterProspects(); })()">
                             <option value="">All Status</option>
                             <option value="active">Active</option>
                             <option value="attention">Needs Attention</option>
                             <option value="reassign">Reassignable</option>
                             <option value="critical">Critical</option>
                         </select>
-                        <select id="filter-deficiency" onchange="app. async filterProspects()">
+                        <select id="filter-deficiency" onchange="(async () => { await app.filterProspects(); })()">
                             <option value="">Star Deficiency: All</option>
                             <option value="Wealth">Wealth</option>
                             <option value="Career">Career</option>
                             <option value="Relationship">Romance/Relationship</option>
                             <option value="Health">Health</option>
                         </select>
-                        <select id="filter-house-audit" onchange="app. async filterProspects()">
+                        <select id="filter-house-audit" onchange="(async () => { await app.filterProspects(); })()">
                             <option value="">House Audit: All</option>
                             <option value="Pending">Pending</option>
                             <option value="Scheduled">Scheduled</option>
                             <option value="Completed">Completed</option>
                             <option value="None">Not Done</option>
                         </select>
-                        <select id="filter-solution-proposed" onchange="app. async filterProspects()">
+                        <select id="filter-solution-proposed" onchange="(async () => { await app.filterProspects(); })()">
                             <option value="">Solution Proposed: All</option>
                             <option value="PR3 Ring">PR3 Ring (proposed)</option>
                             <option value="PR4 Power Ring">PR4 Power Ring (proposed)</option>
                             <option value="PR5 Ring">PR5 Ring (proposed)</option>
                         </select>
-                        <input type="number" id="filter-min-events" min="0" placeholder="Min events attended" onchange="app. async filterProspects()" style="width:160px; padding:6px 10px; border:1px solid var(--border); border-radius:6px; background:var(--surface); color:var(--text);">
-                        <button class="btn primary" onclick="app. async filterProspects()">Apply Filters</button>
+                        <input type="number" id="filter-min-events" min="0" placeholder="Min events attended" onchange="(async () => { await app.filterProspects(); })()" style="width:160px; padding:6px 10px; border:1px solid var(--border); border-radius:6px; background:var(--surface); color:var(--text);">
+                        <button class="btn primary" onclick="(async () => { await app.filterProspects(); })()">Apply Filters</button>
                     </div>
                 </div>
 
@@ -9720,16 +9720,16 @@ function _wireLoginBtn() {
                 <div class="filter-bar">
                     <div class="search-group">
                         <i class="fas fa-search"></i>
-                        <input type="text" id="customer-search" placeholder="Search customers by name, phone, email, or ID" onkeyup="app. async filterCustomers()">
+                        <input type="text" id="customer-search" placeholder="Search customers by name, phone, email, or ID" onkeyup="(async () => { await app.filterCustomers(); })()">
                     </div>
                     <div class="filter-group">
-                        <select id="filter-customer-type" onchange="app. async filterCustomers()">
+                        <select id="filter-customer-type" onchange="(async () => { await app.filterCustomers(); })()">
                             <option value="">Customer Type: All</option>
                             <option value="Regular">Regular</option>
                             <option value="VIP">VIP</option>
                             <option value="Agent Eligible">Agent Eligible</option>
                         </select>
-                        <select id="filter-customer-gua" onchange="app. async filterCustomers()">
+                        <select id="filter-customer-gua" onchange="(async () => { await app.filterCustomers(); })()">
                             <option value="">Ming Gua: All</option>
                             <option value="MG1">MG1</option>
                             <option value="MG2">MG2</option>
@@ -9741,28 +9741,28 @@ function _wireLoginBtn() {
                             <option value="MG8">MG8</option>
                             <option value="MG9">MG9</option>
                         </select>
-                        <select id="filter-purchase-status" onchange="app. async filterCustomers()">
+                        <select id="filter-purchase-status" onchange="(async () => { await app.filterCustomers(); })()">
                             <option value="">Purchase Status: All</option>
                             <option value="30d">Purchased Last 30 Days</option>
                             <option value="90d">Purchased Last 90 Days</option>
                             <option value="no90d">No Purchase 90+ Days</option>
                         </select>
-                        <select id="filter-customer-deficiency" onchange="app. async filterCustomers()">
+                        <select id="filter-customer-deficiency" onchange="(async () => { await app.filterCustomers(); })()">
                             <option value="">Star Deficiency: All</option>
                             <option value="Wealth">Wealth</option>
                             <option value="Career">Career</option>
                             <option value="Relationship">Romance/Relationship</option>
                             <option value="Health">Health</option>
                         </select>
-                        <select id="filter-customer-house-audit" onchange="app. async filterCustomers()">
+                        <select id="filter-customer-house-audit" onchange="(async () => { await app.filterCustomers(); })()">
                             <option value="">House Audit: All</option>
                             <option value="Pending">Pending</option>
                             <option value="Scheduled">Scheduled</option>
                             <option value="Completed">Completed</option>
                             <option value="None">Not Done</option>
                         </select>
-                        <input type="number" id="filter-customer-min-events" min="0" placeholder="Min events attended" onchange="app. async filterCustomers()" style="width:160px; padding:6px 10px; border:1px solid var(--border); border-radius:6px; background:var(--surface); color:var(--text);">
-                        <button class="btn primary" onclick="app. async filterCustomers()">Apply Filters</button>
+                        <input type="number" id="filter-customer-min-events" min="0" placeholder="Min events attended" onchange="(async () => { await app.filterCustomers(); })()" style="width:160px; padding:6px 10px; border:1px solid var(--border); border-radius:6px; background:var(--surface); color:var(--text);">
+                        <button class="btn primary" onclick="(async () => { await app.filterCustomers(); })()">Apply Filters</button>
                     </div>
                 </div>
 
@@ -10400,7 +10400,7 @@ function _wireLoginBtn() {
                 </div>
                 
                 <div style="margin-top:24px;">
-                    <button class="btn secondary" onclick="app. async navigateTo('prospects')"><i class="fas fa-arrow-left"></i> Back to List</button>
+                    <button class="btn secondary" onclick="(async () => { await app.navigateTo('prospects'); })()"><i class="fas fa-arrow-left"></i> Back to List</button>
                 </div>
             </div>
         `;
@@ -11339,7 +11339,7 @@ const deleteNote = async (prospectId, noteId) => {
     `;
         UI.showModal(`Add Purchase for ${customer.full_name}`, content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Add Purchase', type: 'primary', action: `await app. savePurchase(${customerId})` }
+            { label: 'Add Purchase', type: 'primary', action: `(async () => { await app.savePurchase(${customerId}); })()` }
         ]);
     };
 
@@ -11436,7 +11436,7 @@ for (const p of allPackages) {
         UI.showModal('Delete Confirmation',
             '<p>Are you sure you want to delete this prospect? This action cannot be undone.</p>', [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Confirm Delete', type: 'primary', action: `await app. executeDelete(${id})` }
+            { label: 'Confirm Delete', type: 'primary', action: `(async () => { await app.executeDelete(${id}); })()` }
         ]
         );
     };
@@ -11601,7 +11601,7 @@ const openAddSolutionModal = async (prospectId) => {
 
     UI.showModal('Add Proposed Solution', content, [
         { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-        { label: 'Save', type: 'primary', action: `await app. saveSolution(${prospectId})` }
+        { label: 'Save', type: 'primary', action: `(async () => { await app.saveSolution(${prospectId}); })()` }
     ]);
 };
 
@@ -11736,7 +11736,7 @@ const openAddSolutionModal = async (prospectId) => {
                  </div>`,
                 [
                     { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-                    { label: 'Convert Manually', type: 'primary', action: `await app. confirmConvertToCustomer(${prospectId}, true)` }
+                    { label: 'Convert Manually', type: 'primary', action: `(async () => { await app.confirmConvertToCustomer(${prospectId}, true); })()` }
                 ]
             );
             return;
@@ -11758,7 +11758,7 @@ const openAddSolutionModal = async (prospectId) => {
 
         UI.showModal('Convert to Customer', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Convert', type: 'primary', action: `await app. confirmConvertToCustomer(${prospectId})` }
+            { label: 'Convert', type: 'primary', action: `(async () => { await app.confirmConvertToCustomer(${prospectId}); })()` }
         ]);
     };
 
@@ -12309,7 +12309,7 @@ const html = `
 
         UI.showModal('License Renewal', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Purchase Package', type: 'primary', action: `await app. executeRenewal(${agentId})` }
+            { label: 'Purchase Package', type: 'primary', action: `(async () => { await app.executeRenewal(${agentId}); })()` }
         ]);
     };
 
@@ -12907,7 +12907,7 @@ const renderCurrentAssignments = async (agentId) => {
 `;
         UI.showModal('Update Agent Targets', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save Targets', type: 'primary', action: `await app. saveAgentTargets(${agentId})` }
+            { label: 'Save Targets', type: 'primary', action: `(async () => { await app.saveAgentTargets(${agentId}); })()` }
         ]);
     };
 
@@ -13094,7 +13094,7 @@ const deactivateAgent = async (agentId) => {
                     <option value="converted" ${_pipelineStatusFilter === 'converted' ? 'selected' : ''}>Converted</option>
                 </select>
             </div>
-            <button class="btn secondary" onclick="app. async refreshPipeline()">
+            <button class="btn secondary" onclick="(async () => { await app.refreshPipeline(); })()">
                 <i class="fas fa-sync-alt"></i> Refresh
             </button>
             <button class="btn primary" onclick="app. openPipelineConfigModal()">
@@ -13568,7 +13568,7 @@ const deactivateAgent = async (agentId) => {
                  </div>`,
                 [
                     { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-                    { label: 'Close Won', type: 'primary', action: `await app. closeDealWon(${prospect.id})` }
+                    { label: 'Close Won', type: 'primary', action: `(async () => { await app.closeDealWon(${prospect.id}); })()` }
                 ]
             );
         }
@@ -13593,7 +13593,7 @@ const deactivateAgent = async (agentId) => {
                  </div>`,
                 [
                     { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-                    { label: 'Close Lost', type: 'primary', action: `await app. closeDealLost(${prospect.id})` }
+                    { label: 'Close Lost', type: 'primary', action: `(async () => { await app.closeDealLost(${prospect.id}); })()` }
                 ]
             );
         }
@@ -14092,11 +14092,11 @@ container.innerHTML = `
                     </div>
                     <div class="header-actions">
                         ${isSystemAdmin(_currentUser) || _currentUser?.role?.includes('Level 7') ?
-                `<button class="btn primary" onclick="app. async openTargetManagementModal()">
+                `<button class="btn primary" onclick="(async () => { await app.openTargetManagementModal(); })()">
                                 <i class="fas fa-bullseye"></i> Set Targets
                              </button>` : ''
             }
-                        <button class="btn secondary" onclick="app. async exportKPIReport('csv')">
+                        <button class="btn secondary" onclick="(async () => { await app.exportKPIReport('csv'); })()">
                             <i class="fas fa-file-csv"></i> Export CSV
                         </button>
                         <button class="btn secondary" onclick="app.printDashboard()">
@@ -14107,9 +14107,9 @@ container.innerHTML = `
 
                 <div class="time-filter-bar">
                     <div class="time-toggle-group">
-                        <button class="time-toggle-btn ${_currentTimeFilter === 'weekly' ? 'active' : ''}" onclick="app. async setTimeFilter('weekly')">Weekly</button>
-                        <button class="time-toggle-btn ${_currentTimeFilter === 'monthly' ? 'active' : ''}" onclick="app. async setTimeFilter('monthly')">Monthly</button>
-                        <button class="time-toggle-btn ${_currentTimeFilter === 'quarterly' ? 'active' : ''}" onclick="app. async setTimeFilter('quarterly')">Quarterly</button>
+                        <button class="time-toggle-btn ${_currentTimeFilter === 'weekly' ? 'active' : ''}" onclick="(async () => { await app.setTimeFilter('weekly'); })()">Weekly</button>
+                        <button class="time-toggle-btn ${_currentTimeFilter === 'monthly' ? 'active' : ''}" onclick="(async () => { await app.setTimeFilter('monthly'); })()">Monthly</button>
+                        <button class="time-toggle-btn ${_currentTimeFilter === 'quarterly' ? 'active' : ''}" onclick="(async () => { await app.setTimeFilter('quarterly'); })()">Quarterly</button>
                         <button class="time-toggle-btn ${_currentTimeFilter === 'yearly' ? 'active' : ''}" onclick="app. setTimeFilter('yearly')">Yearly</button>
                     </div>
                     <div class="role-filter-group" style="margin-left: 20px;">
@@ -15282,17 +15282,17 @@ const exportKPIReport = async (format) => {
                     <button class="marketing-tab ${_currentMarketingTab === 'templates' ? 'active' : ''}" onclick="app. switchMarketingTab('templates')">
                         <i class="fas fa-layer-group"></i> Message Templates
                     </button>
-                    <button class="marketing-tab ${_currentMarketingTab === 'campaigns' ? 'active' : ''}" onclick="app. async switchMarketingTab('campaigns')">
+                    <button class="marketing-tab ${_currentMarketingTab === 'campaigns' ? 'active' : ''}" onclick="(async () => { await app.switchMarketingTab('campaigns'); })()">
                         <i class="fas fa-bullhorn"></i> Active Campaigns
                     </button>
-                    <button class="marketing-tab ${_currentMarketingTab === 'analytics' ? 'active' : ''}" onclick="app. async switchMarketingTab('analytics')">
+                    <button class="marketing-tab ${_currentMarketingTab === 'analytics' ? 'active' : ''}" onclick="(async () => { await app.switchMarketingTab('analytics'); })()">
                         <i class="fas fa-chart-line"></i> Campaign Analytics
                     </button>
                     ${(isMarketingManager(_currentUser) || isSystemAdmin(_currentUser)) ? `
-                    <button class="marketing-tab ${_currentMarketingTab === 'products' ? 'active' : ''}" onclick="app. async switchMarketingTab('products')">
+                    <button class="marketing-tab ${_currentMarketingTab === 'products' ? 'active' : ''}" onclick="(async () => { await app.switchMarketingTab('products'); })()">
                         <i class="fas fa-box"></i> Products & Services
                     </button>
-                    <button class="marketing-tab ${_currentMarketingTab === 'packages' ? 'active' : ''}" onclick="app. async switchMarketingTab('packages')">
+                    <button class="marketing-tab ${_currentMarketingTab === 'packages' ? 'active' : ''}" onclick="(async () => { await app.switchMarketingTab('packages'); })()">
                         <i class="fas fa-gifts"></i> Promotion Packages
                     </button>
                     ` : ''}
@@ -15344,12 +15344,12 @@ const exportKPIReport = async (format) => {
 
     // ========== PRODUCTS TAB ==========
     const renderProductsTab = async () => {
-        const products =await  await AppDataStore.getAll('products');
+        const products = await AppDataStore.getAll('products');
         return `
             <div class="products-layout" style="padding: 24px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                     <h3>Product & Service Directory</h3>
-                    <button class="btn primary" onclick="app. openAddProductModal()">+ Add New Product</button>
+                    <button class="btn primary" onclick="app.openAddProductModal()">+ Add New Product</button>
                 </div>
                 <table class="data-table" style="width: 100%; border-collapse: collapse;">
                     <thead>
@@ -16100,13 +16100,13 @@ const exportKPIReport = async (format) => {
     // ========== CAMPAIGNS TAB ==========
 
     const renderCampaignsTab = async () => {
-        const campaigns =await  await AppDataStore.getAll('whatsapp_campaigns');
+        const campaigns = await AppDataStore.getAll('whatsapp_campaigns');
 
         return `
             <div class="campaigns-filters">
                 <div class="form-group-inline">
                     <label>Status:</label>
-                    <select id="campaign-status-filter" onchange="app. async filterCampaigns()">
+                    <select id="campaign-status-filter" onchange="(async () => { await app.filterCampaigns(); })()">
                         <option value="all">All Status</option>
                         <option value="active">Active</option>
                         <option value="scheduled">Scheduled</option>
@@ -16116,7 +16116,7 @@ const exportKPIReport = async (format) => {
                 </div>
                 <div class="form-group-inline">
                     <label>Sort By:</label>
-                    <select id="campaign-sort" onchange="app. async filterCampaigns()">
+                    <select id="campaign-sort" onchange="(async () => { await app.filterCampaigns(); })()">
                         <option value="date-desc">Newest First</option>
                         <option value="date-asc">Oldest First</option>
                         <option value="name">Name</option>
@@ -17047,7 +17047,7 @@ const simulateCampaignSending = async (campaignId) => {
     `;
 
         UI.showModal('Recipient History', content, [
-            { label: 'Back', type: 'secondary', action: `await app. viewCampaignDetails(${msg.campaign_id})` }
+            { label: 'Back', type: 'secondary', action: `(async () => { await app.viewCampaignDetails(${msg.campaign_id}); })()` }
         ]);
     };
 
@@ -17229,9 +17229,9 @@ const simulateCampaignSending = async (campaignId) => {
                         <p>Upload legacy data, map fields, validate, and import records</p>
                     </div>
                     <div class="import-header-actions">
-                        <button class="btn primary" onclick="app. async openImportWizard()"><i class="fas fa-upload"></i> IMPORT NEW DATA</button>
+                        <button class="btn primary" onclick="(async () => { await app.openImportWizard(); })()"><i class="fas fa-upload"></i> IMPORT NEW DATA</button>
                         <button class="btn secondary" onclick="app.openTemplatesModal()"><i class="fas fa-download"></i> DOWNLOAD TEMPLATES</button>
-                        <button class="btn secondary" onclick="app. async showImportHistory()"><i class="fas fa-history"></i> VIEW IMPORT HISTORY</button>
+                        <button class="btn secondary" onclick="(async () => { await app.showImportHistory(); })()"><i class="fas fa-history"></i> VIEW IMPORT HISTORY</button>
                     </div>
                 </div>
                 <div class="recent-imports">
@@ -17252,7 +17252,7 @@ const simulateCampaignSending = async (campaignId) => {
         if (imports.length === 0) return `<tr><td colspan="7" style="text-align:center;padding:40px;"><i class="fas fa-cloud-upload-alt" style="font-size:48px;color:var(--gray-300);display:block;margin-bottom:16px;"></i><h3>No imports yet</h3><p>Click "IMPORT NEW DATA" to start your first import</p></td></tr>`;
         return imports.map(imp => {
             const pct = imp.total_rows > 0 ? Math.round((imp.valid_rows / imp.total_rows) * 100) : 0;
-            return `<tr><td><strong>${imp.file_name}</strong></td><td>${imp.import_type}</td><td>${imp.total_rows} (${imp.created_records} new)</td><td>${pct}%</td><td><span class="import-status status-${imp.status}">${imp.status.toUpperCase()}</span></td><td>${UI.formatDate(imp.created_at)}</td><td><button class="btn-icon" onclick="app. viewImportDetails(${imp.id})" title="View"><i class="fas fa-eye"></i></button><button class="btn-icon" onclick="app.downloadImportLog(${imp.id})" title="Download Log"><i class="fas fa-download"></i></button></td></tr>`;
+            return `<tr><td><strong>${imp.file_name}</strong></td><td>${imp.import_type}</td><td>${imp.total_rows} (${imp.created_records} new)</td><td>${pct}%</td><td><span class="import-status status-${imp.status}">${imp.status.toUpperCase()}</span></td><td>${UI.formatDate(imp.created_at)}</td><td><button class="btn-icon" onclick="app.viewImportDetails(${imp.id})" title="View"><i class="fas fa-eye"></i></button><button class="btn-icon" onclick="app.downloadImportLog(${imp.id})" title="Download Log"><i class="fas fa-download"></i></button></td></tr>`;
         }).join('');
     };
 
@@ -17402,7 +17402,7 @@ const simulateCampaignSending = async (campaignId) => {
                     </div>
                 </div>
                 <div class="wizard-footer">
-                    <button class="btn secondary" onclick="app. async importPrevStep()">Back</button>
+                    <button class="btn secondary" onclick="(async () => { await app.importPrevStep(); })()">Back</button>
                     <button class="btn primary" onclick="app. importNextStep()">Next: Import</button>
                 </div>
             </div>
@@ -17589,7 +17589,7 @@ const startImport = async () => {
     const showImportHistory = async () => {
         const jobs = (await AppDataStore.getAll('import_jobs')).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
         const rows = jobs.length === 0 ? '<tr><td colspan="6" style="text-align:center;padding:20px">No import history</td></tr>' :
-            jobs.map(j => `<tr><td>${j.file_name}</td><td>${j.import_type}</td><td>${j.total_rows}</td><td><span class="import-status status-${j.status}">${j.status.toUpperCase()}</span></td><td>${UI.formatDate(j.created_at)}</td><td><button class="btn-icon" onclick="app. viewImportDetails(${j.id})"><i class="fas fa-eye"></i></button></td></tr>`).join('');
+            jobs.map(j => `<tr><td>${j.file_name}</td><td>${j.import_type}</td><td>${j.total_rows}</td><td><span class="import-status status-${j.status}">${j.status.toUpperCase()}</span></td><td>${UI.formatDate(j.created_at)}</td><td><button class="btn-icon" onclick="app.viewImportDetails(${j.id})"><i class="fas fa-eye"></i></button></td></tr>`).join('');
         const content = `<table style="width:100%;border-collapse:collapse"><thead><tr style="background:var(--gray-50)"><th style="padding:10px;text-align:left">File</th><th style="padding:10px;text-align:left">Type</th><th style="padding:10px;text-align:left">Records</th><th style="padding:10px;text-align:left">Status</th><th style="padding:10px;text-align:left">Date</th><th style="padding:10px;text-align:left">Actions</th></tr></thead><tbody>${rows}</tbody></table>`;
         UI.showModal('Import History', content, [{ label: 'Close', type: 'primary', action: 'UI.hideModal()' }]);
     };
@@ -18767,19 +18767,19 @@ const showAdminDashboard = async () => {
                     <p style="color: var(--gray-600); font-size: 14px; margin-top: 8px;">Monitor database, API, storage, and external service connectivity.</p>
                 </div>
 
-                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="app. async showBackupManager()" onmouseover="this.style.transform='await translateY(-5px)'" onmouseout="this.style.transform='await translateY(0)'">
+                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="(async () => { await app.showBackupManager(); })()" onmouseover="this.style.transform='await translateY(-5px)'" onmouseout="this.style.transform='await translateY(0)'">
                     <i class="fas fa-database" style="font-size: 40px; color: var(--secondary-color); margin-bottom: 16px;"></i>
                     <h3>Backup & Restore</h3>
                     <p style="color: var(--gray-600); font-size: 14px; margin-top: 8px;">Configure automated backups, manage snapshots, and perform data restoration.</p>
                 </div>
 
-                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="app. async showPerformanceMonitor()" onmouseover="this.style.transform='await translateY(-5px)'" onmouseout="this.style.transform='await translateY(0)'">
+                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="(async () => { await app.showPerformanceMonitor(); })()" onmouseover="this.style.transform='await translateY(-5px)'" onmouseout="this.style.transform='await translateY(0)'">
                     <i class="fas fa-tachometer-alt" style="font-size: 40px; color: var(--warning-color); margin-bottom: 16px;"></i>
                     <h3>Performance Monitor</h3>
                     <p style="color: var(--gray-600); font-size: 14px; margin-top: 8px;">Track query execution times, memory usage, and application delays.</p>
                 </div>
 
-                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="app. async showDeploymentCenter()" onmouseover="this.style.transform='await translateY(-5px)'" onmouseout="this.style.transform='await translateY(0)'">
+                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="(async () => { await app.showDeploymentCenter(); })()" onmouseover="this.style.transform='await translateY(-5px)'" onmouseout="this.style.transform='await translateY(0)'">
                     <i class="fas fa-rocket" style="font-size: 40px; color: #8b5cf6; margin-bottom: 16px;"></i>
                     <h3>Deployment Center</h3>
                     <p style="color: var(--gray-600); font-size: 14px; margin-top: 8px;">Manage CI/CD pipelines, rollouts to different environments, and zero-downtime updates.</p>
@@ -18930,7 +18930,7 @@ const showBackupManager = async () => {
             <div class="header-actions" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
                 <h2>Backup & Restore</h2>
                 <div>
-                    <button class="btn secondary" onclick="app. async createBackup('INCREMENTAL')">Incremental Backup</button>
+                    <button class="btn secondary" onclick="(async () => { await app.createBackup('INCREMENTAL'); })()">Incremental Backup</button>
                     <button class="btn primary" onclick="app. createBackup('FULL')"><i class="fas fa-save"></i> Full Backup</button>
                 </div>
             </div>
