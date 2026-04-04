@@ -17322,8 +17322,22 @@ const simulateCampaignSending = async (campaignId) => {
     };
 
     const openImportWizard = async () => {
+        // R9: Only system admin, marketing manager, or team leader may import
+        const u = _currentUser;
+        const canImport = isSystemAdmin(u) || isMarketingManager(u) ||
+                          u?.role === 'team_leader' || u?.role?.includes('Level 7');
+        if (!canImport) { UI.toast.error('You do not have permission to import data.'); return; }
+
         _currentImportStep = 1;
-        _importData = { file: null, fileName: null, fileSize: null, rows: 0, headers: ['Full Name', 'Phone Number', 'Email', 'IC Number', 'Date of Birth', 'Occupation', 'Income Range', 'Address', 'City', 'State', 'Postal Code', 'Ming Gua'], data: [], importType: 'prospects', mapping: {}, validation: { valid: 0, warnings: 0, errors: 0 }, duplicates: { total: 0 }, assignment: { assignTo: 'myself' } };
+        _importData = {
+            file: null, fileName: null, fileSize: null, rows: 0,
+            headers: [], data: [], importType: 'prospects',
+            mapping: {},
+            validation: { valid: 0, warnings: 0, errors: 0 },
+            validationResults: [],
+            duplicates: { total: 0, byPhone: 0, byEmail: 0, byIc: 0, list: [] },
+            assignment: { assignTo: 'myself' }
+        };
         await renderImportStep(1);
     };
 
@@ -17398,15 +17412,29 @@ const simulateCampaignSending = async (campaignId) => {
             </div>
         `;
 
-    const getStep3Html = async () => `
+    const getStep3Html = async () => {
+        const { valid, warnings, errors } = _importData.validation;
+        const errorRows   = _importData.validationResults.filter(r => r.status === 'error');
+        const warningRows = _importData.validationResults.filter(r => r.status === 'warning');
+
+        const renderIssueRows = (rows, type) => {
+            const issues = rows.flatMap(r =>
+                (type === 'error' ? r.errors : r.warnings).map(issue =>
+                    `<tr class="${type}-row"><td>${r.rowIndex}</td><td>${issue.field}</td><td>${issue.msg}</td><td>${issue.suggestion}</td></tr>`
+                )
+            );
+            return issues.length > 0 ? issues.join('') : `<tr><td colspan="4" style="text-align:center;color:var(--gray-400)">No ${type}s found</td></tr>`;
+        };
+
+        return `
             <div class="import-wizard">
                 ${getWizardStepsHtml(3)}
                 <div class="step-content">
                     <h3>Step 3: Validation</h3>
                     <div class="validation-summary">
-                        <div class="validation-badge valid"><span class="badge-count">235</span><span class="badge-label">Valid Rows</span></div>
-                        <div class="validation-badge warning"><span class="badge-count">12</span><span class="badge-label">Warnings</span></div>
-                        <div class="validation-badge error"><span class="badge-count">3</span><span class="badge-label">Errors</span></div>
+                        <div class="validation-badge valid"><span class="badge-count">${valid}</span><span class="badge-label">Valid Rows</span></div>
+                        <div class="validation-badge warning"><span class="badge-count">${warnings}</span><span class="badge-label">Warnings</span></div>
+                        <div class="validation-badge error"><span class="badge-count">${errors}</span><span class="badge-label">Errors</span></div>
                     </div>
                     <div style="margin:16px 0">
                         <label class="checkbox-label"><input type="checkbox" id="stop-on-error"> Stop on first error</label>
@@ -17415,22 +17443,13 @@ const simulateCampaignSending = async (campaignId) => {
                     <div class="validation-log">
                         <h4>Error Log</h4>
                         <table class="error-table"><thead><tr><th>Row</th><th>Column</th><th>Error</th><th>Suggestion</th></tr></thead>
-                        <tbody>
-                            <tr class="error-row"><td>45</td><td>Phone</td><td>Invalid format</td><td>Add country code (+60)</td></tr>
-                            <tr class="error-row"><td>78</td><td>Email</td><td>Missing @ symbol</td><td>Check email address</td></tr>
-                            <tr class="error-row"><td>112</td><td>Date of Birth</td><td>Invalid date</td><td>Use YYYY-MM-DD format</td></tr>
-                        </tbody></table>
+                        <tbody>${renderIssueRows(errorRows, 'error')}</tbody></table>
                         <h4 style="margin-top:16px">Warning Log</h4>
                         <table class="warning-table"><thead><tr><th>Row</th><th>Column</th><th>Warning</th><th>Action</th></tr></thead>
-                        <tbody>
-                            <tr class="warning-row"><td>23</td><td>IC Number</td><td>Duplicate found</td><td>Will merge on import</td></tr>
-                            <tr class="warning-row"><td>67</td><td>Income Range</td><td>Unusual format</td><td>Will attempt to parse</td></tr>
-                            <tr class="warning-row"><td>89</td><td>Name</td><td>Contains special chars</td><td>Will clean automatically</td></tr>
-                        </tbody></table>
+                        <tbody>${renderIssueRows(warningRows, 'warning')}</tbody></table>
                     </div>
                     <div class="validation-actions">
                         <button class="btn secondary" onclick="app.downloadErrorReport()"><i class="fas fa-download"></i> Download Error Report</button>
-                        <button class="btn primary" onclick="UI.toast.info('Inline editor coming soon')"><i class="fas fa-edit"></i> Fix Errors</button>
                     </div>
                 </div>
                 <div class="wizard-footer">
@@ -17439,52 +17458,76 @@ const simulateCampaignSending = async (campaignId) => {
                 </div>
             </div>
         `;
+    };
 
-    const getStep4Html = async () => `
+    const getStep4Html = async () => {
+        const { total, byPhone, byEmail, byIc, list } = _importData.duplicates;
+        const reverseMap = buildReverseMapping();
+        const nameCol  = reverseMap['full_name'];
+        const phoneCol = reverseMap['phone'];
+
+        const previewRows = list.slice(0, 20).map(d => {
+            const existName  = d.existingRec?.full_name || '(unknown)';
+            const existPhone = d.existingRec?.phone || '';
+            const importName  = nameCol  !== undefined ? (d.row[nameCol]  || '').toString().trim() : '(no name)';
+            const importPhone = phoneCol !== undefined ? (d.row[phoneCol] || '').toString().trim() : '';
+            return `<tr>
+                <td>${existName}${existPhone ? ' (' + existPhone + ')' : ''}</td>
+                <td>${importName}${importPhone ? ' (' + importPhone + ')' : ''}</td>
+                <td><span style="color:var(--gray-500);font-size:12px">Pending action below</span></td>
+            </tr>`;
+        }).join('') || '<tr><td colspan="3" style="text-align:center;color:var(--gray-400)">No duplicates found</td></tr>';
+
+        return `
             <div class="import-wizard">
                 ${getWizardStepsHtml(4)}
                 <div class="step-content">
                     <h3>Step 4: Duplicate Handling</h3>
                     <div class="duplicate-stats">
-                        <div><strong>Total duplicates found:</strong> 24</div>
-                        <div><strong>By phone number:</strong> 18</div>
-                        <div><strong>By email:</strong> 4</div>
-                        <div><strong>By IC number:</strong> 2</div>
+                        <div><strong>Total duplicates found:</strong> ${total}</div>
+                        <div><strong>By phone number:</strong> ${byPhone}</div>
+                        <div><strong>By email:</strong> ${byEmail}</div>
+                        <div><strong>By IC number:</strong> ${byIc}</div>
                     </div>
                     <div class="duplicate-options" style="margin:16px 0">
                         <h4>Duplicate Handling</h4>
                         <label class="radio-label"><input type="radio" name="duplicate-action" value="skip" checked> Skip duplicates (keep existing)</label>
                         <label class="radio-label"><input type="radio" name="duplicate-action" value="update"> Update existing records</label>
-                        <label class="radio-label"><input type="radio" name="duplicate-action" value="merge"> Merge with existing</label>
+                        <label class="radio-label"><input type="radio" name="duplicate-action" value="merge"> Create as new (merge)</label>
                     </div>
                     <div class="duplicate-preview">
-                        <h4>Preview of affected records</h4>
-                        <table class="preview-table"><thead><tr><th>Existing</th><th>New</th><th>Action</th></tr></thead>
-                        <tbody>
-                            <tr><td>Tan Ah Kow (012-345-6789)</td><td>Tan Ah Kow (012-345-6789)</td><td>Skip</td></tr>
-                            <tr><td>Ong Bee Ling (012-987-6543)</td><td>Ong Bee Ling (012-987-6544)</td><td>Update phone</td></tr>
-                        </tbody></table>
+                        <h4>Preview of affected records${list.length > 20 ? ' (showing first 20)' : ''}</h4>
+                        <table class="preview-table"><thead><tr><th>Existing Record</th><th>Import Record</th><th>Status</th></tr></thead>
+                        <tbody>${previewRows}</tbody></table>
                     </div>
                 </div>
                 <div class="wizard-footer">
-                    <button class="btn secondary" onclick="app. async importPrevStep()">Back</button>
+                    <button class="btn secondary" onclick="app. importPrevStep()">Back</button>
                     <button class="btn primary" onclick="app. importNextStep()">Next: Import</button>
                 </div>
             </div>
         `;
+    };
 
-    const getStep5Html = async () => `
+    const getStep5Html = async () => {
+        const { valid, warnings, errors } = _importData.validation;
+        const processable = valid + warnings;
+        const dupCount    = _importData.duplicates.total;
+        const assignLabel = _currentUser?.full_name || _currentUser?.name || 'Me';
+        return `
             <div class="import-wizard">
                 ${getWizardStepsHtml(5)}
                 <div class="step-content">
                     <h3>Step 5: Import</h3>
                     <div class="summary-stats">
-                        <div><strong>Total records:</strong> 250</div><div><strong>Valid records:</strong> 235</div>
-                        <div><strong>New records:</strong> 217</div><div><strong>Updated records:</strong> 18</div><div><strong>Skipped records:</strong> 15</div>
+                        <div><strong>Total records in file:</strong> ${_importData.data.length}</div>
+                        <div><strong>Valid / warning rows:</strong> ${processable}</div>
+                        <div><strong>Error rows (will skip):</strong> ${errors}</div>
+                        <div><strong>Potential duplicates:</strong> ${dupCount}</div>
                     </div>
                     <div class="assignment-options" style="margin:16px 0">
                         <h4>Assignment Options</h4>
-                        <label class="radio-label"><input type="radio" name="assign-to" value="myself" checked onchange="document.getElementById('team-opts').style.display='none'"> Assign to myself (Michelle Tan)</label>
+                        <label class="radio-label"><input type="radio" name="assign-to" value="myself" checked onchange="document.getElementById('team-opts').style.display='none'"> Assign to myself (${assignLabel})</label>
                         <label class="radio-label"><input type="radio" name="assign-to" value="team" onchange="document.getElementById('team-opts').style.display='block'"> Assign to team</label>
                         <label class="radio-label"><input type="radio" name="assign-to" value="unassigned" onchange="document.getElementById('team-opts').style.display='none'"> Leave unassigned</label>
                         <div id="team-opts" style="display:none;margin-top:12px">
@@ -17501,7 +17544,7 @@ const simulateCampaignSending = async (campaignId) => {
                     <div id="progress-area" style="display:none;margin-top:16px">
                         <h4>Import Progress</h4>
                         <div class="progress-bar-container"><div class="progress-bar-fill" id="progress-bar" style="width:0%">0%</div></div>
-                        <p id="progress-status">Processing 0/250 records...</p>
+                        <p id="progress-status">Preparing import...</p>
                     </div>
                 </div>
                 <div class="wizard-footer">
@@ -17510,6 +17553,7 @@ const simulateCampaignSending = async (campaignId) => {
                 </div>
             </div>
         `;
+    };
 
     const renderMappingRows = () => {
         const headers = _importData.headers || [];
@@ -17557,69 +17601,305 @@ const simulateCampaignSending = async (campaignId) => {
     const processImportFile = async (file) => {
         if (file.size > 10 * 1024 * 1024) { UI.toast.error('File size exceeds 10MB limit'); return; }
         _importData.file = file; _importData.fileName = file.name; _importData.fileSize = file.size;
-        (() => {
-            _importData.rows = 250;
+
+        try {
+            const isCsv = file.name.toLowerCase().endsWith('.csv');
+            const readFile = (f) => new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = e => resolve(e.target.result);
+                reader.onerror = () => reject(new Error('File read failed'));
+                if (isCsv) reader.readAsText(f, 'UTF-8');
+                else reader.readAsArrayBuffer(f);
+            });
+
+            const result = await readFile(file);
+            let allRows = [];
+
+            if (isCsv) {
+                const parsed = Papa.parse(result, { header: false, skipEmptyLines: true });
+                allRows = parsed.data;
+            } else {
+                const workbook = XLSX.read(result, { type: 'array' });
+                const sheet = workbook.Sheets[workbook.SheetNames[0]];
+                allRows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+                // Remove trailing empty rows
+                while (allRows.length > 0 && allRows[allRows.length - 1].every(c => c === '')) allRows.pop();
+            }
+
+            if (allRows.length === 0) { UI.toast.error('File appears to be empty'); return; }
+
+            const firstRowHeader = document.getElementById('first-row-header')?.checked !== false;
+            if (firstRowHeader && allRows.length > 0) {
+                _importData.headers = allRows[0].map(h => (h || '').toString().trim());
+                _importData.data = allRows.slice(1);
+            } else {
+                const colCount = allRows[0].length;
+                _importData.headers = Array.from({ length: colCount }, (_, i) => `Col${i + 1}`);
+                _importData.data = allRows;
+            }
+            _importData.rows = _importData.data.length;
+
             const fi = document.getElementById('file-info');
             if (fi) {
-                fi.innerHTML = `<div class="file-info-card"><div><strong>File:</strong> ${file.name}</div><div><strong>Size:</strong> ${(file.size > 1048576 ? (file.size / 1048576).toFixed(1) + " MB" : (file.size / 1024).toFixed(0) + " KB")}</div><div><strong>Rows detected:</strong> 250</div><div><strong>Columns detected:</strong> 12</div></div>`; fi.style.display = 'block';
+                const sizeStr = file.size > 1048576 ? (file.size / 1048576).toFixed(1) + ' MB' : (file.size / 1024).toFixed(0) + ' KB';
+                fi.innerHTML = `<div class="file-info-card"><div><strong>File:</strong> ${file.name}</div><div><strong>Size:</strong> ${sizeStr}</div><div><strong>Rows detected:</strong> ${_importData.rows}</div><div><strong>Columns detected:</strong> ${_importData.headers.length}</div></div>`;
+                fi.style.display = 'block';
             }
             const btn = document.getElementById('step1-next'); if (btn) btn.disabled = false;
-            UI.toast.success('File loaded successfully');
-        }, 400);
+            UI.toast.success(`File loaded: ${_importData.rows} rows, ${_importData.headers.length} columns`);
+        } catch (err) {
+            console.error('File parse error:', err);
+            UI.toast.error('Failed to read file: ' + err.message);
+        }
     };
 
-    const importNextStep = async () => { if (_currentImportStep < 5) await renderImportStep(_currentImportStep + 1); };
+    // Private helpers (not exported)
+    const buildReverseMapping = () => {
+        const rev = {};
+        Object.entries(_importData.mapping).forEach(([col, field]) => { rev[field] = parseInt(col); });
+        return rev;
+    };
+
+    const normalisePhone = (raw) => (raw || '').toString().replace(/[-\s()]/g, '').replace(/^\+60/, '0');
+
+    const mapRowToRecord = (row, reverseMap, agentId) => {
+        const get = (field) => {
+            const idx = reverseMap[field];
+            return idx !== undefined ? (row[idx] || '').toString().trim() : '';
+        };
+        return {
+            full_name: get('full_name'),
+            phone: get('phone'),
+            email: get('email'),
+            ic_number: get('ic_number'),
+            date_of_birth: get('date_of_birth'),
+            occupation: get('occupation'),
+            company_name: get('company_name'),
+            income_range: get('income_range'),
+            address: get('address'),
+            city: get('city'),
+            state: get('state'),
+            postal_code: get('postal_code'),
+            ming_gua: get('ming_gua'),
+            gender: get('gender'),
+            responsible_agent_id: agentId,
+            pipeline_stage: 'new',
+            source: 'import'
+        };
+    };
+
+    const updateImportProgress = (pct, current, total) => {
+        const bar = document.getElementById('progress-bar');
+        if (bar) { bar.style.width = pct + '%'; bar.textContent = pct + '%'; }
+        const st = document.getElementById('progress-status');
+        if (st) st.textContent = `Processing ${current}/${total} records...`;
+    };
+
+    const runValidation = () => {
+        const reverseMap = buildReverseMapping();
+        const nameCol  = reverseMap['full_name'];
+        const phoneCol = reverseMap['phone'];
+        const emailCol = reverseMap['email'];
+        const icCol    = reverseMap['ic_number'];
+        _importData.validationResults = [];
+        let valid = 0, warnings = 0, errors = 0;
+
+        _importData.data.forEach((row, i) => {
+            const rowErrors = [], rowWarnings = [];
+
+            if (nameCol !== undefined) {
+                const name = (row[nameCol] || '').toString().trim();
+                if (!name) rowErrors.push({ field: 'Full Name', msg: 'Name is required', suggestion: 'Enter the full name' });
+            }
+            if (phoneCol !== undefined) {
+                const raw = (row[phoneCol] || '').toString().trim();
+                if (!raw) rowErrors.push({ field: 'Phone', msg: 'Phone is required', suggestion: 'Enter a phone number' });
+                else if (!/^(\+?60|0)[1-9]\d{7,9}$/.test(raw.replace(/[-\s()]/g, '')))
+                    rowWarnings.push({ field: 'Phone', msg: 'Non-standard MY format', suggestion: 'Use 01X-XXXXXXX or +601XXXXXXXX' });
+            }
+            if (emailCol !== undefined) {
+                const email = (row[emailCol] || '').toString().trim();
+                if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+                    rowErrors.push({ field: 'Email', msg: 'Invalid email format', suggestion: 'Check @ and domain' });
+            }
+            if (icCol !== undefined) {
+                const ic = (row[icCol] || '').toString().replace(/[-\s]/g, '');
+                if (ic && !/^\d{12}$/.test(ic))
+                    rowWarnings.push({ field: 'IC Number', msg: 'IC should be 12 digits', suggestion: 'Remove dashes or spaces' });
+            }
+
+            const status = rowErrors.length > 0 ? 'error' : rowWarnings.length > 0 ? 'warning' : 'valid';
+            _importData.validationResults.push({ rowIndex: i + 2, row, errors: rowErrors, warnings: rowWarnings, status });
+            if (status === 'valid') valid++;
+            else if (status === 'warning') warnings++;
+            else errors++;
+        });
+        _importData.validation = { valid, warnings, errors };
+    };
+
+    const runDuplicateCheck = async () => {
+        const reverseMap = buildReverseMapping();
+        const phoneCol = reverseMap['phone'];
+        const emailCol = reverseMap['email'];
+        const icCol    = reverseMap['ic_number'];
+        const table = _importData.importType === 'customers' ? 'customers' : 'prospects';
+        let existing = [];
+        try { existing = await AppDataStore.getAll(table); } catch (e) { existing = []; }
+
+        const existingPhones = new Map();
+        const existingEmails = new Map();
+        const existingIcs    = new Map();
+        existing.forEach(rec => {
+            if (rec.phone)     existingPhones.set(normalisePhone(rec.phone), rec);
+            if (rec.email)     existingEmails.set((rec.email || '').toLowerCase().trim(), rec);
+            if (rec.ic_number) existingIcs.set((rec.ic_number || '').replace(/[-\s]/g, ''), rec);
+        });
+
+        let byPhone = 0, byEmail = 0, byIc = 0;
+        const dupList = [];
+        _importData.validationResults.forEach(vr => {
+            if (vr.status === 'error') return;
+            const row = vr.row;
+            let isDup = false, matchField = '', existingRec = null;
+
+            if (!isDup && phoneCol !== undefined) {
+                const p = normalisePhone(row[phoneCol]);
+                if (p && existingPhones.has(p)) { byPhone++; isDup = true; matchField = 'phone'; existingRec = existingPhones.get(p); }
+            }
+            if (!isDup && emailCol !== undefined) {
+                const e = (row[emailCol] || '').toString().toLowerCase().trim();
+                if (e && existingEmails.has(e)) { byEmail++; isDup = true; matchField = 'email'; existingRec = existingEmails.get(e); }
+            }
+            if (!isDup && icCol !== undefined) {
+                const ic = (row[icCol] || '').toString().replace(/[-\s]/g, '');
+                if (ic && existingIcs.has(ic)) { byIc++; isDup = true; matchField = 'ic'; existingRec = existingIcs.get(ic); }
+            }
+            if (isDup) dupList.push({ rowIndex: vr.rowIndex, row, matchField, existingRec });
+        });
+        _importData.duplicates = { total: byPhone + byEmail + byIc, byPhone, byEmail, byIc, list: dupList };
+    };
+
+    const importNextStep = async () => {
+        if (_currentImportStep === 2) {
+            // Collect mapping from DOM before proceeding
+            _importData.mapping = {};
+            document.querySelectorAll('.mapping-select').forEach(sel => {
+                if (sel.value) _importData.mapping[parseInt(sel.dataset.col)] = sel.value;
+            });
+            runValidation();
+        }
+        if (_currentImportStep === 3) {
+            await runDuplicateCheck();
+        }
+        if (_currentImportStep < 5) await renderImportStep(_currentImportStep + 1);
+    };
     const importPrevStep = async () => { if (_currentImportStep > 1) await renderImportStep(_currentImportStep - 1); };
     const updateImportType = (type) => { _importData.importType = type; };
-    const autoMapFields = () => UI.toast.success('Fields auto-mapped based on column names');
+    const autoMapFields = () => {
+        const selects = document.querySelectorAll('.mapping-select');
+        let matched = 0;
+        selects.forEach(sel => {
+            const crmField = autoMatchField(_importData.headers[parseInt(sel.dataset.col)] || '');
+            if (crmField) { sel.value = crmField; matched++; }
+        });
+        UI.toast.success(`Auto-mapped ${matched} of ${selects.length} columns`);
+    };
     const clearMapping = () => { document.querySelectorAll('.mapping-select').forEach(s => s.value = ''); UI.toast.info('Mapping cleared'); };
     const clearMappingField = (idx) => { const s = document.querySelector(`.mapping-select[data-col="${idx}"]`); if (s) s.value = ''; };
-    const downloadErrorReport = () => UI.toast.success('Error report downloaded');
+    const downloadErrorReport = () => {
+        const issues = _importData.validationResults.filter(r => r.status !== 'valid');
+        if (!issues.length) { UI.toast.info('No errors or warnings to report'); return; }
+        const lines = ['Row,Field,Severity,Message,Suggestion'];
+        issues.forEach(r => {
+            [...r.errors.map(e => ({ ...e, sev: 'ERROR' })), ...r.warnings.map(w => ({ ...w, sev: 'WARNING' }))].forEach(issue => {
+                lines.push(`${r.rowIndex},"${issue.field}","${issue.sev}","${issue.msg}","${issue.suggestion}"`);
+            });
+        });
+        const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = `import_errors_${Date.now()}.csv`;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        UI.toast.success('Error report downloaded');
+    };
 
-const startImport = async () => {
-    document.getElementById('progress-area').style.display = 'block';
-    document.getElementById('start-import-btn').disabled = true;
-    let progress = 0;
-    
-    const intervalId = setInterval(() => {
-        progress += 5;
-        const bar = document.getElementById('progress-bar');
-        if (bar) {
-            bar.style.width = progress + '%';
-            bar.textContent = progress + '%';
+    const startImport = async () => {
+        const duplicateAction = document.querySelector('input[name="duplicate-action"]:checked')?.value || 'skip';
+        const assignTo        = document.querySelector('input[name="assign-to"]:checked')?.value || 'myself';
+
+        document.getElementById('progress-area').style.display = 'block';
+        document.getElementById('start-import-btn').disabled = true;
+
+        const rowsToProcess = _importData.validationResults.filter(vr => vr.status !== 'error');
+        const total = rowsToProcess.length;
+        if (total === 0) { UI.toast.error('No valid rows to import'); document.getElementById('start-import-btn').disabled = false; return; }
+
+        const dupMap = new Map();
+        _importData.duplicates.list.forEach(d => dupMap.set(d.rowIndex, d));
+
+        let assignedAgentId = null;
+        if (assignTo === 'myself') assignedAgentId = _currentUser?.id;
+
+        const reverseMap = buildReverseMapping();
+        const table = _importData.importType === 'customers' ? 'customers' : 'prospects';
+        let created = 0, updated = 0, skipped = 0, errorCount = 0;
+
+        for (let i = 0; i < rowsToProcess.length; i++) {
+            if (i % 10 === 0) {
+                updateImportProgress(Math.round((i / total) * 100), i, total);
+                await new Promise(r => setTimeout(r, 0));
+            }
+            const vr = rowsToProcess[i];
+            const record = mapRowToRecord(vr.row, reverseMap, assignedAgentId);
+            const dup = dupMap.get(vr.rowIndex);
+
+            if (dup) {
+                if (duplicateAction === 'skip') { skipped++; continue; }
+                if (duplicateAction === 'update') {
+                    try { await AppDataStore.update(table, dup.existingRec.id, record); updated++; }
+                    catch (e) { console.error('Update failed row', vr.rowIndex, e); errorCount++; }
+                    continue;
+                }
+                // merge: fall through to create
+            }
+            try {
+                record.id = Date.now() + i;
+                record.created_at = new Date().toISOString();
+                record.protection_deadline = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+                record.score = 5;
+                await AppDataStore.create(table, record);
+                created++;
+            } catch (e) { console.error('Insert failed row', vr.rowIndex, e); errorCount++; }
         }
-        const st = document.getElementById('progress-status');
-        if (st) st.textContent = `Processing ${Math.floor(progress * 2.5)}/250 records...`;
-        
-        if (progress >= 100) {
-            clearInterval(intervalId);
-            // Use setTimeout to allow UI to update before async operations
-            setTimeout(async () => {
-                UI.hideModal();
-                UI.toast.success('Import completed! 217 new records created.');
-                await AppDataStore.create('import_jobs', {
-                    file_name: _importData.fileName || 'import.xlsx',
-                    import_type: _importData.importType,
-                    total_rows: 250,
-                    valid_rows: 235,
-                    error_rows: 15,
-                    created_records: 217,
-                    updated_records: 18,
-                    skipped_records: 15,
-                    status: 'completed',
-                    mapping_config: {},
-                    duplicate_handling: document.querySelector('input[name="duplicate-action"]:checked')?.value || 'skip',
-                    assignment_config: { assignTo: document.querySelector('input[name="assign-to"]:checked')?.value || 'myself' },
-                    created_by: _currentUser?.id,
-                    created_at: new Date().toISOString(),
-                    completed_at: new Date().toISOString()
-                });
-                const vp = document.getElementById('content-viewport');
-                if (vp) await showImportDashboard(vp);
-            }, 500);
-        }
-    }, 150);
-};
+
+        updateImportProgress(100, total, total);
+        await new Promise(r => setTimeout(r, 200));
+
+        try {
+            await AppDataStore.create('import_jobs', {
+                file_name:          _importData.fileName || 'import.xlsx',
+                import_type:        _importData.importType,
+                total_rows:         _importData.data.length,
+                valid_rows:         _importData.validation.valid + _importData.validation.warnings,
+                error_rows:         _importData.validation.errors + errorCount,
+                created_records:    created,
+                updated_records:    updated,
+                skipped_records:    skipped,
+                status:             'completed',
+                mapping_config:     _importData.mapping,
+                duplicate_handling: duplicateAction,
+                assignment_config:  { assignTo, agentId: assignedAgentId },
+                created_by:         _currentUser?.id,
+                created_at:         new Date().toISOString(),
+                completed_at:       new Date().toISOString()
+            });
+        } catch (e) { console.error('Failed to log import job:', e); }
+
+        UI.hideModal();
+        UI.toast.success(`Import complete: ${created} created, ${updated} updated, ${skipped} skipped`);
+        const vp = document.getElementById('content-viewport');
+        if (vp) await showImportDashboard(vp);
+    };
 
     const viewImportDetails = async (id) => {
         const job = await AppDataStore.getById('import_jobs', id);
