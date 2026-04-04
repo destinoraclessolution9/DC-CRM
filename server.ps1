@@ -26,7 +26,8 @@ if (-not $listener) {
 
 try {
     $listener.Start()
-    Write-Output "Server started on http://localhost:$port/"
+    Write-Output "Listening on http://localhost:$port/"
+    Write-Host "Local:   http://localhost:$port/"
     [Console]::Out.Flush()
     while ($listener.IsListening) {
         try {
