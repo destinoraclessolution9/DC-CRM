@@ -9095,19 +9095,26 @@ function _wireLoginBtn() {
 
         const modalActions = [
             { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Mark Complete', type: 'secondary', action: `await app.markActivityComplete(${activityId})` },
-            { label: 'Edit', type: 'secondary', action: `await app.editActivity(${activityId})` }
+            { label: '✏️ Edit', type: 'secondary', action: `UI.hideModal(); await app.editActivity(${activityId})` },
+            { label: '📝 Post Meeting Update', type: 'secondary', action: `UI.hideModal(); await app.postMeetupNotes(${activityId})` },
+            { label: '✅ Mark Complete', type: 'secondary', action: `await app.markActivityComplete(${activityId})` },
         ];
 
         if (activity.prospect_id) {
             modalActions.push({
-                label: 'Complete Prospect Profile',
+                label: '👤 View Prospect',
                 type: 'secondary',
                 action: `UI.hideModal(); await app.showProspectDetail(${activity.prospect_id})`
             });
+        } else if (activity.customer_id) {
+            modalActions.push({
+                label: '👤 View Customer',
+                type: 'secondary',
+                action: `UI.hideModal(); await app.showCustomerDetail(${activity.customer_id})`
+            });
         }
 
-        modalActions.push({ label: 'Delete', type: 'primary', action: `await app.deleteActivity(${activityId})` });
+        modalActions.push({ label: '🗑️ Delete', type: 'danger', action: `await app.deleteActivity(${activityId})` });
 
         UI.showModal('Activity Details', content, modalActions);
     };
