@@ -1,6 +1,29 @@
-$port = if ($env:PORT) { $env:PORT } else { 8085 }
-$listener = New-Object System.Net.HttpListener
-$listener.Prefixes.Add("http://localhost:$port/")
+$startPort = if ($env:PORT) { [int]$env:PORT } else { 8083 }
+
+# Find an available port starting from startPort
+$port = $startPort
+$listener = $null
+
+for ($attempt = 0; $attempt -lt 20; $attempt++) {
+    $test = New-Object System.Net.HttpListener
+    $test.Prefixes.Add("http://localhost:$port/")
+    try {
+        $test.Start()
+        $test.Stop()
+        $test.Close()
+        $listener = New-Object System.Net.HttpListener
+        $listener.Prefixes.Add("http://localhost:$port/")
+        break
+    } catch {
+        $port++
+    }
+}
+
+if (-not $listener) {
+    Write-Error "Could not find available port starting from $startPort"
+    exit 1
+}
+
 try {
     $listener.Start()
     Write-Output "Listening on http://localhost:$port/"
@@ -16,7 +39,6 @@ try {
             if ($localPath -eq "" -or $localPath -eq "/") { $localPath = "index.html" }
 
             $filePath = Join-Path (Get-Location) $localPath
-            Write-Output "Request: $localPath -> $filePath"
 
             if (Test-Path $filePath -PathType Leaf) {
                 $extension = [System.IO.Path]::GetExtension($filePath).ToLower()
@@ -28,6 +50,7 @@ try {
                     ".jpg"  { "image/jpeg" }
                     ".svg"  { "image/svg+xml" }
                     ".ico"  { "image/x-icon" }
+                    ".json" { "application/json" }
                     default { "application/octet-stream" }
                 }
                 $content = [System.IO.File]::ReadAllBytes($filePath)
@@ -36,7 +59,6 @@ try {
                 $response.OutputStream.Write($content, 0, $content.Length)
                 $response.StatusCode = 200
             } else {
-                Write-Output "404 Not Found: $filePath"
                 $response.StatusCode = 404
             }
             $response.Close()
@@ -46,5 +68,7 @@ try {
         }
     }
 } finally {
-    $listener.Stop()
+    if ($listener -and $listener.IsListening) {
+        $listener.Stop()
+    }
 }

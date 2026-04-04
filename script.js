@@ -1560,7 +1560,8 @@ const appLogic = (() => {
         if (!treeContainer) return;
         if (parentId === null) treeContainer.innerHTML = '';
 
-        const folders = await AppDataStore.getAll('folders')
+        const allFolders = await AppDataStore.getAll('folders');
+        const folders = allFolders
             .filter(f => f.parent_id === parentId)
             .sort((a, b) => a.name.localeCompare(b.name));
 
@@ -3180,7 +3181,8 @@ In a production system, this would show the actual file contents.
     };
 
     const showIntegrationHub = async (container) => {
-        container.innerHTML = `
+        try {
+            container.innerHTML = `
             <div class="integration-hub">
                 <div class="integration-header">
                     <div>
@@ -3191,7 +3193,7 @@ In a production system, this would show the actual file contents.
                         <i class="fas fa-arrow-left"></i> Back to Settings
                     </button>
                 </div>
-                
+
                 <div class="integration-grid">
                     ${await renderIntegrationCard('google', 'Google Calendar', 'Two-way sync', 'calendar', await getConnectionStatus('google'))}
                     ${await renderIntegrationCard('outlook', 'Outlook Calendar', 'One-way sync', 'calendar', await getConnectionStatus('outlook'))}
@@ -3202,6 +3204,10 @@ In a production system, this would show the actual file contents.
                 </div>
             </div>
         `;
+        } catch (e) {
+            console.error('Integration Hub error:', e);
+            container.innerHTML = '<div class="error-state" style="padding:40px;text-align:center;"><i class="fas fa-exclamation-circle" style="font-size:2rem;color:#ef4444;"></i><p style="margin-top:12px;">Failed to load integrations. Please try again later.</p></div>';
+        }
     };
 
     const renderIntegrationCard = async (id, name, description, type, status) => {
@@ -5881,6 +5887,12 @@ function _wireLoginBtn() {
         } else if (viewId === 'marketing_lists') {
             _currentView = 'marketing_lists';
             await showMarketingListsView(viewport);
+        } else if (viewId === 'ranking' || viewId === 'performance') {
+            _currentView = 'ranking';
+            await showRankingPerformanceView(viewport);
+        } else if (viewId === 'workflows') {
+            _currentView = 'workflows';
+            await showWorkflowAutomationView(viewport);
         } else if (viewId === 'settings') {
             _currentView = 'settings';
             showSettingsView(viewport);
@@ -6687,52 +6699,117 @@ function _wireLoginBtn() {
 
     // ========== PHASE 18: CASES MODULE IMPLEMENTATION ==========
 
-    let _caseFilters = { search: '', product: 'all', from: '', to: '', visibility: 'all' };
+    let _caseFilters = { search: '', product: 'all', from: '', to: '', visibility: 'all', agent: 'all', tag: 'all' };
+    let _caseActiveTab = 'cps'; // 'cps' | 'closed'
 
 
 
     const showCasesView = async (container) => {
+        const products = ((await AppDataStore.getAll('products')) || []).filter(p => p.is_active !== false);
+        const allUsers = (await AppDataStore.getAll('users')) || [];
+        const agents = allUsers.filter(u => u.status !== 'inactive');
+        const allTags = (await AppDataStore.getAll('tags')) || [];
+
+        const isCps = _caseActiveTab === 'cps';
+
+        const cpsFilterBar = `
+            <div class="filter-bar">
+                <div class="filter-group">
+                    <i class="fas fa-search"></i>
+                    <input type="text" id="case-search" placeholder="Search title or prospect/customer..." value="${_caseFilters.search}" onkeyup="app.handleCaseSearch(event)">
+                </div>
+                <div class="filter-group">
+                    <label>Product</label>
+                    <select id="case-product-filter" onchange="app.handleCaseFilterChange()">
+                        <option value="all">All Products</option>
+                        ${products.map(p => `<option value="${p.name}" ${_caseFilters.product === p.name ? 'selected' : ''}>${p.name}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>From</label>
+                    <input type="date" id="case-date-from" value="${_caseFilters.from}" onchange="app.handleCaseFilterChange()">
+                </div>
+                <div class="filter-group">
+                    <label>To</label>
+                    <input type="date" id="case-date-to" value="${_caseFilters.to}" onchange="app.handleCaseFilterChange()">
+                </div>
+                <div class="filter-group">
+                    <label>Visibility</label>
+                    <select id="case-visibility-filter" onchange="app.handleCaseFilterChange()">
+                        <option value="all" ${_caseFilters.visibility === 'all' ? 'selected' : ''}>All</option>
+                        <option value="public" ${_caseFilters.visibility === 'public' ? 'selected' : ''}>Public Only</option>
+                        <option value="mine" ${_caseFilters.visibility === 'mine' ? 'selected' : ''}>My Cases</option>
+                    </select>
+                </div>
+            </div>`;
+
+        const closedFilterBar = `
+            <div class="filter-bar">
+                <div class="filter-group">
+                    <i class="fas fa-search"></i>
+                    <input type="text" id="case-search" placeholder="Search title or prospect/customer..." value="${_caseFilters.search}" onkeyup="app.handleCaseSearch(event)">
+                </div>
+                <div class="filter-group">
+                    <label>Product</label>
+                    <select id="case-product-filter" onchange="app.handleCaseFilterChange()">
+                        <option value="all">All Products</option>
+                        ${products.map(p => `<option value="${p.name}" ${_caseFilters.product === p.name ? 'selected' : ''}>${p.name}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>Agent</label>
+                    <select id="case-agent-filter" onchange="app.handleCaseFilterChange()">
+                        <option value="all">All Agents</option>
+                        ${agents.map(u => `<option value="${u.id}" ${_caseFilters.agent === String(u.id) ? 'selected' : ''}>${u.full_name || u.username}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>From</label>
+                    <input type="date" id="case-date-from" value="${_caseFilters.from}" onchange="app.handleCaseFilterChange()">
+                </div>
+                <div class="filter-group">
+                    <label>To</label>
+                    <input type="date" id="case-date-to" value="${_caseFilters.to}" onchange="app.handleCaseFilterChange()">
+                </div>
+                <div class="filter-group">
+                    <label>Tag</label>
+                    <select id="case-tag-filter" onchange="app.handleCaseFilterChange()">
+                        <option value="all">All Tags</option>
+                        ${allTags.map(t => `<option value="${t.id}" ${_caseFilters.tag === String(t.id) ? 'selected' : ''}>${t.name}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>Visibility</label>
+                    <select id="case-visibility-filter" onchange="app.handleCaseFilterChange()">
+                        <option value="all" ${_caseFilters.visibility === 'all' ? 'selected' : ''}>All</option>
+                        <option value="public" ${_caseFilters.visibility === 'public' ? 'selected' : ''}>Public Only</option>
+                        <option value="mine" ${_caseFilters.visibility === 'mine' ? 'selected' : ''}>My Cases</option>
+                    </select>
+                </div>
+            </div>`;
+
         container.innerHTML = `
             <div class="cases-view">
                 <div class="prospects-header">
                     <div>
-                        <h1>Case Studies Repository</h1>
+                        <h1>Success Case Library</h1>
                         <p>Document and share success stories, sales ideas, and closing strategies.</p>
                     </div>
                     <button class="btn primary" onclick="(async () => { await app.openCaseStudyModal(); })()">
-                        <i class="fas fa-plus"></i> New Case Study
+                        <i class="fas fa-plus"></i> New Case
                     </button>
                 </div>
 
-                <div class="filter-bar">
-                    <div class="filter-group">
-                        <i class="fas fa-search"></i>
-                        <input type="text" id="case-search" placeholder="Search title or prospect/customer..." value="${_caseFilters.search}" onkeyup="app.handleCaseSearch(event)">
-                    </div>
-                    <div class="filter-group">
-                        <label>Product</label>
-                        <select id="case-product-filter" onchange="app.handleCaseFilterChange()">
-                            <option value="all">All Products</option>
-                            ${((await AppDataStore.getAll('products')) || []).filter(p => p.is_active !== false).map(p => `<option value="${p.name}" ${_caseFilters.product === p.name ? 'selected' : ''}>${p.name}</option>`).join('')}
-                        </select>
-                    </div>
-                    <div class="filter-group">
-                        <label>From</label>
-                        <input type="date" id="case-date-from" value="${_caseFilters.from}" onchange="app.handleCaseFilterChange()">
-                    </div>
-                    <div class="filter-group">
-                        <label>To</label>
-                        <input type="date" id="case-date-to" value="${_caseFilters.to}" onchange="app.handleCaseFilterChange()">
-                    </div>
-                    <div class="filter-group">
-                        <label>Visibility</label>
-                        <select id="case-visibility-filter" onchange="app.handleCaseFilterChange()">
-                            <option value="all" ${_caseFilters.visibility === 'all' ? 'selected' : ''}>All</option>
-                            <option value="public" ${_caseFilters.visibility === 'public' ? 'selected' : ''}>Public Only</option>
-                            <option value="mine" ${_caseFilters.visibility === 'mine' ? 'selected' : ''}>My Cases</option>
-                        </select>
-                    </div>
+                <div style="display:flex; gap:8px; margin-bottom:12px;">
+                    <button class="btn ${isCps ? 'primary' : 'secondary'}" onclick="app.switchCaseTab('cps')">
+                        <i class="fas fa-handshake"></i> CPS Invitation Cases
+                    </button>
+                    <button class="btn ${!isCps ? 'primary' : 'secondary'}" onclick="app.switchCaseTab('closed')">
+                        <i class="fas fa-check-circle"></i> Closed Cases
+                    </button>
                 </div>
+
+                ${isCps ? cpsFilterBar : closedFilterBar}
 
                 <div class="table-container">
                     <table class="crm-table">
@@ -6743,16 +6820,16 @@ function _wireLoginBtn() {
                                 <th>Product</th>
                                 <th>Amount (RM)</th>
                                 <th>Closing Date</th>
+                                <th>Tags</th>
                                 <th class="text-right">Actions</th>
                             </tr>
                         </thead>
                         <tbody id="cases-list-body">
-                            <!-- Rows rendered by await renderCasesList() -->
                         </tbody>
                     </table>
                     <div id="cases-empty-state" style="display: none; padding: 40px; text-align: center; color: var(--gray-400);">
                         <i class="fas fa-folder-open" style="font-size: 48px; margin-bottom: 16px;"></i>
-                        <p>No case studies found matching your criteria.</p>
+                        <p>No cases found matching your criteria.</p>
                     </div>
                 </div>
             </div>
@@ -6761,16 +6838,26 @@ function _wireLoginBtn() {
         await renderCasesList();
     };
 
+    const switchCaseTab = async (type) => {
+        _caseActiveTab = type;
+        _caseFilters.agent = 'all';
+        _caseFilters.tag = 'all';
+        _caseFilters.search = '';
+        await showCasesView(document.getElementById('content-viewport'));
+    };
+
     const handleCaseSearch = async (e) => {
         _caseFilters.search = e.target.value;
         await renderCasesList();
     };
 
     const handleCaseFilterChange = async () => {
-        _caseFilters.product = document.getElementById('case-product-filter').value;
-        _caseFilters.from = document.getElementById('case-date-from').value;
-        _caseFilters.to = document.getElementById('case-date-to').value;
-        _caseFilters.visibility = document.getElementById('case-visibility-filter').value;
+        _caseFilters.product = document.getElementById('case-product-filter')?.value || 'all';
+        _caseFilters.from = document.getElementById('case-date-from')?.value || '';
+        _caseFilters.to = document.getElementById('case-date-to')?.value || '';
+        _caseFilters.visibility = document.getElementById('case-visibility-filter')?.value || 'all';
+        _caseFilters.agent = document.getElementById('case-agent-filter')?.value || 'all';
+        _caseFilters.tag = document.getElementById('case-tag-filter')?.value || 'all';
         await renderCasesList();
     };
 
@@ -6782,6 +6869,9 @@ function _wireLoginBtn() {
         let cases = await AppDataStore.getAll('case_studies');
         const currentUser = _currentUser;
 
+        // Filter by active tab (case_type)
+        cases = cases.filter(c => (c.case_type || 'cps') === _caseActiveTab);
+
         // Apply Permission/Visibility Filters
         cases = cases.filter(c => {
             const isOwner = c.created_by === currentUser?.id;
@@ -6790,11 +6880,24 @@ function _wireLoginBtn() {
             if (_caseFilters.visibility === 'public') return c.is_public;
             if (_caseFilters.visibility === 'mine') return isOwner;
 
-            // Default "all" view: show public ones OR mine OR if I'm admin
             return c.is_public || isOwner || isAdmin;
         });
 
-        // Apply Search/Filter logic
+        // Agent filter (Closed tab only)
+        if (_caseActiveTab === 'closed' && _caseFilters.agent !== 'all') {
+            cases = cases.filter(c => String(c.created_by) === String(_caseFilters.agent));
+        }
+
+        // Tag filter
+        if (_caseFilters.tag !== 'all') {
+            const tagMappings = (await AppDataStore.getAll('entity_tags')) || [];
+            const caseIdsWithTag = tagMappings
+                .filter(et => et.entity_type === 'case_study' && String(et.tag_id) === String(_caseFilters.tag))
+                .map(et => et.entity_id);
+            cases = cases.filter(c => caseIdsWithTag.includes(c.id));
+        }
+
+        // Search filter
         if (_caseFilters.search) {
             const q = _caseFilters.search.toLowerCase();
             const filteredCases = [];
@@ -6833,22 +6936,31 @@ function _wireLoginBtn() {
             return;
         }
 
+        // Pre-fetch all tags & mappings for batch display
+        const allTags = (await AppDataStore.getAll('tags')) || [];
+        const allTagMappings = (await AppDataStore.getAll('entity_tags')) || [];
+
         emptyState.style.display = 'none';
         const caseRows = await Promise.all(cases.map(async c => {
             let entityName = '-';
-            let entityLink = '#';
+            let entityLink = 'return false';
             if (c.customer_id) {
                 const cust = await AppDataStore.getById('customers', c.customer_id);
                 entityName = cust ? `<i class="fas fa-user-check" title="Customer"></i> ${cust.full_name}` : 'Unknown Customer';
-                entityLink = `await app.showCustomerDetail(${c.customer_id})`;
+                entityLink = `app.showCustomerDetail(${c.customer_id})`;
             } else if (c.prospect_id) {
                 const pros = await AppDataStore.getById('prospects', c.prospect_id);
                 entityName = pros ? `<i class="fas fa-user" title="Prospect"></i> ${pros.full_name}` : 'Unknown Prospect';
-                entityLink = `await app.showProspectDetail(${c.prospect_id})`;
+                entityLink = `app.showProspectDetail(${c.prospect_id})`;
             }
 
             const isOwner = c.created_by === currentUser?.id;
             const isAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || currentUser?.role?.includes('Level 3') || currentUser?.role?.includes('Level 7') || currentUser?.role === 'team_leader' || currentUser?.role === 'admin';
+
+            // Build tag badges for this case
+            const caseMappings = allTagMappings.filter(et => et.entity_type === 'case_study' && et.entity_id === c.id);
+            const caseTags = caseMappings.map(m => allTags.find(t => t.id === m.tag_id)).filter(Boolean);
+            const tagBadges = caseTags.map(t => `<span class="badge" style="background:${t.color || '#e5e7eb'};color:#1f2937;margin-right:4px;font-size:11px;">${t.name}</span>`).join('');
 
             return `
                 <tr class="clickable" onclick="app.showCaseStudyDetail(${c.id})">
@@ -6862,6 +6974,10 @@ function _wireLoginBtn() {
                     <td>${c.product || '-'}</td>
                     <td>RM ${parseFloat(c.amount || 0).toLocaleString()}</td>
                     <td>${c.closing_date || '-'}</td>
+                    <td>
+                        ${tagBadges}
+                        <button class="btn-icon" title="Add Tag" style="font-size:11px;" onclick="event.stopPropagation(); app.addTagToCase(${c.id})"><i class="fas fa-tag"></i></button>
+                    </td>
                     <td class="text-right">
                         <div class="actions">
                             <button class="btn-icon" title="View" onclick="event.stopPropagation(); app.showCaseStudyDetail(${c.id})"><i class="fas fa-eye"></i></button>
@@ -6881,12 +6997,11 @@ function _wireLoginBtn() {
         const c = await AppDataStore.getById('case_studies', id);
         if (!c) return;
 
-        const viewport = document.getElementById('content-viewport');
         const currentUser = _currentUser;
         const isOwner = c.created_by === currentUser?.id;
         const isAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || currentUser?.role?.includes('Level 3') || currentUser?.role?.includes('Level 7') || currentUser?.role === 'team_leader' || currentUser?.role === 'admin';
 
-        let entityInfo = 'Generic Case Study';
+        let entityInfo = 'Generic Case';
         if (c.customer_id) {
             const cust = await AppDataStore.getById('customers', c.customer_id);
             entityInfo = cust ? `Customer: ${cust.full_name}` : 'Unknown Customer';
@@ -6898,70 +7013,100 @@ function _wireLoginBtn() {
         const creator = await AppDataStore.getById('users', c.created_by);
         const creatorName = creator ? (creator.full_name || creator.username) : 'System';
 
-        viewport.innerHTML = `
-            <div class="case-detail-view">
-                <div class="detail-header">
-                    <div class="header-left">
-                        <button class="btn-back" onclick="app.navigateTo('cases')"><i class="fas fa-arrow-left"></i> Back to List</button>
-                        <h1>${c.title}</h1>
-                        <div class="case-meta-header">
-                            <span><i class="fas fa-user-circle"></i> ${entityInfo}</span>
-                            <span><i class="fas fa-calendar-alt"></i> Closed: ${c.closing_date || 'N/A'}</span>
-                            <span><i class="fas fa-tags"></i> Product: ${c.product || 'N/A'}</span>
-                            <span><i class="fas fa-money-bill-wave"></i> RM ${parseFloat(c.amount || 0).toLocaleString()}</span>
-                        </div>
-                    </div>
-                    <div class="header-actions">
-                        ${(isOwner || isAdmin) ? `
-                            <button class="btn secondary" onclick="app.toggleCasePublic(${c.id})">
-                                <i class="fas ${c.is_public ? 'fa-lock' : 'fa-share'}"></i> ${c.is_public ? 'Make Private' : 'Share Publicly'}
-                            </button>
-                            <button class="btn secondary" onclick="app.openCaseStudyModal(${c.id})"><i class="fas fa-edit"></i> Edit</button>
-                            <button class="btn-icon text-danger" onclick="app.deleteCaseStudy(${c.id})"><i class="fas fa-trash"></i></button>
-                        ` : ''}
-                        <button class="btn secondary" onclick="app.copyCaseLink(${c.id})"><i class="fas fa-link"></i> Copy Link</button>
+        // Fetch tags for this case
+        const allTagMappings = (await AppDataStore.getAll('entity_tags')) || [];
+        const allTags = (await AppDataStore.getAll('tags')) || [];
+        const caseMappings = allTagMappings.filter(et => et.entity_type === 'case_study' && et.entity_id === c.id);
+        const caseTags = caseMappings.map(m => allTags.find(t => t.id === m.tag_id)).filter(Boolean);
+        const tagPills = caseTags.map(t => `
+            <span class="badge" style="background:${t.color || '#e5e7eb'};color:#1f2937;margin-right:4px;">
+                ${t.name}
+                <span style="cursor:pointer;margin-left:4px;" onclick="app.removeTagFromCase(${c.id}, ${t.id})">&times;</span>
+            </span>`).join('');
+
+        const typeLabel = (c.case_type || 'cps') === 'cps' ? 'CPS Invitation Case' : 'Closed Case';
+
+        const contentHtml = `
+            <div style="padding:0 4px;">
+                <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px;color:var(--gray-500);font-size:13px;">
+                    <span><i class="fas fa-tag"></i> ${typeLabel}</span>
+                    <span><i class="fas fa-user-circle"></i> ${entityInfo}</span>
+                    <span><i class="fas fa-calendar-alt"></i> Closed: ${c.closing_date || 'N/A'}</span>
+                    <span><i class="fas fa-box"></i> ${c.product || 'N/A'}</span>
+                    <span><i class="fas fa-money-bill-wave"></i> RM ${parseFloat(c.amount || 0).toLocaleString()}</span>
+                    ${c.is_public ? '<span class="badge badge-success">Public</span>' : ''}
+                </div>
+
+                <div style="margin-bottom:16px;">
+                    <strong style="font-size:12px;color:var(--gray-500);text-transform:uppercase;letter-spacing:.05em;">Tags</strong>
+                    <div style="margin-top:6px;">
+                        ${tagPills || '<em style="color:var(--gray-400);font-size:13px;">No tags</em>'}
+                        <button class="btn secondary btn-sm" style="margin-left:8px;" onclick="app.addTagToCase(${c.id})"><i class="fas fa-tag"></i> Add Tag</button>
                     </div>
                 </div>
 
-                <div class="detail-content scroll-y">
-                    <div class="case-section card">
-                        <h3><i class="fas fa-handshake"></i> Part 1: CPS Invitation</h3>
-                        <div class="section-content">
-                            <p>${c.cps_invitation_details || '<em class="text-muted">No details provided.</em>'}</p>
+                <div class="case-section card" style="margin-bottom:12px;">
+                    <h3 style="font-size:14px;font-weight:600;margin-bottom:8px;"><i class="fas fa-handshake"></i> Part 1: CPS Invitation</h3>
+                    <p style="white-space:pre-wrap;">${c.cps_invitation_details || '<em style="color:var(--gray-400);">No details provided.</em>'}</p>
+                </div>
+
+                <div class="case-section card" style="margin-bottom:12px;">
+                    <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;"><i class="fas fa-check-double"></i> Part 2: Closing & Strategy</h3>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                        <div>
+                            <h4 style="font-size:12px;font-weight:600;color:var(--gray-500);text-transform:uppercase;margin-bottom:4px;">Closing Details</h4>
+                            <p style="white-space:pre-wrap;">${c.closing_details || '-'}</p>
+                        </div>
+                        <div>
+                            <h4 style="font-size:12px;font-weight:600;color:var(--gray-500);text-transform:uppercase;margin-bottom:4px;">The Sales Idea</h4>
+                            <p style="white-space:pre-wrap;">${c.sales_idea || '-'}</p>
+                        </div>
+                        <div>
+                            <h4 style="font-size:12px;font-weight:600;color:var(--gray-500);text-transform:uppercase;margin-bottom:4px;">Execution Plan</h4>
+                            <p style="white-space:pre-wrap;">${c.plan_details || '-'}</p>
+                        </div>
+                        <div>
+                            <h4 style="font-size:12px;font-weight:600;color:var(--gray-500);text-transform:uppercase;margin-bottom:4px;">Success Story & Lessons</h4>
+                            <p style="white-space:pre-wrap;">${c.success_story || '-'}</p>
                         </div>
                     </div>
+                </div>
 
-                    <div class="case-section card">
-                        <h3><i class="fas fa-check-double"></i> Part 2: Closing & Strategy</h3>
-                        <div class="strategy-grid">
-                            <div class="strategy-item">
-                                <h4>Closing Details</h4>
-                                <p>${c.closing_details || '-'}</p>
-                            </div>
-                            <div class="strategy-item">
-                                <h4>The Sales Idea</h4>
-                                <div class="highlight-box">
-                                    <p>${c.sales_idea || '-'}</p>
-                                </div>
-                            </div>
-                            <div class="strategy-item">
-                                <h4>Execution Plan</h4>
-                                <p>${c.plan_details || '-'}</p>
-                            </div>
-                            <div class="strategy-item">
-                                <h4>Success Story & Lessons</h4>
-                                <p>${c.success_story || '-'}</p>
-                            </div>
+                ${(c.key_success_factor || c.script) ? `
+                <div class="case-section card" style="margin-bottom:12px;">
+                    <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;"><i class="fas fa-star"></i> Part 3: Key Factors & Script</h3>
+                    ${c.key_success_factor ? `
+                    <div style="margin-bottom:12px;">
+                        <h4 style="font-size:12px;font-weight:600;color:var(--gray-500);text-transform:uppercase;margin-bottom:4px;">Key Success Factor</h4>
+                        <p style="white-space:pre-wrap;">${c.key_success_factor}</p>
+                    </div>` : ''}
+                    ${c.script ? `
+                    <div>
+                        <h4 style="font-size:12px;font-weight:600;color:var(--gray-500);text-transform:uppercase;margin-bottom:4px;">Sales Script</h4>
+                        <div style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:6px;padding:12px;">
+                            <p style="white-space:pre-wrap;font-family:monospace;font-size:13px;">${c.script}</p>
                         </div>
-                    </div>
+                    </div>` : ''}
+                </div>` : ''}
 
-                    <div class="case-footer">
-                        <p><strong>Created By:</strong> ${creatorName} on ${new Date(c.created_at).toLocaleDateString()}</p>
-                        ${c.updated_at ? `<p><strong>Last Updated:</strong> ${new Date(c.updated_at).toLocaleString()}</p>` : ''}
-                    </div>
+                <div style="font-size:12px;color:var(--gray-400);margin-top:8px;">
+                    <span>Created by <strong>${creatorName}</strong> on ${new Date(c.created_at).toLocaleDateString()}</span>
+                    ${c.updated_at ? ` &middot; Updated ${new Date(c.updated_at).toLocaleString()}` : ''}
                 </div>
             </div>
         `;
+
+        const footerButtons = [
+            { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Copy Link', type: 'secondary', action: `app.copyCaseLink(${c.id})` },
+            ...(isOwner || isAdmin ? [
+                { label: c.is_public ? 'Make Private' : 'Share Publicly', type: 'secondary', action: `(async () => { await app.toggleCasePublic(${c.id}); })()` },
+                { label: 'Edit', type: 'secondary', action: `UI.hideModal(); app.openCaseStudyModal(${c.id})` },
+                { label: 'Delete', type: 'danger', action: `(async () => { await app.deleteCaseStudy(${c.id}); UI.hideModal(); })()` }
+            ] : [])
+        ];
+
+        UI.showModal(c.title, contentHtml, footerButtons);
     };
 
     const toggleCasePublic = async (id) => {
@@ -6980,20 +7125,30 @@ function _wireLoginBtn() {
     };
 
     const deleteCaseStudy = async (id) => {
-        if (confirm("Are you sure you want to delete this case study? This action cannot be undone.")) {
+        if (confirm("Are you sure you want to delete this case? This action cannot be undone.")) {
             await AppDataStore.delete('case_studies', id);
-            UI.toast.success("Case study deleted.");
-            if (_currentView === 'cases') {
-                await renderCasesList();
-            } else {
-                await app.navigateTo('cases');
-            }
+            UI.toast.success("Case deleted.");
+            await renderCasesList();
+        }
+    };
+
+    const addTagToCase = (caseId) => {
+        openAddTagModal(caseId, 'case_study');
+    };
+
+    const removeTagFromCase = async (caseId, tagId) => {
+        const mappings = await AppDataStore.query('entity_tags', { entity_type: 'case_study', entity_id: caseId, tag_id: tagId });
+        if (mappings?.length) {
+            await AppDataStore.delete('entity_tags', mappings[0].id);
+            UI.toast.success('Tag removed');
+            await showCaseStudyDetail(caseId);
         }
     };
 
     const openCaseStudyModal = async (id = null) => {
         const c = id ? await AppDataStore.getById('case_studies', id) : null;
-        const title = id ? 'Edit Case Study' : 'New Case Study';
+        const title = id ? 'Edit Case' : 'New Case';
+        const caseType = c ? (c.case_type || 'cps') : _caseActiveTab;
 
         let entityName = '';
         if (c) {
@@ -7008,6 +7163,7 @@ function _wireLoginBtn() {
 
         const modalHtml = `
             <div class="case-study-form">
+                <input type="hidden" id="case-type" value="${caseType}">
                 <div class="modal-tabs">
                     <button class="tab-btn active" onclick="app.switchModalTab(event, 'basic')">Basic Info</button>
                     <button class="tab-btn" onclick="app.switchModalTab(event, 'cps')">CPS Invitation</button>
@@ -7019,7 +7175,7 @@ function _wireLoginBtn() {
                         <label>Title <span class="required">*</span></label>
                         <input type="text" id="case-title" class="form-control" value="${c ? c.title : ''}" placeholder="e.g. How I closed PR4 with career focus">
                     </div>
-                    
+
                     <div class="form-row">
                         <div class="form-group half">
                             <label>Link Prospect/Customer</label>
@@ -7052,7 +7208,7 @@ function _wireLoginBtn() {
 
                     <div class="form-group">
                         <label class="checkbox-label">
-                            <input type="checkbox" id="case-is-public" ${c && c.is_public ? 'checked' : ''}> Make this case study public to other agents
+                            <input type="checkbox" id="case-is-public" ${c && c.is_public ? 'checked' : ''}> Make this case public to other agents
                         </label>
                     </div>
                 </div>
@@ -7061,34 +7217,42 @@ function _wireLoginBtn() {
                     <div class="form-group">
                         <label>CPS Invitation Details</label>
                         <p class="help-text">Who invited? Call/Event/Referral? Special circumstances?</p>
-                        <textarea id="case-cps-details" class="form-control" rows="8">${c ? c.cps_invitation_details : ''}</textarea>
+                        <textarea id="case-cps-details" class="form-control" rows="8">${c ? (c.cps_invitation_details || '') : ''}</textarea>
                     </div>
                 </div>
 
                 <div id="case-tab-closing" class="modal-tab-content">
                     <div class="form-group">
                         <label>Closing Details</label>
-                        <textarea id="case-closing-details" class="form-control" rows="3" placeholder="Key discussions, objections overcome...">${c ? c.closing_details : ''}</textarea>
+                        <textarea id="case-closing-details" class="form-control" rows="3" placeholder="Key discussions, objections overcome...">${c ? (c.closing_details || '') : ''}</textarea>
                     </div>
                     <div class="form-group">
                         <label>The Sales Idea</label>
-                        <textarea id="case-sales-idea" class="form-control" rows="3" placeholder="The core logic that worked...">${c ? c.sales_idea : ''}</textarea>
+                        <textarea id="case-sales-idea" class="form-control" rows="3" placeholder="The core logic that worked...">${c ? (c.sales_idea || '') : ''}</textarea>
                     </div>
                     <div class="form-group">
                         <label>Plan Details</label>
-                        <textarea id="case-plan-details" class="form-control" rows="3" placeholder="Follow-up sequence, bundling...">${c ? c.plan_details : ''}</textarea>
+                        <textarea id="case-plan-details" class="form-control" rows="3" placeholder="Follow-up sequence, bundling...">${c ? (c.plan_details || '') : ''}</textarea>
                     </div>
                     <div class="form-group">
                         <label>Overall Success Story</label>
-                        <textarea id="case-success-story" class="form-control" rows="4" placeholder="Testimonial, lessons learned...">${c ? c.success_story : ''}</textarea>
+                        <textarea id="case-success-story" class="form-control" rows="3" placeholder="Testimonial, lessons learned...">${c ? (c.success_story || '') : ''}</textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Key Success Factor</label>
+                        <textarea id="case-key-success-factor" class="form-control" rows="3" placeholder="The single most important factor that made this case succeed...">${c ? (c.key_success_factor || '') : ''}</textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Sales Script</label>
+                        <textarea id="case-script" class="form-control" rows="4" placeholder="The exact words, pitch, or script that worked...">${c ? (c.script || '') : ''}</textarea>
                     </div>
                 </div>
             </div>
         `;
 
-        UI.modal.show(title, modalHtml, [
-            { text: 'Cancel', class: 'secondary', onclick: 'UI.modal.hide()' },
-            { text: id ? 'Update Case' : 'Save Case Study', class: 'primary', onclick: `await app.saveCaseStudy(${id || 'null'})` }
+        UI.showModal(title, modalHtml, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: id ? 'Update Case' : 'Save Case', type: 'primary', action: `(async () => { await app.saveCaseStudy(${id || 'null'}); })()` }
         ]);
     };
 
@@ -7146,6 +7310,7 @@ function _wireLoginBtn() {
 
         const data = {
             title,
+            case_type: document.getElementById('case-type')?.value || _caseActiveTab,
             prospect_id: document.getElementById('case-prospect-id').value || null,
             customer_id: document.getElementById('case-customer-id').value || null,
             product: document.getElementById('case-product').value,
@@ -7157,26 +7322,24 @@ function _wireLoginBtn() {
             sales_idea: document.getElementById('case-sales-idea').value,
             plan_details: document.getElementById('case-plan-details').value,
             success_story: document.getElementById('case-success-story').value,
+            key_success_factor: document.getElementById('case-key-success-factor').value,
+            script: document.getElementById('case-script').value,
             updated_at: new Date().toISOString()
         };
 
         if (id) {
             await AppDataStore.update('case_studies', id, data);
-            UI.toast.success("Case study updated.");
+            UI.toast.success("Case updated.");
         } else {
             data.created_by = _currentUser?.id || 1;
             data.created_at = new Date().toISOString();
             const newCase = await AppDataStore.create('case_studies', data);
-            UI.toast.success("Case study created.");
+            UI.toast.success("Case created.");
             id = newCase.id;
         }
 
-        UI.modal.hide();
-        if (_currentView === 'cases') {
-            await renderCasesList();
-        } else {
-            await showCaseStudyDetail(id);
-        }
+        UI.hideModal();
+        await renderCasesList();
     };
 
     // ========== PHASE 1: FULL CALENDAR IMPLEMENTATION ==========
@@ -7555,7 +7718,10 @@ function _wireLoginBtn() {
         const getBdayInfo = async (p) => {
             const agent = await AppDataStore.getById('users', p.responsible_agent_id || p.lead_agent_id);
             return {
+                id: p.id,
                 name: p.full_name,
+                phone: p.phone || '',
+                type: p.customer_since ? 'customer' : 'prospect',
                 info: `Agent: ${agent?.full_name || 'Michelle Tan'} · ${p.customer_since ? 'Customer' : 'Prospect'}`,
                 dob: p.date_of_birth ? p.date_of_birth.substring(5) : '' // MM-DD
             };
@@ -7579,8 +7745,8 @@ function _wireLoginBtn() {
                     <div class="bday-name">${b.name} 🎂</div>
                     <div class="bday-info">${b.info}</div>
                     <div class="act-actions" style="border-top:none; margin-top:4px; padding-top:0;">
-                        <button class="btn btn-sm secondary" style="font-size:11px" onclick="app.todo('Send wish')">Send Wish</button>
-                        <button class="btn btn-sm secondary" style="font-size:11px" onclick="app.todo('Gift workflow')">Prepare Gift</button>
+                        <button class="btn btn-sm secondary" style="font-size:11px" onclick="app.sendBirthdayWish('${b.name}', '${b.phone}')">Send Wish</button>
+                        <button class="btn btn-sm secondary" style="font-size:11px" onclick="app.scheduleBirthdayFollowup('${b.name}', ${b.id}, '${b.type}')">Prepare Gift</button>
                     </div>
                 </div>
             `).join('');
@@ -8988,7 +9154,8 @@ function _wireLoginBtn() {
 
                 let matches = [];
                 if (type === 'CPS' || type === 'EVENT') {
-                    const all = [...AppDataStore.getAll('prospects'), ...AppDataStore.getAll('customers')];
+                    const [_prospects, _customers] = await Promise.all([AppDataStore.getAll('prospects'), AppDataStore.getAll('customers')]);
+                    const all = [..._prospects, ..._customers];
                     const available = all.filter(p => !_selectedAttendees.find(a => a.id === p.id && a.type !== 'agent'));
                     matches = available.filter(p =>
                         (p.full_name && p.full_name.toLowerCase().includes(searchTerm)) ||
@@ -9343,7 +9510,7 @@ function _wireLoginBtn() {
                 state: document.getElementById('cps-state')?.value || '',
                 postal_code: document.getElementById('cps-zip')?.value || '',
                 ming_gua: document.getElementById('cps-gua')?.value || '',
-                score: 5,
+                score: SCORING_RULES.CREATE_PROSPECT,
                 responsible_agent_id: _currentUser?.id || null,
                 referred_by_id: _selectedReferrer?.id || null,
                 referred_by_type: _selectedReferrer?.type || null,
@@ -9538,6 +9705,25 @@ function _wireLoginBtn() {
         }
 
         UI.toast.success('Activity saved!');
+
+        // === Auto Scoring: Award points based on activity type ===
+        try {
+            await applyActivityScoring(activity);
+        } catch (e) { console.warn('Activity scoring failed:', e); }
+
+        // === Auto Protection Extension: Extend deadline based on activity type ===
+        if (activity.prospect_id) {
+            try {
+                const extType = activity.is_closing ? 'transaction' : getExtensionType(activity.activity_type);
+                await autoExtendProtection(activity.prospect_id, extType);
+            } catch (e) { console.warn('Protection auto-extend failed:', e); }
+        }
+
+        // === Workflow Engine: Trigger activity_completed workflows ===
+        try {
+            const entityName = _selectedEntity?.name || activity.activity_title || '';
+            await executeWorkflows('activity_completed', { name: entityName, activityType: activity.activity_type });
+        } catch (e) { console.warn('Workflow trigger failed:', e); }
 
         await renderCalendar();
         await renderTodayActivities();
@@ -10310,11 +10496,13 @@ function _wireLoginBtn() {
             } else {
                 data.id = Date.now();
                 data.protection_deadline = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-                data.score = 5;
+                data.score = SCORING_RULES.CREATE_PROSPECT;
                 data.created_at = new Date().toISOString();
                 await AppDataStore.create('prospects', data);
                 UI.toast.success('Prospect created successfully');
                 document.dispatchEvent(new CustomEvent('prospectCreated', { detail: data }));
+                // Trigger new_prospect workflow
+                try { await executeWorkflows('new_prospect', { name: data.full_name }); } catch (e) { /* ignore */ }
             }
         } catch (err) {
             UI.toast.error('Save failed: ' + (err.message || 'Unknown error'));
@@ -10992,15 +11180,24 @@ function _wireLoginBtn() {
 
                     <!-- Potential & Opportunities -->
                     <div class="profile-section" style="margin-top:24px;">
-                        <h2><i class="fas fa-bolt"></i> Potential</h2>
+                        <h2>
+                            <i class="fas fa-bolt"></i> Potential & Opportunities
+                            <span class="section-actions">
+                                <button class="btn primary btn-sm" onclick="app.openEditPotentialModal(${prospect.id})"><i class="fas fa-edit"></i> Edit</button>
+                            </span>
+                        </h2>
                         <div class="detail-section" style="margin-bottom:0;">
-                            <div style="margin-bottom: 12px;"><span class="badge success">HIGH POTENTIAL</span></div>
-                            <div class="info-row"><div class="info-label">Budget</div><div class="info-value">RM 15k - 20k / mo</div></div>
-                            <div class="info-row"><div class="info-label">Close Prob.</div><div class="info-value">75%</div></div>
-                            <div class="progress-bar" style="margin-bottom: 16px;">
-                                <div class="progress-fill" style="width: 75%; background: var(--success);"></div>
+                            <div style="margin-bottom: 12px;"><span class="badge ${(prospect.potential_level === 'High' || !prospect.potential_level) ? 'success' : prospect.potential_level === 'Medium' ? 'warning' : 'secondary'}">${prospect.potential_level || 'NOT SET'} POTENTIAL</span></div>
+                            <div class="info-row"><div class="info-label">Close Prob.</div><div class="info-value">${prospect.close_probability || 0}%</div></div>
+                            <div class="progress-bar" style="margin-bottom: 12px;">
+                                <div class="progress-fill" style="width: ${prospect.close_probability || 0}%; background: var(--${(prospect.close_probability || 0) >= 60 ? 'success' : (prospect.close_probability || 0) >= 30 ? 'warning' : 'danger'});"></div>
                             </div>
-                            <div class="info-row"><div class="info-label">Est. Value</div><div class="info-value">RM 5k - 8k</div></div>
+                            <div class="info-row"><div class="info-label">Est. Value</div><div class="info-value">${prospect.estimated_value_min || prospect.estimated_value_max ? 'RM ' + (prospect.estimated_value_min || 0).toLocaleString() + ' - RM ' + (prospect.estimated_value_max || 0).toLocaleString() : '-'}</div></div>
+                            <div class="info-row"><div class="info-label">Budget</div><div class="info-value">${prospect.budget_range || '-'}</div></div>
+                            <div class="info-row"><div class="info-label">Timeline</div><div class="info-value">${prospect.decision_timeline || '-'}</div></div>
+                            <div class="info-row"><div class="info-label">Decision Maker</div><div class="info-value">${prospect.decision_maker === 'yes' ? 'Yes' : prospect.decision_maker === 'no' ? 'No' : 'Unknown'}</div></div>
+                            ${prospect.pain_points ? `<div class="info-row"><div class="info-label">Pain Points</div><div class="info-value">${prospect.pain_points}</div></div>` : ''}
+                            ${prospect.interests ? `<div class="info-row"><div class="info-label">Interests</div><div class="info-value">${prospect.interests}</div></div>` : ''}
                         </div>
                     </div>
                 </div>
@@ -12417,7 +12614,7 @@ const renderCurrentAssignments = async (agentId) => {
     };
 */
     const renderPerformanceTargets = async (agentId) => {
-        const target = await AppDataStore.query('agent_targets', { agent_id: agentId })[0];
+        const target = (await AppDataStore.query('agent_targets', { agent_id: agentId }))[0];
         if (!target) return '<p>No targets set for this month.</p>';
 
         return `
@@ -12890,7 +13087,7 @@ const renderCurrentAssignments = async (agentId) => {
     };
 
     const updateAgentTargets = async (agentId) => {
-        const target = await AppDataStore.query('agent_targets', { agent_id: agentId })[0];
+        const target = (await AppDataStore.query('agent_targets', { agent_id: agentId }))[0];
         const content = `
     <div class="form-group" style="margin-bottom:15px;">
                 <label>Monthly Sales target (RM)</label>
@@ -12912,7 +13109,7 @@ const renderCurrentAssignments = async (agentId) => {
     };
 
     const saveAgentTargets = async (agentId) => {
-        const target = await AppDataStore.query('agent_targets', { agent_id: agentId })[0];
+        const target = (await AppDataStore.query('agent_targets', { agent_id: agentId }))[0];
         const data = {
             target_amount: parseInt(document.getElementById('target-sales').value),
             target_cps: parseInt(document.getElementById('target-cps').value),
@@ -14092,8 +14289,11 @@ container.innerHTML = `
                     </div>
                     <div class="header-actions">
                         ${isSystemAdmin(_currentUser) || _currentUser?.role?.includes('Level 7') ?
-                `<button class="btn primary" onclick="app.openTargetManagementModal()">
-                                <i class="fas fa-bullseye"></i> Set Targets
+                `<button class="btn primary" onclick="app.openKPITargetsModal()">
+                                <i class="fas fa-bullseye"></i> Set Yearly Targets
+                             </button>
+                             <button class="btn secondary" onclick="app.openTargetManagementModal()">
+                                <i class="fas fa-user-cog"></i> Agent Targets
                              </button>` : ''
             }
                         <button class="btn secondary" onclick="app.exportKPIReport('csv')">
@@ -14163,6 +14363,11 @@ container.innerHTML = `
                         </div>
                     </div>
                 </div>
+
+                <!-- Hierarchical Target Comparison Section -->
+                <div id="kpi-target-comparison-section" style="margin-top:24px;">
+                    <!-- Loaded by refreshKPIDashboard -->
+                </div>
             </div>
 `;
 
@@ -14196,6 +14401,17 @@ container.innerHTML = `
         await renderPerformanceTable();
         await renderAgentLeaderboard();
         await renderRevenueChart(_currentTimeFilter, ranges.current);
+
+        // Render hierarchical target comparison
+        const targetSection = document.getElementById('kpi-target-comparison-section');
+        if (targetSection) {
+            try {
+                targetSection.innerHTML = await renderKPITargetComparison();
+            } catch (e) {
+                console.warn('KPI target comparison render failed:', e);
+                targetSection.innerHTML = '';
+            }
+        }
     };
 
     const getDateRanges = (filter, from, to) => {
@@ -17257,8 +17473,22 @@ const simulateCampaignSending = async (campaignId) => {
     };
 
     const openImportWizard = async () => {
+        // R9: Only system admin, marketing manager, or team leader may import
+        const u = _currentUser;
+        const canImport = isSystemAdmin(u) || isMarketingManager(u) ||
+                          u?.role === 'team_leader' || u?.role?.includes('Level 7');
+        if (!canImport) { UI.toast.error('You do not have permission to import data.'); return; }
+
         _currentImportStep = 1;
-        _importData = { file: null, fileName: null, fileSize: null, rows: 0, headers: ['Full Name', 'Phone Number', 'Email', 'IC Number', 'Date of Birth', 'Occupation', 'Income Range', 'Address', 'City', 'State', 'Postal Code', 'Ming Gua'], data: [], importType: 'prospects', mapping: {}, validation: { valid: 0, warnings: 0, errors: 0 }, duplicates: { total: 0 }, assignment: { assignTo: 'myself' } };
+        _importData = {
+            file: null, fileName: null, fileSize: null, rows: 0,
+            headers: [], data: [], importType: 'prospects',
+            mapping: {},
+            validation: { valid: 0, warnings: 0, errors: 0 },
+            validationResults: [],
+            duplicates: { total: 0, byPhone: 0, byEmail: 0, byIc: 0, list: [] },
+            assignment: { assignTo: 'myself' }
+        };
         await renderImportStep(1);
     };
 
@@ -17333,15 +17563,29 @@ const simulateCampaignSending = async (campaignId) => {
             </div>
         `;
 
-    const getStep3Html = async () => `
+    const getStep3Html = async () => {
+        const { valid, warnings, errors } = _importData.validation;
+        const errorRows   = _importData.validationResults.filter(r => r.status === 'error');
+        const warningRows = _importData.validationResults.filter(r => r.status === 'warning');
+
+        const renderIssueRows = (rows, type) => {
+            const issues = rows.flatMap(r =>
+                (type === 'error' ? r.errors : r.warnings).map(issue =>
+                    `<tr class="${type}-row"><td>${r.rowIndex}</td><td>${issue.field}</td><td>${issue.msg}</td><td>${issue.suggestion}</td></tr>`
+                )
+            );
+            return issues.length > 0 ? issues.join('') : `<tr><td colspan="4" style="text-align:center;color:var(--gray-400)">No ${type}s found</td></tr>`;
+        };
+
+        return `
             <div class="import-wizard">
                 ${getWizardStepsHtml(3)}
                 <div class="step-content">
                     <h3>Step 3: Validation</h3>
                     <div class="validation-summary">
-                        <div class="validation-badge valid"><span class="badge-count">235</span><span class="badge-label">Valid Rows</span></div>
-                        <div class="validation-badge warning"><span class="badge-count">12</span><span class="badge-label">Warnings</span></div>
-                        <div class="validation-badge error"><span class="badge-count">3</span><span class="badge-label">Errors</span></div>
+                        <div class="validation-badge valid"><span class="badge-count">${valid}</span><span class="badge-label">Valid Rows</span></div>
+                        <div class="validation-badge warning"><span class="badge-count">${warnings}</span><span class="badge-label">Warnings</span></div>
+                        <div class="validation-badge error"><span class="badge-count">${errors}</span><span class="badge-label">Errors</span></div>
                     </div>
                     <div style="margin:16px 0">
                         <label class="checkbox-label"><input type="checkbox" id="stop-on-error"> Stop on first error</label>
@@ -17350,22 +17594,13 @@ const simulateCampaignSending = async (campaignId) => {
                     <div class="validation-log">
                         <h4>Error Log</h4>
                         <table class="error-table"><thead><tr><th>Row</th><th>Column</th><th>Error</th><th>Suggestion</th></tr></thead>
-                        <tbody>
-                            <tr class="error-row"><td>45</td><td>Phone</td><td>Invalid format</td><td>Add country code (+60)</td></tr>
-                            <tr class="error-row"><td>78</td><td>Email</td><td>Missing @ symbol</td><td>Check email address</td></tr>
-                            <tr class="error-row"><td>112</td><td>Date of Birth</td><td>Invalid date</td><td>Use YYYY-MM-DD format</td></tr>
-                        </tbody></table>
+                        <tbody>${renderIssueRows(errorRows, 'error')}</tbody></table>
                         <h4 style="margin-top:16px">Warning Log</h4>
                         <table class="warning-table"><thead><tr><th>Row</th><th>Column</th><th>Warning</th><th>Action</th></tr></thead>
-                        <tbody>
-                            <tr class="warning-row"><td>23</td><td>IC Number</td><td>Duplicate found</td><td>Will merge on import</td></tr>
-                            <tr class="warning-row"><td>67</td><td>Income Range</td><td>Unusual format</td><td>Will attempt to parse</td></tr>
-                            <tr class="warning-row"><td>89</td><td>Name</td><td>Contains special chars</td><td>Will clean automatically</td></tr>
-                        </tbody></table>
+                        <tbody>${renderIssueRows(warningRows, 'warning')}</tbody></table>
                     </div>
                     <div class="validation-actions">
                         <button class="btn secondary" onclick="app.downloadErrorReport()"><i class="fas fa-download"></i> Download Error Report</button>
-                        <button class="btn primary" onclick="UI.toast.info('Inline editor coming soon')"><i class="fas fa-edit"></i> Fix Errors</button>
                     </div>
                 </div>
                 <div class="wizard-footer">
@@ -17374,31 +17609,47 @@ const simulateCampaignSending = async (campaignId) => {
                 </div>
             </div>
         `;
+    };
 
-    const getStep4Html = async () => `
+    const getStep4Html = async () => {
+        const { total, byPhone, byEmail, byIc, list } = _importData.duplicates;
+        const reverseMap = buildReverseMapping();
+        const nameCol  = reverseMap['full_name'];
+        const phoneCol = reverseMap['phone'];
+
+        const previewRows = list.slice(0, 20).map(d => {
+            const existName  = d.existingRec?.full_name || '(unknown)';
+            const existPhone = d.existingRec?.phone || '';
+            const importName  = nameCol  !== undefined ? (d.row[nameCol]  || '').toString().trim() : '(no name)';
+            const importPhone = phoneCol !== undefined ? (d.row[phoneCol] || '').toString().trim() : '';
+            return `<tr>
+                <td>${existName}${existPhone ? ' (' + existPhone + ')' : ''}</td>
+                <td>${importName}${importPhone ? ' (' + importPhone + ')' : ''}</td>
+                <td><span style="color:var(--gray-500);font-size:12px">Pending action below</span></td>
+            </tr>`;
+        }).join('') || '<tr><td colspan="3" style="text-align:center;color:var(--gray-400)">No duplicates found</td></tr>';
+
+        return `
             <div class="import-wizard">
                 ${getWizardStepsHtml(4)}
                 <div class="step-content">
                     <h3>Step 4: Duplicate Handling</h3>
                     <div class="duplicate-stats">
-                        <div><strong>Total duplicates found:</strong> 24</div>
-                        <div><strong>By phone number:</strong> 18</div>
-                        <div><strong>By email:</strong> 4</div>
-                        <div><strong>By IC number:</strong> 2</div>
+                        <div><strong>Total duplicates found:</strong> ${total}</div>
+                        <div><strong>By phone number:</strong> ${byPhone}</div>
+                        <div><strong>By email:</strong> ${byEmail}</div>
+                        <div><strong>By IC number:</strong> ${byIc}</div>
                     </div>
                     <div class="duplicate-options" style="margin:16px 0">
                         <h4>Duplicate Handling</h4>
                         <label class="radio-label"><input type="radio" name="duplicate-action" value="skip" checked> Skip duplicates (keep existing)</label>
                         <label class="radio-label"><input type="radio" name="duplicate-action" value="update"> Update existing records</label>
-                        <label class="radio-label"><input type="radio" name="duplicate-action" value="merge"> Merge with existing</label>
+                        <label class="radio-label"><input type="radio" name="duplicate-action" value="merge"> Create as new (merge)</label>
                     </div>
                     <div class="duplicate-preview">
-                        <h4>Preview of affected records</h4>
-                        <table class="preview-table"><thead><tr><th>Existing</th><th>New</th><th>Action</th></tr></thead>
-                        <tbody>
-                            <tr><td>Tan Ah Kow (012-345-6789)</td><td>Tan Ah Kow (012-345-6789)</td><td>Skip</td></tr>
-                            <tr><td>Ong Bee Ling (012-987-6543)</td><td>Ong Bee Ling (012-987-6544)</td><td>Update phone</td></tr>
-                        </tbody></table>
+                        <h4>Preview of affected records${list.length > 20 ? ' (showing first 20)' : ''}</h4>
+                        <table class="preview-table"><thead><tr><th>Existing Record</th><th>Import Record</th><th>Status</th></tr></thead>
+                        <tbody>${previewRows}</tbody></table>
                     </div>
                 </div>
                 <div class="wizard-footer">
@@ -17407,19 +17658,27 @@ const simulateCampaignSending = async (campaignId) => {
                 </div>
             </div>
         `;
+    };
 
-    const getStep5Html = async () => `
+    const getStep5Html = async () => {
+        const { valid, warnings, errors } = _importData.validation;
+        const processable = valid + warnings;
+        const dupCount    = _importData.duplicates.total;
+        const assignLabel = _currentUser?.full_name || _currentUser?.name || 'Me';
+        return `
             <div class="import-wizard">
                 ${getWizardStepsHtml(5)}
                 <div class="step-content">
                     <h3>Step 5: Import</h3>
                     <div class="summary-stats">
-                        <div><strong>Total records:</strong> 250</div><div><strong>Valid records:</strong> 235</div>
-                        <div><strong>New records:</strong> 217</div><div><strong>Updated records:</strong> 18</div><div><strong>Skipped records:</strong> 15</div>
+                        <div><strong>Total records in file:</strong> ${_importData.data.length}</div>
+                        <div><strong>Valid / warning rows:</strong> ${processable}</div>
+                        <div><strong>Error rows (will skip):</strong> ${errors}</div>
+                        <div><strong>Potential duplicates:</strong> ${dupCount}</div>
                     </div>
                     <div class="assignment-options" style="margin:16px 0">
                         <h4>Assignment Options</h4>
-                        <label class="radio-label"><input type="radio" name="assign-to" value="myself" checked onchange="document.getElementById('team-opts').style.display='none'"> Assign to myself (Michelle Tan)</label>
+                        <label class="radio-label"><input type="radio" name="assign-to" value="myself" checked onchange="document.getElementById('team-opts').style.display='none'"> Assign to myself (${assignLabel})</label>
                         <label class="radio-label"><input type="radio" name="assign-to" value="team" onchange="document.getElementById('team-opts').style.display='block'"> Assign to team</label>
                         <label class="radio-label"><input type="radio" name="assign-to" value="unassigned" onchange="document.getElementById('team-opts').style.display='none'"> Leave unassigned</label>
                         <div id="team-opts" style="display:none;margin-top:12px">
@@ -17436,7 +17695,7 @@ const simulateCampaignSending = async (campaignId) => {
                     <div id="progress-area" style="display:none;margin-top:16px">
                         <h4>Import Progress</h4>
                         <div class="progress-bar-container"><div class="progress-bar-fill" id="progress-bar" style="width:0%">0%</div></div>
-                        <p id="progress-status">Processing 0/250 records...</p>
+                        <p id="progress-status">Preparing import...</p>
                     </div>
                 </div>
                 <div class="wizard-footer">
@@ -17445,6 +17704,7 @@ const simulateCampaignSending = async (campaignId) => {
                 </div>
             </div>
         `;
+    };
 
     const renderMappingRows = () => {
         const headers = _importData.headers || [];
@@ -17492,69 +17752,305 @@ const simulateCampaignSending = async (campaignId) => {
     const processImportFile = async (file) => {
         if (file.size > 10 * 1024 * 1024) { UI.toast.error('File size exceeds 10MB limit'); return; }
         _importData.file = file; _importData.fileName = file.name; _importData.fileSize = file.size;
-        (() => {
-            _importData.rows = 250;
+
+        try {
+            const isCsv = file.name.toLowerCase().endsWith('.csv');
+            const readFile = (f) => new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = e => resolve(e.target.result);
+                reader.onerror = () => reject(new Error('File read failed'));
+                if (isCsv) reader.readAsText(f, 'UTF-8');
+                else reader.readAsArrayBuffer(f);
+            });
+
+            const result = await readFile(file);
+            let allRows = [];
+
+            if (isCsv) {
+                const parsed = Papa.parse(result, { header: false, skipEmptyLines: true });
+                allRows = parsed.data;
+            } else {
+                const workbook = XLSX.read(result, { type: 'array' });
+                const sheet = workbook.Sheets[workbook.SheetNames[0]];
+                allRows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+                // Remove trailing empty rows
+                while (allRows.length > 0 && allRows[allRows.length - 1].every(c => c === '')) allRows.pop();
+            }
+
+            if (allRows.length === 0) { UI.toast.error('File appears to be empty'); return; }
+
+            const firstRowHeader = document.getElementById('first-row-header')?.checked !== false;
+            if (firstRowHeader && allRows.length > 0) {
+                _importData.headers = allRows[0].map(h => (h || '').toString().trim());
+                _importData.data = allRows.slice(1);
+            } else {
+                const colCount = allRows[0].length;
+                _importData.headers = Array.from({ length: colCount }, (_, i) => `Col${i + 1}`);
+                _importData.data = allRows;
+            }
+            _importData.rows = _importData.data.length;
+
             const fi = document.getElementById('file-info');
             if (fi) {
-                fi.innerHTML = `<div class="file-info-card"><div><strong>File:</strong> ${file.name}</div><div><strong>Size:</strong> ${(file.size > 1048576 ? (file.size / 1048576).toFixed(1) + " MB" : (file.size / 1024).toFixed(0) + " KB")}</div><div><strong>Rows detected:</strong> 250</div><div><strong>Columns detected:</strong> 12</div></div>`; fi.style.display = 'block';
+                const sizeStr = file.size > 1048576 ? (file.size / 1048576).toFixed(1) + ' MB' : (file.size / 1024).toFixed(0) + ' KB';
+                fi.innerHTML = `<div class="file-info-card"><div><strong>File:</strong> ${file.name}</div><div><strong>Size:</strong> ${sizeStr}</div><div><strong>Rows detected:</strong> ${_importData.rows}</div><div><strong>Columns detected:</strong> ${_importData.headers.length}</div></div>`;
+                fi.style.display = 'block';
             }
             const btn = document.getElementById('step1-next'); if (btn) btn.disabled = false;
-            UI.toast.success('File loaded successfully');
-        }, 400);
+            UI.toast.success(`File loaded: ${_importData.rows} rows, ${_importData.headers.length} columns`);
+        } catch (err) {
+            console.error('File parse error:', err);
+            UI.toast.error('Failed to read file: ' + err.message);
+        }
     };
 
-    const importNextStep = async () => { if (_currentImportStep < 5) await renderImportStep(_currentImportStep + 1); };
+    // Private helpers (not exported)
+    const buildReverseMapping = () => {
+        const rev = {};
+        Object.entries(_importData.mapping).forEach(([col, field]) => { rev[field] = parseInt(col); });
+        return rev;
+    };
+
+    const normalisePhone = (raw) => (raw || '').toString().replace(/[-\s()]/g, '').replace(/^\+60/, '0');
+
+    const mapRowToRecord = (row, reverseMap, agentId) => {
+        const get = (field) => {
+            const idx = reverseMap[field];
+            return idx !== undefined ? (row[idx] || '').toString().trim() : '';
+        };
+        return {
+            full_name: get('full_name'),
+            phone: get('phone'),
+            email: get('email'),
+            ic_number: get('ic_number'),
+            date_of_birth: get('date_of_birth'),
+            occupation: get('occupation'),
+            company_name: get('company_name'),
+            income_range: get('income_range'),
+            address: get('address'),
+            city: get('city'),
+            state: get('state'),
+            postal_code: get('postal_code'),
+            ming_gua: get('ming_gua'),
+            gender: get('gender'),
+            responsible_agent_id: agentId,
+            pipeline_stage: 'new',
+            source: 'import'
+        };
+    };
+
+    const updateImportProgress = (pct, current, total) => {
+        const bar = document.getElementById('progress-bar');
+        if (bar) { bar.style.width = pct + '%'; bar.textContent = pct + '%'; }
+        const st = document.getElementById('progress-status');
+        if (st) st.textContent = `Processing ${current}/${total} records...`;
+    };
+
+    const runValidation = () => {
+        const reverseMap = buildReverseMapping();
+        const nameCol  = reverseMap['full_name'];
+        const phoneCol = reverseMap['phone'];
+        const emailCol = reverseMap['email'];
+        const icCol    = reverseMap['ic_number'];
+        _importData.validationResults = [];
+        let valid = 0, warnings = 0, errors = 0;
+
+        _importData.data.forEach((row, i) => {
+            const rowErrors = [], rowWarnings = [];
+
+            if (nameCol !== undefined) {
+                const name = (row[nameCol] || '').toString().trim();
+                if (!name) rowErrors.push({ field: 'Full Name', msg: 'Name is required', suggestion: 'Enter the full name' });
+            }
+            if (phoneCol !== undefined) {
+                const raw = (row[phoneCol] || '').toString().trim();
+                if (!raw) rowErrors.push({ field: 'Phone', msg: 'Phone is required', suggestion: 'Enter a phone number' });
+                else if (!/^(\+?60|0)[1-9]\d{7,9}$/.test(raw.replace(/[-\s()]/g, '')))
+                    rowWarnings.push({ field: 'Phone', msg: 'Non-standard MY format', suggestion: 'Use 01X-XXXXXXX or +601XXXXXXXX' });
+            }
+            if (emailCol !== undefined) {
+                const email = (row[emailCol] || '').toString().trim();
+                if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+                    rowErrors.push({ field: 'Email', msg: 'Invalid email format', suggestion: 'Check @ and domain' });
+            }
+            if (icCol !== undefined) {
+                const ic = (row[icCol] || '').toString().replace(/[-\s]/g, '');
+                if (ic && !/^\d{12}$/.test(ic))
+                    rowWarnings.push({ field: 'IC Number', msg: 'IC should be 12 digits', suggestion: 'Remove dashes or spaces' });
+            }
+
+            const status = rowErrors.length > 0 ? 'error' : rowWarnings.length > 0 ? 'warning' : 'valid';
+            _importData.validationResults.push({ rowIndex: i + 2, row, errors: rowErrors, warnings: rowWarnings, status });
+            if (status === 'valid') valid++;
+            else if (status === 'warning') warnings++;
+            else errors++;
+        });
+        _importData.validation = { valid, warnings, errors };
+    };
+
+    const runDuplicateCheck = async () => {
+        const reverseMap = buildReverseMapping();
+        const phoneCol = reverseMap['phone'];
+        const emailCol = reverseMap['email'];
+        const icCol    = reverseMap['ic_number'];
+        const table = _importData.importType === 'customers' ? 'customers' : 'prospects';
+        let existing = [];
+        try { existing = await AppDataStore.getAll(table); } catch (e) { existing = []; }
+
+        const existingPhones = new Map();
+        const existingEmails = new Map();
+        const existingIcs    = new Map();
+        existing.forEach(rec => {
+            if (rec.phone)     existingPhones.set(normalisePhone(rec.phone), rec);
+            if (rec.email)     existingEmails.set((rec.email || '').toLowerCase().trim(), rec);
+            if (rec.ic_number) existingIcs.set((rec.ic_number || '').replace(/[-\s]/g, ''), rec);
+        });
+
+        let byPhone = 0, byEmail = 0, byIc = 0;
+        const dupList = [];
+        _importData.validationResults.forEach(vr => {
+            if (vr.status === 'error') return;
+            const row = vr.row;
+            let isDup = false, matchField = '', existingRec = null;
+
+            if (!isDup && phoneCol !== undefined) {
+                const p = normalisePhone(row[phoneCol]);
+                if (p && existingPhones.has(p)) { byPhone++; isDup = true; matchField = 'phone'; existingRec = existingPhones.get(p); }
+            }
+            if (!isDup && emailCol !== undefined) {
+                const e = (row[emailCol] || '').toString().toLowerCase().trim();
+                if (e && existingEmails.has(e)) { byEmail++; isDup = true; matchField = 'email'; existingRec = existingEmails.get(e); }
+            }
+            if (!isDup && icCol !== undefined) {
+                const ic = (row[icCol] || '').toString().replace(/[-\s]/g, '');
+                if (ic && existingIcs.has(ic)) { byIc++; isDup = true; matchField = 'ic'; existingRec = existingIcs.get(ic); }
+            }
+            if (isDup) dupList.push({ rowIndex: vr.rowIndex, row, matchField, existingRec });
+        });
+        _importData.duplicates = { total: byPhone + byEmail + byIc, byPhone, byEmail, byIc, list: dupList };
+    };
+
+    const importNextStep = async () => {
+        if (_currentImportStep === 2) {
+            // Collect mapping from DOM before proceeding
+            _importData.mapping = {};
+            document.querySelectorAll('.mapping-select').forEach(sel => {
+                if (sel.value) _importData.mapping[parseInt(sel.dataset.col)] = sel.value;
+            });
+            runValidation();
+        }
+        if (_currentImportStep === 3) {
+            await runDuplicateCheck();
+        }
+        if (_currentImportStep < 5) await renderImportStep(_currentImportStep + 1);
+    };
     const importPrevStep = async () => { if (_currentImportStep > 1) await renderImportStep(_currentImportStep - 1); };
     const updateImportType = (type) => { _importData.importType = type; };
-    const autoMapFields = () => UI.toast.success('Fields auto-mapped based on column names');
+    const autoMapFields = () => {
+        const selects = document.querySelectorAll('.mapping-select');
+        let matched = 0;
+        selects.forEach(sel => {
+            const crmField = autoMatchField(_importData.headers[parseInt(sel.dataset.col)] || '');
+            if (crmField) { sel.value = crmField; matched++; }
+        });
+        UI.toast.success(`Auto-mapped ${matched} of ${selects.length} columns`);
+    };
     const clearMapping = () => { document.querySelectorAll('.mapping-select').forEach(s => s.value = ''); UI.toast.info('Mapping cleared'); };
     const clearMappingField = (idx) => { const s = document.querySelector(`.mapping-select[data-col="${idx}"]`); if (s) s.value = ''; };
-    const downloadErrorReport = () => UI.toast.success('Error report downloaded');
+    const downloadErrorReport = () => {
+        const issues = _importData.validationResults.filter(r => r.status !== 'valid');
+        if (!issues.length) { UI.toast.info('No errors or warnings to report'); return; }
+        const lines = ['Row,Field,Severity,Message,Suggestion'];
+        issues.forEach(r => {
+            [...r.errors.map(e => ({ ...e, sev: 'ERROR' })), ...r.warnings.map(w => ({ ...w, sev: 'WARNING' }))].forEach(issue => {
+                lines.push(`${r.rowIndex},"${issue.field}","${issue.sev}","${issue.msg}","${issue.suggestion}"`);
+            });
+        });
+        const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = `import_errors_${Date.now()}.csv`;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        UI.toast.success('Error report downloaded');
+    };
 
-const startImport = async () => {
-    document.getElementById('progress-area').style.display = 'block';
-    document.getElementById('start-import-btn').disabled = true;
-    let progress = 0;
-    
-    const intervalId = setInterval(() => {
-        progress += 5;
-        const bar = document.getElementById('progress-bar');
-        if (bar) {
-            bar.style.width = progress + '%';
-            bar.textContent = progress + '%';
+    const startImport = async () => {
+        const duplicateAction = document.querySelector('input[name="duplicate-action"]:checked')?.value || 'skip';
+        const assignTo        = document.querySelector('input[name="assign-to"]:checked')?.value || 'myself';
+
+        document.getElementById('progress-area').style.display = 'block';
+        document.getElementById('start-import-btn').disabled = true;
+
+        const rowsToProcess = _importData.validationResults.filter(vr => vr.status !== 'error');
+        const total = rowsToProcess.length;
+        if (total === 0) { UI.toast.error('No valid rows to import'); document.getElementById('start-import-btn').disabled = false; return; }
+
+        const dupMap = new Map();
+        _importData.duplicates.list.forEach(d => dupMap.set(d.rowIndex, d));
+
+        let assignedAgentId = null;
+        if (assignTo === 'myself') assignedAgentId = _currentUser?.id;
+
+        const reverseMap = buildReverseMapping();
+        const table = _importData.importType === 'customers' ? 'customers' : 'prospects';
+        let created = 0, updated = 0, skipped = 0, errorCount = 0;
+
+        for (let i = 0; i < rowsToProcess.length; i++) {
+            if (i % 10 === 0) {
+                updateImportProgress(Math.round((i / total) * 100), i, total);
+                await new Promise(r => setTimeout(r, 0));
+            }
+            const vr = rowsToProcess[i];
+            const record = mapRowToRecord(vr.row, reverseMap, assignedAgentId);
+            const dup = dupMap.get(vr.rowIndex);
+
+            if (dup) {
+                if (duplicateAction === 'skip') { skipped++; continue; }
+                if (duplicateAction === 'update') {
+                    try { await AppDataStore.update(table, dup.existingRec.id, record); updated++; }
+                    catch (e) { console.error('Update failed row', vr.rowIndex, e); errorCount++; }
+                    continue;
+                }
+                // merge: fall through to create
+            }
+            try {
+                record.id = Date.now() + i;
+                record.created_at = new Date().toISOString();
+                record.protection_deadline = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+                record.score = 5;
+                await AppDataStore.create(table, record);
+                created++;
+            } catch (e) { console.error('Insert failed row', vr.rowIndex, e); errorCount++; }
         }
-        const st = document.getElementById('progress-status');
-        if (st) st.textContent = `Processing ${Math.floor(progress * 2.5)}/250 records...`;
-        
-        if (progress >= 100) {
-            clearInterval(intervalId);
-            // Use setTimeout to allow UI to update before async operations
-            setTimeout(async () => {
-                UI.hideModal();
-                UI.toast.success('Import completed! 217 new records created.');
-                await AppDataStore.create('import_jobs', {
-                    file_name: _importData.fileName || 'import.xlsx',
-                    import_type: _importData.importType,
-                    total_rows: 250,
-                    valid_rows: 235,
-                    error_rows: 15,
-                    created_records: 217,
-                    updated_records: 18,
-                    skipped_records: 15,
-                    status: 'completed',
-                    mapping_config: {},
-                    duplicate_handling: document.querySelector('input[name="duplicate-action"]:checked')?.value || 'skip',
-                    assignment_config: { assignTo: document.querySelector('input[name="assign-to"]:checked')?.value || 'myself' },
-                    created_by: _currentUser?.id,
-                    created_at: new Date().toISOString(),
-                    completed_at: new Date().toISOString()
-                });
-                const vp = document.getElementById('content-viewport');
-                if (vp) await showImportDashboard(vp);
-            }, 500);
-        }
-    }, 150);
-};
+
+        updateImportProgress(100, total, total);
+        await new Promise(r => setTimeout(r, 200));
+
+        try {
+            await AppDataStore.create('import_jobs', {
+                file_name:          _importData.fileName || 'import.xlsx',
+                import_type:        _importData.importType,
+                total_rows:         _importData.data.length,
+                valid_rows:         _importData.validation.valid + _importData.validation.warnings,
+                error_rows:         _importData.validation.errors + errorCount,
+                created_records:    created,
+                updated_records:    updated,
+                skipped_records:    skipped,
+                status:             'completed',
+                mapping_config:     _importData.mapping,
+                duplicate_handling: duplicateAction,
+                assignment_config:  { assignTo, agentId: assignedAgentId },
+                created_by:         _currentUser?.id,
+                created_at:         new Date().toISOString(),
+                completed_at:       new Date().toISOString()
+            });
+        } catch (e) { console.error('Failed to log import job:', e); }
+
+        UI.hideModal();
+        UI.toast.success(`Import complete: ${created} created, ${updated} updated, ${skipped} skipped`);
+        const vp = document.getElementById('content-viewport');
+        if (vp) await showImportDashboard(vp);
+    };
 
     const viewImportDetails = async (id) => {
         const job = await AppDataStore.getById('import_jobs', id);
@@ -17907,6 +18403,942 @@ const initImportDemoData = async () => {
 
     const openPrerequisiteConfig = () => {
         UI.toast.info('Opening prerequisite configuration (Marketing Manager only)');
+    };
+
+    // ========== FEATURE: AUTOMATED SCORING RULES ==========
+    const SCORING_RULES = {
+        CREATE_PROSPECT: 5,
+        FIRST_CONTACT: 10,
+        CPS_ACTIVITY: 10,
+        FTF_MEETING: 10,
+        FSA_CONSULTATION: 25,
+        GR_GROUP_REVIEW: 15,
+        SITE_VISIT: 15,
+        CALL: 5,
+        WHATSAPP: 5,
+        PRICE_INQUIRY: 30,
+        HEARD_LIFE_PLAN: 40,
+        REFERRAL_CLOSED: 50,
+        WEEKLY_INACTIVITY: -5,
+        MARK_NOT_INTERESTED: -30
+    };
+
+    const addScoreToProspect = async (prospectId, points, reason) => {
+        if (!prospectId || !points) return;
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) return;
+        const oldScore = prospect.score || 0;
+        const newScore = Math.max(0, oldScore + points);
+        await AppDataStore.update('prospects', prospectId, { score: newScore });
+        // Log score history
+        try {
+            await AppDataStore.create('score_history', {
+                entity_type: 'prospect',
+                entity_id: prospectId,
+                old_score: oldScore,
+                new_score: newScore,
+                points_change: points,
+                reason: reason,
+                created_at: new Date().toISOString()
+            });
+        } catch (e) { /* score_history table may not exist yet */ }
+        console.log(`Score updated for prospect ${prospectId}: ${oldScore} → ${newScore} (${reason}: ${points > 0 ? '+' : ''}${points})`);
+    };
+
+    const addScoreToCustomer = async (customerId, points, reason) => {
+        if (!customerId || !points) return;
+        const customer = await AppDataStore.getById('customers', customerId);
+        if (!customer) return;
+        const oldScore = customer.score || 0;
+        const newScore = Math.max(0, oldScore + points);
+        await AppDataStore.update('customers', customerId, { score: newScore });
+        try {
+            await AppDataStore.create('score_history', {
+                entity_type: 'customer',
+                entity_id: customerId,
+                old_score: oldScore,
+                new_score: newScore,
+                points_change: points,
+                reason: reason,
+                created_at: new Date().toISOString()
+            });
+        } catch (e) { /* score_history table may not exist */ }
+    };
+
+    const scoreActivityType = (activityType) => {
+        switch (activityType) {
+            case 'CPS': return { points: SCORING_RULES.CPS_ACTIVITY, reason: 'CPS - Consultation/Planning Session' };
+            case 'FTF': return { points: SCORING_RULES.FTF_MEETING, reason: 'Face to Face Meeting' };
+            case 'FSA': return { points: SCORING_RULES.FSA_CONSULTATION, reason: 'Feng Shui Analysis (Consultation)' };
+            case 'GR': return { points: SCORING_RULES.GR_GROUP_REVIEW, reason: 'Group Review' };
+            case 'SITE': return { points: SCORING_RULES.SITE_VISIT, reason: 'Site Visit' };
+            case 'XG': return { points: SCORING_RULES.FTF_MEETING, reason: 'Xin Gua Session' };
+            case 'Call': return { points: SCORING_RULES.CALL, reason: 'Phone Call' };
+            case 'WhatsApp': return { points: SCORING_RULES.WHATSAPP, reason: 'WhatsApp Chat' };
+            default: return { points: 5, reason: `Activity: ${activityType}` };
+        }
+    };
+
+    const applyActivityScoring = async (activity) => {
+        const { points, reason } = scoreActivityType(activity.activity_type);
+        if (activity.prospect_id) {
+            await addScoreToProspect(activity.prospect_id, points, reason);
+        } else if (activity.customer_id) {
+            await addScoreToCustomer(activity.customer_id, points, reason);
+        }
+        // Bonus scoring for closing/transaction
+        if (activity.is_closing && activity.amount_closed) {
+            const txPoints = Math.round(parseFloat(activity.amount_closed) / 100);
+            if (activity.prospect_id) {
+                await addScoreToProspect(activity.prospect_id, txPoints, `Transaction closed: RM ${activity.amount_closed}`);
+            } else if (activity.customer_id) {
+                await addScoreToCustomer(activity.customer_id, txPoints, `Transaction closed: RM ${activity.amount_closed}`);
+            }
+        }
+    };
+
+    // ========== FEATURE: PROTECTION PERIOD AUTO-EXTENSION ==========
+    const PROTECTION_EXTENSIONS = {
+        ACTIVITY: 15,
+        CONSULTATION: 30,
+        TRANSACTION: 90,
+        EVENT: 10
+    };
+
+    const autoExtendProtection = async (prospectId, extensionType) => {
+        if (!prospectId) return;
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) return;
+
+        let days = PROTECTION_EXTENSIONS.ACTIVITY;
+        let label = 'activity';
+        if (extensionType === 'consultation') {
+            days = PROTECTION_EXTENSIONS.CONSULTATION;
+            label = 'consultation';
+        } else if (extensionType === 'transaction') {
+            days = PROTECTION_EXTENSIONS.TRANSACTION;
+            label = 'transaction';
+        } else if (extensionType === 'event') {
+            days = PROTECTION_EXTENSIONS.EVENT;
+            label = 'event attendance';
+        }
+
+        const currentDeadline = new Date(prospect.protection_deadline || Date.now());
+        const today = new Date();
+        const baseDate = currentDeadline > today ? currentDeadline : today;
+        const newDeadline = new Date(baseDate.getTime() + days * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        await AppDataStore.update('prospects', prospectId, {
+            protection_deadline: newDeadline,
+            last_contact_date: new Date().toISOString().split('T')[0]
+        });
+        console.log(`Protection auto-extended for prospect ${prospectId}: +${days} days (${label})`);
+    };
+
+    const getExtensionType = (activityType) => {
+        if (['FSA', 'GR'].includes(activityType)) return 'consultation';
+        if (['EVENT'].includes(activityType)) return 'event';
+        return 'activity';
+    };
+
+    // ========== FEATURE: PROSPECT POTENTIAL & OPPORTUNITIES ==========
+    const openEditPotentialModal = async (prospectId) => {
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) return;
+
+        const content = `
+            <div class="form-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                <div class="form-group">
+                    <label>Potential Level</label>
+                    <select id="pot-level" class="form-control">
+                        <option value="High" ${prospect.potential_level === 'High' ? 'selected' : ''}>HIGH POTENTIAL</option>
+                        <option value="Medium" ${prospect.potential_level === 'Medium' ? 'selected' : ''}>MEDIUM POTENTIAL</option>
+                        <option value="Low" ${prospect.potential_level === 'Low' ? 'selected' : ''}>LOW POTENTIAL</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Close Probability (%)</label>
+                    <input type="number" id="pot-probability" class="form-control" min="0" max="100" value="${prospect.close_probability || 0}">
+                </div>
+                <div class="form-group">
+                    <label>Est. Value Min (RM)</label>
+                    <input type="number" id="pot-value-min" class="form-control" value="${prospect.estimated_value_min || 0}">
+                </div>
+                <div class="form-group">
+                    <label>Est. Value Max (RM)</label>
+                    <input type="number" id="pot-value-max" class="form-control" value="${prospect.estimated_value_max || 0}">
+                </div>
+                <div class="form-group" style="grid-column:1/3;">
+                    <label>Decision Timeline</label>
+                    <input type="text" id="pot-timeline" class="form-control" placeholder="e.g. Within 1 month" value="${prospect.decision_timeline || ''}">
+                </div>
+                <div class="form-group" style="grid-column:1/3;">
+                    <label>Pain Points</label>
+                    <textarea id="pot-pain" class="form-control" rows="2" placeholder="e.g. Declining revenue, team morale">${prospect.pain_points || ''}</textarea>
+                </div>
+                <div class="form-group" style="grid-column:1/3;">
+                    <label>Interests</label>
+                    <input type="text" id="pot-interests" class="form-control" placeholder="e.g. PR4, Office Audit, Career Consultation" value="${prospect.interests || ''}">
+                </div>
+                <div class="form-group">
+                    <label>Decision Maker?</label>
+                    <select id="pot-decision-maker" class="form-control">
+                        <option value="yes" ${prospect.decision_maker === 'yes' ? 'selected' : ''}>Yes</option>
+                        <option value="no" ${prospect.decision_maker === 'no' ? 'selected' : ''}>No</option>
+                        <option value="unknown" ${(!prospect.decision_maker || prospect.decision_maker === 'unknown') ? 'selected' : ''}>Unknown</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Budget Range</label>
+                    <input type="text" id="pot-budget" class="form-control" placeholder="e.g. RM 15k-20k/mo" value="${prospect.budget_range || ''}">
+                </div>
+            </div>
+        `;
+        UI.showModal('Edit Potential & Opportunities', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save', type: 'primary', action: `(async () => { await app.savePotential(${prospectId}); })()` }
+        ]);
+    };
+
+    const savePotential = async (prospectId) => {
+        const data = {
+            potential_level: document.getElementById('pot-level')?.value || 'Medium',
+            close_probability: parseInt(document.getElementById('pot-probability')?.value) || 0,
+            estimated_value_min: parseFloat(document.getElementById('pot-value-min')?.value) || 0,
+            estimated_value_max: parseFloat(document.getElementById('pot-value-max')?.value) || 0,
+            decision_timeline: document.getElementById('pot-timeline')?.value || '',
+            pain_points: document.getElementById('pot-pain')?.value || '',
+            interests: document.getElementById('pot-interests')?.value || '',
+            decision_maker: document.getElementById('pot-decision-maker')?.value || 'unknown',
+            budget_range: document.getElementById('pot-budget')?.value || ''
+        };
+        await AppDataStore.update('prospects', prospectId, data);
+        UI.hideModal();
+        UI.toast.success('Potential & Opportunities updated');
+        await showProspectDetail(prospectId);
+    };
+
+    // ========== FEATURE: BIRTHDAY ACTION WORKFLOWS ==========
+    const sendBirthdayWish = async (personName, phone) => {
+        const templates = await AppDataStore.getAll('whatsapp_templates');
+        const bdayTemplate = templates.find(t => t.template_name?.toLowerCase().includes('birthday'));
+        const message = bdayTemplate
+            ? bdayTemplate.content.replace(/\{\{name\}\}/g, personName)
+            : `Hi ${personName}, Happy Birthday! 🎂 Wishing you a wonderful day filled with joy and blessings. — From the DestinOracles Team`;
+
+        UI.showModal('Send Birthday Wish', `
+            <div class="form-group">
+                <label>To: ${personName}</label>
+                <input type="text" class="form-control" value="${phone || ''}" readonly>
+            </div>
+            <div class="form-group">
+                <label>Message</label>
+                <textarea id="bday-msg" class="form-control" rows="5">${message}</textarea>
+            </div>
+            <div class="form-group">
+                <label>Channel</label>
+                <select id="bday-channel" class="form-control">
+                    <option value="whatsapp">WhatsApp</option>
+                    <option value="sms">SMS</option>
+                    <option value="call">Phone Call</option>
+                </select>
+            </div>
+        `, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Send', type: 'primary', action: `(async () => { UI.hideModal(); UI.toast.success('Birthday wish sent to ${personName} via ' + document.getElementById('bday-channel').value); })()` }
+        ]);
+    };
+
+    const scheduleBirthdayFollowup = async (personName, entityId, entityType) => {
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const dateStr = tomorrow.toISOString().split('T')[0];
+
+        UI.showModal('Schedule Birthday Follow-up', `
+            <div class="form-group">
+                <label>For: ${personName}</label>
+            </div>
+            <div class="form-group">
+                <label>Action Type</label>
+                <select id="bday-action-type" class="form-control">
+                    <option value="gift">Prepare Birthday Gift</option>
+                    <option value="call">Schedule Follow-up Call</option>
+                    <option value="meeting">Schedule Birthday Meeting</option>
+                    <option value="task">Create General Task</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Date</label>
+                <input type="date" id="bday-action-date" class="form-control" value="${dateStr}">
+            </div>
+            <div class="form-group">
+                <label>Notes</label>
+                <textarea id="bday-action-notes" class="form-control" rows="2" placeholder="e.g. Prepare fruit basket, call to wish..."></textarea>
+            </div>
+        `, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Create', type: 'primary', action: `(async () => { await app.executeBirthdayAction('${personName}', ${entityId}, '${entityType || 'prospect'}'); })()` }
+        ]);
+    };
+
+    const executeBirthdayAction = async (personName, entityId, entityType) => {
+        const actionType = document.getElementById('bday-action-type')?.value || 'task';
+        const actionDate = document.getElementById('bday-action-date')?.value || new Date().toISOString().split('T')[0];
+        const notes = document.getElementById('bday-action-notes')?.value || '';
+
+        if (actionType === 'call' || actionType === 'meeting') {
+            const activity = {
+                activity_type: actionType === 'call' ? 'Call' : 'FTF',
+                activity_date: actionDate,
+                start_time: '10:00',
+                end_time: '10:30',
+                activity_title: `Birthday follow-up with ${personName}`,
+                lead_agent_id: _currentUser?.id || 5,
+                discussion_summary: `Birthday follow-up. ${notes}`
+            };
+            if (entityType === 'prospect') activity.prospect_id = entityId;
+            else activity.customer_id = entityId;
+            await AppDataStore.create('activities', activity);
+            UI.hideModal();
+            UI.toast.success(`${actionType === 'call' ? 'Call' : 'Meeting'} scheduled for ${personName} on ${actionDate}`);
+        } else {
+            // Create as a note/task
+            await AppDataStore.create('notes', {
+                entity_type: entityType,
+                entity_id: entityId,
+                content: `[Birthday ${actionType === 'gift' ? 'Gift' : 'Task'}] ${personName} — ${notes || 'Prepare birthday follow-up'}`,
+                created_by: _currentUser?.id || 5,
+                created_at: new Date().toISOString(),
+                due_date: actionDate
+            });
+            UI.hideModal();
+            UI.toast.success(`Birthday ${actionType} created for ${personName}`);
+        }
+    };
+
+    // ========== FEATURE: KPI HIERARCHICAL TARGETS ==========
+    const openKPITargetsModal = async () => {
+        const currentYear = new Date().getFullYear();
+        const existing = (await AppDataStore.getAll('yearly_targets')).find(t => t.target_year === currentYear);
+
+        const content = `
+            <div style="max-height:70vh; overflow-y:auto;">
+                <h3 style="margin-bottom:12px;">Yearly Targets — ${currentYear}</h3>
+                <div class="form-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                    <div class="form-group"><label>CPS Count Target</label>
+                        <input type="number" id="yt-cps" class="form-control" value="${existing?.cps_count_target || 840}"></div>
+                    <div class="form-group"><label>Total Sales Target (RM)</label>
+                        <input type="number" id="yt-sales" class="form-control" value="${existing?.total_sales_target || 1680000}"></div>
+                    <div class="form-group"><label>POP Case Target</label>
+                        <input type="number" id="yt-pop-count" class="form-control" value="${existing?.pop_case_count_target || 120}"></div>
+                    <div class="form-group"><label>POP Sales Target (RM)</label>
+                        <input type="number" id="yt-pop-sales" class="form-control" value="${existing?.pop_sales_target || 480000}"></div>
+                    <div class="form-group"><label>EPP Case Target</label>
+                        <input type="number" id="yt-epp-count" class="form-control" value="${existing?.epp_case_count_target || 80}"></div>
+                    <div class="form-group"><label>EPP Sales Target (RM)</label>
+                        <input type="number" id="yt-epp-sales" class="form-control" value="${existing?.epp_sales_target || 320000}"></div>
+                    <div class="form-group"><label>New Agents Target</label>
+                        <input type="number" id="yt-agents" class="form-control" value="${existing?.new_agents_target || 48}"></div>
+                    <div class="form-group"><label>New Customers Target</label>
+                        <input type="number" id="yt-customers" class="form-control" value="${existing?.new_customers_target || 360}"></div>
+                    <div class="form-group"><label>Total Meetings Target</label>
+                        <input type="number" id="yt-meetings" class="form-control" value="${existing?.total_meetings_target || 2000}"></div>
+                    <div class="form-group"><label>Activity Headcount Target</label>
+                        <input type="number" id="yt-headcount" class="form-control" value="${existing?.activity_headcount_target || 500}"></div>
+                </div>
+                <h3 style="margin:16px 0 8px;">Seasonal Weighting</h3>
+                <p style="font-size:12px; color:var(--gray-500); margin-bottom:8px;">Distribute percentage weights across quarters (must sum to 100%)</p>
+                <div class="form-grid" style="display:grid; grid-template-columns:repeat(4,1fr); gap:8px;">
+                    <div class="form-group"><label>Q1 %</label><input type="number" id="yt-q1w" class="form-control" value="${existing?.q1_weight || 22}"></div>
+                    <div class="form-group"><label>Q2 %</label><input type="number" id="yt-q2w" class="form-control" value="${existing?.q2_weight || 25}"></div>
+                    <div class="form-group"><label>Q3 %</label><input type="number" id="yt-q3w" class="form-control" value="${existing?.q3_weight || 27}"></div>
+                    <div class="form-group"><label>Q4 %</label><input type="number" id="yt-q4w" class="form-control" value="${existing?.q4_weight || 26}"></div>
+                </div>
+            </div>
+        `;
+        UI.showModal('Set KPI Targets', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save & Auto-Generate Breakdown', type: 'primary', action: `(async () => { await app.saveKPITargets(${currentYear}); })()` }
+        ]);
+    };
+
+    const saveKPITargets = async (year) => {
+        const d = (id) => parseFloat(document.getElementById(id)?.value) || 0;
+        const weights = [d('yt-q1w'), d('yt-q2w'), d('yt-q3w'), d('yt-q4w')];
+        const totalWeight = weights.reduce((a, b) => a + b, 0);
+        if (Math.abs(totalWeight - 100) > 1) {
+            UI.toast.error(`Quarter weights must sum to 100% (currently ${totalWeight}%)`);
+            return;
+        }
+
+        const yearlyData = {
+            target_year: year,
+            cps_count_target: d('yt-cps'),
+            total_sales_target: d('yt-sales'),
+            pop_case_count_target: d('yt-pop-count'),
+            pop_sales_target: d('yt-pop-sales'),
+            epp_case_count_target: d('yt-epp-count'),
+            epp_sales_target: d('yt-epp-sales'),
+            new_agents_target: d('yt-agents'),
+            new_customers_target: d('yt-customers'),
+            total_meetings_target: d('yt-meetings'),
+            activity_headcount_target: d('yt-headcount'),
+            q1_weight: weights[0],
+            q2_weight: weights[1],
+            q3_weight: weights[2],
+            q4_weight: weights[3],
+            created_at: new Date().toISOString()
+        };
+
+        // Save or update yearly target
+        const existing = (await AppDataStore.getAll('yearly_targets')).find(t => t.target_year === year);
+        if (existing) {
+            await AppDataStore.update('yearly_targets', existing.id, yearlyData);
+        } else {
+            yearlyData.id = Date.now();
+            await AppDataStore.create('yearly_targets', yearlyData);
+        }
+
+        // Auto-generate quarterly targets
+        const metrics = ['cps_count_target', 'total_sales_target', 'pop_case_count_target', 'pop_sales_target', 'epp_case_count_target', 'epp_sales_target', 'new_agents_target', 'new_customers_target', 'total_meetings_target', 'activity_headcount_target'];
+        for (let q = 1; q <= 4; q++) {
+            const w = weights[q - 1] / 100;
+            const qData = { quarter: q, year: year };
+            metrics.forEach(m => { qData[m] = Math.round(yearlyData[m] * w); });
+            const existingQ = (await AppDataStore.getAll('quarterly_targets')).find(t => t.quarter === q && t.year === year);
+            if (existingQ) {
+                await AppDataStore.update('quarterly_targets', existingQ.id, qData);
+            } else {
+                qData.id = Date.now() + q;
+                await AppDataStore.create('quarterly_targets', qData);
+            }
+
+            // Auto-generate monthly targets (3 months per quarter, even split)
+            for (let m = 0; m < 3; m++) {
+                const month = (q - 1) * 3 + m + 1;
+                const mData = { month: month, year: year, quarter: q };
+                metrics.forEach(met => { mData[met] = Math.round(qData[met] / 3); });
+                const existingM = (await AppDataStore.getAll('monthly_targets')).find(t => t.month === month && t.year === year);
+                if (existingM) {
+                    await AppDataStore.update('monthly_targets', existingM.id, mData);
+                } else {
+                    mData.id = Date.now() + q * 10 + m;
+                    await AppDataStore.create('monthly_targets', mData);
+                }
+            }
+        }
+
+        UI.hideModal();
+        UI.toast.success('KPI targets saved — quarterly and monthly breakdowns auto-generated');
+        if (typeof refreshKPIDashboard === 'function') await refreshKPIDashboard();
+    };
+
+    const renderKPITargetComparison = async () => {
+        const year = new Date().getFullYear();
+        const quarter = Math.ceil((new Date().getMonth() + 1) / 3);
+        const month = new Date().getMonth() + 1;
+
+        const yearlyTargets = (await AppDataStore.getAll('yearly_targets')).find(t => t.target_year === year);
+        const quarterlyTarget = (await AppDataStore.getAll('quarterly_targets')).find(t => t.quarter === quarter && t.year === year);
+        const monthlyTarget = (await AppDataStore.getAll('monthly_targets')).find(t => t.month === month && t.year === year);
+
+        if (!yearlyTargets) return '<div style="text-align:center; padding:20px; color:var(--gray-500);">No targets set for ' + year + '. <button class="btn primary btn-sm" onclick="app.openKPITargetsModal()">Set Targets</button></div>';
+
+        // Calculate quarter date range
+        const qStart = `${year}-${String((quarter - 1) * 3 + 1).padStart(2, '0')}-01`;
+        const qEndMonth = quarter * 3;
+        const qEnd = `${year}-${String(qEndMonth).padStart(2, '0')}-${new Date(year, qEndMonth, 0).getDate()}`;
+
+        // Get actuals
+        const cpsActual = await getCPSCount(qStart, qEnd);
+        const salesActual = await getTotalSales(qStart, qEnd);
+        const popCountActual = await getPOPCaseCount(qStart, qEnd);
+        const popSalesActual = await getPOPSales(qStart, qEnd);
+        const eppCountActual = await getEPPCaseCount(qStart, qEnd);
+        const eppSalesActual = await getEPPSales(qStart, qEnd);
+        const agentsActual = await getNewAgents(qStart, qEnd);
+        const customersActual = await getNewCustomers(qStart, qEnd);
+        const meetingsActual = await getTotalMeetings(qStart, qEnd);
+
+        const row = (label, actual, target) => {
+            const pct = target > 0 ? Math.round((actual / target) * 100) : 0;
+            const color = pct >= 95 ? 'success' : pct >= 80 ? 'warning' : 'danger';
+            const variance = actual - target;
+            return `<tr>
+                <td>${label}</td>
+                <td style="text-align:right;">${typeof target === 'number' && target > 999 ? 'RM ' + target.toLocaleString() : target}</td>
+                <td style="text-align:right;">${typeof actual === 'number' && actual > 999 ? 'RM ' + actual.toLocaleString() : actual}</td>
+                <td style="text-align:right; color:${variance >= 0 ? 'var(--success)' : 'var(--danger)'};">${variance >= 0 ? '+' : ''}${typeof variance === 'number' && Math.abs(variance) > 999 ? 'RM ' + variance.toLocaleString() : variance}</td>
+                <td style="text-align:right;"><span class="badge ${color}">${pct}%</span></td>
+            </tr>`;
+        };
+
+        return `
+            <div class="profile-section" style="margin-top:20px;">
+                <h2><i class="fas fa-bullseye"></i> Q${quarter} ${year} — Target vs Actual</h2>
+                <table class="data-table" style="width:100%;">
+                    <thead><tr><th>Metric</th><th style="text-align:right;">Target</th><th style="text-align:right;">Actual</th><th style="text-align:right;">Variance</th><th style="text-align:right;">%</th></tr></thead>
+                    <tbody>
+                        ${row('CPS Count', cpsActual, quarterlyTarget?.cps_count_target || 0)}
+                        ${row('Total Sales', salesActual, quarterlyTarget?.total_sales_target || 0)}
+                        ${row('POP Cases', popCountActual, quarterlyTarget?.pop_case_count_target || 0)}
+                        ${row('POP Sales', popSalesActual, quarterlyTarget?.pop_sales_target || 0)}
+                        ${row('EPP Cases', eppCountActual, quarterlyTarget?.epp_case_count_target || 0)}
+                        ${row('EPP Sales', eppSalesActual, quarterlyTarget?.epp_sales_target || 0)}
+                        ${row('New Agents', agentsActual, quarterlyTarget?.new_agents_target || 0)}
+                        ${row('New Customers', customersActual, quarterlyTarget?.new_customers_target || 0)}
+                        ${row('Total Meetings', meetingsActual, quarterlyTarget?.total_meetings_target || 0)}
+                    </tbody>
+                </table>
+            </div>
+            <div class="profile-section" style="margin-top:16px;">
+                <h2><i class="fas fa-calendar-alt"></i> Yearly Target Overview — ${year}</h2>
+                <table class="data-table" style="width:100%;">
+                    <thead><tr><th>Metric</th><th style="text-align:right;">Q1</th><th style="text-align:right;">Q2</th><th style="text-align:right;">Q3</th><th style="text-align:right;">Q4</th><th style="text-align:right;">Year Total</th></tr></thead>
+                    <tbody>
+                        ${await renderYearlyTargetRows(year)}
+                    </tbody>
+                </table>
+            </div>`;
+    };
+
+    const renderYearlyTargetRows = async (year) => {
+        const qTargets = (await AppDataStore.getAll('quarterly_targets')).filter(t => t.year === year).sort((a, b) => a.quarter - b.quarter);
+        const yearlyTarget = (await AppDataStore.getAll('yearly_targets')).find(t => t.target_year === year);
+        if (!yearlyTarget || qTargets.length === 0) return '<tr><td colspan="6" style="text-align:center;">No targets configured</td></tr>';
+
+        const metrics = [
+            { key: 'cps_count_target', label: 'CPS Count' },
+            { key: 'total_sales_target', label: 'Total Sales (RM)' },
+            { key: 'pop_case_count_target', label: 'POP Cases' },
+            { key: 'pop_sales_target', label: 'POP Sales (RM)' },
+            { key: 'new_agents_target', label: 'New Agents' },
+            { key: 'new_customers_target', label: 'New Customers' },
+            { key: 'total_meetings_target', label: 'Total Meetings' }
+        ];
+        return metrics.map(m => {
+            const vals = qTargets.map(q => q[m.key] || 0);
+            const fmt = (v) => v > 999 ? v.toLocaleString() : v;
+            return `<tr>
+                <td>${m.label}</td>
+                ${vals.map(v => `<td style="text-align:right;">${fmt(v)}</td>`).join('')}
+                ${vals.length < 4 ? '<td></td>'.repeat(4 - vals.length) : ''}
+                <td style="text-align:right; font-weight:600;">${fmt(yearlyTarget[m.key] || 0)}</td>
+            </tr>`;
+        }).join('');
+    };
+
+    // ========== FEATURE: RANKING PERFORMANCE OVERVIEW ==========
+    const showRankingPerformanceView = async (container) => {
+        _currentView = 'ranking';
+        const users = await AppDataStore.getAll('users');
+        const agents = users.filter(u => u.role && (u.role.includes('Level') || u.role === 'agent' || u.role === 'consultant'));
+        const now = new Date();
+        const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+        const monthEnd = now.toISOString().split('T')[0];
+
+        // Gather agent stats
+        const agentStats = [];
+        for (const agent of agents) {
+            const activities = (await AppDataStore.getAll('activities')).filter(a => a.lead_agent_id === agent.id && a.activity_date >= monthStart && a.activity_date <= monthEnd);
+            const purchases = (await AppDataStore.getAll('purchases')).filter(p => p.agent_id === agent.id && p.purchase_date >= monthStart && p.purchase_date <= monthEnd);
+            const prospects = (await AppDataStore.getAll('prospects')).filter(p => p.responsible_agent_id === agent.id);
+            const cpsCount = activities.filter(a => a.activity_type === 'CPS').length;
+            const totalSales = purchases.reduce((s, p) => s + (p.amount || 0), 0);
+            const meetingCount = activities.filter(a => ['FTF', 'FSA', 'GR', 'SITE', 'XG'].includes(a.activity_type)).length;
+            const followedUp = prospects.filter(p => {
+                if (!p.last_contact_date) return false;
+                const diff = (now - new Date(p.last_contact_date)) / (1000 * 60 * 60 * 24);
+                return diff <= 7;
+            }).length;
+            const followupRate = prospects.length > 0 ? Math.round((followedUp / prospects.length) * 100) : 0;
+            const closingRate = cpsCount > 0 ? Math.round((purchases.length / cpsCount) * 100) : 0;
+
+            agentStats.push({
+                id: agent.id,
+                name: agent.full_name || 'Unknown',
+                team: agent.team || '-',
+                cps: cpsCount,
+                sales: totalSales,
+                meetings: meetingCount,
+                prospects: prospects.length,
+                followupRate,
+                closingRate,
+                // Overall performance score
+                performanceScore: Math.round(cpsCount * 5 + totalSales / 1000 + meetingCount * 3 + followupRate * 0.5 + closingRate * 0.8)
+            });
+        }
+        agentStats.sort((a, b) => b.performanceScore - a.performanceScore);
+
+        const rankBadge = (i) => i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`;
+
+        container.innerHTML = `
+            <div class="ranking-view">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                    <div>
+                        <h1>Ranking Performance Overview</h1>
+                        <p style="color:var(--gray-500);">Agent rankings for ${now.toLocaleString('default', { month: 'long', year: 'numeric' })}</p>
+                    </div>
+                    <div>
+                        <button class="btn secondary" onclick="app.refreshCurrentView()"><i class="fas fa-sync-alt"></i> Refresh</button>
+                    </div>
+                </div>
+
+                <!-- Top 3 Cards -->
+                <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:16px; margin-bottom:24px;">
+                    ${agentStats.slice(0, 3).map((a, i) => `
+                        <div style="background:var(--white); border-radius:12px; padding:20px; text-align:center; box-shadow:0 2px 8px rgba(0,0,0,0.06); border-top:4px solid ${i === 0 ? '#FFD700' : i === 1 ? '#C0C0C0' : '#CD7F32'};">
+                            <div style="font-size:32px; margin-bottom:8px;">${rankBadge(i)}</div>
+                            <div style="font-size:16px; font-weight:600;">${a.name}</div>
+                            <div style="color:var(--gray-500); font-size:12px; margin-bottom:12px;">${a.team}</div>
+                            <div style="font-size:24px; font-weight:700; color:var(--primary);">${a.performanceScore} pts</div>
+                            <div style="font-size:12px; color:var(--gray-500); margin-top:8px;">Sales: RM ${a.sales.toLocaleString()} · CPS: ${a.cps} · Rate: ${a.closingRate}%</div>
+                        </div>
+                    `).join('')}
+                </div>
+
+                <!-- Full Rankings Table -->
+                <div class="profile-section">
+                    <h2><i class="fas fa-list-ol"></i> Full Rankings</h2>
+                    <table class="data-table" style="width:100%;">
+                        <thead>
+                            <tr>
+                                <th>Rank</th>
+                                <th>Agent</th>
+                                <th>Team</th>
+                                <th style="text-align:right;">Score</th>
+                                <th style="text-align:right;">CPS</th>
+                                <th style="text-align:right;">Sales (RM)</th>
+                                <th style="text-align:right;">Meetings</th>
+                                <th style="text-align:right;">Prospects</th>
+                                <th style="text-align:right;">Follow-up %</th>
+                                <th style="text-align:right;">Closing %</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${agentStats.map((a, i) => `
+                                <tr style="${i < 3 ? 'background:var(--primary-50);' : ''}">
+                                    <td style="font-weight:600;">${rankBadge(i)}</td>
+                                    <td>${a.name}</td>
+                                    <td>${a.team}</td>
+                                    <td style="text-align:right; font-weight:600;">${a.performanceScore}</td>
+                                    <td style="text-align:right;">${a.cps}</td>
+                                    <td style="text-align:right;">${a.sales.toLocaleString()}</td>
+                                    <td style="text-align:right;">${a.meetings}</td>
+                                    <td style="text-align:right;">${a.prospects}</td>
+                                    <td style="text-align:right;"><span class="badge ${a.followupRate >= 80 ? 'success' : a.followupRate >= 50 ? 'warning' : 'danger'}">${a.followupRate}%</span></td>
+                                    <td style="text-align:right;"><span class="badge ${a.closingRate >= 30 ? 'success' : a.closingRate >= 15 ? 'warning' : 'danger'}">${a.closingRate}%</span></td>
+                                </tr>
+                            `).join('')}
+                            ${agentStats.length === 0 ? '<tr><td colspan="10" style="text-align:center; padding:20px;">No agent data available</td></tr>' : ''}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    };
+
+    // ========== FEATURE: WORKFLOW AUTOMATION ENGINE ==========
+    const showWorkflowAutomationView = async (container) => {
+        _currentView = 'workflows';
+        const workflows = await AppDataStore.getAll('automation_workflows');
+
+        container.innerHTML = `
+            <div class="workflow-view">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                    <div>
+                        <h1>Workflow Automation Engine</h1>
+                        <p style="color:var(--gray-500);">Create automated workflows with triggers and actions</p>
+                    </div>
+                    <div style="display:flex; gap:8px;">
+                        <button class="btn primary" onclick="app.openCreateWorkflowModal()"><i class="fas fa-plus"></i> Create Workflow</button>
+                        <button class="btn secondary" onclick="app.refreshCurrentView()"><i class="fas fa-sync-alt"></i> Refresh</button>
+                    </div>
+                </div>
+
+                <!-- Active Workflows -->
+                <div class="profile-section">
+                    <h2><i class="fas fa-bolt"></i> Active Workflows (${workflows.filter(w => w.status === 'active').length})</h2>
+                    <div id="workflows-list">
+                        ${workflows.length > 0 ? workflows.map(w => renderWorkflowCard(w)).join('') : `
+                            <div style="text-align:center; padding:40px; color:var(--gray-500);">
+                                <i class="fas fa-cogs" style="font-size:48px; margin-bottom:12px; color:var(--gray-300);"></i>
+                                <p>No workflows created yet</p>
+                                <p style="font-size:12px;">Create your first workflow to automate tasks like sending birthday wishes, scoring updates, and follow-up reminders.</p>
+                                <button class="btn primary" style="margin-top:12px;" onclick="app.openCreateWorkflowModal()"><i class="fas fa-plus"></i> Create First Workflow</button>
+                            </div>
+                        `}
+                    </div>
+                </div>
+
+                <!-- Workflow Templates -->
+                <div class="profile-section" style="margin-top:20px;">
+                    <h2><i class="fas fa-clipboard-list"></i> Quick Templates</h2>
+                    <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(250px, 1fr)); gap:12px;">
+                        ${renderWorkflowTemplate('Birthday Greeting', 'birthday', 'Send WhatsApp greeting on customer birthday', 'fas fa-birthday-cake')}
+                        ${renderWorkflowTemplate('Protection Expiring', 'protection_expiring', 'Alert agent 7 days before protection expires', 'fas fa-shield-alt')}
+                        ${renderWorkflowTemplate('Inactivity Alert', 'inactivity', 'Flag prospects with >7 days no follow-up', 'fas fa-exclamation-triangle')}
+                        ${renderWorkflowTemplate('New Prospect Welcome', 'new_prospect', 'Send welcome message when prospect created', 'fas fa-user-plus')}
+                        ${renderWorkflowTemplate('Event Follow-up', 'event_attendance', 'Create follow-up task after event attendance', 'fas fa-calendar-check')}
+                        ${renderWorkflowTemplate('Score Threshold', 'score_change', 'Notify agent when prospect reaches 600+ score', 'fas fa-chart-line')}
+                    </div>
+                </div>
+            </div>
+        `;
+    };
+
+    const renderWorkflowCard = (w) => {
+        const statusColor = w.status === 'active' ? 'success' : w.status === 'paused' ? 'warning' : 'secondary';
+        return `
+            <div style="background:var(--white); border-radius:8px; padding:16px; margin-bottom:12px; border:1px solid var(--gray-200); display:flex; justify-content:space-between; align-items:center;">
+                <div>
+                    <div style="font-weight:600; font-size:14px;">${w.workflow_name}</div>
+                    <div style="font-size:12px; color:var(--gray-500); margin-top:4px;">
+                        Trigger: <strong>${w.trigger_type}</strong> → Action: <strong>${w.action_type || 'Multiple'}</strong>
+                    </div>
+                    <div style="font-size:11px; color:var(--gray-400); margin-top:2px;">Runs: ${w.run_count || 0} times · Last: ${w.last_run || 'Never'}</div>
+                </div>
+                <div style="display:flex; gap:8px; align-items:center;">
+                    <span class="badge ${statusColor}">${w.status}</span>
+                    <button class="btn btn-sm secondary" onclick="app.toggleWorkflow(${w.id})">${w.status === 'active' ? 'Pause' : 'Activate'}</button>
+                    <button class="btn btn-sm secondary" onclick="app.editWorkflow(${w.id})"><i class="fas fa-edit"></i></button>
+                    <button class="btn btn-sm secondary" style="color:var(--danger);" onclick="app.deleteWorkflow(${w.id})"><i class="fas fa-trash"></i></button>
+                </div>
+            </div>
+        `;
+    };
+
+    const renderWorkflowTemplate = (name, trigger, desc, icon) => `
+        <div style="background:var(--gray-50); border-radius:8px; padding:16px; border:1px solid var(--gray-200); cursor:pointer;" onclick="app.createWorkflowFromTemplate('${trigger}')">
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+                <i class="${icon}" style="color:var(--primary);"></i>
+                <span style="font-weight:600; font-size:13px;">${name}</span>
+            </div>
+            <p style="font-size:12px; color:var(--gray-500); margin:0;">${desc}</p>
+        </div>
+    `;
+
+    const WORKFLOW_TRIGGERS = {
+        new_prospect: 'New Prospect Created',
+        new_customer: 'Customer Converted',
+        score_change: 'Score Threshold Reached',
+        purchase: 'Transaction Completed',
+        activity_completed: 'Activity Completed',
+        birthday: 'Customer/Prospect Birthday',
+        protection_expiring: 'Protection ≤7 Days Left',
+        inactivity: 'No Contact >7 Days',
+        event_attendance: 'Event Attended'
+    };
+
+    const WORKFLOW_ACTIONS = {
+        send_whatsapp: 'Send WhatsApp Message',
+        create_task: 'Create Follow-up Task',
+        add_tag: 'Add Tag',
+        remove_tag: 'Remove Tag',
+        add_score: 'Add Score Points',
+        extend_protection: 'Extend Protection Period',
+        send_notification: 'Send In-App Notification',
+        assign_agent: 'Reassign to Agent',
+        create_activity: 'Schedule Activity',
+        flag_reassignment: 'Flag for Reassignment'
+    };
+
+    const openCreateWorkflowModal = async (workflowId = null) => {
+        const existing = workflowId ? await AppDataStore.getById('automation_workflows', workflowId) : null;
+
+        const content = `
+            <div style="max-height:70vh; overflow-y:auto;">
+                <div class="form-group">
+                    <label>Workflow Name *</label>
+                    <input type="text" id="wf-name" class="form-control" value="${existing?.workflow_name || ''}" placeholder="e.g. Birthday Greeting Workflow">
+                </div>
+                <div class="form-group">
+                    <label>Trigger *</label>
+                    <select id="wf-trigger" class="form-control" onchange="app.updateWorkflowConditions()">
+                        <option value="">Select Trigger...</option>
+                        ${Object.entries(WORKFLOW_TRIGGERS).map(([k, v]) => `<option value="${k}" ${existing?.trigger_type === k ? 'selected' : ''}>${v}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="form-group" id="wf-conditions-container" style="display:${existing?.trigger_conditions ? 'block' : 'none'};">
+                    <label>Conditions (optional)</label>
+                    <div id="wf-conditions">
+                        ${existing?.trigger_conditions ? `<input type="text" id="wf-condition-value" class="form-control" value="${existing.trigger_conditions.value || ''}" placeholder="e.g. score threshold: 600">` : ''}
+                    </div>
+                </div>
+                <hr style="margin:16px 0;">
+                <div class="form-group">
+                    <label>Action *</label>
+                    <select id="wf-action" class="form-control">
+                        <option value="">Select Action...</option>
+                        ${Object.entries(WORKFLOW_ACTIONS).map(([k, v]) => `<option value="${k}" ${existing?.action_type === k ? 'selected' : ''}>${v}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Action Configuration</label>
+                    <textarea id="wf-action-config" class="form-control" rows="3" placeholder="e.g. Message: Happy Birthday {{name}}! or Tag: VIP Customer">${existing?.action_config || ''}</textarea>
+                </div>
+                <div class="form-group">
+                    <label>Delay (days after trigger)</label>
+                    <input type="number" id="wf-delay" class="form-control" min="0" value="${existing?.delay_days || 0}">
+                </div>
+                <div class="form-group">
+                    <label>Status</label>
+                    <select id="wf-status" class="form-control">
+                        <option value="active" ${(!existing || existing?.status === 'active') ? 'selected' : ''}>Active</option>
+                        <option value="paused" ${existing?.status === 'paused' ? 'selected' : ''}>Paused</option>
+                        <option value="draft" ${existing?.status === 'draft' ? 'selected' : ''}>Draft</option>
+                    </select>
+                </div>
+            </div>
+        `;
+        UI.showModal(workflowId ? 'Edit Workflow' : 'Create Workflow', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save Workflow', type: 'primary', action: `(async () => { await app.saveWorkflow(${workflowId || 'null'}); })()` }
+        ]);
+    };
+
+    const updateWorkflowConditions = () => {
+        const trigger = document.getElementById('wf-trigger')?.value;
+        const container = document.getElementById('wf-conditions-container');
+        const conditions = document.getElementById('wf-conditions');
+        if (!container || !conditions) return;
+
+        if (trigger === 'score_change') {
+            container.style.display = 'block';
+            conditions.innerHTML = '<input type="number" id="wf-condition-value" class="form-control" placeholder="Score threshold (e.g. 600)">';
+        } else if (trigger === 'inactivity') {
+            container.style.display = 'block';
+            conditions.innerHTML = '<input type="number" id="wf-condition-value" class="form-control" placeholder="Days inactive (e.g. 7)" value="7">';
+        } else if (trigger === 'protection_expiring') {
+            container.style.display = 'block';
+            conditions.innerHTML = '<input type="number" id="wf-condition-value" class="form-control" placeholder="Days before expiry (e.g. 7)" value="7">';
+        } else {
+            container.style.display = 'none';
+        }
+    };
+
+    const saveWorkflow = async (workflowId) => {
+        const name = document.getElementById('wf-name')?.value?.trim();
+        const trigger = document.getElementById('wf-trigger')?.value;
+        const action = document.getElementById('wf-action')?.value;
+
+        if (!name || !trigger || !action) {
+            UI.toast.error('Workflow name, trigger, and action are required');
+            return;
+        }
+
+        const data = {
+            workflow_name: name,
+            trigger_type: trigger,
+            action_type: action,
+            action_config: document.getElementById('wf-action-config')?.value || '',
+            delay_days: parseInt(document.getElementById('wf-delay')?.value) || 0,
+            status: document.getElementById('wf-status')?.value || 'active',
+            trigger_conditions: {
+                value: document.getElementById('wf-condition-value')?.value || ''
+            },
+            updated_at: new Date().toISOString()
+        };
+
+        if (workflowId) {
+            await AppDataStore.update('automation_workflows', workflowId, data);
+        } else {
+            data.id = Date.now();
+            data.created_by = _currentUser?.id || 5;
+            data.created_at = new Date().toISOString();
+            data.run_count = 0;
+            await AppDataStore.create('automation_workflows', data);
+        }
+
+        UI.hideModal();
+        UI.toast.success(workflowId ? 'Workflow updated' : 'Workflow created');
+        const viewport = document.getElementById('content-viewport');
+        if (viewport) await showWorkflowAutomationView(viewport);
+    };
+
+    const createWorkflowFromTemplate = async (triggerType) => {
+        const templates = {
+            birthday: { name: 'Birthday Greeting', action: 'send_whatsapp', config: 'Hi {{name}}, Happy Birthday! Wishing you a wonderful year ahead. — DestinOracles Team', delay: 0 },
+            protection_expiring: { name: 'Protection Expiry Alert', action: 'send_notification', config: 'Protection period for {{prospect_name}} expires in {{days}} days. Take action now.', delay: 0 },
+            inactivity: { name: 'Inactivity Follow-up Alert', action: 'flag_reassignment', config: 'Prospect {{name}} has been inactive for {{days}} days. Consider reassignment.', delay: 0 },
+            new_prospect: { name: 'New Prospect Welcome', action: 'send_whatsapp', config: 'Hi {{name}}, thank you for your interest! Our consultant will reach out to you shortly.', delay: 0 },
+            event_attendance: { name: 'Post-Event Follow-up', action: 'create_task', config: 'Follow up with {{name}} after attending {{event_name}}. Schedule a CPS within 3 days.', delay: 1 },
+            score_change: { name: 'High Score Notification', action: 'send_notification', config: 'Prospect {{name}} has reached score {{score}}. Prioritize follow-up.', delay: 0 }
+        };
+
+        const tpl = templates[triggerType];
+        if (!tpl) return;
+
+        const data = {
+            id: Date.now(),
+            workflow_name: tpl.name,
+            trigger_type: triggerType,
+            action_type: tpl.action,
+            action_config: tpl.config,
+            delay_days: tpl.delay,
+            status: 'active',
+            trigger_conditions: {},
+            created_by: _currentUser?.id || 5,
+            created_at: new Date().toISOString(),
+            run_count: 0
+        };
+
+        await AppDataStore.create('automation_workflows', data);
+        UI.toast.success(`Workflow "${tpl.name}" created from template`);
+        const viewport = document.getElementById('content-viewport');
+        if (viewport) await showWorkflowAutomationView(viewport);
+    };
+
+    const toggleWorkflow = async (workflowId) => {
+        const wf = await AppDataStore.getById('automation_workflows', workflowId);
+        if (!wf) return;
+        const newStatus = wf.status === 'active' ? 'paused' : 'active';
+        await AppDataStore.update('automation_workflows', workflowId, { status: newStatus });
+        UI.toast.success(`Workflow ${newStatus === 'active' ? 'activated' : 'paused'}`);
+        const viewport = document.getElementById('content-viewport');
+        if (viewport) await showWorkflowAutomationView(viewport);
+    };
+
+    const editWorkflow = async (workflowId) => {
+        await openCreateWorkflowModal(workflowId);
+    };
+
+    const deleteWorkflow = async (workflowId) => {
+        UI.showModal('Delete Workflow', '<p>Are you sure you want to delete this workflow?</p>', [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Delete', type: 'primary', action: `(async () => { await AppDataStore.delete('automation_workflows', ${workflowId}); UI.hideModal(); UI.toast.success('Workflow deleted'); const vp = document.getElementById('content-viewport'); if (vp) await app.showWorkflowAutomationView(vp); })()` }
+        ]);
+    };
+
+    // Workflow execution engine — runs on app events
+    const executeWorkflows = async (triggerType, context = {}) => {
+        const workflows = (await AppDataStore.getAll('automation_workflows')).filter(w => w.trigger_type === triggerType && w.status === 'active');
+        for (const wf of workflows) {
+            try {
+                // Check conditions
+                if (wf.trigger_conditions?.value) {
+                    if (triggerType === 'score_change' && context.score < parseInt(wf.trigger_conditions.value)) continue;
+                    if (triggerType === 'inactivity' && context.daysInactive < parseInt(wf.trigger_conditions.value)) continue;
+                }
+
+                // Execute action
+                const config = (wf.action_config || '')
+                    .replace(/\{\{name\}\}/g, context.name || '')
+                    .replace(/\{\{prospect_name\}\}/g, context.name || '')
+                    .replace(/\{\{score\}\}/g, context.score || '')
+                    .replace(/\{\{days\}\}/g, context.days || '')
+                    .replace(/\{\{event_name\}\}/g, context.eventName || '');
+
+                console.log(`Workflow "${wf.workflow_name}" triggered: ${wf.action_type} — ${config}`);
+
+                // Update run count
+                await AppDataStore.update('automation_workflows', wf.id, {
+                    run_count: (wf.run_count || 0) + 1,
+                    last_run: new Date().toISOString()
+                });
+            } catch (err) {
+                console.error(`Workflow execution error for "${wf.workflow_name}":`, err);
+            }
+        }
     };
 
     return {
@@ -18310,6 +19742,7 @@ const initImportDemoData = async () => {
 
         // Phase 18: Cases Module Functions
         showCasesView,
+        switchCaseTab,
         handleCaseSearch,
         handleCaseFilterChange,
         renderCasesList,
@@ -18317,6 +19750,8 @@ const initImportDemoData = async () => {
         toggleCasePublic,
         copyCaseLink,
         deleteCaseStudy,
+        addTagToCase,
+        removeTagFromCase,
         openCaseStudyModal,
         switchModalTab,
         searchCaseEntities,
@@ -18421,6 +19856,12 @@ const initImportDemoData = async () => {
             case 'promotions':
                 if (typeof showMarketingAutomationView === 'function') await showMarketingAutomationView(viewport);
                 break;
+            case 'ranking':
+                if (typeof showRankingPerformanceView === 'function') await showRankingPerformanceView(viewport);
+                break;
+            case 'workflows':
+                if (typeof showWorkflowAutomationView === 'function') await showWorkflowAutomationView(viewport);
+                break;
             default:
                 console.log(`No specific refresh logic configured for ${view}`);
         }
@@ -18474,6 +19915,42 @@ const initImportDemoData = async () => {
         saveMarketingListItem,
         deleteMarketingListItem,
 
+        // Feature: Automated Scoring
+        addScoreToProspect,
+        addScoreToCustomer,
+        applyActivityScoring,
+
+        // Feature: Protection Auto-Extension
+        autoExtendProtection,
+
+        // Feature: Prospect Potential & Opportunities
+        openEditPotentialModal,
+        savePotential,
+
+        // Feature: Birthday Action Workflows
+        sendBirthdayWish,
+        scheduleBirthdayFollowup,
+        executeBirthdayAction,
+
+        // Feature: KPI Hierarchical Targets
+        openKPITargetsModal,
+        saveKPITargets,
+        renderKPITargetComparison,
+
+        // Feature: Ranking Performance Overview
+        showRankingPerformanceView,
+
+        // Feature: Workflow Automation Engine
+        showWorkflowAutomationView,
+        openCreateWorkflowModal,
+        updateWorkflowConditions,
+        saveWorkflow,
+        createWorkflowFromTemplate,
+        toggleWorkflow,
+        editWorkflow,
+        deleteWorkflow,
+        executeWorkflows,
+
         // Auth exports
         login,
         logout,
@@ -18482,7 +19959,8 @@ const initImportDemoData = async () => {
         setRoleFilter,
         setTimeFilter,
         setCustomDateRange,
-        refreshKPIDashboard
+        refreshKPIDashboard,
+        exportKPIReport
 
     };
 

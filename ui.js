@@ -74,6 +74,7 @@ window.UI = (() => {
         const overlay = document.getElementById('global-modal-overlay');
         if (overlay) {
             overlay.classList.remove('active');
+            overlay.innerHTML = '';
         }
     };
 
