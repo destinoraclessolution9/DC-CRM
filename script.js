@@ -13194,87 +13194,164 @@ const deactivateAgent = async (agentId) => {
 
     // ========== PHASE 6: PIPELINE & SALES FORCE MODULE ==========
 
-    const loadReadinessConfig = () => {
-        const defaultConfig = {
-            weights: { CPS: 30, EVENT: 20, MUSEUM: 10, FTF: 15, FSA: 15, score: 10 },
-            thresholds: { hot: 80, warm: 50 },
-            fullWeightDays: 7,
-            decayDays: 30
-        };
-        const saved = localStorage.getItem('pipeline_readiness_config');
-        return saved ? JSON.parse(saved) : defaultConfig;
-    };
+    // ===== PIPELINE MANAGEMENT — 6-Category Prerequisite Model =====
 
-    const calculateReadiness = (prospect, allActivities) => {
-        const config = loadReadinessConfig();
-        const prospectActivities = allActivities.filter(a => a.prospect_id === prospect.id);
-
-        let totalScore = 0;
-        const badges = [];
-        const activityTypes = ['CPS', 'EVENT', 'MUSEUM', 'FTF', 'FSA'];
-
-        // Activity contributions
-        activityTypes.forEach(type => {
-            const typeActivities = prospectActivities.filter(a => a.activity_type === type);
-            if (typeActivities.length > 0) {
-                badges.push(type);
-
-                // Find most recent completed activity of this type
-                const sorted = typeActivities.sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
-                const mostRecent = sorted[0];
-
-                const daysSince = Math.floor((new Date() - new Date(mostRecent.activity_date)) / (1000 * 60 * 60 * 24));
-
-                let factor = 0;
-                if (daysSince <= config.fullWeightDays) {
-                    factor = 1;
-                } else if (daysSince <= config.decayDays) {
-                    factor = 1 - (daysSince - config.fullWeightDays) / (config.decayDays - config.fullWeightDays);
-                }
-
-                totalScore += (config.weights[type] || 0) * factor;
-            }
-        });
-
-        // Lead score contribution
-        const maxLeadScore = 1000; // Assuming 1000 is the benchmark for 100% of the score weight
-        const scoreFactor = Math.min(1, (prospect.score || 0) / maxLeadScore);
-        totalScore += (config.weights.score || 0) * scoreFactor;
-
-        const percentage = Math.min(100, Math.round(totalScore));
-        let label = 'COLD';
-        if (percentage >= config.thresholds.hot) label = 'HOT';
-        else if (percentage >= config.thresholds.warm) label = 'WARM';
-
-        return { percentage, label, badges };
-    };
-
-    const getProposedProduct = async (prospectId) => {
-        const solutions = await AppDataStore.query('proposed_solutions', { prospect_id: prospectId });
-        if (solutions.length > 0) {
-            return {
-                name: solutions[0].product_name || 'Standard Consultation',
-                amount: solutions[0].amount || 0
-            };
+    // 6 Product Categories with prerequisite definitions mapped to activity types
+    const PIPELINE_CATEGORIES = [
+        {
+            id: 'lifechart',
+            name: 'Personal Lifechart Solution',
+            products: 'Lifechart reading, 9-stars analysis, personalised chart report',
+            defaultAmount: 3000,
+            prerequisites: [
+                { key: 'CPS', label: 'CPS', check: (acts) => acts.some(a => a.activity_type === 'CPS') },
+                { key: '9Stars', label: '9 Stars Session', check: (acts) => acts.some(a => a.activity_type === 'EVENT' && /(9[\s-]?stars?|9星|nine[\s-]?stars?)/i.test((a.event_title || '') + ' ' + (a.notes || ''))) },
+                { key: 'PersonalSharing', label: 'Personal Sharing Class', check: (acts) => acts.some(a => a.activity_type === 'EVENT' && /(personal.?sharing|sharing.?class)/i.test((a.event_title || '') + ' ' + (a.notes || ''))) },
+                { key: 'Museum', label: 'Museum Visit', check: (acts) => acts.some(a => a.activity_type === 'MUSEUM') },
+            ]
+        },
+        {
+            id: 'fengshui',
+            name: 'Fengshui Audit Solution',
+            products: 'Residential audit, office audit, landform analysis',
+            defaultAmount: 5000,
+            prerequisites: [
+                { key: 'CPS', label: 'CPS', check: (acts) => acts.some(a => a.activity_type === 'CPS') },
+                { key: 'FengshuiDIY', label: 'Fengshui DIY', check: (acts) => acts.some(a => (a.activity_type === 'EVENT' || a.activity_type === 'FSA') && /(fengshui.?diy|feng.?shui.?diy)/i.test((a.event_title || '') + ' ' + (a.notes || ''))) },
+                { key: 'HuiJi', label: 'Hui Ji', check: (acts) => acts.some(a => a.activity_type === 'EVENT' && /(hui.?ji|汇聚)/i.test((a.event_title || '') + ' ' + (a.notes || ''))) },
+                { key: 'Museum', label: 'Museum Visit', check: (acts) => acts.some(a => a.activity_type === 'MUSEUM') },
+            ]
+        },
+        {
+            id: 'calligraphy',
+            name: 'Calligraphy Solution',
+            products: 'Custom calligraphy for wealth/health, blessing pieces',
+            defaultAmount: 2800,
+            prerequisites: [
+                { key: 'CPS', label: 'CPS', check: (acts) => acts.some(a => a.activity_type === 'CPS') },
+                { key: 'CalligraphySharing', label: '画作分享会', check: (acts) => acts.some(a => a.activity_type === 'EVENT' && /(画作|calligraphy.?sharing|painting.?sharing)/i.test((a.event_title || '') + ' ' + (a.notes || ''))) },
+                { key: 'HuiJi', label: 'Hui Ji', check: (acts) => acts.some(a => a.activity_type === 'EVENT' && /(hui.?ji|汇聚)/i.test((a.event_title || '') + ' ' + (a.notes || ''))) },
+                { key: 'Museum', label: 'Museum Visit', check: (acts) => acts.some(a => a.activity_type === 'MUSEUM') },
+            ]
+        },
+        {
+            id: 'bujishu',
+            name: 'Bujishu',
+            products: 'Bujishu bed set, energy curtains, Bujishu furniture package',
+            defaultAmount: 8500,
+            prerequisites: [
+                { key: 'CPS', label: 'CPS', check: (acts) => acts.some(a => a.activity_type === 'CPS') },
+                { key: 'BujishuClass', label: 'Bujishu Sharing Class', check: (acts) => acts.some(a => a.activity_type === 'EVENT' && /(bujishu|bu.?ji.?shu)/i.test((a.event_title || '') + ' ' + (a.notes || ''))) },
+                { key: 'HuiJi', label: 'Hui Ji', check: (acts) => acts.some(a => a.activity_type === 'EVENT' && /(hui.?ji|汇聚)/i.test((a.event_title || '') + ' ' + (a.notes || ''))) },
+                { key: 'WangHouse', label: 'Visited Wang House', check: (acts) => acts.some(a => a.activity_type === 'FTF' && /wang.?house/i.test((a.event_title || '') + ' ' + (a.notes || ''))) },
+                { key: 'Mattress', label: 'Tried Mattress', check: (acts) => acts.some(a => a.activity_type === 'FTF' && /(mattress|bed.?set)/i.test((a.event_title || '') + ' ' + (a.notes || ''))) },
+                { key: 'Curtain', label: 'Touched Curtain', check: (acts) => acts.some(a => a.activity_type === 'FTF' && /curtain/i.test((a.event_title || '') + ' ' + (a.notes || ''))) },
+                { key: 'Sofa', label: 'Tried Sofa', check: (acts) => acts.some(a => a.activity_type === 'FTF' && /sofa/i.test((a.event_title || '') + ' ' + (a.notes || ''))) },
+            ]
+        },
+        {
+            id: 'healthcare',
+            name: 'Formula Healthcare Solution',
+            products: 'Formula supplements, health plan, wellness consultation',
+            defaultAmount: 1200,
+            prerequisites: [
+                { key: 'HealthClass', label: 'Health Class', check: (acts) => acts.some(a => a.activity_type === 'EVENT' && /(health.?class|formula.?health|wellness.?class|kesihatan)/i.test((a.event_title || '') + ' ' + (a.notes || ''))) },
+            ]
+        },
+        {
+            id: 'other',
+            name: 'Other / Cross-Category',
+            products: 'Bundles, POP RM499/month, 21-step packages',
+            defaultAmount: 499,
+            prerequisites: []
         }
-        return { name: 'General Interest', amount: 0 };
+    ];
+
+    // Calculate which pipeline category a prospect qualifies for and their signing probability
+    const calcPipelineEntry = (prospect, prospectActivities) => {
+        const now = new Date();
+
+        let lastActivityDate = null;
+        if (prospectActivities.length > 0) {
+            const sorted = [...prospectActivities].sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
+            lastActivityDate = new Date(sorted[0].activity_date);
+        }
+
+        const daysSinceLast = lastActivityDate
+            ? Math.floor((now - lastActivityDate) / (1000 * 60 * 60 * 24))
+            : 999;
+
+        const getMultiplier = (days) => {
+            if (days <= 30) return 1.0;
+            if (days <= 90) return 0.7;
+            return 0.5;
+        };
+
+        let qualifiedCategory = null;
+        let partialCategory = null;
+        let partialCompleted = [];
+        let partialMissing = [];
+
+        for (const cat of PIPELINE_CATEGORIES) {
+            if (cat.id === 'other' || cat.prerequisites.length === 0) continue;
+            const completed = cat.prerequisites.filter(p => p.check(prospectActivities));
+            const missing = cat.prerequisites.filter(p => !p.check(prospectActivities));
+            if (missing.length === 0) {
+                qualifiedCategory = cat;
+                break;
+            } else if (!partialCategory || completed.length > partialCompleted.length) {
+                partialCategory = cat;
+                partialCompleted = completed;
+                partialMissing = missing;
+            }
+        }
+
+        const category = qualifiedCategory || partialCategory || PIPELINE_CATEGORIES.find(c => c.id === 'other');
+        const isQualified = !!qualifiedCategory;
+        const missingPrereqs = isQualified ? [] : partialMissing;
+        const completedPrereqs = isQualified ? (qualifiedCategory?.prerequisites || []) : partialCompleted;
+        const probability = isQualified ? Math.round(100 * getMultiplier(daysSinceLast)) : 0;
+        const action = generatePipelineAction(category, missingPrereqs, daysSinceLast, isQualified);
+
+        return { category, probability, missingPrereqs, completedPrereqs, daysSinceLast, lastActivityDate, action, qualified: isQualified };
+    };
+
+    const generatePipelineAction = (category, missingPrereqs, daysSinceLast, isQualified) => {
+        if (!isQualified && missingPrereqs.length > 0) {
+            return `Complete prerequisite: <strong>${escapeHtml(missingPrereqs[0].label)}</strong> – schedule next session`;
+        }
+        if (category?.id === 'bujishu') {
+            return 'Schedule in-home trial for mattress / curtain / sofa – then close';
+        }
+        if (category?.id === 'healthcare') {
+            if (daysSinceLast <= 30) return 'Send starter pack offer – Health Class completed ✓';
+            if (daysSinceLast <= 90) return 'Re-engagement: book health class follow-up session';
+            return 'Win-back campaign – special health package to reactivate';
+        }
+        if (daysSinceLast <= 30) return `Send proposal for <strong>${escapeHtml(category?.name || '')}</strong> – follow up within 7 days`;
+        if (daysSinceLast <= 90) return 'Re-engagement call – offer free museum revisit or sharing class';
+        return 'Win-back campaign – special discount or Burger Program to reactivate';
     };
 
     const getNoteCount = async (prospectId) => {
-        return await AppDataStore.query('notes', { prospect_id: prospectId }).length +
-            await AppDataStore.query('activities', { prospect_id: prospectId }).length;
+        const notes = await AppDataStore.query('notes', { prospect_id: prospectId });
+        const activities = await AppDataStore.query('activities', { prospect_id: prospectId });
+        return notes.length + activities.length;
     };
 
     const getProspectOutcome = async (prospect) => {
         if (prospect.status === 'converted') return 'Won';
         if (prospect.status === 'lost') return 'Lost';
-
         const purchases = await AppDataStore.query('purchases', { prospect_id: prospect.id });
         if (purchases.length > 0) return 'Won';
-
         return 'Open';
     };
 
+    const getPipelineAmount = async (prospect, category) => {
+        const solutions = await AppDataStore.query('proposed_solutions', { prospect_id: prospect.id });
+        if (solutions.length > 0 && solutions[0].amount) return solutions[0].amount;
+        return category?.defaultAmount || 0;
+    };
 
     let _pipelineAgentFilter = 'all';
     let _pipelineStatusFilter = 'all';
@@ -13285,255 +13362,202 @@ const deactivateAgent = async (agentId) => {
         let prospects = await getVisibleProspects();
         const agents = (await AppDataStore.getAll('users')).filter(u => isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'));
 
-        // --- NEW: Apply Filters ---
-        if (_pipelineAgentFilter !== 'all') {
-            prospects = prospects.filter(p => p.responsible_agent_id == _pipelineAgentFilter);
-        }
-        if (_pipelineStatusFilter !== 'all') {
-            prospects = prospects.filter(p => p.status === _pipelineStatusFilter);
-        }
+        if (_pipelineAgentFilter !== 'all') prospects = prospects.filter(p => p.responsible_agent_id == _pipelineAgentFilter);
+        if (_pipelineStatusFilter !== 'all') prospects = prospects.filter(p => p.status === _pipelineStatusFilter);
+
+        const activeProspects = prospects.filter(p => p.status !== 'converted' && p.status !== 'lost');
 
         const focusList = (await AppDataStore.query('my_potential_list', { user_id: userId }))
-            .filter(rec => prospects.some(p => p.id == rec.prospect_id))
+            .filter(rec => activeProspects.some(p => p.id == rec.prospect_id))
             .sort((a, b) => a.priority_order - b.priority_order);
 
-        // Calculate readiness for all prospects to sort the system pipeline
-        const systemProspects = prospects.map(p => {
-            const readiness = calculateReadiness(p, allActivities);
-            return { ...p, readiness };
-        }).sort((a, b) => b.readiness.percentage - a.readiness.percentage);
+        // Enrich and qualify prospects for Table 2
+        const enriched = activeProspects.map(p => {
+            const acts = allActivities.filter(a => a.prospect_id === p.id);
+            return { ...p, _pipeline: calcPipelineEntry(p, acts) };
+        }).filter(p => p._pipeline.qualified)
+          .sort((a, b) => {
+              if (b._pipeline.probability !== a._pipeline.probability) return b._pipeline.probability - a._pipeline.probability;
+              const da = a._pipeline.lastActivityDate ? a._pipeline.lastActivityDate.getTime() : 0;
+              const db = b._pipeline.lastActivityDate ? b._pipeline.lastActivityDate.getTime() : 0;
+              if (db !== da) return db - da;
+              return (a.name || a.full_name || '').localeCompare(b.name || b.full_name || '');
+          });
+
+        const probBadge = (prob) => {
+            const color = prob >= 80 ? '#DC2626' : prob >= 60 ? '#F59E0B' : '#6B7280';
+            const label = prob >= 80 ? '🔥 HOT' : prob >= 50 ? '⚡ WARM' : '❄️ COLD';
+            return `<span style="background:${color};color:white;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;">${label}</span><strong style="margin-left:6px;">${prob}%</strong>`;
+        };
+
+        const focusRows = (await Promise.all(focusList.map((rec, idx) => renderFocusRow(rec, idx, allActivities, probBadge)))).join('');
+        const systemRows = (await Promise.all(enriched.map(p => renderSystemRow(p, probBadge)))).join('');
 
         container.innerHTML = `
-    <div class="pipeline-dual-view">
-    < !--HEADER SECTION-->
-    <div class="pipeline-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+<div class="pipeline-dual-view">
+    <!--PIPELINE HEADER-->
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;">
         <div>
-            <h1 style="font-size: 24px; font-weight: 700; margin: 0;">Sales Pipeline</h1>
-            <p style="color: #6B7280; margin-top: 4px;">Track opportunities and prerequisite completion</p>
+            <h1 style="font-size:24px;font-weight:700;margin:0;">Potential Pipeline Management</h1>
+            <p style="color:#6B7280;margin-top:4px;">Track signing probability across 6 solution categories</p>
         </div>
-        <div class="header-actions" style="display: flex; gap: 12px; align-items: center;">
-            <div class="filter-group" style="display: flex; gap: 8px;">
-                <select class="form-control" style="width: 160px; height: 38px;" onchange="app.setPipelineFilter('agent', this.value)">
-                    <option value="all">All Agents</option>
-                    ${agents.map(a => `<option value="${a.id}" ${_pipelineAgentFilter == a.id ? 'selected' : ''}>${a.full_name}</option>`).join('')}
-                </select>
-                <select class="form-control" style="width: 140px; height: 38px;" onchange="(async () => { await app.setPipelineFilter('status', this.value); })()">
-                    <option value="all">All Status</option>
-                    <option value="prospect" ${_pipelineStatusFilter === 'prospect' ? 'selected' : ''}>Prospect</option>
-                    <option value="active" ${_pipelineStatusFilter === 'active' ? 'selected' : ''}>Active</option>
-                    <option value="warm" ${_pipelineStatusFilter === 'warm' ? 'selected' : ''}>Warm</option>
-                    <option value="hot" ${_pipelineStatusFilter === 'hot' ? 'selected' : ''}>Hot</option>
-                    <option value="converted" ${_pipelineStatusFilter === 'converted' ? 'selected' : ''}>Converted</option>
-                </select>
-            </div>
-            <button class="btn secondary" onclick="app.refreshPipeline()">
-                <i class="fas fa-sync-alt"></i> Refresh
-            </button>
-            <button class="btn primary" onclick="app.openPipelineConfigModal()">
-                <i class="fas fa-cog"></i> Configure Rules
-            </button>
+        <div style="display:flex;gap:12px;align-items:center;">
+            <select class="form-control" style="width:160px;height:38px;" onchange="app.setPipelineFilter('agent', this.value)">
+                <option value="all">All Agents</option>
+                ${agents.map(a => `<option value="${a.id}" ${_pipelineAgentFilter == a.id ? 'selected' : ''}>${escapeHtml(a.full_name)}</option>`).join('')}
+            </select>
+            <select class="form-control" style="width:140px;height:38px;" onchange="(async () => { await app.setPipelineFilter('status', this.value); })()">
+                <option value="all">All Status</option>
+                <option value="prospect" ${_pipelineStatusFilter === 'prospect' ? 'selected' : ''}>Prospect</option>
+                <option value="active" ${_pipelineStatusFilter === 'active' ? 'selected' : ''}>Active</option>
+                <option value="warm" ${_pipelineStatusFilter === 'warm' ? 'selected' : ''}>Warm</option>
+                <option value="hot" ${_pipelineStatusFilter === 'hot' ? 'selected' : ''}>Hot</option>
+            </select>
+            <button class="btn secondary" onclick="app.refreshPipeline()"><i class="fas fa-sync-alt"></i> Refresh</button>
+            <button class="btn primary" onclick="app.openPipelineConfigModal()"><i class="fas fa-info-circle"></i> Rules</button>
         </div>
     </div>
 
     <!--TABLE 1: MONTH FOCUS - MANUAL PRIORITY LIST-->
-    <div class="focus-section" style="margin-bottom: 32px; background: white; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 20px;">
-        <div class="section-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-            <div style="display: flex; align-items: center; gap: 12px;">
-                <h2 style="font-size: 18px; font-weight: 600; margin: 0;">🔥 MONTH FOCUS - My Priority List</h2>
-                <span style="background: #F3F4F6; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600;" id="focus-count">${focusList.length} prospects</span>
+    <div style="margin-bottom:32px;background:white;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.1);padding:20px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <div style="display:flex;align-items:center;gap:12px;">
+                <h2 style="font-size:18px;font-weight:600;margin:0;">🔥 MONTH FOCUS — My Priority List</h2>
+                <span style="background:#F3F4F6;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;">${focusList.length} prospects</span>
             </div>
-            <button class="btn-icon" onclick="app.saveManualOrder()" title="Save Order">
-                <i class="fas fa-save"></i>
-            </button>
+            <button class="btn-icon" onclick="app.saveManualOrder()" title="Save Order"><i class="fas fa-save"></i></button>
         </div>
-        
-        <p style="font-size: 12px; color: #9CA3AF; margin-bottom: 16px;">
-            <i class="fas fa-arrows-alt" style="margin-right: 4px;"></i> Drag the ☰ handle to reorder priority
-        </p>
-        
-        <div class="focus-table-container" style="overflow-x: auto;">
-            <table style="width: 100%; border-collapse: collapse; min-width: 1200px;">
+        <p style="font-size:12px;color:#9CA3AF;margin-bottom:16px;"><i class="fas fa-arrows-alt" style="margin-right:4px;"></i> Drag ☰ to reorder priority • Add prospects from Table 2 below</p>
+        <div style="overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;min-width:1080px;">
                 <thead>
-                    <tr style="background: #F9FAFB; border-bottom: 2px solid #E5E7EB;">
-                        <th style="padding: 12px 16px; text-align: left; font-size: 13px; font-weight: 600; color: #6B7280; width: 60px;">#</th>
-                        <th style="padding: 12px 16px; text-align: left; font-size: 13px; font-weight: 600; color: #6B7280;">Prospect</th>
-                        <th style="padding: 12px 16px; text-align: left; font-size: 13px; font-weight: 600; color: #6B7280;">Agent</th>
-                        <th style="padding: 12px 16px; text-align: left; font-size: 13px; font-weight: 600; color: #6B7280;">Product</th>
-                        <th style="padding: 12px 16px; text-align: left; font-size: 13px; font-weight: 600; color: #6B7280;">Amount</th>
-                        <th style="padding: 12px 16px; text-align: left; font-size: 13px; font-weight: 600; color: #6B7280;">Readiness</th>
-                        <th style="padding: 12px 16px; text-align: left; font-size: 13px; font-weight: 600; color: #6B7280;">Close Status</th>
-                        <th style="padding: 12px 16px; text-align: left; font-size: 13px; font-weight: 600; color: #6B7280;">Actions</th>
+                    <tr style="background:#F9FAFB;border-bottom:2px solid #E5E7EB;">
+                        <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;width:50px;">#</th>
+                        <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Prospect Name</th>
+                        <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Target to Sign (Product/Service)</th>
+                        <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Amount (RM)</th>
+                        <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Probability</th>
+                        <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Action Needed to Close Deal</th>
+                        <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Actions</th>
                     </tr>
                 </thead>
                 <tbody id="focus-list-body">
-                    ${(await Promise.all(focusList.map(async (rec, idx) => await renderFocusRow(rec, idx, allActivities)))).join('')}
-                    ${focusList.length === 0 ? '<tr><td colspan="7" style="padding: 32px; text-align: center; color: #9CA3AF;">No prospects in your focus list yet.</td></tr>' : ''}
+                    ${focusRows || '<tr><td colspan="7" style="padding:32px;text-align:center;color:#9CA3AF;">No prospects in your priority list. Add from Table 2 below.</td></tr>'}
                 </tbody>
             </table>
         </div>
     </div>
 
-    <!--TABLE 2: SYSTEM PIPELINE - AUTO - CALCULATED-->
-    <div class="pipeline-section" style="background: white; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 20px;">
-        <div class="section-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-            <div style="display: flex; align-items: center; gap: 12px;">
-                <h2 style="font-size: 18px; font-weight: 600; margin: 0;">📊 System Pipeline</h2>
-                <span style="background: #F3F4F6; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600;" id="pipeline-count">${systemProspects.length} prospects</span>
+    <!--TABLE 2: AUTO-GENERATED PIPELINE (sorted by probability)-->
+    <div style="background:white;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.1);padding:20px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <div style="display:flex;align-items:center;gap:12px;">
+                <h2 style="font-size:18px;font-weight:600;margin:0;">📊 Auto-Generated Pipeline</h2>
+                <span style="background:#F3F4F6;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;">${enriched.length} qualified</span>
             </div>
+            <p style="font-size:11px;color:#9CA3AF;margin:0;">Sorted: highest probability → most recent activity → name</p>
         </div>
-
-        <div class="pipeline-table-container" style="overflow-x: auto;">
-            <table style="width: 100%; border-collapse: collapse; min-width: 1200px;">
+        <div style="overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;min-width:1080px;">
                 <thead>
-                    <tr style="background: #F9FAFB; border-bottom: 2px solid #E5E7EB;">
-                        <th style="padding: 12px 16px; text-align: left; font-size: 13px; font-weight: 600; color: #6B7280;">Prospect</th>
-                        <th style="padding: 12px 16px; text-align: left; font-size: 13px; font-weight: 600; color: #6B7280;">Agent</th>
-                        <th style="padding: 12px 16px; text-align: left; font-size: 13px; font-weight: 600; color: #6B7280;">Product</th>
-                        <th style="padding: 12px 16px; text-align: left; font-size: 13px; font-weight: 600; color: #6B7280;">Amount</th>
-                        <th style="padding: 12px 16px; text-align: left; font-size: 13px; font-weight: 600; color: #6B7280;">Status</th>
-                        <th style="padding: 12px 16px; text-align: left; font-size: 13px; font-weight: 600; color: #6B7280;">Readiness</th>
-                        <th style="padding: 12px 16px; text-align: left; font-size: 13px; font-weight: 600; color: #6B7280;">Close Status</th>
-                        <th style="padding: 12px 16px; text-align: left; font-size: 13px; font-weight: 600; color: #6B7280;">Quick Action</th>
+                    <tr style="background:#F9FAFB;border-bottom:2px solid #E5E7EB;">
+                        <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Prospect Name</th>
+                        <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Target to Sign (Product/Service)</th>
+                        <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Amount (RM)</th>
+                        <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Probability</th>
+                        <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Action Needed to Close Deal</th>
+                        <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Quick Action</th>
                     </tr>
                 </thead>
                 <tbody id="pipeline-list-body">
-                    ${(await Promise.all(systemProspects.map(async p => await renderSystemRow(p, allActivities)))).join('')}
-                    ${systemProspects.length === 0 ? '<tr><td colspan="7" style="padding: 32px; text-align: center; color: #9CA3AF;">No active prospects found.</td></tr>' : ''}
+                    ${systemRows || '<tr><td colspan="6" style="padding:32px;text-align:center;color:#9CA3AF;">No qualified prospects found. Complete prerequisites for any category to appear here.</td></tr>'}
                 </tbody>
             </table>
         </div>
     </div>
-</div>
-    `;
+</div>`;
     };
 
-    const renderFocusRow = async (rec, idx, allActivities) => {
+    const renderFocusRow = async (rec, idx, allActivities, probBadge) => {
         const prospect = await AppDataStore.getById('prospects', rec.prospect_id);
         if (!prospect) return '';
 
-        const readiness = calculateReadiness(prospect, allActivities);
-        const productInfo = await getProposedProduct(prospect.id);
+        const acts = allActivities.filter(a => a.prospect_id === prospect.id);
+        const entry = calcPipelineEntry(prospect, acts);
+        const amount = await getPipelineAmount(prospect, entry.category);
         const noteCount = await getNoteCount(prospect.id);
-        const outcome = await getProspectOutcome(prospect);
-
-        const readinessColor = readiness.label === 'HOT' ? '#DC2626' : (readiness.label === 'WARM' ? '#F59E0B' : '#6B7280');
 
         return `
-            <tr class="focus-row draggable" data-list-id="${rec.id}" style="border-bottom: 1px solid #F3F4F6;">
-                <td style="padding: 16px;">
-                    <div class="drag-handle" style="cursor: grab; color: #9CA3AF;"><i class="fas fa-bars"></i></div>
-                </td>
-                <td style="padding: 16px;">
-                    <div style="font-weight: 600; color: #111827;">${await escapeHtml(prospect.name)}</div>
-                    <div style="font-size: 12px; color: #6B7280; margin-top: 2px;">Created: ${prospect.created_at || 'N/A'}</div>
-                </td>
-                <td style="padding: 16px;">
-                    <div style="font-size: 13px;">${await escapeHtml(await AppDataStore.getById('users', prospect.responsible_agent_id)?.full_name || 'Unassigned')}</div>
-                </td>
-                <td style="padding: 16px;">
-                    <div style="font-weight: 500;">${await escapeHtml(productInfo.name)}</div>
-                </td>
-                <td style="padding: 16px; font-weight: 600; color: #059669;">RM ${productInfo.amount.toLocaleString()}</td>
-                <td style="padding: 16px;">
-                    <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 6px;">
-                        <span style="background: ${readinessColor}; color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600;">${readiness.label === 'HOT' ? '🔥 ' : ''}${readiness.label}</span>
-                        <span style="font-weight: 600; font-size: 14px;">${readiness.percentage}%</span>
+            <tr data-list-id="${rec.id}" draggable="true"
+                ondragstart="app.handleDragStart(event, ${rec.id})"
+                ondragover="app.handleDragOver(event)"
+                ondrop="app.handleDrop(event, ${rec.id})"
+                style="border-bottom:1px solid #F3F4F6;"
+                onmouseover="this.style.background='#F9FAFB'" onmouseout="this.style.background=''">
+                <td style="padding:14px 12px;">
+                    <div style="display:flex;align-items:center;gap:8px;cursor:grab;">
+                        <span style="color:#9CA3AF;">☰</span>
+                        <span style="font-weight:700;color:#6B7280;">${idx + 1}</span>
                     </div>
                 </td>
-                <td style="padding: 16px;">
-                    ${outcome === 'Won' ? '<span style="color: #059669; font-weight: 600;">✅ Won</span>' :
-                (outcome === 'Lost' ? '<span style="color: #DC2626; font-weight: 600;">❌ Lost</span>' :
-                    '<span style="color: #6B7280;">Open</span>')}
+                <td style="padding:14px 12px;">
+                    <div style="font-weight:600;color:#111827;">${escapeHtml(prospect.name || prospect.full_name || '')}</div>
+                    <div style="font-size:11px;color:#9CA3AF;">Last activity: ${entry.lastActivityDate ? entry.lastActivityDate.toLocaleDateString('en-GB') : 'None'}</div>
                 </td>
-                <td style="padding: 16px;">
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <button class="btn-icon" onclick="event.stopPropagation(); app.showProspectMenu(${prospect.id})" title="Options">
-                            <i class="fas fa-ellipsis-v"></i>
-                        </button>
-                        <button class="btn-icon" onclick="event.stopPropagation(); app.showComments(${prospect.id})" style="position: relative;" title="Comments">
+                <td style="padding:14px 12px;">
+                    <div style="font-weight:500;color:#1E40AF;">${escapeHtml(entry.category?.name || 'Unknown')}</div>
+                    <div style="font-size:11px;color:#9CA3AF;">${escapeHtml(entry.category?.products || '')}</div>
+                </td>
+                <td style="padding:14px 12px;font-weight:600;color:#059669;">RM ${(amount || 0).toLocaleString()}</td>
+                <td style="padding:14px 12px;">${probBadge(entry.probability)}</td>
+                <td style="padding:14px 12px;font-size:13px;line-height:1.5;max-width:260px;">${entry.action}</td>
+                <td style="padding:14px 12px;">
+                    <div style="display:flex;gap:6px;">
+                        <button class="btn-icon" onclick="event.stopPropagation();app.showProspectMenu(${prospect.id})" title="View Profile"><i class="fas fa-eye"></i></button>
+                        <button class="btn-icon" onclick="event.stopPropagation();app.showComments(${prospect.id})" style="position:relative;" title="Comments">
                             <i class="fas fa-comment"></i>
-                            <span style="position: absolute; top: -5px; right: -5px; background: #EF4444; color: white; border-radius: 50%; width: 16px; height: 16px; font-size: 10px; display: flex; align-items: center; justify-content: center;">${noteCount}</span>
+                            ${noteCount > 0 ? `<span style="position:absolute;top:-4px;right:-4px;background:#EF4444;color:white;border-radius:50%;width:14px;height:14px;font-size:9px;display:flex;align-items:center;justify-content:center;">${noteCount}</span>` : ''}
                         </button>
-                        <button class="btn-icon text-danger" onclick="event.stopPropagation(); app.removeFromFocusList(${rec.id})" title="Remove from Focus">
-                            <i class="fas fa-trash-alt"></i>
-                        </button>
+                        <button class="btn-icon text-danger" onclick="event.stopPropagation();app.removeFromFocusList(${rec.id})" title="Remove from Priority"><i class="fas fa-trash-alt"></i></button>
                     </div>
                 </td>
-            </tr>
-        `;
+            </tr>`;
     };
 
-    const renderSystemRow = async (prospect, allActivities) => {
-        const readiness = calculateReadiness(prospect, allActivities);
-        const productInfo = await getProposedProduct(prospect.id);
+    const renderSystemRow = async (prospect, probBadge) => {
+        const entry = prospect._pipeline;
+        const amount = await getPipelineAmount(prospect, entry.category);
         const noteCount = await getNoteCount(prospect.id);
-        const outcome = await getProspectOutcome(prospect);
 
-        const readinessColor = readiness.label === 'HOT' ? '#DC2626' : (readiness.label === 'WARM' ? '#F59E0B' : '#6B7280');
-
-        const prospectName = await escapeHtml(prospect.name);
-        const agentUser = await AppDataStore.getById('users', prospect.responsible_agent_id);
-        const agentName = await escapeHtml(agentUser?.full_name || 'Unassigned');
-        const productNameHtml = await escapeHtml(productInfo.name);
-        const tagsHtml = prospect.tags
-            ? (await Promise.all(prospect.tags.split(',').map(async t => `<span style="background: #FEF3C7; color: #92400E; padding: 2px 6px; border-radius: 4px; font-size: 10px;">${await escapeHtml(t.trim())}</span>`))).join('')
-            : '';
+        const prereqsHtml = (entry.category?.prerequisites || []).map(p => {
+            const done = entry.completedPrereqs.some(c => c.key === p.key);
+            return `<span style="background:${done ? '#D1FAE5' : '#FEE2E2'};color:${done ? '#065F46' : '#991B1B'};padding:2px 5px;border-radius:4px;font-size:10px;">${done ? '✓' : '✗'} ${escapeHtml(p.label)}</span>`;
+        }).join(' ');
 
         return `
-            <tr class="pipeline-row" data-prospect-id="${prospect.id}" style="border-bottom: 1px solid #F3F4F6;">
-                <td style="padding: 16px;">
-                    <div style="font-weight: 600; color: #111827;">${prospectName}</div>
-                    <div style="display: flex; align-items: center; gap: 4px; margin-top: 4px;">
-                        <span style="font-size: 12px; color: #F59E0B;">⭐ ${prospect.score || 0}</span>
-                        ${tagsHtml}
-                    </div>
+            <tr style="border-bottom:1px solid #F3F4F6;" onmouseover="this.style.background='#F9FAFB'" onmouseout="this.style.background=''">
+                <td style="padding:14px 12px;">
+                    <div style="font-weight:600;color:#111827;">${escapeHtml(prospect.name || prospect.full_name || '')}</div>
+                    <div style="font-size:11px;color:#9CA3AF;">Last activity: ${entry.lastActivityDate ? entry.lastActivityDate.toLocaleDateString('en-GB') : 'None'}</div>
                 </td>
-                <td style="padding: 16px;">
-                    <div style="font-size: 13px;">${agentName}</div>
+                <td style="padding:14px 12px;">
+                    <div style="font-weight:500;color:#1E40AF;">${escapeHtml(entry.category?.name || '')}</div>
+                    <div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:2px;">${prereqsHtml}</div>
                 </td>
-                <td style="padding: 16px;">
-                    <div style="font-weight: 500;">${productNameHtml}</div>
-                </td>
-                <td style="padding: 16px; font-weight: 600; color: #059669;">RM ${productInfo.amount.toLocaleString()}</td>
-                <td style="padding: 16px;">
-                    <span style="background: #DBEAFE; color: #1E40AF; padding: 4px 8px; border-radius: 12px; font-size: 11px;">${prospect.status ? prospect.status.toUpperCase() : 'ACTIVE'}</span>
-                </td>
-                <td style="padding: 16px;">
-                    <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 6px;">
-                        <span style="background: ${readinessColor}; color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600;">${readiness.label === 'HOT' ? '🔥 ' : ''}${readiness.label}</span>
-                        <span style="font-weight: 600; font-size: 14px;">${readiness.percentage}%</span>
-                    </div>
-                    <div style="width: 120px; height: 6px; background: #E5E7EB; border-radius: 3px; overflow: hidden; margin-bottom: 8px;">
-                        <div style="width: ${readiness.percentage}%; height: 100%; background: ${readinessColor};"></div>
-                    </div>
-                    <div style="display: flex; flex-wrap: wrap; gap: 4px;">
-                        ${['CPS', 'EVENT', 'MUSEUM', 'FTF', 'FSA'].map(type => {
-            const hasActivity = readiness.badges.includes(type);
-            return `<span style="background: ${hasActivity ? '#D1FAE5' : '#F3F4F6'}; color: ${hasActivity ? '#065F46' : '#9CA3AF'}; padding: 2px 6px; border-radius: 4px; font-size: 10px;">${hasActivity ? '✅ ' : '⬜ '}${type}</span>`;
-        }).join('')}
-                    </div>
-                </td>
-                <td style="padding: 16px;">
-                    ${outcome === 'Won' ? '<span style="color: #059669; font-weight: 600;">✅ Won</span>' :
-                (outcome === 'Lost' ? '<span style="color: #DC2626; font-weight: 600;">❌ Lost</span>' :
-                    '<span style="color: #6B7280;">Open</span>')}
-                </td>
-                <td style="padding: 16px;">
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <button class="btn secondary btn-sm" style="padding: 4px 12px; font-size: 12px;" onclick="app.addToFocusList(${prospect.id})">
-                            <i class="fas fa-plus"></i> Add to Focus
-                        </button>
-                        <button class="btn-icon" onclick="event.stopPropagation(); app.showProspectMenu(${prospect.id})" title="Options">
-                            <i class="fas fa-ellipsis-v"></i>
-                        </button>
-                        <button class="btn-icon" onclick="event.stopPropagation(); app.showComments(${prospect.id})" style="position: relative;" title="Comments">
+                <td style="padding:14px 12px;font-weight:600;color:#059669;">RM ${(amount || 0).toLocaleString()}</td>
+                <td style="padding:14px 12px;">${probBadge(entry.probability)}</td>
+                <td style="padding:14px 12px;font-size:13px;line-height:1.5;max-width:260px;">${entry.action}</td>
+                <td style="padding:14px 12px;">
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                        <button class="btn secondary btn-sm" style="padding:4px 10px;font-size:11px;" onclick="app.addToFocusList(${prospect.id})"><i class="fas fa-plus"></i> Add to Focus</button>
+                        <button class="btn-icon" onclick="event.stopPropagation();app.showProspectMenu(${prospect.id})" title="View"><i class="fas fa-eye"></i></button>
+                        <button class="btn-icon" onclick="event.stopPropagation();app.showComments(${prospect.id})" style="position:relative;" title="Comments">
                             <i class="fas fa-comment"></i>
-                            <span style="position: absolute; top: -5px; right: -5px; background: #3B82F6; color: white; border-radius: 50%; width: 16px; height: 16px; font-size: 10px; display: flex; align-items: center; justify-content: center;">${noteCount}</span>
+                            ${noteCount > 0 ? `<span style="position:absolute;top:-4px;right:-4px;background:#3B82F6;color:white;border-radius:50%;width:14px;height:14px;font-size:9px;display:flex;align-items:center;justify-content:center;">${noteCount}</span>` : ''}
                         </button>
                     </div>
                 </td>
-            </tr>
-        `;
+            </tr>`;
     };
 
     const refreshPipeline = async () => {
@@ -13544,41 +13568,30 @@ const deactivateAgent = async (agentId) => {
     const addToFocusList = async (prospectId) => {
         const userId = _currentUser?.id || 5;
         const currentList = await AppDataStore.query('my_potential_list', { user_id: userId });
-
-        // Check if already in list
         if (currentList.some(item => item.prospect_id == prospectId)) {
-            UI.toast.warn('Prospect is already in your focus list.');
+            UI.toast.warn('Prospect is already in your priority list.');
             return;
         }
-
-        const nextPriority = currentList.length + 1;
-
         await AppDataStore.create('my_potential_list', {
             user_id: userId,
             prospect_id: prospectId,
-            priority_order: nextPriority
+            priority_order: currentList.length + 1
         });
-
-        UI.toast.success('Added to Focus List');
+        UI.toast.success('Added to Priority List');
         await refreshPipeline();
     };
 
     const removeFromFocusList = async (listItemId) => {
         const item = await AppDataStore.getById('my_potential_list', listItemId);
         if (!item) return;
-
         const userId = item.user_id;
         await AppDataStore.delete('my_potential_list', listItemId);
-
-        // Re-compact
-        const remaining = await AppDataStore.query('my_potential_list', { user_id: userId })
+        const remaining = (await AppDataStore.query('my_potential_list', { user_id: userId }))
             .sort((a, b) => a.priority_order - b.priority_order);
-
         for (const [idx, rec] of remaining.entries()) {
             await AppDataStore.update('my_potential_list', rec.id, { priority_order: idx + 1 });
         }
-
-        UI.toast.info('Removed from Focus List');
+        UI.toast.info('Removed from Priority List');
         await refreshPipeline();
     };
 
@@ -13588,165 +13601,107 @@ const deactivateAgent = async (agentId) => {
         await refreshPipeline();
     };
 
-    const openPipelineConfigModal = async () => {
-        const config = loadReadinessConfig();
+    const openPipelineConfigModal = () => {
+        const rows = [
+            ['0 – 30 days since last activity', '× 1.0', '100%', '#059669'],
+            ['31 – 90 days since last activity', '× 0.7', '70%', '#D97706'],
+            ['> 90 days since last activity', '× 0.5', '50%', '#DC2626'],
+            ['Prerequisites not completed', '—', '0% (not in Table 2)', '#6B7280'],
+        ];
         const content = `
-            <div class="config-modal" style="padding: 10px;">
-                <h3 style="margin-bottom: 16px; border-bottom: 1px solid #EEE; padding-bottom: 8px;">Activity Weights (Total should be ~100)</h3>
-                <div class="grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px;">
-                    <div class="form-group">
-                        <label>CPS Weight (%)</label>
-                        <input type="number" id="config-weight-cps" class="form-control" value="${config.weights.CPS}" min="0" max="100">
-                    </div>
-                    <div class="form-group">
-                        <label>Event Weight (%)</label>
-                        <input type="number" id="config-weight-event" class="form-control" value="${config.weights.EVENT}" min="0" max="100">
-                    </div>
-                    <div class="form-group">
-                        <label>Museum Weight (%)</label>
-                        <input type="number" id="config-weight-museum" class="form-control" value="${config.weights.MUSEUM}" min="0" max="100">
-                    </div>
-                    <div class="form-group">
-                        <label>FTF Weight (%)</label>
-                        <input type="number" id="config-weight-ftf" class="form-control" value="${config.weights.FTF}" min="0" max="100">
-                    </div>
-                    <div class="form-group">
-                        <label>FSA Weight (%)</label>
-                        <input type="number" id="config-weight-fsa" class="form-control" value="${config.weights.FSA}" min="0" max="100">
-                    </div>
-                    <div class="form-group">
-                        <label>Lead Score Weight (%)</label>
-                        <input type="number" id="config-weight-score" class="form-control" value="${config.weights.score}" min="0" max="100">
-                    </div>
+            <div style="padding:4px;">
+                <h3 style="margin-bottom:12px;font-size:15px;font-weight:600;">Time Decay — Signing Probability Rules</h3>
+                <div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:8px;padding:14px;margin-bottom:18px;">
+                    <table style="width:100%;font-size:13px;border-collapse:collapse;">
+                        ${rows.map(([cond, mult, result, color]) => `
+                        <tr style="border-bottom:1px solid #D1FAE5;">
+                            <td style="padding:6px 8px;">${cond}</td>
+                            <td style="padding:6px 8px;font-weight:700;">${mult}</td>
+                            <td style="padding:6px 8px;font-weight:700;color:${color};">${result}</td>
+                        </tr>`).join('')}
+                    </table>
                 </div>
-
-                <h3 style="margin-bottom: 16px; border-bottom: 1px solid #EEE; padding-bottom: 8px;">Thresholds & Decay</h3>
-                <div class="grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-                    <div class="form-group">
-                        <label>Hot Threshold (%)</label>
-                        <input type="number" id="config-threshold-hot" class="form-control" value="${config.thresholds.hot}" min="0" max="100">
-                    </div>
-                    <div class="form-group">
-                        <label>Warm Threshold (%)</label>
-                        <input type="number" id="config-threshold-warm" class="form-control" value="${config.thresholds.warm}" min="0" max="100">
-                    </div>
-                    <div class="form-group">
-                        <label>Full Weight Period (Days)</label>
-                        <input type="number" id="config-full-weight-days" class="form-control" value="${config.fullWeightDays}" min="0">
-                    </div>
-                    <div class="form-group">
-                        <label>Decay Period (Days)</label>
-                        <input type="number" id="number" id="config-decay-days" class="form-control" value="${config.decayDays}" min="0">
-                    </div>
-                </div>
-            </div>
-        `;
-
-        UI.showModal('Configure Pipeline Rules', content, [
-            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save Configuration', type: 'primary', action: '(async () => { await app.savePipelineConfig(); })()' }
+                <h3 style="margin-bottom:12px;font-size:15px;font-weight:600;">6 Product Categories & Prerequisites</h3>
+                ${PIPELINE_CATEGORIES.filter(c => c.id !== 'other').map(cat => `
+                    <div style="border:1px solid #E5E7EB;border-radius:8px;padding:12px;margin-bottom:10px;">
+                        <div style="font-weight:600;color:#1E40AF;margin-bottom:3px;">${escapeHtml(cat.name)} <span style="font-weight:400;color:#6B7280;font-size:12px;">· RM ${cat.defaultAmount.toLocaleString()} est.</span></div>
+                        <div style="font-size:11px;color:#9CA3AF;margin-bottom:6px;">${escapeHtml(cat.products)}</div>
+                        <div style="display:flex;flex-wrap:wrap;gap:4px;">
+                            ${cat.prerequisites.map(p => `<span style="background:#EFF6FF;color:#1E40AF;padding:2px 8px;border-radius:4px;font-size:11px;">${escapeHtml(p.label)}</span>`).join('')}
+                        </div>
+                    </div>`).join('')}
+            </div>`;
+        UI.showModal('Pipeline Rules & 6 Categories', content, [
+            { label: 'Close', type: 'secondary', action: 'UI.hideModal()' }
         ]);
     };
 
     const savePipelineConfig = async () => {
-        const fullWeightDays = parseInt(document.getElementById('config-full-weight-days').value);
-        const decayDays = parseInt(document.getElementById('config-decay-days').value);
-
-        if (decayDays < fullWeightDays) {
-            UI.toast.error('Decay Period must be greater than or equal to Full Weight Period.');
-            return;
-        }
-
-        const config = {
-            weights: {
-                CPS: parseInt(document.getElementById('config-weight-cps').value),
-                EVENT: parseInt(document.getElementById('config-weight-event').value),
-                MUSEUM: parseInt(document.getElementById('config-weight-museum').value),
-                FTF: parseInt(document.getElementById('config-weight-ftf').value),
-                FSA: parseInt(document.getElementById('config-weight-fsa').value),
-                score: parseInt(document.getElementById('config-weight-score').value)
-            },
-            thresholds: {
-                hot: parseInt(document.getElementById('config-threshold-hot').value),
-                warm: parseInt(document.getElementById('config-threshold-warm').value)
-            },
-            fullWeightDays,
-            decayDays
-        };
-
-        localStorage.setItem('pipeline_readiness_config', JSON.stringify(config));
-        UI.toast.success('Pipeline configuration saved.');
+        UI.toast.info('Pipeline rules are defined by the 6-category model.');
         UI.hideModal();
-        await refreshPipeline();
     };
 
     const showProspectMenu = async (prospectId) => {
         if (typeof app.showProspectDetail === 'function') {
             await app.showProspectDetail(prospectId);
         } else {
-            UI.toast.info(`Viewing profile for prospect ID: ${prospectId} `);
+            UI.toast.info(`Viewing profile for prospect ID: ${prospectId}`);
         }
     };
 
     const showComments = async (prospectId) => {
         const prospect = await AppDataStore.getById('prospects', prospectId);
-        const notes = await AppDataStore.query('notes', { prospect_id: prospectId })
+        const notes = (await AppDataStore.query('notes', { prospect_id: prospectId }))
             .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-        const activities = await AppDataStore.query('activities', { prospect_id: prospectId })
+        const activities = (await AppDataStore.query('activities', { prospect_id: prospectId }))
             .sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
 
         const content = `
-            <div style="max-height: 400px; overflow-y: auto; margin-bottom: 16px;">
-                <div style="background: #F9FAFB; padding: 12px; border-radius: 8px; margin-bottom: 16px;">
-                    <textarea id="new-note-content" class="form-control" placeholder="Add a new comment/note..." style="min-height: 80px;"></textarea>
-                    <div style="display: flex; justify-content: flex-end; margin-top: 8px;">
+            <div style="max-height:420px;overflow-y:auto;">
+                <div style="background:#F9FAFB;padding:12px;border-radius:8px;margin-bottom:14px;">
+                    <textarea id="new-note-content" class="form-control" placeholder="Add a new comment/note..." style="min-height:72px;"></textarea>
+                    <div style="display:flex;justify-content:flex-end;margin-top:8px;">
                         <button class="btn primary btn-sm" onclick="app.addPipelineNote(${prospectId})">Add Note</button>
                     </div>
                 </div>
-
-                <div class="notes-timeline">
+                <div>
                     ${notes.map(n => `
-                        <div style="border-left: 2px solid #E5E7EB; padding-left: 16px; margin-bottom: 20px; position: relative;">
-                            <div style="position: absolute; left: -5px; top: 0; width: 8px; height: 8px; border-radius: 50%; background: #3B82F6;"></div>
-                            <div style="font-size: 11px; color: #6B7280;">${new Date(n.created_at).toLocaleString()}</div>
-                            <div style="margin-top: 4px;">${n.content}</div>
-                        </div>
-                    `).join('')}
+                        <div style="border-left:2px solid #3B82F6;padding-left:12px;margin-bottom:14px;position:relative;">
+                            <div style="position:absolute;left:-5px;top:0;width:8px;height:8px;border-radius:50%;background:#3B82F6;"></div>
+                            <div style="font-size:11px;color:#6B7280;">${new Date(n.created_at).toLocaleString()}</div>
+                            <div style="margin-top:2px;">${escapeHtml(n.content || '')}</div>
+                        </div>`).join('')}
                     ${activities.map(a => `
-                        <div style="border-left: 2px solid #D1FAE5; padding-left: 16px; margin-bottom: 20px; position: relative;">
-                            <div style="position: absolute; left: -5px; top: 0; width: 8px; height: 8px; border-radius: 50%; background: #10B981;"></div>
-                            <div style="font-size: 11px; color: #6B7280;">${new Date(a.activity_date).toLocaleString()}</div>
-                            <div style="font-weight: 600;">Activity: ${a.activity_type}</div>
-                            <div style="margin-top: 2px;">${a.notes || 'No notes provided.'}</div>
-                        </div>
-                    `).join('')}
-                    ${notes.length === 0 && activities.length === 0 ? '<p style="text-align: center; color: #9CA3AF;">No comments or activities found.</p>' : ''}
+                        <div style="border-left:2px solid #10B981;padding-left:12px;margin-bottom:14px;position:relative;">
+                            <div style="position:absolute;left:-5px;top:0;width:8px;height:8px;border-radius:50%;background:#10B981;"></div>
+                            <div style="font-size:11px;color:#6B7280;">${new Date(a.activity_date).toLocaleString()}</div>
+                            <div style="font-weight:600;">Activity: ${escapeHtml(a.activity_type || '')}</div>
+                            <div style="margin-top:2px;font-size:12px;">${escapeHtml(a.notes || 'No notes provided.')}</div>
+                        </div>`).join('')}
+                    ${notes.length === 0 && activities.length === 0 ? '<p style="text-align:center;color:#9CA3AF;padding:20px;">No comments or activities found.</p>' : ''}
                 </div>
-            </div >
-    `;
+            </div>`;
 
-        UI.showModal(`Comments: ${prospect?.full_name || prospect?.name || 'Prospect'}`, content, [
+        UI.showModal(`Comments: ${escapeHtml(prospect?.full_name || prospect?.name || 'Prospect')}`, content, [
             { label: 'Close', type: 'secondary', action: 'UI.hideModal()' }
         ]);
     };
 
     const addPipelineNote = async (prospectId) => {
-        const content = document.getElementById('new-note-content').value;
-        if (!content.trim()) {
+        const content = document.getElementById('new-note-content')?.value;
+        if (!content?.trim()) {
             UI.toast.warn('Please enter some content for the note.');
             return;
         }
-
         await AppDataStore.create('notes', {
             prospect_id: prospectId,
             content: content.trim(),
             created_at: new Date().toISOString(),
             created_by: _currentUser?.id || 5
         });
-
         UI.toast.success('Note added.');
-        await showComments(prospectId); // Refresh modal
-        await refreshPipeline(); // Refresh badge count
+        await showComments(prospectId);
+        await refreshPipeline();
     };
 
     const calculateDealValue = (prospect) => {
@@ -13932,7 +13887,7 @@ const deactivateAgent = async (agentId) => {
         if (!list) return;
 
         // Get top 5 prospects by score
-        const prospects = await getVisibleProspects()
+        const prospects = (await getVisibleProspects())
             .filter(p => p.status !== 'converted' && p.status !== 'lost')
             .sort((a, b) => (b.score || 0) - (a.score || 0))
             .slice(0, 5);
@@ -13990,7 +13945,7 @@ const deactivateAgent = async (agentId) => {
         if (_draggedId === targetId) return;
 
         const userId = _currentUser?.id || 5;
-        const list = await AppDataStore.query('my_potential_list', { user_id: userId })
+        const list = (await AppDataStore.query('my_potential_list', { user_id: userId }))
             .sort((a, b) => a.priority_order - b.priority_order);
 
         const draggedIndex = list.findIndex(i => i.id === _draggedId);
@@ -19539,6 +19494,7 @@ const initImportDemoData = async () => {
         // Phase 6 Pipeline Functions
         showPipelineView,
         refreshPipeline,
+        setPipelineFilter,
         addToFocusList,
         removeFromFocusList,
         showProspectMenu,
