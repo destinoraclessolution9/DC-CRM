@@ -103,26 +103,59 @@ class DataStore {
     async add(tableName, record) {
         const dataToInsert = { ...record };
         if (!dataToInsert.id) dataToInsert.id = this._generateId();
-        const { data, error } = await window.supabase
-            .from(tableName)
-            .insert(dataToInsert)
-            .select()
-            .single();
-        if (error) throw error;
-        this.emit('dataChanged', { action: 'add', table: tableName, record: data });
-        return data;
+        try {
+            const { data, error } = await window.supabase
+                .from(tableName)
+                .insert(dataToInsert)
+                .select()
+                .single();
+            if (error) throw error;
+            this.emit('dataChanged', { action: 'add', table: tableName, record: data });
+            return data;
+        } catch (e) {
+            if (e.code === 'PGRST204') {
+                console.warn(`Schema mismatch on insert to ${tableName}: ${e.message} — saving locally`);
+                const key = `fs_crm_${tableName}`;
+                try {
+                    const all = JSON.parse(localStorage.getItem(key) || '[]');
+                    all.push(dataToInsert);
+                    localStorage.setItem(key, JSON.stringify(all));
+                } catch (_) {}
+                this.emit('dataChanged', { action: 'add', table: tableName, record: dataToInsert });
+                return dataToInsert;
+            }
+            throw e;
+        }
     }
 
     async update(tableName, id, updates) {
-        const { data, error } = await window.supabase
-            .from(tableName)
-            .update(updates)
-            .eq('id', id)
-            .select()
-            .single();
-        if (error) throw error;
-        this.emit('dataChanged', { action: 'update', table: tableName, record: data });
-        return data;
+        try {
+            const { data, error } = await window.supabase
+                .from(tableName)
+                .update(updates)
+                .eq('id', id)
+                .select()
+                .single();
+            if (error) throw error;
+            this.emit('dataChanged', { action: 'update', table: tableName, record: data });
+            return data;
+        } catch (e) {
+            if (e.code === 'PGRST204') {
+                console.warn(`Schema mismatch on update to ${tableName}: ${e.message} — saving locally`);
+                const key = `fs_crm_${tableName}`;
+                try {
+                    const all = JSON.parse(localStorage.getItem(key) || '[]');
+                    const idx = all.findIndex(r => r.id == id);
+                    const updated = idx >= 0 ? { ...all[idx], ...updates } : { id, ...updates };
+                    if (idx >= 0) all[idx] = updated; else all.push(updated);
+                    localStorage.setItem(key, JSON.stringify(all));
+                } catch (_) {}
+                const record = { id, ...updates };
+                this.emit('dataChanged', { action: 'update', table: tableName, record });
+                return record;
+            }
+            throw e;
+        }
     }
 
     async delete(tableName, id) {
