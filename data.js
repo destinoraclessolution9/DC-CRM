@@ -113,7 +113,7 @@ class DataStore {
     }
 
     async get(tableName, id) {
-        if (id == null) return null;
+        if (id == null || id === 'null' || id === 'undefined') return null;
         const { data, error } = await window.supabase
             .from(tableName)
             .select('*')
@@ -196,6 +196,7 @@ class DataStore {
         try {
             let q = window.supabase.from(tableName).select('*');
             for (const [key, value] of Object.entries(filters)) {
+                if (value == null || value === 'null' || value === 'undefined') continue;
                 q = q.eq(key, value);
             }
             const { data, error } = await q;
