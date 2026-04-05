@@ -9524,9 +9524,9 @@ function _wireLoginBtn() {
 
     const postMeetupNotes = async (activityId) => {
         await app.editActivity(activityId);
-        (() => {
+        setTimeout(() => {
             document.getElementById('note-key-points')?.focus();
-        }, 350);
+        }, 650);
     };
 
     const rescheduleActivity = async (activityId) => {
@@ -9902,7 +9902,7 @@ function _wireLoginBtn() {
         await updateActivityForm();
 
         if (activity) {
-            (() => {
+            setTimeout(() => {
                 fillActivityForm(activity);
             }, 300); // Increased timeout to ensure DOM is ready
         }
@@ -10043,6 +10043,10 @@ function _wireLoginBtn() {
                         setField('cps-ic', prospect.ic_number);
                         setField('cps-email', prospect.email);
                         setField('cps-dob', prospect.date_of_birth);
+                        if (prospect.date_of_birth) {
+                            const dobChk = document.getElementById('has-dob');
+                            if (dobChk) dobChk.checked = true;
+                        }
                         setField('cps-lunar', prospect.lunar_birth);
                         setField('cps-gua', prospect.ming_gua);
                         setField('cps-occupation', prospect.occupation);
@@ -10845,7 +10849,7 @@ function _wireLoginBtn() {
             };
 
             if (document.getElementById('has-dob')?.checked) {
-                prospectData.dob = document.getElementById('cps-dob')?.value;
+                prospectData.date_of_birth = document.getElementById('cps-dob')?.value;
             }
             if (document.getElementById('has-lunar')?.checked) {
                 prospectData.lunar_birth = document.getElementById('cps-lunar')?.value;
@@ -21580,6 +21584,9 @@ const initImportDemoData = async () => {
         saveAndAddAnother,
         viewActivityDetails,
         editActivity,
+        deleteActivity,
+        confirmDeleteActivity,
+        markActivityComplete,
         updateActivity,
         fillActivityForm,
         postMeetupNotes,
