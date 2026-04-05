@@ -5531,8 +5531,7 @@ In a production system, this would show the actual file contents.
             'calendar', 'pipeline', 'protection', 'agents', 'prospects', 'referrals',
             'cases', 'documents', 'import', 'promotions', 'marketing-lists',
             'performance', 'reports', 'risk', 'ai-insights', 'security', 'admin',
-            'integrations', 'settings', 'milestones', 'fude',
-            'booking_settings', 'lead_forms', 'surveys', 'contracts', 'custom_fields', 'workflows'
+            'integrations', 'settings', 'milestones', 'fude'
         ];
 
         allNavIds.forEach(id => {
@@ -10051,6 +10050,29 @@ function _wireLoginBtn() {
     await AppDataStore.update('activities', activityId, { ...activity, ...updatedData });
     UI.hideModal();
     UI.toast.success('Activity updated');
+
+    // === Auto Milestone: also check on edit in case type/title was set now ===
+    try {
+        if (_currentUser) {
+            const aType = updatedData.activity_type || '';
+            const aTitle = (updatedData.activity_title || '').toLowerCase();
+            const milestoneMap = [
+                { key: 'CPS',           test: () => aType === 'CPS' },
+                { key: '9 Stars',       test: () => aTitle.includes('9 star') || aTitle.includes('nine star') },
+                { key: 'DIY',           test: () => aTitle.includes('diy') },
+                { key: '福气课',         test: () => aTitle.includes('福气') || aTitle.includes('fudi') || aTitle.includes('fu qi') },
+                { key: '九运课',         test: () => aTitle.includes('九运') || aTitle.includes('jiuyun') || aTitle.includes('jiu yun') },
+                { key: 'Museum',        test: () => aTitle.includes('museum') },
+                { key: 'HuiJi',         test: () => aTitle.includes('huiji') || aTitle.includes('hui ji') },
+                { key: 'Advance Class', test: () => aTitle.includes('advance') },
+                { key: 'Sharing',       test: () => aTitle.includes('sharing') || aType === 'Sharing' }
+            ];
+            for (const m of milestoneMap) {
+                if (m.test()) await markMilestoneCompleted(_currentUser.id, m.key);
+            }
+        }
+    } catch (e) { console.warn('Milestone auto-mark (update) failed:', e); }
+
     if (typeof renderCalendar === 'function') await renderCalendar();
     if (typeof renderTodayActivities === 'function') await renderTodayActivities();
 };
@@ -21294,6 +21316,12 @@ const initImportDemoData = async () => {
                 break;
             case 'workflows':
                 if (typeof showWorkflowAutomationView === 'function') await showWorkflowAutomationView(viewport);
+                break;
+            case 'milestones':
+                if (typeof showMilestonesView === 'function') await showMilestonesView(viewport);
+                break;
+            case 'fude':
+                if (typeof showFudeView === 'function') await showFudeView(viewport);
                 break;
             default:
                 console.log(`No specific refresh logic configured for ${view}`);
