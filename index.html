@@ -42,17 +42,18 @@
             </div>
 
             <ul class="nav-links" id="nav-links">
+                <!-- Group 1: Core CRM -->
                 <li id="nav-calendar" data-view="calendar">Calendar</li>
-                <li id="nav-pipeline" data-view="pipeline">Potential Pipeline Management</li>
-                <li id="nav-protection" data-view="protection">Protection Monitoring</li>
-                <li id="nav-agents" data-view="agents">Consultant</li>
                 <li id="nav-prospects" data-view="prospects">Prospect/Customer</li>
                 <li id="nav-referrals" data-view="referrals">Referral Relationship Management</li>
-                <li id="nav-cases" data-view="cases">Success Case Library</li>
-                <li id="nav-documents" data-view="documents">Document Management</li>
-                <li id="nav-import" data-view="import">Bulk Import</li>
+                <li id="nav-pipeline" data-view="pipeline">Potential Pipeline Management</li>
                 <li id="nav-promotions" data-view="promotions">Monthly Promotion</li>
-                <li id="nav-workflows" data-view="workflows">Workflow Automation</li>
+                <li id="nav-milestones" data-view="milestones" onclick="app.navigateTo('milestones')" style="display:none;">增运9步路</li>
+                <li id="nav-fude" data-view="fude" onclick="app.navigateTo('fude')" style="display:none;">福运相随</li>
+                <li id="nav-cases" data-view="cases">Success Case Library</li>
+
+                <!-- Group 2: Consultant & Analytics -->
+                <li id="nav-agents" data-view="agents">Consultant</li>
                 <li id="nav-marketing-lists" data-view="marketing_lists" style="display:none;">Marketing Lists</li>
                 <li id="nav-performance" data-view="performance">Ranking Performance Overview</li>
                 <li id="nav-reports" data-view="reports">Reporting KPI</li>
@@ -92,9 +93,12 @@
                     </ul>
                 </li>
 
+                <!-- Group 3: Documents & Admin -->
+                <li id="nav-documents" data-view="documents">Document Management</li>
+                <li id="nav-import" data-view="import">Bulk Import</li>
+
                 <!-- Phase 20: System Administration & Deployment -->
-                <li class="dropdown-trigger" style="position:relative; cursor:pointer;" id="nav-admin"
-                    style="display:none;">
+                <li class="dropdown-trigger" style="position:relative; cursor:pointer;" id="nav-admin">
                     Admin <i class="fas fa-caret-down"></i>
                     <ul class="dropdown-menu"
                         style="display:none; position:absolute; top:100%; left:0; background:white; box-shadow:0 4px 12px rgba(0,0,0,0.1); border-radius:8px; min-width:200px; z-index:1000; padding:8px 0;">
@@ -114,6 +118,7 @@
                         </li>
                     </ul>
                 </li>
+
                 <script>
                         // Simple dropdown toggle logic for AI Insights, Security, Admin
                         document.addEventListener('DOMContentLoaded', () => {
@@ -134,15 +139,16 @@
                         });
                 </script>
 
-                <li id="nav-booking_settings" data-view="booking_settings" onclick="app.navigateTo('booking_settings')">Booking Scheduler</li>
+                <!-- Group 4: Tools & Settings -->
+                <li id="nav-workflows" data-view="workflows">Workflow Automation</li>
+                <li id="nav-protection" data-view="protection">Protection Monitoring</li>
                 <li id="nav-lead_forms" data-view="lead_forms" onclick="app.navigateTo('lead_forms')">Lead Capture Forms</li>
                 <li id="nav-surveys" data-view="surveys" onclick="app.navigateTo('surveys')">NPS Surveys</li>
                 <li id="nav-contracts" data-view="contracts" onclick="app.navigateTo('contracts')">Contracts</li>
                 <li id="nav-custom_fields" data-view="custom_fields" onclick="app.navigateTo('custom_fields')">Custom Fields</li>
                 <li id="nav-integrations" data-view="integrations" onclick="app.navigateTo('integrations')">Integrations</li>
                 <li id="nav-settings" data-view="settings">Setting - Account</li>
-                <li id="nav-milestones" data-view="milestones" onclick="app.navigateTo('milestones')" style="display:none;">增运9步路</li>
-                <li id="nav-fude" data-view="fude" onclick="app.navigateTo('fude')" style="display:none;">福德</li>
+                <li id="nav-booking_settings" data-view="booking_settings" onclick="app.navigateTo('booking_settings')">Booking Scheduler</li>
             </ul>
 
             <div class="bar-right">
