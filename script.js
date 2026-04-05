@@ -5499,7 +5499,9 @@ In a production system, this would show the actual file contents.
             9: ['calendar', 'pipeline', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'settings'],
             10: ['calendar', 'pipeline', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'settings'],
             11: ['calendar', 'prospects', 'referrals', 'cases', 'promotions', 'settings'],
-            12: ['calendar', 'prospects', 'referrals', 'cases']
+            12: ['calendar', 'prospects', 'referrals', 'cases'],
+            13: ['calendar', 'prospects', 'fude', 'milestones'],   // Customer
+            14: ['calendar', 'prospects', 'fude', 'milestones']    // Referrer
         };
 
         // Determine level from role (e.g., "Level 1 Super Admin" -> 1)
@@ -5517,6 +5519,8 @@ In a production system, this would show the actual file contents.
                 else if (roleLower === 'team_leader') level = 5;
                 else if (roleLower === 'consultant') level = 7;
                 else if (roleLower === 'agent') level = 10;
+                else if (roleLower === 'customer') level = 13;
+                else if (roleLower === 'referrer') level = 14;
             }
         }
 
@@ -5524,10 +5528,11 @@ In a production system, this would show the actual file contents.
         
         // List of all nav item suffixes
         const allNavIds = [
-            'calendar', 'pipeline', 'protection', 'agents', 'prospects', 'referrals', 
-            'cases', 'documents', 'import', 'promotions', 'marketing-lists', 
-            'performance', 'reports', 'risk', 'ai-insights', 'security', 'admin', 
-            'integrations', 'settings'
+            'calendar', 'pipeline', 'protection', 'agents', 'prospects', 'referrals',
+            'cases', 'documents', 'import', 'promotions', 'marketing-lists',
+            'performance', 'reports', 'risk', 'ai-insights', 'security', 'admin',
+            'integrations', 'settings', 'milestones', 'fude',
+            'booking_settings', 'lead_forms', 'surveys', 'contracts', 'custom_fields', 'workflows'
         ];
 
         allNavIds.forEach(id => {
@@ -5982,7 +5987,22 @@ function _wireLoginBtn() {
         await safeInsert('activities', a);
     }
 
-    // ----- 4. Other tables (optional, add as needed) -----
+    // ----- 4. Demo users: Level 13 Customer & Level 14 Referrer -----
+    const demoLevel1314 = [
+        { id: 101, username: 'customer1', password: 'cust123', full_name: 'Lim Ah Kow (Customer)', role: 'Level 13 Customer', status: 'active' },
+        { id: 102, username: 'referrer1', password: 'ref123',  full_name: 'Tan Mei Mei (Referrer)', role: 'Level 14 Referrer', status: 'active' }
+    ];
+    for (const u of demoLevel1314) { await safeInsert('users', u); }
+
+    // ----- 5. News highlights (for 福德 tab) -----
+    const demoNews = [
+        { id: 10001, title: 'New Feng Shui Breakthrough', content: 'Our team discovered a powerful application of the 九运 cycle that has helped 30+ clients improve their wealth sector this quarter.', type: 'highlight', is_active: true, created_at: new Date().toISOString() },
+        { id: 10002, title: 'How Mr Tan Increased Sales by 200%', content: 'After attending the CPS and 福气课 sessions, Mr Tan repositioned his office desk and main entrance — his sales doubled within 3 months.', type: 'success_story', is_active: true, created_at: new Date().toISOString() },
+        { id: 10003, title: 'Ms Wong Finds Her Dream Home', content: 'By applying the DIY assessment taught in class, Ms Wong identified a property perfectly aligned with her Ming Gua and moved in last month.', type: 'success_story', is_active: true, created_at: new Date().toISOString() }
+    ];
+    for (const n of demoNews) { await safeInsert('news_highlights', n); }
+
+    // ----- 6. Other tables (optional, add as needed) -----
 
     console.log(`Demo data seeding completed: ${demoUsers.length} users, ${demoProspects.length} prospects, ${demoActivities.length} activities.`);
 };
@@ -6927,6 +6947,12 @@ function _wireLoginBtn() {
         } else if (viewId === 'settings') {
             _currentView = 'settings';
             showSettingsView(viewport);
+        } else if (viewId === 'milestones') {
+            _currentView = 'milestones';
+            await showMilestonesView(viewport);
+        } else if (viewId === 'fude') {
+            _currentView = 'fude';
+            await showFudeView(viewport);
         } else {
             viewport.innerHTML = `
                 <div class="placeholder-view">
@@ -20929,6 +20955,145 @@ const initImportDemoData = async () => {
         }
     };
 
+    // ========== LEVEL 13/14: MILESTONES VIEW ==========
+    const markMilestoneCompleted = async (userId, milestoneName) => {
+        try {
+            const existing = await AppDataStore.query('user_milestones', { user_id: userId, milestone_name: milestoneName });
+            if (existing.length === 0) {
+                await AppDataStore.create('user_milestones', {
+                    id: Date.now(),
+                    user_id: userId,
+                    milestone_name: milestoneName,
+                    completed: true,
+                    completed_date: new Date().toISOString().split('T')[0]
+                });
+            } else if (!existing[0].completed) {
+                await AppDataStore.update('user_milestones', existing[0].id, {
+                    completed: true,
+                    completed_date: new Date().toISOString().split('T')[0]
+                });
+            }
+        } catch (err) {
+            console.warn('markMilestoneCompleted error:', err);
+        }
+    };
+
+    const showMilestonesView = async (container) => {
+        const currentUser = _currentUser;
+        if (!currentUser) return;
+
+        const milestones = [
+            { name: 'CPS',           label: 'CPS' },
+            { name: '9 Stars',       label: '9 Stars' },
+            { name: 'DIY',           label: 'DIY' },
+            { name: '福气课',         label: '福气课' },
+            { name: '九运课',         label: '九运课' },
+            { name: 'Museum',        label: 'Museum' },
+            { name: 'HuiJi',         label: 'HuiJi' },
+            { name: 'Advance Class', label: 'Advance Class' },
+            { name: 'Sharing',       label: 'Sharing' }
+        ];
+
+        let userMilestones = [];
+        try { userMilestones = await AppDataStore.query('user_milestones', { user_id: currentUser.id }); } catch(e) {}
+        const completedMap = {};
+        userMilestones.forEach(m => { completedMap[m.milestone_name] = m.completed; });
+
+        const completedCount = milestones.filter(m => completedMap[m.name]).length;
+        const progressPercent = Math.round((completedCount / milestones.length) * 100);
+
+        container.innerHTML = `
+            <div class="milestone-container">
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+                    <h1 style="margin:0; font-size:1.6rem; color:var(--primary,#8B0000);">增运9步路</h1>
+                    <span style="font-size:0.95rem; color:var(--gray-500,#6b7280);">${completedCount} / ${milestones.length} completed</span>
+                </div>
+                <div class="progress-bar-wrapper">
+                    <div class="progress-bar-fill" style="width:${progressPercent}%;"></div>
+                </div>
+                <div class="milestones-grid">
+                    ${milestones.map((m, i) => `
+                        <div class="milestone-card ${completedMap[m.name] ? 'completed' : ''}">
+                            <div class="milestone-step">Step ${i + 1}</div>
+                            <div class="milestone-name">${m.label}</div>
+                            <div class="milestone-icon">${completedMap[m.name] ? '<i class="fas fa-check-circle" style="color:#065f46;"></i>' : '<i class="far fa-circle" style="color:#9ca3af;"></i>'}</div>
+                        </div>
+                    `).join('')}
+                </div>
+                <p class="milestone-hint">Attend the corresponding class or activity to unlock each milestone step.</p>
+            </div>
+        `;
+    };
+
+    // ========== LEVEL 13/14: 福德 VIEW ==========
+    const showFudeView = async (container) => {
+        const currentUser = _currentUser;
+        if (!currentUser) return;
+
+        let highlights = [], myRewards = [];
+        try { highlights = await AppDataStore.query('news_highlights', { is_active: true }); } catch(e) {}
+        try { myRewards = await AppDataStore.query('recommendation_rewards', { user_id: currentUser.id }); } catch(e) {}
+
+        const publicNews    = highlights.filter(h => h.type === 'highlight');
+        const successStories = highlights.filter(h => h.type === 'success_story');
+
+        const fmtDate = d => { try { return new Date(d).toLocaleDateString(); } catch(e) { return d; } };
+
+        let rewardsHtml = '';
+        if (myRewards.length === 0) {
+            rewardsHtml = '<p style="color:var(--gray-500,#6b7280); padding:12px 0;">No recommendations or rewards yet.</p>';
+        } else {
+            rewardsHtml = `<table class="data-table"><thead><tr>
+                <th>Action</th><th>福气 Points</th><th>Sharing Return (RM)</th><th>Date</th>
+            </tr></thead><tbody>
+                ${myRewards.map(r => `<tr>
+                    <td>${r.action_type || '-'}</td>
+                    <td>${r.fudi_points || 0}</td>
+                    <td>${parseFloat(r.sharing_return || 0).toFixed(2)}</td>
+                    <td>${fmtDate(r.created_at)}</td>
+                </tr>`).join('')}
+            </tbody></table>`;
+        }
+
+        container.innerHTML = `
+            <div class="fude-tab">
+                <h1 style="font-size:1.8rem; color:var(--primary,#8B0000); margin-bottom:24px;">福德</h1>
+
+                <div class="fude-section">
+                    <h2>📰 Highlights &amp; News</h2>
+                    <div class="news-list">
+                        ${publicNews.length ? publicNews.map(n => `
+                            <div class="news-item">
+                                <h3 style="margin:0 0 4px;">${n.title}</h3>
+                                <p style="margin:0 0 4px; color:var(--gray-600,#4b5563);">${n.content || ''}</p>
+                                <small style="color:var(--gray-400,#9ca3af);">${fmtDate(n.created_at)}</small>
+                            </div>
+                        `).join('') : '<p style="color:var(--gray-500,#6b7280);">No highlights yet.</p>'}
+                    </div>
+                </div>
+
+                <div class="fude-section">
+                    <h2>🌟 Success Stories</h2>
+                    <div class="stories-list">
+                        ${successStories.length ? successStories.map(s => `
+                            <div class="story-item">
+                                <h3 style="margin:0 0 4px;">${s.title}</h3>
+                                <p style="margin:0; color:var(--gray-600,#4b5563);">${s.content || ''}</p>
+                            </div>
+                        `).join('') : '<p style="color:var(--gray-500,#6b7280);">No success stories yet.</p>'}
+                    </div>
+                </div>
+
+                <div class="fude-section">
+                    <h2>💎 My Recommendations &amp; Returns</h2>
+                    ${rewardsHtml}
+                </div>
+            </div>
+        `;
+    };
+
+    // ========== DATA FLOW VALIDATION ==========
+
     return {
         init,
         navigateTo,
@@ -21603,6 +21768,11 @@ const initImportDemoData = async () => {
 
         // Customer Self-Service Portal
         sendPortalLink,
+
+        // Level 13/14: Milestones & 福德
+        showMilestonesView,
+        showFudeView,
+        markMilestoneCompleted,
 
         // Auth exports
         login,

@@ -38,7 +38,9 @@ class DataStore {
             'contracts',
             'custom_field_definitions', 'custom_field_values',
             'portal_sessions',
-            'tree_interested'
+            'tree_interested',
+            // Level 13/14 account type tables
+            'user_milestones', 'news_highlights', 'recommendation_rewards', 'user_fudi_summary'
         ];
         this.initialized = false;
         this._events = {};

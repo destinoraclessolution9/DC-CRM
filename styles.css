@@ -8591,7 +8591,7 @@ input:checked+.slider:before {
     font-size: 11px;
 }
 
-/* ===== Activity History Table ñ Improved Layout ===== */
+/* ===== Activity History Table ÔøΩ Improved Layout ===== */
 
 /* Make all input fields wider and consistent */
 .activity-notes-table .note-input {
@@ -8643,7 +8643,7 @@ input:checked+.slider:before {
     box-shadow: 0 1px 4px rgba(0,0,0,0.08);
 }
 
-/* Photo thumbnails ñ keep them tidy */
+/* Photo thumbnails ÔøΩ keep them tidy */
 .photo-thumbnails {
     display: flex;
     flex-wrap: wrap;
@@ -8667,9 +8667,9 @@ input:checked+.slider:before {
 }
 
 
-/* Activity History Table ñ Multi-line Textareas */
+/* Activity History Table ÔøΩ Multi-line Textareas */
 .activity-notes-table textarea.note-input {
-    min-height: 60px;          /* give enough height for 2ñ3 lines */
+    min-height: 60px;          /* give enough height for 2ÔøΩ3 lines */
     resize: vertical;           /* allow user to expand */
     line-height: 1.4;
     font-family: inherit;      /* match body font */
@@ -8712,4 +8712,97 @@ input:checked+.slider:before {
     box-shadow: 0 4px 8px rgba(0,0,0,0.1);
     display: none;
     margin-top: 2px;
+}
+
+/* ========== LEVEL 13/14: Milestone Bar (Â¢ûËøê9Ê≠•Ë∑Ø) ========== */
+.milestone-container {
+    background: white;
+    border-radius: 12px;
+    padding: 28px 24px;
+    margin: 20px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+}
+.progress-bar-wrapper {
+    background: #e5e7eb;
+    border-radius: 10px;
+    height: 14px;
+    margin: 16px 0 24px;
+    overflow: hidden;
+}
+.progress-bar-fill {
+    background: linear-gradient(90deg, #8B0000, #c0392b);
+    height: 100%;
+    width: 0%;
+    transition: width 0.5s ease;
+    border-radius: 10px;
+}
+.milestones-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    gap: 14px;
+    margin-top: 8px;
+}
+.milestone-card {
+    background: #f3f4f6;
+    border: 2px solid #e5e7eb;
+    padding: 14px 10px;
+    border-radius: 10px;
+    text-align: center;
+    transition: all 0.2s;
+}
+.milestone-card.completed {
+    background: #d1fae5;
+    border-color: #6ee7b7;
+    color: #065f46;
+}
+.milestone-step {
+    font-size: 0.7rem;
+    color: #9ca3af;
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+.milestone-card.completed .milestone-step { color: #10b981; }
+.milestone-name {
+    font-weight: 700;
+    font-size: 0.85rem;
+    margin-bottom: 8px;
+    color: #374151;
+}
+.milestone-card.completed .milestone-name { color: #065f46; }
+.milestone-icon { font-size: 1.2rem; }
+.milestone-hint {
+    margin-top: 20px;
+    color: #9ca3af;
+    font-size: 0.85rem;
+    text-align: center;
+}
+
+/* ========== LEVEL 13/14: Á¶èÂæ∑ Tab ========== */
+.fude-tab {
+    padding: 24px;
+    max-width: 900px;
+    margin: 0 auto;
+}
+.fude-section {
+    background: white;
+    border-radius: 12px;
+    padding: 20px 24px;
+    margin-bottom: 24px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+.fude-section h2 {
+    margin: 0 0 16px;
+    font-size: 1.1rem;
+    color: #374151;
+    border-bottom: 1px solid #f3f4f6;
+    padding-bottom: 10px;
+}
+.news-item, .story-item {
+    border-bottom: 1px solid #f3f4f6;
+    padding: 12px 0;
+}
+.news-item:last-child, .story-item:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
 }
