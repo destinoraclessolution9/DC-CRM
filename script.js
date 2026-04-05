@@ -1613,7 +1613,7 @@ const appLogic = (() => {
         UI.showModal('New Folder', `
             <div class="form-group"><label>Folder Name</label><input type="text" id="new-folder-name" class="form-control" placeholder="Enter name..."></div>
             <div class="form-group"><label>Label Color</label><input type="color" id="new-folder-color" class="form-control" value="#f59e0b"></div>
-        `, [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Create', type: 'primary', action: 'await app.createFolder()' }]);
+        `, [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Create', type: 'primary', action: '(async () => { await app.createFolder(); })()' }]);
     };
 
     const createFolder = async () => {
@@ -1626,7 +1626,7 @@ const appLogic = (() => {
     const renameFolder = async (id) => {
         const folder = await AppDataStore.getById('folders', id);
         UI.showModal('Rename Folder', `<div class="form-group"><label>New Name</label><input type="text" id="rename-folder-input" class="form-control" value="${folder.name}"></div>`,
-            [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Rename', type: 'primary', action: `await app.confirmRenameFolder(${id})` }]);
+            [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Rename', type: 'primary', action: `(async () => { await app.confirmRenameFolder(${id}); })()` }]);
     };
     window.app.confirmRenameFolder = async (id) => {
         const name = document.getElementById('rename-folder-input')?.value;
@@ -1638,7 +1638,7 @@ const appLogic = (() => {
         const hasSub =(await AppDataStore.getAll('folders')).some(f => f.parent_id === id);
         const hasFiles = (await AppDataStore.getAll('documents')).some(d => d.folder_id === id);
         if (hasSub || hasFiles) return UI.toast.error('Cannot delete: Folder is not empty');
-        UI.showModal('Delete Folder', '<p>Are you sure?</p>', [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Delete', type: 'primary', action: `await app.confirmDeleteFolder(${id})` }]);
+        UI.showModal('Delete Folder', '<p>Are you sure?</p>', [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Delete', type: 'primary', action: `(async () => { await app.confirmDeleteFolder(${id}); })()` }]);
     };
     window.app.confirmDeleteFolder = async (id) => { await AppDataStore.delete('folders', id); UI.hideModal(); if (_currentFolder === id) _currentFolder = null; await renderFolderTree(); await loadFolderContents(); };
 
@@ -2059,7 +2059,7 @@ const appLogic = (() => {
     <p class="text-error">This action cannot be undone.</p>`,
             [
                 { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-                { label: 'Delete', type: 'primary', action: 'await app.confirmDeleteSelected()' }
+                { label: 'Delete', type: 'primary', action: '(async () => { await app.confirmDeleteSelected(); })()' }
             ]
         );
     };
@@ -2275,7 +2275,7 @@ In a production system, this would show the actual file contents.
 
         UI.showModal(`Preview: ${file.filename}`, previewContent, [
             { label: 'Download', type: 'secondary', action: `app.downloadFile(${fileId})` },
-            { label: 'Share', type: 'secondary', action: `await app.openShareModal(${fileId})` },
+            { label: 'Share', type: 'secondary', action: `(async () => { await app.openShareModal(${fileId}); })()` },
             { label: 'Close', type: 'primary', action: 'UI.hideModal()' }
         ], 'fullscreen');
     };
@@ -2357,7 +2357,7 @@ In a production system, this would show the actual file contents.
         `;
 
         UI.showModal('File Information', content, [
-            { label: 'Edit Description', type: 'secondary', action: `await app.editFileDescription(${fileId})` },
+            { label: 'Edit Description', type: 'secondary', action: `(async () => { await app.editFileDescription(${fileId}); })()` },
             { label: 'Close', type: 'primary', action: 'UI.hideModal()' }
         ]);
     };
@@ -2373,7 +2373,7 @@ In a production system, this would show the actual file contents.
     const editFileDescription = async (fileId) => {
         const file = await AppDataStore.getById('documents', fileId);
         UI.showModal('Edit Description', `<div class="form-group"><label>Description</label><textarea id="edit-file-desc" class="form-control" rows="4">${file.description || ''}</textarea></div>`,
-            [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Save', type: 'primary', action: `await app.saveFileDescription(${fileId})` }]);
+            [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Save', type: 'primary', action: `(async () => { await app.saveFileDescription(${fileId}); })()` }]);
     };
 
     const saveFileDescription = async (fileId) => {
@@ -3472,7 +3472,7 @@ In a production system, this would show the actual file contents.
             </div>
         `, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Simulate Connection', type: 'primary', action: 'await app.simulateGoogleConnection()' }
+            { label: 'Simulate Connection', type: 'primary', action: '(async () => { await app.simulateGoogleConnection(); })()' }
         ]);
     };
 
@@ -3654,7 +3654,7 @@ In a production system, this would show the actual file contents.
             <p class="warning-text" style="color:var(--error);font-weight:600;">Your existing activities will remain in both systems.</p>
         `, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Disconnect', type: 'error', action: 'await app.confirmDisconnectGoogle()' }
+            { label: 'Disconnect', type: 'error', action: '(async () => { await app.confirmDisconnectGoogle(); })()' }
         ]);
     };
 
@@ -3927,7 +3927,7 @@ In a production system, this would show the actual file contents.
             <p>This will stop all messaging and template sync.</p>
         `, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Disconnect', type: 'error', action: 'await app.confirmDisconnectWhatsApp()' }
+            { label: 'Disconnect', type: 'error', action: '(async () => { await app.confirmDisconnectWhatsApp(); })()' }
         ]);
     };
 
@@ -5779,7 +5779,7 @@ function _wireLoginBtn() {
 
         UI.showModal(isEdit ? 'Edit Name' : 'Add Name', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save', type: 'primary', action: `await app.saveName(${prospectId})` }
+            { label: 'Save', type: 'primary', action: `(async () => { await app.saveName(${prospectId}); })()` }
         ]);
     };
 
@@ -5814,7 +5814,7 @@ function _wireLoginBtn() {
     const deleteName = async (prospectId, nameId) => {
         UI.showModal('Confirm Delete', 'Are you sure you want to delete this name?', [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Delete', type: 'primary', action: `await app.confirmDeleteName(${prospectId}, ${nameId})` }
+            { label: 'Delete', type: 'primary', action: `(async () => { await app.confirmDeleteName(${prospectId}, ${nameId}); })()` }
         ]);
     };
 
@@ -8515,8 +8515,8 @@ function _wireLoginBtn() {
             `;
 
         UI.showModal('Calendar Filters', content, [
-            { label: 'Clear Filters', type: 'secondary', action: 'await app.clearCalendarFilters()' },
-            { label: 'Apply', type: 'primary', action: 'await app.applyCalendarFilters()' }
+            { label: 'Clear Filters', type: 'secondary', action: '(async () => { await app.clearCalendarFilters(); })()' },
+            { label: 'Apply', type: 'primary', action: '(async () => { await app.applyCalendarFilters(); })()' }
         ]);
     };
 
@@ -8988,8 +8988,8 @@ function _wireLoginBtn() {
 
         UI.showModal('Filter Calendar', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Apply Filters', type: 'primary', action: 'await app.applyFilters()' },
-            { label: 'Clear Filters', type: 'secondary', action: 'await app.clearFilters()' }
+            { label: 'Apply Filters', type: 'primary', action: '(async () => { await app.applyFilters(); })()' },
+            { label: 'Clear Filters', type: 'secondary', action: '(async () => { await app.clearFilters(); })()' }
         ]);
     };
 
@@ -9108,32 +9108,36 @@ function _wireLoginBtn() {
 
         const modalActions = [
             { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
-            { label: '✏️ Edit', type: 'secondary', action: `UI.hideModal(); await app.editActivity(${activityId})` },
-            { label: '📝 Post Meeting Update', type: 'secondary', action: `UI.hideModal(); await app.postMeetupNotes(${activityId})` },
-            { label: '✅ Case Closed', type: 'secondary', action: `await app.markActivityComplete(${activityId})` },
+            { label: '✏️ Edit', type: 'secondary', action: `(async () => { UI.hideModal(); await app.editActivity(${activityId}); })()` },
+            { label: '📝 Post Meeting Update', type: 'secondary', action: `(async () => { UI.hideModal(); await app.postMeetupNotes(${activityId}); })()` },
+            { label: '✅ Case Closed', type: 'secondary', action: `(async () => { await app.markActivityComplete(${activityId}); })()` },
         ];
 
         if (activity.prospect_id) {
             modalActions.push({
                 label: '👤 View Prospect',
                 type: 'secondary',
-                action: `UI.hideModal(); await app.showProspectDetail(${activity.prospect_id})`
+                action: `(async () => { UI.hideModal(); await app.showProspectDetail(${activity.prospect_id}); })()`
             });
         } else if (activity.customer_id) {
             modalActions.push({
                 label: '👤 View Customer',
                 type: 'secondary',
-                action: `UI.hideModal(); await app.showCustomerDetail(${activity.customer_id})`
+                action: `(async () => { UI.hideModal(); await app.showCustomerDetail(${activity.customer_id}); })()`
             });
         }
 
-        modalActions.push({ label: '🗑️ Delete', type: 'danger', action: `await app.deleteActivity(${activityId})` });
+        modalActions.push({ label: '🗑️ Delete', type: 'danger', action: `(async () => { await app.deleteActivity(${activityId}); })()` });
 
         UI.showModal('Activity Details', content, modalActions);
     };
 
     const editActivity = async (activityId) => {
-        const activity = await AppDataStore.getById('activities', activityId);
+        let activity = await AppDataStore.getById('activities', activityId);
+        if (!activity) {
+            const all = await AppDataStore.getAll('activities');
+            activity = all.find(a => String(a.id) === String(activityId)) || null;
+        }
         if (!activity) return;
         UI.hideModal(); // close any open modal
         await openActivityModal(null, null, activity);
@@ -9144,7 +9148,7 @@ function _wireLoginBtn() {
             '<p>Are you sure you want to delete this activity? This action cannot be undone.</p>',
             [
                 { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-                { label: 'Delete', type: 'primary', action: `await app.confirmDeleteActivity(${activityId})` }
+                { label: 'Delete', type: 'primary', action: `(async () => { await app.confirmDeleteActivity(${activityId}); })()` }
             ]
         );
     };
@@ -9160,7 +9164,11 @@ function _wireLoginBtn() {
     };
 
     const markActivityComplete = async (activityId) => {
-        const activity = await AppDataStore.getById('activities', activityId);
+        let activity = await AppDataStore.getById('activities', activityId);
+        if (!activity) {
+            const all = await AppDataStore.getAll('activities');
+            activity = all.find(a => String(a.id) === String(activityId)) || null;
+        }
         if (!activity) return;
 
         activity.status = 'completed';
@@ -9234,7 +9242,7 @@ function _wireLoginBtn() {
 
         UI.showModal('Meeting Outcome', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save Outcome', type: 'primary', action: `await app.saveAttendeeNote(${attendeeId}, '${attendeeType}', ${activityId}, 'outcome')` }
+            { label: 'Save Outcome', type: 'primary', action: `(async () => { await app.saveAttendeeNote(${attendeeId}, '${attendeeType}', ${activityId}, 'outcome'); })()` }
         ]);
     };
 
@@ -9257,7 +9265,7 @@ function _wireLoginBtn() {
 
         UI.showModal('Post-Meetup Notes', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save Notes', type: 'primary', action: `await app.saveAttendeeNote(${attendeeId}, '${attendeeType}', ${activityId}, 'post_meetup')` }
+            { label: 'Save Notes', type: 'primary', action: `(async () => { await app.saveAttendeeNote(${attendeeId}, '${attendeeType}', ${activityId}, 'post_meetup'); })()` }
         ]);
     };
 
@@ -12573,7 +12581,7 @@ const deleteNote = async (prospectId, noteId) => {
     `;
         UI.showModal(`Add Purchase for ${customer.full_name}`, content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Add Purchase', type: 'primary', action: `await app.savePurchase(${customerId})` }
+            { label: 'Add Purchase', type: 'primary', action: `(async () => { await app.savePurchase(${customerId}); })()` }
         ]);
     };
 
@@ -12670,7 +12678,7 @@ for (const p of allPackages) {
         UI.showModal('Delete Confirmation',
             '<p>Are you sure you want to delete this prospect? This action cannot be undone.</p>', [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Confirm Delete', type: 'primary', action: `await app.executeDelete(${id})` }
+            { label: 'Confirm Delete', type: 'primary', action: `(async () => { await app.executeDelete(${id}); })()` }
         ]
         );
     };
@@ -12723,7 +12731,7 @@ for (const p of allPackages) {
 
         UI.showModal('Add Tag', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Add Tag', type: 'primary', action: `await app.addTagToEntity(${entityId}, '${entityType}')` }
+            { label: 'Add Tag', type: 'primary', action: `(async () => { await app.addTagToEntity(${entityId}, '${entityType}'); })()` }
         ]);
     };
 
@@ -12835,7 +12843,7 @@ const openAddSolutionModal = async (prospectId) => {
 
     UI.showModal('Add Proposed Solution', content, [
         { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-        { label: 'Save', type: 'primary', action: `await app.saveSolution(${prospectId})` }
+        { label: 'Save', type: 'primary', action: `(async () => { await app.saveSolution(${prospectId}); })()` }
     ]);
 };
 
@@ -12971,7 +12979,7 @@ const openAddSolutionModal = async (prospectId) => {
                  </div>`,
                 [
                     { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-                    { label: 'Convert Manually', type: 'primary', action: `await app.confirmConvertToCustomer(${prospectId}, true)` }
+                    { label: 'Convert Manually', type: 'primary', action: `(async () => { await app.confirmConvertToCustomer(${prospectId}, true); })()` }
                 ]
             );
             return;
@@ -12993,7 +13001,7 @@ const openAddSolutionModal = async (prospectId) => {
 
         UI.showModal('Convert to Customer', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Convert', type: 'primary', action: `await app.confirmConvertToCustomer(${prospectId})` }
+            { label: 'Convert', type: 'primary', action: `(async () => { await app.confirmConvertToCustomer(${prospectId}); })()` }
         ]);
     };
 
@@ -13586,7 +13594,7 @@ const html = `
 
         UI.showModal('License Renewal', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Purchase Package', type: 'primary', action: `await app.executeRenewal(${agentId})` }
+            { label: 'Purchase Package', type: 'primary', action: `(async () => { await app.executeRenewal(${agentId}); })()` }
         ]);
     };
 
@@ -14226,7 +14234,7 @@ const renderCurrentAssignments = async (agentId) => {
 `;
         UI.showModal('Update Agent Targets', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save Targets', type: 'primary', action: `await app.saveAgentTargets(${agentId})` }
+            { label: 'Save Targets', type: 'primary', action: `(async () => { await app.saveAgentTargets(${agentId}); })()` }
         ]);
     };
 
@@ -14888,7 +14896,7 @@ const deactivateAgent = async (agentId) => {
                  </div>`,
                 [
                     { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-                    { label: 'Close Won', type: 'primary', action: `await app.closeDealWon(${prospect.id})` }
+                    { label: 'Close Won', type: 'primary', action: `(async () => { await app.closeDealWon(${prospect.id}); })()` }
                 ]
             );
         }
@@ -14913,7 +14921,7 @@ const deactivateAgent = async (agentId) => {
                  </div>`,
                 [
                     { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-                    { label: 'Close Lost', type: 'primary', action: `await app.closeDealLost(${prospect.id})` }
+                    { label: 'Close Lost', type: 'primary', action: `(async () => { await app.closeDealLost(${prospect.id}); })()` }
                 ]
             );
         }
@@ -16531,7 +16539,7 @@ const exportKPIReport = async (format) => {
 
         UI.showModal('Edit ' + type.slice(0, -1), content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save Changes', type: 'primary', action: `await app.saveMarketingListItem('${id}')` }
+            { label: 'Save Changes', type: 'primary', action: `(async () => { await app.saveMarketingListItem('${id}'); })()` }
         ]);
     };
 
@@ -16634,6 +16642,9 @@ const exportKPIReport = async (format) => {
                     <button class="marketing-tab ${_currentMarketingTab === 'packages' ? 'active' : ''}" onclick="app.switchMarketingTab('packages')">
                         <i class="fas fa-gifts"></i> Promotion Packages
                     </button>
+                    <button class="marketing-tab ${_currentMarketingTab === 'promotions' ? 'active' : ''}" onclick="app.switchMarketingTab('promotions')">
+                        <i class="fas fa-calendar-alt"></i> Monthly Promotions
+                    </button>
                     ` : ''}
                 </div>
                 
@@ -16657,7 +16668,8 @@ const exportKPIReport = async (format) => {
             if (t.textContent.includes(tab === 'templates' ? 'Message Templates' :
                 tab === 'campaigns' ? 'Active Campaigns' :
                     tab === 'products' ? 'Products & Services' :
-                        tab === 'packages' ? 'Promotion Packages' : 'Campaign Analytics')) {
+                        tab === 'packages' ? 'Promotion Packages' :
+                            tab === 'promotions' ? 'Monthly Promotions' : 'Campaign Analytics')) {
                 t.classList.add('active');
             }
         });
@@ -16678,6 +16690,8 @@ const exportKPIReport = async (format) => {
             return await renderProductsTab();
         } else if (_currentMarketingTab === 'packages') {
             return await renderPackagesTab();
+        } else if (_currentMarketingTab === 'promotions') {
+            return await renderMonthlyPromotionsTab();
         }
     };
 
@@ -16738,7 +16752,7 @@ const exportKPIReport = async (format) => {
 `;
         UI.showModal(id ? 'Edit Product' : 'Add Product', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save', type: 'primary', action: `await app.saveProduct(${id || 'null'})` }
+            { label: 'Save', type: 'primary', action: `(async () => { await app.saveProduct(${id || 'null'}); })()` }
         ]);
     };
 
@@ -16935,7 +16949,7 @@ const exportKPIReport = async (format) => {
 
         UI.showModal(isEdit ? 'Edit Promotion Package' : 'Create Promotion Package', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: isEdit ? 'Update Package' : 'Create Package', type: 'primary', action: `await app.savePackage(${id || 'null'})` }
+            { label: isEdit ? 'Update Package' : 'Create Package', type: 'primary', action: `(async () => { await app.savePackage(${id || 'null'}); })()` }
         ]);
     };
 
@@ -17072,6 +17086,517 @@ const exportKPIReport = async (format) => {
     ], 'large');
 };
 
+
+    // ========== MONTHLY PROMOTIONS TAB ==========
+
+    const renderMonthlyPromotionsTab = async () => {
+        let promotions = [];
+        try { promotions = await AppDataStore.getAll('monthly_promotions'); } catch(e) { promotions = []; }
+        promotions.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+        const canManage = isMarketingManager(_currentUser) || isSystemAdmin(_currentUser);
+
+        return `
+            <div style="padding: 24px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <div>
+                        <h3>Monthly Promotions</h3>
+                        <p class="text-muted">Full history of all monthly promotions — sorted newest first, never deleted</p>
+                    </div>
+                    <div style="display: flex; gap: 10px;">
+                        <button class="btn secondary" onclick="app.exportMonthlyPromotions()">
+                            <i class="fas fa-download"></i> Export CSV
+                        </button>
+                        ${canManage ? `<button class="btn primary" onclick="app.openMonthlyPromotionModal()">
+                            <i class="fas fa-plus"></i> New Promotion
+                        </button>` : ''}
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 15px; margin-bottom: 20px;">
+                    <div style="position: relative; flex: 1;">
+                        <i class="fas fa-search" style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--gray-400);"></i>
+                        <input type="text" id="promo-search" class="form-control" placeholder="Search by promotion name or package..." style="padding-left: 35px;" onkeyup="app.filterMonthlyPromotions()">
+                    </div>
+                    <select id="promo-status-filter" class="form-control" style="width: 170px;" onchange="app.filterMonthlyPromotions()">
+                        <option value="all">All Status</option>
+                        <option value="Draft">Draft</option>
+                        <option value="Active">Active</option>
+                        <option value="Ended">Ended</option>
+                        <option value="Archived">Archived</option>
+                    </select>
+                </div>
+
+                <div style="overflow-x: auto;">
+                    <table class="data-table" style="width: 100%; border-collapse: collapse; min-width: 900px;">
+                        <thead>
+                            <tr style="background: var(--gray-100); text-align: left;">
+                                <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Promotion Name</th>
+                                <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Month/Year</th>
+                                <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Time Frame</th>
+                                <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Special Package</th>
+                                <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Payment Mode</th>
+                                <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Target Customer</th>
+                                <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Entitlement Req.</th>
+                                <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Status</th>
+                                <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="monthly-promotions-tbody">
+                            ${promotions.map(p => renderMonthlyPromotionRow(p)).join('')}
+                            ${promotions.length === 0 ? '<tr><td colspan="9" style="padding: 40px; text-align: center; color: var(--gray-500);">No monthly promotions yet. Click "+ New Promotion" to create the first one.</td></tr>' : ''}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    };
+
+    const renderMonthlyPromotionRow = (p) => {
+        const monthYear = p.month_year
+            ? new Date(p.month_year + 'T00:00:00').toLocaleDateString('en-MY', { month: 'short', year: 'numeric' })
+            : '—';
+
+        let timeFrame = '—';
+        if (p.start_date && p.end_date) {
+            const sd = new Date(p.start_date + 'T00:00:00');
+            const ed = new Date(p.end_date + 'T00:00:00');
+            const days = Math.round((ed - sd) / 86400000) + 1;
+            const fmt = (d) => d.toLocaleDateString('en-MY', { day: '2-digit', month: 'short', year: 'numeric' });
+            timeFrame = `${fmt(sd)} – ${fmt(ed)} (${days}d)`;
+        }
+
+        let paymentBadges = '';
+        try {
+            const modes = JSON.parse(p.payment_modes || '[]');
+            paymentBadges = modes.map(m => `<span class="badge badge-gray" style="font-size:10px; margin:1px;">${m}</span>`).join('');
+        } catch(e) { paymentBadges = p.payment_modes || '—'; }
+
+        const statusClass = `status-${(p.status || 'draft').toLowerCase()}`;
+
+        const pkg = p.special_package ? (p.special_package.length > 25 ? p.special_package.slice(0, 23) + '…' : p.special_package) : '—';
+        const target = p.target_customer ? (p.target_customer.length > 20 ? p.target_customer.slice(0, 18) + '…' : p.target_customer) : '—';
+        const entitle = p.entitlement_requirement ? (p.entitlement_requirement.length > 22 ? p.entitlement_requirement.slice(0, 20) + '…' : p.entitlement_requirement) : '—';
+
+        const isArchived = p.status === 'Archived';
+
+        return `
+            <tr style="cursor: pointer;" onclick="app.viewMonthlyPromotionDetails(${p.id})">
+                <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">
+                    <strong>${p.name}</strong>
+                </td>
+                <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">${monthYear}</td>
+                <td style="padding: 12px; border-bottom: 1px solid var(--gray-200); font-size: 12px; color: var(--gray-600);">${timeFrame}</td>
+                <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);" title="${p.special_package || ''}">${pkg}</td>
+                <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">
+                    <div style="display: flex; flex-wrap: wrap; gap: 2px;">${paymentBadges || '—'}</div>
+                </td>
+                <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);" title="${p.target_customer || ''}">${target}</td>
+                <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);" title="${p.entitlement_requirement || ''}">${entitle}</td>
+                <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">
+                    <span class="status-badge ${statusClass}">${p.status || 'Draft'}</span>
+                </td>
+                <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">
+                    <div class="table-actions" onclick="event.stopPropagation()">
+                        <button class="btn-icon" onclick="app.viewMonthlyPromotionDetails(${p.id})" title="View Details"><i class="fas fa-eye"></i></button>
+                        ${!isArchived ? `<button class="btn-icon" onclick="app.openMonthlyPromotionModal(${p.id})" title="Edit"><i class="fas fa-edit"></i></button>` : ''}
+                        <button class="btn-icon" onclick="app.duplicateMonthlyPromotion(${p.id})" title="Duplicate"><i class="fas fa-copy"></i></button>
+                        ${!isArchived ? `<button class="btn-icon" onclick="app.archiveMonthlyPromotion(${p.id})" title="Archive"><i class="fas fa-archive"></i></button>` : ''}
+                        <button class="btn-icon text-danger" onclick="app.deleteMonthlyPromotion(${p.id})" title="Delete"><i class="fas fa-trash"></i></button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    };
+
+    const filterMonthlyPromotions = async () => {
+        const search = (document.getElementById('promo-search')?.value || '').toLowerCase();
+        const status = document.getElementById('promo-status-filter')?.value || 'all';
+
+        let promotions = [];
+        try { promotions = await AppDataStore.getAll('monthly_promotions'); } catch(e) { promotions = []; }
+        promotions.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+        const filtered = promotions.filter(p => {
+            const matchesSearch = (p.name || '').toLowerCase().includes(search) ||
+                (p.special_package || '').toLowerCase().includes(search);
+            const matchesStatus = status === 'all' || p.status === status;
+            return matchesSearch && matchesStatus;
+        });
+
+        const tbody = document.getElementById('monthly-promotions-tbody');
+        if (tbody) {
+            tbody.innerHTML = filtered.map(p => renderMonthlyPromotionRow(p)).join('') +
+                (filtered.length === 0 ? '<tr><td colspan="9" style="padding: 40px; text-align: center; color: var(--gray-500);">No matching promotions found.</td></tr>' : '');
+        }
+    };
+
+    const viewMonthlyPromotionDetails = async (id) => {
+        let p = await AppDataStore.getById('monthly_promotions', id);
+        if (!p) {
+            const all = await AppDataStore.getAll('monthly_promotions');
+            p = all.find(x => String(x.id) === String(id));
+        }
+        if (!p) return;
+
+        const monthYear = p.month_year
+            ? new Date(p.month_year + 'T00:00:00').toLocaleDateString('en-MY', { month: 'long', year: 'numeric' })
+            : '—';
+        const fmtDate = (d) => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-MY', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+
+        let paymentStr = '—';
+        try { paymentStr = JSON.parse(p.payment_modes || '[]').join(', ') || '—'; } catch(e) {}
+
+        let productDetailsHtml = '';
+        try {
+            const products = JSON.parse(p.package_product_details || '[]');
+            if (products.length > 0) {
+                productDetailsHtml = products.map(item => `
+                    <li style="margin-bottom: 4px;">${item.product || ''}${item.qty ? ' × ' + item.qty : ''}${item.discount ? ' — ' + item.discount : ''}</li>
+                `).join('');
+            }
+        } catch(e) {}
+
+        const content = `
+            <div style="font-size: 14px; line-height: 1.6;">
+                <div style="background: var(--gray-50); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                        <div><span style="color: var(--gray-500); font-size: 12px;">Month/Year</span><br><strong>${monthYear}</strong></div>
+                        <div><span style="color: var(--gray-500); font-size: 12px;">Status</span><br><span class="status-badge status-${(p.status || 'draft').toLowerCase()}">${p.status || 'Draft'}</span></div>
+                        <div><span style="color: var(--gray-500); font-size: 12px;">Start Date</span><br><strong>${fmtDate(p.start_date)}</strong></div>
+                        <div><span style="color: var(--gray-500); font-size: 12px;">End Date</span><br><strong>${fmtDate(p.end_date)}</strong></div>
+                    </div>
+                </div>
+                <div style="margin-bottom: 12px;">
+                    <span style="color: var(--gray-500); font-size: 12px;">Special Package</span>
+                    <p style="font-weight: 600;">${p.special_package || '—'}</p>
+                </div>
+                ${productDetailsHtml ? `
+                <div style="margin-bottom: 12px;">
+                    <span style="color: var(--gray-500); font-size: 12px;">Package Product Details</span>
+                    <ul style="margin-top: 6px; padding-left: 18px;">${productDetailsHtml}</ul>
+                </div>` : ''}
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+                    <div>
+                        <span style="color: var(--gray-500); font-size: 12px;">Payment Mode</span>
+                        <p>${paymentStr}</p>
+                    </div>
+                    <div>
+                        <span style="color: var(--gray-500); font-size: 12px;">Target Customer</span>
+                        <p>${p.target_customer || '—'}</p>
+                    </div>
+                </div>
+                <div style="margin-bottom: 12px;">
+                    <span style="color: var(--gray-500); font-size: 12px;">Entitlement Requirement</span>
+                    <p>${p.entitlement_requirement || '—'}</p>
+                </div>
+                ${p.promotion_script ? `
+                <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 16px; margin-bottom: 12px;">
+                    <span style="color: var(--gray-500); font-size: 12px;"><i class="fab fa-whatsapp" style="color: #25d366;"></i> Promotion Script (WhatsApp)</span>
+                    <pre style="margin-top: 8px; font-family: inherit; white-space: pre-wrap; font-size: 13px;">${p.promotion_script}</pre>
+                </div>` : ''}
+            </div>
+        `;
+
+        const canManage = isMarketingManager(_currentUser) || isSystemAdmin(_currentUser);
+        const actions = [
+            { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
+        ];
+        if (canManage && p.status !== 'Archived') {
+            actions.push({ label: 'Edit', type: 'secondary', action: `(async () => { UI.hideModal(); await app.openMonthlyPromotionModal(${p.id}); })()` });
+            actions.push({ label: 'Archive', type: 'secondary', action: `(async () => { await app.archiveMonthlyPromotion(${p.id}); })()` });
+        }
+        actions.push({ label: 'Duplicate', type: 'secondary', action: `(async () => { await app.duplicateMonthlyPromotion(${p.id}); })()` });
+
+        UI.showModal(`${p.name} — Details`, content, actions);
+    };
+
+    const openMonthlyPromotionModal = async (id = null) => {
+        const isEdit = !!id;
+        let p = null;
+        if (isEdit) {
+            p = await AppDataStore.getById('monthly_promotions', id);
+            if (!p) {
+                const all = await AppDataStore.getAll('monthly_promotions');
+                p = all.find(x => String(x.id) === String(id));
+            }
+        }
+
+        const paymentOptions = ['Cash', 'FPX', 'Credit Card', 'Debit Card', 'GrabPay', 'Touch n Go', 'QR Pay', 'Bank Transfer', 'EPP', 'Cheque', 'Installment'];
+        const currentModes = isEdit ? (JSON.parse(p.payment_modes || '[]') || []) : [];
+
+        let productRows = '';
+        if (isEdit && p.package_product_details) {
+            try {
+                const products = JSON.parse(p.package_product_details);
+                productRows = products.map((item, i) => `
+                    <div class="promo-product-row" style="display: flex; gap: 8px; margin-bottom: 8px;">
+                        <input type="text" placeholder="Product name" value="${item.product || ''}" class="form-control promo-prod-name" style="flex: 2;">
+                        <input type="text" placeholder="Qty" value="${item.qty || ''}" class="form-control promo-prod-qty" style="flex: 1;">
+                        <input type="text" placeholder="Discount/Price" value="${item.discount || ''}" class="form-control promo-prod-discount" style="flex: 1;">
+                        <button type="button" class="btn-icon" style="color: var(--danger);" onclick="this.closest('.promo-product-row').remove()"><i class="fas fa-times"></i></button>
+                    </div>
+                `).join('');
+            } catch(e) {}
+        }
+        if (!productRows) {
+            productRows = `<div class="promo-product-row" style="display: flex; gap: 8px; margin-bottom: 8px;">
+                <input type="text" placeholder="Product name" class="form-control promo-prod-name" style="flex: 2;">
+                <input type="text" placeholder="Qty" class="form-control promo-prod-qty" style="flex: 1;">
+                <input type="text" placeholder="Discount/Price" class="form-control promo-prod-discount" style="flex: 1;">
+                <button type="button" class="btn-icon" style="color: var(--danger);" onclick="this.closest('.promo-product-row').remove()"><i class="fas fa-times"></i></button>
+            </div>`;
+        }
+
+        const content = `
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                <div class="form-group">
+                    <label>Promotion Name <span class="required">*</span></label>
+                    <input type="text" id="promo-name" class="form-control" value="${isEdit ? (p.name || '') : ''}" placeholder="e.g. CNY Prosperity Pack">
+                </div>
+                <div class="form-group">
+                    <label>Month/Year <span class="required">*</span></label>
+                    <input type="month" id="promo-month-year" class="form-control" value="${isEdit && p.month_year ? p.month_year.slice(0, 7) : ''}">
+                </div>
+                <div class="form-group">
+                    <label>Start Date <span class="required">*</span></label>
+                    <input type="date" id="promo-start-date" class="form-control" value="${isEdit ? (p.start_date || '') : ''}">
+                </div>
+                <div class="form-group">
+                    <label>End Date <span class="required">*</span></label>
+                    <input type="date" id="promo-end-date" class="form-control" value="${isEdit ? (p.end_date || '') : ''}">
+                </div>
+                <div class="form-group">
+                    <label>Status</label>
+                    <select id="promo-status" class="form-control">
+                        ${['Draft', 'Active', 'Ended', 'Archived'].map(s => `<option value="${s}" ${isEdit && p.status === s ? 'selected' : ''}>${s}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Special Package Name</label>
+                    <input type="text" id="promo-package" class="form-control" value="${isEdit ? (p.special_package || '') : ''}" placeholder="e.g. Ultimate Bundle">
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>Package Product Details</label>
+                <div id="promo-products-container">${productRows}</div>
+                <button type="button" class="btn secondary" style="margin-top: 6px; font-size: 12px;" onclick="app.addPromoProductRow()">
+                    <i class="fas fa-plus"></i> Add Product Row
+                </button>
+            </div>
+
+            <div class="form-group">
+                <label>Payment Mode</label>
+                <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                    ${paymentOptions.map(opt => `
+                        <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
+                            <input type="checkbox" name="promo-payment" value="${opt}" ${currentModes.includes(opt) ? 'checked' : ''}> ${opt}
+                        </label>
+                    `).join('')}
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>Target Customer</label>
+                <input type="text" id="promo-target" class="form-control" value="${isEdit ? (p.target_customer || '') : ''}" placeholder="e.g. All customers, new sign-ups, members">
+            </div>
+
+            <div class="form-group">
+                <label>Entitlement Requirement</label>
+                <input type="text" id="promo-entitlement" class="form-control" value="${isEdit ? (p.entitlement_requirement || '') : ''}" placeholder="e.g. Min spend RM150, first 50 customers">
+            </div>
+
+            <div class="form-group">
+                <label>Promotion Script (WhatsApp)</label>
+                <div style="margin-bottom: 6px; display: flex; gap: 6px; flex-wrap: wrap;">
+                    ${['{{name}}', '{{package}}', '{{discount}}', '{{deadline}}', '{{code}}'].map(v =>
+                        `<span style="background: var(--primary-100); color: var(--primary-700); padding: 2px 8px; border-radius: 4px; font-size: 11px; cursor: pointer;" onclick="app.insertPromoVariable('${v}')">${v}</span>`
+                    ).join('')}
+                </div>
+                <textarea id="promo-script" class="form-control" rows="5" placeholder="Dear {{name}}, enjoy our special promotion...">${isEdit ? (p.promotion_script || '') : ''}</textarea>
+            </div>
+        `;
+
+        UI.showModal(isEdit ? 'Edit Promotion' : 'New Monthly Promotion', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: isEdit ? 'Save Changes' : 'Create Promotion', type: 'primary', action: `(async () => { await app.saveMonthlyPromotion(${isEdit ? id : 'null'}); })()` }
+        ], 'large');
+    };
+
+    const addPromoProductRow = () => {
+        const container = document.getElementById('promo-products-container');
+        if (!container) return;
+        const row = document.createElement('div');
+        row.className = 'promo-product-row';
+        row.style.cssText = 'display: flex; gap: 8px; margin-bottom: 8px;';
+        row.innerHTML = `
+            <input type="text" placeholder="Product name" class="form-control promo-prod-name" style="flex: 2;">
+            <input type="text" placeholder="Qty" class="form-control promo-prod-qty" style="flex: 1;">
+            <input type="text" placeholder="Discount/Price" class="form-control promo-prod-discount" style="flex: 1;">
+            <button type="button" class="btn-icon" style="color: var(--danger);" onclick="this.closest('.promo-product-row').remove()"><i class="fas fa-times"></i></button>
+        `;
+        container.appendChild(row);
+    };
+
+    const insertPromoVariable = (variable) => {
+        const ta = document.getElementById('promo-script');
+        if (!ta) return;
+        const start = ta.selectionStart;
+        const end = ta.selectionEnd;
+        ta.value = ta.value.slice(0, start) + variable + ta.value.slice(end);
+        ta.selectionStart = ta.selectionEnd = start + variable.length;
+        ta.focus();
+    };
+
+    const saveMonthlyPromotion = async (id) => {
+        const name = document.getElementById('promo-name')?.value.trim();
+        if (!name) { UI.toast.error('Promotion name is required'); return; }
+
+        const monthYearInput = document.getElementById('promo-month-year')?.value;
+        const month_year = monthYearInput ? monthYearInput + '-01' : null;
+
+        const start_date = document.getElementById('promo-start-date')?.value || null;
+        const end_date = document.getElementById('promo-end-date')?.value || null;
+        if (!start_date || !end_date) { UI.toast.error('Start and end dates are required'); return; }
+
+        const paymentModes = Array.from(document.querySelectorAll('input[name="promo-payment"]:checked')).map(cb => cb.value);
+
+        const productRows = document.querySelectorAll('.promo-product-row');
+        const packageProductDetails = [];
+        productRows.forEach(row => {
+            const name = row.querySelector('.promo-prod-name')?.value.trim();
+            if (name) {
+                packageProductDetails.push({
+                    product: name,
+                    qty: row.querySelector('.promo-prod-qty')?.value.trim() || '',
+                    discount: row.querySelector('.promo-prod-discount')?.value.trim() || ''
+                });
+            }
+        });
+
+        const record = {
+            name,
+            month_year,
+            start_date,
+            end_date,
+            status: document.getElementById('promo-status')?.value || 'Draft',
+            special_package: document.getElementById('promo-package')?.value.trim() || null,
+            package_product_details: JSON.stringify(packageProductDetails),
+            payment_modes: JSON.stringify(paymentModes),
+            target_customer: document.getElementById('promo-target')?.value.trim() || null,
+            entitlement_requirement: document.getElementById('promo-entitlement')?.value.trim() || null,
+            promotion_script: document.getElementById('promo-script')?.value.trim() || null,
+            updated_at: new Date().toISOString()
+        };
+
+        if (!id || id === 'null') {
+            record.created_by = _currentUser ? _currentUser.id : null;
+            record.created_at = new Date().toISOString();
+            await AppDataStore.create('monthly_promotions', record);
+            UI.toast.success('Promotion created');
+        } else {
+            await AppDataStore.update('monthly_promotions', id, record);
+            UI.toast.success('Promotion updated');
+        }
+
+        UI.hideModal();
+        if (_currentMarketingTab === 'promotions') await app.switchMarketingTab('promotions');
+    };
+
+    const archiveMonthlyPromotion = async (id) => {
+        try {
+            await AppDataStore.update('monthly_promotions', id, { status: 'Archived', updated_at: new Date().toISOString() });
+            UI.toast.success('Promotion archived');
+            UI.hideModal();
+            if (_currentMarketingTab === 'promotions') await app.switchMarketingTab('promotions');
+        } catch(e) {
+            UI.toast.error('Failed to archive promotion');
+        }
+    };
+
+    const duplicateMonthlyPromotion = async (id) => {
+        try {
+            let original = await AppDataStore.getById('monthly_promotions', id);
+            if (!original) {
+                const all = await AppDataStore.getAll('monthly_promotions');
+                original = all.find(x => String(x.id) === String(id));
+            }
+            if (!original) return;
+            const { id: _ignored, ...rest } = original;
+            const copy = {
+                ...rest,
+                name: 'Copy of ' + original.name,
+                status: 'Draft',
+                created_by: _currentUser ? _currentUser.id : null,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+            };
+            await AppDataStore.create('monthly_promotions', copy);
+            UI.toast.success('Promotion duplicated as Draft');
+            UI.hideModal();
+            if (_currentMarketingTab === 'promotions') await app.switchMarketingTab('promotions');
+        } catch(e) {
+            UI.toast.error('Failed to duplicate promotion');
+        }
+    };
+
+    const deleteMonthlyPromotion = async (id) => {
+        if (!confirm('Delete this promotion permanently? This cannot be undone.')) return;
+        try {
+            await AppDataStore.delete('monthly_promotions', id);
+            UI.toast.success('Promotion deleted');
+            if (_currentMarketingTab === 'promotions') await app.switchMarketingTab('promotions');
+        } catch(e) {
+            UI.toast.error('Failed to delete promotion');
+        }
+    };
+
+    const exportMonthlyPromotions = async () => {
+        const search = (document.getElementById('promo-search')?.value || '').toLowerCase();
+        const status = document.getElementById('promo-status-filter')?.value || 'all';
+
+        let promotions = [];
+        try { promotions = await AppDataStore.getAll('monthly_promotions'); } catch(e) {}
+        promotions.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+        const filtered = promotions.filter(p => {
+            const matchesSearch = (p.name || '').toLowerCase().includes(search) ||
+                (p.special_package || '').toLowerCase().includes(search);
+            const matchesStatus = status === 'all' || p.status === status;
+            return matchesSearch && matchesStatus;
+        });
+
+        const esc = (v) => `"${String(v || '').replace(/"/g, '""')}"`;
+        const header = ['Name','Month/Year','Start Date','End Date','Special Package','Payment Modes','Target Customer','Entitlement Requirement','Status','Created At'];
+        const rows = filtered.map(p => {
+            const monthYear = p.month_year
+                ? new Date(p.month_year + 'T00:00:00').toLocaleDateString('en-MY', { month: 'short', year: 'numeric' })
+                : '';
+            let paymentStr = '';
+            try { paymentStr = JSON.parse(p.payment_modes || '[]').join(' | '); } catch(e) { paymentStr = p.payment_modes || ''; }
+            return [
+                esc(p.name), esc(monthYear), esc(p.start_date), esc(p.end_date),
+                esc(p.special_package), esc(paymentStr), esc(p.target_customer),
+                esc(p.entitlement_requirement), esc(p.status),
+                esc(p.created_at ? new Date(p.created_at).toLocaleDateString('en-MY') : '')
+            ].join(',');
+        });
+
+        const csv = '\uFEFF' + [header.map(esc).join(','), ...rows].join('\r\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Monthly_Promotions_${new Date().toLocaleDateString('en-MY').replace(/\//g, '-')}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+        UI.toast.success(`Exported ${filtered.length} promotion${filtered.length !== 1 ? 's' : ''}`);
+    };
+
+    // ========== END MONTHLY PROMOTIONS TAB ==========
 
     // ========== TEMPLATES TAB ==========
 
@@ -17228,7 +17753,7 @@ const exportKPIReport = async (format) => {
 
         UI.showModal(isEdit ? 'Edit Template' : 'Create WhatsApp Template', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: isEdit ? 'Update Template' : 'Save Template', type: 'primary', action: `await app.saveTemplate(${isEdit ? templateId : 'null'})` }
+            { label: isEdit ? 'Update Template' : 'Save Template', type: 'primary', action: `(async () => { await app.saveTemplate(${isEdit ? templateId : 'null'}); })()` }
         ]);
     };
 
@@ -18386,7 +18911,7 @@ const simulateCampaignSending = async (campaignId) => {
     `;
 
         UI.showModal('Recipient History', content, [
-            { label: 'Back', type: 'secondary', action: `await app.viewCampaignDetails(${msg.campaign_id})` }
+            { label: 'Back', type: 'secondary', action: `(async () => { await app.viewCampaignDetails(${msg.campaign_id}); })()` }
         ]);
     };
 
@@ -20802,6 +21327,20 @@ const initImportDemoData = async () => {
         deletePackage,
         viewPackageCustomers,
         filterPackages,
+
+        // Monthly Promotions
+        renderMonthlyPromotionsTab,
+        renderMonthlyPromotionRow,
+        filterMonthlyPromotions,
+        viewMonthlyPromotionDetails,
+        openMonthlyPromotionModal,
+        addPromoProductRow,
+        insertPromoVariable,
+        saveMonthlyPromotion,
+        archiveMonthlyPromotion,
+        duplicateMonthlyPromotion,
+        deleteMonthlyPromotion,
+        exportMonthlyPromotions,
 
         // Phase 13: Import & Reassignment
         showImportDashboard,

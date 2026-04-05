@@ -1640,6 +1640,21 @@ body {
     color: #4b5563;
 }
 
+.status-draft {
+    background: #fef9c3;
+    color: #854d0e;
+}
+
+.status-ended {
+    background: #e5e7eb;
+    color: #374151;
+}
+
+.status-archived {
+    background: #f3e8ff;
+    color: #6b21a8;
+}
+
 .followup-rate {
     display: flex;
     align-items: center;
@@ -8591,7 +8606,7 @@ input:checked+.slider:before {
     font-size: 11px;
 }
 
-/* ===== Activity History Table – Improved Layout ===== */
+/* ===== Activity History Table ï¿½ Improved Layout ===== */
 
 /* Make all input fields wider and consistent */
 .activity-notes-table .note-input {
@@ -8643,7 +8658,7 @@ input:checked+.slider:before {
     box-shadow: 0 1px 4px rgba(0,0,0,0.08);
 }
 
-/* Photo thumbnails – keep them tidy */
+/* Photo thumbnails ï¿½ keep them tidy */
 .photo-thumbnails {
     display: flex;
     flex-wrap: wrap;
@@ -8667,9 +8682,9 @@ input:checked+.slider:before {
 }
 
 
-/* Activity History Table – Multi-line Textareas */
+/* Activity History Table ï¿½ Multi-line Textareas */
 .activity-notes-table textarea.note-input {
-    min-height: 60px;          /* give enough height for 2–3 lines */
+    min-height: 60px;          /* give enough height for 2ï¿½3 lines */
     resize: vertical;           /* allow user to expand */
     line-height: 1.4;
     font-family: inherit;      /* match body font */
