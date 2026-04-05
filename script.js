@@ -5736,6 +5736,9 @@ function _wireLoginBtn() {
             await ConfigManager.init();
         }
 
+        // Action Plan: schedule Monday reminders
+        initActionPlanReminder();
+
         // Mark app as ready
         window.app.ready = true;
         window.app.initialized = true;
@@ -14943,6 +14946,91 @@ const deactivateAgent = async (agentId) => {
         const focusRows = (await Promise.all(focusList.map((rec, idx) => renderFocusRow(rec, idx, allActivities, probBadge)))).join('');
         const systemRows = (await Promise.all(enriched.map(p => renderSystemRow(p, probBadge)))).join('');
 
+        // ---- ACTION PLAN DATA FETCH ----
+        const _apCurrentMonth = new Date().toISOString().slice(0, 7) + '-01';
+        let _apPlanList = [];
+        let _apItems = [];
+        let _apChecks = [];
+        try {
+            _apPlanList = await AppDataStore.query('action_plans', { user_id: userId, month_year: _apCurrentMonth });
+        } catch(e) { /* offline fallback */ }
+        const _activePlan = _apPlanList[0] || null;
+        if (_activePlan) {
+            try {
+                _apItems = await AppDataStore.query('action_plan_items', { plan_id: _activePlan.id });
+                _apItems.sort((a,b) => (a.display_order||0) - (b.display_order||0));
+                const _today = new Date();
+                const _diff = (_today.getDay() === 0 ? 6 : _today.getDay() - 1);
+                const _monday = new Date(_today);
+                _monday.setDate(_today.getDate() - _diff);
+                const _mondayStr = _monday.toISOString().slice(0,10);
+                _apChecks = await AppDataStore.query('action_plan_checks', { plan_id: _activePlan.id, check_date: _mondayStr });
+            } catch(e) { /* offline fallback */ }
+        }
+        const _apMonthLabel = new Date().toLocaleString('default', { month: 'long', year: 'numeric' });
+        const _actionPlanHtml = `
+            <div class="action-plan-section" style="margin-bottom:32px;background:white;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                    <div>
+                        <h2 style="font-size:18px;font-weight:600;margin:0;">📋 Action Plan — ${_apMonthLabel}</h2>
+                        ${_activePlan ? `<span style="background:#d1fae5;color:#065f46;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600;margin-top:4px;display:inline-block;">${(_activePlan.status||'active').toUpperCase()}</span>` : ''}
+                    </div>
+                    <div style="display:flex;gap:8px;">
+                        <button class="btn secondary btn-sm" onclick="app.showActionPlanHistory()">View History</button>
+                        <button class="btn primary btn-sm" onclick="app.openActionPlanModal()">${_activePlan ? 'Edit Plan' : 'Create Plan'}</button>
+                    </div>
+                </div>
+                ${_activePlan ? `
+                    <div style="background:#f0fdf4;padding:12px;border-radius:8px;margin-bottom:20px;">
+                        <strong>🎯 Main Target:</strong> RM ${(_activePlan.main_target||0).toLocaleString()}
+                    </div>
+                    <div style="overflow-x:auto;">
+                        <table class="plan-items-table" style="width:100%;border-collapse:collapse;">
+                            <thead>
+                                <tr style="background:#f9fafb;border-bottom:2px solid #e5e7eb;">
+                                    <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Event Name</th>
+                                    <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Objective</th>
+                                    <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Target</th>
+                                    <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Due Date</th>
+                                    <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">This Week</th>
+                                    <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Remarks</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${_apItems.length ? _apItems.map(item => {
+                                    const chk = _apChecks.find(c => c.item_id === item.id);
+                                    const done = chk?.is_done || false;
+                                    return `<tr style="border-bottom:1px solid #e5e7eb;">
+                                        <td style="padding:10px 12px;">${escapeHtml(item.event_name)}</td>
+                                        <td style="padding:10px 12px;">${escapeHtml(item.objective||'')}</td>
+                                        <td style="padding:10px 12px;">${escapeHtml(item.target_to_achieve||'')}</td>
+                                        <td style="padding:10px 12px;">${item.when_to_achieve||'-'}</td>
+                                        <td style="padding:10px 12px;">
+                                            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+                                                <input type="checkbox" class="plan-checkbox" ${done?'checked':''} onchange="app.updatePlanCheck(${_activePlan.id},${item.id},this.checked)">
+                                                ${done ? '<span style="color:#059669;font-weight:600;">✅ Done</span>' : '<span style="color:#9ca3af;">⏳ Pending</span>'}
+                                            </label>
+                                        </td>
+                                        <td style="padding:10px 12px;">${escapeHtml(item.remarks||'')}</td>
+                                    </tr>`;
+                                }).join('') : `<tr><td colspan="6" style="padding:24px;text-align:center;color:#9ca3af;">No items added yet. Click "Edit Plan" to add items.</td></tr>`}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="weekly-reminder" style="margin-top:16px;padding:12px;background:#fef3c7;border-radius:8px;display:flex;justify-content:space-between;align-items:center;">
+                        <span><i class="fas fa-bell"></i> Weekly check every Monday — mark completed items above.</span>
+                        <button class="btn secondary btn-sm" onclick="app.sendPlanReminder()">Send Reminder</button>
+                    </div>
+                ` : `
+                    <div style="text-align:center;padding:40px;color:#9ca3af;">
+                        <i class="fas fa-clipboard-list" style="font-size:40px;margin-bottom:16px;display:block;"></i>
+                        <p>No action plan for this month. Click <strong>"Create Plan"</strong> to get started.</p>
+                    </div>
+                `}
+            </div>
+        `;
+        // ---- END ACTION PLAN HTML ----
+
         container.innerHTML = `
 <div class="pipeline-dual-view">
     <!--PIPELINE HEADER-->
@@ -14967,6 +15055,8 @@ const deactivateAgent = async (agentId) => {
             <button class="btn primary" onclick="app.openPipelineConfigModal()"><i class="fas fa-info-circle"></i> Rules</button>
         </div>
     </div>
+
+    ${_actionPlanHtml}
 
     <!--TABLE 1: MONTH FOCUS - MANUAL PRIORITY LIST-->
     <div style="margin-bottom:32px;background:white;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.1);padding:20px;">
@@ -15114,6 +15204,266 @@ const deactivateAgent = async (agentId) => {
         const container = document.getElementById('content-viewport');
         if (container) await showPipelineView(container);
     };
+
+    // ===== ACTION PLAN FUNCTIONS =====
+
+    const renderPlanItemRow = (item = null, index = 0) => {
+        const id = item?.id || `new_${Date.now()}_${index}`;
+        return `
+            <div class="plan-item-row" data-item-id="${id}" style="border:1px solid #e5e7eb;padding:12px;margin-bottom:12px;border-radius:8px;background:#f9fafb;">
+                <div style="display:flex;gap:12px;margin-bottom:8px;">
+                    <div style="flex:1;">
+                        <label style="font-size:12px;font-weight:600;color:#374151;">Event Name *</label>
+                        <input type="text" class="form-control item-event-name" value="${escapeHtml(item?.event_name || '')}" placeholder="e.g., CPS Workshop" style="background:white;">
+                    </div>
+                    <div style="flex:1;">
+                        <label style="font-size:12px;font-weight:600;color:#374151;">Objective</label>
+                        <input type="text" class="form-control item-objective" value="${escapeHtml(item?.objective || '')}" placeholder="What to achieve" style="background:white;">
+                    </div>
+                </div>
+                <div style="display:flex;gap:12px;margin-bottom:8px;">
+                    <div style="flex:1;">
+                        <label style="font-size:12px;font-weight:600;color:#374151;">Target To Achieve</label>
+                        <input type="text" class="form-control item-target" value="${escapeHtml(item?.target_to_achieve || '')}" placeholder="e.g., 5 new prospects" style="background:white;">
+                    </div>
+                    <div style="flex:1;">
+                        <label style="font-size:12px;font-weight:600;color:#374151;">When to Achieve</label>
+                        <input type="date" class="form-control item-when" value="${item?.when_to_achieve || ''}" style="background:white;">
+                    </div>
+                </div>
+                <div style="margin-bottom:8px;">
+                    <label style="font-size:12px;font-weight:600;color:#374151;">Remarks</label>
+                    <textarea class="form-control item-remarks" rows="2" style="background:white;">${escapeHtml(item?.remarks || '')}</textarea>
+                </div>
+                <button type="button" class="btn-icon" style="color:#DC2626;" onclick="this.closest('.plan-item-row').remove()"><i class="fas fa-trash"></i> Remove</button>
+                <input type="hidden" class="item-id" value="${item?.id || ''}">
+            </div>
+        `;
+    };
+
+    const openActionPlanModal = async (planId = null) => {
+        const currentUser = _currentUser;
+        const currentMonth = new Date().toISOString().slice(0, 7) + '-01';
+        let plan = null;
+        let items = [];
+        if (planId) {
+            plan = await AppDataStore.getById('action_plans', planId);
+            if (plan) items = await AppDataStore.query('action_plan_items', { plan_id: plan.id });
+        } else {
+            const existing = await AppDataStore.query('action_plans', { user_id: currentUser.id, month_year: currentMonth });
+            if (existing.length) plan = existing[0];
+            if (plan) items = await AppDataStore.query('action_plan_items', { plan_id: plan.id });
+        }
+
+        const modalContent = `
+            <div class="action-plan-modal">
+                <div class="form-group">
+                    <label>Month / Year</label>
+                    <input type="month" id="plan-month" class="form-control" value="${plan?.month_year?.slice(0,7) || new Date().toISOString().slice(0,7)}" required>
+                </div>
+                <div class="form-group">
+                    <label>Main Target (RM)</label>
+                    <input type="number" id="main-target" class="form-control" value="${plan?.main_target || ''}" step="0.01" placeholder="e.g., 50000">
+                </div>
+                <hr>
+                <h4 style="margin-bottom:12px;">Action Plan Items</h4>
+                <div id="plan-items-container">
+                    ${items.map((item, idx) => renderPlanItemRow(item, idx)).join('')}
+                </div>
+                <button type="button" class="btn secondary btn-sm" onclick="app.addPlanItemRow()" style="margin-top:4px;"><i class="fas fa-plus"></i> Add Item</button>
+            </div>
+        `;
+
+        UI.showModal(plan ? 'Edit Action Plan' : 'Create Action Plan', modalContent, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save Plan', type: 'primary', action: `(async () => { await app.saveActionPlan(${plan?.id ?? 'null'}); })()` }
+        ]);
+    };
+
+    const addPlanItemRow = () => {
+        const container = document.getElementById('plan-items-container');
+        if (container) {
+            container.insertAdjacentHTML('beforeend', renderPlanItemRow(null, Date.now()));
+        }
+    };
+
+    const saveActionPlan = async (planId) => {
+        const currentUser = _currentUser;
+        const mainTarget = parseFloat(document.getElementById('main-target')?.value) || 0;
+        const monthYear = document.getElementById('plan-month')?.value;
+        if (!monthYear) {
+            UI.toast.error('Please select a month');
+            return;
+        }
+        const monthDate = monthYear + '-01';
+
+        let plan;
+        if (planId) {
+            plan = await AppDataStore.getById('action_plans', planId);
+            await AppDataStore.update('action_plans', planId, { main_target: mainTarget, updated_at: new Date().toISOString() });
+            plan.id = planId;
+        } else {
+            const existing = await AppDataStore.query('action_plans', { user_id: currentUser.id, month_year: monthDate });
+            if (existing.length) {
+                plan = existing[0];
+                await AppDataStore.update('action_plans', plan.id, { main_target: mainTarget, updated_at: new Date().toISOString() });
+            } else {
+                plan = await AppDataStore.create('action_plans', {
+                    id: Date.now(),
+                    user_id: currentUser.id,
+                    month_year: monthDate,
+                    main_target: mainTarget,
+                    status: 'active',
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString()
+                });
+            }
+        }
+
+        const rows = document.querySelectorAll('.plan-item-row');
+        for (let i = 0; i < rows.length; i++) {
+            const row = rows[i];
+            const eventName = row.querySelector('.item-event-name')?.value.trim();
+            if (!eventName) continue;
+            const itemId = row.querySelector('.item-id')?.value;
+            const itemData = {
+                plan_id: plan.id,
+                event_name: eventName,
+                objective: row.querySelector('.item-objective')?.value || '',
+                target_to_achieve: row.querySelector('.item-target')?.value || '',
+                when_to_achieve: row.querySelector('.item-when')?.value || null,
+                remarks: row.querySelector('.item-remarks')?.value || '',
+                display_order: i
+            };
+            if (itemId && !isNaN(parseInt(itemId))) {
+                await AppDataStore.update('action_plan_items', parseInt(itemId), itemData);
+            } else {
+                itemData.id = Date.now() + i;
+                itemData.created_at = new Date().toISOString();
+                await AppDataStore.create('action_plan_items', itemData);
+            }
+        }
+
+        UI.hideModal();
+        UI.toast.success('Action Plan saved');
+        await refreshPipeline();
+    };
+
+    const updatePlanCheck = async (planId, itemId, isDone) => {
+        const today = new Date();
+        const day = today.getDay();
+        const diffToMonday = (day === 0 ? 6 : day - 1);
+        const lastMonday = new Date(today);
+        lastMonday.setDate(today.getDate() - diffToMonday);
+        const mondayStr = lastMonday.toISOString().slice(0,10);
+
+        const existing = await AppDataStore.query('action_plan_checks', { plan_id: planId, check_date: mondayStr, item_id: itemId });
+        if (existing.length) {
+            await AppDataStore.update('action_plan_checks', existing[0].id, { is_done: isDone });
+        } else {
+            await AppDataStore.create('action_plan_checks', {
+                id: Date.now(),
+                plan_id: planId,
+                check_date: mondayStr,
+                item_id: itemId,
+                is_done: isDone,
+                created_at: new Date().toISOString()
+            });
+        }
+        UI.toast.success(isDone ? '✅ Item marked as done for this week' : '⏳ Item marked as pending');
+    };
+
+    const sendPlanReminder = async () => {
+        const currentUser = _currentUser;
+        const currentMonth = new Date().toISOString().slice(0,7) + '-01';
+        const planList = await AppDataStore.query('action_plans', { user_id: currentUser.id, month_year: currentMonth });
+        const plan = planList[0];
+        if (!plan) {
+            UI.toast.info('No action plan for this month');
+            return;
+        }
+        const items = await AppDataStore.query('action_plan_items', { plan_id: plan.id });
+        const today = new Date();
+        const day = today.getDay();
+        const diffToMonday = (day === 0 ? 6 : day - 1);
+        const lastMonday = new Date(today);
+        lastMonday.setDate(today.getDate() - diffToMonday);
+        const mondayStr = lastMonday.toISOString().slice(0,10);
+        const checks = await AppDataStore.query('action_plan_checks', { plan_id: plan.id, check_date: mondayStr });
+        const pendingItems = items.filter(item => !checks.some(c => c.item_id === item.id && c.is_done));
+        if (pendingItems.length === 0) {
+            UI.toast.success('🎉 All items completed this week! Great job!');
+        } else {
+            const pendingNames = pendingItems.map(i => i.event_name).join(', ');
+            UI.toast.warning(`⚠️ Pending: ${pendingNames}. Please update your progress.`);
+        }
+    };
+
+    const showActionPlanHistory = async () => {
+        const currentUser = _currentUser;
+        const plans = await AppDataStore.query('action_plans', { user_id: currentUser.id });
+        plans.sort((a, b) => b.month_year > a.month_year ? 1 : -1);
+        let html = `
+            <div class="action-plan-history">
+                <table class="data-table" style="width:100%;border-collapse:collapse;">
+                    <thead>
+                        <tr style="background:#f9fafb;border-bottom:2px solid #e5e7eb;">
+                            <th style="padding:10px 12px;text-align:left;">Month</th>
+                            <th style="padding:10px 12px;text-align:left;">Main Target</th>
+                            <th style="padding:10px 12px;text-align:left;">Status</th>
+                            <th style="padding:10px 12px;text-align:left;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+        `;
+        if (!plans.length) {
+            html += `<tr><td colspan="4" style="padding:32px;text-align:center;color:#9ca3af;">No action plans found.</td></tr>`;
+        }
+        for (const p of plans) {
+            const monthLabel = new Date(p.month_year).toLocaleString('default', { month: 'long', year: 'numeric' });
+            html += `
+                <tr style="border-bottom:1px solid #e5e7eb;">
+                    <td style="padding:10px 12px;">${monthLabel}</td>
+                    <td style="padding:10px 12px;">RM ${p.main_target?.toLocaleString() || '0'}</td>
+                    <td style="padding:10px 12px;"><span style="background:#d1fae5;color:#065f46;padding:2px 10px;border-radius:12px;font-size:12px;">${(p.status || 'active').toUpperCase()}</span></td>
+                    <td style="padding:10px 12px;"><button class="btn secondary btn-sm" onclick="app.openActionPlanModal(${p.id})">View/Edit</button></td>
+                </tr>
+            `;
+        }
+        html += `</tbody></table></div>`;
+        UI.showModal('Action Plan History', html, [{ label: 'Close', type: 'primary', action: 'UI.hideModal()' }]);
+    };
+
+    const initActionPlanReminder = () => {
+        setInterval(async () => {
+            const now = new Date();
+            if (now.getDay() === 1) { // Monday
+                const todayStr = now.toISOString().slice(0,10);
+                try {
+                    const allUsers = await AppDataStore.getAll('users');
+                    const agentRoles = ['consultant', 'agent', 'team_leader', 'Level 3', 'Level 4', 'Level 5', 'Level 6'];
+                    for (const user of allUsers) {
+                        if (!agentRoles.some(r => (user.role || '').includes(r))) continue;
+                        const planList = await AppDataStore.query('action_plans', { user_id: user.id, status: 'active' });
+                        const plan = planList[0];
+                        if (!plan) continue;
+                        const existing = await AppDataStore.query('action_plan_checks', { plan_id: plan.id, check_date: todayStr, reminder_sent: true });
+                        if (existing.length === 0) {
+                            await AppDataStore.create('action_plan_checks', {
+                                id: Date.now(),
+                                plan_id: plan.id,
+                                check_date: todayStr,
+                                reminder_sent: true,
+                                created_at: new Date().toISOString()
+                            });
+                        }
+                    }
+                } catch(e) { /* silent — offline or no data */ }
+            }
+        }, 60 * 60 * 1000); // check every hour
+    };
+
+    // ===== END ACTION PLAN FUNCTIONS =====
 
     const addToFocusList = async (prospectId) => {
         const userId = _currentUser?.id || 5;
@@ -22564,6 +22914,15 @@ const initImportDemoData = async () => {
         validateDataFlow,
         resetDemoData,
         confirmResetDemoData,
+
+        // Action Plan
+        openActionPlanModal,
+        addPlanItemRow,
+        saveActionPlan,
+        updatePlanCheck,
+        sendPlanReminder,
+        showActionPlanHistory,
+        initActionPlanReminder,
 
     };
 
