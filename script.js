@@ -5488,8 +5488,8 @@ In a production system, this would show the actual file contents.
 
         // Map Level 1-12 to visible nav IDs (suffix after 'nav-')
         const levelPermissions = {
-            1: ['calendar', 'pipeline', 'protection', 'agents', 'prospects', 'referrals', 'cases', 'documents', 'import', 'promotions', 'marketing-lists', 'performance', 'reports', 'risk', 'ai-insights', 'security', 'admin', 'integrations', 'settings'],
-            2: ['calendar', 'pipeline', 'protection', 'agents', 'prospects', 'referrals', 'cases', 'documents', 'import', 'promotions', 'marketing-lists', 'performance', 'reports', 'risk', 'ai-insights', 'security', 'admin', 'integrations', 'settings'],
+            1: ['calendar', 'pipeline', 'protection', 'agents', 'prospects', 'referrals', 'cases', 'documents', 'import', 'promotions', 'marketing-lists', 'performance', 'reports', 'risk', 'ai-insights', 'security', 'admin', 'integrations', 'settings', 'fude', 'milestones'],
+            2: ['calendar', 'pipeline', 'protection', 'agents', 'prospects', 'referrals', 'cases', 'documents', 'import', 'promotions', 'marketing-lists', 'performance', 'reports', 'risk', 'ai-insights', 'security', 'admin', 'integrations', 'settings', 'fude', 'milestones'],
             3: ['calendar', 'pipeline', 'protection', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'reports', 'risk', 'settings'],
             4: ['calendar', 'pipeline', 'protection', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'reports', 'risk', 'settings'],
             5: ['calendar', 'pipeline', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'settings'],
@@ -5885,12 +5885,28 @@ function _wireLoginBtn() {
         await safeInsert('activities', a);
     }
 
-    // ----- 4. Demo users: Level 13 Customer & Level 14 Referrer -----
+    // ----- 4. Demo customers record for customer1 -----
+    await safeInsert('customers', {
+        id: 9001, full_name: 'Lim Ah Kow', phone: '012-5551234',
+        email: 'limahkow@demo.com', status: 'active',
+        created_at: new Date().toISOString()
+    });
+
+    // ----- 5. Demo users: Level 13 Customer & Level 14 Referrer -----
+    // customer1 is linked to customers record 9001 via customer_id
     const demoLevel1314 = [
-        { id: 101, username: 'customer1', password: 'cust123', full_name: 'Lim Ah Kow (Customer)', role: 'Level 13 Customer', status: 'active' },
+        { id: 101, username: 'customer1', password: 'cust123', full_name: 'Lim Ah Kow (Customer)', role: 'Level 13 Customer', status: 'active', customer_id: 9001 },
         { id: 102, username: 'referrer1', password: 'ref123',  full_name: 'Tan Mei Mei (Referrer)', role: 'Level 14 Referrer', status: 'active' }
     ];
     for (const u of demoLevel1314) { await safeInsert('users', u); }
+
+    // ----- 6. Demo purchases for customer1 -----
+    const demoPurchases = [
+        { id: 90001, customer_id: 9001, product_name: 'CPS Consultation Package', amount: 888.00, status: 'completed', purchase_date: '2026-02-10', created_at: new Date().toISOString() },
+        { id: 90002, customer_id: 9001, product_name: '九运课 Masterclass', amount: 1280.00, status: 'completed', purchase_date: '2026-03-05', created_at: new Date().toISOString() },
+        { id: 90003, customer_id: 9001, product_name: 'Advance Class Module 1', amount: 2200.00, status: 'pending',   purchase_date: '2026-04-01', created_at: new Date().toISOString() }
+    ];
+    for (const p of demoPurchases) { await safeInsert('purchases', p); }
 
     // ----- 5. News highlights (for 福德 tab) -----
     const demoNews = [
@@ -20693,8 +20709,21 @@ const initImportDemoData = async () => {
         const currentUser = _currentUser;
         if (!currentUser) return;
 
+        // Determine if the current user is an admin (L1 or L2)
+        const userLevel = (() => {
+            if (!currentUser.role) return 12;
+            const m = currentUser.role.match(/Level\s+(\d+)/i);
+            return m ? parseInt(m[1]) : 12;
+        })();
+        const isAdmin = userLevel <= 2;
+
         let highlights = [], myRewards = [], myPurchases = [];
-        try { highlights = await AppDataStore.query('news_highlights', { is_active: true }); } catch(e) {}
+        // Admins see all highlights (including inactive); others see only active
+        try {
+            highlights = isAdmin
+                ? await AppDataStore.getAll('news_highlights')
+                : await AppDataStore.query('news_highlights', { is_active: true });
+        } catch(e) {}
         try { myRewards = await AppDataStore.query('recommendation_rewards', { user_id: currentUser.id }); } catch(e) {}
 
         // Level 13 (Customer): load purchase history via customer_id link
@@ -20749,9 +20778,41 @@ const initImportDemoData = async () => {
                 </div>`;
         }
 
+        // Admin management table (all highlights + inactive)
+        const adminSection = isAdmin ? `
+            <div class="fude-section">
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
+                    <h2 style="margin:0;">⚙️ Manage Highlights &amp; Stories</h2>
+                    <button class="btn primary btn-sm" onclick="app.openHighlightModal()">
+                        <i class="fas fa-plus"></i> Add New
+                    </button>
+                </div>
+                <div style="overflow-x:auto;">
+                    <table class="data-table">
+                        <thead><tr>
+                            <th>Title</th><th>Type</th><th>Status</th><th>Created</th><th>Actions</th>
+                        </tr></thead>
+                        <tbody>
+                            ${highlights.length ? highlights.map(h => `<tr>
+                                <td style="max-width:240px; overflow:hidden; text-overflow:ellipsis;">${h.title}</td>
+                                <td><span style="padding:2px 8px; border-radius:12px; font-size:0.78rem; background:#e0e7ff; color:#3730a3;">${h.type || '-'}</span></td>
+                                <td><span style="padding:2px 8px; border-radius:12px; font-size:0.78rem; background:${h.is_active ? '#d1fae5' : '#f3f4f6'}; color:${h.is_active ? '#065f46' : '#6b7280'};">${h.is_active ? 'Active' : 'Hidden'}</span></td>
+                                <td>${fmtDate(h.created_at)}</td>
+                                <td style="white-space:nowrap;">
+                                    <button class="btn secondary btn-sm" onclick="event.stopPropagation(); app.openHighlightModal(${h.id})"><i class="fas fa-edit"></i></button>
+                                    <button class="btn danger btn-sm" style="margin-left:4px;" onclick="event.stopPropagation(); app.deleteHighlight(${h.id})"><i class="fas fa-trash"></i></button>
+                                </td>
+                            </tr>`).join('') : '<tr><td colspan="5" style="text-align:center; color:var(--gray-400);">No highlights yet.</td></tr>'}
+                        </tbody>
+                    </table>
+                </div>
+            </div>` : '';
+
         container.innerHTML = `
             <div class="fude-tab">
                 <h1 style="font-size:1.8rem; color:var(--primary,#8B0000); margin-bottom:24px;">福德</h1>
+
+                ${adminSection}
 
                 <div class="fude-section">
                     <h2>📰 Highlights &amp; News</h2>
@@ -20786,6 +20847,86 @@ const initImportDemoData = async () => {
                 </div>
             </div>
         `;
+    };
+
+    // ========== LEVEL 13/14: Highlight CRUD (Admin only) ==========
+    const openHighlightModal = async (highlightId = null) => {
+        const h = highlightId ? await AppDataStore.getById('news_highlights', highlightId) : null;
+        const isEdit = !!h;
+
+        const content = `
+            <div class="form-section">
+                <input type="hidden" id="edit-highlight-id" value="${highlightId || ''}">
+                <div class="form-group">
+                    <label>Title <span class="required">*</span></label>
+                    <input type="text" id="highlight-title" class="form-control" value="${h?.title || ''}" placeholder="Enter title">
+                </div>
+                <div class="form-group">
+                    <label>Content</label>
+                    <textarea id="highlight-content" class="form-control" rows="4" placeholder="Enter content...">${h?.content || ''}</textarea>
+                </div>
+                <div class="form-group">
+                    <label>Type</label>
+                    <select id="highlight-type" class="form-control">
+                        <option value="highlight" ${(!h || h.type === 'highlight') ? 'selected' : ''}>Highlight / News</option>
+                        <option value="success_story" ${h?.type === 'success_story' ? 'selected' : ''}>Success Story</option>
+                        <option value="recommendation_tip" ${h?.type === 'recommendation_tip' ? 'selected' : ''}>Recommendation Tip</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                        <input type="checkbox" id="highlight-active" ${!h || h.is_active ? 'checked' : ''}>
+                        Show publicly (active)
+                    </label>
+                </div>
+            </div>
+        `;
+
+        UI.showModal(isEdit ? 'Edit Highlight' : 'Add New Highlight', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: isEdit ? 'Save Changes' : 'Add Highlight', type: 'primary', action: '(async () => { await app.saveHighlight(); })()' }
+        ]);
+    };
+
+    const saveHighlight = async () => {
+        const id    = document.getElementById('edit-highlight-id')?.value;
+        const title = document.getElementById('highlight-title')?.value?.trim();
+        if (!title) { UI.toast.error('Title is required.'); return; }
+
+        const payload = {
+            title,
+            content:   document.getElementById('highlight-content')?.value || '',
+            type:      document.getElementById('highlight-type')?.value || 'highlight',
+            is_active: document.getElementById('highlight-active')?.checked ?? true,
+            author_id: _currentUser?.id || null
+        };
+
+        try {
+            if (id) {
+                await AppDataStore.update('news_highlights', parseInt(id), payload);
+                UI.toast.success('Highlight updated.');
+            } else {
+                await AppDataStore.create('news_highlights', { id: Date.now(), ...payload, created_at: new Date().toISOString() });
+                UI.toast.success('Highlight added.');
+            }
+            UI.hideModal();
+            const viewport = document.getElementById('content-viewport');
+            if (viewport) await showFudeView(viewport);
+        } catch(err) {
+            UI.toast.error('Save failed: ' + (err.message || 'Unknown error'));
+        }
+    };
+
+    const deleteHighlight = async (highlightId) => {
+        if (!confirm('Delete this highlight? This cannot be undone.')) return;
+        try {
+            await AppDataStore.delete('news_highlights', highlightId);
+            UI.toast.success('Highlight deleted.');
+            const viewport = document.getElementById('content-viewport');
+            if (viewport) await showFudeView(viewport);
+        } catch(err) {
+            UI.toast.error('Delete failed: ' + (err.message || 'Unknown error'));
+        }
     };
 
     return {
@@ -21473,6 +21614,9 @@ const initImportDemoData = async () => {
         showMilestonesView,
         showFudeView,
         markMilestoneCompleted,
+        openHighlightModal,
+        saveHighlight,
+        deleteHighlight,
 
         // Auth exports
         login,
