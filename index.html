@@ -257,6 +257,8 @@
                         } else {
                             console.warn('App not ready yet');
                         }
+                        // Close mobile nav after selection
+                        document.getElementById('nav-links')?.classList.remove('show');
                     });
                 }
             });

@@ -1640,6 +1640,21 @@ body {
     color: #4b5563;
 }
 
+.status-draft {
+    background: #fef9c3;
+    color: #854d0e;
+}
+
+.status-ended {
+    background: #e5e7eb;
+    color: #374151;
+}
+
+.status-archived {
+    background: #f3e8ff;
+    color: #6b21a8;
+}
+
 .followup-rate {
     display: flex;
     align-items: center;
