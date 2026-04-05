@@ -2440,6 +2440,10 @@ In a production system, this would show the actual file contents.
     const openVoiceRecorder = async (targetElementId, entityType, entityId) => {
         window._voiceTarget = { elementId: targetElementId, entityType, entityId };
 
+        // Save current modal HTML so we can restore it when voice recorder closes
+        const overlay = document.getElementById('global-modal-overlay');
+        window._prevModalState = (overlay && overlay.classList.contains('active')) ? overlay.innerHTML : null;
+
         const modalContent = `
             <div class="voice-recorder">
                 <div class="mic-container">
@@ -2489,8 +2493,12 @@ In a production system, this would show the actual file contents.
         `;
 
         UI.showModal('🎤 Voice Recording', modalContent, [
-            { label: 'Close', type: 'secondary', action: 'app.discardRecording()' }
+            { label: 'Close', type: 'secondary', action: 'app.closeVoiceRecorder()' }
         ]);
+
+        // Override × button to restore previous modal instead of closing entirely
+        const closeBtn = document.querySelector('#global-modal-overlay .modal-close');
+        if (closeBtn) closeBtn.setAttribute('onclick', 'app.closeVoiceRecorder()');
     };
 
     const startRecording = async () => {
@@ -2610,7 +2618,7 @@ In a production system, this would show the actual file contents.
             // Directly insert into the target field
             const currentVal = targetEl.value;
             targetEl.value = currentVal ? currentVal + '\n' + transcribedText : transcribedText;
-            UI.hideModal();
+            closeVoiceRecorder();
             UI.toast.success('Voice text inserted');
         } else {
             // Create a note record
@@ -2660,7 +2668,18 @@ In a production system, this would show the actual file contents.
         if (_recordingStream) { _recordingStream.getTracks().forEach(t => t.stop()); _recordingStream = null; }
         clearInterval(_recordingTimer); _recordingTimer = null;
         clearInterval(window._waveformInterval); window._waveformInterval = null;
-        UI.hideModal();
+        closeVoiceRecorder();
+    };
+
+    const closeVoiceRecorder = () => {
+        const overlay = document.getElementById('global-modal-overlay');
+        if (overlay && window._prevModalState) {
+            overlay.innerHTML = window._prevModalState;
+            overlay.classList.add('active');
+            window._prevModalState = null;
+        } else {
+            UI.hideModal();
+        }
     };
 
     const deleteAudio = () => {
@@ -9825,6 +9844,12 @@ function _wireLoginBtn() {
                             <textarea id="unable-reason" class="form-control" rows="2" placeholder="Why unable to serve..."></textarea>
                         </div>
                     </div>
+
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="continue-follow-up"> Continue Follow Up
+                        </label>
+                    </div>
                 </div>
 
                 <div class="form-section">
@@ -10942,6 +10967,10 @@ function _wireLoginBtn() {
         if (document.getElementById('unable-to-serve')?.checked) {
             activity.unable_to_serve = true;
             activity.unable_reason = document.getElementById('unable-reason')?.value;
+        }
+
+        if (document.getElementById('continue-follow-up')?.checked) {
+            activity.continue_follow_up = true;
         }
 
         activity.summary = document.getElementById('note-key-points')?.value || '';
@@ -21873,6 +21902,7 @@ const initImportDemoData = async () => {
         createNoteFromVoice,
         editTranscription,
         discardRecording,
+        closeVoiceRecorder,
         deleteAudio,
         openVoiceSettings,
         saveVoiceSettings,
