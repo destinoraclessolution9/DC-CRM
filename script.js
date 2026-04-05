@@ -10969,6 +10969,28 @@ function _wireLoginBtn() {
             await executeWorkflows('activity_completed', { name: entityName, activityType: activity.activity_type });
         } catch (e) { console.warn('Workflow trigger failed:', e); }
 
+        // === Auto Milestone: Mark milestone based on activity type / title ===
+        try {
+            if (_currentUser) {
+                const aType = activity.activity_type || '';
+                const aTitle = (activity.activity_title || '').toLowerCase();
+                const milestoneMap = [
+                    { key: 'CPS',           test: () => aType === 'CPS' },
+                    { key: '9 Stars',       test: () => aTitle.includes('9 star') || aTitle.includes('nine star') },
+                    { key: 'DIY',           test: () => aTitle.includes('diy') },
+                    { key: '福气课',         test: () => aTitle.includes('福气') || aTitle.includes('fudi') || aTitle.includes('fu qi') },
+                    { key: '九运课',         test: () => aTitle.includes('九运') || aTitle.includes('jiuyun') || aTitle.includes('jiu yun') },
+                    { key: 'Museum',        test: () => aTitle.includes('museum') },
+                    { key: 'HuiJi',         test: () => aTitle.includes('huiji') || aTitle.includes('hui ji') },
+                    { key: 'Advance Class', test: () => aTitle.includes('advance') },
+                    { key: 'Sharing',       test: () => aTitle.includes('sharing') || aType === 'Sharing' }
+                ];
+                for (const m of milestoneMap) {
+                    if (m.test()) await markMilestoneCompleted(_currentUser.id, m.key);
+                }
+            }
+        } catch (e) { console.warn('Milestone auto-mark failed:', e); }
+
         await renderCalendar();
         await renderTodayActivities();
 
@@ -20649,20 +20671,27 @@ const initImportDemoData = async () => {
         const currentUser = _currentUser;
         if (!currentUser) return;
 
-        let highlights = [], myRewards = [];
+        let highlights = [], myRewards = [], myPurchases = [];
         try { highlights = await AppDataStore.query('news_highlights', { is_active: true }); } catch(e) {}
         try { myRewards = await AppDataStore.query('recommendation_rewards', { user_id: currentUser.id }); } catch(e) {}
 
-        const publicNews    = highlights.filter(h => h.type === 'highlight');
+        // Level 13 (Customer): load purchase history via customer_id link
+        const isCustomer = currentUser.role && currentUser.role.match(/Level\s*13/i);
+        if (isCustomer && currentUser.customer_id) {
+            try { myPurchases = await AppDataStore.query('purchases', { customer_id: currentUser.customer_id }); } catch(e) {}
+        }
+
+        const publicNews     = highlights.filter(h => h.type === 'highlight');
         const successStories = highlights.filter(h => h.type === 'success_story');
 
-        const fmtDate = d => { try { return new Date(d).toLocaleDateString(); } catch(e) { return d; } };
+        const fmtDate = d => { try { return new Date(d).toLocaleDateString(); } catch(e) { return d || '-'; } };
+        const fmtAmt  = v => { try { return 'RM ' + parseFloat(v || 0).toLocaleString('en-MY', { minimumFractionDigits: 2 }); } catch(e) { return v; } };
 
         let rewardsHtml = '';
         if (myRewards.length === 0) {
             rewardsHtml = '<p style="color:var(--gray-500,#6b7280); padding:12px 0;">No recommendations or rewards yet.</p>';
         } else {
-            rewardsHtml = `<table class="data-table"><thead><tr>
+            rewardsHtml = `<div style="overflow-x:auto;"><table class="data-table"><thead><tr>
                 <th>Action</th><th>福气 Points</th><th>Sharing Return (RM)</th><th>Date</th>
             </tr></thead><tbody>
                 ${myRewards.map(r => `<tr>
@@ -20671,7 +20700,31 @@ const initImportDemoData = async () => {
                     <td>${parseFloat(r.sharing_return || 0).toFixed(2)}</td>
                     <td>${fmtDate(r.created_at)}</td>
                 </tr>`).join('')}
-            </tbody></table>`;
+            </tbody></table></div>`;
+        }
+
+        let purchasesSection = '';
+        if (isCustomer) {
+            let purchasesHtml = '';
+            if (myPurchases.length === 0) {
+                purchasesHtml = '<p style="color:var(--gray-500,#6b7280); padding:12px 0;">No purchases found.</p>';
+            } else {
+                purchasesHtml = `<div style="overflow-x:auto;"><table class="data-table"><thead><tr>
+                    <th>Product / Package</th><th>Amount</th><th>Status</th><th>Date</th>
+                </tr></thead><tbody>
+                    ${myPurchases.map(p => `<tr>
+                        <td>${p.product_name || p.package_name || p.solution || '-'}</td>
+                        <td>${fmtAmt(p.amount || p.total_amount)}</td>
+                        <td><span style="padding:2px 8px; border-radius:12px; font-size:0.8rem; background:${p.status === 'completed' ? '#d1fae5' : '#fef3c7'}; color:${p.status === 'completed' ? '#065f46' : '#92400e'};">${p.status || 'pending'}</span></td>
+                        <td>${fmtDate(p.purchase_date || p.created_at)}</td>
+                    </tr>`).join('')}
+                </tbody></table></div>`;
+            }
+            purchasesSection = `
+                <div class="fude-section">
+                    <h2>🛍️ My Purchase History</h2>
+                    ${purchasesHtml}
+                </div>`;
         }
 
         container.innerHTML = `
@@ -20702,6 +20755,8 @@ const initImportDemoData = async () => {
                         `).join('') : '<p style="color:var(--gray-500,#6b7280);">No success stories yet.</p>'}
                     </div>
                 </div>
+
+                ${purchasesSection}
 
                 <div class="fude-section">
                     <h2>💎 My Recommendations &amp; Returns</h2>
