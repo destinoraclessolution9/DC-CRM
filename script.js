@@ -9913,7 +9913,7 @@ function _wireLoginBtn() {
             }, 300); // Increased timeout to ensure DOM is ready
         }
 
-        // If prospectId is provided, pre-select it
+        // If prospectId is provided, pre-select it and pre-fill CPS fields
         if (prospectId) {
             setTimeout(async () => {
                 const prospect = await AppDataStore.getById('prospects', prospectId);
@@ -9928,6 +9928,38 @@ function _wireLoginBtn() {
                             </div>
                         `;
                     }
+                    // Pre-fill CPS fields when activity type is CPS (default)
+                    let attempts = 0;
+                    const cpsInterval = setInterval(() => {
+                        const cpsName = document.getElementById('cps-name');
+                        if (cpsName) {
+                            const setF = (id, val) => { const el = document.getElementById(id); if (el) el.value = val || ''; };
+                            setF('cps-name', prospect.full_name);
+                            setF('cps-nickname', prospect.nickname);
+                            setF('cps-phone', prospect.phone);
+                            setF('cps-ic', prospect.ic_number);
+                            setF('cps-email', prospect.email);
+                            setF('cps-dob', prospect.date_of_birth);
+                            if (prospect.date_of_birth) {
+                                const dobChk = document.getElementById('has-dob');
+                                if (dobChk) dobChk.checked = true;
+                            }
+                            setF('cps-lunar', prospect.lunar_birth);
+                            setF('cps-gua', prospect.ming_gua);
+                            setF('cps-occupation', prospect.occupation);
+                            setF('cps-company', prospect.company_name);
+                            setF('cps-income', prospect.income_range);
+                            setF('cps-address', prospect.address);
+                            setF('cps-city', prospect.city);
+                            setF('cps-state', prospect.state);
+                            setF('cps-zip', prospect.postal_code);
+                            setF('cps-referrer', prospect.referred_by);
+                            setF('cps-relation', prospect.referral_relationship);
+                            clearInterval(cpsInterval);
+                        } else if (++attempts >= 30) {
+                            clearInterval(cpsInterval);
+                        }
+                    }, 100);
                 }
             }, 200);
         }
