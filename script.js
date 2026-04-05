@@ -758,7 +758,7 @@ const appLogic = (() => {
             <div class="filter-row">
                 <div class="filter-group">
                     <label>Activity Type</label>
-                    <select id="filter-activity-type" class="form-control">
+                    <select id="filter-activity-type" class="form-control" onchange="document.getElementById('event-attendance-row').style.display = this.value === 'EVENT' ? '' : 'none'">
                         <option value="">All Types</option>
                         <option value="CPS">CPS</option>
                         <option value="FTF">FTF</option>
@@ -788,6 +788,17 @@ const appLogic = (() => {
                         <option value="scheduled">Scheduled</option>
                         <option value="completed">Completed</option>
                         <option value="cancelled">Cancelled</option>
+                    </select>
+                </div>
+            </div>
+            <div class="filter-row" id="event-attendance-row" style="display:none;">
+                <div class="filter-group">
+                    <label>Attendance</label>
+                    <select id="filter-activity-attendance" class="form-control">
+                        <option value="">All</option>
+                        <option value="Attended">Attended</option>
+                        <option value="No Show">No Show</option>
+                        <option value="Registered">Registered only</option>
                     </select>
                 </div>
             </div>
@@ -1194,8 +1205,18 @@ const appLogic = (() => {
     const performActivitySearch = async (filters) => {
         let items = await AppDataStore.getAll('activities');
 
-        if (filters.basic.type) {
-            items = items.filter(i => i.activity_type === filters.basic.type);
+        const type = filters.basic['filter-activity-type'] || filters.basic.type;
+        if (type) {
+            items = items.filter(i => i.activity_type === type);
+        }
+
+        const attendance = filters.basic['filter-activity-attendance'];
+        if (attendance) {
+            const allAttendees = await AppDataStore.getAll('event_attendees');
+            items = items.filter(i => {
+                if (i.activity_type !== 'EVENT' || !i.event_id) return false;
+                return allAttendees.some(a => a.event_id === i.event_id && a.attendance_status === attendance);
+            });
         }
 
         return applyComplexConditions(items, filters.complex);
