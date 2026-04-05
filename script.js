@@ -17337,79 +17337,157 @@ const exportKPIReport = async (format) => {
     };
 
     // ========== PROMOTION PACKAGES TAB ==========
+
+    // Helper: compute a package's status label + css class based on dates
+    const _getPackageStatus = (p) => {
+        const today = new Date(); today.setHours(0,0,0,0);
+        if (p.end_date) {
+            const end = new Date(p.end_date); end.setHours(0,0,0,0);
+            if (end < today) return { label: 'Expired', cls: 'status-inactive', style: 'background:#fed7d7;color:#c53030;' };
+        }
+        if (p.start_date) {
+            const start = new Date(p.start_date); start.setHours(0,0,0,0);
+            if (start > today) return { label: 'Upcoming', cls: 'status-badge', style: 'background:#bee3f8;color:#2b6cb0;' };
+        }
+        return p.is_active
+            ? { label: 'Active',   cls: 'status-active',   style: '' }
+            : { label: 'Inactive', cls: 'status-inactive', style: '' };
+    };
+
     const renderPackagesTab = async () => {
         const packages = await AppDataStore.getAll('promotions');
+        const today = new Date(); today.setHours(0,0,0,0);
+
+        const isExpired = p => p.end_date && (() => { const e = new Date(p.end_date); e.setHours(0,0,0,0); return e < today; })();
+
+        const activeList   = packages.filter(p => !isExpired(p)).sort((a,b) => new Date(b.created_at||0) - new Date(a.created_at||0));
+        const expiredList  = packages.filter(p =>  isExpired(p)).sort((a,b) => new Date(b.end_date||0)   - new Date(a.end_date||0));
+
+        const activeRows  = (await Promise.all(activeList.map(p  => renderPackageRow(p, false)))).join('');
+        const expiredRows = (await Promise.all(expiredList.map(p => renderPackageRow(p, true)))).join('');
+
+        const divider = expiredList.length > 0 ? `
+            <tr>
+                <td colspan="9" style="padding:7px 14px;background:#f7f7f7;color:#999;font-size:11px;text-align:center;letter-spacing:1.5px;font-weight:700;border-bottom:1px solid var(--gray-200);">
+                    ── EXPIRED PROMOTIONS ──
+                </td>
+            </tr>` : '';
+
         return `
-            <div class="packages-layout" style="padding: 24px;">
-                <div class="packages-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <style>
+                .pkg-th { padding:11px 14px; font-size:12px; font-weight:700; white-space:nowrap; color:#fff; background:#8B1A1A; border-right:1px solid rgba(255,255,255,0.15); }
+                .pkg-th:last-child { border-right:none; }
+                .pkg-td { padding:11px 14px; border-bottom:1px solid var(--gray-200); font-size:13px; vertical-align:middle; }
+            </style>
+            <div class="packages-layout" style="padding:24px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:18px;">
                     <div>
-                        <h3>Promotion Packages</h3>
-                        <p class="text-muted">Manage bundled offers and track customer purchases</p>
+                        <h3 style="margin:0 0 4px;">Promotion Packages</h3>
+                        <p class="text-muted" style="margin:0;">Manage bundled offers and track customer purchases</p>
                     </div>
-                    <button class="btn primary" onclick="app.openCreatePackageModal()">+ New Package</button>
+                    <button class="btn primary" onclick="app.openCreatePackageModal()"><i class="fas fa-plus"></i> New Package</button>
                 </div>
 
-                <div class="packages-filters" style="display: flex; gap: 15px; margin-bottom: 20px;">
-                    <div class="search-box" style="position: relative; flex: 1;">
-                        <i class="fas fa-search" style="position: absolute; left: 12px; top: 50%; transform: await translateY(-50%); color: var(--gray-400);"></i>
-                        <input type="text" id="package-search" class="form-control" placeholder="Search by package name or product..." style="padding-left: 35px;" onkeyup="app.filterPackages()">
+                <div style="display:flex; gap:12px; margin-bottom:18px; flex-wrap:wrap;">
+                    <div style="position:relative; flex:1; min-width:200px;">
+                        <i class="fas fa-search" style="position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--gray-400);font-size:13px;"></i>
+                        <input type="text" id="package-search" class="form-control" placeholder="Search by package name or product…" style="padding-left:34px;" onkeyup="app.filterPackages()">
                     </div>
-                    <select id="package-status-filter" class="form-control" style="width: 150px;" onchange="app.filterPackages()">
+                    <select id="package-status-filter" class="form-control" style="width:160px;" onchange="app.filterPackages()">
                         <option value="all">All Status</option>
                         <option value="active">Active</option>
+                        <option value="upcoming">Upcoming</option>
                         <option value="inactive">Inactive</option>
+                        <option value="expired">Expired</option>
                     </select>
                 </div>
 
-                <table class="data-table" style="width: 100%; border-collapse: collapse;">
-                    <thead>
-                        <tr style="background: var(--gray-100); text-align: left;">
-                            <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Package Name</th>
-                            <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Product(s)</th>
-                            <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Price (RM)</th>
-                            <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Payment Types</th>
-                            <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Status</th>
-                            <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="packages-table-body">
-                        ${(await Promise.all(packages.map(p => renderPackageRow(p)))).join('')}
-                        ${packages.length === 0 ? '<tr><td colspan="6" style="padding: 40px; text-align: center; color: var(--gray-500);">No promotion packages found. Click "+ New Package" to create one.</td></tr>' : ''}
-                    </tbody>
-                </table>
+                <div style="overflow-x:auto; border-radius:6px; box-shadow:0 1px 4px rgba(0,0,0,0.08);">
+                    <table style="width:100%;border-collapse:collapse;min-width:880px;">
+                        <thead>
+                            <tr>
+                                <th class="pkg-th">Package Name</th>
+                                <th class="pkg-th">Product / Service</th>
+                                <th class="pkg-th">Amount (RM)</th>
+                                <th class="pkg-th">Discounted Value Worth</th>
+                                <th class="pkg-th">Requirement</th>
+                                <th class="pkg-th" style="text-align:center;">Limited To (Sets)</th>
+                                <th class="pkg-th">Time Frame</th>
+                                <th class="pkg-th">Status</th>
+                                <th class="pkg-th">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="packages-table-body">
+                            ${packages.length === 0
+                                ? '<tr><td colspan="9" style="padding:40px;text-align:center;color:var(--gray-500);">No promotion packages found. Click "+ New Package" to create one.</td></tr>'
+                                : activeRows + divider + expiredRows}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         `;
     };
 
-    const renderPackageRow = async (p) => {
+    const renderPackageRow = async (p, isExpiredGroup = false) => {
         const productNamesList = await Promise.all((p.product_ids || []).map(async id => {
             const prod = await AppDataStore.getById('products', id);
             return prod ? prod.name : 'Unknown Product';
         }));
-        const productNames = productNamesList.join(', ');
+        const productNames     = productNamesList.join(', ');
+        const shortProducts    = productNames.length > 38 ? productNames.substring(0, 35) + '…' : productNames;
 
-        const abbreviatedProducts = productNames.length > 50 ? productNames.substring(0, 47) + '...' : productNames;
+        // Status
+        const st = _getPackageStatus(p);
+
+        // Time Frame
+        let timeFrame = '<span style="color:#aaa;">Ongoing</span>';
+        if (p.start_date || p.end_date) {
+            const s = p.start_date ? UI.formatDate(p.start_date) : '—';
+            const e = p.end_date   ? UI.formatDate(p.end_date)   : 'No End';
+            timeFrame = `<span style="white-space:nowrap;">${s} – ${e}</span>`;
+        }
+
+        // Discounted Value Worth
+        let discountHtml = '<span style="color:#aaa;">—</span>';
+        if (p.original_value) {
+            if (p.original_value > (p.price || 0)) {
+                const savePct = Math.round(((p.original_value - p.price) / p.original_value) * 100);
+                discountHtml = `
+                    <span style="color:#888;text-decoration:line-through;font-size:11px;">RM ${UI.formatNumber(p.original_value)}</span><br>
+                    <span style="color:#c53030;font-weight:700;font-size:11px;">Save ${savePct}%</span>`;
+            } else {
+                discountHtml = `<span style="font-size:12px;">RM ${UI.formatNumber(p.original_value)}</span>`;
+            }
+        }
+
+        // Limited Sets
+        const limitedSets = p.limited_slots
+            ? `<strong>${p.limited_slots}</strong> <span style="color:#aaa;font-size:11px;">sets</span>`
+            : '<span style="color:#aaa;">—</span>';
+
+        const rowStyle = isExpiredGroup || st.label === 'Expired'
+            ? 'opacity:0.62;background:#fafafa;'
+            : '';
 
         return `
-            <tr>
-                <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">
-                    <a href="javascript:async void(0)" onclick="app.viewPackageCustomers(${p.id})"><strong>${p.package_name || p.name}</strong></a>
+            <tr style="${rowStyle}" onmouseover="if(!this.style.opacity||this.style.opacity==1)this.style.background='#fdf8f8'" onmouseout="if(!this.style.opacity||this.style.opacity==1)this.style.background=''">
+                <td class="pkg-td">
+                    <a href="javascript:void(0)" onclick="app.viewPackageCustomers(${p.id})" style="font-weight:600;color:#8B1A1A;">${p.package_name || p.name || '—'}</a>
                 </td>
-                <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);" title="${productNames}">${abbreviatedProducts}</td>
-                <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">RM ${UI.formatNumber(p.price)}</td>
-                <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">
-                    <div style="display: flex; gap: 4px; flex-wrap: wrap;">
-                        ${(p.payment_types || []).map(t => `<span class="badge badge-gray" style="font-size: 10px;">${t}</span>`).join('')}
-                    </div>
+                <td class="pkg-td" title="${productNames}" style="color:#555;">${shortProducts || '—'}</td>
+                <td class="pkg-td" style="font-weight:700;">RM ${UI.formatNumber(p.price || 0)}</td>
+                <td class="pkg-td">${discountHtml}</td>
+                <td class="pkg-td" style="font-size:12px;color:#555;max-width:140px;">${p.requirement || '<span style="color:#aaa;">—</span>'}</td>
+                <td class="pkg-td" style="text-align:center;">${limitedSets}</td>
+                <td class="pkg-td" style="font-size:12px;">${timeFrame}</td>
+                <td class="pkg-td">
+                    <span class="status-badge ${st.cls}" style="${st.style}">${st.label}</span>
                 </td>
-                <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">
-                    <span class="status-badge ${p.is_active ? 'status-active' : 'status-inactive'}">${p.is_active ? 'Active' : 'Inactive'}</span>
-                </td>
-                <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">
+                <td class="pkg-td">
                     <div class="table-actions">
-                        <button class="btn-icon" onclick="app.openCreatePackageModal(${p.id})" title="Edit"><i class="fas fa-edit"></i></button>
-                        <button class="btn-icon" onclick="app.viewPackageCustomers(${p.id})" title="View Customers"><i class="fas fa-users"></i></button>
-                        <button class="btn-icon text-danger" onclick="app.deletePackage(${p.id})" title="Delete"><i class="fas fa-trash"></i></button>
+                        <button class="btn-icon" onclick="event.stopPropagation();app.openCreatePackageModal(${p.id})" title="Edit"><i class="fas fa-edit"></i></button>
+                        <button class="btn-icon" onclick="event.stopPropagation();app.viewPackageCustomers(${p.id})" title="View Customers"><i class="fas fa-users"></i></button>
+                        <button class="btn-icon text-danger" onclick="event.stopPropagation();app.deletePackage(${p.id})" title="Delete"><i class="fas fa-trash"></i></button>
                     </div>
                 </td>
             </tr>
@@ -17417,26 +17495,43 @@ const exportKPIReport = async (format) => {
     };
 
     const filterPackages = async () => {
-        const search = document.getElementById('package-search')?.value.toLowerCase() || '';
-        const status = document.getElementById('package-status-filter')?.value || 'all';
+        const search       = document.getElementById('package-search')?.value.toLowerCase() || '';
+        const statusFilter = document.getElementById('package-status-filter')?.value || 'all';
+        const today        = new Date(); today.setHours(0,0,0,0);
 
         const packages = await AppDataStore.getAll('promotions');
+
+        const getStatusKey = (p) => {
+            if (p.end_date) { const e = new Date(p.end_date); e.setHours(0,0,0,0); if (e < today) return 'expired'; }
+            if (p.start_date) { const s = new Date(p.start_date); s.setHours(0,0,0,0); if (s > today) return 'upcoming'; }
+            return p.is_active ? 'active' : 'inactive';
+        };
+
         const filteredResults = await Promise.all(packages.map(async p => {
-            // Pre-fetch all products for this package to check search keyword
-            const products = await Promise.all((p.product_ids || []).map(id => AppDataStore.getById('products', id)));
+            const products      = await Promise.all((p.product_ids || []).map(id => AppDataStore.getById('products', id)));
             const matchesSearch = (p.package_name || p.name || '').toLowerCase().includes(search) ||
                 products.some(prod => prod && (prod.name || '').toLowerCase().includes(search));
-            const matchesStatus = status === 'all' || (status === 'active' ? p.is_active : !p.is_active);
+            const matchesStatus = statusFilter === 'all' || getStatusKey(p) === statusFilter;
             return matchesSearch && matchesStatus;
         }));
-        
+
         const filtered = packages.filter((_, i) => filteredResults[i]);
+
+        const isExpired = p => p.end_date && (() => { const e = new Date(p.end_date); e.setHours(0,0,0,0); return e < today; })();
+        const activeList  = filtered.filter(p => !isExpired(p)).sort((a,b) => new Date(b.created_at||0) - new Date(a.created_at||0));
+        const expiredList = filtered.filter(p =>  isExpired(p)).sort((a,b) => new Date(b.end_date||0)   - new Date(a.end_date||0));
+
+        const activeRows  = (await Promise.all(activeList.map(p  => renderPackageRow(p, false)))).join('');
+        const expiredRows = (await Promise.all(expiredList.map(p => renderPackageRow(p, true)))).join('');
+        const divider     = expiredList.length > 0
+            ? '<tr><td colspan="9" style="padding:7px 14px;background:#f7f7f7;color:#999;font-size:11px;text-align:center;letter-spacing:1.5px;font-weight:700;border-bottom:1px solid var(--gray-200);">── EXPIRED PROMOTIONS ──</td></tr>'
+            : '';
 
         const tbody = document.getElementById('packages-table-body');
         if (tbody) {
-            const rows = await Promise.all(filtered.map(p => renderPackageRow(p)));
-            tbody.innerHTML = rows.join('') +
-                (filtered.length === 0 ? '<tr><td colspan="6" style="padding: 40px; text-align: center; color: var(--gray-500);">No matching packages found.</td></tr>' : '');
+            tbody.innerHTML = filtered.length === 0
+                ? '<tr><td colspan="9" style="padding:40px;text-align:center;color:var(--gray-500);">No matching packages found.</td></tr>'
+                : activeRows + divider + expiredRows;
         }
     };
 
@@ -17446,8 +17541,12 @@ const exportKPIReport = async (format) => {
             package_name: '',
             product_ids: [],
             price: 0,
+            original_value: 0,
             payment_types: [],
             requirement: '',
+            limited_slots: '',
+            start_date: '',
+            end_date: '',
             remarks: '',
             is_active: true
         };
@@ -17458,46 +17557,73 @@ const exportKPIReport = async (format) => {
         const content = `
             <div class="form-group">
                 <label>Package Name <span class="required">*</span></label>
-                <input type="text" id="pkg-name" class="form-control" value="${pkg.package_name}" placeholder="e.g., Anniversary Special Bundle">
+                <input type="text" id="pkg-name" class="form-control" value="${pkg.package_name || ''}" placeholder="e.g., Anniversary Special Bundle">
             </div>
+
             <div class="form-group">
-                <label>Product(s) <span class="required">*</span></label>
-                <div class="multi-select-container" style="border: 1px solid var(--gray-300); border-radius: 4px; padding: 10px; max-height: 150px; overflow-y: auto;">
+                <label>Product / Service <span class="required">*</span></label>
+                <div class="multi-select-container" style="border:1px solid var(--gray-300);border-radius:4px;padding:10px;max-height:140px;overflow-y:auto;">
                     ${allProducts.map(p => `
-                        <label style="display: block; margin-bottom: 5px; cursor: pointer;">
-                            <input type="checkbox" name="pkg-products" value="${p.id}" ${pkg.product_ids.includes(p.id) ? 'checked' : ''}> ${p.name}
+                        <label style="display:block;margin-bottom:5px;cursor:pointer;font-size:13px;">
+                            <input type="checkbox" name="pkg-products" value="${p.id}" ${(pkg.product_ids||[]).includes(p.id) ? 'checked' : ''}> ${p.name}
                         </label>
                     `).join('')}
                     ${allProducts.length === 0 ? '<p class="text-muted">No active products found.</p>' : ''}
                 </div>
             </div>
+
             <div class="form-row">
                 <div class="form-group half">
-                    <label>Price (RM) <span class="required">*</span></label>
-                    <input type="number" id="pkg-price" class="form-control" value="${pkg.price}" step="0.01">
+                    <label>Amount / Price (RM) <span class="required">*</span></label>
+                    <input type="number" id="pkg-price" class="form-control" value="${pkg.price || 0}" step="0.01" placeholder="0.00">
+                </div>
+                <div class="form-group half">
+                    <label>Discounted Value Worth (RM) <span title="Original retail value before discount" style="cursor:help;color:var(--gray-400);">ⓘ</span></label>
+                    <input type="number" id="pkg-original-value" class="form-control" value="${pkg.original_value || ''}" step="0.01" placeholder="e.g. 1200.00">
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group half">
+                    <label>Start Date</label>
+                    <input type="date" id="pkg-start-date" class="form-control" value="${pkg.start_date ? pkg.start_date.substring(0,10) : ''}">
+                </div>
+                <div class="form-group half">
+                    <label>End Date <span title="Promotion auto-expires after this date" style="cursor:help;color:var(--gray-400);">ⓘ</span></label>
+                    <input type="date" id="pkg-end-date" class="form-control" value="${pkg.end_date ? pkg.end_date.substring(0,10) : ''}">
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group half">
+                    <label>Limited To (Sets)</label>
+                    <input type="number" id="pkg-limited-slots" class="form-control" value="${pkg.limited_slots || ''}" min="0" placeholder="e.g. 50">
                 </div>
                 <div class="form-group half">
                     <label>Payment Type(s)</label>
-                    <div class="multi-select-container" style="border: 1px solid var(--gray-300); border-radius: 4px; padding: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 5px;">
+                    <div class="multi-select-container" style="border:1px solid var(--gray-300);border-radius:4px;padding:10px;display:grid;grid-template-columns:1fr 1fr;gap:4px;">
                         ${paymentOptions.map(opt => `
-                            <label style="display: block; cursor: pointer; font-size: 13px;">
-                                <input type="checkbox" name="pkg-payments" value="${opt}" ${pkg.payment_types.includes(opt) ? 'checked' : ''}> ${opt}
+                            <label style="display:block;cursor:pointer;font-size:12px;">
+                                <input type="checkbox" name="pkg-payments" value="${opt}" ${(pkg.payment_types||[]).includes(opt) ? 'checked' : ''}> ${opt}
                             </label>
                         `).join('')}
                     </div>
                 </div>
             </div>
+
             <div class="form-group">
                 <label>Requirement</label>
                 <textarea id="pkg-requirement" class="form-control" rows="2" placeholder="e.g. Minimum 3 referrals required">${pkg.requirement || ''}</textarea>
             </div>
+
             <div class="form-group">
-                <label>Remarks</label>
-                <textarea id="pkg-remarks" class="form-control" rows="2" placeholder="Internal notes...">${pkg.remarks || ''}</textarea>
+                <label>Remarks (Internal Notes)</label>
+                <textarea id="pkg-remarks" class="form-control" rows="2" placeholder="Internal notes…">${pkg.remarks || ''}</textarea>
             </div>
+
             <div class="form-group">
-                <label style="display: flex; align-items: center; cursor: pointer;">
-                    <input type="checkbox" id="pkg-active" ${pkg.is_active ? 'checked' : ''} style="margin-right: 8px;"> Active Package
+                <label style="display:flex;align-items:center;cursor:pointer;">
+                    <input type="checkbox" id="pkg-active" ${pkg.is_active !== false ? 'checked' : ''} style="margin-right:8px;"> Mark as Active
                 </label>
             </div>
 `;
@@ -17509,29 +17635,41 @@ const exportKPIReport = async (format) => {
     };
 
     const savePackage = async (id) => {
-        const name = document.getElementById('pkg-name').value.trim();
-        const price = parseFloat(document.getElementById('pkg-price').value);
-        const productIds = Array.from(document.querySelectorAll('input[name="pkg-products"]:checked')).map(i => parseInt(i.value));
-        const payments = Array.from(document.querySelectorAll('input[name="pkg-payments"]:checked')).map(i => i.value);
-        const requirement = document.getElementById('pkg-requirement').value.trim();
-        const remarks = document.getElementById('pkg-remarks').value.trim();
-        const isActive = document.getElementById('pkg-active').checked;
+        const name          = document.getElementById('pkg-name').value.trim();
+        const price         = parseFloat(document.getElementById('pkg-price').value);
+        const originalVal   = parseFloat(document.getElementById('pkg-original-value').value) || null;
+        const limitedSlots  = parseInt(document.getElementById('pkg-limited-slots').value) || null;
+        const startDate     = document.getElementById('pkg-start-date').value || null;
+        const endDate       = document.getElementById('pkg-end-date').value || null;
+        const productIds    = Array.from(document.querySelectorAll('input[name="pkg-products"]:checked')).map(i => parseInt(i.value));
+        const payments      = Array.from(document.querySelectorAll('input[name="pkg-payments"]:checked')).map(i => i.value);
+        const requirement   = document.getElementById('pkg-requirement').value.trim();
+        const remarks       = document.getElementById('pkg-remarks').value.trim();
+        const isActive      = document.getElementById('pkg-active').checked;
 
         if (!name || isNaN(price) || productIds.length === 0) {
             UI.toast.error("Please fill in all required fields (Name, Price, and at least one Product)");
             return;
         }
+        if (startDate && endDate && endDate < startDate) {
+            UI.toast.error("End Date cannot be before Start Date");
+            return;
+        }
 
         const data = {
-            package_name: name,
-            name: name, // support both fields
-            product_ids: productIds,
-            price: price,
-            payment_types: payments,
-            requirement: requirement,
-            remarks: remarks,
-            is_active: isActive,
-            updated_at: new Date().toISOString()
+            package_name:   name,
+            name:           name,
+            product_ids:    productIds,
+            price:          price,
+            original_value: originalVal,
+            payment_types:  payments,
+            requirement:    requirement,
+            limited_slots:  limitedSlots,
+            start_date:     startDate,
+            end_date:       endDate,
+            remarks:        remarks,
+            is_active:      isActive,
+            updated_at:     new Date().toISOString()
         };
 
         if (id) {
