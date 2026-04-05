@@ -7642,10 +7642,14 @@ function _wireLoginBtn() {
         const isCps = _caseActiveTab === 'cps';
 
         const cpsFilterBar = `
-            <div class="filter-bar">
-                <div class="filter-group">
-                    <i class="fas fa-search"></i>
-                    <input type="text" id="case-search" placeholder="Search title or prospect/customer..." value="${_caseFilters.search}" onkeyup="app.handleCaseSearch(event)">
+            <div class="filter-bar" style="flex-direction: column; align-items: stretch; gap: 8px;">
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <button class="btn-icon" style="width:36px; height:36px; border:1px solid var(--border); border-radius:6px;" onclick="(() => { const inp = document.getElementById('case-search-wrap'); inp.style.display = inp.style.display === 'none' ? 'flex' : 'none'; if(inp.style.display !== 'none') document.getElementById('case-search').focus(); })()">
+                        <i class="fas fa-search"></i>
+                    </button>
+                    <div id="case-search-wrap" style="display: none; flex: 1;">
+                        <input type="text" id="case-search" class="form-control" placeholder="Search title or prospect/customer..." value="${_caseFilters.search}" onkeyup="app.handleCaseSearch(event)" style="width: 100%;">
+                    </div>
                 </div>
                 <div class="filter-group">
                     <label>Product</label>
@@ -7673,10 +7677,14 @@ function _wireLoginBtn() {
             </div>`;
 
         const closedFilterBar = `
-            <div class="filter-bar">
-                <div class="filter-group">
-                    <i class="fas fa-search"></i>
-                    <input type="text" id="case-search" placeholder="Search title or prospect/customer..." value="${_caseFilters.search}" onkeyup="app.handleCaseSearch(event)">
+            <div class="filter-bar" style="flex-direction: column; align-items: stretch; gap: 8px;">
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <button class="btn-icon" style="width:36px; height:36px; border:1px solid var(--border); border-radius:6px;" onclick="(() => { const inp = document.getElementById('case-search-wrap'); inp.style.display = inp.style.display === 'none' ? 'flex' : 'none'; if(inp.style.display !== 'none') document.getElementById('case-search').focus(); })()">
+                        <i class="fas fa-search"></i>
+                    </button>
+                    <div id="case-search-wrap" style="display: none; flex: 1;">
+                        <input type="text" id="case-search" class="form-control" placeholder="Search title or prospect/customer..." value="${_caseFilters.search}" onkeyup="app.handleCaseSearch(event)" style="width: 100%;">
+                    </div>
                 </div>
                 <div class="filter-group">
                     <label>Product</label>
@@ -7729,18 +7737,18 @@ function _wireLoginBtn() {
                     </button>
                 </div>
 
-                <div style="display:flex; gap:8px; margin-bottom:12px;">
-                    <button class="btn ${isCps ? 'primary' : 'secondary'}" onclick="app.switchCaseTab('cps')">
+                <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:12px;">
+                    <button class="btn ${isCps ? 'primary' : 'secondary'}" style="width:100%; justify-content:flex-start;" onclick="app.switchCaseTab('cps')">
                         <i class="fas fa-handshake"></i> CPS Invitation Cases
                     </button>
-                    <button class="btn ${!isCps ? 'primary' : 'secondary'}" onclick="app.switchCaseTab('closed')">
+                    <button class="btn ${!isCps ? 'primary' : 'secondary'}" style="width:100%; justify-content:flex-start;" onclick="app.switchCaseTab('closed')">
                         <i class="fas fa-check-circle"></i> Closed Cases
                     </button>
                 </div>
 
                 ${isCps ? cpsFilterBar : closedFilterBar}
 
-                <div class="table-container">
+                <div class="table-container" style="overflow-x: auto; overflow-y: auto;">
                     <table class="crm-table">
                         <thead>
                             <tr>
@@ -10912,52 +10920,59 @@ function _wireLoginBtn() {
                     <span>⚠️ DELETE IS NOT AVAILABLE - Customer records are permanent and cannot be deleted under any circumstances.</span>
                 </div>
 
-                <div class="filter-bar">
-                    <div class="search-group">
-                        <i class="fas fa-search"></i>
-                        <input type="text" id="customer-search" placeholder="Search customers by name, phone, email, or ID" onkeyup="app.filterCustomers()">
+                <div class="filter-bar" style="flex-direction: column; align-items: stretch; gap: 8px;">
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <div class="search-group" style="flex: 1;">
+                            <i class="fas fa-search"></i>
+                            <input type="text" id="customer-search" placeholder="Search customers by name, phone, email, or ID" onkeyup="app.filterCustomers()">
+                        </div>
+                        <button class="btn secondary" style="white-space: nowrap;" onclick="(() => { const p = document.getElementById('customer-advanced-filters'); const icon = document.getElementById('customer-advanced-icon'); const open = p.style.display !== 'none'; p.style.display = open ? 'none' : 'block'; icon.className = open ? 'fas fa-sliders-h' : 'fas fa-times'; })()">
+                            <i id="customer-advanced-icon" class="fas fa-sliders-h"></i> Advanced Search
+                        </button>
                     </div>
-                    <div class="filter-group">
-                        <select id="filter-customer-type" onchange="app.filterCustomers()">
-                            <option value="">Customer Type: All</option>
-                            <option value="Regular">Regular</option>
-                            <option value="VIP">VIP</option>
-                            <option value="Agent Eligible">Agent Eligible</option>
-                        </select>
-                        <select id="filter-customer-gua" onchange="app.filterCustomers()">
-                            <option value="">Ming Gua: All</option>
-                            <option value="MG1">MG1</option>
-                            <option value="MG2">MG2</option>
-                            <option value="MG3">MG3</option>
-                            <option value="MG4">MG4</option>
-                            <option value="MG5">MG5</option>
-                            <option value="MG6">MG6</option>
-                            <option value="MG7">MG7</option>
-                            <option value="MG8">MG8</option>
-                            <option value="MG9">MG9</option>
-                        </select>
-                        <select id="filter-purchase-status" onchange="app.filterCustomers()">
-                            <option value="">Purchase Status: All</option>
-                            <option value="30d">Purchased Last 30 Days</option>
-                            <option value="90d">Purchased Last 90 Days</option>
-                            <option value="no90d">No Purchase 90+ Days</option>
-                        </select>
-                        <select id="filter-customer-deficiency" onchange="app.filterCustomers()">
-                            <option value="">Star Deficiency: All</option>
-                            <option value="Wealth">Wealth</option>
-                            <option value="Career">Career</option>
-                            <option value="Relationship">Romance/Relationship</option>
-                            <option value="Health">Health</option>
-                        </select>
-                        <select id="filter-customer-house-audit" onchange="app.filterCustomers()">
-                            <option value="">House Audit: All</option>
-                            <option value="Pending">Pending</option>
-                            <option value="Scheduled">Scheduled</option>
-                            <option value="Completed">Completed</option>
-                            <option value="None">Not Done</option>
-                        </select>
-                        <input type="number" id="filter-customer-min-events" min="0" placeholder="Min events attended" onchange="app.filterCustomers()" style="width:160px; padding:6px 10px; border:1px solid var(--border); border-radius:6px; background:var(--surface); color:var(--text);">
-                        <button class="btn primary" onclick="app.filterCustomers()">Apply Filters</button>
+                    <div id="customer-advanced-filters" style="display: none;">
+                        <div class="filter-group" style="flex-wrap: wrap;">
+                            <select id="filter-customer-type" onchange="app.filterCustomers()">
+                                <option value="">Customer Type: All</option>
+                                <option value="Regular">Regular</option>
+                                <option value="VIP">VIP</option>
+                                <option value="Agent Eligible">Agent Eligible</option>
+                            </select>
+                            <select id="filter-customer-gua" onchange="app.filterCustomers()">
+                                <option value="">Ming Gua: All</option>
+                                <option value="MG1">MG1</option>
+                                <option value="MG2">MG2</option>
+                                <option value="MG3">MG3</option>
+                                <option value="MG4">MG4</option>
+                                <option value="MG5">MG5</option>
+                                <option value="MG6">MG6</option>
+                                <option value="MG7">MG7</option>
+                                <option value="MG8">MG8</option>
+                                <option value="MG9">MG9</option>
+                            </select>
+                            <select id="filter-purchase-status" onchange="app.filterCustomers()">
+                                <option value="">Purchase Status: All</option>
+                                <option value="30d">Purchased Last 30 Days</option>
+                                <option value="90d">Purchased Last 90 Days</option>
+                                <option value="no90d">No Purchase 90+ Days</option>
+                            </select>
+                            <select id="filter-customer-deficiency" onchange="app.filterCustomers()">
+                                <option value="">Star Deficiency: All</option>
+                                <option value="Wealth">Wealth</option>
+                                <option value="Career">Career</option>
+                                <option value="Relationship">Romance/Relationship</option>
+                                <option value="Health">Health</option>
+                            </select>
+                            <select id="filter-customer-house-audit" onchange="app.filterCustomers()">
+                                <option value="">House Audit: All</option>
+                                <option value="Pending">Pending</option>
+                                <option value="Scheduled">Scheduled</option>
+                                <option value="Completed">Completed</option>
+                                <option value="None">Not Done</option>
+                            </select>
+                            <input type="number" id="filter-customer-min-events" min="0" placeholder="Min events attended" onchange="app.filterCustomers()" style="width:160px; padding:6px 10px; border:1px solid var(--border); border-radius:6px; background:var(--surface); color:var(--text);">
+                            <button class="btn primary" onclick="app.filterCustomers()">Apply Filters</button>
+                        </div>
                     </div>
                 </div>
 
@@ -11038,7 +11053,7 @@ function _wireLoginBtn() {
                     <td>${renderQuickHealthBadge(c)}</td>
                     <td><span class="score-badge score-A+">${c.status.toUpperCase()}</span></td>
                     <td onclick="event.stopPropagation()">
-                        <button class="btn-icon" title="Edit"><i class="fas fa-edit"></i></button>
+                        <button class="btn-icon" title="Edit" onclick="app.showCustomerDetail(${c.id})"><i class="fas fa-edit"></i></button>
                         <button class="btn-icon" title="Add Purchase" onclick="app.openAddPurchaseModal(${c.id})"><i class="fas fa-shopping-cart"></i></button>
                         <button class="btn-icon" title="Referral" onclick="app.todo('Referral workflow')"><i class="fas fa-user-plus"></i></button>
                         <button class="btn-icon" title="Recruit" onclick="app.openRecruitModal(${c.id})"><i class="fas fa-user-tie"></i></button>
@@ -14786,9 +14801,9 @@ const deactivateAgent = async (agentId) => {
 
     const showComments = async (prospectId) => {
         const prospect = await AppDataStore.getById('prospects', prospectId);
-        const notes = await AppDataStore.query('notes', { prospect_id: prospectId })
+        const notes = (await AppDataStore.query('notes', { prospect_id: prospectId }))
             .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-        const activities = await AppDataStore.query('activities', { prospect_id: prospectId })
+        const activities = (await AppDataStore.query('activities', { prospect_id: prospectId }))
             .sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
 
         const content = `
