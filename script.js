@@ -5941,16 +5941,22 @@ function _wireLoginBtn() {
     const demoNews = [
         { id: 10001, title: 'New Feng Shui Breakthrough', content: 'Our team discovered a powerful application of the 九运 cycle that has helped 30+ clients improve their wealth sector this quarter.', type: 'highlight', is_active: true, created_at: new Date().toISOString() },
         { id: 10002, title: 'How Mr Tan Increased Sales by 200%', content: 'After attending the CPS and 福气课 sessions, Mr Tan repositioned his office desk and main entrance — his sales doubled within 3 months.', type: 'success_story', is_active: true, created_at: new Date().toISOString() },
-        { id: 10003, title: 'Ms Wong Finds Her Dream Home', content: 'By applying the DIY assessment taught in class, Ms Wong identified a property perfectly aligned with her Ming Gua and moved in last month.', type: 'success_story', is_active: true, created_at: new Date().toISOString() }
+        { id: 10003, title: 'Ms Wong Finds Her Dream Home', content: 'By applying the DIY assessment taught in class, Ms Wong identified a property perfectly aligned with her Ming Gua and moved in last month.', type: 'success_story', is_active: true, created_at: new Date().toISOString() },
+        { id: 10004, title: '3 Easy Ways to Share Feng Shui with Friends', content: '1. Share the free 九运 chart tool link. 2. Invite them to a Museum tour. 3. Forward the monthly newsletter — each share earns you 福气 points!', type: 'recommendation_tip', is_active: true, created_at: new Date().toISOString() },
+        { id: 10005, title: 'Which Class Should I Attend First?', content: 'New members: start with CPS for a personalised consultation, then join the 9 Stars session to understand your life chart. Both unlock milestone steps automatically!', type: 'recommendation_tip', is_active: true, created_at: new Date().toISOString() }
     ];
     for (const n of demoNews) { await safeInsert('news_highlights', n); }
 
-    // ----- 8. Recommendation rewards for referrer1 (id: 102) -----
+    // ----- 8. Recommendation rewards for referrer1 (id: 102) and customer1 (id: 101) -----
     // Reserved ID range: 80001–80099 (recommendation_rewards)
     const demoRewards = [
-        { id: 80001, user_id: 102, recommended_user_id: 1,    action_type: 'recommendation', fudi_points: 50,  sharing_return: 0,      description: 'Referred Tan Ah Kow to CPS session', created_at: '2026-02-15T10:00:00Z' },
-        { id: 80002, user_id: 102, recommended_user_id: null, action_type: 'sharing',        fudi_points: 30,  sharing_return: 120.00, description: 'Shared 9 Stars workshop to WhatsApp group (8 attendees)', created_at: '2026-03-10T14:00:00Z' },
-        { id: 80003, user_id: 102, recommended_user_id: null, action_type: 'class_attendance', fudi_points: 20, sharing_return: 0,     description: 'Attended 福气课 class', created_at: '2026-03-20T09:00:00Z' }
+        // referrer1 rewards
+        { id: 80001, user_id: 102, recommended_user_id: 1,    action_type: 'recommendation',   fudi_points: 50, sharing_return: 0,      description: 'Referred Tan Ah Kow to CPS session',                       created_at: '2026-02-15T10:00:00Z' },
+        { id: 80002, user_id: 102, recommended_user_id: null, action_type: 'sharing',           fudi_points: 30, sharing_return: 120.00, description: 'Shared 9 Stars workshop to WhatsApp group (8 attendees)',    created_at: '2026-03-10T14:00:00Z' },
+        { id: 80003, user_id: 102, recommended_user_id: null, action_type: 'class_attendance',  fudi_points: 20, sharing_return: 0,      description: 'Attended 福气课 class',                                      created_at: '2026-03-20T09:00:00Z' },
+        // customer1 rewards
+        { id: 80004, user_id: 101, recommended_user_id: null, action_type: 'recommendation',   fudi_points: 40, sharing_return: 0,      description: 'Recommended friend to attend 9 Stars class',               created_at: '2026-03-01T09:00:00Z' },
+        { id: 80005, user_id: 101, recommended_user_id: null, action_type: 'class_attendance', fudi_points: 20, sharing_return: 0,      description: 'Attended Advance Class Module 1',                           created_at: '2026-04-01T10:00:00Z' }
     ];
     for (const r of demoRewards) { await safeInsert('recommendation_rewards', r); }
 
@@ -21167,138 +21173,208 @@ const initImportDemoData = async () => {
         const currentUser = _currentUser;
         if (!currentUser) return;
 
-        // Determine if the current user is an admin (L1 or L2)
         const userLevel = (() => {
-            if (!currentUser.role) return 12;
-            const m = currentUser.role.match(/Level\s+(\d+)/i);
+            const m = (currentUser.role || '').match(/Level\s+(\d+)/i);
             return m ? parseInt(m[1]) : 12;
         })();
-        const isAdmin = userLevel <= 2;
+        const isAdmin   = userLevel <= 2;
+        const isL1314   = userLevel >= 13;
+        const isCustomer = userLevel === 13;
 
-        let highlights = [], myRewards = [], myPurchases = [];
-        // Admins see all highlights (including inactive); others see only active
+        // --- Data loading ---
+        let highlights = [], myRewards = [], myPurchases = [], allRewards = [];
         try {
             highlights = isAdmin
                 ? await AppDataStore.getAll('news_highlights')
                 : await AppDataStore.query('news_highlights', { is_active: true });
         } catch(e) {}
         try { myRewards = await AppDataStore.query('recommendation_rewards', { user_id: currentUser.id }); } catch(e) {}
-
-        // Level 13 (Customer): load purchase history via customer_id link
-        const isCustomer = currentUser.role && currentUser.role.match(/Level\s*13/i);
         if (isCustomer && currentUser.customer_id) {
             try { myPurchases = await AppDataStore.query('purchases', { customer_id: currentUser.customer_id }); } catch(e) {}
         }
+        let allUsersForReward = [];
+        if (isAdmin) {
+            try { allUsersForReward = (await AppDataStore.getAll('users')).filter(u => u.role && u.role.match(/Level\s*1[34]/i)); } catch(e) {}
+            try { allRewards = await AppDataStore.getAll('recommendation_rewards'); } catch(e) {}
+        }
 
-        const publicNews     = highlights.filter(h => h.type === 'highlight');
-        const successStories = highlights.filter(h => h.type === 'success_story');
-
+        // --- Helpers ---
         const fmtDate = d => { try { return new Date(d).toLocaleDateString(); } catch(e) { return d || '-'; } };
         const fmtAmt  = v => { try { return 'RM ' + parseFloat(v || 0).toLocaleString('en-MY', { minimumFractionDigits: 2 }); } catch(e) { return v; } };
+        const badge   = (txt, bg, col) => `<span style="padding:2px 8px;border-radius:12px;font-size:0.78rem;background:${bg};color:${col};">${txt}</span>`;
 
-        let rewardsHtml = '';
-        if (myRewards.length === 0) {
-            rewardsHtml = '<p style="color:var(--gray-500,#6b7280); padding:12px 0;">No recommendations or rewards yet.</p>';
-        } else {
-            rewardsHtml = `<div style="overflow-x:auto;"><table class="data-table"><thead><tr>
-                <th>Action</th><th>福气 Points</th><th>Sharing Return (RM)</th><th>Date</th>
-            </tr></thead><tbody>
-                ${myRewards.map(r => `<tr>
-                    <td>${r.action_type || '-'}</td>
-                    <td>${r.fudi_points || 0}</td>
-                    <td>${parseFloat(r.sharing_return || 0).toFixed(2)}</td>
-                    <td>${fmtDate(r.created_at)}</td>
-                </tr>`).join('')}
-            </tbody></table></div>`;
-        }
+        // --- Content filters ---
+        const publicNews         = highlights.filter(h => h.type === 'highlight');
+        const successStories     = highlights.filter(h => h.type === 'success_story');
+        const recommendationTips = highlights.filter(h => h.type === 'recommendation_tip');
 
-        let purchasesSection = '';
-        if (isCustomer) {
-            let purchasesHtml = '';
-            if (myPurchases.length === 0) {
-                purchasesHtml = '<p style="color:var(--gray-500,#6b7280); padding:12px 0;">No purchases found.</p>';
-            } else {
-                purchasesHtml = `<div style="overflow-x:auto;"><table class="data-table"><thead><tr>
-                    <th>Product / Package</th><th>Amount</th><th>Status</th><th>Date</th>
-                </tr></thead><tbody>
-                    ${myPurchases.map(p => `<tr>
-                        <td>${p.product_name || p.package_name || p.solution || '-'}</td>
-                        <td>${fmtAmt(p.amount || p.total_amount)}</td>
-                        <td><span style="padding:2px 8px; border-radius:12px; font-size:0.8rem; background:${p.status === 'completed' ? '#d1fae5' : '#fef3c7'}; color:${p.status === 'completed' ? '#065f46' : '#92400e'};">${p.status || 'pending'}</span></td>
-                        <td>${fmtDate(p.purchase_date || p.created_at)}</td>
-                    </tr>`).join('')}
-                </tbody></table></div>`;
-            }
-            purchasesSection = `
-                <div class="fude-section">
-                    <h2>🛍️ My Purchase History</h2>
-                    ${purchasesHtml}
-                </div>`;
-        }
+        // --- Totals & summary sync ---
+        const totalPoints  = myRewards.reduce((s, r) => s + (parseInt(r.fudi_points)    || 0), 0);
+        const totalReturns = myRewards.reduce((s, r) => s + (parseFloat(r.sharing_return) || 0), 0);
+        if (myRewards.length > 0) { try { await syncFudiSummary(currentUser.id, totalPoints, totalReturns); } catch(e) {} }
 
-        // Admin management table (all highlights + inactive)
-        const adminSection = isAdmin ? `
-            <div class="fude-section">
-                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
-                    <h2 style="margin:0;">⚙️ Manage Highlights &amp; Stories</h2>
-                    <button class="btn primary btn-sm" onclick="app.openHighlightModal()">
-                        <i class="fas fa-plus"></i> Add New
-                    </button>
+        // --- 福气 summary banner (L13/L14 only) ---
+        const summaryBanner = isL1314 ? `
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px;">
+                <div style="background:linear-gradient(135deg,#8B0000,#c0392b);color:white;border-radius:12px;padding:20px;text-align:center;">
+                    <div style="font-size:2rem;font-weight:700;">${totalPoints}</div>
+                    <div style="font-size:0.85rem;opacity:0.85;margin-top:4px;">福气 Points</div>
                 </div>
-                <div style="overflow-x:auto;">
-                    <table class="data-table">
-                        <thead><tr>
-                            <th>Title</th><th>Type</th><th>Status</th><th>Created</th><th>Actions</th>
-                        </tr></thead>
-                        <tbody>
-                            ${highlights.length ? highlights.map(h => `<tr>
-                                <td style="max-width:240px; overflow:hidden; text-overflow:ellipsis;">${h.title}</td>
-                                <td><span style="padding:2px 8px; border-radius:12px; font-size:0.78rem; background:#e0e7ff; color:#3730a3;">${h.type || '-'}</span></td>
-                                <td><span style="padding:2px 8px; border-radius:12px; font-size:0.78rem; background:${h.is_active ? '#d1fae5' : '#f3f4f6'}; color:${h.is_active ? '#065f46' : '#6b7280'};">${h.is_active ? 'Active' : 'Hidden'}</span></td>
-                                <td>${fmtDate(h.created_at)}</td>
-                                <td style="white-space:nowrap;">
-                                    <button class="btn secondary btn-sm" onclick="event.stopPropagation(); app.openHighlightModal(${h.id})"><i class="fas fa-edit"></i></button>
-                                    <button class="btn danger btn-sm" style="margin-left:4px;" onclick="event.stopPropagation(); app.deleteHighlight(${h.id})"><i class="fas fa-trash"></i></button>
-                                </td>
-                            </tr>`).join('') : '<tr><td colspan="5" style="text-align:center; color:var(--gray-400);">No highlights yet.</td></tr>'}
-                        </tbody>
-                    </table>
+                <div style="background:linear-gradient(135deg,#065f46,#10b981);color:white;border-radius:12px;padding:20px;text-align:center;">
+                    <div style="font-size:2rem;font-weight:700;">RM ${totalReturns.toFixed(2)}</div>
+                    <div style="font-size:0.85rem;opacity:0.85;margin-top:4px;">Sharing Returns</div>
                 </div>
             </div>` : '';
 
+        // --- Admin: leaderboard ---
+        const leaderboardSection = isAdmin ? (() => {
+            const totals = {};
+            allRewards.forEach(r => {
+                if (!totals[r.user_id]) totals[r.user_id] = { pts: 0, ret: 0 };
+                totals[r.user_id].pts += parseInt(r.fudi_points)    || 0;
+                totals[r.user_id].ret += parseFloat(r.sharing_return) || 0;
+            });
+            const ranked = Object.entries(totals)
+                .map(([uid, t]) => { const u = allUsersForReward.find(u => u.id === parseInt(uid)); return { name: u?.full_name || 'User ' + uid, ...t }; })
+                .sort((a, b) => b.pts - a.pts);
+            if (!ranked.length) return '';
+            const medals = ['🥇','🥈','🥉'];
+            return `<div class="fude-section">
+                <h2>🏆 福气 Leaderboard</h2>
+                <div style="overflow-x:auto;"><table class="data-table"><thead><tr>
+                    <th>#</th><th>Name</th><th>福气 Points</th><th>Sharing Returns (RM)</th>
+                </tr></thead><tbody>
+                    ${ranked.map((r, i) => `<tr>
+                        <td>${medals[i] || (i + 1)}</td>
+                        <td style="font-weight:600;">${r.name}</td>
+                        <td>${r.pts}</td>
+                        <td>${r.ret.toFixed(2)}</td>
+                    </tr>`).join('')}
+                </tbody></table></div>
+            </div>`;
+        })() : '';
+
+        // --- Admin: manage highlights table ---
+        const adminHighlightsSection = isAdmin ? `
+            <div class="fude-section">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+                    <h2 style="margin:0;">⚙️ Manage Highlights &amp; Stories</h2>
+                    <button class="btn primary btn-sm" onclick="app.openHighlightModal()"><i class="fas fa-plus"></i> Add New</button>
+                </div>
+                <div style="overflow-x:auto;"><table class="data-table"><thead><tr>
+                    <th>Title</th><th>Type</th><th>Status</th><th>Created</th><th>Actions</th>
+                </tr></thead><tbody>
+                    ${highlights.length ? highlights.map(h => `<tr>
+                        <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;">${h.title}</td>
+                        <td>${badge(h.type || '-', '#e0e7ff', '#3730a3')}</td>
+                        <td>${badge(h.is_active ? 'Active' : 'Hidden', h.is_active ? '#d1fae5' : '#f3f4f6', h.is_active ? '#065f46' : '#6b7280')}</td>
+                        <td>${fmtDate(h.created_at)}</td>
+                        <td style="white-space:nowrap;">
+                            <button class="btn secondary btn-sm" onclick="event.stopPropagation();app.openHighlightModal(${h.id})"><i class="fas fa-edit"></i></button>
+                            <button class="btn danger btn-sm" style="margin-left:4px;" onclick="event.stopPropagation();app.deleteHighlight(${h.id})"><i class="fas fa-trash"></i></button>
+                        </td>
+                    </tr>`).join('') : '<tr><td colspan="5" style="text-align:center;color:var(--gray-400);">No highlights yet.</td></tr>'}
+                </tbody></table></div>
+            </div>` : '';
+
+        // --- Admin: manage rewards table ---
+        const adminRewardsSection = isAdmin ? `
+            <div class="fude-section">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+                    <h2 style="margin:0;">🎁 Manage Rewards &amp; 福气 Points</h2>
+                    <button class="btn primary btn-sm" onclick="app.openRewardModal()"><i class="fas fa-plus"></i> Award Points</button>
+                </div>
+                <div style="overflow-x:auto;"><table class="data-table"><thead><tr>
+                    <th>User</th><th>Action</th><th>福气 Pts</th><th>Sharing Return</th><th>Description</th><th>Date</th><th></th>
+                </tr></thead><tbody>
+                    ${allRewards.length ? allRewards.map(r => {
+                        const u = allUsersForReward.find(u => u.id === r.user_id);
+                        return `<tr>
+                            <td style="font-weight:600;">${u ? u.full_name : 'User ' + r.user_id}</td>
+                            <td>${badge(r.action_type || '-', '#e0e7ff', '#3730a3')}</td>
+                            <td>${r.fudi_points || 0}</td>
+                            <td>${parseFloat(r.sharing_return || 0).toFixed(2)}</td>
+                            <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;">${r.description || '-'}</td>
+                            <td>${fmtDate(r.created_at)}</td>
+                            <td><button class="btn danger btn-sm" onclick="event.stopPropagation();app.deleteReward(${r.id})"><i class="fas fa-trash"></i></button></td>
+                        </tr>`;
+                    }).join('') : '<tr><td colspan="7" style="text-align:center;color:var(--gray-400);">No rewards yet.</td></tr>'}
+                </tbody></table></div>
+            </div>` : '';
+
+        // --- Purchases section (L13 only) ---
+        let purchasesSection = '';
+        if (isCustomer) {
+            const rows = myPurchases.length
+                ? myPurchases.map(p => `<tr>
+                    <td>${p.product_name || p.package_name || p.solution || '-'}</td>
+                    <td>${fmtAmt(p.amount || p.total_amount)}</td>
+                    <td>${badge(p.status || 'pending', p.status === 'completed' ? '#d1fae5' : '#fef3c7', p.status === 'completed' ? '#065f46' : '#92400e')}</td>
+                    <td>${fmtDate(p.purchase_date || p.created_at)}</td>
+                  </tr>`).join('')
+                : '<tr><td colspan="4" style="text-align:center;color:var(--gray-400);">No purchases found.</td></tr>';
+            purchasesSection = `<div class="fude-section"><h2>🛍️ My Purchase History</h2>
+                <div style="overflow-x:auto;"><table class="data-table"><thead><tr>
+                    <th>Product / Package</th><th>Amount</th><th>Status</th><th>Date</th>
+                </tr></thead><tbody>${rows}</tbody></table></div></div>`;
+        }
+
+        // --- My rewards table ---
+        const rewardsHtml = myRewards.length === 0
+            ? '<p style="color:var(--gray-500,#6b7280);padding:12px 0;">No recommendations or rewards yet.</p>'
+            : `<div style="overflow-x:auto;"><table class="data-table"><thead><tr>
+                <th>Action</th><th>福气 Points</th><th>Sharing Return (RM)</th><th>Description</th><th>Date</th>
+               </tr></thead><tbody>
+                ${myRewards.map(r => `<tr>
+                    <td>${badge(r.action_type || '-', '#e0e7ff', '#3730a3')}</td>
+                    <td style="font-weight:600;">${r.fudi_points || 0}</td>
+                    <td>${parseFloat(r.sharing_return || 0).toFixed(2)}</td>
+                    <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;">${r.description || '-'}</td>
+                    <td>${fmtDate(r.created_at)}</td>
+                </tr>`).join('')}
+               </tbody></table></div>`;
+
+        // --- Render ---
         container.innerHTML = `
             <div class="fude-tab">
-                <h1 style="font-size:1.8rem; color:var(--primary,#8B0000); margin-bottom:24px;">福德</h1>
-
-                ${adminSection}
-
+                <h1 style="font-size:1.8rem;color:var(--primary,#8B0000);margin-bottom:24px;">福德</h1>
+                ${summaryBanner}
+                ${leaderboardSection}
+                ${adminHighlightsSection}
+                ${adminRewardsSection}
                 <div class="fude-section">
                     <h2>📰 Highlights &amp; News</h2>
-                    <div class="news-list">
-                        ${publicNews.length ? publicNews.map(n => `
-                            <div class="news-item">
-                                <h3 style="margin:0 0 4px;">${n.title}</h3>
-                                <p style="margin:0 0 4px; color:var(--gray-600,#4b5563);">${n.content || ''}</p>
-                                <small style="color:var(--gray-400,#9ca3af);">${fmtDate(n.created_at)}</small>
-                            </div>
-                        `).join('') : '<p style="color:var(--gray-500,#6b7280);">No highlights yet.</p>'}
-                    </div>
+                    <div class="news-list">${publicNews.length
+                        ? publicNews.map(n => `<div class="news-item">
+                            <h3 style="margin:0 0 4px;">${n.title}</h3>
+                            <p style="margin:0 0 4px;color:var(--gray-600,#4b5563);">${n.content || ''}</p>
+                            <small style="color:var(--gray-400,#9ca3af);">${fmtDate(n.created_at)}</small>
+                          </div>`).join('')
+                        : '<p style="color:var(--gray-500,#6b7280);">No highlights yet.</p>'}</div>
                 </div>
-
                 <div class="fude-section">
                     <h2>🌟 Success Stories</h2>
-                    <div class="stories-list">
-                        ${successStories.length ? successStories.map(s => `
-                            <div class="story-item">
-                                <h3 style="margin:0 0 4px;">${s.title}</h3>
-                                <p style="margin:0; color:var(--gray-600,#4b5563);">${s.content || ''}</p>
-                            </div>
-                        `).join('') : '<p style="color:var(--gray-500,#6b7280);">No success stories yet.</p>'}
-                    </div>
+                    <div class="stories-list">${successStories.length
+                        ? successStories.map(s => `<div class="story-item">
+                            <h3 style="margin:0 0 4px;">${s.title}</h3>
+                            <p style="margin:0;color:var(--gray-600,#4b5563);">${s.content || ''}</p>
+                          </div>`).join('')
+                        : '<p style="color:var(--gray-500,#6b7280);">No success stories yet.</p>'}</div>
                 </div>
-
+                ${recommendationTips.length ? `
+                <div class="fude-section">
+                    <h2>💡 Recommendation Tips</h2>
+                    <div class="tips-list">${recommendationTips.map(t => `
+                        <div class="news-item" style="display:flex;gap:12px;align-items:flex-start;">
+                            <span style="font-size:1.4rem;flex-shrink:0;">💡</span>
+                            <div>
+                                <h3 style="margin:0 0 4px;">${t.title}</h3>
+                                <p style="margin:0;color:var(--gray-600,#4b5563);">${t.content || ''}</p>
+                            </div>
+                        </div>`).join('')}
+                    </div>
+                </div>` : ''}
                 ${purchasesSection}
-
                 <div class="fude-section">
                     <h2>💎 My Recommendations &amp; Returns</h2>
                     ${rewardsHtml}
