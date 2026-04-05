@@ -5711,7 +5711,12 @@ function _wireLoginBtn() {
         initWhatsAppIntegration();
         await initAIAnalytics();
 
-        await navigateTo('calendar');
+        // L13 (Customer) and L14 (Referrer) land on 福德; everyone else on calendar
+        const _initLevel = (() => {
+            const m = (_currentUser?.role || '').match(/Level\s+(\d+)/i);
+            return m ? parseInt(m[1]) : 0;
+        })();
+        await navigateTo(_initLevel >= 13 ? 'fude' : 'calendar');
 
         // Phase 14: Offline & mobile features
         initOfflineSupport();
@@ -5901,6 +5906,7 @@ function _wireLoginBtn() {
     for (const u of demoLevel1314) { await safeInsert('users', u); }
 
     // ----- 6. Demo purchases for customer1 -----
+    // Reserved ID range: 90001–90099 (L13/14 demo purchases)
     const demoPurchases = [
         { id: 90001, customer_id: 9001, product_name: 'CPS Consultation Package', amount: 888.00, status: 'completed', purchase_date: '2026-02-10', created_at: new Date().toISOString() },
         { id: 90002, customer_id: 9001, product_name: '九运课 Masterclass', amount: 1280.00, status: 'completed', purchase_date: '2026-03-05', created_at: new Date().toISOString() },
@@ -5908,13 +5914,23 @@ function _wireLoginBtn() {
     ];
     for (const p of demoPurchases) { await safeInsert('purchases', p); }
 
-    // ----- 5. News highlights (for 福德 tab) -----
+    // ----- 7. News highlights (for 福德 tab) -----
+    // Reserved ID range: 10001–10099 (news_highlights)
     const demoNews = [
         { id: 10001, title: 'New Feng Shui Breakthrough', content: 'Our team discovered a powerful application of the 九运 cycle that has helped 30+ clients improve their wealth sector this quarter.', type: 'highlight', is_active: true, created_at: new Date().toISOString() },
         { id: 10002, title: 'How Mr Tan Increased Sales by 200%', content: 'After attending the CPS and 福气课 sessions, Mr Tan repositioned his office desk and main entrance — his sales doubled within 3 months.', type: 'success_story', is_active: true, created_at: new Date().toISOString() },
         { id: 10003, title: 'Ms Wong Finds Her Dream Home', content: 'By applying the DIY assessment taught in class, Ms Wong identified a property perfectly aligned with her Ming Gua and moved in last month.', type: 'success_story', is_active: true, created_at: new Date().toISOString() }
     ];
     for (const n of demoNews) { await safeInsert('news_highlights', n); }
+
+    // ----- 8. Recommendation rewards for referrer1 (id: 102) -----
+    // Reserved ID range: 80001–80099 (recommendation_rewards)
+    const demoRewards = [
+        { id: 80001, user_id: 102, recommended_user_id: 1,    action_type: 'recommendation', fudi_points: 50,  sharing_return: 0,      description: 'Referred Tan Ah Kow to CPS session', created_at: '2026-02-15T10:00:00Z' },
+        { id: 80002, user_id: 102, recommended_user_id: null, action_type: 'sharing',        fudi_points: 30,  sharing_return: 120.00, description: 'Shared 9 Stars workshop to WhatsApp group (8 attendees)', created_at: '2026-03-10T14:00:00Z' },
+        { id: 80003, user_id: 102, recommended_user_id: null, action_type: 'class_attendance', fudi_points: 20, sharing_return: 0,     description: 'Attended 福气课 class', created_at: '2026-03-20T09:00:00Z' }
+    ];
+    for (const r of demoRewards) { await safeInsert('recommendation_rewards', r); }
 
     console.log('Demo data seeding completed.');
 };
@@ -18714,7 +18730,13 @@ const simulateCampaignSending = async (campaignId) => {
             // Auth.setUser removed – Supabase manages session; _currentUser set directly below
             _currentUser = user;
             updateUserDisplay();
-            await navigateTo(_currentView || 'calendar');
+            updateNavVisibility();
+            // L13 (Customer) / L14 (Referrer) land on 福德; everyone else on calendar
+            const _laLevel = (() => {
+                const m = (user.role || '').match(/Level\s+(\d+)/i);
+                return m ? parseInt(m[1]) : 0;
+            })();
+            await navigateTo(_laLevel >= 13 ? 'fude' : 'calendar');
             UI.hideModal();
             UI.toast.success(`Welcome back, ${user.full_name} !`);
         } else {
@@ -20657,9 +20679,23 @@ const initImportDemoData = async () => {
         }
     };
 
-    const showMilestonesView = async (container) => {
+    // showMilestonesView(container, targetUserId?)
+    // If targetUserId is supplied (admin use), shows that user's progress instead of the current user's.
+    const showMilestonesView = async (container, targetUserId = null) => {
         const currentUser = _currentUser;
         if (!currentUser) return;
+
+        // Determine admin status
+        const viewerLevel = (() => {
+            const m = (currentUser.role || '').match(/Level\s+(\d+)/i);
+            return m ? parseInt(m[1]) : 12;
+        })();
+        const isAdmin = viewerLevel <= 2;
+
+        // Resolve which user's milestones to show
+        const subjectId   = (isAdmin && targetUserId) ? parseInt(targetUserId) : currentUser.id;
+        const subjectUser = (isAdmin && targetUserId) ? (await AppDataStore.getById('users', subjectId) || currentUser) : currentUser;
+        const viewingOther = isAdmin && subjectId !== currentUser.id;
 
         const milestones = [
             { name: 'CPS',           label: 'CPS' },
@@ -20674,17 +20710,38 @@ const initImportDemoData = async () => {
         ];
 
         let userMilestones = [];
-        try { userMilestones = await AppDataStore.query('user_milestones', { user_id: currentUser.id }); } catch(e) {}
+        try { userMilestones = await AppDataStore.query('user_milestones', { user_id: subjectId }); } catch(e) {}
         const completedMap = {};
         userMilestones.forEach(m => { completedMap[m.milestone_name] = m.completed; });
 
         const completedCount = milestones.filter(m => completedMap[m.name]).length;
         const progressPercent = Math.round((completedCount / milestones.length) * 100);
 
+        // Admin: user picker for viewing other accounts
+        let adminPicker = '';
+        if (isAdmin) {
+            let allUsers = [];
+            try { allUsers = (await AppDataStore.getAll('users')).filter(u => u.role && u.role.match(/Level\s+1[34]/i)); } catch(e) {}
+            if (allUsers.length) {
+                adminPicker = `
+                    <div style="margin-bottom:16px; display:flex; align-items:center; gap:10px;">
+                        <label style="font-weight:600; font-size:0.9rem;">View user:</label>
+                        <select class="form-control" style="max-width:240px;" onchange="(async()=>{ const vp=document.getElementById('content-viewport'); if(vp) await app.showMilestonesView(vp, this.value||null); })()">
+                            <option value="">— My own milestones —</option>
+                            ${allUsers.map(u => `<option value="${u.id}" ${u.id === subjectId && viewingOther ? 'selected' : ''}>${u.full_name} (${u.role})</option>`).join('')}
+                        </select>
+                    </div>`;
+            }
+        }
+
         container.innerHTML = `
             <div class="milestone-container">
+                ${adminPicker}
                 <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
-                    <h1 style="margin:0; font-size:1.6rem; color:var(--primary,#8B0000);">增运9步路</h1>
+                    <div>
+                        <h1 style="margin:0; font-size:1.6rem; color:var(--primary,#8B0000);">增运9步路</h1>
+                        ${viewingOther ? `<p style="margin:4px 0 0; font-size:0.85rem; color:var(--gray-500);">Viewing: ${subjectUser.full_name}</p>` : ''}
+                    </div>
                     <span style="font-size:0.95rem; color:var(--gray-500,#6b7280);">${completedCount} / ${milestones.length} completed</span>
                 </div>
                 <div class="progress-bar-wrapper">
@@ -20695,13 +20752,31 @@ const initImportDemoData = async () => {
                         <div class="milestone-card ${completedMap[m.name] ? 'completed' : ''}">
                             <div class="milestone-step">Step ${i + 1}</div>
                             <div class="milestone-name">${m.label}</div>
-                            <div class="milestone-icon">${completedMap[m.name] ? '<i class="fas fa-check-circle" style="color:#065f46;"></i>' : '<i class="far fa-circle" style="color:#9ca3af;"></i>'}</div>
+                            <div class="milestone-icon">${completedMap[m.name]
+                                ? `<i class="fas fa-check-circle" style="color:#065f46;"></i>${isAdmin ? `<br><button class="btn danger btn-sm" style="margin-top:6px;font-size:0.7rem;" onclick="event.stopPropagation(); app.resetMilestone(${subjectId},'${m.name}')">Reset</button>` : ''}`
+                                : `<i class="far fa-circle" style="color:#9ca3af;"></i>${isAdmin ? `<br><button class="btn secondary btn-sm" style="margin-top:6px;font-size:0.7rem;" onclick="event.stopPropagation(); app.markMilestoneCompleted(${subjectId},'${m.name}').then(()=>{ const vp=document.getElementById('content-viewport'); if(vp) app.showMilestonesView(vp,${targetUserId||'null'}); })">Mark ✓</button>` : ''}`
+                            }</div>
                         </div>
                     `).join('')}
                 </div>
-                <p class="milestone-hint">Attend the corresponding class or activity to unlock each milestone step.</p>
+                <p class="milestone-hint">${isAdmin ? 'As admin you can manually mark or reset any milestone step.' : 'Attend the corresponding class or activity to unlock each milestone step.'}</p>
             </div>
         `;
+    };
+
+    // Reset a milestone back to incomplete
+    const resetMilestone = async (userId, milestoneName) => {
+        try {
+            const existing = await AppDataStore.query('user_milestones', { user_id: userId, milestone_name: milestoneName });
+            if (existing.length > 0) {
+                await AppDataStore.update('user_milestones', existing[0].id, { completed: false, completed_date: null });
+                UI.toast.success(`Milestone "${milestoneName}" reset.`);
+            }
+            const viewport = document.getElementById('content-viewport');
+            if (viewport) await showMilestonesView(viewport, userId !== _currentUser?.id ? userId : null);
+        } catch(err) {
+            UI.toast.error('Reset failed: ' + (err.message || 'Unknown error'));
+        }
     };
 
     // ========== LEVEL 13/14: 福德 VIEW ==========
@@ -20918,9 +20993,16 @@ const initImportDemoData = async () => {
     };
 
     const deleteHighlight = async (highlightId) => {
-        if (!confirm('Delete this highlight? This cannot be undone.')) return;
+        UI.showModal('Delete Highlight', '<p>Are you sure you want to delete this highlight? This cannot be undone.</p>', [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Delete', type: 'danger', action: `(async () => { await app.confirmDeleteHighlight(${highlightId}); })()` }
+        ]);
+    };
+
+    const confirmDeleteHighlight = async (highlightId) => {
         try {
             await AppDataStore.delete('news_highlights', highlightId);
+            UI.hideModal();
             UI.toast.success('Highlight deleted.');
             const viewport = document.getElementById('content-viewport');
             if (viewport) await showFudeView(viewport);
@@ -21617,6 +21699,8 @@ const initImportDemoData = async () => {
         openHighlightModal,
         saveHighlight,
         deleteHighlight,
+        confirmDeleteHighlight,
+        resetMilestone,
 
         // Auth exports
         login,
