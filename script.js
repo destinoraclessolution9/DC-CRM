@@ -21361,6 +21361,133 @@ const initImportDemoData = async () => {
         }
     };
 
+    // ========== LEVEL 13/14: Reward CRUD + 福气 Summary Sync ==========
+
+    const syncFudiSummary = async (userId, totalPoints, totalReturns) => {
+        try {
+            const existing = await AppDataStore.query('user_fudi_summary', { user_id: userId });
+            const payload  = { total_fudi_points: totalPoints, total_sharing_return: totalReturns, updated_at: new Date().toISOString() };
+            if (existing.length > 0) {
+                await AppDataStore.update('user_fudi_summary', existing[0].user_id, payload);
+            } else {
+                await AppDataStore.create('user_fudi_summary', { user_id: userId, ...payload });
+            }
+        } catch(e) { console.warn('syncFudiSummary error:', e); }
+    };
+
+    const openRewardModal = async (rewardId = null) => {
+        const r = rewardId ? await AppDataStore.getById('recommendation_rewards', rewardId) : null;
+        const isEdit = !!r;
+
+        let eligibleUsers = [];
+        try { eligibleUsers = (await AppDataStore.getAll('users')).filter(u => u.role && u.role.match(/Level\s*1[34]/i)); } catch(e) {}
+        const userOptions = eligibleUsers.map(u =>
+            `<option value="${u.id}" ${r?.user_id === u.id ? 'selected' : ''}>${u.full_name} (${u.role})</option>`
+        ).join('');
+
+        const content = `
+            <div class="form-section">
+                <input type="hidden" id="edit-reward-id" value="${rewardId || ''}">
+                <div class="form-group">
+                    <label>Recipient <span class="required">*</span></label>
+                    <select id="reward-user" class="form-control">
+                        <option value="">— Select user —</option>
+                        ${userOptions}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Action Type <span class="required">*</span></label>
+                    <select id="reward-action" class="form-control">
+                        <option value="recommendation"   ${(!r || r.action_type === 'recommendation')   ? 'selected' : ''}>Recommendation</option>
+                        <option value="sharing"          ${r?.action_type === 'sharing'          ? 'selected' : ''}>Sharing</option>
+                        <option value="class_attendance" ${r?.action_type === 'class_attendance' ? 'selected' : ''}>Class Attendance</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>福气 Points</label>
+                    <input type="number" id="reward-points" class="form-control" value="${r?.fudi_points || 0}" min="0">
+                </div>
+                <div class="form-group">
+                    <label>Sharing Return (RM)</label>
+                    <input type="number" id="reward-return" class="form-control" value="${parseFloat(r?.sharing_return || 0).toFixed(2)}" min="0" step="0.01">
+                </div>
+                <div class="form-group">
+                    <label>Description</label>
+                    <input type="text" id="reward-desc" class="form-control" value="${r?.description || ''}" placeholder="e.g. Referred Tan Ah Kow to CPS session">
+                </div>
+            </div>
+        `;
+
+        UI.showModal(isEdit ? 'Edit Reward' : 'Award 福气 Points', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: isEdit ? 'Save Changes' : 'Award', type: 'primary', action: '(async () => { await app.saveReward(); })()' }
+        ]);
+    };
+
+    const saveReward = async () => {
+        const id     = document.getElementById('edit-reward-id')?.value;
+        const userId = parseInt(document.getElementById('reward-user')?.value);
+        if (!userId) { UI.toast.error('Please select a recipient.'); return; }
+
+        const payload = {
+            user_id:        userId,
+            action_type:    document.getElementById('reward-action')?.value || 'recommendation',
+            fudi_points:    parseInt(document.getElementById('reward-points')?.value) || 0,
+            sharing_return: parseFloat(document.getElementById('reward-return')?.value) || 0,
+            description:    document.getElementById('reward-desc')?.value || ''
+        };
+
+        try {
+            if (id) {
+                await AppDataStore.update('recommendation_rewards', parseInt(id), payload);
+                UI.toast.success('Reward updated.');
+            } else {
+                await AppDataStore.create('recommendation_rewards', { id: Date.now(), ...payload, created_at: new Date().toISOString() });
+                UI.toast.success('Reward awarded!');
+            }
+            // Recalculate and sync summary for the recipient
+            const allRewards = await AppDataStore.query('recommendation_rewards', { user_id: userId });
+            await syncFudiSummary(
+                userId,
+                allRewards.reduce((s, r) => s + (parseInt(r.fudi_points)    || 0), 0),
+                allRewards.reduce((s, r) => s + (parseFloat(r.sharing_return) || 0), 0)
+            );
+            UI.hideModal();
+            const viewport = document.getElementById('content-viewport');
+            if (viewport) await showFudeView(viewport);
+        } catch(err) {
+            UI.toast.error('Save failed: ' + (err.message || 'Unknown error'));
+        }
+    };
+
+    const deleteReward = async (rewardId) => {
+        UI.showModal('Delete Reward', "<p>Remove this reward record? The user's 福气 points will be recalculated.</p>", [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Delete', type: 'danger', action: `(async () => { await app.confirmDeleteReward(${rewardId}); })()` }
+        ]);
+    };
+
+    const confirmDeleteReward = async (rewardId) => {
+        try {
+            const r = await AppDataStore.getById('recommendation_rewards', rewardId);
+            await AppDataStore.delete('recommendation_rewards', rewardId);
+            if (r?.user_id) {
+                const remaining = await AppDataStore.query('recommendation_rewards', { user_id: r.user_id });
+                await syncFudiSummary(
+                    r.user_id,
+                    remaining.reduce((s, x) => s + (parseInt(x.fudi_points)    || 0), 0),
+                    remaining.reduce((s, x) => s + (parseFloat(x.sharing_return) || 0), 0)
+                );
+            }
+            UI.hideModal();
+            UI.toast.success('Reward deleted.');
+            const viewport = document.getElementById('content-viewport');
+            if (viewport) await showFudeView(viewport);
+        } catch(err) {
+            UI.toast.error('Delete failed: ' + (err.message || 'Unknown error'));
+        }
+    };
+
     return {
         init,
         navigateTo,
@@ -22051,6 +22178,11 @@ const initImportDemoData = async () => {
         deleteHighlight,
         confirmDeleteHighlight,
         resetMilestone,
+        syncFudiSummary,
+        openRewardModal,
+        saveReward,
+        deleteReward,
+        confirmDeleteReward,
 
         // Auth exports
         login,
@@ -22061,7 +22193,7 @@ const initImportDemoData = async () => {
         setTimeFilter,
         setCustomDateRange,
         refreshKPIDashboard,
-        exportKPIReport
+        exportKPIReport,
 
         // Action Plan
         openActionPlanModal,
