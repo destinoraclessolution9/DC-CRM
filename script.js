@@ -5626,7 +5626,6 @@ function _wireLoginBtn() {
             if (profileError && profileError.code === 'PGRST116') {
                 console.log('Profile not found, creating one...');
                 const newProfile = {
-                    id: user.id,                     // Use Supabase Auth user ID
                     email: user.email,
                     username: user.email.split('@')[0],
                     full_name: user.user_metadata?.full_name || user.email,
