@@ -5850,41 +5850,141 @@ function _wireLoginBtn() {
         }
     };
 
-    // ----- 1. Users -----
+    // ----- 1. Users (24 total — full 12-level hierarchy, 2 parallel chains) -----
+    // Chain A: L1→L2→L3A→L4A→L5A→L6A→L7A→L8A→L9A→L10A→L11A→L12A,L12B
+    // Chain B: L1→L2→L3B→L4B→L5B→L6B→L7B→L8B→L9B→L10B→L11B→L12C,L12D
     const demoUsers = [
-        { id: 1, username: 'admin', password: 'admin123', full_name: 'System Admin', role: 'Level 1 Super Admin', status: 'active' },
-        { id: 2, username: 'marketing', password: 'mkt123', full_name: 'Marketing Manager', role: 'Level 2 Marketing Manager', status: 'active' },
-        { id: 3, username: 'teamlead', password: 'tl123', full_name: 'Team Leader', role: 'Level 5 Team Leader', team_id: 1, reporting_to: 10, status: 'active' },
-        { id: 4, username: 'consultant', password: 'cons123', full_name: 'Consultant', role: 'Level 10 Agent', team_id: 1, status: 'active' },
-        { id: 5, username: 'michelle', password: 'michelle123', full_name: 'Michelle Tan', role: 'Level 6 Senior Consultant', team_id: 1, reporting_to: 3, status: 'active' },
-        { id: 10, username: 'manager', password: 'manager123', full_name: 'Manager', role: 'Level 4 Managers', team_id: 1, status: 'active' }
+        // Level 1 — Super Admin (sees ALL data)
+        { id: 1,  username: 'demo_l1',   password: 'demo123', full_name: 'Ahmad Razif',       role: 'Level 1 Super Admin',        email: 'l1@destino.com',   phone: '011-1000001', agent_code: 'AGN-L1-001',  commission_rate: 0,  join_date: '2024-01-01', status: 'active' },
+        // Level 2 — Marketing Manager (1 account, sees ALL data)
+        { id: 2,  username: 'demo_l2',   password: 'demo123', full_name: 'Nurul Hana',        role: 'Level 2 Marketing Manager',  email: 'l2@destino.com',   phone: '011-1000002', agent_code: 'AGN-L2-001',  commission_rate: 20, join_date: '2024-01-15', reporting_to: 1,  status: 'active' },
+        // Level 3 — Senior Managers (×2)
+        { id: 3,  username: 'demo_l3a',  password: 'demo123', full_name: 'Tan Wei Liang',     role: 'Level 3 Senior Managers',    email: 'l3a@destino.com',  phone: '011-1000003', agent_code: 'AGN-L3-001',  commission_rate: 18, join_date: '2024-02-01', reporting_to: 2,  status: 'active' },
+        { id: 4,  username: 'demo_l3b',  password: 'demo123', full_name: 'Siti Aminah',       role: 'Level 3 Senior Managers',    email: 'l3b@destino.com',  phone: '011-1000004', agent_code: 'AGN-L3-002',  commission_rate: 18, join_date: '2024-02-01', reporting_to: 2,  status: 'active' },
+        // Level 4 — Managers (×2)
+        { id: 5,  username: 'demo_l4a',  password: 'demo123', full_name: 'Raj Kumar',         role: 'Level 4 Managers',           email: 'l4a@destino.com',  phone: '011-1000005', agent_code: 'AGN-L4-001',  commission_rate: 15, join_date: '2024-03-01', reporting_to: 3,  status: 'active' },
+        { id: 6,  username: 'demo_l4b',  password: 'demo123', full_name: 'Fatimah Zahra',     role: 'Level 4 Managers',           email: 'l4b@destino.com',  phone: '011-1000006', agent_code: 'AGN-L4-002',  commission_rate: 15, join_date: '2024-03-01', reporting_to: 4,  status: 'active' },
+        // Level 5 — Team Leaders (×2)
+        { id: 7,  username: 'demo_l5a',  password: 'demo123', full_name: 'Lim Chee Keong',   role: 'Level 5 Team Leader',        email: 'l5a@destino.com',  phone: '011-1000007', agent_code: 'AGN-L5-001',  commission_rate: 12, join_date: '2024-04-01', reporting_to: 5,  status: 'active' },
+        { id: 8,  username: 'demo_l5b',  password: 'demo123', full_name: 'Zainab Mohd',       role: 'Level 5 Team Leader',        email: 'l5b@destino.com',  phone: '011-1000008', agent_code: 'AGN-L5-002',  commission_rate: 12, join_date: '2024-04-01', reporting_to: 6,  status: 'active' },
+        // Level 6 — Senior Consultants (×2)
+        { id: 9,  username: 'demo_l6a',  password: 'demo123', full_name: 'Chong Mei Ling',   role: 'Level 6 Senior Consultant',  email: 'l6a@destino.com',  phone: '011-1000009', agent_code: 'AGN-L6-001',  commission_rate: 10, join_date: '2024-05-01', reporting_to: 7,  status: 'active' },
+        { id: 10, username: 'demo_l6b',  password: 'demo123', full_name: 'Hafizuddin Malik',  role: 'Level 6 Senior Consultant',  email: 'l6b@destino.com',  phone: '011-1000010', agent_code: 'AGN-L6-002',  commission_rate: 10, join_date: '2024-05-01', reporting_to: 8,  status: 'active' },
+        // Level 7 — Consultants (×2)
+        { id: 11, username: 'demo_l7a',  password: 'demo123', full_name: 'Ng Sook Yee',       role: 'Level 7 Consultant',         email: 'l7a@destino.com',  phone: '011-1000011', agent_code: 'AGN-L7-001',  commission_rate: 8,  join_date: '2024-06-01', reporting_to: 9,  status: 'active' },
+        { id: 12, username: 'demo_l7b',  password: 'demo123', full_name: 'Amirul Hakim',      role: 'Level 7 Consultant',         email: 'l7b@destino.com',  phone: '011-1000012', agent_code: 'AGN-L7-002',  commission_rate: 8,  join_date: '2024-06-01', reporting_to: 10, status: 'active' },
+        // Level 8 — Junior Consultants (×2)
+        { id: 13, username: 'demo_l8a',  password: 'demo123', full_name: 'Priya Devi',        role: 'Level 8 Junior Consultant',  email: 'l8a@destino.com',  phone: '011-1000013', agent_code: 'AGN-L8-001',  commission_rate: 6,  join_date: '2024-07-01', reporting_to: 11, status: 'active' },
+        { id: 14, username: 'demo_l8b',  password: 'demo123', full_name: 'Mohd Faris',        role: 'Level 8 Junior Consultant',  email: 'l8b@destino.com',  phone: '011-1000014', agent_code: 'AGN-L8-002',  commission_rate: 6,  join_date: '2024-07-01', reporting_to: 12, status: 'active' },
+        // Level 9 — Senior Agents (×2)
+        { id: 15, username: 'demo_l9a',  password: 'demo123', full_name: 'Khoo Boon Keat',   role: 'Level 9 Senior Agent',       email: 'l9a@destino.com',  phone: '011-1000015', agent_code: 'AGN-L9-001',  commission_rate: 5,  join_date: '2024-08-01', reporting_to: 13, status: 'active' },
+        { id: 16, username: 'demo_l9b',  password: 'demo123', full_name: 'Nor Azreen',        role: 'Level 9 Senior Agent',       email: 'l9b@destino.com',  phone: '011-1000016', agent_code: 'AGN-L9-002',  commission_rate: 5,  join_date: '2024-08-01', reporting_to: 14, status: 'active' },
+        // Level 10 — Agents (×2)
+        { id: 17, username: 'demo_l10a', password: 'demo123', full_name: 'Vincent Lee',       role: 'Level 10 Agent',             email: 'l10a@destino.com', phone: '011-1000017', agent_code: 'AGN-L10-001', commission_rate: 4,  join_date: '2024-09-01', reporting_to: 15, status: 'active' },
+        { id: 18, username: 'demo_l10b', password: 'demo123', full_name: 'Ruzanna Idris',     role: 'Level 10 Agent',             email: 'l10b@destino.com', phone: '011-1000018', agent_code: 'AGN-L10-002', commission_rate: 4,  join_date: '2024-09-01', reporting_to: 16, status: 'active' },
+        // Level 11 — Junior Agents (×2)
+        { id: 19, username: 'demo_l11a', password: 'demo123', full_name: 'Yap Chun Hong',     role: 'Level 11 Junior Agent',      email: 'l11a@destino.com', phone: '011-1000019', agent_code: 'AGN-L11-001', commission_rate: 3,  join_date: '2024-10-01', reporting_to: 17, status: 'active' },
+        { id: 20, username: 'demo_l11b', password: 'demo123', full_name: 'Shafiqah Noorin',   role: 'Level 11 Junior Agent',      email: 'l11b@destino.com', phone: '011-1000020', agent_code: 'AGN-L11-002', commission_rate: 3,  join_date: '2024-10-01', reporting_to: 18, status: 'active' },
+        // Level 12 — Ambassadors (×4, 2 per L11 branch)
+        { id: 21, username: 'demo_l12a', password: 'demo123', full_name: 'Chia Wei Xin',      role: 'Level 12 Ambassador',        email: 'l12a@destino.com', phone: '011-1000021', agent_code: 'AGN-L12-001', commission_rate: 2,  join_date: '2025-01-01', reporting_to: 19, status: 'active' },
+        { id: 22, username: 'demo_l12b', password: 'demo123', full_name: 'Hazwan Roslan',     role: 'Level 12 Ambassador',        email: 'l12b@destino.com', phone: '011-1000022', agent_code: 'AGN-L12-002', commission_rate: 2,  join_date: '2025-01-01', reporting_to: 19, status: 'active' },
+        { id: 23, username: 'demo_l12c', password: 'demo123', full_name: 'Tan Shu Min',       role: 'Level 12 Ambassador',        email: 'l12c@destino.com', phone: '011-1000023', agent_code: 'AGN-L12-003', commission_rate: 2,  join_date: '2025-01-15', reporting_to: 20, status: 'active' },
+        { id: 24, username: 'demo_l12d', password: 'demo123', full_name: 'Mohd Ridzuan',      role: 'Level 12 Ambassador',        email: 'l12d@destino.com', phone: '011-1000024', agent_code: 'AGN-L12-004', commission_rate: 2,  join_date: '2025-01-15', reporting_to: 20, status: 'active' },
     ];
     for (const u of demoUsers) {
         await safeInsert('users', u);
     }
 
-    // ----- 2. Prospects (depend on users) -----
+    // ----- 2. Test Prospects — one per user, assigned from L12 up to L1 -----
+    // prospect id = 100 + user id  |  responsible_agent_id = user id
     const demoProspects = [
-        { id: 1, full_name: 'Tan Ah Kow', phone: '012-3456789', score: 850, responsible_agent_id: 5, ming_gua: 'MG4', element: 'Wood', status: 'active', needs: 'Wealth,Career' },
-        { id: 2, full_name: 'Ong Bee Ling', phone: '012-9876543', score: 720, responsible_agent_id: 5, protection_deadline: '2026-03-20', ming_gua: 'MG2', status: 'active', needs: 'Health,Relationship' }
+        // L12 Ambassadors (bottom of chain — entry-level data)
+        { id: 121, full_name: 'Loke Wai Kit',      phone: '019-2100001', score: 540, responsible_agent_id: 21, ming_gua: 'MG1', element: 'Water', status: 'active', needs: 'Wealth',            notes: '[L12A] Chia Wei Xin prospect' },
+        { id: 122, full_name: 'Zuraidah Sabri',    phone: '019-2100002', score: 555, responsible_agent_id: 22, ming_gua: 'MG2', element: 'Earth', status: 'active', needs: 'Career',            notes: '[L12B] Hazwan Roslan prospect' },
+        { id: 123, full_name: 'Ho Chin Long',      phone: '019-2100003', score: 560, responsible_agent_id: 23, ming_gua: 'MG3', element: 'Wood',  status: 'active', needs: 'Health',            notes: '[L12C] Tan Shu Min prospect' },
+        { id: 124, full_name: 'Maryam Sulaiman',   phone: '019-2100004', score: 545, responsible_agent_id: 24, ming_gua: 'MG4', element: 'Metal', status: 'active', needs: 'Relationship',      notes: '[L12D] Mohd Ridzuan prospect' },
+        // L11 Junior Agents
+        { id: 119, full_name: 'Teh Boon Peng',     phone: '019-2100005', score: 610, responsible_agent_id: 19, ming_gua: 'MG5', element: 'Earth', status: 'active', needs: 'Wealth,Health',    notes: '[L11A] Yap Chun Hong prospect' },
+        { id: 120, full_name: 'Suraya Ahmad',      phone: '019-2100006', score: 625, responsible_agent_id: 20, ming_gua: 'MG6', element: 'Metal', status: 'active', needs: 'Career',            notes: '[L11B] Shafiqah Noorin prospect' },
+        // L10 Agents
+        { id: 117, full_name: 'Chan Kum Fatt',     phone: '019-2100007', score: 670, responsible_agent_id: 17, ming_gua: 'MG7', element: 'Metal', status: 'active', needs: 'Wealth',            notes: '[L10A] Vincent Lee prospect' },
+        { id: 118, full_name: 'Nabilah Othman',    phone: '019-2100008', score: 660, responsible_agent_id: 18, ming_gua: 'MG8', element: 'Earth', status: 'active', needs: 'Health',            notes: '[L10B] Ruzanna Idris prospect' },
+        // L9 Senior Agents
+        { id: 115, full_name: 'Lau Seng Hock',     phone: '019-2100009', score: 710, responsible_agent_id: 15, ming_gua: 'MG9', element: 'Fire',  status: 'active', needs: 'Career,Wealth',    notes: '[L9A] Khoo Boon Keat prospect' },
+        { id: 116, full_name: 'Rosnida Azmi',      phone: '019-2100010', score: 700, responsible_agent_id: 16, ming_gua: 'MG1', element: 'Water', status: 'active', needs: 'Relationship',      notes: '[L9B] Nor Azreen prospect' },
+        // L8 Junior Consultants
+        { id: 113, full_name: 'Foo Ah Seng',       phone: '019-2100011', score: 740, responsible_agent_id: 13, ming_gua: 'MG2', element: 'Earth', status: 'active', needs: 'Health',            notes: '[L8A] Priya Devi prospect' },
+        { id: 114, full_name: 'Norsyahida Kamal',  phone: '019-2100012', score: 730, responsible_agent_id: 14, ming_gua: 'MG3', element: 'Wood',  status: 'active', needs: 'Wealth',            notes: '[L8B] Mohd Faris prospect' },
+        // L7 Consultants
+        { id: 111, full_name: 'Goh Bak Chuan',     phone: '019-2100013', score: 770, responsible_agent_id: 11, ming_gua: 'MG4', element: 'Wood',  status: 'active', needs: 'Career',            notes: '[L7A] Ng Sook Yee prospect' },
+        { id: 112, full_name: 'Halimah Yusoff',    phone: '019-2100014', score: 760, responsible_agent_id: 12, ming_gua: 'MG5', element: 'Earth', status: 'active', needs: 'Wealth,Career',    notes: '[L7B] Amirul Hakim prospect' },
+        // L6 Senior Consultants
+        { id: 109, full_name: 'Wong Kah Sing',     phone: '019-2100015', score: 800, responsible_agent_id: 9,  ming_gua: 'MG6', element: 'Metal', status: 'active', needs: 'Health,Wealth',    notes: '[L6A] Chong Mei Ling prospect' },
+        { id: 110, full_name: 'Nurfazira Hassan',  phone: '019-2100016', score: 790, responsible_agent_id: 10, ming_gua: 'MG7', element: 'Metal', status: 'active', needs: 'Career',            notes: '[L6B] Hafizuddin Malik prospect' },
+        // L5 Team Leaders
+        { id: 107, full_name: 'Ooi Teck Huat',     phone: '019-2100017', score: 830, responsible_agent_id: 7,  ming_gua: 'MG8', element: 'Earth', status: 'active', needs: 'Wealth',            notes: '[L5A] Lim Chee Keong prospect' },
+        { id: 108, full_name: 'Azizah Nordin',     phone: '019-2100018', score: 820, responsible_agent_id: 8,  ming_gua: 'MG9', element: 'Fire',  status: 'active', needs: 'Health',            notes: '[L5B] Zainab Mohd prospect' },
+        // L4 Managers
+        { id: 105, full_name: 'Leong Chee Wai',    phone: '019-2100019', score: 855, responsible_agent_id: 5,  ming_gua: 'MG1', element: 'Water', status: 'active', needs: 'Career,Wealth',    notes: '[L4A] Raj Kumar prospect' },
+        { id: 106, full_name: 'Sarimah Ibrahim',   phone: '019-2100020', score: 845, responsible_agent_id: 6,  ming_gua: 'MG2', element: 'Earth', status: 'active', needs: 'Wealth',            notes: '[L4B] Fatimah Zahra prospect' },
+        // L3 Senior Managers
+        { id: 103, full_name: 'Cheah Boon Lay',    phone: '019-2100021', score: 890, responsible_agent_id: 3,  ming_gua: 'MG3', element: 'Wood',  status: 'active', needs: 'Health',            notes: '[L3A] Tan Wei Liang prospect' },
+        { id: 104, full_name: 'Rohani Daud',       phone: '019-2100022', score: 880, responsible_agent_id: 4,  ming_gua: 'MG4', element: 'Wood',  status: 'active', needs: 'Wealth,Career',    notes: '[L3B] Siti Aminah prospect' },
+        // L2 Marketing Manager
+        { id: 102, full_name: 'Danny Tan',         phone: '019-2100023', score: 920, responsible_agent_id: 2,  ming_gua: 'MG5', element: 'Earth', status: 'active', needs: 'Career',            notes: '[L2] Nurul Hana prospect' },
+        // L1 Super Admin
+        { id: 101, full_name: 'Elizabeth Wong',    phone: '019-2100024', score: 940, responsible_agent_id: 1,  ming_gua: 'MG6', element: 'Metal', status: 'active', needs: 'Wealth',            notes: '[L1] Ahmad Razif prospect' },
     ];
     for (const p of demoProspects) {
         await safeInsert('prospects', p);
     }
 
-    // ----- 3. Activities (depend on prospects) -----
+    // ----- 3. Test Activities — one per prospect, assigned to the same agent -----
     const demoActivities = [
-        { id: 1001, activity_type: 'CPS', activity_title: 'Initial Consultation', activity_date: '2026-03-04', start_time: '09:00', end_time: '10:00', prospect_id: 1, lead_agent_id: 5 },
-        { id: 1002, activity_type: 'FTF', activity_title: 'Face to Face Meeting', activity_date: '2026-03-04', start_time: '11:00', end_time: '12:00', prospect_id: 2, lead_agent_id: 5 }
+        // L12 activities (entered first — bottom-up flow)
+        { id: 2021, activity_type: 'CPS', activity_title: '[L12A] Initial Consultation',   activity_date: '2026-03-10', start_time: '09:00', end_time: '10:00', prospect_id: 121, lead_agent_id: 21 },
+        { id: 2022, activity_type: 'FTF', activity_title: '[L12B] Face to Face Meeting',   activity_date: '2026-03-10', start_time: '10:00', end_time: '11:00', prospect_id: 122, lead_agent_id: 22 },
+        { id: 2023, activity_type: 'CPS', activity_title: '[L12C] Discovery Call',         activity_date: '2026-03-11', start_time: '09:00', end_time: '10:00', prospect_id: 123, lead_agent_id: 23 },
+        { id: 2024, activity_type: 'FTF', activity_title: '[L12D] Profile Review',         activity_date: '2026-03-11', start_time: '10:00', end_time: '11:00', prospect_id: 124, lead_agent_id: 24 },
+        // L11 activities
+        { id: 2019, activity_type: 'CPS', activity_title: '[L11A] Strategy Session',       activity_date: '2026-03-12', start_time: '09:00', end_time: '10:00', prospect_id: 119, lead_agent_id: 19 },
+        { id: 2020, activity_type: 'FTF', activity_title: '[L11B] Needs Analysis',         activity_date: '2026-03-12', start_time: '10:00', end_time: '11:00', prospect_id: 120, lead_agent_id: 20 },
+        // L10 activities
+        { id: 2017, activity_type: 'CPS', activity_title: '[L10A] Initial Consultation',   activity_date: '2026-03-13', start_time: '09:00', end_time: '10:00', prospect_id: 117, lead_agent_id: 17 },
+        { id: 2018, activity_type: 'FTF', activity_title: '[L10B] Solution Presentation',  activity_date: '2026-03-13', start_time: '10:00', end_time: '11:00', prospect_id: 118, lead_agent_id: 18 },
+        // L9 activities
+        { id: 2015, activity_type: 'CPS', activity_title: '[L9A] Follow-Up Call',          activity_date: '2026-03-14', start_time: '09:00', end_time: '10:00', prospect_id: 115, lead_agent_id: 15 },
+        { id: 2016, activity_type: 'FTF', activity_title: '[L9B] Proposal Meeting',        activity_date: '2026-03-14', start_time: '10:00', end_time: '11:00', prospect_id: 116, lead_agent_id: 16 },
+        // L8 activities
+        { id: 2013, activity_type: 'CPS', activity_title: '[L8A] Client Review',           activity_date: '2026-03-15', start_time: '09:00', end_time: '10:00', prospect_id: 113, lead_agent_id: 13 },
+        { id: 2014, activity_type: 'FTF', activity_title: '[L8B] Closing Session',         activity_date: '2026-03-15', start_time: '10:00', end_time: '11:00', prospect_id: 114, lead_agent_id: 14 },
+        // L7 activities
+        { id: 2011, activity_type: 'CPS', activity_title: '[L7A] Consultation',            activity_date: '2026-03-16', start_time: '09:00', end_time: '10:00', prospect_id: 111, lead_agent_id: 11 },
+        { id: 2012, activity_type: 'FTF', activity_title: '[L7B] Service Update',          activity_date: '2026-03-16', start_time: '10:00', end_time: '11:00', prospect_id: 112, lead_agent_id: 12 },
+        // L6 activities
+        { id: 2009, activity_type: 'CPS', activity_title: '[L6A] Senior Consultation',     activity_date: '2026-03-17', start_time: '09:00', end_time: '10:00', prospect_id: 109, lead_agent_id: 9  },
+        { id: 2010, activity_type: 'FTF', activity_title: '[L6B] Team Planning',           activity_date: '2026-03-17', start_time: '10:00', end_time: '11:00', prospect_id: 110, lead_agent_id: 10 },
+        // L5 activities
+        { id: 2007, activity_type: 'CPS', activity_title: '[L5A] Team Lead Session',       activity_date: '2026-03-18', start_time: '09:00', end_time: '10:00', prospect_id: 107, lead_agent_id: 7  },
+        { id: 2008, activity_type: 'FTF', activity_title: '[L5B] Leadership Review',       activity_date: '2026-03-18', start_time: '10:00', end_time: '11:00', prospect_id: 108, lead_agent_id: 8  },
+        // L4 activities
+        { id: 2005, activity_type: 'CPS', activity_title: '[L4A] Manager Consultation',    activity_date: '2026-03-19', start_time: '09:00', end_time: '10:00', prospect_id: 105, lead_agent_id: 5  },
+        { id: 2006, activity_type: 'FTF', activity_title: '[L4B] Regional Meeting',        activity_date: '2026-03-19', start_time: '10:00', end_time: '11:00', prospect_id: 106, lead_agent_id: 6  },
+        // L3 activities
+        { id: 2003, activity_type: 'CPS', activity_title: '[L3A] Senior Manager Review',   activity_date: '2026-03-20', start_time: '09:00', end_time: '10:00', prospect_id: 103, lead_agent_id: 3  },
+        { id: 2004, activity_type: 'FTF', activity_title: '[L3B] Strategic Planning',      activity_date: '2026-03-20', start_time: '10:00', end_time: '11:00', prospect_id: 104, lead_agent_id: 4  },
+        // L2 activity
+        { id: 2002, activity_type: 'CPS', activity_title: '[L2] Marketing Overview',       activity_date: '2026-03-21', start_time: '09:00', end_time: '10:00', prospect_id: 102, lead_agent_id: 2  },
+        // L1 activity
+        { id: 2001, activity_type: 'CPS', activity_title: '[L1] Admin Strategy Session',   activity_date: '2026-03-21', start_time: '11:00', end_time: '12:00', prospect_id: 101, lead_agent_id: 1  },
     ];
     for (const a of demoActivities) {
         await safeInsert('activities', a);
     }
 
     // ----- 4. Other tables (optional, add as needed) -----
-    // e.g., roles, tags, etc.
 
-    console.log('Demo data seeding completed.');
+    console.log(`Demo data seeding completed: ${demoUsers.length} users, ${demoProspects.length} prospects, ${demoActivities.length} activities.`);
 };
 
     const updateUserDisplay = () => {
@@ -18573,34 +18673,69 @@ const simulateCampaignSending = async (campaignId) => {
         const currentUser = _currentUser || await Auth.getCurrentUser();
 
         if (!currentUser) {
-            // Guest mode - show demo users
+            // Guest mode - show all 24 demo users organized by level
             const users = await AppDataStore.getAll('users') || [];
-            // Filter for demo users
-            const demoUsers = users.slice(0, 8); // Just show first 8 as demo
+            const sortedUsers = [...users].sort((a, b) => {
+                const la = parseInt(a.role?.match(/Level\s+(\d+)/i)?.[1] || 99);
+                const lb = parseInt(b.role?.match(/Level\s+(\d+)/i)?.[1] || 99);
+                return la !== lb ? la - lb : (a.id - b.id);
+            });
+
+            // Group by level
+            const byLevel = {};
+            for (const u of sortedUsers) {
+                const lv = parseInt(u.role?.match(/Level\s+(\d+)/i)?.[1] || 99);
+                if (!byLevel[lv]) byLevel[lv] = [];
+                byLevel[lv].push(u);
+            }
+
+            const levelColors = { 1:'#7c3aed',2:'#6d28d9',3:'#1d4ed8',4:'#1e40af',5:'#0369a1',6:'#0891b2',7:'#047857',8:'#15803d',9:'#b45309',10:'#92400e',11:'#be185d',12:'#9f1239' };
+
+            const groupsHtml = Object.entries(byLevel).map(([lv, lvUsers]) => {
+                const lc = levelColors[lv] || '#6b7280';
+                const userCards = lvUsers.map(u => `
+                    <div onclick="app.loginAs('${u.id}')" style="padding:10px;border:1px solid var(--gray-200);border-radius:8px;cursor:pointer;background:white;transition:all .15s;" onmouseover="this.style.borderColor='${lc}';this.style.background='${lc}11'" onmouseout="this.style.borderColor='var(--gray-200)';this.style.background='white'">
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <div style="width:26px;height:26px;background:${lc};color:white;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:10px;flex-shrink:0;">
+                                ${(u.full_name||'U').split(' ').map(n=>n[0]).join('').toUpperCase().substring(0,2)}
+                            </div>
+                            <div>
+                                <div style="font-weight:600;font-size:12px;color:var(--gray-900);line-height:1.2;">${u.full_name}</div>
+                                <div style="font-size:10px;color:var(--gray-400);">${u.username}</div>
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+                return `
+                    <div style="margin-bottom:14px;">
+                        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                            <span style="background:${lc};color:white;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;">L${lv}</span>
+                            <span style="font-size:12px;color:var(--gray-600);font-weight:500;">${lvUsers[0].role.replace(/Level\s+\d+\s*/i,'')}</span>
+                            <span style="font-size:11px;color:var(--gray-400);">(${lvUsers.length})</span>
+                        </div>
+                        <div style="display:grid;grid-template-columns:repeat(${Math.min(lvUsers.length,3)},1fr);gap:8px;">
+                            ${userCards}
+                        </div>
+                    </div>
+                `;
+            }).join('');
 
             const content = `
-            <div class="user-menu-modal" style="padding: 10px 0;">
-                    <p style="margin-bottom: 20px; color: var(--gray-600); font-size: 14px;">Log in as a demo user to access CRM features:</p>
-                    <div class="demo-users-list" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                        ${demoUsers.map(u => `
-                            <div class="demo-user-item" onclick="app.loginAs('${u.id}')" style="padding: 12px; border: 1px solid var(--gray-200); border-radius: 8px; cursor: pointer; transition: all 0.2s; background: white; text-align: left;">
-                                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
-                                    <div class="avatar-sm" style="width: 28px; height: 28px; background: var(--primary-color); color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 11px;">
-                                        ${(u.full_name || 'U').split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2)}
-                                    </div>
-                                    <div style="font-weight: 600; font-size: 13px; color: var(--gray-900); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${u.full_name}</div>
-                                </div>
-                                <div style="font-size: 11px; color: var(--gray-500); text-transform: capitalize; background: var(--gray-100); padding: 2px 8px; border-radius: 4px; display: inline-block;">${u.role}</div>
-                            </div>
-                        `).join('')}
-                    </div>
-                    <div style="margin-top: 24px; text-align: center;">
-                        <button class="btn secondary" onclick="UI.hideModal()" style="font-size: 13px;">Continue as Guest</button>
-                    </div>
+            <div style="padding:4px 0;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+                    <p style="margin:0;color:var(--gray-600);font-size:13px;">Select any user to log in. All passwords: <strong>demo123</strong></p>
+                    <button onclick="(async()=>{UI.hideModal();await app.validateDataFlow();})()" style="font-size:11px;padding:4px 10px;background:var(--primary-color);color:white;border:none;border-radius:6px;cursor:pointer;"><i class="fas fa-check-circle"></i> Validate</button>
                 </div>
-    `;
+                <div style="max-height:62vh;overflow-y:auto;padding-right:4px;">
+                    ${groupsHtml}
+                </div>
+                <div style="margin-top:14px;text-align:center;border-top:1px solid var(--gray-100);padding-top:12px;">
+                    <button class="btn secondary" onclick="UI.hideModal()" style="font-size:12px;margin-right:8px;">Continue as Guest</button>
+                    <button onclick="(async()=>{UI.hideModal();await app.resetDemoData();})()" style="font-size:12px;padding:6px 14px;background:#f97316;color:white;border:none;border-radius:6px;cursor:pointer;"><i class="fas fa-sync"></i> Reset Demo Data</button>
+                </div>
+            </div>`;
 
-            UI.showModal('Select User to Login', content, []);
+            UI.showModal('Select Demo User', content, []);
         } else {
             // Logged in mode - show user options
             const content = `
@@ -20551,6 +20686,249 @@ const initImportDemoData = async () => {
         }
     };
 
+    // ========== DATA FLOW VALIDATION ==========
+
+    const validateDataFlow = async () => {
+        UI.showModal('Data Flow Validation', `<div style="text-align:center;padding:40px;"><i class="fas fa-spinner fa-spin fa-2x" style="color:var(--primary-color);"></i><p style="margin-top:12px;color:var(--gray-500);">Running validation across all 12 levels...</p></div>`, []);
+        try {
+            const allUsers = await AppDataStore.getAll('users');
+            const allProspects = await AppDataStore.getAll('prospects');
+            const allActivities = await AppDataStore.getAll('activities');
+
+            // Build matrix: for each user compute scope + counts
+            const matrix = [];
+            const sortedUsers = [...allUsers].sort((a, b) => {
+                const la = parseInt(a.role?.match(/Level\s+(\d+)/i)?.[1] || 99);
+                const lb = parseInt(b.role?.match(/Level\s+(\d+)/i)?.[1] || 99);
+                return la !== lb ? la - lb : (a.id - b.id);
+            });
+            for (const user of sortedUsers) {
+                const visibleIds = await getVisibleUserIds(user);
+                const isAll = visibleIds === 'all';
+                const scope = isAll ? allUsers.map(u => u.id) : visibleIds;
+                const level = parseInt(user.role?.match(/Level\s+(\d+)/i)?.[1] || 99);
+                const upline = allUsers.find(u => u.id === user.reporting_to);
+                const visProspects = isAll ? allProspects : allProspects.filter(p => scope.includes(p.responsible_agent_id));
+                const visActivities = isAll ? allActivities : allActivities.filter(a => scope.includes(a.lead_agent_id));
+                matrix.push({ user, level, upline, scope, isAll, visProspects, visActivities });
+            }
+
+            // Cross-validation checks
+            const checks = [];
+
+            // Check 1: Levels 1–4 see ALL prospects
+            for (const m of matrix.filter(m => m.level <= 4)) {
+                checks.push({
+                    name: `L${m.level} ${m.user.full_name} sees ALL ${allProspects.length} prospects`,
+                    pass: m.visProspects.length === allProspects.length,
+                    detail: `Visible: ${m.visProspects.length} / ${allProspects.length}`
+                });
+            }
+
+            // Check 2: Each L5+ user can see their own prospect(s)
+            for (const m of matrix.filter(m => m.level >= 5)) {
+                const own = allProspects.filter(p => p.responsible_agent_id === m.user.id);
+                if (own.length > 0) {
+                    const canSeeOwn = own.every(p => m.scope.includes(p.responsible_agent_id));
+                    checks.push({
+                        name: `L${m.level} ${m.user.full_name} can see own prospect(s)`,
+                        pass: canSeeOwn,
+                        detail: `Own: ${own.length}, scope includes self: ${m.scope.includes(m.user.id)}`
+                    });
+                }
+            }
+
+            // Check 3: Each upline sees direct downline prospects
+            for (const m of matrix.filter(m => m.level >= 5 && m.level <= 11)) {
+                const directDownlines = matrix.filter(d => d.user.reporting_to === m.user.id);
+                for (const dl of directDownlines) {
+                    const dlOwn = allProspects.filter(p => p.responsible_agent_id === dl.user.id);
+                    if (dlOwn.length > 0) {
+                        const canSee = dlOwn.every(p => m.scope.includes(p.responsible_agent_id));
+                        checks.push({
+                            name: `L${m.level} ${m.user.full_name} sees L${dl.level} ${dl.user.full_name}'s prospects`,
+                            pass: canSee,
+                            detail: `${dlOwn.length} downline prospect(s) in upline scope`
+                        });
+                    }
+                }
+            }
+
+            // Check 4: L12 siblings cannot see each other (horizontal isolation)
+            const l12 = matrix.filter(m => m.level === 12);
+            const siblingsChecked = new Set();
+            for (const a of l12) {
+                for (const b of l12.filter(x => x.user.id !== a.user.id && x.user.reporting_to === a.user.reporting_to)) {
+                    const key = [a.user.id, b.user.id].sort().join('-');
+                    if (siblingsChecked.has(key)) continue;
+                    siblingsChecked.add(key);
+                    const bOwn = allProspects.filter(p => p.responsible_agent_id === b.user.id);
+                    if (bOwn.length > 0) {
+                        const isolated = !a.scope.includes(b.user.id);
+                        checks.push({
+                            name: `L12 ${a.user.full_name} CANNOT see sibling ${b.user.full_name}`,
+                            pass: isolated,
+                            detail: `Horizontal isolation check (same upline, different branch)`
+                        });
+                    }
+                }
+            }
+
+            // Check 5: L12 cannot see L11 sibling-branch data
+            for (const m of matrix.filter(m => m.level === 12)) {
+                const otherL12 = matrix.filter(x => x.level === 12 && x.user.reporting_to !== m.user.reporting_to);
+                const otherIds = otherL12.map(x => x.user.id);
+                const cannotSeeCrossBranch = otherIds.every(id => !m.scope.includes(id));
+                if (otherIds.length > 0) {
+                    checks.push({
+                        name: `L12 ${m.user.full_name} CANNOT see cross-branch L12 users`,
+                        pass: cannotSeeCrossBranch,
+                        detail: `Cross-branch isolation (${otherIds.length} other L12 users in separate chains)`
+                    });
+                }
+            }
+
+            const passCount = checks.filter(c => c.pass).length;
+            const failCount = checks.length - passCount;
+
+            const levelColors = { 1: '#7c3aed', 2: '#6d28d9', 3: '#1d4ed8', 4: '#1e40af', 5: '#0369a1', 6: '#0891b2', 7: '#047857', 8: '#15803d', 9: '#b45309', 10: '#92400e', 11: '#be185d', 12: '#9f1239' };
+
+            const content = `
+            <div style="max-height:72vh;overflow-y:auto;padding:4px;">
+                <!-- Summary Cards -->
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px;">
+                    <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:12px;text-align:center;">
+                        <div style="font-size:22px;font-weight:700;color:#16a34a;">${allUsers.length}</div>
+                        <div style="font-size:11px;color:#15803d;font-weight:500;">Demo Users (12 Levels)</div>
+                    </div>
+                    <div style="background:#eff6ff;border:1px solid #93c5fd;border-radius:8px;padding:12px;text-align:center;">
+                        <div style="font-size:22px;font-weight:700;color:#1d4ed8;">${allProspects.length}</div>
+                        <div style="font-size:11px;color:#1e40af;font-weight:500;">Test Prospects</div>
+                    </div>
+                    <div style="background:#fefce8;border:1px solid #fde047;border-radius:8px;padding:12px;text-align:center;">
+                        <div style="font-size:22px;font-weight:700;color:#ca8a04;">${allActivities.length}</div>
+                        <div style="font-size:11px;color:#a16207;font-weight:500;">Test Activities</div>
+                    </div>
+                    <div style="background:${failCount===0?'#f0fdf4':'#fef2f2'};border:1px solid ${failCount===0?'#86efac':'#fca5a5'};border-radius:8px;padding:12px;text-align:center;">
+                        <div style="font-size:22px;font-weight:700;color:${failCount===0?'#16a34a':'#dc2626'};">${passCount}/${checks.length}</div>
+                        <div style="font-size:11px;color:${failCount===0?'#15803d':'#b91c1c'};font-weight:500;">Checks Passed</div>
+                    </div>
+                </div>
+
+                <!-- Visibility Matrix -->
+                <h3 style="font-size:13px;font-weight:700;margin:0 0 10px;color:var(--gray-700);text-transform:uppercase;letter-spacing:.5px;">
+                    <i class="fas fa-sitemap" style="margin-right:6px;color:var(--primary-color);"></i>Visibility Matrix — All ${matrix.length} Users
+                </h3>
+                <div style="overflow-x:auto;margin-bottom:20px;border:1px solid var(--gray-200);border-radius:8px;">
+                    <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                        <thead>
+                            <tr style="background:var(--gray-50);">
+                                <th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--gray-200);font-weight:600;color:var(--gray-600);">User</th>
+                                <th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--gray-200);font-weight:600;color:var(--gray-600);">Level</th>
+                                <th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--gray-200);font-weight:600;color:var(--gray-600);">Reports To</th>
+                                <th style="padding:8px 10px;text-align:center;border-bottom:1px solid var(--gray-200);font-weight:600;color:var(--gray-600);">Users Visible</th>
+                                <th style="padding:8px 10px;text-align:center;border-bottom:1px solid var(--gray-200);font-weight:600;color:var(--gray-600);">Prospects</th>
+                                <th style="padding:8px 10px;text-align:center;border-bottom:1px solid var(--gray-200);font-weight:600;color:var(--gray-600);">Activities</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${matrix.map((m, i) => {
+                                const lc = levelColors[m.level] || '#6b7280';
+                                const bg = m.level <= 4 ? '#faf5ff' : i % 2 === 0 ? 'white' : '#f9fafb';
+                                const ownP = allProspects.filter(p => p.responsible_agent_id === m.user.id).length;
+                                return `<tr style="background:${bg};border-bottom:1px solid var(--gray-100);">
+                                    <td style="padding:7px 10px;font-weight:500;">${m.user.full_name}</td>
+                                    <td style="padding:7px 10px;">
+                                        <span style="background:${lc};color:white;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:600;white-space:nowrap;">L${m.level}</span>
+                                    </td>
+                                    <td style="padding:7px 10px;color:var(--gray-500);font-size:11px;">${m.upline?.full_name || '<span style="color:var(--gray-300)">—</span>'}</td>
+                                    <td style="padding:7px 10px;text-align:center;">
+                                        <span style="font-weight:700;color:${m.isAll?'#16a34a':'#1d4ed8'};">${m.isAll?`ALL (${allUsers.length})`:m.scope.length}</span>
+                                    </td>
+                                    <td style="padding:7px 10px;text-align:center;">
+                                        <span style="font-weight:700;color:#1d4ed8;">${m.visProspects.length}</span>
+                                        <span style="color:var(--gray-400);font-size:10px;"> (own:${ownP})</span>
+                                    </td>
+                                    <td style="padding:7px 10px;text-align:center;font-weight:700;color:#0891b2;">${m.visActivities.length}</td>
+                                </tr>`;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Cross-Validation Checks -->
+                <h3 style="font-size:13px;font-weight:700;margin:0 0 10px;color:var(--gray-700);text-transform:uppercase;letter-spacing:.5px;">
+                    <i class="fas fa-check-double" style="margin-right:6px;color:var(--primary-color);"></i>Cross-Validation Checks (${checks.length} total)
+                </h3>
+                <div style="display:flex;flex-direction:column;gap:5px;">
+                    ${checks.map(c => `
+                        <div style="display:flex;align-items:flex-start;gap:10px;padding:8px 12px;background:${c.pass?'#f0fdf4':'#fef2f2'};border-radius:6px;border-left:3px solid ${c.pass?'#16a34a':'#dc2626'};">
+                            <i class="fas fa-${c.pass?'check':'times'}" style="color:${c.pass?'#16a34a':'#dc2626'};margin-top:2px;width:12px;flex-shrink:0;"></i>
+                            <div>
+                                <div style="font-size:12px;font-weight:500;color:var(--gray-800);">${c.name}</div>
+                                <div style="font-size:11px;color:var(--gray-500);margin-top:1px;">${c.detail}</div>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+
+                <!-- Final Verdict -->
+                <div style="margin-top:16px;padding:14px;background:${failCount===0?'#f0fdf4':'#fef2f2'};border:1px solid ${failCount===0?'#86efac':'#fca5a5'};border-radius:8px;text-align:center;">
+                    <i class="fas fa-${failCount===0?'check-circle':'exclamation-circle'}" style="color:${failCount===0?'#16a34a':'#dc2626'};font-size:20px;"></i>
+                    <div style="font-weight:700;color:${failCount===0?'#15803d':'#b91c1c'};margin-top:6px;font-size:14px;">
+                        ${failCount===0?'All checks passed — data flow is correctly configured across all 12 levels!':failCount+' check(s) failed — review the items above.'}
+                    </div>
+                    <div style="font-size:12px;color:var(--gray-500);margin-top:4px;">Password for all demo accounts: <strong>demo123</strong></div>
+                </div>
+            </div>`;
+
+            UI.showModal('Data Flow Validation Report', content, [
+                { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
+                { label: 'Reset & Re-seed', type: 'danger', action: '(async () => { UI.hideModal(); await app.resetDemoData(); })()' }
+            ]);
+        } catch (err) {
+            console.error('Validation error:', err);
+            UI.toast.error('Validation failed: ' + err.message);
+        }
+    };
+
+    const resetDemoData = async () => {
+        UI.showModal('Reset Demo Data', `
+            <div style="text-align:center;padding:24px 16px;">
+                <i class="fas fa-exclamation-triangle" style="font-size:40px;color:#f59e0b;margin-bottom:16px;"></i>
+                <h3 style="margin:0 0 10px;">Reset & Re-seed Demo Data?</h3>
+                <p style="color:var(--gray-600);font-size:14px;margin:0 0 8px;">This will <strong>delete all current users, prospects, and activities</strong>, then re-insert the full 24-user hierarchy with fresh test data.</p>
+                <p style="color:var(--gray-400);font-size:12px;margin:0;">This operation cannot be undone.</p>
+            </div>
+        `, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Reset & Re-seed', type: 'danger', action: '(async () => { await app.confirmResetDemoData(); })()' }
+        ]);
+    };
+
+    const confirmResetDemoData = async () => {
+        UI.hideModal();
+        UI.toast.info('Resetting demo data — please wait...');
+        try {
+            // Delete in reverse dependency order: activities → prospects → users
+            const [activities, prospects, users] = await Promise.all([
+                AppDataStore.getAll('activities'),
+                AppDataStore.getAll('prospects'),
+                AppDataStore.getAll('users')
+            ]);
+            for (const a of activities) await AppDataStore.delete('activities', a.id).catch(() => {});
+            for (const p of prospects) await AppDataStore.delete('prospects', p.id).catch(() => {});
+            for (const u of users) await AppDataStore.delete('users', u.id).catch(() => {});
+            await initDemoData();
+            _currentUser = null;
+            updateUserDisplay();
+            UI.toast.success('Demo data reset — 24 users, 24 prospects, 24 activities seeded.');
+        } catch (err) {
+            console.error('Reset error:', err);
+            UI.toast.error('Reset failed: ' + err.message);
+        }
+    };
+
     return {
         init,
         navigateTo,
@@ -21235,7 +21613,13 @@ const initImportDemoData = async () => {
         setTimeFilter,
         setCustomDateRange,
         refreshKPIDashboard,
-        exportKPIReport
+        exportKPIReport,
+
+        // Demo Data & Validation
+        initDemoData,
+        validateDataFlow,
+        resetDemoData,
+        confirmResetDemoData,
 
     };
 
