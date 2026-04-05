@@ -8821,3 +8821,25 @@ input:checked+.slider:before {
     border-bottom: none;
     padding-bottom: 0;
 }
+
+/* ===== ACTION PLAN SECTION ===== */
+.action-plan-section {
+    transition: all 0.2s;
+}
+.plan-items-table th, .plan-items-table td {
+    padding: 8px 12px;
+    vertical-align: middle;
+}
+.plan-checkbox {
+    transform: scale(1.2);
+    margin-right: 8px;
+}
+.weekly-reminder {
+    border-left: 4px solid #f59e0b;
+}
+.plan-item-row {
+    background: #f9fafb;
+}
+.plan-item-row .form-control {
+    background: white;
+}
