@@ -121,7 +121,7 @@ const appLogic = (() => {
         const result = [];
         const collect = (uid) => {
             result.push(uid);
-            allUsers.filter(u => u.reporting_to === uid).forEach(u => collect(u.id));
+            allUsers.filter(u => String(u.reporting_to) === String(uid)).forEach(u => collect(u.id));
         };
         collect(user.id);
         return result;
