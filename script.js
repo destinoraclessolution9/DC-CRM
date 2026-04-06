@@ -17847,9 +17847,10 @@ const exportKPIReport = async (format) => {
                         <p class="text-muted">Manage master data for products, events, and monthly promotions.</p>
                     </div>
                     <div class="header-actions">
+                        ${_currentMarketingListTab !== 'promotions' ? `
                         <button class="btn primary" onclick="app.openMarketingListAddModal()">
                             <i class="fas fa-plus"></i> New ${_currentMarketingListTab.charAt(0).toUpperCase() + _currentMarketingListTab.slice(1, -1)}
-                        </button>
+                        </button>` : ''}
                     </div>
                 </div>
 
@@ -17956,37 +17957,7 @@ const exportKPIReport = async (format) => {
                 </table>
             `;
         } else {
-            return `
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>Package Name</th>
-                            <th>Price (RM)</th>
-                            <th>Lead Time</th>
-                            <th>Status</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${data.map(item => `
-                            <tr style="${!item.is_active ? 'opacity: 0.6; background: #f9fafb;' : ''}">
-                                <td><strong>${item.package_name}</strong><br><small class="text-muted">${item.details || ''}</small></td>
-                                <td>${item.price || 0}</td>
-                                <td>${item.delivery_lead_time || '-'}</td>
-                                <td>
-                                    <span class="status-badge ${item.is_active ? 'status-active' : 'status-inactive'}">
-                                        ${item.is_active ? 'Active' : 'Inactive'}
-                                    </span>
-                                </td>
-                                <td>
-                                    <button class="btn-icon" onclick="app.openMarketingListEditModal('${item.id}')" title="Edit"><i class="fas fa-pencil-alt"></i></button>
-                                    <button class="btn-icon text-danger" onclick="app.deleteMarketingListItem('${item.id}')" title="Delete"><i class="fas fa-trash-alt"></i></button>
-                                </td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
-            `;
+            return await renderPackagesTab();
         }
     };
 
@@ -18131,9 +18102,77 @@ const exportKPIReport = async (format) => {
     // ========== MONTHLY PROMOTION VIEW (read-only) ==========
 
     const showMonthlyPromotionView = async (container) => {
-        const promotions = (await AppDataStore.getAll('promotions')).filter(p => p.is_active !== false);
+        const today = new Date(); today.setHours(0,0,0,0);
+        const allPromos = await AppDataStore.getAll('promotions');
+        // Show active promotions that are not expired
+        const promotions = allPromos.filter(p => {
+            if (p.is_active === false) return false;
+            if (p.end_date) { const e = new Date(p.end_date); e.setHours(0,0,0,0); if (e < today) return false; }
+            return true;
+        });
+
+        // Pre-load product names for each promotion
+        const promoCards = await Promise.all(promotions.map(async p => {
+            const productNames = await Promise.all((p.product_ids || []).map(async id => {
+                const prod = await AppDataStore.getById('products', id);
+                return prod ? prod.name : null;
+            }));
+            const validProductNames = productNames.filter(Boolean);
+
+            // Discount display
+            let discountHtml = '';
+            if (p.original_value && p.original_value > (p.price || 0)) {
+                const savePct = Math.round(((p.original_value - p.price) / p.original_value) * 100);
+                discountHtml = `
+                    <div style="font-size:12px;color:#888;text-decoration:line-through;">RM ${parseFloat(p.original_value).toFixed(2)}</div>
+                    <div style="font-size:11px;color:#c53030;font-weight:700;">Save ${savePct}%</div>`;
+            }
+
+            // Time frame
+            let timeFrame = '';
+            if (p.start_date || p.end_date) {
+                const s = p.start_date ? UI.formatDate(p.start_date) : '—';
+                const e = p.end_date   ? UI.formatDate(p.end_date)   : 'Ongoing';
+                timeFrame = `<span style="font-size:11px;color:var(--gray-500);"><i class="fas fa-calendar-alt" style="margin-right:4px;"></i>${s} – ${e}</span>`;
+            }
+
+            // Payment types
+            const paymentHtml = (p.payment_types || []).length > 0
+                ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;">${(p.payment_types || []).map(pt =>
+                    `<span style="font-size:11px;background:#f3f4f6;border:1px solid #e5e7eb;border-radius:4px;padding:1px 7px;color:#555;">${pt}</span>`
+                  ).join('')}</div>`
+                : '';
+
+            // Limited slots
+            const slotsHtml = p.limited_slots
+                ? `<span style="font-size:11px;color:var(--gray-500);"><i class="fas fa-layer-group" style="margin-right:4px;"></i>Limited: ${p.limited_slots} sets</span>`
+                : '';
+
+            return `
+                <div style="background:#fff;border:1px solid var(--gray-200);border-radius:10px;padding:18px 22px;box-shadow:var(--shadow-sm);">
+                    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;">
+                        <div style="flex:1;min-width:0;">
+                            <div style="font-size:17px;font-weight:700;color:#8B1A1A;margin-bottom:4px;">${p.package_name || p.name || 'Promotion'}</div>
+                            ${validProductNames.length > 0 ? `<div style="font-size:12px;color:var(--gray-500);margin-bottom:6px;"><i class="fas fa-box" style="margin-right:4px;"></i>${validProductNames.join(', ')}</div>` : ''}
+                            ${p.requirement ? `<div style="font-size:12px;color:var(--gray-600);margin-bottom:4px;"><i class="fas fa-check-circle" style="color:#8B1A1A;margin-right:4px;"></i>${p.requirement}</div>` : ''}
+                            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:6px;">
+                                ${timeFrame}
+                                ${slotsHtml}
+                            </div>
+                            ${paymentHtml}
+                            ${p.remarks ? `<div style="font-size:11px;color:var(--gray-400);margin-top:6px;"><i class="fas fa-info-circle" style="margin-right:4px;"></i>${p.remarks}</div>` : ''}
+                        </div>
+                        <div style="text-align:right;flex-shrink:0;min-width:90px;">
+                            ${p.price ? `<div style="font-size:20px;font-weight:800;color:#8B1A1A;">RM ${parseFloat(p.price).toFixed(2)}</div>` : ''}
+                            ${discountHtml}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }));
+
         container.innerHTML = `
-            <div style="padding:20px;max-width:900px;margin:0 auto;">
+            <div style="padding:20px;max-width:960px;margin:0 auto;">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
                     <div>
                         <h2 style="font-size:22px;font-weight:700;margin:0;">Monthly Promotion</h2>
@@ -18147,22 +18186,7 @@ const exportKPIReport = async (format) => {
                     </div>
                 ` : `
                     <div style="display:grid;gap:16px;">
-                        ${promotions.map(p => `
-                            <div style="background:#fff;border:1px solid var(--gray-200);border-radius:10px;padding:16px 20px;box-shadow:var(--shadow-sm);">
-                                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
-                                    <div style="flex:1;min-width:0;">
-                                        <div style="font-size:16px;font-weight:600;color:var(--gray-900);margin-bottom:4px;">${p.package_name || p.name || 'Promotion'}</div>
-                                        ${p.details ? `<div style="font-size:13px;color:var(--gray-600);margin-bottom:6px;">${p.details}</div>` : ''}
-                                        ${p.requirement ? `<div style="font-size:12px;color:var(--gray-500);"><i class="fas fa-check-circle" style="color:var(--primary);margin-right:4px;"></i>${p.requirement}</div>` : ''}
-                                        ${p.remarks ? `<div style="font-size:12px;color:var(--gray-500);margin-top:4px;"><i class="fas fa-info-circle" style="margin-right:4px;"></i>${p.remarks}</div>` : ''}
-                                    </div>
-                                    <div style="text-align:right;flex-shrink:0;">
-                                        ${p.price ? `<div style="font-size:18px;font-weight:700;color:var(--primary);">RM ${parseFloat(p.price).toFixed(2)}</div>` : ''}
-                                        ${p.delivery_lead_time ? `<div style="font-size:12px;color:var(--gray-500);margin-top:4px;"><i class="fas fa-clock" style="margin-right:4px;"></i>${p.delivery_lead_time}</div>` : ''}
-                                    </div>
-                                </div>
-                            </div>
-                        `).join('')}
+                        ${promoCards.join('')}
                     </div>
                 `}
             </div>
@@ -18211,9 +18235,6 @@ const exportKPIReport = async (format) => {
                     <button class="marketing-tab ${_currentMarketingTab === 'products' ? 'active' : ''}" onclick="app.switchMarketingTab('products')">
                         <i class="fas fa-box"></i> Products & Services
                     </button>
-                    <button class="marketing-tab ${_currentMarketingTab === 'packages' ? 'active' : ''}" onclick="app.switchMarketingTab('packages')">
-                        <i class="fas fa-gifts"></i> Promotion Packages
-                    </button>
                     ` : ''}
                 </div>
                 
@@ -18256,8 +18277,6 @@ const exportKPIReport = async (format) => {
             return await renderAnalyticsTab();
         } else if (_currentMarketingTab === 'products') {
             return await renderProductsTab();
-        } else if (_currentMarketingTab === 'packages') {
-            return await renderPackagesTab();
         }
     };
 
@@ -18694,14 +18713,24 @@ const exportKPIReport = async (format) => {
         }
 
         UI.hideModal();
-        if (_currentMarketingTab === 'packages') await app.switchMarketingTab('packages');
+        if (_currentMarketingListTab === 'promotions') {
+            const viewport = document.getElementById('content-viewport');
+            await showMarketingListsView(viewport);
+        } else if (_currentMarketingTab === 'packages') {
+            await app.switchMarketingTab('packages');
+        }
     };
 
     const deletePackage = async (id) => {
         if (confirm("Are you sure you want to delete this promotion package? This action cannot be undone.")) {
             await AppDataStore.delete('promotions', id);
             UI.toast.success("Package deleted");
-            if (_currentMarketingTab === 'packages') await app.switchMarketingTab('packages');
+            if (_currentMarketingListTab === 'promotions') {
+                const viewport = document.getElementById('content-viewport');
+                await showMarketingListsView(viewport);
+            } else if (_currentMarketingTab === 'packages') {
+                await app.switchMarketingTab('packages');
+            }
         }
     };
 
