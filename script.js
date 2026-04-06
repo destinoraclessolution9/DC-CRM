@@ -5725,15 +5725,6 @@ function _wireLoginBtn() {
     console.log('App initializing...');
 
     try {
-        // Check and seed demo data if needed
-        if (!(await AppDataStore.getAll('users')).length) {
-            console.log('No users found. Initializing demo data...');
-            await initDemoData();
-            await initDefaultFolders();
-            await initSampleDocuments();
-            await initImportDemoData();
-        }
-
         // Try to get current user – if session missing, just set _currentUser = null
         try {
             const authUser = await Auth.getCurrentUser();
