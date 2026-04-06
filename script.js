@@ -110,9 +110,11 @@ const appLogic = (() => {
     // Returns an array of user IDs, or 'all' for roles that see everything.
     const getVisibleUserIds = async (user) => {
         if (!user) return [];
+        // Super admin / marketing manager roles (both level-based and named roles) see everything
+        if (isSystemAdmin(user) || isMarketingManager(user)) return 'all';
         const lvlMatch = user.role?.match(/Level\s+(\d+)/i);
         const level = lvlMatch ? parseInt(lvlMatch[1]) : 99;
-        // Levels 1–2 (Super Admin, Marketing Manager) see everything
+        // Levels 1–2 see everything (fallback, already covered above)
         if (level <= 2) return 'all';
         // Levels 12+ (Ambassador, Customer, Referrer) see only own records
         if (level >= 12) return [user.id];
@@ -168,8 +170,9 @@ const appLogic = (() => {
         if (!user) return false;
         // If explicitly marked private, check ownership; any other value (open, null, undefined) allows role check
         if (activity.visibility === 'private') {
-            return activity.lead_agent_id === user.id ||
-                (activity.co_agents && activity.co_agents.some(ca => ca.id === user.id));
+            if (isSystemAdmin(user)) return true;
+            return String(activity.lead_agent_id) === String(user.id) ||
+                (activity.co_agents && activity.co_agents.some(ca => String(ca.id) === String(user.id)));
         }
         const isLead = String(activity.lead_agent_id) === String(user.id);
         const isCoAgent = activity.co_agents && activity.co_agents.some(ca => String(ca.id) === String(user.id));
