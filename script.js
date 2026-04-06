@@ -9750,6 +9750,29 @@ function _wireLoginBtn() {
         }
         UI.hideModal();
         UI.toast.success('Post-meetup notes saved');
+
+        // Navigate to prospect detail and open Potential & Opportunities + Next Actions
+        if (prospectId) {
+            await showProspectDetail(prospectId);
+            // Wait for DOM to render, then expand and scroll to the two sections
+            setTimeout(async () => {
+                for (const tab of ['potential', 'nextactions']) {
+                    const itemEl = document.getElementById(`acc-${tab}-${prospectId}`);
+                    const bodyEl = document.getElementById(`acc-body-${tab}-${prospectId}`);
+                    if (itemEl && bodyEl && !itemEl.classList.contains('open')) {
+                        itemEl.classList.add('open');
+                        bodyEl.style.display = 'block';
+                        if (bodyEl.dataset.loaded === 'false') {
+                            bodyEl.dataset.loaded = 'true';
+                            await switchProspectTab(tab, prospectId, null, bodyEl);
+                        }
+                    }
+                }
+                // Scroll to Potential & Opportunities
+                const potentialEl = document.getElementById(`acc-potential-${prospectId}`);
+                if (potentialEl) potentialEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }, 400);
+        }
     };
 
     const editActivity = async (activityId) => {
