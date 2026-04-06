@@ -5543,19 +5543,15 @@ In a production system, this would show the actual file contents.
         const user = _currentUser;
         if (!user) return;
 
-        // Map Level 1-12 to visible nav IDs (suffix after 'nav-')
+        // Map Level 1-14 to visible nav IDs (suffix after 'nav-')
+        const _l12 = ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'reports', 'documents', 'settings', 'fude', 'milestones'];
         const levelPermissions = {
-            1: ['calendar', 'pipeline', 'protection', 'agents', 'prospects', 'referrals', 'cases', 'documents', 'import', 'promotions', 'marketing-automation', 'marketing-lists', 'performance', 'reports', 'risk', 'ai-insights', 'security', 'admin', 'integrations', 'settings', 'fude', 'milestones'],
-            2: ['calendar', 'pipeline', 'protection', 'agents', 'prospects', 'referrals', 'cases', 'documents', 'import', 'promotions', 'marketing-automation', 'marketing-lists', 'performance', 'reports', 'risk', 'ai-insights', 'security', 'admin', 'integrations', 'settings', 'fude', 'milestones'],
-            3: ['calendar', 'pipeline', 'protection', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'performance', 'reports', 'settings', 'fude', 'milestones'],
-            4: ['calendar', 'pipeline', 'protection', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'performance', 'reports', 'settings', 'fude', 'milestones'],
-            5: ['calendar', 'pipeline', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'reports', 'fude', 'milestones', 'settings'],
-            6: ['calendar', 'pipeline', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'reports', 'fude', 'milestones', 'settings'],
-            7: ['calendar', 'pipeline', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'reports', 'fude', 'milestones', 'settings'],
-            8: ['calendar', 'pipeline', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'reports', 'fude', 'milestones', 'settings'],
-            9: ['calendar', 'pipeline', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'reports', 'fude', 'milestones', 'settings'],
-            10: ['calendar', 'pipeline', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'reports', 'fude', 'milestones', 'settings'],
-            11: ['calendar', 'prospects', 'referrals', 'cases', 'promotions', 'fude', 'milestones', 'settings'],
+            1: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'agents', 'performance', 'reports', 'risk', 'ai-insights', 'security', 'admin', 'protection', 'documents', 'import', 'integrations', 'settings', 'fude', 'milestones', 'workflows', 'lead_forms', 'surveys', 'contracts', 'custom_fields', 'booking_settings'],
+            2: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'agents', 'performance', 'reports', 'risk', 'ai-insights', 'security', 'admin', 'protection', 'documents', 'import', 'integrations', 'settings', 'fude', 'milestones', 'workflows', 'lead_forms', 'surveys', 'contracts', 'custom_fields', 'booking_settings'],
+            3: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'performance', 'reports', 'protection', 'documents', 'settings', 'fude'],
+            4: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'performance', 'reports', 'protection', 'documents', 'settings', 'fude'],
+            5: _l12, 6: _l12, 7: _l12, 8: _l12, 9: _l12, 10: _l12,
+            11: ['calendar', 'prospects', 'referrals', 'promotions', 'cases', 'settings', 'fude', 'milestones'],
             12: ['calendar', 'prospects', 'referrals', 'fude', 'milestones'],
             13: ['calendar', 'prospects', 'fude', 'milestones'],   // Customer
             14: ['calendar', 'prospects', 'fude', 'milestones']    // Referrer
@@ -5588,7 +5584,8 @@ In a production system, this would show the actual file contents.
             'calendar', 'pipeline', 'protection', 'agents', 'prospects', 'referrals',
             'cases', 'documents', 'import', 'promotions', 'marketing-automation', 'marketing-lists',
             'performance', 'reports', 'risk', 'ai-insights', 'security', 'admin',
-            'integrations', 'settings', 'milestones', 'fude'
+            'integrations', 'settings', 'milestones', 'fude',
+            'workflows', 'lead_forms', 'surveys', 'contracts', 'custom_fields', 'booking_settings'
         ];
 
         allNavIds.forEach(id => {
