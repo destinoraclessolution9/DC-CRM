@@ -19838,7 +19838,7 @@ const simulateCampaignSending = async (campaignId) => {
     };
 
     const autoMatchField = (header) => {
-        const map = { 'full name': 'full_name', 'name': 'full_name', 'phone': 'phone', 'mobile': 'phone', 'email': 'email', 'ic': 'ic_number', 'ic number': 'ic_number', 'nric': 'ic_number', 'dob': 'date_of_birth', 'date of birth': 'date_of_birth', 'occupation': 'occupation', 'income': 'income_range', 'address': 'address', 'city': 'city', 'state': 'state', 'postcode': 'postal_code', 'postal': 'postal_code', 'ming gua': 'ming_gua', 'gender': 'gender' };
+        const map = { 'full name': 'full_name', 'name': 'full_name', 'phone': 'phone', 'mobile': 'phone', 'email': 'email', 'ic': 'ic_number', 'ic number': 'ic_number', 'nric': 'ic_number', 'dob': 'date_of_birth', 'date of birth': 'date_of_birth', 'occupation': 'occupation', 'income': 'income_range', 'address': 'address', 'city': 'city', 'state': 'state', 'postcode': 'postal_code', 'postal': 'postal_code', 'postal code': 'postal_code', 'ming gua': 'ming_gua', 'gender': 'gender', 'title': 'title', 'nationality': 'nationality', 'lunar': 'lunar_birth', 'company': 'company_name', 'referred by': 'referred_by', 'referral relationship': 'referral_relationship', 'relationship': 'referral_relationship', 'pipeline': 'pipeline_stage', 'stage': 'pipeline_stage', 'close date': 'expected_close_date', 'expected close': 'expected_close_date', 'deal value': 'deal_value' };
         const lower = header.toLowerCase().trim();
         for (let key in map) { if (lower.includes(key)) return map[key]; }
         return '';
@@ -19916,12 +19916,18 @@ const simulateCampaignSending = async (campaignId) => {
             const idx = reverseMap[field];
             return idx !== undefined ? (row[idx] || '').toString().trim() : '';
         };
+        const dealVal = get('deal_value');
+        const pipelineStage = get('pipeline_stage') || 'new';
         return {
             full_name: get('full_name'),
+            title: get('title'),
+            gender: get('gender'),
+            nationality: get('nationality'),
             phone: get('phone'),
             email: get('email'),
             ic_number: get('ic_number'),
             date_of_birth: get('date_of_birth'),
+            lunar_birth: get('lunar_birth'),
             occupation: get('occupation'),
             company_name: get('company_name'),
             income_range: get('income_range'),
@@ -19930,9 +19936,12 @@ const simulateCampaignSending = async (campaignId) => {
             state: get('state'),
             postal_code: get('postal_code'),
             ming_gua: get('ming_gua'),
-            gender: get('gender'),
+            referred_by: get('referred_by'),
+            referral_relationship: get('referral_relationship'),
+            pipeline_stage: pipelineStage,
+            expected_close_date: get('expected_close_date') || null,
+            deal_value: dealVal ? parseFloat(dealVal) || null : null,
             responsible_agent_id: agentId,
-            pipeline_stage: 'new',
             source: 'import'
         };
     };
@@ -20171,12 +20180,33 @@ const simulateCampaignSending = async (campaignId) => {
     };
 
     const downloadTemplate = (type, format) => {
-        const headers = { prospects: 'Full Name,Phone,Email,IC Number,Date of Birth,Occupation,Income Range,Address,City,State,Postal Code,Ming Gua', customers: 'Full Name,Phone,Email,IC Number,Customer Since,Lifetime Value', agents: 'Full Name,Phone,Email,Agent Code,Commission Rate,License Start,License Expiry', products: 'Product Name,Category,Price,Description', activities: 'Date,Type,Title,Agent,Prospect,Status' };
-        const headerRow = headers[type] || headers.prospects;
-        const csv = `${headerRow}\n"Sample Name","012-345-6789","sample@email.com","901212-10-1234","1990-12-12","Business Owner","15000-20000","123 Jalan SS2","Petaling Jaya","Selangor","46000","MG4"`;
-        const blob = new Blob([csv], { type: 'text/csv' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a'); a.href = url; a.download = `${type}_template.${format}`; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        const headers = {
+            prospects: ['Title','Full Name','Gender','Nationality','Phone','Email','IC Number','Date of Birth','Lunar Birth','Occupation','Company Name','Income Range','Address','City','State','Postal Code','Ming Gua','Referred By','Referral Relationship','Pipeline Stage','Expected Close Date','Deal Value (RM)'],
+            customers: ['Full Name','Phone','Email','IC Number','Customer Since','Lifetime Value'],
+            agents: ['Full Name','Phone','Email','Agent Code','Commission Rate','License Start','License Expiry'],
+            products: ['Product Name','Category','Price','Description'],
+            activities: ['Date','Type','Title','Agent','Prospect','Status']
+        };
+        const samples = {
+            prospects: ['Mr.','Ahmad bin Ali','Male','Malaysian','012-345-6789','ahmad@email.com','901212-10-1234','1990-12-12','','Business Owner','ABC Sdn Bhd','RM5-8k','123 Jalan SS2','Petaling Jaya','Selangor','46000','MG4','','Friend','new','2025-06-30','50000'],
+            customers: ['Sample Name','012-345-6789','sample@email.com','901212-10-1234','2024-01-01','50000'],
+            agents: ['Sample Name','012-345-6789','sample@email.com','AGT001','0.10','2024-01-01','2025-01-01'],
+            products: ['Sample Product','Category A','1000','Product description'],
+            activities: ['2024-01-01','Meeting','Sample Activity','Agent Name','Prospect Name','Completed']
+        };
+        const cols = headers[type] || headers.prospects;
+        const sample = samples[type] || samples.prospects;
+        if (format === 'xlsx') {
+            const ws = XLSX.utils.aoa_to_sheet([cols, sample]);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, type);
+            XLSX.writeFile(wb, `${type}_template.xlsx`);
+        } else {
+            const csv = cols.join(',') + '\n' + sample.map(v => `"${v}"`).join(',');
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a'); a.href = url; a.download = `${type}_template.csv`; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        }
         UI.toast.success(`${type} template downloaded`);
     };
 
