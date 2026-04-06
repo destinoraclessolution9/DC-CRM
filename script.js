@@ -17558,6 +17558,7 @@ const exportKPIReport = async (format) => {
                     <thead>
                         <tr>
                             <th>Name</th>
+                            <th>Category</th>
                             <th>Price (RM)</th>
                             <th>Lead Time</th>
                             <th>Status</th>
@@ -17568,6 +17569,7 @@ const exportKPIReport = async (format) => {
                         ${data.map(item => `
                             <tr style="${!item.is_active ? 'opacity: 0.6; background: #f9fafb;' : ''}">
                                 <td><strong>${item.name}</strong><br><small class="text-muted">${item.remarks || ''}</small></td>
+                                <td>${item.category || '-'}</td>
                                 <td>${item.price || 0}</td>
                                 <td>${item.delivery_lead_time || '-'}</td>
                                 <td>
