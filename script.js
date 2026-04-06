@@ -9494,7 +9494,10 @@ function _wireLoginBtn() {
 
         const modalActions = [
             { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Mark Complete', type: 'secondary', action: `await app.markActivityComplete(${activityId})` },
+            ...(activity.activity_type === 'CPS' && activity.prospect_id
+                ? [{ label: '📷 Upload CPS Form', type: 'secondary', action: `app.uploadCPSForm(${activityId}, ${activity.prospect_id})` }]
+                : [{ label: 'Mark Complete', type: 'secondary', action: `await app.markActivityComplete(${activityId})` }]
+            ),
             { label: 'Edit', type: 'secondary', action: `await app.editActivity(${activityId})` }
         ];
 
@@ -9509,6 +9512,42 @@ function _wireLoginBtn() {
         modalActions.push({ label: 'Delete', type: 'primary', action: `await app.deleteActivity(${activityId})` });
 
         UI.showModal('Activity Details', content, modalActions);
+    };
+
+    const uploadCPSForm = (activityId, prospectId) => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*,application/pdf';
+        input.capture = 'environment'; // prefer rear camera on mobile
+        input.style.display = 'none';
+        document.body.appendChild(input);
+        input.onchange = async () => {
+            const file = input.files[0];
+            document.body.removeChild(input);
+            if (!file) return;
+            if (file.size > 5 * 1024 * 1024) {
+                UI.toast.error('File too large (max 5 MB)');
+                return;
+            }
+            try {
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    const dataUrl = e.target.result;
+                    await AppDataStore.update('prospects', prospectId, {
+                        cps_form_data: dataUrl,
+                        cps_form_date: new Date().toISOString().split('T')[0],
+                        cps_form_name: file.name
+                    });
+                    UI.hideModal();
+                    UI.toast.success('CPS form uploaded and saved to prospect profile');
+                };
+                reader.readAsDataURL(file);
+            } catch (err) {
+                UI.toast.error('Upload failed: ' + err.message);
+            }
+        };
+        input.oncancel = () => document.body.removeChild(input);
+        input.click();
     };
 
     const editActivity = async (activityId) => {
@@ -12657,6 +12696,24 @@ function _wireLoginBtn() {
         if (!container || !prospect) return;
 
         if (tab === 'info') {
+            const cpsFormHtml = prospect.cps_form_data ? `
+            <div class="profile-section" style="margin-top:12px;">
+                <h2><i class="fas fa-file-image"></i> CPS Form</h2>
+                <div class="detail-section">
+                    <div class="info-row"><div class="info-label">Uploaded</div><div class="info-value">${prospect.cps_form_date || '-'}</div></div>
+                    <div class="info-row"><div class="info-label">File</div><div class="info-value">${prospect.cps_form_name || 'CPS Form'}</div></div>
+                </div>
+                ${prospect.cps_form_data.startsWith('data:image') ? `
+                    <div style="margin-top:10px; text-align:center;">
+                        <img src="${prospect.cps_form_data}" alt="CPS Form" style="max-width:100%; max-height:320px; border-radius:8px; border:1px solid var(--border); cursor:pointer;" onclick="window.open(this.src,'_blank')">
+                        <div style="font-size:11px; color:var(--gray-400); margin-top:4px;">Tap to view full size</div>
+                    </div>
+                ` : `
+                    <div style="margin-top:10px; text-align:center;">
+                        <a href="${prospect.cps_form_data}" download="${prospect.cps_form_name || 'cps_form.pdf'}" class="btn secondary btn-sm"><i class="fas fa-download"></i> Download PDF</a>
+                    </div>
+                `}
+            </div>` : '';
             container.innerHTML = `
     <div class="profile-grid">
         <div class="main-content">
@@ -12670,6 +12727,7 @@ function _wireLoginBtn() {
                     <div class="info-row"><div class="info-label">Email</div><div class="info-value">${prospect.email || '-'}</div></div>
                 </div>
             </div>
+            ${cpsFormHtml}
             <div class="profile-section">
                 <h2><i class="fas fa-user-shield"></i> Registration & Referral</h2>
                 <div class="detail-section">
@@ -21854,6 +21912,7 @@ const initImportDemoData = async () => {
         saveActivity,
         saveAndAddAnother,
         viewActivityDetails,
+        uploadCPSForm,
         editActivity,
         deleteActivity,
         confirmDeleteActivity,
