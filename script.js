@@ -5540,8 +5540,8 @@ In a production system, this would show the actual file contents.
 
         // Map Level 1-12 to visible nav IDs (suffix after 'nav-')
         const levelPermissions = {
-            1: ['calendar', 'pipeline', 'protection', 'agents', 'prospects', 'referrals', 'cases', 'documents', 'import', 'promotions', 'marketing-lists', 'performance', 'reports', 'risk', 'ai-insights', 'security', 'admin', 'integrations', 'settings', 'fude', 'milestones'],
-            2: ['calendar', 'pipeline', 'protection', 'agents', 'prospects', 'referrals', 'cases', 'documents', 'import', 'promotions', 'marketing-lists', 'performance', 'reports', 'risk', 'ai-insights', 'security', 'admin', 'integrations', 'settings', 'fude', 'milestones'],
+            1: ['calendar', 'pipeline', 'protection', 'agents', 'prospects', 'referrals', 'cases', 'documents', 'import', 'promotions', 'marketing-automation', 'marketing-lists', 'performance', 'reports', 'risk', 'ai-insights', 'security', 'admin', 'integrations', 'settings', 'fude', 'milestones'],
+            2: ['calendar', 'pipeline', 'protection', 'agents', 'prospects', 'referrals', 'cases', 'documents', 'import', 'promotions', 'marketing-automation', 'marketing-lists', 'performance', 'reports', 'risk', 'ai-insights', 'security', 'admin', 'integrations', 'settings', 'fude', 'milestones'],
             3: ['calendar', 'pipeline', 'protection', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'reports', 'risk', 'settings'],
             4: ['calendar', 'pipeline', 'protection', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'reports', 'risk', 'settings'],
             5: ['calendar', 'pipeline', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'settings'],
@@ -5581,7 +5581,7 @@ In a production system, this would show the actual file contents.
         // List of all nav item suffixes
         const allNavIds = [
             'calendar', 'pipeline', 'protection', 'agents', 'prospects', 'referrals',
-            'cases', 'documents', 'import', 'promotions', 'marketing-lists',
+            'cases', 'documents', 'import', 'promotions', 'marketing-automation', 'marketing-lists',
             'performance', 'reports', 'risk', 'ai-insights', 'security', 'admin',
             'integrations', 'settings', 'milestones', 'fude'
         ];
@@ -6036,7 +6036,7 @@ function _wireLoginBtn() {
         const phaseMap = {
             'dashboard': '0', 'calendar': '1', 'pipeline': '6', 'protection': '13',
             'prospects': '3', 'referrals': '7', 'cases': '18', 'documents': '11',
-            'promotions': '12', 'performance': '9', 'reports': '9', 'risk': '19', 'settings': '0',
+            'promotions': '12', 'marketing_automation': '12', 'performance': '9', 'reports': '9', 'risk': '19', 'settings': '0',
             'import': '13'
         };
         return phaseMap[viewId] || '?';
@@ -6911,6 +6911,9 @@ function _wireLoginBtn() {
             await showAgentsView(viewport);
         } else if (viewId === 'promotions') {
             _currentView = 'promotions';
+            await showMonthlyPromotionView(viewport);
+        } else if (viewId === 'marketing_automation') {
+            _currentView = 'marketing_automation';
             await showMarketingAutomationView(viewport);
         } else if (viewId === 'reports') {
             _currentView = 'reports';
@@ -17951,6 +17954,25 @@ const exportKPIReport = async (format) => {
     };
 
 
+    // ========== MONTHLY PROMOTION (simplified) ==========
+
+    const showMonthlyPromotionView = async (container) => {
+        const packagesContent = await renderPackagesTab();
+        container.innerHTML = `
+            <div class="marketing-view">
+                <div class="marketing-header">
+                    <div>
+                        <h1>Monthly Promotion</h1>
+                        <p>Promotion packages and bundled offers</p>
+                    </div>
+                </div>
+                <div id="monthly-promotion-content">
+                    ${packagesContent}
+                </div>
+            </div>
+        `;
+    };
+
     // ========== PHASE 12: MARKETING AUTOMATION ==========
 
     const showMarketingAutomationView = async (container) => {
@@ -22857,6 +22879,7 @@ const initImportDemoData = async () => {
         restoreVersion,
 
         // Phase 12 Marketing Functions
+        showMonthlyPromotionView,
         showMarketingAutomationView,
         switchMarketingTab,
         renderMarketingTabContent,
@@ -23093,6 +23116,9 @@ const initImportDemoData = async () => {
                 if (typeof showCasesView === 'function') await showCasesView(viewport);
                 break;
             case 'promotions':
+                if (typeof showMonthlyPromotionView === 'function') await showMonthlyPromotionView(viewport);
+                break;
+            case 'marketing_automation':
                 if (typeof showMarketingAutomationView === 'function') await showMarketingAutomationView(viewport);
                 break;
             case 'ranking':
