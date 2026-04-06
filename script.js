@@ -13980,8 +13980,8 @@ const deleteNote = async (prospectId, noteId) => {
                     </div>
                     <div id="epp-fields" style="display:none; margin-bottom:16px;">
                         <div class="form-row">
-                            <div class="form-group half"><label>Months</label><select class="form-control"><option>6</option><option>12</option><option>24</option></select></div>
-                            <div class="form-group half"><label>Bank</label><input type="text" class="form-control" placeholder="Bank name"></div>
+                            <div class="form-group half"><label>Months</label><select id="epp-months" class="form-control"><option>6</option><option>12</option><option>18</option><option>24</option><option>36</option></select></div>
+                            <div class="form-group half"><label>Bank</label><input type="text" id="epp-bank" class="form-control" placeholder="Bank name"></div>
                         </div>
                     </div>
                     <div class="form-row">
@@ -14042,6 +14042,7 @@ for (const p of allPackages) {
 
         if (matchingPkg) packageId = matchingPkg.id;
 
+        const purMethod = document.getElementById('pur-method')?.value || 'Cash';
         const pur = {
             customer_id: customerId,
             date: new Date().toISOString().split('T')[0],
@@ -14050,7 +14051,10 @@ for (const p of allPackages) {
             amount: amt,
             status: document.getElementById('pur-status')?.value,
             proof: document.getElementById('pur-file')?.value ? 'image_uploaded.png' : '',
-            package_id: packageId
+            package_id: packageId,
+            payment_method: purMethod,
+            epp_months: purMethod === 'EPP' ? (document.getElementById('epp-months')?.value || '') : '',
+            epp_bank: purMethod === 'EPP' ? (document.getElementById('epp-bank')?.value?.trim() || '') : '',
         };
         await AppDataStore.create('purchases', pur);
 
@@ -17334,7 +17338,7 @@ container.innerHTML = `
         const [
             cpsCount, totalSales, popCaseCount, popSales,
             eppCaseCount, eppSales, newAgents, newCustomers,
-            totalMeetings, activityHeadcount, conversionRate
+            totalMeetings, activityHeadcount, conversionRate, eppDetails
         ] = await Promise.all([
             getCPSCount(from, to),
             getTotalSales(from, to),
@@ -17346,12 +17350,13 @@ container.innerHTML = `
             getNewCustomers(from, to),
             getTotalMeetings(from, to),
             getActivityHeadcount(from, to),
-            getConversionRate(from, to)
+            getConversionRate(from, to),
+            getEPPDetails(from, to)
         ]);
         return {
             cpsCount, totalSales, popCaseCount, popSales,
             eppCaseCount, eppSales, newAgents, newCustomers,
-            totalMeetings, activityHeadcount, conversionRate
+            totalMeetings, activityHeadcount, conversionRate, eppDetails
         };
     };
 
@@ -17501,6 +17506,31 @@ const getEPPSales = async (from, to) => {
     return total;
 };
 
+const getEPPDetails = async (from, to) => {
+    const needUsers = _currentRoleFilter !== 'All' || _visibleUserIds !== 'all';
+    const [purchases, users] = await Promise.all([
+        AppDataStore.getAll('purchases'),
+        needUsers ? AppDataStore.getAll('users') : Promise.resolve([])
+    ]);
+    const userMap = {};
+    users.forEach(u => { userMap[u.id] = u; });
+    const map = {};
+    for (const p of purchases) {
+        if (p.payment_method !== 'EPP' || p.date < from || p.date > to) continue;
+        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(p.agent_id)) continue;
+        if (_currentRoleFilter !== 'All') {
+            const agent = userMap[p.agent_id];
+            if (!agent || agent.role !== _currentRoleFilter) continue;
+        }
+        const bank = p.epp_bank || 'Unknown';
+        const months = p.epp_months || '-';
+        const key = `${bank}||${months}`;
+        if (!map[key]) map[key] = { bank, months, count: 0 };
+        map[key].count++;
+    }
+    return Object.values(map);
+};
+
 const getNewAgents = async (from, to) => {
     const users = await AppDataStore.getAll('users');
     let count = 0;
@@ -17563,11 +17593,17 @@ const getActivityHeadcount = async (from, to) => {
         const grid = document.getElementById('kpi-stats-grid');
         if (!grid) return;
 
+        const eppDetailsHtml = (kpis.eppDetails || []).length > 0
+            ? (kpis.eppDetails || []).map(d => `<div style="font-size:11px;color:var(--gray-500);line-height:1.6;">${d.bank} &middot; ${d.months} months &times;${d.count}</div>`).join('')
+            : '';
+
         const cards = [
             { label: 'CPS Consultations', value: kpis.cpsCount, prev: prevKpis.cpsCount, icon: '📞', color: 'blue', key: 'cpsCount' },
             { label: 'Total Sales', value: `RM ${kpis.totalSales.toLocaleString()} `, prev: prevKpis.totalSales, icon: '💰', color: 'green', key: 'totalSales' },
-            { label: 'POP Cases', value: kpis.popCaseCount, prev: prevKpis.popCaseCount, icon: '📦', color: 'orange', key: 'popCaseCount' },
-            { label: 'EPP Cases', value: kpis.eppCaseCount, prev: prevKpis.eppCaseCount, icon: '💳', color: 'purple', key: 'eppCaseCount' },
+            { label: 'POP Cases', value: kpis.popCaseCount, prev: prevKpis.popCaseCount, icon: '📦', color: 'orange', key: 'popCaseCount',
+              subHtml: `<div style="font-size:12px;color:var(--gray-500);margin-top:2px;">RM ${(kpis.popSales || 0).toLocaleString()} total</div>` },
+            { label: 'EPP Cases', value: kpis.eppCaseCount, prev: prevKpis.eppCaseCount, icon: '💳', color: 'purple', key: 'eppCaseCount',
+              subHtml: eppDetailsHtml },
             { label: 'New Agents', value: kpis.newAgents, prev: prevKpis.newAgents, icon: '👤', color: 'blue', key: 'newAgents' },
             { label: 'New Customers', value: kpis.newCustomers, prev: prevKpis.newCustomers, icon: '👥', color: 'green', key: 'newCustomers' },
             { label: 'Conversion Rate', value: `${kpis.conversionRate}% `, prev: prevKpis.conversionRate, icon: '📈', color: 'purple', key: 'conversionRate' },
@@ -17591,6 +17627,7 @@ const getActivityHeadcount = async (from, to) => {
                             </div>
                         </h3>
                         <div class="stat-value">${c.value}</div>
+                        ${c.subHtml || ''}
                         <div class="stat-trend ${trendClass}">
                             <i class="fas ${trendIcon}"></i>
                             <span>${Math.abs(diff)}% vs last period</span>
