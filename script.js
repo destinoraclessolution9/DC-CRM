@@ -12027,6 +12027,9 @@ function _wireLoginBtn() {
         let prospects = await getVisibleProspects();
         const activities = await getVisibleActivities();
         const allUsers = await AppDataStore.getAll('users');
+        const _userLvlMatch = _currentUser?.role?.match(/Level\s+(\d+)/i);
+        const _userLevel = _userLvlMatch ? parseInt(_userLvlMatch[1]) : 99;
+        const canDelete = _userLevel <= 5;
         const searchQuery = document.getElementById('prospect-search')?.value.toLowerCase() || '';
         const scoreFilter = document.getElementById('filter-score')?.value || '';
         const guaFilter = document.getElementById('filter-gua')?.value || '';
@@ -12163,6 +12166,7 @@ function _wireLoginBtn() {
                         <button class="btn-icon" title="Edit" onclick="app.openProspectModal(${p.id})"><i class="fas fa-edit"></i></button>
                         <button class="btn-icon" title="Add Activity" onclick="app.openActivityModal('', ${p.id})"><i class="fas fa-calendar-plus"></i></button>
                         <button class="btn-icon" title="Convert to Customer" onclick="app.convertToCustomer(${p.id})"><i class="fas fa-user-check"></i></button>
+                        ${canDelete ? `<button class="btn-icon" title="Delete" style="color:var(--red-500);" onclick="app.deleteProspect(${p.id})"><i class="fas fa-trash"></i></button>` : ''}
                     </td>
                 </tr>
             `;
@@ -12174,6 +12178,13 @@ function _wireLoginBtn() {
         }
 
         tbody.innerHTML = html;
+    };
+
+    const deleteProspect = async (id) => {
+        UI.showModal('Delete Prospect', '<p>This will permanently delete this prospect and cannot be undone. Continue?</p>', [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Delete', type: 'primary', action: `(async () => { UI.hideModal(); try { await AppDataStore.delete('prospects', ${id}); UI.toast.success('Prospect deleted.'); await app.renderProspectsTable(); } catch(err) { UI.toast.error('Failed to delete: ' + (err.message || 'Unknown error')); } })()` }
+        ]);
     };
 
     const getScoreGrade = (score) => {
@@ -23479,6 +23490,8 @@ const initImportDemoData = async () => {
         reassignProspect,
         convertToCustomer,
         confirmConvertToCustomer,
+        deleteProspect,
+        renderProspectsTable,
 
         // Phase 4 Customer Management Functions
         switchCustomerTab,
