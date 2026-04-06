@@ -17481,6 +17481,9 @@ const renderAgentLeaderboard = async () => {
     if (!container) return;
 
     let agentsList = (await AppDataStore.getAll('users')).filter(isAgent);
+    if (_visibleUserIds !== 'all') {
+        agentsList = agentsList.filter(u => _visibleUserIds.includes(u.id));
+    }
     if (_currentRoleFilter !== 'All') {
         agentsList = agentsList.filter(u => u.role === _currentRoleFilter);
     }
