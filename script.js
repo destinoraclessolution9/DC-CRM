@@ -12756,7 +12756,7 @@ function _wireLoginBtn() {
                             </div>
                         </div>
 
-                        <!-- ② Personal Details — collapsed -->
+                        <!-- ② Personal Details -->
                         <div class="acc-item" id="acc-personal-${prospect.id}">
                             <div class="acc-hdr" onclick="app.toggleAccordion('personal',${prospect.id},this.parentElement)">
                                 <span><i class="fas fa-user"></i> Personal Details</span>
@@ -12765,16 +12765,7 @@ function _wireLoginBtn() {
                             <div class="acc-body" id="acc-body-personal-${prospect.id}" style="display:none" data-loaded="false"></div>
                         </div>
 
-                        <!-- ③ Name List -->
-                        <div class="acc-item" id="acc-names-${prospect.id}">
-                            <div class="acc-hdr" onclick="app.toggleAccordion('names',${prospect.id},this.parentElement)">
-                                <span><i class="fas fa-users"></i> Name List</span>
-                                <i class="fas fa-chevron-down acc-chev"></i>
-                            </div>
-                            <div class="acc-body" id="acc-body-names-${prospect.id}" style="display:none" data-loaded="false"></div>
-                        </div>
-
-                        <!-- ④ Meet Up History -->
+                        <!-- ③ Meet Up History -->
                         <div class="acc-item" id="acc-activity-${prospect.id}">
                             <div class="acc-hdr" onclick="app.toggleAccordion('activity',${prospect.id},this.parentElement)">
                                 <span><i class="fas fa-user-friends"></i> Meet Up History</span>
@@ -12783,7 +12774,7 @@ function _wireLoginBtn() {
                             <div class="acc-body" id="acc-body-activity-${prospect.id}" style="display:none" data-loaded="false"></div>
                         </div>
 
-                        <!-- ⑤ Activities and Events -->
+                        <!-- ④ Activities and Events -->
                         <div class="acc-item" id="acc-events-${prospect.id}">
                             <div class="acc-hdr" onclick="app.toggleAccordion('events',${prospect.id},this.parentElement)">
                                 <span><i class="fas fa-calendar-alt"></i> Activities and Events</span>
@@ -12792,34 +12783,7 @@ function _wireLoginBtn() {
                             <div class="acc-body" id="acc-body-events-${prospect.id}" style="display:none" data-loaded="false"></div>
                         </div>
 
-                        <!-- ⑥ Notes -->
-                        <div class="acc-item" id="acc-notes-${prospect.id}">
-                            <div class="acc-hdr" onclick="app.toggleAccordion('notes',${prospect.id},this.parentElement)">
-                                <span><i class="fas fa-sticky-note"></i> Notes</span>
-                                <i class="fas fa-chevron-down acc-chev"></i>
-                            </div>
-                            <div class="acc-body" id="acc-body-notes-${prospect.id}" style="display:none" data-loaded="false"></div>
-                        </div>
-
-                        <!-- ⑦ Protection Period -->
-                        <div class="acc-item" id="acc-protection-${prospect.id}">
-                            <div class="acc-hdr" onclick="app.toggleAccordion('protection',${prospect.id},this.parentElement)">
-                                <span><i class="fas fa-shield-alt"></i> Protection Period</span>
-                                <i class="fas fa-chevron-down acc-chev"></i>
-                            </div>
-                            <div class="acc-body" id="acc-body-protection-${prospect.id}" style="display:none" data-loaded="false"></div>
-                        </div>
-
-                        <!-- ⑧ Tags -->
-                        <div class="acc-item" id="acc-tags-${prospect.id}">
-                            <div class="acc-hdr" onclick="app.toggleAccordion('tags',${prospect.id},this.parentElement)">
-                                <span><i class="fas fa-tags"></i> Tags</span>
-                                <i class="fas fa-chevron-down acc-chev"></i>
-                            </div>
-                            <div class="acc-body" id="acc-body-tags-${prospect.id}" style="display:none" data-loaded="false"></div>
-                        </div>
-
-                        <!-- ⑨ Potential & Opportunities -->
+                        <!-- ⑤ Potential & Opportunities -->
                         <div class="acc-item" id="acc-potential-${prospect.id}">
                             <div class="acc-hdr" onclick="app.toggleAccordion('potential',${prospect.id},this.parentElement)">
                                 <span><i class="fas fa-bolt"></i> Potential &amp; Opportunities</span>
@@ -12828,7 +12792,7 @@ function _wireLoginBtn() {
                             <div class="acc-body" id="acc-body-potential-${prospect.id}" style="display:none" data-loaded="false"></div>
                         </div>
 
-                        <!-- ⑩ Next Actions -->
+                        <!-- ⑥ Next Actions -->
                         <div class="acc-item" id="acc-nextactions-${prospect.id}">
                             <div class="acc-hdr" onclick="app.toggleAccordion('nextactions',${prospect.id},this.parentElement)">
                                 <span><i class="fas fa-tasks"></i> Next Actions</span>
@@ -12837,13 +12801,49 @@ function _wireLoginBtn() {
                             <div class="acc-body" id="acc-body-nextactions-${prospect.id}" style="display:none" data-loaded="false"></div>
                         </div>
 
-                        <!-- ⑪ Closing Record -->
+                        <!-- ⑦ Closing Record -->
                         <div class="acc-item" id="acc-closing-${prospect.id}">
                             <div class="acc-hdr" onclick="app.toggleAccordion('closing',${prospect.id},this.parentElement)">
                                 <span><i class="fas fa-handshake"></i> Closing Record</span>
                                 <i class="fas fa-chevron-down acc-chev"></i>
                             </div>
                             <div class="acc-body" id="acc-body-closing-${prospect.id}" style="display:none" data-loaded="false"></div>
+                        </div>
+
+                        <!-- ⑧ Notes -->
+                        <div class="acc-item" id="acc-notes-${prospect.id}">
+                            <div class="acc-hdr" onclick="app.toggleAccordion('notes',${prospect.id},this.parentElement)">
+                                <span><i class="fas fa-sticky-note"></i> Notes</span>
+                                <i class="fas fa-chevron-down acc-chev"></i>
+                            </div>
+                            <div class="acc-body" id="acc-body-notes-${prospect.id}" style="display:none" data-loaded="false"></div>
+                        </div>
+
+                        <!-- ⑨ Protection Period -->
+                        <div class="acc-item" id="acc-protection-${prospect.id}">
+                            <div class="acc-hdr" onclick="app.toggleAccordion('protection',${prospect.id},this.parentElement)">
+                                <span><i class="fas fa-shield-alt"></i> Protection Period</span>
+                                <i class="fas fa-chevron-down acc-chev"></i>
+                            </div>
+                            <div class="acc-body" id="acc-body-protection-${prospect.id}" style="display:none" data-loaded="false"></div>
+                        </div>
+
+                        <!-- ⑩ Tags -->
+                        <div class="acc-item" id="acc-tags-${prospect.id}">
+                            <div class="acc-hdr" onclick="app.toggleAccordion('tags',${prospect.id},this.parentElement)">
+                                <span><i class="fas fa-tags"></i> Tags</span>
+                                <i class="fas fa-chevron-down acc-chev"></i>
+                            </div>
+                            <div class="acc-body" id="acc-body-tags-${prospect.id}" style="display:none" data-loaded="false"></div>
+                        </div>
+
+                        <!-- ⑪ Name List -->
+                        <div class="acc-item" id="acc-names-${prospect.id}">
+                            <div class="acc-hdr" onclick="app.toggleAccordion('names',${prospect.id},this.parentElement)">
+                                <span><i class="fas fa-users"></i> Name List</span>
+                                <i class="fas fa-chevron-down acc-chev"></i>
+                            </div>
+                            <div class="acc-body" id="acc-body-names-${prospect.id}" style="display:none" data-loaded="false"></div>
                         </div>
 
                     </div>
