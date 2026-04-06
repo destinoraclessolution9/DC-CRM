@@ -10756,15 +10756,18 @@ function _wireLoginBtn() {
         const resultsDiv = document.getElementById('agent-search-results');
         if (!term || term.length < 2) return;
 
-        const users = (await AppDataStore.getAll('users')).filter(isAgent);
-        const matches = users.filter(u => u.full_name.toLowerCase().includes(term));
+        const consultants = (await AppDataStore.getAll('users')).filter(u => {
+            const lvl = parseInt(u.role?.match(/Level\s+(\d+)/i)?.[1] || 0);
+            return lvl >= 3 || isAgent(u) || u.role === 'team_leader' || u.role === 'consultant';
+        });
+        const matches = consultants.filter(u => u.full_name && u.full_name.toLowerCase().includes(term));
 
         if (resultsDiv) {
             resultsDiv.innerHTML = matches.map(m => `
-                <div class="search-result-item" onclick="app.addCoAgent(${m.id}, '${m.full_name}')">
-                    ${m.full_name}
+                <div class="search-result-item" onclick="app.addCoAgent(${m.id}, '${m.full_name.replace(/'/g, "\\'")}')">
+                    <strong>${m.full_name}</strong> <span style="color:#888; font-size:11px;">(${m.role || 'Consultant'})</span>
                 </div>
-            `).join('') || '<div class="search-result-item">No agents found</div>';
+            `).join('') || '<div class="search-result-item">No consultants found</div>';
             resultsDiv.style.display = 'block';
         }
     };
