@@ -10886,36 +10886,55 @@ function _wireLoginBtn() {
             const term = document.getElementById('cps-referrer')?.value.toLowerCase();
             const resultsDiv = document.getElementById('referrer-results');
 
-            console.log('searchReferrers matching term:', term);
-
             if (!term || term.length < 1) {
                 if (resultsDiv) resultsDiv.style.display = 'none';
                 return;
             }
 
-            const prospects = (await AppDataStore.getAll('prospects')).filter(p => !p.status || p.status === 'active');
-            const consultants = (await AppDataStore.getAll('users')).filter(u => {
+            const allProspects = (await AppDataStore.getAll('prospects')).filter(p => !p.status || p.status === 'active');
+            const allUsers = (await AppDataStore.getAll('users')).filter(u => {
                 const lvl = parseInt(u.role?.match(/Level\s+(\d+)/i)?.[1] || 0);
-                return lvl >= 5 || isAgent(u) || u.role === 'team_leader';
+                return lvl >= 3;
             });
 
-            const all = [
-                ...prospects.map(p => ({ id: p.id, name: p.full_name, type: 'Prospect' })),
-                ...consultants.map(a => ({ id: a.id, name: a.full_name, type: 'Consultant' }))
-            ];
-
-            const matches = all.filter(e => e.name && e.name.toLowerCase().includes(term)).slice(0, 10);
+            const matchedProspects = allProspects
+                .filter(p => p.full_name && p.full_name.toLowerCase().includes(term))
+                .slice(0, 5);
+            const matchedConsultants = allUsers
+                .filter(u => u.full_name && u.full_name.toLowerCase().includes(term))
+                .slice(0, 5);
 
             if (resultsDiv) {
-                const resultsHtml = matches.map(m => `
-                    <div class="search-result-item" onclick="app.selectReferrer(${m.id}, '${m.name.replace(/'/g, "\\'")}', '${m.type}')" style="cursor:pointer; padding:8px; border-bottom:1px solid #eee;">
-                        <strong>${m.name}</strong> (${m.type})
-                    </div>
-                `).join('');
+                let html = '';
 
-                resultsDiv.innerHTML = resultsHtml || '<div class="search-result-item" style="padding:8px;">No results found</div>';
+                if (matchedProspects.length > 0) {
+                    html += `<div style="padding:4px 10px; font-size:11px; font-weight:600; color:#6b7280; background:#f9fafb; border-bottom:1px solid #e5e7eb; text-transform:uppercase; letter-spacing:0.05em;">Prospects</div>`;
+                    html += matchedProspects.map(p => `
+                        <div class="search-result-item" onclick="app.selectReferrer(${p.id}, '${(p.full_name || '').replace(/'/g, "\\'")}', 'Prospect')"
+                             style="cursor:pointer; padding:8px 12px; border-bottom:1px solid #f3f4f6; display:flex; flex-direction:column;">
+                            <strong style="font-size:13px;">${p.full_name || ''}</strong>
+                            <span style="font-size:11px; color:#6b7280;">${p.phone || p.ic_number || ''}</span>
+                        </div>
+                    `).join('');
+                }
+
+                if (matchedConsultants.length > 0) {
+                    html += `<div style="padding:4px 10px; font-size:11px; font-weight:600; color:#6b7280; background:#f9fafb; border-bottom:1px solid #e5e7eb; text-transform:uppercase; letter-spacing:0.05em;">Consultants</div>`;
+                    html += matchedConsultants.map(u => `
+                        <div class="search-result-item" onclick="app.selectReferrer(${u.id}, '${(u.full_name || '').replace(/'/g, "\\'")}', 'Consultant')"
+                             style="cursor:pointer; padding:8px 12px; border-bottom:1px solid #f3f4f6; display:flex; flex-direction:column;">
+                            <strong style="font-size:13px;">${u.full_name || ''}</strong>
+                            <span style="font-size:11px; color:#6b7280;">${u.agent_code || u.role || ''}</span>
+                        </div>
+                    `).join('');
+                }
+
+                if (!html) {
+                    html = '<div style="padding:10px 12px; color:#6b7280; font-size:13px;">No results found</div>';
+                }
+
+                resultsDiv.innerHTML = html;
                 resultsDiv.style.display = 'block';
-                console.log(`searchReferrers: showing ${matches.length} results`);
             }
         } catch (error) {
             console.error('Error in searchReferrers:', error);
