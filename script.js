@@ -177,7 +177,7 @@ const appLogic = (() => {
         // For managers/team leaders: check if lead agent is in visible subordinates
         const visibleIds = await getVisibleUserIds(user);
         if (visibleIds === 'all') return true;
-        return visibleIds.includes(activity.lead_agent_id);
+        return visibleIds.some(id => String(id) === String(activity.lead_agent_id));
     };
 
     const getVisibleActivities = async () => {

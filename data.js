@@ -115,10 +115,19 @@ class DataStore {
             const { data, error } = await window.supabase.from(tableName).select('*');
             if (error) throw error;
             const result = data || [];
-            // Supabase is authoritative — overwrite localStorage so deleted records
-            // don't resurface as ghost data on next load.
-            try { localStorage.setItem(`fs_crm_${tableName}`, JSON.stringify(result)); } catch (_) {}
-            return result;
+            // Merge: preserve any locally-saved items not returned by Supabase
+            // (handles PGRST204 schema-mismatch saves and RLS-hidden records)
+            try {
+                const key = `fs_crm_${tableName}`;
+                const local = JSON.parse(localStorage.getItem(key) || '[]');
+                const supabaseIds = new Set(result.map(r => String(r.id)));
+                const localOnly = local.filter(r => !supabaseIds.has(String(r.id)));
+                const merged = [...result, ...localOnly];
+                localStorage.setItem(key, JSON.stringify(merged));
+                return merged;
+            } catch (_) {
+                return result;
+            }
         } catch (e) {
             console.warn(`Offline: falling back to localStorage for ${tableName}`, e);
             const local = localStorage.getItem(`fs_crm_${tableName}`);
