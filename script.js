@@ -5659,6 +5659,7 @@ function _wireLoginBtn() {
             if (profileError && profileError.code === 'PGRST116') {
                 console.log('Profile not found, creating one...');
                 const newProfile = {
+                    id: Date.now(),
                     email: user.email,
                     username: user.email.split('@')[0],
                     full_name: user.user_metadata?.full_name || user.email,
@@ -5666,13 +5667,8 @@ function _wireLoginBtn() {
                     status: 'active',
                     created_at: new Date().toISOString()
                 };
-                const { data: created, error: createError } = await window.supabase
-                    .from('users')
-                    .insert(newProfile)
-                    .select()
-                    .single();
-                if (createError) throw createError;
-                profile = created;
+                // Use AppDataStore.create() so the service-role client is used (bypasses RLS)
+                profile = await AppDataStore.create('users', newProfile);
             } else if (profileError) {
                 throw profileError;
             }
