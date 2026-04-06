@@ -9498,14 +9498,14 @@ function _wireLoginBtn() {
                 ? [{ label: '📷 Upload CPS Form', type: 'secondary', action: `app.uploadCPSForm(${activityId}, ${activity.prospect_id})` }]
                 : [{ label: 'Mark Complete', type: 'secondary', action: `await app.markActivityComplete(${activityId})` }]
             ),
-            { label: 'Edit', type: 'secondary', action: `await app.editActivity(${activityId})` }
+            { label: 'Edit', type: 'secondary', action: `app.editActivityTiming(${activityId})` }
         ];
 
         if (activity.prospect_id) {
             modalActions.push({
-                label: 'Complete Prospect Profile',
+                label: '📝 Post MtUp',
                 type: 'secondary',
-                action: `UI.hideModal(); await app.showProspectDetail(${activity.prospect_id})`
+                action: `app.openPostMeetupModal(${activityId}, ${activity.prospect_id})`
             });
         }
 
@@ -9548,6 +9548,91 @@ function _wireLoginBtn() {
         };
         input.oncancel = () => document.body.removeChild(input);
         input.click();
+    };
+
+    const editActivityTiming = async (activityId) => {
+        const all = await AppDataStore.getAll('activities');
+        const activity = (await AppDataStore.getById('activities', activityId)) || all.find(a => a.id == activityId);
+        if (!activity) return;
+        UI.showModal('Edit Appointment Timing', `
+            <div class="form-group">
+                <label>Date</label>
+                <input type="date" id="edit-timing-date" class="form-control" value="${activity.activity_date || ''}">
+            </div>
+            <div class="form-row">
+                <div class="form-group half">
+                    <label>Start Time</label>
+                    <input type="time" id="edit-timing-start" class="form-control" value="${activity.start_time || ''}">
+                </div>
+                <div class="form-group half">
+                    <label>End Time</label>
+                    <input type="time" id="edit-timing-end" class="form-control" value="${activity.end_time || ''}">
+                </div>
+            </div>
+        `, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save', type: 'primary', action: `(async () => { await app.saveActivityTiming(${activityId}); })()` }
+        ]);
+    };
+
+    const saveActivityTiming = async (activityId) => {
+        const date = document.getElementById('edit-timing-date')?.value;
+        const start = document.getElementById('edit-timing-start')?.value;
+        const end = document.getElementById('edit-timing-end')?.value;
+        if (!date || !start || !end) { UI.toast.error('Please fill in all timing fields'); return; }
+        await AppDataStore.update('activities', activityId, { activity_date: date, start_time: start, end_time: end });
+        UI.hideModal();
+        UI.toast.success('Appointment timing updated');
+        if (document.querySelector('.calendar-view-container')) { await renderCalendar(); await renderTodayActivities(); }
+    };
+
+    const openPostMeetupModal = async (activityId, prospectId) => {
+        const prospect = (await AppDataStore.getById('prospects', prospectId))
+            || (await AppDataStore.getAll('prospects')).find(p => p.id == prospectId);
+        const name = prospect?.full_name || 'Prospect';
+        const notes = await AppDataStore.getAll('notes');
+        const existing_outcome = notes.find(n => n.activity_id == activityId && n.note_type === 'outcome' && n.prospect_id == prospectId);
+        const existing_postmtup = notes.find(n => n.activity_id == activityId && n.note_type === 'post_meetup' && n.prospect_id == prospectId);
+        UI.showModal(`📝 Post MtUp — ${name}`, `
+            <div class="form-group">
+                <label><strong>📝 Meeting Outcome</strong></label>
+                <textarea id="post-mtup-outcome" class="form-control" rows="3" placeholder="Outcome of this meeting...">${existing_outcome?.text || ''}</textarea>
+            </div>
+            <div class="form-group" style="margin-top:12px;">
+                <label><strong>📝 Post-Meetup Notes</strong></label>
+                <textarea id="post-mtup-notes" class="form-control" rows="3" placeholder="Key points, next steps, follow-up actions...">${existing_postmtup?.text || ''}</textarea>
+            </div>
+        `, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save', type: 'primary', action: `(async () => { await app.savePostMeetup(${activityId}, ${prospectId}); })()` }
+        ]);
+    };
+
+    const savePostMeetup = async (activityId, prospectId) => {
+        const outcomeText = document.getElementById('post-mtup-outcome')?.value?.trim();
+        const notesText = document.getElementById('post-mtup-notes')?.value?.trim();
+        const agentName = _currentUser?.full_name || 'Agent';
+        const today = new Date().toISOString().split('T')[0];
+        const allNotes = await AppDataStore.getAll('notes');
+
+        if (outcomeText) {
+            const existing = allNotes.find(n => n.activity_id == activityId && n.note_type === 'outcome' && n.prospect_id == prospectId);
+            if (existing) {
+                await AppDataStore.update('notes', existing.id, { text: outcomeText });
+            } else {
+                await AppDataStore.create('notes', { id: Date.now(), activity_id: activityId, prospect_id: prospectId, note_type: 'outcome', text: outcomeText, author: agentName, date: today });
+            }
+        }
+        if (notesText) {
+            const existing = allNotes.find(n => n.activity_id == activityId && n.note_type === 'post_meetup' && n.prospect_id == prospectId);
+            if (existing) {
+                await AppDataStore.update('notes', existing.id, { text: notesText });
+            } else {
+                await AppDataStore.create('notes', { id: Date.now() + 1, activity_id: activityId, prospect_id: prospectId, note_type: 'post_meetup', text: notesText, author: agentName, date: today });
+            }
+        }
+        UI.hideModal();
+        UI.toast.success('Post-meetup notes saved');
     };
 
     const editActivity = async (activityId) => {
@@ -21913,6 +21998,10 @@ const initImportDemoData = async () => {
         saveAndAddAnother,
         viewActivityDetails,
         uploadCPSForm,
+        editActivityTiming,
+        saveActivityTiming,
+        openPostMeetupModal,
+        savePostMeetup,
         editActivity,
         deleteActivity,
         confirmDeleteActivity,
