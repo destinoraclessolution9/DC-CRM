@@ -17679,6 +17679,9 @@ const exportKPIReport = async (format) => {
                         <p class="text-muted">Manage master data for products, events, and monthly promotions.</p>
                     </div>
                     <div class="header-actions">
+                        <button class="btn secondary" onclick="app.exportMarketingList('csv')"><i class="fas fa-file-csv"></i> Export CSV</button>
+                        <button class="btn secondary" onclick="app.exportMarketingList('xlsx')"><i class="fas fa-file-excel"></i> Export Excel</button>
+                        <button class="btn secondary" onclick="app.openImportWizardForType('${_currentMarketingListTab}')"><i class="fas fa-file-import"></i> Import</button>
                         <button class="btn primary" onclick="app.openMarketingListAddModal()">
                             <i class="fas fa-plus"></i> New ${_currentMarketingListTab.charAt(0).toUpperCase() + _currentMarketingListTab.slice(1, -1)}
                         </button>
@@ -20177,7 +20180,12 @@ const simulateCampaignSending = async (campaignId) => {
                     <h3>Step 2: Field Mapping</h3>
                     <div class="import-type-selector"><label>Import Type:</label>
                         <select id="import-type" class="form-control" style="width:200px" onchange="app.updateImportType(this.value)">
-                            <option value="prospects" selected>Prospects</option><option value="customers">Customers</option><option value="agents">Agents</option>
+                            <option value="prospects" ${_importData.importType === 'prospects' ? 'selected' : ''}>Prospects</option>
+                            <option value="customers" ${_importData.importType === 'customers' ? 'selected' : ''}>Customers</option>
+                            <option value="agents" ${_importData.importType === 'agents' ? 'selected' : ''}>Agents</option>
+                            <option value="products" ${_importData.importType === 'products' ? 'selected' : ''}>Products (Marketing List)</option>
+                            <option value="events" ${_importData.importType === 'events' ? 'selected' : ''}>Events (Marketing List)</option>
+                            <option value="promotions" ${_importData.importType === 'promotions' ? 'selected' : ''}>Promotions (Marketing List)</option>
                         </select>
                     </div>
                     <div class="mapping-actions">
@@ -20343,7 +20351,7 @@ const simulateCampaignSending = async (campaignId) => {
         const headers = _importData.headers || [];
         const crmFields = getCRMFieldsForType(_importData.importType);
         return headers.map((header, index) => {
-            const matched = autoMatchField(header);
+            const matched = autoMatchField(header, _importData.importType);
             return `<tr><td><strong>${header}</strong></td><td>
                 <select class="form-control mapping-select" data-col="${index}" style="width:200px">
                     <option value="">-- Ignore column --</option>
@@ -20369,12 +20377,51 @@ const simulateCampaignSending = async (campaignId) => {
         if (type === 'prospects') return [...common, ...extraProspect];
         if (type === 'customers') return [...common, { value: 'lifetime_value', label: 'Lifetime Value' }];
         if (type === 'agents') return [...common, { value: 'agent_code', label: 'Agent Code', required: true }];
+        if (type === 'products') return [
+            { value: 'name', label: 'Name', required: true },
+            { value: 'price', label: 'Price (RM)', required: false },
+            { value: 'remarks', label: 'Remarks', required: false },
+            { value: 'delivery_lead_time', label: 'Delivery Lead Time', required: false },
+            { value: 'is_active', label: 'Is Active (Yes/No)', required: false }
+        ];
+        if (type === 'events') return [
+            { value: 'title', label: 'Title', required: true },
+            { value: 'ticket_price', label: 'Ticket Price (RM)', required: false },
+            { value: 'duration', label: 'Duration', required: false },
+            { value: 'target_group', label: 'Target Group', required: false },
+            { value: 'description', label: 'Description', required: false },
+            { value: 'is_active', label: 'Is Active (Yes/No)', required: false }
+        ];
+        if (type === 'promotions') return [
+            { value: 'package_name', label: 'Package Name', required: true },
+            { value: 'price', label: 'Price (RM)', required: false },
+            { value: 'details', label: 'Details', required: false },
+            { value: 'requirement', label: 'Requirement', required: false },
+            { value: 'remarks', label: 'Remarks', required: false },
+            { value: 'delivery_lead_time', label: 'Delivery Lead Time', required: false },
+            { value: 'is_active', label: 'Is Active (Yes/No)', required: false }
+        ];
         return common;
     };
 
-    const autoMatchField = (header) => {
-        const map = { 'full name': 'full_name', 'name': 'full_name', 'phone': 'phone', 'mobile': 'phone', 'email': 'email', 'ic': 'ic_number', 'ic number': 'ic_number', 'nric': 'ic_number', 'dob': 'date_of_birth', 'date of birth': 'date_of_birth', 'occupation': 'occupation', 'income': 'income_range', 'address': 'address', 'city': 'city', 'state': 'state', 'postcode': 'postal_code', 'postal': 'postal_code', 'postal code': 'postal_code', 'ming gua': 'ming_gua', 'gender': 'gender', 'title': 'title', 'nationality': 'nationality', 'lunar': 'lunar_birth', 'company': 'company_name', 'referred by': 'referred_by', 'referral relationship': 'referral_relationship', 'relationship': 'referral_relationship', 'pipeline': 'pipeline_stage', 'stage': 'pipeline_stage', 'close date': 'expected_close_date', 'expected close': 'expected_close_date', 'deal value': 'deal_value' };
+    const autoMatchField = (header, importType = 'prospects') => {
         const lower = header.toLowerCase().trim();
+        if (importType === 'products') {
+            const m = { 'name': 'name', 'product name': 'name', 'price': 'price', 'remarks': 'remarks', 'delivery lead time': 'delivery_lead_time', 'lead time': 'delivery_lead_time', 'is active': 'is_active', 'active': 'is_active' };
+            for (let key in m) { if (lower.includes(key)) return m[key]; }
+            return '';
+        }
+        if (importType === 'events') {
+            const m = { 'title': 'title', 'name': 'title', 'event name': 'title', 'ticket price': 'ticket_price', 'price': 'ticket_price', 'duration': 'duration', 'target group': 'target_group', 'target': 'target_group', 'description': 'description', 'is active': 'is_active', 'active': 'is_active' };
+            for (let key in m) { if (lower.includes(key)) return m[key]; }
+            return '';
+        }
+        if (importType === 'promotions') {
+            const m = { 'package name': 'package_name', 'name': 'package_name', 'price': 'price', 'details': 'details', 'description': 'details', 'requirement': 'requirement', 'remarks': 'remarks', 'delivery lead time': 'delivery_lead_time', 'lead time': 'delivery_lead_time', 'is active': 'is_active', 'active': 'is_active' };
+            for (let key in m) { if (lower.includes(key)) return m[key]; }
+            return '';
+        }
+        const map = { 'full name': 'full_name', 'name': 'full_name', 'phone': 'phone', 'mobile': 'phone', 'email': 'email', 'ic': 'ic_number', 'ic number': 'ic_number', 'nric': 'ic_number', 'dob': 'date_of_birth', 'date of birth': 'date_of_birth', 'occupation': 'occupation', 'income': 'income_range', 'address': 'address', 'city': 'city', 'state': 'state', 'postcode': 'postal_code', 'postal': 'postal_code', 'postal code': 'postal_code', 'ming gua': 'ming_gua', 'gender': 'gender', 'title': 'title', 'nationality': 'nationality', 'lunar': 'lunar_birth', 'company': 'company_name', 'referred by': 'referred_by', 'referral relationship': 'referral_relationship', 'relationship': 'referral_relationship', 'pipeline': 'pipeline_stage', 'stage': 'pipeline_stage', 'close date': 'expected_close_date', 'expected close': 'expected_close_date', 'deal value': 'deal_value' };
         for (let key in map) { if (lower.includes(key)) return map[key]; }
         return '';
     };
@@ -20481,6 +20528,15 @@ const simulateCampaignSending = async (campaignId) => {
         };
     };
 
+    const mapRowToMarketingRecord = (row, reverseMap, type) => {
+        const get = (field) => { const idx = reverseMap[field]; return idx !== undefined ? (row[idx] || '').toString().trim() : ''; };
+        const parseActive = (val) => { if (!val) return true; return !['false','no','0','inactive','n'].includes(val.toLowerCase()); };
+        if (type === 'products') return { name: get('name'), price: parseFloat(get('price')) || 0, remarks: get('remarks') || null, delivery_lead_time: get('delivery_lead_time') || null, is_active: parseActive(get('is_active')) };
+        if (type === 'events') return { title: get('title'), ticket_price: parseFloat(get('ticket_price')) || 0, duration: get('duration') || null, target_group: get('target_group') || null, description: get('description') || null, is_active: parseActive(get('is_active')) };
+        // promotions
+        return { package_name: get('package_name'), price: parseFloat(get('price')) || 0, details: get('details') || null, requirement: get('requirement') || null, remarks: get('remarks') || null, delivery_lead_time: get('delivery_lead_time') || null, is_active: parseActive(get('is_active')) };
+    };
+
     const updateImportProgress = (pct, current, total) => {
         const bar = document.getElementById('progress-bar');
         if (bar) { bar.style.width = pct + '%'; bar.textContent = pct + '%'; }
@@ -20490,35 +20546,49 @@ const simulateCampaignSending = async (campaignId) => {
 
     const runValidation = () => {
         const reverseMap = buildReverseMapping();
-        const nameCol  = reverseMap['full_name'];
-        const phoneCol = reverseMap['phone'];
-        const emailCol = reverseMap['email'];
-        const icCol    = reverseMap['ic_number'];
+        const importType = _importData.importType;
+        const isMarketingType = ['products', 'events', 'promotions'].includes(importType);
         _importData.validationResults = [];
         let valid = 0, warnings = 0, errors = 0;
 
         _importData.data.forEach((row, i) => {
             const rowErrors = [], rowWarnings = [];
 
-            if (nameCol !== undefined) {
-                const name = (row[nameCol] || '').toString().trim();
-                if (!name) rowErrors.push({ field: 'Full Name', msg: 'Name is required', suggestion: 'Enter the full name' });
-            }
-            if (phoneCol !== undefined) {
-                const raw = (row[phoneCol] || '').toString().trim();
-                if (!raw) rowErrors.push({ field: 'Phone', msg: 'Phone is required', suggestion: 'Enter a phone number' });
-                else if (!/^(\+?60|0)[1-9]\d{7,9}$/.test(raw.replace(/[-\s()]/g, '')))
-                    rowWarnings.push({ field: 'Phone', msg: 'Non-standard MY format', suggestion: 'Use 01X-XXXXXXX or +601XXXXXXXX' });
-            }
-            if (emailCol !== undefined) {
-                const email = (row[emailCol] || '').toString().trim();
-                if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
-                    rowErrors.push({ field: 'Email', msg: 'Invalid email format', suggestion: 'Check @ and domain' });
-            }
-            if (icCol !== undefined) {
-                const ic = (row[icCol] || '').toString().replace(/[-\s]/g, '');
-                if (ic && !/^\d{12}$/.test(ic))
-                    rowWarnings.push({ field: 'IC Number', msg: 'IC should be 12 digits', suggestion: 'Remove dashes or spaces' });
+            if (isMarketingType) {
+                // Validate required name field per marketing type
+                const reqField = importType === 'products' ? 'name' : importType === 'events' ? 'title' : 'package_name';
+                const reqLabel = importType === 'products' ? 'Name' : importType === 'events' ? 'Title' : 'Package Name';
+                const reqCol = reverseMap[reqField];
+                if (reqCol !== undefined) {
+                    const val = (row[reqCol] || '').toString().trim();
+                    if (!val) rowErrors.push({ field: reqLabel, msg: `${reqLabel} is required`, suggestion: `Enter the ${reqLabel.toLowerCase()}` });
+                }
+            } else {
+                const nameCol  = reverseMap['full_name'];
+                const phoneCol = reverseMap['phone'];
+                const emailCol = reverseMap['email'];
+                const icCol    = reverseMap['ic_number'];
+
+                if (nameCol !== undefined) {
+                    const name = (row[nameCol] || '').toString().trim();
+                    if (!name) rowErrors.push({ field: 'Full Name', msg: 'Name is required', suggestion: 'Enter the full name' });
+                }
+                if (phoneCol !== undefined) {
+                    const raw = (row[phoneCol] || '').toString().trim();
+                    if (!raw) rowErrors.push({ field: 'Phone', msg: 'Phone is required', suggestion: 'Enter a phone number' });
+                    else if (!/^(\+?60|0)[1-9]\d{7,9}$/.test(raw.replace(/[-\s()]/g, '')))
+                        rowWarnings.push({ field: 'Phone', msg: 'Non-standard MY format', suggestion: 'Use 01X-XXXXXXX or +601XXXXXXXX' });
+                }
+                if (emailCol !== undefined) {
+                    const email = (row[emailCol] || '').toString().trim();
+                    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+                        rowErrors.push({ field: 'Email', msg: 'Invalid email format', suggestion: 'Check @ and domain' });
+                }
+                if (icCol !== undefined) {
+                    const ic = (row[icCol] || '').toString().replace(/[-\s]/g, '');
+                    if (ic && !/^\d{12}$/.test(ic))
+                        rowWarnings.push({ field: 'IC Number', msg: 'IC should be 12 digits', suggestion: 'Remove dashes or spaces' });
+                }
             }
 
             const status = rowErrors.length > 0 ? 'error' : rowWarnings.length > 0 ? 'warning' : 'valid';
@@ -20532,13 +20602,37 @@ const simulateCampaignSending = async (campaignId) => {
 
     const runDuplicateCheck = async () => {
         const reverseMap = buildReverseMapping();
-        const phoneCol = reverseMap['phone'];
-        const emailCol = reverseMap['email'];
-        const icCol    = reverseMap['ic_number'];
-        const table = _importData.importType === 'customers' ? 'customers' : 'prospects';
+        const importType = _importData.importType;
+        const isMarketingType = ['products', 'events', 'promotions'].includes(importType);
+        const table = { customers: 'customers', prospects: 'prospects', products: 'products', events: 'events', promotions: 'promotions' }[importType] || 'prospects';
         let existing = [];
         try { existing = await AppDataStore.getAll(table); } catch (e) { existing = []; }
 
+        if (isMarketingType) {
+            // Duplicate check by name for marketing list types
+            const nameField = importType === 'products' ? 'name' : importType === 'events' ? 'title' : 'package_name';
+            const nameCol = reverseMap[nameField];
+            const existingNames = new Map();
+            existing.forEach(rec => {
+                const n = (rec[nameField] || '').toLowerCase().trim();
+                if (n) existingNames.set(n, rec);
+            });
+            let byName = 0;
+            const dupList = [];
+            _importData.validationResults.forEach(vr => {
+                if (vr.status === 'error') return;
+                if (nameCol !== undefined) {
+                    const n = (vr.row[nameCol] || '').toString().toLowerCase().trim();
+                    if (n && existingNames.has(n)) { byName++; dupList.push({ rowIndex: vr.rowIndex, row: vr.row, matchField: 'name', existingRec: existingNames.get(n) }); }
+                }
+            });
+            _importData.duplicates = { total: byName, byPhone: 0, byEmail: 0, byIc: 0, list: dupList };
+            return;
+        }
+
+        const phoneCol = reverseMap['phone'];
+        const emailCol = reverseMap['email'];
+        const icCol    = reverseMap['ic_number'];
         const existingPhones = new Map();
         const existingEmails = new Map();
         const existingIcs    = new Map();
@@ -20592,7 +20686,7 @@ const simulateCampaignSending = async (campaignId) => {
         const selects = document.querySelectorAll('.mapping-select');
         let matched = 0;
         selects.forEach(sel => {
-            const crmField = autoMatchField(_importData.headers[parseInt(sel.dataset.col)] || '');
+            const crmField = autoMatchField(_importData.headers[parseInt(sel.dataset.col)] || '', _importData.importType);
             if (crmField) { sel.value = crmField; matched++; }
         });
         UI.toast.success(`Auto-mapped ${matched} of ${selects.length} columns`);
@@ -20634,7 +20728,8 @@ const simulateCampaignSending = async (campaignId) => {
         if (assignTo === 'myself') assignedAgentId = _currentUser?.id;
 
         const reverseMap = buildReverseMapping();
-        const table = _importData.importType === 'customers' ? 'customers' : 'prospects';
+        const isMarketingType = ['products', 'events', 'promotions'].includes(_importData.importType);
+        const table = { customers: 'customers', prospects: 'prospects', products: 'products', events: 'events', promotions: 'promotions' }[_importData.importType] || 'prospects';
         let created = 0, updated = 0, skipped = 0, errorCount = 0;
 
         for (let i = 0; i < rowsToProcess.length; i++) {
@@ -20643,7 +20738,7 @@ const simulateCampaignSending = async (campaignId) => {
                 await new Promise(r => setTimeout(r, 0));
             }
             const vr = rowsToProcess[i];
-            const record = mapRowToRecord(vr.row, reverseMap, assignedAgentId);
+            const record = isMarketingType ? mapRowToMarketingRecord(vr.row, reverseMap, _importData.importType) : mapRowToRecord(vr.row, reverseMap, assignedAgentId);
             const dup = dupMap.get(vr.rowIndex);
 
             if (dup) {
@@ -20657,10 +20752,12 @@ const simulateCampaignSending = async (campaignId) => {
             }
             try {
                 record.id = Date.now() + i;
-                record.status = 'New';
                 record.created_at = new Date().toISOString();
-                record.protection_deadline = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-                record.score = 5;
+                if (!isMarketingType) {
+                    record.status = 'New';
+                    record.protection_deadline = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+                    record.score = 5;
+                }
                 await AppDataStore.create(table, record);
                 created++;
             } catch (e) { console.error('Insert failed row', vr.rowIndex, e); errorCount++; }
@@ -20695,6 +20792,9 @@ const simulateCampaignSending = async (campaignId) => {
         if (vp) {
             if (_importData.importType === 'prospects') {
                 await showProspectsView(vp);
+            } else if (['products', 'events', 'promotions'].includes(_importData.importType)) {
+                _currentMarketingListTab = _importData.importType;
+                await showMarketingListsView(vp);
             } else {
                 await showImportDashboard(vp);
             }
@@ -20715,7 +20815,7 @@ const simulateCampaignSending = async (campaignId) => {
             <table style="width:100%;border-collapse:collapse">
                 <thead><tr><th style="padding:10px;text-align:left;background:var(--gray-50)">Template</th><th style="padding:10px;text-align:left;background:var(--gray-50)">Description</th><th style="padding:10px;text-align:left;background:var(--gray-50)">Download</th></tr></thead>
                 <tbody>
-                    ${['Prospects', 'Customers', 'Agents', 'Products', 'Activities'].map(t => `<tr><td style="padding:10px;border-bottom:1px solid var(--gray-100)">${t} Template</td><td style="padding:10px;border-bottom:1px solid var(--gray-100)">${t} data import</td><td style="padding:10px;border-bottom:1px solid var(--gray-100)"><button class="btn secondary btn-sm" onclick="app.downloadTemplate('${t.toLowerCase()}','csv')">CSV</button> <button class="btn secondary btn-sm" onclick="app.downloadTemplate('${t.toLowerCase()}','xlsx')">Excel</button></td></tr>`).join('')}
+                    ${['Prospects', 'Customers', 'Agents', 'Products', 'Events', 'Promotions', 'Activities'].map(t => `<tr><td style="padding:10px;border-bottom:1px solid var(--gray-100)">${t} Template</td><td style="padding:10px;border-bottom:1px solid var(--gray-100)">${t} data import</td><td style="padding:10px;border-bottom:1px solid var(--gray-100)"><button class="btn secondary btn-sm" onclick="app.downloadTemplate('${t.toLowerCase()}','csv')">CSV</button> <button class="btn secondary btn-sm" onclick="app.downloadTemplate('${t.toLowerCase()}','xlsx')">Excel</button></td></tr>`).join('')}
                 </tbody>
             </table>`;
         UI.showModal('Download Import Templates', content, [{ label: 'Close', type: 'primary', action: 'UI.hideModal()' }]);
@@ -20726,14 +20826,18 @@ const simulateCampaignSending = async (campaignId) => {
             prospects: ['Title','Full Name','Gender','Nationality','Phone','Email','IC Number','Date of Birth','Lunar Birth','Occupation','Company Name','Income Range','Address','City','State','Postal Code','Ming Gua','Referred By','Referral Relationship','Pipeline Stage','Expected Close Date','Deal Value (RM)'],
             customers: ['Full Name','Phone','Email','IC Number','Customer Since','Lifetime Value'],
             agents: ['Full Name','Phone','Email','Agent Code','Commission Rate','License Start','License Expiry'],
-            products: ['Product Name','Category','Price','Description'],
+            products: ['Name','Price (RM)','Remarks','Delivery Lead Time','Is Active'],
+            events: ['Title','Ticket Price (RM)','Duration','Target Group','Description','Is Active'],
+            promotions: ['Package Name','Price (RM)','Details','Requirement','Remarks','Delivery Lead Time','Is Active'],
             activities: ['Date','Type','Title','Agent','Prospect','Status']
         };
         const samples = {
             prospects: ['Mr.','Ahmad bin Ali','Male','Malaysian','012-345-6789','ahmad@email.com','901212-10-1234','1990-12-12','','Business Owner','ABC Sdn Bhd','RM5-8k','123 Jalan SS2','Petaling Jaya','Selangor','46000','MG4','','Friend','new','2025-06-30','50000'],
             customers: ['Sample Name','012-345-6789','sample@email.com','901212-10-1234','2024-01-01','50000'],
             agents: ['Sample Name','012-345-6789','sample@email.com','AGT001','0.10','2024-01-01','2025-01-01'],
-            products: ['Sample Product','Category A','1000','Product description'],
+            products: ['PR4 Power Ring','2500','Premium feng shui ring','3-5 days','Yes'],
+            events: ['Feng Shui Workshop','50','2 hours','Homeowners','Introduction to Feng Shui principles','Yes'],
+            promotions: ['Starter Package','2000','Basic feng shui consultation','New customers only','Limited time offer','7-14 days','Yes'],
             activities: ['2024-01-01','Meeting','Sample Activity','Agent Name','Prospect Name','Completed']
         };
         const cols = headers[type] || headers.prospects;
@@ -20750,6 +20854,43 @@ const simulateCampaignSending = async (campaignId) => {
             const a = document.createElement('a'); a.href = url; a.download = `${type}_template.csv`; document.body.appendChild(a); a.click(); document.body.removeChild(a);
         }
         UI.toast.success(`${type} template downloaded`);
+    };
+
+    const exportMarketingList = async (format) => {
+        const type = _currentMarketingListTab;
+        const data = await AppDataStore.getAll(type);
+        if (!data.length) { UI.toast.error('No data to export'); return; }
+        let cols, rows;
+        if (type === 'products') {
+            cols = ['Name','Price (RM)','Remarks','Delivery Lead Time','Is Active'];
+            rows = data.map(d => [d.name || '', d.price || 0, d.remarks || '', d.delivery_lead_time || '', d.is_active ? 'Yes' : 'No']);
+        } else if (type === 'events') {
+            cols = ['Title','Ticket Price (RM)','Duration','Target Group','Description','Is Active'];
+            rows = data.map(d => [d.title || '', d.ticket_price || 0, d.duration || '', d.target_group || '', d.description || '', d.is_active ? 'Yes' : 'No']);
+        } else {
+            cols = ['Package Name','Price (RM)','Details','Requirement','Remarks','Delivery Lead Time','Is Active'];
+            rows = data.map(d => [d.package_name || '', d.price || 0, d.details || '', d.requirement || '', d.remarks || '', d.delivery_lead_time || '', d.is_active ? 'Yes' : 'No']);
+        }
+        const filename = `${type}_export_${new Date().toISOString().split('T')[0]}`;
+        if (format === 'xlsx') {
+            const ws = XLSX.utils.aoa_to_sheet([cols, ...rows]);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, type);
+            XLSX.writeFile(wb, `${filename}.xlsx`);
+        } else {
+            const csvRows = [cols, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','));
+            const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a'); a.href = url; a.download = `${filename}.csv`;
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+        UI.toast.success(`${type.charAt(0).toUpperCase() + type.slice(1)} exported (${data.length} records)`);
+    };
+
+    const openImportWizardForType = async (type) => {
+        await openImportWizard();
+        _importData.importType = type;
     };
 
     const showImportHistory = async () => {
@@ -22941,6 +23082,8 @@ const initImportDemoData = async () => {
         showImportHistory,
         handleImportFileDrop,
         handleImportFileSelect,
+        exportMarketingList,
+        openImportWizardForType,
 
         // Phase 13: Protection Monitoring
         showProtectionMonitoringView,
