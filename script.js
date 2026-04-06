@@ -2557,7 +2557,7 @@ In a production system, this would show the actual file contents.
             if (micIcon) micIcon.className = 'fas fa-microphone recording';
 
             // Start timer
-            _recordingTimer = (() => {
+            _recordingTimer = setInterval(() => {
                 const elapsed = Math.floor((Date.now() - _recordingStartTime) / 1000);
                 const m = Math.floor(elapsed / 60).toString().padStart(2, '0');
                 const s = (elapsed % 60).toString().padStart(2, '0');
@@ -2571,7 +2571,7 @@ In a production system, this would show the actual file contents.
                 waveform.innerHTML = Array.from({ length: 40 }, () =>
                     `<div class="waveform-bar" style="height:${Math.floor(Math.random() * 28) + 4}px;"></div>`
                 ).join('');
-                window._waveformInterval = (() => {
+                window._waveformInterval = setInterval(() => {
                     document.querySelectorAll('.waveform-bar').forEach(b => {
                         b.style.height = (Math.floor(Math.random() * 28) + 4) + 'px';
                     });
@@ -15241,11 +15241,11 @@ const renderCurrentAssignments = async (agentId) => {
 
     const confirmDeleteAgent = async (agentId) => {
         try {
+            // Fetch agent BEFORE deleting so we have the email for auth deletion
+            const agent = await AppDataStore.getById('users', agentId);
             await AppDataStore.delete('users', agentId);
             // Also remove from Supabase Auth via admin API
             try {
-                const { data: authUsers } = await window.supabase.auth.admin?.listUsers?.() || {};
-                const agent = await AppDataStore.getById('users', agentId);
                 if (agent?.email) {
                     // Find auth user by email and delete
                     const listResp = await fetch(`${window.SUPABASE_URL}/auth/v1/admin/users?email=${encodeURIComponent(agent.email)}`, {
