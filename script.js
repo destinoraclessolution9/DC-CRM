@@ -14534,23 +14534,33 @@ const renderCurrentAssignments = async (agentId) => {
 
             // Create Supabase Auth account via admin API (no session disruption)
             try {
-                const resp = await fetch(`${window.SUPABASE_URL}/auth/v1/admin/users`, {
+                const SR = window.SUPABASE_SR;
+                const BASE = window.SUPABASE_URL;
+                const createResp = await fetch(`${BASE}/auth/v1/admin/users`, {
                     method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${window.SUPABASE_SR}`,
-                        'apikey': window.SUPABASE_SR,
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        email: fields.email,
-                        password: initialPassword,
-                        email_confirm: true,
-                        user_metadata: { full_name: name }
-                    })
+                    headers: { 'Authorization': `Bearer ${SR}`, 'apikey': SR, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: fields.email, password: initialPassword, email_confirm: true, user_metadata: { full_name: name } })
                 });
-                const authData = await resp.json();
-                if (!resp.ok) {
-                    console.warn('Auth account creation warning:', authData.message || authData.msg);
+                const createData = await createResp.json();
+                if (!createResp.ok) {
+                    // If user already exists, update their password to the new temp password
+                    const alreadyExists = createData.message?.toLowerCase().includes('already') || createData.msg?.toLowerCase().includes('already');
+                    if (alreadyExists) {
+                        const listResp = await fetch(`${BASE}/auth/v1/admin/users?per_page=1000`, {
+                            headers: { 'Authorization': `Bearer ${SR}`, 'apikey': SR }
+                        });
+                        const listData = await listResp.json();
+                        const existingUser = listData?.users?.find(u => u.email === fields.email);
+                        if (existingUser?.id) {
+                            await fetch(`${BASE}/auth/v1/admin/users/${existingUser.id}`, {
+                                method: 'PUT',
+                                headers: { 'Authorization': `Bearer ${SR}`, 'apikey': SR, 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ password: initialPassword, email_confirm: true })
+                            });
+                        }
+                    } else {
+                        console.warn('Auth account creation warning:', createData.message || createData.msg);
+                    }
                 }
             } catch (authErr) {
                 console.warn('Supabase Auth account creation skipped (offline?):', authErr.message);
