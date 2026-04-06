@@ -21820,9 +21820,17 @@ const initImportDemoData = async () => {
     const openKPITargetsModal = async () => {
         const currentYear = new Date().getFullYear();
         const existing = (await AppDataStore.getAll('yearly_targets')).find(t => t.target_year === currentYear);
+        const allQ = (await AppDataStore.getAll('quarterly_targets')).filter(t => t.year === currentYear);
+        const getQ = (q, field) => { const qt = allQ.find(t => t.quarter === q); return qt?.[field] || ''; };
+
+        const qRow = (label, field, qkey) => `
+            <tr style="border-bottom:1px solid var(--gray-200);">
+                <td style="padding:5px 8px; font-size:12px; white-space:nowrap;">${label}</td>
+                ${[1,2,3,4].map(q => `<td style="padding:4px;"><input type="number" id="qt-q${q}-${qkey}" class="form-control" style="min-width:80px; font-size:12px; padding:4px 6px;" placeholder="auto" value="${getQ(q, field)}"></td>`).join('')}
+            </tr>`;
 
         const content = `
-            <div style="max-height:70vh; overflow-y:auto;">
+            <div style="max-height:75vh; overflow-y:auto; padding-right:4px;">
                 <h3 style="margin-bottom:12px;">Yearly Targets — ${currentYear}</h3>
                 <div class="form-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
                     <div class="form-group"><label>CPS Count Target</label>
@@ -21846,8 +21854,36 @@ const initImportDemoData = async () => {
                     <div class="form-group"><label>Activity Headcount Target</label>
                         <input type="number" id="yt-headcount" class="form-control" value="${existing?.activity_headcount_target || 500}"></div>
                 </div>
-                <h3 style="margin:16px 0 8px;">Seasonal Weighting</h3>
-                <p style="font-size:12px; color:var(--gray-500); margin-bottom:8px;">Distribute percentage weights across quarters (must sum to 100%)</p>
+                <hr style="margin:16px 0; border:none; border-top:1px solid var(--gray-200);">
+                <h3 style="margin-bottom:4px;">Quarterly Targets — ${currentYear}</h3>
+                <p style="font-size:12px; color:var(--gray-500); margin-bottom:10px;">Set per-quarter values manually, or leave blank to auto-calculate from yearly targets × seasonal weights below.</p>
+                <div style="overflow-x:auto;">
+                    <table style="width:100%; border-collapse:collapse;">
+                        <thead>
+                            <tr style="background:var(--gray-100);">
+                                <th style="text-align:left; padding:6px 8px; font-size:12px; font-weight:600;">Metric</th>
+                                <th style="text-align:center; padding:6px 8px; font-size:12px; font-weight:600;">Q1</th>
+                                <th style="text-align:center; padding:6px 8px; font-size:12px; font-weight:600;">Q2</th>
+                                <th style="text-align:center; padding:6px 8px; font-size:12px; font-weight:600;">Q3</th>
+                                <th style="text-align:center; padding:6px 8px; font-size:12px; font-weight:600;">Q4</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${qRow('CPS Count', 'cps_count_target', 'cps')}
+                            ${qRow('Total Sales (RM)', 'total_sales_target', 'sales')}
+                            ${qRow('POP Case', 'pop_case_count_target', 'pop-count')}
+                            ${qRow('POP Sales (RM)', 'pop_sales_target', 'pop-sales')}
+                            ${qRow('EPP Case', 'epp_case_count_target', 'epp-count')}
+                            ${qRow('EPP Sales (RM)', 'epp_sales_target', 'epp-sales')}
+                            ${qRow('New Agents', 'new_agents_target', 'agents')}
+                            ${qRow('New Customers', 'new_customers_target', 'customers')}
+                            ${qRow('Total Meetings', 'total_meetings_target', 'meetings')}
+                            ${qRow('Activity Headcount', 'activity_headcount_target', 'headcount')}
+                        </tbody>
+                    </table>
+                </div>
+                <h3 style="margin:16px 0 8px;">Seasonal Weighting (auto-calc fallback)</h3>
+                <p style="font-size:12px; color:var(--gray-500); margin-bottom:8px;">Used only when quarterly fields above are left blank. Must sum to 100%.</p>
                 <div class="form-grid" style="display:grid; grid-template-columns:repeat(4,1fr); gap:8px;">
                     <div class="form-group"><label>Q1 %</label><input type="number" id="yt-q1w" class="form-control" value="${existing?.q1_weight || 22}"></div>
                     <div class="form-group"><label>Q2 %</label><input type="number" id="yt-q2w" class="form-control" value="${existing?.q2_weight || 25}"></div>
@@ -21858,7 +21894,7 @@ const initImportDemoData = async () => {
         `;
         UI.showModal('Set KPI Targets', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save & Auto-Generate Breakdown', type: 'primary', action: `(async () => { await app.saveKPITargets(${currentYear}); })()` }
+            { label: 'Save Targets', type: 'primary', action: `(async () => { await app.saveKPITargets(${currentYear}); })()` }
         ]);
     };
 
@@ -21866,10 +21902,12 @@ const initImportDemoData = async () => {
         const d = (id) => parseFloat(document.getElementById(id)?.value) || 0;
         const weights = [d('yt-q1w'), d('yt-q2w'), d('yt-q3w'), d('yt-q4w')];
         const totalWeight = weights.reduce((a, b) => a + b, 0);
-        if (Math.abs(totalWeight - 100) > 1) {
+        // Only enforce weight sum if weights are being used (non-zero)
+        if (totalWeight > 0 && Math.abs(totalWeight - 100) > 1) {
             UI.toast.error(`Quarter weights must sum to 100% (currently ${totalWeight}%)`);
             return;
         }
+        const effectiveWeights = totalWeight > 0 ? weights : [25, 25, 25, 25];
 
         const yearlyData = {
             target_year: year,
@@ -21883,10 +21921,10 @@ const initImportDemoData = async () => {
             new_customers_target: d('yt-customers'),
             total_meetings_target: d('yt-meetings'),
             activity_headcount_target: d('yt-headcount'),
-            q1_weight: weights[0],
-            q2_weight: weights[1],
-            q3_weight: weights[2],
-            q4_weight: weights[3],
+            q1_weight: effectiveWeights[0],
+            q2_weight: effectiveWeights[1],
+            q3_weight: effectiveWeights[2],
+            q4_weight: effectiveWeights[3],
             created_at: new Date().toISOString()
         };
 
@@ -21899,12 +21937,17 @@ const initImportDemoData = async () => {
             await AppDataStore.create('yearly_targets', yearlyData);
         }
 
-        // Auto-generate quarterly targets
+        // Save quarterly targets — use manual inputs if provided, else auto-calculate from weights
         const metrics = ['cps_count_target', 'total_sales_target', 'pop_case_count_target', 'pop_sales_target', 'epp_case_count_target', 'epp_sales_target', 'new_agents_target', 'new_customers_target', 'total_meetings_target', 'activity_headcount_target'];
+        const qkeys = ['cps', 'sales', 'pop-count', 'pop-sales', 'epp-count', 'epp-sales', 'agents', 'customers', 'meetings', 'headcount'];
         for (let q = 1; q <= 4; q++) {
-            const w = weights[q - 1] / 100;
+            const w = effectiveWeights[q - 1] / 100;
             const qData = { quarter: q, year: year };
-            metrics.forEach(m => { qData[m] = Math.round(yearlyData[m] * w); });
+            metrics.forEach((m, i) => {
+                const el = document.getElementById(`qt-q${q}-${qkeys[i]}`);
+                const manual = el ? parseFloat(el.value) : NaN;
+                qData[m] = (!isNaN(manual) && el?.value !== '') ? manual : Math.round(yearlyData[m] * w);
+            });
             const existingQ = (await AppDataStore.getAll('quarterly_targets')).find(t => t.quarter === q && t.year === year);
             if (existingQ) {
                 await AppDataStore.update('quarterly_targets', existingQ.id, qData);
@@ -21929,7 +21972,7 @@ const initImportDemoData = async () => {
         }
 
         UI.hideModal();
-        UI.toast.success('KPI targets saved — quarterly and monthly breakdowns auto-generated');
+        UI.toast.success('KPI targets saved — monthly breakdowns auto-generated from quarterly values');
         if (typeof refreshKPIDashboard === 'function') await refreshKPIDashboard();
     };
 
