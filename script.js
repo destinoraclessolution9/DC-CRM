@@ -9740,9 +9740,8 @@ function _wireLoginBtn() {
                 <div id="co-agent-section" style="display: none; background: #f0fdfa; padding: 12px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #ccfbf1;">
                     <div class="form-group">
                         <label>Search and Add Co-Agents</label>
-                        <div class="co-agent-search" style="display:flex; gap:8px;">
-                            <input type="text" id="co-agent-search-input" class="form-control" placeholder="Type agent name..." onkeyup="app.searchAgents()">
-                            <button class="btn secondary btn-sm" onclick="app.searchAgents()">Search</button>
+                        <div class="co-agent-search" style="position:relative;">
+                            <input type="text" id="co-agent-search-input" class="form-control" placeholder="Type consultant name..." onkeyup="app.searchAgents()">
                         </div>
                         <div id="agent-search-results" class="search-results-dropdown"></div>
                     </div>
@@ -10754,7 +10753,7 @@ function _wireLoginBtn() {
     const searchAgents = async () => {
         const term = document.getElementById('co-agent-search-input')?.value.toLowerCase();
         const resultsDiv = document.getElementById('agent-search-results');
-        if (!term || term.length < 2) return;
+        if (!term || term.length < 1) { if (resultsDiv) resultsDiv.style.display = 'none'; return; }
 
         const consultants = (await AppDataStore.getAll('users')).filter(u => {
             const lvl = parseInt(u.role?.match(/Level\s+(\d+)/i)?.[1] || 0);
