@@ -10649,16 +10649,14 @@ function _wireLoginBtn() {
             }
 
             const prospects = (await AppDataStore.getAll('prospects')).filter(p => !p.status || p.status === 'active');
-            const customers = (await AppDataStore.getAll('customers')).filter(c => !c.status || c.status === 'active');
-            const agents = (await AppDataStore.getAll('users')).filter(u => {
+            const consultants = (await AppDataStore.getAll('users')).filter(u => {
                 const lvl = parseInt(u.role?.match(/Level\s+(\d+)/i)?.[1] || 0);
                 return lvl >= 5 || isAgent(u) || u.role === 'team_leader';
             });
 
             const all = [
                 ...prospects.map(p => ({ id: p.id, name: p.full_name, type: 'Prospect' })),
-                ...customers.map(c => ({ id: c.id, name: c.full_name, type: 'Customer' })),
-                ...agents.map(a => ({ id: a.id, name: a.full_name, type: 'Agent' }))
+                ...consultants.map(a => ({ id: a.id, name: a.full_name, type: 'Consultant' }))
             ];
 
             const matches = all.filter(e => e.name && e.name.toLowerCase().includes(term)).slice(0, 10);
