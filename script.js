@@ -12094,7 +12094,7 @@ function _wireLoginBtn() {
 
             // Get last activity
             const lastActivity = activities
-                .filter(a => a.prospect_id === p.id)
+                .filter(a => a.prospect_id == p.id)
                 .sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date))[0];
 
             const lastActivityText = lastActivity
