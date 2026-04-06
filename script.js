@@ -14930,31 +14930,31 @@ const renderCurrentAssignments = async (agentId) => {
                 id: Date.now(),
                 username: usernameVal,
                 password: initialPassword,
-                force_password_change: true,
                 status: 'probation',
                 join_date: new Date().toISOString().split('T')[0],
                 ...fields
             };
             await AppDataStore.create('users', newAgent);
 
-            // Create Supabase Auth account, preserving admin session
+            // Create Supabase Auth account via admin API (no session disruption)
             try {
-                const { data: { session: adminSession } } = await window.supabase.auth.getSession();
-                const { error: signUpError } = await window.supabase.auth.signUp({
-                    email: fields.email,
-                    password: initialPassword,
-                    options: { data: { full_name: name } }
+                const resp = await fetch(`${window.SUPABASE_URL}/auth/v1/admin/users`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${window.SUPABASE_SR}`,
+                        'apikey': window.SUPABASE_SR,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        email: fields.email,
+                        password: initialPassword,
+                        email_confirm: true,
+                        user_metadata: { full_name: name }
+                    })
                 });
-                if (signUpError && !signUpError.message.toLowerCase().includes('already registered')) {
-                    console.warn('Supabase signUp warning:', signUpError.message);
-                }
-                // Sign out the newly created agent session, restore admin session
-                await window.supabase.auth.signOut();
-                if (adminSession?.access_token && adminSession?.refresh_token) {
-                    await window.supabase.auth.setSession({
-                        access_token: adminSession.access_token,
-                        refresh_token: adminSession.refresh_token
-                    });
+                const authData = await resp.json();
+                if (!resp.ok) {
+                    console.warn('Auth account creation warning:', authData.message || authData.msg);
                 }
             } catch (authErr) {
                 console.warn('Supabase Auth account creation skipped (offline?):', authErr.message);
