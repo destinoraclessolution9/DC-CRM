@@ -693,15 +693,15 @@ const appLogic = (() => {
                     <label>Ming Gua</label>
                     <select id="filter-${type}-minggua" class="form-control">
                         <option value="">All</option>
-                        <option value="MG1">MG1</option>
-                        <option value="MG2">MG2</option>
-                        <option value="MG3">MG3</option>
-                        <option value="MG4">MG4</option>
+                        <option value="MG1">MG1 坎</option>
+                        <option value="MG2">MG2 坤</option>
+                        <option value="MG3">MG3 震</option>
+                        <option value="MG4">MG4 巽</option>
                         <option value="MG5">MG5</option>
-                        <option value="MG6">MG6</option>
-                        <option value="MG7">MG7</option>
-                        <option value="MG8">MG8</option>
-                        <option value="MG9">MG9</option>
+                        <option value="MG6">MG6 乾</option>
+                        <option value="MG7">MG7 兑</option>
+                        <option value="MG8">MG8 艮</option>
+                        <option value="MG9">MG9 离</option>
                     </select>
                 </div>
             </div>
@@ -10487,15 +10487,15 @@ function _wireLoginBtn() {
                                 <label>Ming Gua</label>
                                 <select id="cps-gua" class="form-control">
                                     <option value="">-- Select --</option>
-                                    <option value="MG1">MG1 (Kan)</option>
-                                    <option value="MG2">MG2 (Kun)</option>
-                                    <option value="MG3">MG3 (Zhen)</option>
-                                    <option value="MG4">MG4 (Xun)</option>
-                                    <option value="MG5">MG5 (Zhong)</option>
-                                    <option value="MG6">MG6 (Qian)</option>
-                                    <option value="MG7">MG7 (Dui)</option>
-                                    <option value="MG8">MG8 (Gen)</option>
-                                    <option value="MG9">MG9 (Li)</option>
+                                    <option value="MG1">MG1 坎</option>
+                                    <option value="MG2">MG2 坤</option>
+                                    <option value="MG3">MG3 震</option>
+                                    <option value="MG4">MG4 巽</option>
+                                    <option value="MG5">MG5</option>
+                                    <option value="MG6">MG6 乾</option>
+                                    <option value="MG7">MG7 兑</option>
+                                    <option value="MG8">MG8 艮</option>
+                                    <option value="MG9">MG9 离</option>
                                 </select>
                             </div>
                         </div>
@@ -11455,15 +11455,15 @@ function _wireLoginBtn() {
                             </select>
                             <select id="filter-gua" onchange="app.filterProspects()">
                                 <option value="">All Ming Gua</option>
-                                <option value="MG1">MG1 (Kan)</option>
-                                <option value="MG2">MG2 (Kun)</option>
-                                <option value="MG3">MG3 (Zhen)</option>
-                                <option value="MG4">MG4 (Xun)</option>
-                                <option value="MG5">MG5 (Zhong)</option>
-                                <option value="MG6">MG6 (Qian)</option>
-                                <option value="MG7">MG7 (Dui)</option>
-                                <option value="MG8">MG8 (Gen)</option>
-                                <option value="MG9">MG9 (Li)</option>
+                                <option value="MG1">MG1 坎</option>
+                                <option value="MG2">MG2 坤</option>
+                                <option value="MG3">MG3 震</option>
+                                <option value="MG4">MG4 巽</option>
+                                <option value="MG5">MG5</option>
+                                <option value="MG6">MG6 乾</option>
+                                <option value="MG7">MG7 兑</option>
+                                <option value="MG8">MG8 艮</option>
+                                <option value="MG9">MG9 离</option>
                             </select>
                             <select id="filter-status" onchange="app.filterProspects()">
                                 <option value="">All Status</option>
@@ -11579,15 +11579,15 @@ function _wireLoginBtn() {
                         </select>
                         <select id="filter-customer-gua" onchange="app.filterCustomers()">
                             <option value="">Ming Gua: All</option>
-                            <option value="MG1">MG1</option>
-                            <option value="MG2">MG2</option>
-                            <option value="MG3">MG3</option>
-                            <option value="MG4">MG4</option>
+                            <option value="MG1">MG1 坎</option>
+                            <option value="MG2">MG2 坤</option>
+                            <option value="MG3">MG3 震</option>
+                            <option value="MG4">MG4 巽</option>
                             <option value="MG5">MG5</option>
-                            <option value="MG6">MG6</option>
-                            <option value="MG7">MG7</option>
-                            <option value="MG8">MG8</option>
-                            <option value="MG9">MG9</option>
+                            <option value="MG6">MG6 乾</option>
+                            <option value="MG7">MG7 兑</option>
+                            <option value="MG8">MG8 艮</option>
+                            <option value="MG9">MG9 离</option>
                         </select>
                         <select id="filter-purchase-status" onchange="app.filterCustomers()">
                             <option value="">Purchase Status: All</option>
@@ -12070,8 +12070,8 @@ function _wireLoginBtn() {
                         <label>Ming Gua</label>
                         <select id="prospect-minggua" class="form-control">
                             <option value="">Auto-calculate from DOB</option>
-                            ${['MG1', 'MG2', 'MG3', 'MG4', 'MG5', 'MG6', 'MG7', 'MG8', 'MG9'].map(mg => `
-                                <option value="${mg}" ${prospect?.ming_gua === mg ? 'selected' : ''}>${mg}</option>
+                            ${[['MG1','MG1 坎'],['MG2','MG2 坤'],['MG3','MG3 震'],['MG4','MG4 巽'],['MG5','MG5'],['MG6','MG6 乾'],['MG7','MG7 兑'],['MG8','MG8 艮'],['MG9','MG9 离']].map(([val,lbl]) => `
+                                <option value="${val}" ${prospect?.ming_gua === val ? 'selected' : ''}>${lbl}</option>
                             `).join('')}
                         </select>
                     </div>
