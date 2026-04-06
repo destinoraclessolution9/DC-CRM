@@ -112,9 +112,11 @@ const appLogic = (() => {
         if (!user) return [];
         const lvlMatch = user.role?.match(/Level\s+(\d+)/i);
         const level = lvlMatch ? parseInt(lvlMatch[1]) : 99;
-        // Levels 1–4 (Super Admin, Marketing Manager, Senior Manager, Manager) see everything
-        if (level <= 4) return 'all';
-        // For team leaders and consultants, traverse down the reporting tree
+        // Levels 1–2 (Super Admin, Marketing Manager) see everything
+        if (level <= 2) return 'all';
+        // Levels 12+ (Ambassador, Customer, Referrer) see only own records
+        if (level >= 12) return [user.id];
+        // Levels 3–11: traverse down the reporting tree (team/subordinates)
         const allUsers = await AppDataStore.getAll('users');
         const result = [];
         const collect = (uid) => {
@@ -180,20 +182,23 @@ const appLogic = (() => {
         return all.filter((_, i) => visibility[i]);
     };
 
-    // Check edit permission: super_admin, marketing_manager, manager can edit anything;
-    // team leader can edit prospects of subordinates; consultant only own.
+    // Check edit permission: Level 1-2 can edit anything;
+    // Level 3-10 can edit their team's records; Level 11-14 own records only.
     const canEditProspect = async (prospect) => {
         const user = _currentUser;
         if (!user) return false;
-        if (user.role === 'super_admin' || user.role === 'marketing_manager' || user.role === 'manager') return true;
-        if (user.role === 'team_leader' || user.role?.includes('Level 7')) {
+        const lvlMatch = user.role?.match(/Level\s+(\d+)/i);
+        const level = lvlMatch ? parseInt(lvlMatch[1]) : 99;
+        // Levels 1-2: full edit access
+        if (level <= 2) return true;
+        // Levels 3-10: can edit team/subordinate records
+        if (level <= 10) {
             const visibleIds = await getVisibleUserIds(user);
+            if (visibleIds === 'all') return true;
             return visibleIds.includes(prospect.responsible_agent_id);
         }
-        if (user.role === 'consultant') {
-            return prospect.responsible_agent_id === user.id;
-        }
-        return false;
+        // Levels 11-14: own records only
+        return prospect.responsible_agent_id === user.id;
     };
 
     // Similar for customers, activities, etc. – you can add as needed.
@@ -5542,16 +5547,16 @@ In a production system, this would show the actual file contents.
         const levelPermissions = {
             1: ['calendar', 'pipeline', 'protection', 'agents', 'prospects', 'referrals', 'cases', 'documents', 'import', 'promotions', 'marketing-automation', 'marketing-lists', 'performance', 'reports', 'risk', 'ai-insights', 'security', 'admin', 'integrations', 'settings', 'fude', 'milestones'],
             2: ['calendar', 'pipeline', 'protection', 'agents', 'prospects', 'referrals', 'cases', 'documents', 'import', 'promotions', 'marketing-automation', 'marketing-lists', 'performance', 'reports', 'risk', 'ai-insights', 'security', 'admin', 'integrations', 'settings', 'fude', 'milestones'],
-            3: ['calendar', 'pipeline', 'protection', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'reports', 'risk', 'settings'],
-            4: ['calendar', 'pipeline', 'protection', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'reports', 'risk', 'settings'],
-            5: ['calendar', 'pipeline', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'settings'],
-            6: ['calendar', 'pipeline', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'settings'],
-            7: ['calendar', 'pipeline', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'settings'],
-            8: ['calendar', 'pipeline', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'settings'],
-            9: ['calendar', 'pipeline', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'settings'],
-            10: ['calendar', 'pipeline', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'settings'],
-            11: ['calendar', 'prospects', 'referrals', 'cases', 'promotions', 'settings'],
-            12: ['calendar', 'prospects', 'referrals', 'cases'],
+            3: ['calendar', 'pipeline', 'protection', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'performance', 'reports', 'settings', 'fude', 'milestones'],
+            4: ['calendar', 'pipeline', 'protection', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'performance', 'reports', 'settings', 'fude', 'milestones'],
+            5: ['calendar', 'pipeline', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'reports', 'fude', 'milestones', 'settings'],
+            6: ['calendar', 'pipeline', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'reports', 'fude', 'milestones', 'settings'],
+            7: ['calendar', 'pipeline', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'reports', 'fude', 'milestones', 'settings'],
+            8: ['calendar', 'pipeline', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'reports', 'fude', 'milestones', 'settings'],
+            9: ['calendar', 'pipeline', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'reports', 'fude', 'milestones', 'settings'],
+            10: ['calendar', 'pipeline', 'prospects', 'referrals', 'cases', 'documents', 'promotions', 'reports', 'fude', 'milestones', 'settings'],
+            11: ['calendar', 'prospects', 'referrals', 'cases', 'promotions', 'fude', 'milestones', 'settings'],
+            12: ['calendar', 'prospects', 'referrals', 'fude', 'milestones'],
             13: ['calendar', 'prospects', 'fude', 'milestones'],   // Customer
             14: ['calendar', 'prospects', 'fude', 'milestones']    // Referrer
         };
