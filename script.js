@@ -9036,7 +9036,15 @@ function _wireLoginBtn() {
 
         const prospects = await AppDataStore.getAll('prospects');
         const customers = await AppDataStore.getAll('customers');
+        const names = await AppDataStore.getAll('names');
         const all = [...prospects, ...customers];
+
+        // Safely extract MM-DD from a date_of_birth string (YYYY-MM-DD)
+        const getMMDD = (dob) => {
+            if (!dob) return '';
+            if (typeof dob === 'string' && dob.length >= 7 && dob[4] === '-') return dob.substring(5, 10);
+            return '';
+        };
 
         const getBdayInfo = async (p) => {
             const agent = await AppDataStore.getById('users', p.responsible_agent_id || p.lead_agent_id);
@@ -9046,19 +9054,47 @@ function _wireLoginBtn() {
                 phone: p.phone || '',
                 type: p.customer_since ? 'customer' : 'prospect',
                 info: `Agent: ${agent?.full_name || 'Michelle Tan'} · ${p.customer_since ? 'Customer' : 'Prospect'}`,
-                dob: p.date_of_birth ? p.date_of_birth.substring(5) : '' // MM-DD
+                dob: getMMDD(p.date_of_birth)
             };
         };
 
-        const todayBdays = await Promise.all(all.filter(p => p.date_of_birth && p.date_of_birth.substring(5) === todayStr).map(getBdayInfo));
-        const upcomingBdays = await Promise.all(all.filter(p => p.date_of_birth && (p.date_of_birth.substring(5) === tomorrowStr || p.date_of_birth.substring(5) === day2Str))
-            .map(async p => {
+        // Build bday info for a family member entry from the names table
+        const getNameBdayInfo = async (n) => {
+            const prospect = all.find(p => String(p.id) === String(n.prospect_id));
+            return {
+                id: n.prospect_id || n.id,
+                name: `${n.full_name} (${n.relation || 'Family'} of ${prospect?.full_name || 'Contact'})`,
+                phone: prospect?.phone || '',
+                type: 'prospect',
+                info: `Family of: ${prospect?.full_name || 'Contact'} · ${n.relation || 'Family Member'}`,
+                dob: getMMDD(n.date_of_birth)
+            };
+        };
+
+        const todayBdays = await Promise.all([
+            ...all.filter(p => getMMDD(p.date_of_birth) === todayStr).map(getBdayInfo),
+            ...names.filter(n => getMMDD(n.date_of_birth) === todayStr).map(getNameBdayInfo)
+        ]);
+
+        const upcomingBdays = await Promise.all([
+            ...all.filter(p => {
+                const md = getMMDD(p.date_of_birth);
+                return md === tomorrowStr || md === day2Str;
+            }).map(async p => {
                 const info = await getBdayInfo(p);
-                const isTomorrow = p.date_of_birth.substring(5) === tomorrowStr;
-                info.info += ` · ${isTomorrow ? 'Tomorrow' : 'In 2 days'}`;
+                info.info += ` · ${getMMDD(p.date_of_birth) === tomorrowStr ? 'Tomorrow' : 'In 2 days'}`;
                 return info;
-            }));
-        
+            }),
+            ...names.filter(n => {
+                const md = getMMDD(n.date_of_birth);
+                return md === tomorrowStr || md === day2Str;
+            }).map(async n => {
+                const info = await getNameBdayInfo(n);
+                info.info += ` · ${getMMDD(n.date_of_birth) === tomorrowStr ? 'Tomorrow' : 'In 2 days'}`;
+                return info;
+            })
+        ]);
+
         console.log("Birthday Data:", todayBdays, upcomingBdays);
 
         const renderBday = (data) => {
