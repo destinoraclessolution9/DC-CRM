@@ -5697,7 +5697,7 @@ function _wireLoginBtn() {
 
     try {
         // Check and seed demo data if needed
-        if (!await AppDataStore.getAll('users').length) {
+        if (!(await AppDataStore.getAll('users')).length) {
             console.log('No users found. Initializing demo data...');
             await initDemoData();
             await initDefaultFolders();
