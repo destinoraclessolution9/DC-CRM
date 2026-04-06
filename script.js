@@ -166,9 +166,13 @@ const appLogic = (() => {
     const canViewActivity = async (activity) => {
         const user = _currentUser;
         if (!user) return false;
-        if (activity.visibility === 'open') return true;
-        const isLead = activity.lead_agent_id === user.id;
-        const isCoAgent = activity.co_agents && activity.co_agents.some(ca => ca.id === user.id);
+        // If explicitly marked private, check ownership; any other value (open, null, undefined) allows role check
+        if (activity.visibility === 'private') {
+            return activity.lead_agent_id === user.id ||
+                (activity.co_agents && activity.co_agents.some(ca => ca.id === user.id));
+        }
+        const isLead = String(activity.lead_agent_id) === String(user.id);
+        const isCoAgent = activity.co_agents && activity.co_agents.some(ca => String(ca.id) === String(user.id));
         if (isLead || isCoAgent) return true;
         // For managers/team leaders: check if lead agent is in visible subordinates
         const visibleIds = await getVisibleUserIds(user);
@@ -11075,8 +11079,7 @@ function _wireLoginBtn() {
             start_time: start,
             end_time: end,
             co_agents: _selectedCoAgents,
-            lead_agent_id: _currentUser ? _currentUser.id : 5,
-            visibility: 'open'
+            lead_agent_id: _currentUser ? _currentUser.id : 5
         };
 
         if (type === 'CPS') {
@@ -11100,30 +11103,43 @@ function _wireLoginBtn() {
                 return;
             }
 
-            // Phase X: Duplicate checking
-            if (!window._cpsDuplicateConfirmed) {
-                const prospects = await getVisibleProspects();
-                const customers = await getVisibleCustomers();
-                const all = [...prospects, ...customers];
-
+            // Duplicate checking: BLOCK on same name+phone or same name+IC
+            {
+                const allPeople = [...(await AppDataStore.getAll('prospects')), ...(await AppDataStore.getAll('customers'))];
                 const normalize = str => str ? str.toLowerCase().replace(/\s+/g, '') : '';
                 const normName = normalize(name);
-                const isDuplicate = all.find(p => p.phone === phone || normalize(p.full_name) === normName);
+                const ic = document.getElementById('cps-ic')?.value?.trim();
 
-                if (isDuplicate) {
-                    const agent = await AppDataStore.getById('users', isDuplicate.responsible_agent_id || isDuplicate.lead_agent_id) || { full_name: 'Unknown Agent' };
-                    // Find last activity
-                    const activities = (await AppDataStore.getAll('activities')).filter(a => a.prospect_id === isDuplicate.id || a.customer_id === isDuplicate.id);
-                    activities.sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
-                    const lastDate = activities.length > 0 ? activities[0].activity_date : 'N/A';
+                const hardDuplicate = allPeople.find(p => {
+                    const sameName = normalize(p.full_name) === normName;
+                    if (!sameName) return false;
+                    if (phone && p.phone && normalize(p.phone) === normalize(phone)) return true;
+                    if (ic && p.ic_number && normalize(p.ic_number) === normalize(ic)) return true;
+                    return false;
+                });
 
-                    const msg = `This person has visited before. The agent is ${agent.full_name}, and last meet up on ${lastDate}. Are you sure this is not the same prospect? Please double-check with the leader again.`;
-
-                    UI.showModal('Potential Duplicate Found', `<p>${msg}</p>`, [
-                        { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-                        { label: 'Continue', type: 'primary', action: `window._cpsDuplicateConfirmed = true; await app.saveActivity(${stayOpen})` }
-                    ]);
+                if (hardDuplicate) {
+                    const agent = await AppDataStore.getById('users', hardDuplicate.responsible_agent_id || hardDuplicate.lead_agent_id) || { full_name: 'Unknown Agent' };
+                    const matchField = (phone && hardDuplicate.phone && normalize(hardDuplicate.phone) === normalize(phone)) ? 'phone number' : 'IC number';
+                    UI.toast.error(`Duplicate blocked: "${hardDuplicate.full_name}" already exists under ${agent.full_name} with the same name and ${matchField}.`);
                     return;
+                }
+
+                // Soft warning: same phone or same name (but not hard match)
+                if (!window._cpsDuplicateConfirmed) {
+                    const softDuplicate = allPeople.find(p => normalize(p.phone) === normalize(phone) || normalize(p.full_name) === normName);
+                    if (softDuplicate) {
+                        const agent = await AppDataStore.getById('users', softDuplicate.responsible_agent_id || softDuplicate.lead_agent_id) || { full_name: 'Unknown Agent' };
+                        const activities2 = (await AppDataStore.getAll('activities')).filter(a => a.prospect_id === softDuplicate.id || a.customer_id === softDuplicate.id);
+                        activities2.sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
+                        const lastDate = activities2.length > 0 ? activities2[0].activity_date : 'N/A';
+                        const msg = `This person may have visited before. The agent is ${agent.full_name}, last meet up on ${lastDate}. Are you sure this is not the same prospect? Check with your leader.`;
+                        UI.showModal('Potential Duplicate Found', `<p>${msg}</p>`, [
+                            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+                            { label: 'Continue Anyway', type: 'primary', action: `window._cpsDuplicateConfirmed = true; (async () => { await app.saveActivity(${stayOpen}); })()` }
+                        ]);
+                        return;
+                    }
                 }
             }
             window._cpsDuplicateConfirmed = false; // reset flag
