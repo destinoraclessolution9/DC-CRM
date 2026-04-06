@@ -14857,22 +14857,40 @@ const renderCurrentAssignments = async (agentId) => {
                     </div>
                 </div>
 
+                <div class="form-section">
+                    <h4>Team & Status</h4>
+                    <div class="form-row">
+                        <div class="form-group half">
+                            <label>Team</label>
+                            <select id="agent-team" class="form-control">
+                                <option value="">— Unassigned —</option>
+                                <option value="Team A" ${isEdit && agent.team === 'Team A' ? 'selected' : ''}>Team A</option>
+                                <option value="Team B" ${isEdit && agent.team === 'Team B' ? 'selected' : ''}>Team B</option>
+                                <option value="Team C" ${isEdit && agent.team === 'Team C' ? 'selected' : ''}>Team C</option>
+                            </select>
+                        </div>
+                        <div class="form-group half">
+                            <label>Status</label>
+                            <select id="agent-status" class="form-control">
+                                <option value="active" ${(isEdit ? agent.status : 'probation') === 'active' ? 'selected' : ''}>Active</option>
+                                <option value="probation" ${(isEdit ? agent.status : 'probation') === 'probation' ? 'selected' : ''}>Probation</option>
+                                <option value="inactive" ${isEdit && agent.status === 'inactive' ? 'selected' : ''}>Inactive</option>
+                                <option value="expired" ${isEdit && agent.status === 'expired' ? 'selected' : ''}>License Expired</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
                 ${!isEdit ? `
                 <div class="form-section">
                     <h4>Login Credentials</h4>
-                    <div class="form-row">
-                        <div class="form-group half">
-                            <label>Username <span class="required">*</span></label>
-                            <input type="text" id="agent-username" class="form-control" placeholder="e.g. wong.wai" oninput="this.value=this.value.toLowerCase().replace(/\\s+/g,'.')">
+                    <div class="form-group">
+                        <label>Initial Password <span class="required">*</span></label>
+                        <div style="display:flex; gap:8px;">
+                            <input type="text" id="agent-initial-password" class="form-control" placeholder="Min 8 characters">
+                            <button type="button" class="btn secondary" style="white-space:nowrap" onclick="(()=>{ const p=app.generatePassword(); document.getElementById('agent-initial-password').value=p; })()">Auto-generate</button>
                         </div>
-                        <div class="form-group half">
-                            <label>Initial Password <span class="required">*</span></label>
-                            <div style="display:flex; gap:8px;">
-                                <input type="text" id="agent-initial-password" class="form-control" placeholder="Min 8 characters">
-                                <button type="button" class="btn secondary" style="white-space:nowrap" onclick="(()=>{ const p=app.generatePassword(); document.getElementById('agent-initial-password').value=p; })()">Auto-generate</button>
-                            </div>
-                            <small style="color:var(--gray-500); margin-top:4px; display:block;">Agent must change password on first login.</small>
-                        </div>
+                        <small style="color:var(--gray-500); margin-top:4px; display:block;">Login uses email address. Agent must change password on first login.</small>
                     </div>
                 </div>
                 ` : `
@@ -14906,9 +14924,11 @@ const renderCurrentAssignments = async (agentId) => {
             email: document.getElementById('agent-email').value,
             ic_number: document.getElementById('agent-ic').value,
             commission_rate: parseInt(document.getElementById('agent-comm').value),
-            license_start: document.getElementById('agent-license-start').value,
-            license_expiry: document.getElementById('agent-license-expiry').value,
+            license_start: document.getElementById('agent-license-start').value || null,
+            license_expiry: document.getElementById('agent-license-expiry').value || null,
             reporting_to: reportingToVal ? parseInt(reportingToVal) : null,
+            team: document.getElementById('agent-team')?.value || null,
+            status: document.getElementById('agent-status')?.value || 'active',
         };
 
         if (editId) {
@@ -14916,8 +14936,8 @@ const renderCurrentAssignments = async (agentId) => {
             UI.hideModal();
             UI.toast.success('Agent updated successfully');
         } else {
-            const usernameVal = document.getElementById('agent-username')?.value?.trim()
-                || name.toLowerCase().replace(/\s+/g, '.');
+            // Username derived from email (part before @)
+            const usernameVal = fields.email?.split('@')[0] || name.toLowerCase().replace(/\s+/g, '.');
             const initialPassword = document.getElementById('agent-initial-password')?.value?.trim();
 
             if (!initialPassword || initialPassword.length < 8) {
@@ -14931,7 +14951,6 @@ const renderCurrentAssignments = async (agentId) => {
                 id: Date.now(),
                 username: usernameVal,
                 password: initialPassword,
-                status: 'probation',
                 join_date: new Date().toISOString().split('T')[0],
                 ...fields
             };
