@@ -11404,6 +11404,12 @@ function _wireLoginBtn() {
                             <p>Track and manage potential customers through the lifecycle.</p>
                         </div>
                         <div class="header-actions">
+                            <button class="btn secondary" onclick="app.exportProspects('csv')">
+                                <i class="fas fa-file-csv"></i> Export CSV
+                            </button>
+                            <button class="btn secondary" onclick="app.exportProspects('xlsx')">
+                                <i class="fas fa-file-excel"></i> Export Excel
+                            </button>
                             <button class="btn secondary" onclick="app.openImportWizard()">
                                 <i class="fas fa-file-import"></i> Bulk Import
                             </button>
@@ -11681,6 +11687,35 @@ function _wireLoginBtn() {
     };
 
     const filterCustomers = async () => await renderCustomersTable();
+
+    const exportProspects = async (format) => {
+        const prospects = await getVisibleProspects();
+        if (!prospects.length) { UI.toast.error('No prospects to export'); return; }
+        const cols = ['Full Name','Phone','Email','IC Number','Date of Birth','Occupation','Company','Income Range','Address','City','State','Postal Code','Ming Gua','Pipeline Stage','Deal Value (RM)','Score','Source','Created At'];
+        const rows = prospects.map(p => [
+            p.full_name || '', p.phone || '', p.email || '', p.ic_number || '',
+            p.date_of_birth || '', p.occupation || '', p.company_name || '',
+            p.income_range || '', p.address || '', p.city || '', p.state || '',
+            p.postal_code || '', p.ming_gua || '', p.pipeline_stage || '',
+            p.deal_value || '', p.score || '', p.source || '',
+            p.created_at ? p.created_at.split('T')[0] : ''
+        ]);
+        const filename = `prospects_export_${new Date().toISOString().split('T')[0]}`;
+        if (format === 'xlsx') {
+            const ws = XLSX.utils.aoa_to_sheet([cols, ...rows]);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Prospects');
+            XLSX.writeFile(wb, `${filename}.xlsx`);
+        } else {
+            const csvRows = [cols, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','));
+            const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a'); a.href = url; a.download = `${filename}.csv`;
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+        UI.toast.success(`Exported ${prospects.length} prospects`);
+    };
 
     const renderProspectsTable = async () => {
         const tbody = document.getElementById('prospects-table-body');
@@ -22871,6 +22906,7 @@ const initImportDemoData = async () => {
         editProspect,
         saveProspect,
         filterProspects,
+        exportProspects,
         sortProspects,
         switchProspectTab,
         toggleAccordion,
