@@ -11390,60 +11390,65 @@ function _wireLoginBtn() {
                     </div>
 
                 <div class="filter-bar">
-                    <div class="search-group">
-                        <i class="fas fa-search"></i>
-                        <input type="text" id="prospect-search" placeholder="Search by name, phone, email, or ID..." onkeyup="app.filterProspects()">
+                    <div style="display:flex;gap:8px;align-items:center;">
+                        <div class="search-group" style="flex:1;">
+                            <i class="fas fa-search"></i>
+                            <input type="text" id="prospect-search" placeholder="Search by name, phone, email, or ID..." onkeyup="app.filterProspects()">
+                        </div>
+                        <button class="btn secondary btn-sm" onclick="(function(btn){var p=document.getElementById('prospect-adv-filters');var open=p.style.display!=='none';p.style.display=open?'none':'block';btn.innerHTML=open?'<i class=\\'fas fa-sliders-h\\'></i> Filters':'<i class=\\'fas fa-sliders-h\\'></i> Filters <i class=\\'fas fa-chevron-up\\'></i>';})(this)" style="white-space:nowrap;"><i class="fas fa-sliders-h"></i> Filters</button>
                     </div>
-                    <div class="filter-group">
-                        <select id="filter-score" onchange="app.filterProspects()">
-                            <option value="">All Scores</option>
-                            <option value="A+">Grade A+ (800-1000)</option>
-                            <option value="A">Grade A (600-799)</option>
-                            <option value="B">Grade B (400-599)</option>
-                            <option value="C">Grade C (200-399)</option>
-                            <option value="D">Grade D (0-199)</option>
-                        </select>
-                        <select id="filter-gua" onchange="app.filterProspects()">
-                            <option value="">All Ming Gua</option>
-                            <option value="MG1">MG1 (Kan)</option>
-                            <option value="MG2">MG2 (Kun)</option>
-                            <option value="MG3">MG3 (Zhen)</option>
-                            <option value="MG4">MG4 (Xun)</option>
-                            <option value="MG5">MG5 (Zhong)</option>
-                            <option value="MG6">MG6 (Qian)</option>
-                            <option value="MG7">MG7 (Dui)</option>
-                            <option value="MG8">MG8 (Gen)</option>
-                            <option value="MG9">MG9 (Li)</option>
-                        </select>
-                        <select id="filter-status" onchange="app.filterProspects()">
-                            <option value="">All Status</option>
-                            <option value="active">Active</option>
-                            <option value="attention">Needs Attention</option>
-                            <option value="reassign">Reassignable</option>
-                            <option value="critical">Critical</option>
-                        </select>
-                        <select id="filter-deficiency" onchange="app.filterProspects()">
-                            <option value="">Star Deficiency: All</option>
-                            <option value="Wealth">Wealth</option>
-                            <option value="Career">Career</option>
-                            <option value="Relationship">Romance/Relationship</option>
-                            <option value="Health">Health</option>
-                        </select>
-                        <select id="filter-house-audit" onchange="app.filterProspects()">
-                            <option value="">House Audit: All</option>
-                            <option value="Pending">Pending</option>
-                            <option value="Scheduled">Scheduled</option>
-                            <option value="Completed">Completed</option>
-                            <option value="None">Not Done</option>
-                        </select>
-                        <select id="filter-solution-proposed" onchange="app.filterProspects()">
-                            <option value="">Solution Proposed: All</option>
-                            <option value="PR3 Ring">PR3 Ring (proposed)</option>
-                            <option value="PR4 Power Ring">PR4 Power Ring (proposed)</option>
-                            <option value="PR5 Ring">PR5 Ring (proposed)</option>
-                        </select>
-                        <input type="number" id="filter-min-events" min="0" placeholder="Min events attended" onchange="app.filterProspects()" style="width:160px; padding:6px 10px; border:1px solid var(--border); border-radius:6px; background:var(--surface); color:var(--text);">
-                        <button class="btn primary" onclick="app.filterProspects()">Apply Filters</button>
+                    <div id="prospect-adv-filters" style="display:none;margin-top:10px;">
+                        <div class="filter-group">
+                            <select id="filter-score" onchange="app.filterProspects()">
+                                <option value="">All Scores</option>
+                                <option value="A+">Grade A+ (800-1000)</option>
+                                <option value="A">Grade A (600-799)</option>
+                                <option value="B">Grade B (400-599)</option>
+                                <option value="C">Grade C (200-399)</option>
+                                <option value="D">Grade D (0-199)</option>
+                            </select>
+                            <select id="filter-gua" onchange="app.filterProspects()">
+                                <option value="">All Ming Gua</option>
+                                <option value="MG1">MG1 (Kan)</option>
+                                <option value="MG2">MG2 (Kun)</option>
+                                <option value="MG3">MG3 (Zhen)</option>
+                                <option value="MG4">MG4 (Xun)</option>
+                                <option value="MG5">MG5 (Zhong)</option>
+                                <option value="MG6">MG6 (Qian)</option>
+                                <option value="MG7">MG7 (Dui)</option>
+                                <option value="MG8">MG8 (Gen)</option>
+                                <option value="MG9">MG9 (Li)</option>
+                            </select>
+                            <select id="filter-status" onchange="app.filterProspects()">
+                                <option value="">All Status</option>
+                                <option value="active">Active</option>
+                                <option value="attention">Needs Attention</option>
+                                <option value="reassign">Reassignable</option>
+                                <option value="critical">Critical</option>
+                            </select>
+                            <select id="filter-deficiency" onchange="app.filterProspects()">
+                                <option value="">Star Deficiency: All</option>
+                                <option value="Wealth">Wealth</option>
+                                <option value="Career">Career</option>
+                                <option value="Relationship">Romance/Relationship</option>
+                                <option value="Health">Health</option>
+                            </select>
+                            <select id="filter-house-audit" onchange="app.filterProspects()">
+                                <option value="">House Audit: All</option>
+                                <option value="Pending">Pending</option>
+                                <option value="Scheduled">Scheduled</option>
+                                <option value="Completed">Completed</option>
+                                <option value="None">Not Done</option>
+                            </select>
+                            <select id="filter-solution-proposed" onchange="app.filterProspects()">
+                                <option value="">Solution Proposed: All</option>
+                                <option value="PR3 Ring">PR3 Ring (proposed)</option>
+                                <option value="PR4 Power Ring">PR4 Power Ring (proposed)</option>
+                                <option value="PR5 Ring">PR5 Ring (proposed)</option>
+                            </select>
+                            <input type="number" id="filter-min-events" min="0" placeholder="Min events attended" onchange="app.filterProspects()" style="width:160px; padding:6px 10px; border:1px solid var(--border); border-radius:6px; background:var(--surface); color:var(--text);">
+                            <button class="btn primary" onclick="app.filterProspects()">Apply Filters</button>
+                        </div>
                     </div>
                 </div>
 
