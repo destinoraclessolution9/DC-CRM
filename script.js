@@ -11395,12 +11395,6 @@ function _wireLoginBtn() {
                             <p>Track and manage potential customers through the lifecycle.</p>
                         </div>
                         <div class="header-actions">
-                            <button class="btn secondary" onclick="app.exportProspects('csv')">
-                                <i class="fas fa-file-csv"></i> Export CSV
-                            </button>
-                            <button class="btn secondary" onclick="app.exportProspects('xlsx')">
-                                <i class="fas fa-file-excel"></i> Export Excel
-                            </button>
                             <button class="btn secondary" onclick="app.openImportWizard()">
                                 <i class="fas fa-file-import"></i> Bulk Import
                             </button>
@@ -11679,23 +11673,11 @@ function _wireLoginBtn() {
 
     const filterCustomers = async () => await renderCustomersTable();
 
-    const exportProspects = async (format) => {
-        const prospects = await getVisibleProspects();
-        if (!prospects.length) { UI.toast.error('No prospects to export'); return; }
-        const cols = ['Full Name','Phone','Email','IC Number','Date of Birth','Occupation','Company','Income Range','Address','City','State','Postal Code','Ming Gua','Pipeline Stage','Deal Value (RM)','Score','Source','Created At'];
-        const rows = prospects.map(p => [
-            p.full_name || '', p.phone || '', p.email || '', p.ic_number || '',
-            p.date_of_birth || '', p.occupation || '', p.company_name || '',
-            p.income_range || '', p.address || '', p.city || '', p.state || '',
-            p.postal_code || '', p.ming_gua || '', p.pipeline_stage || '',
-            p.deal_value || '', p.score || '', p.source || '',
-            p.created_at ? p.created_at.split('T')[0] : ''
-        ]);
-        const filename = `prospects_export_${new Date().toISOString().split('T')[0]}`;
+    const _downloadSheet = (cols, rows, sheetName, filename, format) => {
         if (format === 'xlsx') {
             const ws = XLSX.utils.aoa_to_sheet([cols, ...rows]);
             const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, 'Prospects');
+            XLSX.utils.book_append_sheet(wb, ws, sheetName);
             XLSX.writeFile(wb, `${filename}.xlsx`);
         } else {
             const csvRows = [cols, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','));
@@ -11705,7 +11687,56 @@ function _wireLoginBtn() {
             document.body.appendChild(a); a.click(); document.body.removeChild(a);
             URL.revokeObjectURL(url);
         }
-        UI.toast.success(`Exported ${prospects.length} prospects`);
+    };
+
+    const exportData = async (type, format) => {
+        const today = new Date().toISOString().split('T')[0];
+        const filename = `${type}_export_${today}`;
+
+        if (type === 'prospects') {
+            const data = await getVisibleProspects();
+            if (!data.length) { UI.toast.error('No prospects to export'); return; }
+            const cols = ['Full Name','Phone','Email','IC Number','Date of Birth','Occupation','Company','Income Range','Address','City','State','Postal Code','Ming Gua','Pipeline Stage','Deal Value (RM)','Score','Source','Status','Created At'];
+            const rows = data.map(p => [p.full_name||'', p.phone||'', p.email||'', p.ic_number||'', p.date_of_birth||'', p.occupation||'', p.company_name||'', p.income_range||'', p.address||'', p.city||'', p.state||'', p.postal_code||'', p.ming_gua||'', p.pipeline_stage||'', p.deal_value||'', p.score||'', p.source||'', p.status||'', p.created_at?p.created_at.split('T')[0]:'']);
+            _downloadSheet(cols, rows, 'Prospects', filename, format);
+            UI.toast.success(`Exported ${data.length} prospects`);
+
+        } else if (type === 'prospects_activities') {
+            const prospects = await getVisibleProspects();
+            if (!prospects.length) { UI.toast.error('No prospects to export'); return; }
+            const activities = await getVisibleActivities();
+            const pCols = ['Full Name','Phone','Email','IC Number','Date of Birth','Occupation','Company','Income Range','Address','City','State','Postal Code','Ming Gua','Pipeline Stage','Deal Value (RM)','Score','Source','Status','Created At'];
+            const pRows = prospects.map(p => [p.full_name||'', p.phone||'', p.email||'', p.ic_number||'', p.date_of_birth||'', p.occupation||'', p.company_name||'', p.income_range||'', p.address||'', p.city||'', p.state||'', p.postal_code||'', p.ming_gua||'', p.pipeline_stage||'', p.deal_value||'', p.score||'', p.source||'', p.status||'', p.created_at?p.created_at.split('T')[0]:'']);
+            const prospectMap = Object.fromEntries(prospects.map(p => [p.id, p.full_name]));
+            const aCols = ['Prospect Name','Date','Type','Title','Start Time','End Time','Status','Notes','Lead Agent ID'];
+            const aRows = activities.map(a => [prospectMap[a.prospect_id]||'', a.activity_date||'', a.activity_type||'', a.activity_title||'', a.start_time||'', a.end_time||'', a.status||'', a.notes||'', a.lead_agent_id||'']);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([pCols, ...pRows]), 'Prospects');
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([aCols, ...aRows]), 'Activities');
+            XLSX.writeFile(wb, `${filename}.xlsx`);
+            UI.toast.success(`Exported ${prospects.length} prospects and ${activities.length} activities`);
+
+        } else if (type === 'customers') {
+            const data = await getVisibleCustomers();
+            if (!data.length) { UI.toast.error('No customers to export'); return; }
+            const cols = ['Full Name','Phone','Email','IC Number','Date of Birth','Address','City','State','Lifetime Value (RM)','Status','Customer Since','Created At'];
+            const rows = data.map(c => [c.full_name||'', c.phone||'', c.email||'', c.ic_number||'', c.date_of_birth||'', c.address||'', c.city||'', c.state||'', c.lifetime_value||'', c.status||'', c.customer_since||'', c.created_at?c.created_at.split('T')[0]:'']);
+            _downloadSheet(cols, rows, 'Customers', filename, format);
+            UI.toast.success(`Exported ${data.length} customers`);
+
+        } else if (type === 'agents') {
+            const allUsers = await AppDataStore.getAll('users');
+            const data = allUsers.filter(u => u.full_name);
+            if (!data.length) { UI.toast.error('No agents to export'); return; }
+            const cols = ['Full Name','Role','Agent Code','Phone','Email','IC Number','Team','Commission Rate (%)','License Start','License Expiry','Status','Join Date'];
+            const rows = data.map(a => [a.full_name||'', a.role||'', a.agent_code||'', a.phone||'', a.email||'', a.ic_number||'', a.team||'', a.commission_rate||'', a.license_start||'', a.license_expiry||'', a.status||'', a.join_date||'']);
+            _downloadSheet(cols, rows, 'Agents', filename, format);
+            UI.toast.success(`Exported ${data.length} consultants/agents`);
+
+        } else if (['products','events','promotions'].includes(type)) {
+            _currentMarketingListTab = type;
+            await exportMarketingList(format);
+        }
     };
 
     const renderProspectsTable = async () => {
@@ -17760,9 +17791,6 @@ const exportKPIReport = async (format) => {
                         <p class="text-muted">Manage master data for products, events, and monthly promotions.</p>
                     </div>
                     <div class="header-actions">
-                        <button class="btn secondary" onclick="app.exportMarketingList('csv')"><i class="fas fa-file-csv"></i> Export CSV</button>
-                        <button class="btn secondary" onclick="app.exportMarketingList('xlsx')"><i class="fas fa-file-excel"></i> Export Excel</button>
-                        <button class="btn secondary" onclick="app.openImportWizardForType('${_currentMarketingListTab}')"><i class="fas fa-file-import"></i> Import</button>
                         <button class="btn primary" onclick="app.openMarketingListAddModal()">
                             <i class="fas fa-plus"></i> New ${_currentMarketingListTab.charAt(0).toUpperCase() + _currentMarketingListTab.slice(1, -1)}
                         </button>
@@ -20204,8 +20232,8 @@ const simulateCampaignSending = async (campaignId) => {
             <div class="import-view">
                 <div class="import-header">
                     <div>
-                        <h1>Excel Import & Data Management</h1>
-                        <p>Upload legacy data, map fields, validate, and import records</p>
+                        <h1>Import / Export & Data Management</h1>
+                        <p>Import data from files or export your CRM data for backup and analysis</p>
                     </div>
                     <div class="import-header-actions">
                         <button class="btn primary" onclick="app.openImportWizard()"><i class="fas fa-upload"></i> IMPORT NEW DATA</button>
@@ -20213,12 +20241,60 @@ const simulateCampaignSending = async (campaignId) => {
                         <button class="btn secondary" onclick="app.showImportHistory()"><i class="fas fa-history"></i> VIEW IMPORT HISTORY</button>
                     </div>
                 </div>
-                <div class="recent-imports">
+
+                <div class="recent-imports" style="margin-bottom:32px;">
                     <h3>Recent Imports</h3>
                     <div class="imports-table-container">
                         <table class="imports-table">
                             <thead><tr><th>File Name</th><th>Type</th><th>Records</th><th>Success %</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead>
                             <tbody id="imports-table-body">${await renderRecentImports()}</tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="recent-imports">
+                    <h3>Data Export</h3>
+                    <p style="color:var(--gray-500);margin-bottom:16px;font-size:14px;">Download your CRM data as CSV or Excel. Access is restricted to authorized roles only.</p>
+                    <div class="imports-table-container">
+                        <table class="imports-table">
+                            <thead><tr><th>Data Type</th><th>Description</th><th style="width:180px">Export</th></tr></thead>
+                            <tbody>
+                                <tr>
+                                    <td><strong><i class="fas fa-users" style="color:var(--primary-600);margin-right:8px;"></i>Prospects</strong></td>
+                                    <td>All prospect records with full profile details</td>
+                                    <td><button class="btn secondary btn-sm" onclick="app.exportData('prospects','csv')"><i class="fas fa-file-csv"></i> CSV</button> <button class="btn secondary btn-sm" onclick="app.exportData('prospects','xlsx')"><i class="fas fa-file-excel"></i> Excel</button></td>
+                                </tr>
+                                <tr>
+                                    <td><strong><i class="fas fa-calendar-check" style="color:var(--primary-600);margin-right:8px;"></i>Prospects + Activities</strong></td>
+                                    <td>Full prospect profiles with complete activity history (multi-sheet Excel)</td>
+                                    <td><button class="btn secondary btn-sm" onclick="app.exportData('prospects_activities','xlsx')"><i class="fas fa-file-excel"></i> Excel</button></td>
+                                </tr>
+                                <tr>
+                                    <td><strong><i class="fas fa-user-check" style="color:var(--success);margin-right:8px;"></i>Customers</strong></td>
+                                    <td>All customer records including pipeline & lifetime value</td>
+                                    <td><button class="btn secondary btn-sm" onclick="app.exportData('customers','csv')"><i class="fas fa-file-csv"></i> CSV</button> <button class="btn secondary btn-sm" onclick="app.exportData('customers','xlsx')"><i class="fas fa-file-excel"></i> Excel</button></td>
+                                </tr>
+                                <tr>
+                                    <td><strong><i class="fas fa-user-tie" style="color:var(--warning);margin-right:8px;"></i>Consultants / Agents</strong></td>
+                                    <td>All consultant and agent profiles with roles and license info</td>
+                                    <td><button class="btn secondary btn-sm" onclick="app.exportData('agents','csv')"><i class="fas fa-file-csv"></i> CSV</button> <button class="btn secondary btn-sm" onclick="app.exportData('agents','xlsx')"><i class="fas fa-file-excel"></i> Excel</button></td>
+                                </tr>
+                                <tr>
+                                    <td><strong><i class="fas fa-box" style="color:var(--gray-600);margin-right:8px;"></i>Products</strong></td>
+                                    <td>Products marketing list</td>
+                                    <td><button class="btn secondary btn-sm" onclick="app.exportData('products','csv')"><i class="fas fa-file-csv"></i> CSV</button> <button class="btn secondary btn-sm" onclick="app.exportData('products','xlsx')"><i class="fas fa-file-excel"></i> Excel</button></td>
+                                </tr>
+                                <tr>
+                                    <td><strong><i class="fas fa-calendar-alt" style="color:var(--gray-600);margin-right:8px;"></i>Events</strong></td>
+                                    <td>Events marketing list</td>
+                                    <td><button class="btn secondary btn-sm" onclick="app.exportData('events','csv')"><i class="fas fa-file-csv"></i> CSV</button> <button class="btn secondary btn-sm" onclick="app.exportData('events','xlsx')"><i class="fas fa-file-excel"></i> Excel</button></td>
+                                </tr>
+                                <tr>
+                                    <td><strong><i class="fas fa-tags" style="color:var(--gray-600);margin-right:8px;"></i>Promotions</strong></td>
+                                    <td>Promotion packages marketing list</td>
+                                    <td><button class="btn secondary btn-sm" onclick="app.exportData('promotions','csv')"><i class="fas fa-file-csv"></i> CSV</button> <button class="btn secondary btn-sm" onclick="app.exportData('promotions','xlsx')"><i class="fas fa-file-excel"></i> Excel</button></td>
+                                </tr>
+                            </tbody>
                         </table>
                     </div>
                 </div>
@@ -22922,7 +22998,7 @@ const initImportDemoData = async () => {
         editProspect,
         saveProspect,
         filterProspects,
-        exportProspects,
+        exportData,
         sortProspects,
         switchProspectTab,
         toggleAccordion,
