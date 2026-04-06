@@ -14819,6 +14819,10 @@ const renderCurrentAssignments = async (agentId) => {
         try {
             // Fetch agent BEFORE deleting so we have the email for auth deletion
             const agent = await AppDataStore.getById('users', agentId);
+            // Clear reporting_to references pointing to this agent to avoid FK violation
+            await window.supabase.from('users').update({ reporting_to: null }).eq('reporting_to', agentId);
+            // Also clear any prospects assigned to this agent
+            await window.supabase.from('prospects').update({ responsible_agent_id: null }).eq('responsible_agent_id', agentId);
             await AppDataStore.delete('users', agentId);
             // Also remove from Supabase Auth via admin API
             try {
