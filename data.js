@@ -174,8 +174,9 @@ class DataStore {
             this.emit('dataChanged', { action: 'add', table: tableName, record: data });
             return data;
         } catch (e) {
-            if (e.code === 'PGRST204') {
-                console.warn(`Schema mismatch on insert to ${tableName}: ${e.message} — saving locally`);
+            const isNetworkError = e instanceof TypeError && e.message === 'Failed to fetch';
+            if (e.code === 'PGRST204' || isNetworkError) {
+                console.warn(`${isNetworkError ? 'Network error' : 'Schema mismatch'} on insert to ${tableName}: ${e.message} — saving locally`);
                 const key = `fs_crm_${tableName}`;
                 try {
                     const all = JSON.parse(localStorage.getItem(key) || '[]');
@@ -208,8 +209,9 @@ class DataStore {
             this.emit('dataChanged', { action: 'update', table: tableName, record: data });
             return data;
         } catch (e) {
-            if (e.code === 'PGRST204') {
-                console.warn(`Schema mismatch on update to ${tableName}: ${e.message} — saving locally`);
+            const isNetworkError = e instanceof TypeError && e.message === 'Failed to fetch';
+            if (e.code === 'PGRST204' || isNetworkError) {
+                console.warn(`${isNetworkError ? 'Network error' : 'Schema mismatch'} on update to ${tableName}: ${e.message} — saving locally`);
                 const key = `fs_crm_${tableName}`;
                 try {
                     const all = JSON.parse(localStorage.getItem(key) || '[]');
