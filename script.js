@@ -17922,6 +17922,7 @@ const exportKPIReport = async (format) => {
         if (type === 'products') {
             content = `
                 <div class="form-group"><label>Name*</label><input type="text" id="mkt-name" class="form-control"></div>
+                <div class="form-group"><label>Category</label><input type="text" id="mkt-category" class="form-control" placeholder="e.g. Power Ring, 画作, 风水方案"></div>
                 <div class="form-group"><label>Price (RM)</label><input type="number" id="mkt-price" class="form-control" value="0"></div>
                 <div class="form-group"><label>Remarks</label><input type="text" id="mkt-remarks" class="form-control"></div>
                 <div class="form-group"><label>Delivery Lead Time</label><input type="text" id="mkt-lead" class="form-control" placeholder="e.g. 3-5 days"></div>
@@ -17964,6 +17965,7 @@ const exportKPIReport = async (format) => {
         if (type === 'products') {
             content = `
                 <div class="form-group"><label>Name*</label><input type="text" id="mkt-name" class="form-control" value="${item.name}"></div>
+                <div class="form-group"><label>Category</label><input type="text" id="mkt-category" class="form-control" value="${item.category || ''}" placeholder="e.g. Power Ring, 画作, 风水方案"></div>
                 <div class="form-group"><label>Price (RM)</label><input type="number" id="mkt-price" class="form-control" value="${item.price || 0}"></div>
                 <div class="form-group"><label>Remarks</label><input type="text" id="mkt-remarks" class="form-control" value="${item.remarks || ''}"></div>
                 <div class="form-group"><label>Delivery Lead Time</label><input type="text" id="mkt-lead" class="form-control" value="${item.delivery_lead_time || ''}"></div>
@@ -18005,6 +18007,7 @@ const exportKPIReport = async (format) => {
 
         if (type === 'products') {
             data.name = document.getElementById('mkt-name').value.trim();
+            data.category = document.getElementById('mkt-category').value.trim();
             data.price = parseFloat(document.getElementById('mkt-price').value) || 0;
             data.remarks = document.getElementById('mkt-remarks').value;
             data.delivery_lead_time = document.getElementById('mkt-lead').value;
