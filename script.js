@@ -9898,20 +9898,6 @@ function _wireLoginBtn() {
                 </div>
             </div>
             <div class="form-group">
-                <label>Outcome:</label>
-                <div style="display:flex; gap:8px;">
-                    <textarea id="pmn-outcome" class="form-control" rows="2" placeholder="What was the result?">${activity.note_outcome || ''}</textarea>
-                    <button class="btn-icon" onclick="app.openVoiceRecorder('pmn-outcome', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
-                </div>
-            </div>
-            <div class="form-group">
-                <label>Next Steps:</label>
-                <div style="display:flex; gap:8px;">
-                    <textarea id="pmn-next-steps" class="form-control" rows="2" placeholder="Action items...">${activity.note_next_steps || ''}</textarea>
-                    <button class="btn-icon" onclick="app.openVoiceRecorder('pmn-next-steps', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
-                </div>
-            </div>
-            <div class="form-group">
                 <label>Customer Needs/Interests:</label>
                 <div style="display:flex; gap:8px;">
                     <textarea id="pmn-needs" class="form-control" rows="2" placeholder="What are they looking for?">${activity.note_needs || ''}</textarea>
@@ -9925,6 +9911,22 @@ function _wireLoginBtn() {
                     <button class="btn-icon" onclick="app.openVoiceRecorder('pmn-pain-points', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
                 </div>
             </div>
+            <div class="form-group">
+                <label>Potential &amp; Opportunities:</label>
+                <div style="display:flex; gap:8px;">
+                    <textarea id="pmn-opportunity" class="form-control" rows="2" placeholder="Solution proposed or opportunity identified...">${activity.opportunity_potential || ''}</textarea>
+                    <button class="btn-icon" onclick="app.openVoiceRecorder('pmn-opportunity', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+                </div>
+                <div style="font-size:11px;color:var(--gray-400);margin-top:3px;"><i class="fas fa-link"></i> Linked to prospect profile → Potential &amp; Opportunities</div>
+            </div>
+            <div class="form-group">
+                <label>Next Actions:</label>
+                <div style="display:flex; gap:8px;">
+                    <textarea id="pmn-next-action" class="form-control" rows="2" placeholder="What is the next action to take?">${activity.next_action || ''}</textarea>
+                    <button class="btn-icon" onclick="app.openVoiceRecorder('pmn-next-action', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+                </div>
+                <div style="font-size:11px;color:var(--gray-400);margin-top:3px;"><i class="fas fa-link"></i> Linked to prospect profile → Next Actions</div>
+            </div>
         `;
         UI.showModal('📝 Post-Meetup Notes', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
@@ -9936,10 +9938,10 @@ function _wireLoginBtn() {
         const updates = {
             note_key_points: document.getElementById('pmn-key-points')?.value || '',
             summary: document.getElementById('pmn-key-points')?.value || '',
-            note_outcome: document.getElementById('pmn-outcome')?.value || '',
-            note_next_steps: document.getElementById('pmn-next-steps')?.value || '',
             note_needs: document.getElementById('pmn-needs')?.value || '',
             note_pain_points: document.getElementById('pmn-pain-points')?.value || '',
+            opportunity_potential: document.getElementById('pmn-opportunity')?.value || '',
+            next_action: document.getElementById('pmn-next-action')?.value || '',
         };
         await AppDataStore.update('activities', activityId, updates);
         UI.hideModal();
