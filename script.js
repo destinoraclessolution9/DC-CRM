@@ -1676,7 +1676,19 @@ const appLogic = (() => {
 
     const toggleStar = async (id) => { const f = await AppDataStore.getById('documents', id); await AppDataStore.update('documents', id, { is_starred: !f.is_starred }); await loadFolderContents(); };
 
-    const downloadFile = (id) => { UI.toast.info('Starting download...'); /* Implementation depends on environment */ };
+    const downloadFile = async (id) => {
+        const file = await AppDataStore.getById('documents', id);
+        if (!file) { UI.toast.error('File not found'); return; }
+        const src = file.data;
+        if (!src || src === '#') { UI.toast.error('File content not available — please re-upload the file'); return; }
+        const a = document.createElement('a');
+        a.href = src;
+        a.download = file.filename || 'download';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        UI.toast.success(`Downloading ${file.filename}`);
+    };
 
     const handleFileDragStart = (e, id) => { _draggedFileId = id; e.dataTransfer.setData('text/plain', id); e.target.classList.add('dragging'); };
     const handleFileDragEnd = (e) => { e.target.classList.remove('dragging'); _draggedFileId = null; };
@@ -2208,42 +2220,42 @@ const appLogic = (() => {
         let uploaded = 0;
         const total = files.length;
 
-        // Simulate async upload (in production, actually upload)
         for (const [index, file] of files.entries()) {
-            await new Promise(resolve => setTimeout(async () => {
-                // Create document record
-                const newDoc = {
-                    id: Date.now() + index,
-                    filename: file.name,
-                    folder_id: _currentFolder,
-                    size: file.size,
-                    mime_type: file.type,
-                    data: '#', // Would be actual file data
-                    current_version: 1,
-                    created_by: _currentUser?.id,
-                    created_at: new Date().toISOString(),
-                    updated_at: new Date().toISOString(),
-                    description: '',
-                    is_starred: false
-                };
+            const dataUrl = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = e => resolve(e.target.result);
+                reader.onerror = () => reject(new Error('Read failed'));
+                reader.readAsDataURL(file);
+            });
 
-                await AppDataStore.create('documents', newDoc);
+            const newDoc = {
+                id: Date.now() + index,
+                filename: file.name,
+                folder_id: _currentFolder,
+                size: file.size,
+                mime_type: file.type,
+                data: dataUrl,
+                current_version: 1,
+                created_by: _currentUser?.id,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+                description: '',
+                is_starred: false
+            };
 
-                uploaded++;
-                const percent = (uploaded / total) * 100;
-                document.getElementById('upload-progress-fill').style.width = percent + '%';
-                document.getElementById('upload-status').textContent = `Uploaded ${uploaded} of ${total} files`;
+            await AppDataStore.create('documents', newDoc);
 
-                if (uploaded === total) {
-                    setTimeout(async () => {
-                        UI.hideModal();
-                        UI.toast.success(`${total} files uploaded successfully`);
-                        await loadFolderContents();
-                    }, 500);
-                }
-                resolve();
-            }, index * 300)); // Stagger for demo effect
+            uploaded++;
+            const percent = (uploaded / total) * 100;
+            document.getElementById('upload-progress-fill').style.width = percent + '%';
+            document.getElementById('upload-status').textContent = `Uploaded ${uploaded} of ${total} files`;
         }
+
+        setTimeout(async () => {
+            UI.hideModal();
+            UI.toast.success(`${total} files uploaded successfully`);
+            await loadFolderContents();
+        }, 300);
     };
 
     const previewFile = async (fileId) => {
