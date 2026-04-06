@@ -5693,7 +5693,28 @@ function _wireLoginBtn() {
             }
         } catch (err) {
             console.error('Login error:', err);
-            alert('Login failed: ' + err.message);
+            const msg = err.message || '';
+            if (msg.toLowerCase().includes('email not confirmed')) {
+                const loginEmail = document.getElementById('loginEmail')?.value?.trim();
+                const resendMsg = document.createElement('div');
+                resendMsg.id = 'login-error-msg';
+                resendMsg.style.cssText = 'color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:12px 14px;margin-top:12px;font-size:13px;text-align:left;';
+                resendMsg.innerHTML = `<strong>Email not confirmed.</strong> The agent must click the confirmation link sent to <em>${loginEmail}</em> before logging in.<br><br>
+                    <button onclick="(async()=>{
+                        try {
+                            await window.supabase.auth.resend({type:'signup',email:'${loginEmail}'});
+                            this.textContent='Sent!'; this.disabled=true;
+                        } catch(e) { alert('Could not resend: '+e.message); }
+                    })()" style="margin-top:4px;padding:6px 12px;background:#991b1b;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;">
+                        Resend confirmation email
+                    </button>
+                    <span style="display:block;margin-top:10px;color:#6b7280;font-size:11px;">Or ask your admin to disable <em>Confirm email</em> in Supabase → Authentication → Providers → Email.</span>`;
+                const existing = document.getElementById('login-error-msg');
+                if (existing) existing.remove();
+                document.getElementById('loginBtn')?.insertAdjacentElement('afterend', resendMsg);
+            } else {
+                alert('Login failed: ' + msg);
+            }
         } finally {
             btn.disabled = false;
             btn.textContent = 'Login';
@@ -14526,6 +14547,11 @@ const renderCurrentAssignments = async (agentId) => {
                         <div><span style="color:var(--gray-500)">Temp Password:</span> <strong id="show-temp-pwd">${escapeHtml(initialPassword)}</strong></div>
                     </div>
                     <p style="margin-top:12px; color:var(--gray-500); font-size:13px;">Agent must change their password on first login.</p>
+                    <div style="margin-top:12px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 12px;font-size:12px;color:#92400e;text-align:left;">
+                        <strong>⚠ Email confirmation required</strong><br>
+                        A confirmation email was sent to <strong>${escapeHtml(fields.email)}</strong>. The agent must click the link before they can log in.<br>
+                        <span style="color:#6b7280;">To skip this step: Supabase Dashboard → Authentication → Providers → Email → uncheck <em>Confirm email</em>.</span>
+                    </div>
                 </div>`, [
                 { label: 'Close', type: 'primary', action: 'UI.hideModal()' }
             ]);
