@@ -9408,8 +9408,13 @@ function _wireLoginBtn() {
     };
 
     const viewActivityDetails = async (activityId) => {
-        const activity = await AppDataStore.getById('activities', activityId);
-        if (!activity) return;
+        let activity = await AppDataStore.getById('activities', activityId);
+        if (!activity) {
+            // Fallback for locally-stored activities (timestamp IDs not yet synced to Supabase)
+            const all = await AppDataStore.getAll('activities');
+            activity = all.find(a => a.id == activityId);
+        }
+        if (!activity) { UI.toast.error('Activity not found'); return; }
 
         const prospect = activity.prospect_id ? await AppDataStore.getById('prospects', activity.prospect_id) : null;
         const customer = activity.customer_id ? await AppDataStore.getById('customers', activity.customer_id) : null;
