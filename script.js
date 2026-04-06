@@ -11752,6 +11752,7 @@ function _wireLoginBtn() {
                         <thead>
                             <tr>
                                 <th onclick="app.sortProspects('name')" style="cursor: pointer;">Name ${_sortField === 'name' ? (_sortDirection === 'asc' ? '↑' : '↓') : ''}</th>
+                                <th>Agent</th>
                                 <th onclick="app.sortProspects('score')" style="cursor: pointer;">Score ${_sortField === 'score' ? (_sortDirection === 'asc' ? '↑' : '↓') : ''}</th>
                                 <th>Ming Gua</th>
                                 <th>Occupation/Company</th>
@@ -12025,6 +12026,7 @@ function _wireLoginBtn() {
 
         let prospects = await getVisibleProspects();
         const activities = await getVisibleActivities();
+        const allUsers = await AppDataStore.getAll('users');
         const searchQuery = document.getElementById('prospect-search')?.value.toLowerCase() || '';
         const scoreFilter = document.getElementById('filter-score')?.value || '';
         const guaFilter = document.getElementById('filter-gua')?.value || '';
@@ -12138,9 +12140,13 @@ function _wireLoginBtn() {
                 if (attendedCount < minEventsFilter) continue;
             }
 
+            const agent = allUsers.find(u => u.id === p.responsible_agent_id);
+            const agentName = agent ? agent.full_name : '—';
+
             html += `
                 <tr onclick="app.showProspectDetail(${p.id})">
                     <td><strong>${p.full_name || '(No Name)'}</strong></td>
+                    <td>${agentName}</td>
                     <td>
                         <span class="score-badge score-${grade.replace('+', '-plus')}">${p.score || 0} (${grade})</span>
                     </td>
@@ -12164,7 +12170,7 @@ function _wireLoginBtn() {
         }
 
         if (visibleCount === 0) {
-            html = '<tr><td colspan="7" style="text-align:center; padding:40px;">No prospects found. Click "Add Prospect" to create one.</td></tr>';
+            html = '<tr><td colspan="8" style="text-align:center; padding:40px;">No prospects found. Click "Add Prospect" to create one.</td></tr>';
         }
 
         tbody.innerHTML = html;
