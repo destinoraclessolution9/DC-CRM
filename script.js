@@ -18053,21 +18053,43 @@ const exportKPIReport = async (format) => {
     };
 
 
-    // ========== MONTHLY PROMOTION (simplified) ==========
+    // ========== MONTHLY PROMOTION VIEW (read-only) ==========
 
     const showMonthlyPromotionView = async (container) => {
-        const packagesContent = await renderPackagesTab();
+        const promotions = (await AppDataStore.getAll('promotions')).filter(p => p.is_active !== false);
         container.innerHTML = `
-            <div class="marketing-view">
-                <div class="marketing-header">
+            <div style="padding:20px;max-width:900px;margin:0 auto;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
                     <div>
-                        <h1>Monthly Promotion</h1>
-                        <p>Promotion packages and bundled offers</p>
+                        <h2 style="font-size:22px;font-weight:700;margin:0;">Monthly Promotion</h2>
+                        <p style="color:var(--gray-500);font-size:13px;margin:4px 0 0;">Current active promotions</p>
                     </div>
                 </div>
-                <div id="monthly-promotion-content">
-                    ${packagesContent}
-                </div>
+                ${promotions.length === 0 ? `
+                    <div style="text-align:center;padding:60px 20px;color:var(--gray-400);">
+                        <i class="fas fa-tags" style="font-size:40px;margin-bottom:12px;display:block;"></i>
+                        <p>No active promotions at the moment.</p>
+                    </div>
+                ` : `
+                    <div style="display:grid;gap:16px;">
+                        ${promotions.map(p => `
+                            <div style="background:#fff;border:1px solid var(--gray-200);border-radius:10px;padding:16px 20px;box-shadow:var(--shadow-sm);">
+                                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
+                                    <div style="flex:1;min-width:0;">
+                                        <div style="font-size:16px;font-weight:600;color:var(--gray-900);margin-bottom:4px;">${p.package_name || p.name || 'Promotion'}</div>
+                                        ${p.details ? `<div style="font-size:13px;color:var(--gray-600);margin-bottom:6px;">${p.details}</div>` : ''}
+                                        ${p.requirement ? `<div style="font-size:12px;color:var(--gray-500);"><i class="fas fa-check-circle" style="color:var(--primary);margin-right:4px;"></i>${p.requirement}</div>` : ''}
+                                        ${p.remarks ? `<div style="font-size:12px;color:var(--gray-500);margin-top:4px;"><i class="fas fa-info-circle" style="margin-right:4px;"></i>${p.remarks}</div>` : ''}
+                                    </div>
+                                    <div style="text-align:right;flex-shrink:0;">
+                                        ${p.price ? `<div style="font-size:18px;font-weight:700;color:var(--primary);">RM ${parseFloat(p.price).toFixed(2)}</div>` : ''}
+                                        ${p.delivery_lead_time ? `<div style="font-size:12px;color:var(--gray-500);margin-top:4px;"><i class="fas fa-clock" style="margin-right:4px;"></i>${p.delivery_lead_time}</div>` : ''}
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                `}
             </div>
         `;
     };
@@ -23363,7 +23385,7 @@ const initImportDemoData = async () => {
                 if (typeof showCasesView === 'function') await showCasesView(viewport);
                 break;
             case 'promotions':
-                if (typeof showMonthlyPromotionView === 'function') await showMonthlyPromotionView(viewport);
+                await showMonthlyPromotionView(viewport);
                 break;
             case 'marketing_automation':
                 if (typeof showMarketingAutomationView === 'function') await showMarketingAutomationView(viewport);
