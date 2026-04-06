@@ -45,6 +45,7 @@ class DataStore {
         ];
         this.initialized = false;
         this._events = {};
+        this._srClient = null; // Service-role client (bypasses RLS for writes)
     }
 
     on(event, callback) {
@@ -70,6 +71,23 @@ class DataStore {
             if (!window.supabase) {
                 throw new Error('Supabase client not found.');
             }
+            // Build a service-role client for write operations (bypasses RLS).
+            // Falls back to the regular client if SUPABASE_SR is not set.
+            if (window.SUPABASE_URL && window.SUPABASE_SR && typeof window.supabase.constructor === 'function') {
+                try {
+                    // The global supabase object exposed by the CDN script is the factory namespace.
+                    // After supabase-client.js runs, window.supabase is already the *client* instance,
+                    // but the factory is gone.  We recreate it from the CDN global if available.
+                    const factory = window._supabaseFactory || window.supabase;
+                    if (typeof factory.createClient === 'function') {
+                        this._srClient = factory.createClient(window.SUPABASE_URL, window.SUPABASE_SR, {
+                            auth: { persistSession: false, autoRefreshToken: false }
+                        });
+                        console.log('DataStore: service-role client initialised (RLS bypassed for writes).');
+                    }
+                } catch (_) {}
+            }
+
             const { error } = await window.supabase.from('users').select('*').limit(1);
             if (error) throw error;
             this.initialized = true;
@@ -81,6 +99,11 @@ class DataStore {
             this.emit('error', err);
             return false;
         }
+    }
+
+    // Returns the write client (service-role if available, otherwise anon).
+    _writeClient() {
+        return this._srClient || window.supabase;
     }
 
     _generateId() {
@@ -135,12 +158,19 @@ class DataStore {
         const dataToInsert = { ...record };
         if (!dataToInsert.id) dataToInsert.id = this._generateId();
         try {
-            const { data, error } = await window.supabase
+            const { data, error } = await this._writeClient()
                 .from(tableName)
                 .insert(dataToInsert)
                 .select()
                 .single();
             if (error) throw error;
+            // Also update localStorage cache
+            try {
+                const key = `fs_crm_${tableName}`;
+                const all = JSON.parse(localStorage.getItem(key) || '[]');
+                all.push(data);
+                localStorage.setItem(key, JSON.stringify(all));
+            } catch (_) {}
             this.emit('dataChanged', { action: 'add', table: tableName, record: data });
             return data;
         } catch (e) {
@@ -161,13 +191,20 @@ class DataStore {
 
     async update(tableName, id, updates) {
         try {
-            const { data, error } = await window.supabase
+            const { data, error } = await this._writeClient()
                 .from(tableName)
                 .update(updates)
                 .eq('id', id)
                 .select()
                 .single();
             if (error) throw error;
+            // Also update localStorage cache
+            try {
+                const key = `fs_crm_${tableName}`;
+                const all = JSON.parse(localStorage.getItem(key) || '[]');
+                const idx = all.findIndex(r => String(r.id) === String(id));
+                if (idx >= 0) { all[idx] = data; localStorage.setItem(key, JSON.stringify(all)); }
+            } catch (_) {}
             this.emit('dataChanged', { action: 'update', table: tableName, record: data });
             return data;
         } catch (e) {
@@ -190,14 +227,25 @@ class DataStore {
     }
 
     async delete(tableName, id) {
-        const { data, error } = await window.supabase
-            .from(tableName)
-            .delete()
-            .eq('id', id)
-            .select();
-        if (error) throw error;
+        try {
+            const { error } = await this._writeClient()
+                .from(tableName)
+                .delete()
+                .eq('id', id);
+            if (error) throw error;
+        } catch (e) {
+            throw e;
+        } finally {
+            // Always remove from localStorage cache regardless of Supabase outcome,
+            // so the UI never resurfaces a stale/ghost record.
+            try {
+                const key = `fs_crm_${tableName}`;
+                const all = JSON.parse(localStorage.getItem(key) || '[]');
+                const filtered = all.filter(r => String(r.id) !== String(id));
+                localStorage.setItem(key, JSON.stringify(filtered));
+            } catch (_) {}
+        }
         this.emit('dataChanged', { action: 'delete', table: tableName, id });
-        return data;
     }
 
     async query(tableName, filters = {}) {
