@@ -14183,6 +14183,7 @@ const openAddSolutionModal = async (prospectId) => {
                         <button class="btn-icon edit-agent-btn" onclick="event.stopPropagation(); app.openEditAgentModal('${agent.id}')" title="Edit Agent"><i class="fas fa-edit"></i></button>
                         ${canAssignUpline ? `<button class="btn-icon" onclick="event.stopPropagation(); app.openAssignUplineModal('${agent.id}')" title="Assign Upline"><i class="fas fa-sitemap"></i></button>` : ''}
                         ${canAssignUpline ? `<button class="btn-icon" onclick="event.stopPropagation(); app.openResetPasswordModal('${agent.id}')" title="Reset Password"><i class="fas fa-key"></i></button>` : ''}
+                        ${canAssignUpline ? `<button class="btn-icon" onclick="event.stopPropagation(); app.deleteAgent('${agent.id}')" title="Delete Agent" style="color:var(--error);"><i class="fas fa-trash"></i></button>` : ''}
                     </td>
                 </tr>
             `;
@@ -15202,6 +15203,50 @@ const renderCurrentAssignments = async (agentId) => {
                     </div>
                     <p style="margin-top:8px; color:var(--gray-500); font-size:13px;">Agent must change password on next login.</p>
                 </div>`, [{ label: 'Done', type: 'primary', action: 'UI.hideModal()' }]);
+        }
+    };
+
+    const deleteAgent = async (agentId) => {
+        const agent = await AppDataStore.getById('users', agentId);
+        if (!agent) return UI.toast.error('Agent not found');
+        UI.showModal('Delete Agent', `
+            <div style="text-align:center; padding:8px 0;">
+                <i class="fas fa-exclamation-triangle" style="font-size:40px; color:var(--error); margin-bottom:12px;"></i>
+                <p>Are you sure you want to delete <strong>${escapeHtml(agent.full_name)}</strong>?</p>
+                <p style="color:var(--gray-500); font-size:13px; margin-top:8px;">This will permanently remove the agent and cannot be undone.</p>
+            </div>`, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Delete', type: 'primary', action: `(async () => { await app.confirmDeleteAgent('${agentId}'); })()` }
+        ]);
+    };
+
+    const confirmDeleteAgent = async (agentId) => {
+        try {
+            await AppDataStore.delete('users', agentId);
+            // Also remove from Supabase Auth via admin API
+            try {
+                const { data: authUsers } = await window.supabase.auth.admin?.listUsers?.() || {};
+                const agent = await AppDataStore.getById('users', agentId);
+                if (agent?.email) {
+                    // Find auth user by email and delete
+                    const listResp = await fetch(`${window.SUPABASE_URL}/auth/v1/admin/users?email=${encodeURIComponent(agent.email)}`, {
+                        headers: { 'Authorization': `Bearer ${window.SUPABASE_SR}`, 'apikey': window.SUPABASE_SR }
+                    });
+                    const listData = await listResp.json();
+                    const authUser = listData?.users?.[0];
+                    if (authUser?.id) {
+                        await fetch(`${window.SUPABASE_URL}/auth/v1/admin/users/${authUser.id}`, {
+                            method: 'DELETE',
+                            headers: { 'Authorization': `Bearer ${window.SUPABASE_SR}`, 'apikey': window.SUPABASE_SR }
+                        });
+                    }
+                }
+            } catch (_) {}
+            UI.hideModal();
+            UI.toast.success('Agent deleted successfully');
+            await renderAgentsTable();
+        } catch (err) {
+            UI.toast.error('Failed to delete agent: ' + err.message);
         }
     };
 
@@ -22644,6 +22689,8 @@ const initImportDemoData = async () => {
         showSettingsView,
         openResetPasswordModal,
         executePasswordReset,
+        deleteAgent,
+        confirmDeleteAgent,
         renewLicense,
         executeRenewal,
         sendRenewalReminder,
