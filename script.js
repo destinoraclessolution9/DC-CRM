@@ -5941,7 +5941,7 @@ function _wireLoginBtn() {
 
     // ----- 3. Activities (depend on prospects) -----
     const demoActivities = [
-        { id: 1001, activity_type: 'CPS', activity_title: 'Initial Consultation', activity_date: '2026-03-04', start_time: '09:00', end_time: '10:00', prospect_id: 1, lead_agent_id: 5 },
+        { id: 1001, activity_type: 'CPS', activity_title: 'Initial Consultation', activity_date: '2026-03-04', start_time: '09:00', end_time: '10:00', prospect_id: 1, lead_agent_id: 5, note_pain_points: 'Office facing bad direction, business income dropping', note_needs: 'Needs wealth enhancement and career stability', opportunity_potential: 'Feng Shui consultation + PR4 package RM 3,800', note_next_steps: 'Send proposal by end of week, schedule follow-up call', next_action: 'Book PR4 demo session' },
         { id: 1002, activity_type: 'FTF', activity_title: 'Face to Face Meeting', activity_date: '2026-03-04', start_time: '11:00', end_time: '12:00', prospect_id: 2, lead_agent_id: 5 }
     ];
     for (const a of demoActivities) {
@@ -13095,16 +13095,29 @@ function _wireLoginBtn() {
             `;
         }
         else if (tab === 'potential') {
+            const MEETUP_TYPES = ['CPS','FTF','FSA','GR','XG','CALL','EMAIL','WHATSAPP'];
             const allActivities = (await AppDataStore.getAll('activities')).filter(a => a.prospect_id == prospectId);
-            const sorted = allActivities.sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
-            const latestWithOpportunity = sorted.find(a => a.opportunity_potential);
-            const latestWithProblem = sorted.find(a => a.core_problem || a.summary);
-            const meetingCount = allActivities.length;
+            const meetups = allActivities.filter(a => MEETUP_TYPES.includes(a.activity_type))
+                .sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
+
+            // Aggregate across all meetings
+            const allPains = [...new Set(meetups.flatMap(a => [a.note_pain_points, a.core_problem].filter(Boolean)))];
+            const allNeeds = [...new Set(meetups.flatMap(a => [a.note_needs, a.note_key_points].filter(Boolean)))];
+            const allSolutions = [...new Set(meetups.flatMap(a => [a.opportunity_potential, a.note_outcome].filter(Boolean)))];
+            const allNextSteps = [...new Set(meetups.flatMap(a => [a.next_action, a.note_next_steps].filter(Boolean)))];
+
+            const dealCards = meetups.filter(a =>
+                a.note_pain_points || a.note_needs || a.note_key_points || a.core_problem ||
+                a.opportunity_potential || a.note_outcome || a.next_action || a.note_next_steps
+            );
+
             container.innerHTML = `
-                <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                    <div>
+                        <span class="badge ${(prospect.potential_level === 'High') ? 'success' : prospect.potential_level === 'Medium' ? 'warning' : prospect.potential_level === 'Low' ? 'secondary' : 'secondary'}" style="font-size:13px;">${prospect.potential_level || 'NOT SET'} POTENTIAL</span>
+                    </div>
                     <button class="btn secondary btn-sm" onclick="app.openEditPotentialModal(${prospect.id})"><i class="fas fa-edit"></i> Edit</button>
                 </div>
-                <div style="margin-bottom:12px;"><span class="badge ${(prospect.potential_level === 'High' || !prospect.potential_level) ? 'success' : prospect.potential_level === 'Medium' ? 'warning' : 'secondary'}">${prospect.potential_level || 'NOT SET'} POTENTIAL</span></div>
                 <div class="pv-row"><span class="pv-lbl">Close Prob.</span><span class="pv-val">${prospect.close_probability || 0}%</span></div>
                 <div class="progress-bar" style="margin-bottom:12px;">
                     <div class="progress-fill" style="width:${prospect.close_probability || 0}%;background:var(--${(prospect.close_probability || 0) >= 60 ? 'success' : (prospect.close_probability || 0) >= 30 ? 'warning' : 'danger'});"></div>
@@ -13113,48 +13126,75 @@ function _wireLoginBtn() {
                 <div class="pv-row"><span class="pv-lbl">Budget</span><span class="pv-val">${prospect.budget_range || '-'}</span></div>
                 <div class="pv-row"><span class="pv-lbl">Timeline</span><span class="pv-val">${prospect.decision_timeline || '-'}</span></div>
                 <div class="pv-row"><span class="pv-lbl">Decision Maker</span><span class="pv-val">${prospect.decision_maker === 'yes' ? 'Yes' : prospect.decision_maker === 'no' ? 'No' : 'Unknown'}</span></div>
-                ${prospect.pain_points ? `<div class="pv-row"><span class="pv-lbl">Pain Points</span><span class="pv-val">${prospect.pain_points}</span></div>` : ''}
-                ${prospect.interests ? `<div class="pv-row"><span class="pv-lbl">Interests</span><span class="pv-val">${prospect.interests}</span></div>` : ''}
-                ${meetingCount > 0 ? `
-                <div class="pv-sub" style="margin-top:8px;">From Meetings (${meetingCount} total)</div>
-                ${latestWithProblem ? `<div class="pv-row"><span class="pv-lbl">Core Problem</span><span class="pv-val">${latestWithProblem.core_problem || latestWithProblem.summary}</span></div>` : ''}
-                ${latestWithOpportunity ? `<div class="pv-row"><span class="pv-lbl">Opportunity</span><span class="pv-val" style="color:var(--primary);font-weight:500;">${latestWithOpportunity.opportunity_potential}</span></div>` : ''}
-                ${allActivities.some(a => a.opportunity_potential) ? `
-                <div style="margin-top:10px;">
-                    <div class="pv-sub">All Opportunities</div>
-                    ${allActivities.filter(a => a.opportunity_potential).map(a => `
-                        <div class="meet-card" style="margin-bottom:8px;">
-                            <div class="meet-lbl">${a.activity_date || ''} — ${a.activity_type || 'Meeting'}</div>
-                            <div style="font-size:13px;margin-top:4px;">${a.opportunity_potential}</div>
-                        </div>
-                    `).join('')}
+
+                ${meetups.length > 0 ? `
+                <div class="pv-sub" style="margin-top:12px;">Deal Analysis from ${meetups.length} Meet Up${meetups.length > 1 ? 's' : ''}</div>
+
+                ${allPains.length > 0 ? `
+                <div style="background:#fff3f3;border-left:3px solid #ef4444;border-radius:0 8px 8px 0;padding:10px 12px;margin-bottom:8px;">
+                    <div class="meet-lbl" style="color:#ef4444;margin-bottom:4px;"><i class="fas fa-exclamation-circle"></i> Pain Points / Core Problem</div>
+                    ${allPains.map(p => `<div style="font-size:13px;color:var(--gray-700);margin-bottom:3px;">• ${p}</div>`).join('')}
                 </div>` : ''}
-                ` : ''}
+
+                ${allNeeds.length > 0 ? `
+                <div style="background:#fff8e1;border-left:3px solid #f59e0b;border-radius:0 8px 8px 0;padding:10px 12px;margin-bottom:8px;">
+                    <div class="meet-lbl" style="color:#d97706;margin-bottom:4px;"><i class="fas fa-lightbulb"></i> Customer Needs / Interests</div>
+                    ${allNeeds.map(n => `<div style="font-size:13px;color:var(--gray-700);margin-bottom:3px;">• ${n}</div>`).join('')}
+                </div>` : ''}
+
+                ${allSolutions.length > 0 ? `
+                <div style="background:#f0fdf4;border-left:3px solid #22c55e;border-radius:0 8px 8px 0;padding:10px 12px;margin-bottom:8px;">
+                    <div class="meet-lbl" style="color:#16a34a;margin-bottom:4px;"><i class="fas fa-hand-holding-heart"></i> Solution Proposed / Opportunity</div>
+                    ${allSolutions.map(s => `<div style="font-size:13px;color:var(--gray-700);margin-bottom:3px;">• ${s}</div>`).join('')}
+                </div>` : ''}
+
+                ${allNextSteps.length > 0 ? `
+                <div style="background:#eff6ff;border-left:3px solid var(--primary);border-radius:0 8px 8px 0;padding:10px 12px;margin-bottom:8px;">
+                    <div class="meet-lbl" style="color:var(--primary);margin-bottom:4px;"><i class="fas fa-arrow-right"></i> Next Steps to Close</div>
+                    ${allNextSteps.map(s => `<div style="font-size:13px;color:var(--gray-700);margin-bottom:3px;">• ${s}</div>`).join('')}
+                </div>` : ''}
+
+                ${dealCards.length === 0 ? '<p style="text-align:center;padding:12px;color:var(--gray-400);font-size:13px;">No deal analysis recorded yet. Add notes during meet ups.</p>' : ''}
+                ` : '<p style="text-align:center;padding:20px;color:var(--gray-400);font-size:13px;">No meet ups recorded yet.</p>'}
             `;
         }
         else if (tab === 'nextactions') {
-            const activities = (await AppDataStore.getAll('activities')).filter(a => a.prospect_id == prospectId);
-            const withActions = activities.filter(a => a.next_action && a.next_action.trim());
-            if (withActions.length === 0) {
-                container.innerHTML = '<p style="text-align:center;padding:20px;color:var(--gray-400);">No next actions recorded yet. Add actions through 1-on-1 meetings.</p>';
+            const activities = (await AppDataStore.getAll('activities')).filter(a => a.prospect_id == prospectId)
+                .sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date) || b.id - a.id);
+
+            // Collect action items: next_action field + note_next_steps field, deduplicated per activity
+            const actionItems = [];
+            for (const a of activities) {
+                if (a.next_action?.trim()) {
+                    actionItems.push({ id: `${a.id}_na`, activityId: a.id, text: a.next_action.trim(), date: a.activity_date, type: a.activity_type, title: a.activity_title, source: 'Next Action' });
+                }
+                if (a.note_next_steps?.trim() && a.note_next_steps.trim() !== (a.next_action || '').trim()) {
+                    actionItems.push({ id: `${a.id}_ns`, activityId: a.id, text: a.note_next_steps.trim(), date: a.activity_date, type: a.activity_type, title: a.activity_title, source: 'Next Steps' });
+                }
+            }
+
+            if (actionItems.length === 0) {
+                container.innerHTML = '<p style="text-align:center;padding:20px;color:var(--gray-400);">No next actions recorded yet. Add during meet ups via Next Action or Next Steps fields.</p>';
                 return;
             }
-            const rows = withActions.map(a => {
-                const key = `na_done_${prospectId}_${a.id}`;
+
+            const rows = actionItems.map(item => {
+                const key = `na_done_${prospectId}_${item.id}`;
                 const isDone = localStorage.getItem(key) === '1';
                 return `
-                    <div class="na-item${isDone ? ' done' : ''}" id="na-item-${a.id}">
-                        <input type="checkbox" class="na-cb" id="na-cb-${a.id}" ${isDone ? 'checked' : ''}
-                            onchange="app.toggleNextAction(${prospectId}, ${a.id}, this.checked)">
+                    <div class="na-item${isDone ? ' done' : ''}" id="na-item-${item.id}">
+                        <input type="checkbox" class="na-cb" id="na-cb-${item.id}" ${isDone ? 'checked' : ''}
+                            onchange="app.toggleNextActionItem(${prospectId}, '${item.id}', this.checked)">
                         <div style="flex:1;">
-                            <div class="na-text" id="na-text-${a.id}">${a.next_action}</div>
-                            <div style="font-size:11px;color:var(--gray-400);margin-top:2px;">${a.activity_date || ''} — ${a.activity_type || 'Meeting'}${a.activity_title ? ' · ' + a.activity_title : ''}</div>
+                            <div class="na-text" id="na-text-${item.id}">${item.text}</div>
+                            <div style="font-size:11px;color:var(--gray-400);margin-top:2px;">${item.date || ''} — ${item.type || 'Meeting'}${item.title ? ' · ' + item.title : ''} <span style="background:var(--gray-100);border-radius:3px;padding:1px 4px;">${item.source}</span></div>
                         </div>
                     </div>
                 `;
             }).join('');
-            const total = withActions.length;
-            const done = withActions.filter(a => localStorage.getItem(`na_done_${prospectId}_${a.id}`) === '1').length;
+
+            const total = actionItems.length;
+            const done = actionItems.filter(item => localStorage.getItem(`na_done_${prospectId}_${item.id}`) === '1').length;
             container.innerHTML = `
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
                     <span data-na-count style="font-size:13px;color:var(--gray-500);">${done} of ${total} completed</span>
@@ -13380,10 +13420,15 @@ const deleteNote = async (prospectId, noteId) => {
     };
 
     const toggleNextAction = (prospectId, activityId, isDone) => {
-        const key = `na_done_${prospectId}_${activityId}`;
+        // Legacy: kept for backward compatibility
+        toggleNextActionItem(prospectId, activityId, isDone);
+    };
+
+    const toggleNextActionItem = (prospectId, itemId, isDone) => {
+        const key = `na_done_${prospectId}_${itemId}`;
         localStorage.setItem(key, isDone ? '1' : '0');
-        const itemEl = document.getElementById(`na-item-${activityId}`);
-        const textEl = document.getElementById(`na-text-${activityId}`);
+        const itemEl = document.getElementById(`na-item-${itemId}`);
+        const textEl = document.getElementById(`na-text-${itemId}`);
         if (itemEl) itemEl.classList.toggle('done', isDone);
         if (textEl) textEl.style.textDecoration = isDone ? 'line-through' : '';
         // Update progress bar
@@ -22526,6 +22571,7 @@ const initImportDemoData = async () => {
         attachActivityPhoto,
         recordSalesClosure,
         toggleNextAction,
+        toggleNextActionItem,
         saveClosingRecord,
         submitClosingRecord,
         approveClosingRecord,
@@ -23010,7 +23056,7 @@ const initImportDemoData = async () => {
         generatePerformanceReport: () => UI.toast.info('Generating performance report...'),
         shareInsights: () => UI.toast.info('Sharing insights...'),
         viewAgentDetails: (id) => UI.toast.info(`Viewing agent ${id}`),
-        viewLeadDetails: (id) => UI.toast.info(`Viewing lead ${id}`),
+        viewLeadDetails: (id) => app.showProspectDetail(id),
         executeAction: (action) => UI.toast.info(`Executing: ${action}`),
         openAttendeeOutcomeModal,
         openAttendeeNotesModal,
