@@ -9562,11 +9562,11 @@ function _wireLoginBtn() {
             <div class="form-row">
                 <div class="form-group half">
                     <label>Start Time</label>
-                    <input type="time" id="edit-timing-start" class="form-control" value="${activity.start_time || ''}">
+                    <input type="time" id="edit-timing-start" class="form-control" value="${activity.start_time || ''}" onchange="app.autoSetEndTime()">
                 </div>
                 <div class="form-group half">
                     <label>End Time</label>
-                    <input type="time" id="edit-timing-end" class="form-control" value="${activity.end_time || ''}">
+                    <input type="time" id="edit-timing-end" class="form-control" value="${activity.end_time || ''}" data-manual="false" onchange="this.dataset.manual='true'">
                 </div>
             </div>
         `, [
@@ -9575,12 +9575,32 @@ function _wireLoginBtn() {
         ]);
     };
 
+    const autoSetEndTime = () => {
+        const endInput = document.getElementById('edit-timing-end');
+        if (!endInput || endInput.dataset.manual === 'true') return;
+        const startVal = document.getElementById('edit-timing-start')?.value;
+        if (!startVal) return;
+        const [h, m] = startVal.split(':').map(Number);
+        const endH = (h + 1) % 24;
+        endInput.value = `${String(endH).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    };
+
     const saveActivityTiming = async (activityId) => {
         const date = document.getElementById('edit-timing-date')?.value;
         const start = document.getElementById('edit-timing-start')?.value;
         const end = document.getElementById('edit-timing-end')?.value;
         if (!date || !start || !end) { UI.toast.error('Please fill in all timing fields'); return; }
-        await AppDataStore.update('activities', activityId, { activity_date: date, start_time: start, end_time: end });
+        const updates = { activity_date: date, start_time: start, end_time: end };
+        try {
+            await AppDataStore.update('activities', activityId, updates);
+        } catch (e) {
+            // Fallback: update localStorage directly for local-only activities
+            const key = 'fs_crm_activities';
+            const all = JSON.parse(localStorage.getItem(key) || '[]');
+            const idx = all.findIndex(r => r.id == activityId);
+            if (idx >= 0) { all[idx] = { ...all[idx], ...updates }; localStorage.setItem(key, JSON.stringify(all)); }
+            else { UI.toast.error('Could not save: ' + e.message); return; }
+        }
         UI.hideModal();
         UI.toast.success('Appointment timing updated');
         if (document.querySelector('.calendar-view-container')) { await renderCalendar(); await renderTodayActivities(); }
@@ -21999,6 +22019,7 @@ const initImportDemoData = async () => {
         viewActivityDetails,
         uploadCPSForm,
         editActivityTiming,
+        autoSetEndTime,
         saveActivityTiming,
         openPostMeetupModal,
         savePostMeetup,
