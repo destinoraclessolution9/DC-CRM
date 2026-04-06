@@ -10234,6 +10234,13 @@ function _wireLoginBtn() {
                             <input type="text" id="duration" class="form-control" readonly value="60 min">
                         </div>
                     </div>
+                    <div class="form-group">
+                        <label>Venue</label>
+                        <select id="activity-venue" class="form-control">
+                            <option value="">-- Select Venue --</option>
+                            ${(await AppDataStore.getAll('venues')).map(v => `<option value="${v.name} | ${v.location}">${v.name} | ${v.location}</option>`).join('')}
+                        </select>
+                    </div>
                 </div>
                 
                 <div class="form-section" style="display:none">
@@ -11309,7 +11316,8 @@ function _wireLoginBtn() {
             start_time: start,
             end_time: end,
             co_agents: _selectedCoAgents,
-            lead_agent_id: _currentUser ? _currentUser.id : 5
+            lead_agent_id: _currentUser ? _currentUser.id : 5,
+            venue: document.getElementById('activity-venue')?.value || ''
         };
 
         if (type === 'CPS') {
@@ -18159,7 +18167,7 @@ const exportKPIReport = async (format) => {
 
 
     // ========== PHASE: MARKETING MANAGER LISTS ==========
-    let _currentMarketingListTab = 'products'; // 'products', 'events', 'promotions'
+    let _currentMarketingListTab = 'products'; // 'products', 'events', 'promotions', 'venues'
 
     const showMarketingListsView = async (container) => {
         container.innerHTML = `
@@ -18170,9 +18178,9 @@ const exportKPIReport = async (format) => {
                         <p class="text-muted">Manage master data for products, events, and monthly promotions.</p>
                     </div>
                     <div class="header-actions">
-                        ${_currentMarketingListTab !== 'promotions' ? `
+                        ${(_currentMarketingListTab !== 'promotions') ? `
                         <button class="btn primary" onclick="app.openMarketingListAddModal()">
-                            <i class="fas fa-plus"></i> New ${_currentMarketingListTab.charAt(0).toUpperCase() + _currentMarketingListTab.slice(1, -1)}
+                            <i class="fas fa-plus"></i> New ${{ products: 'Product', events: 'Event', venues: 'Venue' }[_currentMarketingListTab] || _currentMarketingListTab}
                         </button>` : ''}
                     </div>
                 </div>
@@ -18188,10 +18196,15 @@ const exportKPIReport = async (format) => {
                          style="padding: 10px 16px; cursor: pointer; border-bottom: 2px solid ${_currentMarketingListTab === 'events' ? 'var(--primary-600)' : 'transparent'}; color: ${_currentMarketingListTab === 'events' ? 'var(--primary-600)' : 'var(--gray-600)'}; font-weight: 500;">
                         Events
                     </div>
-                    <div class="tab-item ${_currentMarketingListTab === 'promotions' ? 'active' : ''}" 
-                         onclick="app.switchMarketingListTab('promotions')" 
+                    <div class="tab-item ${_currentMarketingListTab === 'promotions' ? 'active' : ''}"
+                         onclick="app.switchMarketingListTab('promotions')"
                          style="padding: 10px 16px; cursor: pointer; border-bottom: 2px solid ${_currentMarketingListTab === 'promotions' ? 'var(--primary-600)' : 'transparent'}; color: ${_currentMarketingListTab === 'promotions' ? 'var(--primary-600)' : 'var(--gray-600)'}; font-weight: 500;">
                         Promotions
+                    </div>
+                    <div class="tab-item ${_currentMarketingListTab === 'venues' ? 'active' : ''}"
+                         onclick="app.switchMarketingListTab('venues')"
+                         style="padding: 10px 16px; cursor: pointer; border-bottom: 2px solid ${_currentMarketingListTab === 'venues' ? 'var(--primary-600)' : 'transparent'}; color: ${_currentMarketingListTab === 'venues' ? 'var(--primary-600)' : 'var(--gray-600)'}; font-weight: 500;">
+                        Venues
                     </div>
                 </div>
 
@@ -18279,6 +18292,30 @@ const exportKPIReport = async (format) => {
                     </tbody>
                 </table>
             `;
+        } else if (_currentMarketingListTab === 'venues') {
+            return `
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Venue Name</th>
+                            <th>Location</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${data.length === 0 ? '<tr><td colspan="3" style="text-align:center; color: var(--gray-400); padding: 32px;">No venues added yet.</td></tr>' : data.map(item => `
+                            <tr>
+                                <td><strong>${item.name}</strong></td>
+                                <td>${item.location || '-'}</td>
+                                <td>
+                                    <button class="btn-icon" onclick="app.openMarketingListEditModal('${item.id}')" title="Edit"><i class="fas fa-pencil-alt"></i></button>
+                                    <button class="btn-icon text-danger" onclick="app.deleteMarketingListItem('${item.id}')" title="Delete"><i class="fas fa-trash-alt"></i></button>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
         } else {
             return await renderPackagesTab();
         }
@@ -18306,6 +18343,11 @@ const exportKPIReport = async (format) => {
                 <div class="form-group"><label>Description</label><textarea id="mkt-desc" class="form-control"></textarea></div>
                 <div class="form-group"><label><input type="checkbox" id="mkt-active" checked> Is Active</label></div>
 `;
+        } else if (type === 'venues') {
+            content = `
+                <div class="form-group"><label>Venue Name*</label><input type="text" id="mkt-vname" class="form-control" placeholder="e.g. MBB, Bujishu Premier"></div>
+                <div class="form-group"><label>Location*</label><input type="text" id="mkt-vlocation" class="form-control" placeholder="e.g. KL, JB, SG"></div>
+`;
         } else {
             content = `
                 <div class="form-group"><label>Package Name*</label><input type="text" id="mkt-pkname" class="form-control"></div>
@@ -18318,7 +18360,7 @@ const exportKPIReport = async (format) => {
 `;
         }
 
-        UI.showModal('Add New ' + type.slice(0, -1), content, [
+        UI.showModal('Add New ' + { products: 'Product', events: 'Event', venues: 'Venue', promotions: 'Promotion' }[type], content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
             { label: 'Save', type: 'primary', action: '(async () => { await app.saveMarketingListItem(); })()' }
         ]);
@@ -18349,6 +18391,11 @@ const exportKPIReport = async (format) => {
                 <div class="form-group"><label>Description</label><textarea id="mkt-desc" class="form-control">${item.description || ''}</textarea></div>
                 <div class="form-group"><label><input type="checkbox" id="mkt-active" ${item.is_active ? 'checked' : ''}> Is Active</label></div>
             `;
+        } else if (type === 'venues') {
+            content = `
+                <div class="form-group"><label>Venue Name*</label><input type="text" id="mkt-vname" class="form-control" value="${item.name || ''}"></div>
+                <div class="form-group"><label>Location*</label><input type="text" id="mkt-vlocation" class="form-control" value="${item.location || ''}"></div>
+            `;
         } else {
             content = `
                 <div class="form-group"><label>Package Name*</label><input type="text" id="mkt-pkname" class="form-control" value="${item.package_name}"></div>
@@ -18361,7 +18408,7 @@ const exportKPIReport = async (format) => {
             `;
         }
 
-        UI.showModal('Edit ' + type.slice(0, -1), content, [
+        UI.showModal('Edit ' + { products: 'Product', events: 'Event', venues: 'Venue', promotions: 'Promotion' }[type], content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
             { label: 'Save Changes', type: 'primary', action: `await app.saveMarketingListItem('${id}')` }
         ]);
@@ -18369,12 +18416,20 @@ const exportKPIReport = async (format) => {
 
     const saveMarketingListItem = async (id = null) => {
         const type = _currentMarketingListTab;
-        let data = {
-            is_active: document.getElementById('mkt-active').checked,
-            updated_at: new Date().toISOString()
-        };
+        let data = { updated_at: new Date().toISOString() };
 
-        if (type === 'products') {
+        if (type === 'venues') {
+            data.name = document.getElementById('mkt-vname').value.trim();
+            data.location = document.getElementById('mkt-vlocation').value.trim();
+            if (!data.name) return UI.toast.error('Venue Name is required');
+            if (!data.location) return UI.toast.error('Location is required');
+        } else {
+            data.is_active = document.getElementById('mkt-active').checked;
+        }
+
+        if (type === 'venues') {
+            // name/location already set above
+        } else if (type === 'products') {
             data.name = document.getElementById('mkt-name').value.trim();
             data.category = document.getElementById('mkt-category').value.trim();
             data.price = parseFloat(document.getElementById('mkt-price').value) || 0;
