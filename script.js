@@ -14135,10 +14135,10 @@ const openAddSolutionModal = async (prospectId) => {
 
         let html = '';
         for (const agent of agents) {
-            if (searchQuery && !agent.full_name.toLowerCase().includes(searchQuery) && !agent.agent_code?.toLowerCase().includes(searchQuery)) return;
-            if (teamFilter && agent.team !== teamFilter) return;
-            if (roleFilter && agent.role !== roleFilter) return;
-            if (statusFilter && agent.status !== statusFilter) return;
+            if (searchQuery && !agent.full_name?.toLowerCase().includes(searchQuery) && !agent.agent_code?.toLowerCase().includes(searchQuery) && !agent.phone?.toLowerCase().includes(searchQuery)) continue;
+            if (teamFilter && agent.team !== teamFilter) continue;
+            if (roleFilter && agent.role !== roleFilter) continue;
+            if (statusFilter && agent.status !== statusFilter) continue;
 
             const stats = await AppDataStore.query('agent_stats', { agent_id: agent.id })[0] || { total_assigned: 0, followup_rate: 0 };
             const rateClass = stats.followup_rate >= 90 ? 'rate-good' : (stats.followup_rate >= 70 ? 'rate-warning' : 'rate-critical');
@@ -22606,7 +22606,7 @@ const initImportDemoData = async () => {
         // Phase 5 Agent Management Functions
         showAgentsView,
         renderAgentsTable,
-        //filterAgents,
+        filterAgents: renderAgentsTable,
         //showAgentDetail,
         showAgentProfile,
         openAddAgentModal,

@@ -118,13 +118,30 @@ class DataStore {
 
     async get(tableName, id) {
         if (id == null || id === 'null' || id === 'undefined') return null;
-        const { data, error } = await window.supabase
-            .from(tableName)
-            .select('*')
-            .eq('id', id)
-            .maybeSingle();
-        if (error) throw error;
-        return data;
+        try {
+            const { data, error } = await window.supabase
+                .from(tableName)
+                .select('*')
+                .eq('id', id)
+                .maybeSingle();
+            if (error) throw error;
+            if (data) return data;
+            // Not found in Supabase — check localStorage fallback (schema-mismatch saves)
+            const local = localStorage.getItem(`fs_crm_${tableName}`);
+            if (local) {
+                const records = JSON.parse(local);
+                return records.find(r => String(r.id) === String(id)) || null;
+            }
+            return null;
+        } catch (e) {
+            // Offline — search localStorage
+            const local = localStorage.getItem(`fs_crm_${tableName}`);
+            if (local) {
+                const records = JSON.parse(local);
+                return records.find(r => String(r.id) === String(id)) || null;
+            }
+            return null;
+        }
     }
 
     async add(tableName, record) {
