@@ -11741,7 +11741,7 @@ function _wireLoginBtn() {
         for (const p of prospects) {
             // Search filter (Name, Phone, Email, ID)
             const matchesSearch = !searchQuery ||
-                p.full_name.toLowerCase().includes(searchQuery) ||
+                (p.full_name || '').toLowerCase().includes(searchQuery) ||
                 (p.phone && p.phone.includes(searchQuery)) ||
                 (p.email && p.email.toLowerCase().includes(searchQuery)) ||
                 (p.id && p.id.toString().includes(searchQuery));
@@ -11804,7 +11804,7 @@ function _wireLoginBtn() {
 
             html += `
                 <tr onclick="app.showProspectDetail(${p.id})">
-                    <td><strong>${p.full_name}</strong></td>
+                    <td><strong>${p.full_name || '(No Name)'}</strong></td>
                     <td>
                         <span class="score-badge score-${grade.replace('+', '-plus')}">${p.score || 0} (${grade})</span>
                     </td>
@@ -20657,6 +20657,7 @@ const simulateCampaignSending = async (campaignId) => {
             }
             try {
                 record.id = Date.now() + i;
+                record.status = 'New';
                 record.created_at = new Date().toISOString();
                 record.protection_deadline = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
                 record.score = 5;
@@ -20691,7 +20692,13 @@ const simulateCampaignSending = async (campaignId) => {
         UI.hideModal();
         UI.toast.success(`Import complete: ${created} created, ${updated} updated, ${skipped} skipped`);
         const vp = document.getElementById('content-viewport');
-        if (vp) await showImportDashboard(vp);
+        if (vp) {
+            if (_importData.importType === 'prospects') {
+                await showProspectsView(vp);
+            } else {
+                await showImportDashboard(vp);
+            }
+        }
     };
 
     const viewImportDetails = async (id) => {
