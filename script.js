@@ -11072,7 +11072,8 @@ function _wireLoginBtn() {
             start_time: start,
             end_time: end,
             co_agents: _selectedCoAgents,
-            lead_agent_id: _currentUser ? _currentUser.id : 5
+            lead_agent_id: _currentUser ? _currentUser.id : 5,
+            visibility: 'open'
         };
 
         if (type === 'CPS') {
@@ -12188,6 +12189,31 @@ function _wireLoginBtn() {
             UI.toast.error('Please fill in the required fields');
             document.querySelector('.form-control.error')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
             return;
+        }
+
+        // Duplicate detection: block same name + IC or same name + phone
+        if (!editId) {
+            const ic = document.getElementById('prospect-ic')?.value?.trim();
+            const normalize = str => str ? str.toLowerCase().replace(/\s+/g, '') : '';
+            const normName = normalize(name);
+
+            const existingProspects = await AppDataStore.getAll('prospects');
+            const existingCustomers = await AppDataStore.getAll('customers');
+            const allPeople = [...existingProspects, ...existingCustomers];
+
+            const duplicate = allPeople.find(p => {
+                const sameName = normalize(p.full_name) === normName;
+                if (!sameName) return false;
+                if (ic && p.ic_number && normalize(p.ic_number) === normalize(ic)) return true;
+                if (phone && p.phone && normalize(p.phone) === normalize(phone)) return true;
+                return false;
+            });
+
+            if (duplicate) {
+                const type = existingProspects.find(p => p.id === duplicate.id) ? 'Prospect' : 'Customer';
+                UI.toast.error(`Duplicate detected: "${duplicate.full_name}" already exists as a ${type} with the same name and ${duplicate.ic_number && normalize(duplicate.ic_number) === normalize(ic) ? 'IC number' : 'phone number'}.`);
+                return;
+            }
         }
 
         const d = (id) => document.getElementById(id)?.value || null;
