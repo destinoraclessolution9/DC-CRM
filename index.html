@@ -195,6 +195,8 @@
 <script>
     window.SUPABASE_URL = 'https://remuwhxvzkzjtgbzqjaa.supabase.co';
     window.SUPABASE_SR  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJlbXV3aHh2emt6anRnYnpxamFhIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NDM2NzMwMywiZXhwIjoyMDg5OTQzMzAzfQ.ZLTYpmvxnpLVZGbPvMtd6Kk6TO9hmRuFyHLt1NJ14ec';
+    // Save the factory BEFORE replacing it so DataStore can create a service-role client.
+    window._supabaseFactory = window.supabase;
     window.supabase = window.supabase.createClient(
         window.SUPABASE_URL,
         'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJlbXV3aHh2emt6anRnYnpxamFhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQzNjczMDMsImV4cCI6MjA4OTk0MzMwM30.L8yISXnOd1CxzyAbRyFLQXIYviyBrxQC_J19egNtUbs'
