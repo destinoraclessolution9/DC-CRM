@@ -12595,8 +12595,6 @@ function _wireLoginBtn() {
                     .pv-hdr{padding:12px 16px 16px;border-bottom:1px solid var(--gray-200);}
                     .pv-hdr h1{font-size:22px;font-weight:700;margin:6px 0 8px;line-height:1.2;}
                     .pv-hdr-meta{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px;color:var(--gray-500);}
-                    .pv-hdr-actions{display:flex;gap:8px;margin-top:12px;}
-                    .pv-hdr-actions .btn{flex:1;text-align:center;padding:10px 8px;font-size:14px;display:flex;align-items:center;justify-content:center;gap:6px;}
                     .acc-container{display:flex;flex-direction:column;gap:8px;padding:12px;}
                     .acc-item{border:1px solid var(--gray-200);border-radius:12px;overflow:hidden;}
                     .acc-hdr{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;cursor:pointer;background:var(--gray-50);font-weight:600;font-size:15px;user-select:none;-webkit-tap-highlight-color:transparent;gap:8px;}
@@ -12645,10 +12643,9 @@ function _wireLoginBtn() {
                         <span class="badge success">Active</span>
                         <span class="badge info">Grade ${getScoreGrade(prospect.score)}</span>
                     </div>
-                    <h1>${prospect.full_name}${prospect.nickname ? `<span style="font-size:15px;font-weight:400;color:var(--gray-500);margin-left:8px;">"${prospect.nickname}"</span>` : ''}</h1>
-                    <div class="pv-hdr-actions">
-                        <button class="btn secondary" onclick="app.editProspect(${prospect.id})"><i class="fas fa-edit"></i> Edit</button>
-                        <button class="btn primary" onclick="app.convertToCustomer(${prospect.id})"><i class="fas fa-user-check"></i> Convert</button>
+                    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:6px 0 8px;">
+                        <span style="font-size:22px;font-weight:700;line-height:1.3;flex-shrink:0;">${prospect.full_name}</span>${prospect.nickname ? `<span style="font-size:15px;font-weight:400;color:var(--gray-500);">"${prospect.nickname}"</span>` : ''}
+                        <button title="Edit" onclick="app.editProspect(${prospect.id})" style="width:24px;height:24px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--gray-500);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fas fa-edit"></i></button><button title="Convert to Customer" onclick="app.convertToCustomer(${prospect.id})" style="width:24px;height:24px;border-radius:50%;border:none;background:var(--primary);color:#fff;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'"><i class="fas fa-user-check"></i></button>
                     </div>
                 </div>
 
