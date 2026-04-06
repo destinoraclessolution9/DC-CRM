@@ -121,7 +121,7 @@ const appLogic = (() => {
         const result = [];
         const collect = (uid) => {
             result.push(uid);
-            allUsers.filter(u => u.reporting_to === uid).forEach(u => collect(u.id));
+            allUsers.filter(u => String(u.reporting_to) === String(uid)).forEach(u => collect(u.id));
         };
         collect(user.id);
         return result;
@@ -177,7 +177,7 @@ const appLogic = (() => {
         // For managers/team leaders: check if lead agent is in visible subordinates
         const visibleIds = await getVisibleUserIds(user);
         if (visibleIds === 'all') return true;
-        return visibleIds.includes(activity.lead_agent_id);
+        return visibleIds.some(id => String(id) === String(activity.lead_agent_id));
     };
 
     const getVisibleActivities = async () => {
