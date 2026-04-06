@@ -470,62 +470,95 @@ const appLogic = (() => {
             <div class="search-panel-overlay" id="search-panel-overlay" onclick="app.hideSearchPanel()"></div>
             <div class="search-panel" id="search-panel">
                 <div class="search-panel-header">
-                    <h2>Advanced Search & Analytics</h2>
+                    <h2>Search</h2>
                     <button class="close-btn" onclick="app.hideSearchPanel()">&times;</button>
                 </div>
-                
-                <div class="search-presets">
-                    <h3>Quick Presets</h3>
-                    <div class="preset-buttons">
-                        <button class="preset-btn" onclick="app.loadPreset('agent-monthly')">Agent Monthly Report</button>
-                        <button class="preset-btn" onclick="app.loadPreset('high-score')">High Score Prospects</button>
-                        <button class="preset-btn" onclick="app.loadPreset('recent-activities')">Recent Activities</button>
-                        <button class="preset-btn" onclick="app.loadPreset('cai-ku-not-purchased')">CAI KU Painting Not Purchased</button>
-                    </div>
-                </div>
-                
-                <div class="search-entity-selector">
-                    <label>Search in:</label>
-                    <select id="search-entity" onchange="app.updateFilterSections()">
-                        <option value="agents">Agents</option>
-                        <option value="prospects" selected>Prospects</option>
-                        <option value="customers">Customers</option>
-                        <option value="activities">Activities</option>
-                        <option value="transactions">Transactions</option>
-                        <option value="events">Events</option>
-                    </select>
-                </div>
-                
-                <div class="date-range-filter">
-                    <h3>Date Range</h3>
-                    <div class="date-range-group">
-                        <input type="date" id="search-date-from" class="form-control" placeholder="From">
-                        <span>to</span>
-                        <input type="date" id="search-date-to" class="form-control" placeholder="To">
-                    </div>
-                </div>
-                
+
                 <div class="filter-sections" id="filter-sections">
                     <!-- Dynamic filters will be rendered here -->
                 </div>
-                
-                <div class="condition-builder" id="condition-builder">
-                    <h3>Advanced Conditions</h3>
-                    <div id="condition-groups">
-                        <!-- Condition groups rendered here -->
+
+                <details id="search-advanced-options" style="margin-top:4px;">
+                    <summary style="cursor:pointer; font-weight:600; color:#8B0000; padding:10px 0; list-style:none; display:flex; align-items:center; gap:6px; user-select:none;">
+                        <i class="fas fa-sliders-h"></i> Advanced Options
+                    </summary>
+
+                    <div class="search-presets">
+                        <h3>Quick Presets</h3>
+                        <div class="preset-buttons">
+                            <button class="preset-btn" onclick="app.loadPreset('agent-monthly')">Agent Monthly Report</button>
+                            <button class="preset-btn" onclick="app.loadPreset('high-score')">High Score Prospects</button>
+                            <button class="preset-btn" onclick="app.loadPreset('recent-activities')">Recent Activities</button>
+                            <button class="preset-btn" onclick="app.loadPreset('cai-ku-not-purchased')">CAI KU Painting Not Purchased</button>
+                        </div>
                     </div>
-                    <button class="btn secondary btn-sm" onclick="app.addConditionGroup()">
-                        <i class="fas fa-plus"></i> Add Condition Group
-                    </button>
-                    <div class="condition-logic-toggle">
-                        <label>Group Logic:</label>
-                        <select id="group-logic" onchange="app.updateGroupLogic(0, this.value)">
-                            <option value="AND">AND</option>
-                            <option value="OR">OR</option>
+
+                    <div class="search-entity-selector">
+                        <label>Search in:</label>
+                        <select id="search-entity" onchange="app.updateFilterSections()">
+                            <option value="agents">Agents</option>
+                            <option value="prospects" selected>Prospects</option>
+                            <option value="customers">Customers</option>
+                            <option value="activities">Activities</option>
+                            <option value="transactions">Transactions</option>
+                            <option value="events">Events</option>
                         </select>
                     </div>
-                </div>
-                
+
+                    <div class="date-range-filter">
+                        <h3>Date Range</h3>
+                        <div class="date-range-group">
+                            <input type="date" id="search-date-from" class="form-control" placeholder="From">
+                            <span>to</span>
+                            <input type="date" id="search-date-to" class="form-control" placeholder="To">
+                        </div>
+                    </div>
+
+                    <div id="extra-filter-sections">
+                        <!-- Extra dynamic filters will be rendered here -->
+                    </div>
+
+                    <div class="condition-builder" id="condition-builder">
+                        <h3>Advanced Conditions</h3>
+                        <div id="condition-groups">
+                            <!-- Condition groups rendered here -->
+                        </div>
+                        <button class="btn secondary btn-sm" onclick="app.addConditionGroup()">
+                            <i class="fas fa-plus"></i> Add Condition Group
+                        </button>
+                        <div class="condition-logic-toggle">
+                            <label>Group Logic:</label>
+                            <select id="group-logic" onchange="app.updateGroupLogic(0, this.value)">
+                                <option value="AND">AND</option>
+                                <option value="OR">OR</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div style="display:flex; gap:8px; margin:8px 0; flex-wrap:wrap;">
+                        <button class="btn secondary" onclick="app.openSaveSearchModal()">
+                            <i class="fas fa-save"></i> Save Search
+                        </button>
+                        <button class="btn secondary" onclick="app.exportResults('csv')">
+                            <i class="fas fa-download"></i> Export
+                        </button>
+                    </div>
+
+                    <div class="saved-searches">
+                        <h3>Saved Searches</h3>
+                        <div id="saved-searches-list">
+                            <!-- Saved searches will be rendered here -->
+                        </div>
+                    </div>
+
+                    <div class="search-history">
+                        <h3>Recent Searches</h3>
+                        <div id="search-history-list">
+                            <!-- Search history will be rendered here -->
+                        </div>
+                    </div>
+                </details>
+
                 <div class="search-actions">
                     <button class="btn primary" onclick="app.executeSearch()">
                         <i class="fas fa-search"></i> Apply Filters
@@ -533,32 +566,12 @@ const appLogic = (() => {
                     <button class="btn secondary" onclick="app.clearAllFilters()">
                         <i class="fas fa-times"></i> Clear All
                     </button>
-                    <button class="btn secondary" onclick="app.openSaveSearchModal()">
-                        <i class="fas fa-save"></i> Save Search
-                    </button>
-                    <button class="btn secondary" onclick="app.exportResults('csv')">
-                        <i class="fas fa-download"></i> Export
-                    </button>
                 </div>
-                
-                <div class="saved-searches">
-                    <h3>Saved Searches</h3>
-                    <div id="saved-searches-list">
-                        <!-- Saved searches will be rendered here -->
-                    </div>
-                </div>
-                
-                <div class="search-history">
-                    <h3>Recent Searches</h3>
-                    <div id="search-history-list">
-                        <!-- Search history will be rendered here -->
-                    </div>
-                </div>
-                
+
                 <div class="search-results" id="search-results">
                     <!-- Results will be rendered here -->
                 </div>
-                
+
                 <div class="pagination" id="search-pagination">
                     <!-- Pagination will be rendered here -->
                 </div>
@@ -592,32 +605,41 @@ const appLogic = (() => {
         _currentSearchEntity = entity;
 
         const container = document.getElementById('filter-sections');
+        const extraContainer = document.getElementById('extra-filter-sections');
         if (!container) return;
 
-        let html = '<h3>Basic Filters</h3>';
+        let basicHtml = '';
+        let extraHtml = '';
 
         switch (entity) {
             case 'agents':
-                html += renderAgentFilters();
+                basicHtml = renderAgentFilters();
                 break;
-            case 'prospects':
-                html += await renderProspectCustomerFilters();
+            case 'prospects': {
+                const r = await renderProspectCustomerFilters();
+                basicHtml = r.basic;
+                extraHtml = r.extra;
                 break;
-            case 'customers':
-                html += await renderProspectCustomerFilters(true);
+            }
+            case 'customers': {
+                const r = await renderProspectCustomerFilters(true);
+                basicHtml = r.basic;
+                extraHtml = r.extra;
                 break;
+            }
             case 'activities':
-                html += renderActivityFilters();
+                basicHtml = renderActivityFilters();
                 break;
             case 'transactions':
-                html += renderTransactionFilters();
+                basicHtml = renderTransactionFilters();
                 break;
             case 'events':
-                html += renderEventFilters();
+                basicHtml = renderEventFilters();
                 break;
         }
 
-        container.innerHTML = html;
+        container.innerHTML = basicHtml;
+        if (extraContainer) extraContainer.innerHTML = extraHtml;
 
         // Update condition builder options
         renderConditionGroups();
@@ -659,22 +681,13 @@ const appLogic = (() => {
 
     const renderProspectCustomerFilters = async (isCustomer = false) => {
         const type = isCustomer ? 'customer' : 'prospect';
+        const products = (await AppDataStore.getAll('products')).filter(p => p.is_active !== false);
 
-        return `
+        const basic = `
             <div class="filter-row">
                 <div class="filter-group">
                     <label>Name</label>
                     <input type="text" id="filter-${type}-name" class="form-control" placeholder="Full name...">
-                </div>
-                <div class="filter-group">
-                    <label>Phone</label>
-                    <input type="text" id="filter-${type}-phone" class="form-control" placeholder="Phone number...">
-                </div>
-            </div>
-            <div class="filter-row">
-                <div class="filter-group">
-                    <label>Email</label>
-                    <input type="text" id="filter-${type}-email" class="form-control" placeholder="Email...">
                 </div>
                 <div class="filter-group">
                     <label>Ming Gua</label>
@@ -690,6 +703,19 @@ const appLogic = (() => {
                         <option value="MG8">MG8</option>
                         <option value="MG9">MG9</option>
                     </select>
+                </div>
+            </div>
+        `;
+
+        const extra = `
+            <div class="filter-row">
+                <div class="filter-group">
+                    <label>Phone</label>
+                    <input type="text" id="filter-${type}-phone" class="form-control" placeholder="Phone number...">
+                </div>
+                <div class="filter-group">
+                    <label>Email</label>
+                    <input type="text" id="filter-${type}-email" class="form-control" placeholder="Email...">
                 </div>
             </div>
             <div class="filter-row">
@@ -708,14 +734,14 @@ const appLogic = (() => {
                     <label>Has Purchased</label>
                     <select id="filter-prospect-has-purchased" class="form-control">
                         <option value="">Select Product</option>
-                        ${(await AppDataStore.getAll('products')).filter(p => p.is_active !== false).map(p => `<option value="${p.name}">${p.name}</option>`).join('')}
+                        ${products.map(p => `<option value="${p.name}">${p.name}</option>`).join('')}
                     </select>
                 </div>
                 <div class="filter-group">
                     <label>Has Not Purchased</label>
                     <select id="filter-prospect-not-purchased" class="form-control">
                         <option value="">Select Product</option>
-                        ${(await AppDataStore.getAll('products')).filter(p => p.is_active !== false).map(p => `<option value="${p.name}">${p.name}</option>`).join('')}
+                        ${products.map(p => `<option value="${p.name}">${p.name}</option>`).join('')}
                     </select>
                 </div>
             </div>
@@ -756,6 +782,8 @@ const appLogic = (() => {
                 </div>
             </div>
         `;
+
+        return { basic, extra };
     };
 
     const renderActivityFilters = () => {
