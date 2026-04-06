@@ -16828,7 +16828,7 @@ container.innerHTML = `
                 </div>
 
                 <div id="kpi-stats-grid" class="stats-grid">
-                    <!-- Stat cards loaded by refreshKPIDashboard -->
+                    <div style="grid-column:1/-1; text-align:center; padding:32px; color:var(--gray-400);"><i class="fas fa-spinner fa-spin"></i> Loading KPI data...</div>
                 </div>
 
                 <div class="dashboard-charts-row" style="display: grid; grid-template-columns: 2fr 1fr; gap: 24px; margin-bottom: 24px;">
@@ -16895,8 +16895,10 @@ container.innerHTML = `
 
     const refreshKPIDashboard = async () => {
         const ranges = getDateRanges(_currentTimeFilter, _customDateFrom, _customDateTo);
-        const kpis = await calculateKPIs(ranges.current.from, ranges.current.to);
-        const prevKpis = await calculateKPIs(ranges.previous.from, ranges.previous.to);
+        const [kpis, prevKpis] = await Promise.all([
+            calculateKPIs(ranges.current.from, ranges.current.to),
+            calculateKPIs(ranges.previous.from, ranges.previous.to)
+        ]);
 
         renderKPIStats(kpis, prevKpis);
         await renderTargetOverview();
@@ -16958,18 +16960,27 @@ container.innerHTML = `
     };
 
     const calculateKPIs = async (from, to) => {
+        const [
+            cpsCount, totalSales, popCaseCount, popSales,
+            eppCaseCount, eppSales, newAgents, newCustomers,
+            totalMeetings, activityHeadcount, conversionRate
+        ] = await Promise.all([
+            getCPSCount(from, to),
+            getTotalSales(from, to),
+            getPOPCaseCount(from, to),
+            getPOPSales(from, to),
+            getEPPCaseCount(from, to),
+            getEPPSales(from, to),
+            getNewAgents(from, to),
+            getNewCustomers(from, to),
+            getTotalMeetings(from, to),
+            getActivityHeadcount(from, to),
+            getConversionRate(from, to)
+        ]);
         return {
-            cpsCount: await getCPSCount(from, to),
-            totalSales: await getTotalSales(from, to),
-            popCaseCount: await getPOPCaseCount(from, to),
-            popSales: await getPOPSales(from, to),
-            eppCaseCount: await getEPPCaseCount(from, to),
-            eppSales: await getEPPSales(from, to),
-            newAgents: await getNewAgents(from, to),
-            newCustomers: await getNewCustomers(from, to),
-            totalMeetings: await getTotalMeetings(from, to),
-            activityHeadcount: await getActivityHeadcount(from, to),
-            conversionRate: await getConversionRate(from, to)
+            cpsCount, totalSales, popCaseCount, popSales,
+            eppCaseCount, eppSales, newAgents, newCustomers,
+            totalMeetings, activityHeadcount, conversionRate
         };
     };
 
@@ -16982,66 +16993,74 @@ container.innerHTML = `
 
 
 const getCPSCount = async (from, to) => {
-    const activities = await AppDataStore.getAll('activities');
+    const [activities, users] = await Promise.all([
+        AppDataStore.getAll('activities'),
+        _currentRoleFilter !== 'All' ? AppDataStore.getAll('users') : Promise.resolve([])
+    ]);
+    const userMap = {};
+    users.forEach(u => { userMap[u.id] = u; });
     let count = 0;
-    
     for (const a of activities) {
         if (a.activity_type !== 'CPS' || a.activity_date < from || a.activity_date > to) continue;
-        
         if (_currentRoleFilter !== 'All') {
-            const agent = await AppDataStore.getById('users', a.agent_id);
+            const agent = userMap[a.agent_id];
             if (!agent || agent.role !== _currentRoleFilter) continue;
         }
-        
         count++;
     }
-    
     return count;
 };
   
- const getTotalSales = async (from, to) => {
-    const purchases = await AppDataStore.getAll('purchases');
+const getTotalSales = async (from, to) => {
+    const [purchases, users] = await Promise.all([
+        AppDataStore.getAll('purchases'),
+        _currentRoleFilter !== 'All' ? AppDataStore.getAll('users') : Promise.resolve([])
+    ]);
+    const userMap = {};
+    users.forEach(u => { userMap[u.id] = u; });
     let total = 0;
-    
     for (const p of purchases) {
         if (p.date < from || p.date > to || p.is_agent_package) continue;
-        
         if (_currentRoleFilter !== 'All') {
-            const agent = await AppDataStore.getById('users', p.agent_id);
+            const agent = userMap[p.agent_id];
             if (!agent || agent.role !== _currentRoleFilter) continue;
         }
-        
         total += p.amount || 0;
     }
-    
     return total;
 };
 
 const getPOPCaseCount = async (from, to) => {
-    const purchases = await AppDataStore.getAll('purchases');
+    const [purchases, users] = await Promise.all([
+        AppDataStore.getAll('purchases'),
+        _currentRoleFilter !== 'All' ? AppDataStore.getAll('users') : Promise.resolve([])
+    ]);
+    const userMap = {};
+    users.forEach(u => { userMap[u.id] = u; });
     let count = 0;
-    
     for (const p of purchases) {
         if (p.payment_method !== 'POP' || p.date < from || p.date > to) continue;
-        
         if (_currentRoleFilter !== 'All') {
-            const agent = await AppDataStore.getById('users', p.agent_id);
+            const agent = userMap[p.agent_id];
             if (!agent || agent.role !== _currentRoleFilter) continue;
         }
-        
         count++;
     }
-    
     return count;
 };
 
-  const getPOPSales = async (from, to) => {
-    const purchases = await AppDataStore.getAll('purchases');
+const getPOPSales = async (from, to) => {
+    const [purchases, users] = await Promise.all([
+        AppDataStore.getAll('purchases'),
+        _currentRoleFilter !== 'All' ? AppDataStore.getAll('users') : Promise.resolve([])
+    ]);
+    const userMap = {};
+    users.forEach(u => { userMap[u.id] = u; });
     let total = 0;
     for (const p of purchases) {
         if (p.payment_method !== 'POP' || p.date < from || p.date > to) continue;
         if (_currentRoleFilter !== 'All') {
-            const agent = await AppDataStore.getById('users', p.agent_id);
+            const agent = userMap[p.agent_id];
             if (!agent || agent.role !== _currentRoleFilter) continue;
         }
         total += p.amount || 0;
@@ -17050,12 +17069,17 @@ const getPOPCaseCount = async (from, to) => {
 };
 
 const getEPPCaseCount = async (from, to) => {
-    const purchases = await AppDataStore.getAll('purchases');
+    const [purchases, users] = await Promise.all([
+        AppDataStore.getAll('purchases'),
+        _currentRoleFilter !== 'All' ? AppDataStore.getAll('users') : Promise.resolve([])
+    ]);
+    const userMap = {};
+    users.forEach(u => { userMap[u.id] = u; });
     let count = 0;
     for (const p of purchases) {
         if (p.payment_method !== 'EPP' || p.date < from || p.date > to) continue;
         if (_currentRoleFilter !== 'All') {
-            const agent = await AppDataStore.getById('users', p.agent_id);
+            const agent = userMap[p.agent_id];
             if (!agent || agent.role !== _currentRoleFilter) continue;
         }
         count++;
@@ -17064,12 +17088,17 @@ const getEPPCaseCount = async (from, to) => {
 };
 
 const getEPPSales = async (from, to) => {
-    const purchases = await AppDataStore.getAll('purchases');
+    const [purchases, users] = await Promise.all([
+        AppDataStore.getAll('purchases'),
+        _currentRoleFilter !== 'All' ? AppDataStore.getAll('users') : Promise.resolve([])
+    ]);
+    const userMap = {};
+    users.forEach(u => { userMap[u.id] = u; });
     let total = 0;
     for (const p of purchases) {
         if (p.payment_method !== 'EPP' || p.date < from || p.date > to) continue;
         if (_currentRoleFilter !== 'All') {
-            const agent = await AppDataStore.getById('users', p.agent_id);
+            const agent = userMap[p.agent_id];
             if (!agent || agent.role !== _currentRoleFilter) continue;
         }
         total += p.amount || 0;
@@ -17102,12 +17131,17 @@ const getNewCustomers = async (from, to) => {
 };
 
 const getTotalMeetings = async (from, to) => {
-    const activities = await AppDataStore.getAll('activities');
+    const [activities, users] = await Promise.all([
+        AppDataStore.getAll('activities'),
+        _currentRoleFilter !== 'All' ? AppDataStore.getAll('users') : Promise.resolve([])
+    ]);
+    const userMap = {};
+    users.forEach(u => { userMap[u.id] = u; });
     let count = 0;
     for (const a of activities) {
         if (a.activity_date < from || a.activity_date > to) continue;
         if (_currentRoleFilter !== 'All') {
-            const agent = await AppDataStore.getById('users', a.agent_id);
+            const agent = userMap[a.agent_id];
             if (!agent || agent.role !== _currentRoleFilter) continue;
         }
         count++;
@@ -17116,12 +17150,17 @@ const getTotalMeetings = async (from, to) => {
 };
 
 const getActivityHeadcount = async (from, to) => {
-    const registrations = await AppDataStore.getAll('event_registrations');
+    const [registrations, users] = await Promise.all([
+        AppDataStore.getAll('event_registrations'),
+        _currentRoleFilter !== 'All' ? AppDataStore.getAll('users') : Promise.resolve([])
+    ]);
+    const userMap = {};
+    users.forEach(u => { userMap[u.id] = u; });
     let count = 0;
     for (const r of registrations) {
         if (!r.checked_in || r.checked_in_at < from || r.checked_in_at > to) continue;
         if (_currentRoleFilter !== 'All') {
-            const agent = await AppDataStore.getById('users', r.agent_id);
+            const agent = userMap[r.agent_id];
             if (!agent || agent.role !== _currentRoleFilter) continue;
         }
         count++;
