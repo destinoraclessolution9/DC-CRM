@@ -5916,11 +5916,15 @@ function _wireLoginBtn() {
 
     // ----- 2. Prospects (depend on users) -----
     const demoProspects = [
-        { id: 1, full_name: 'Tan Ah Kow', phone: '012-3456789', score: 850, responsible_agent_id: 5, ming_gua: 'MG4', element: 'Wood', status: 'active', needs: 'Wealth,Career' },
+        { id: 1, full_name: 'Tan Ah Kow', nickname: 'Ah Kow', phone: '012-3456789', email: 'ahkow@example.com', ic_number: '801204-56-7890', date_of_birth: '1980-12-04', address: 'No. 12, Jalan Bahagia', city: 'Petaling Jaya', state: 'Selangor', postal_code: '47500', score: 850, responsible_agent_id: 5, ming_gua: 'MG4', element: 'Wood', status: 'active', needs: 'Wealth,Career' },
         { id: 2, full_name: 'Ong Bee Ling', phone: '012-9876543', score: 720, responsible_agent_id: 5, protection_deadline: '2026-03-20', ming_gua: 'MG2', status: 'active', needs: 'Health,Relationship' }
     ];
     for (const p of demoProspects) {
-        await safeInsert('prospects', p);
+        const inserted = await safeInsert('prospects', p);
+        if (!inserted) {
+            // Update existing record to ensure all fields are current
+            await AppDataStore.update('prospects', p.id, p);
+        }
     }
 
     // ----- 3. Activities (depend on prospects) -----
@@ -12640,41 +12644,69 @@ function _wireLoginBtn() {
         }, 100);
 
         container.innerHTML = `
-            <div class="profile-view">
-                <button class="btn secondary btn-sm" onclick="app.showProspectsView(document.getElementById('content-viewport'))" style="margin-bottom: 20px;">
-                    <i class="fas fa-arrow-left"></i> Back to List
-                </button>
-
-                <!-- Profile Header -->
-                <div class="profile-header">
-                    <div class="profile-info">
-                        <h1>${prospect.full_name}</h1>
-                        <div class="profile-meta">
-                            <span>ID: P100${prospect.id}</span>
-                            <span class="badge success">Active</span>
-                            <span class="badge info">Grade ${getScoreGrade(prospect.score)}</span>
-                        </div>
+            <div class="pv-wrap">
+                <style>
+                    .pv-wrap{background:#fff;border-radius:12px;box-shadow:var(--shadow-md);overflow:hidden;padding-bottom:80px;}
+                    .pv-back{padding:14px 16px 0;}
+                    .pv-hdr{padding:12px 16px 16px;border-bottom:1px solid var(--gray-200);}
+                    .pv-hdr h1{font-size:22px;font-weight:700;margin:6px 0 8px;line-height:1.2;}
+                    .pv-hdr-meta{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px;color:var(--gray-500);}
+                    .pv-hdr-actions{display:flex;gap:8px;margin-top:12px;}
+                    .pv-hdr-actions .btn{flex:1;text-align:center;padding:10px 8px;font-size:14px;display:flex;align-items:center;justify-content:center;gap:6px;}
+                    .acc-container{display:flex;flex-direction:column;gap:8px;padding:12px;}
+                    .acc-item{border:1px solid var(--gray-200);border-radius:12px;overflow:hidden;}
+                    .acc-hdr{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;cursor:pointer;background:var(--gray-50);font-weight:600;font-size:15px;user-select:none;-webkit-tap-highlight-color:transparent;gap:8px;}
+                    .acc-hdr:active{opacity:.85;}
+                    .acc-item.open>.acc-hdr{background:var(--primary);color:#fff;}
+                    .acc-item.open>.acc-hdr .acc-chev{color:#fff;transform:rotate(180deg);}
+                    .acc-chev{transition:transform .25s;color:var(--gray-500);flex-shrink:0;}
+                    .acc-body{padding:16px 14px;background:#fff;}
+                    .acc-loading{text-align:center;padding:24px;color:var(--gray-400);font-size:14px;}
+                    .pv-row{display:flex;align-items:flex-start;padding:9px 0;border-bottom:1px solid var(--gray-100);font-size:14px;gap:8px;}
+                    .pv-row:last-child{border-bottom:none;}
+                    .pv-lbl{color:var(--gray-500);font-weight:500;min-width:110px;flex-shrink:0;}
+                    .pv-val{flex:1;color:var(--gray-800);word-break:break-word;}
+                    .pv-sub{font-size:12px;font-weight:700;color:var(--gray-400);text-transform:uppercase;letter-spacing:.5px;margin:14px 0 6px;padding-top:12px;border-top:1px solid var(--gray-100);}
+                    .pv-sub:first-child{margin-top:0;padding-top:0;border-top:none;}
+                    .meet-card{background:var(--gray-50);border-radius:8px;padding:12px;margin-bottom:10px;border:1px solid var(--gray-100);}
+                    .meet-card-hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;}
+                    .meet-type{font-weight:600;font-size:13px;color:var(--primary);margin-right:6px;}
+                    .meet-date{font-size:12px;color:var(--gray-400);}
+                    .meet-section{margin-bottom:8px;}
+                    .meet-lbl{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--gray-400);margin-bottom:2px;}
+                    .meet-txt{font-size:13px;color:var(--gray-700);line-height:1.5;}
+                    .meet-actions{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;}
+                    .meet-photos{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;}
+                    .na-item{display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--gray-100);}
+                    .na-item:last-child{border-bottom:none;}
+                    .na-item input[type=checkbox]{width:18px;height:18px;margin-top:1px;flex-shrink:0;accent-color:var(--primary);cursor:pointer;}
+                    .na-item.done .na-text{text-decoration:line-through;color:var(--gray-400);}
+                    .na-text{font-size:14px;color:var(--gray-800);flex:1;}
+                    .na-meta{font-size:11px;color:var(--gray-400);margin-top:2px;}
+                    .cr-row{margin-bottom:10px;}
+                    .cr-label{display:block;font-size:12px;font-weight:600;color:var(--gray-500);margin-bottom:4px;}
+                    .cr-status{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:20px;font-size:13px;font-weight:600;}
+                    .cr-status.draft{background:#f3f4f6;color:#6b7280;}
+                    .cr-status.submitted{background:#fef3c7;color:#92400e;}
+                    .cr-status.approved{background:#d1fae5;color:#065f46;}
+                </style>
+                <div class="pv-back">
+                    <button class="btn secondary btn-sm" onclick="app.showProspectsView(document.getElementById('content-viewport'))">
+                        <i class="fas fa-arrow-left"></i> Back to List
+                    </button>
+                </div>
+                <div class="pv-hdr">
+                    <div class="pv-hdr-meta">
+                        <span>ID: P100${prospect.id}</span>
+                        <span class="badge success">Active</span>
+                        <span class="badge info">Grade ${getScoreGrade(prospect.score)}</span>
                     </div>
-                    <div class="profile-actions">
+                    <h1>${prospect.full_name}${prospect.nickname ? `<span style="font-size:15px;font-weight:400;color:var(--gray-500);margin-left:8px;">"${prospect.nickname}"</span>` : ''}</h1>
+                    <div class="pv-hdr-actions">
                         <button class="btn secondary" onclick="app.editProspect(${prospect.id})"><i class="fas fa-edit"></i> Edit</button>
                         <button class="btn primary" onclick="app.convertToCustomer(${prospect.id})"><i class="fas fa-user-check"></i> Convert</button>
                     </div>
                 </div>
-
-                <div class="scroll-container">
-                    <style>
-                        .acc-container{display:flex;flex-direction:column;gap:10px;margin-top:4px}
-                        .acc-item{border:1px solid var(--gray-200);border-radius:10px;overflow:hidden}
-                        .acc-hdr{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;cursor:pointer;background:var(--gray-50);font-weight:600;font-size:15px;user-select:none;-webkit-tap-highlight-color:transparent;gap:8px}
-                        .acc-hdr:active{opacity:.85}
-                        .acc-item.open>.acc-hdr{background:var(--primary);color:#fff}
-                        .acc-item.open>.acc-hdr .acc-chev{color:#fff;transform:rotate(180deg)}
-                        .acc-chev{transition:transform .25s;color:var(--gray-500);flex-shrink:0}
-                        .acc-body{padding:16px;background:#fff}
-                        .acc-loading{text-align:center;padding:24px;color:var(--gray-400);font-size:14px}
-                        .acc-names-section{border:1px solid var(--gray-200);border-radius:10px;overflow:hidden;padding:0}
-                        .acc-names-header{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;background:var(--gray-50);font-weight:600;font-size:15px}
-                    </style>
 
                     <div class="acc-container" id="acc-container-${prospect.id}">
 
@@ -12698,50 +12730,34 @@ function _wireLoginBtn() {
                             <div class="acc-body" id="acc-body-personal-${prospect.id}" style="display:none" data-loaded="false"></div>
                         </div>
 
-                        <!-- ③ Name List — always visible, no collapse -->
-                        <div class="acc-names-section" id="section-names">
-                            <div class="acc-names-header">
+                        <!-- ③ Name List -->
+                        <div class="acc-item" id="acc-names-${prospect.id}">
+                            <div class="acc-hdr" onclick="app.toggleAccordion('names',${prospect.id},this.parentElement)">
                                 <span><i class="fas fa-users"></i> Name List</span>
-                                <button class="btn primary btn-sm" onclick="app.openAddNameModal(${prospect.id})"><i class="fas fa-plus"></i> Add Name</button>
+                                <i class="fas fa-chevron-down acc-chev"></i>
                             </div>
-                            <div style="padding:0 16px 16px;">
-                                <table class="name-list-table" style="margin-top:8px">
-                                    <thead><tr><th>Relation</th><th>Name</th><th>DOB</th><th>Actions</th></tr></thead>
-                                    <tbody>
-                                        ${names.length > 0 ? names.map(n => `
-                                            <tr>
-                                                <td>${n.relation}</td>
-                                                <td>${n.full_name}</td>
-                                                <td>${n.date_of_birth || '-'}</td>
-                                                <td>
-                                                    <button class="btn-icon" onclick="app.openAddNameModal(${prospect.id},${n.id})"><i class="fas fa-edit"></i></button>
-                                                    <button class="btn-icon" onclick="app.deleteName(${prospect.id},${n.id})"><i class="fas fa-trash"></i></button>
-                                                </td>
-                                            </tr>`).join('') : '<tr><td colspan="4" style="text-align:center;padding:20px;">No names added.</td></tr>'}
-                                    </tbody>
-                                </table>
-                            </div>
+                            <div class="acc-body" id="acc-body-names-${prospect.id}" style="display:none" data-loaded="false"></div>
                         </div>
 
-                        <!-- ④ Activity History — collapsed -->
+                        <!-- ④ Meet Up History -->
                         <div class="acc-item" id="acc-activity-${prospect.id}">
                             <div class="acc-hdr" onclick="app.toggleAccordion('activity',${prospect.id},this.parentElement)">
-                                <span><i class="fas fa-history"></i> Activity History</span>
+                                <span><i class="fas fa-user-friends"></i> Meet Up History</span>
                                 <i class="fas fa-chevron-down acc-chev"></i>
                             </div>
                             <div class="acc-body" id="acc-body-activity-${prospect.id}" style="display:none" data-loaded="false"></div>
                         </div>
 
-                        <!-- ⑤ Events — collapsed -->
+                        <!-- ⑤ Activities and Events -->
                         <div class="acc-item" id="acc-events-${prospect.id}">
                             <div class="acc-hdr" onclick="app.toggleAccordion('events',${prospect.id},this.parentElement)">
-                                <span><i class="fas fa-calendar-alt"></i> Events</span>
+                                <span><i class="fas fa-calendar-alt"></i> Activities and Events</span>
                                 <i class="fas fa-chevron-down acc-chev"></i>
                             </div>
                             <div class="acc-body" id="acc-body-events-${prospect.id}" style="display:none" data-loaded="false"></div>
                         </div>
 
-                        <!-- ⑥ Notes — collapsed -->
+                        <!-- ⑥ Notes -->
                         <div class="acc-item" id="acc-notes-${prospect.id}">
                             <div class="acc-hdr" onclick="app.toggleAccordion('notes',${prospect.id},this.parentElement)">
                                 <span><i class="fas fa-sticky-note"></i> Notes</span>
@@ -12750,69 +12766,52 @@ function _wireLoginBtn() {
                             <div class="acc-body" id="acc-body-notes-${prospect.id}" style="display:none" data-loaded="false"></div>
                         </div>
 
-                    </div>
-                </div>
-
-                <div class="sidebar-container">
-                    <!-- Protection Section -->
-                    <div class="protection-section" style="border-left-color: var(--${statusColor}); margin-top: 0;">
-                        <h3><i class="fas fa-shield-alt"></i> Protection Period</h3>
-                        <div class="protection-stats">
-                            <div><strong>Responsible Agent:</strong> Michelle Tan (Assigned: ${prospect.cps_assignment_date || '15 Feb 2026'})</div>
-                            <div><strong>Deadline:</strong> ${prospect.protection_deadline || '17 Mar 2026'}</div>
-                            <div style="font-size:18px; color:var(--${statusColor});"><strong>Days Left: ${daysLeft} Days</strong></div>
-                            <div><strong>Status:</strong> 🟢 ${statusLabel}</div>
-                            <div><strong>Inactivity:</strong> 2 days active</div>
-                            <div><strong>Follow-up Rate:</strong> 92%</div>
-                        </div>
-                        <div class="protection-progress">
-                            <div class="fill" style="width: ${Math.min(100, (daysLeft / 30) * 100)}%; background: var(--${statusColor});"></div>
-                        </div>
-                        <div style="display: flex; gap: 12px; margin-top: 16px;">
-                            <button class="btn secondary btn-sm" onclick="app.extendProtection(${prospect.id})">Extend</button>
-                            <button class="btn secondary btn-sm" onclick="app.transferProspect(${prospect.id})">Transfer</button>
-                            <button class="btn secondary btn-sm" onclick="app.reassignProspect(${prospect.id})">Reassign</button>
-                        </div>
-                    </div>
-
-                    <!-- Tags -->
-                    <div class="profile-section" style="margin-top:24px;">
-                        <h2>
-                            <i class="fas fa-tags"></i> Tags
-                            <span class="section-actions">
-                                <button class="btn primary btn-sm" onclick="app.openAddTagModal(${prospect.id})"><i class="fas fa-plus"></i></button>
-                            </span>
-                        </h2>
-                        <div class="tags-container" id="prospect-tags-container">
-                            ${prospect.tags && prospect.tags.length > 0 ? prospect.tags.map(t => `
-                                            <span class="tag ${t.color}">${t.name} <i class="fas fa-times remove" onclick="app.removeTagFromProspect(${prospect.id}, ${t.id})"></i></span>
-                                        `).join('') : '<span>No tags yet</span>'}
-                        </div>
-                    </div>
-
-                    <!-- Potential & Opportunities -->
-                    <div class="profile-section" style="margin-top:24px;">
-                        <h2>
-                            <i class="fas fa-bolt"></i> Potential & Opportunities
-                            <span class="section-actions">
-                                <button class="btn primary btn-sm" onclick="app.openEditPotentialModal(${prospect.id})"><i class="fas fa-edit"></i> Edit</button>
-                            </span>
-                        </h2>
-                        <div class="detail-section" style="margin-bottom:0;">
-                            <div style="margin-bottom: 12px;"><span class="badge ${(prospect.potential_level === 'High' || !prospect.potential_level) ? 'success' : prospect.potential_level === 'Medium' ? 'warning' : 'secondary'}">${prospect.potential_level || 'NOT SET'} POTENTIAL</span></div>
-                            <div class="info-row"><div class="info-label">Close Prob.</div><div class="info-value">${prospect.close_probability || 0}%</div></div>
-                            <div class="progress-bar" style="margin-bottom: 12px;">
-                                <div class="progress-fill" style="width: ${prospect.close_probability || 0}%; background: var(--${(prospect.close_probability || 0) >= 60 ? 'success' : (prospect.close_probability || 0) >= 30 ? 'warning' : 'danger'});"></div>
+                        <!-- ⑦ Protection Period -->
+                        <div class="acc-item" id="acc-protection-${prospect.id}">
+                            <div class="acc-hdr" onclick="app.toggleAccordion('protection',${prospect.id},this.parentElement)">
+                                <span><i class="fas fa-shield-alt"></i> Protection Period</span>
+                                <i class="fas fa-chevron-down acc-chev"></i>
                             </div>
-                            <div class="info-row"><div class="info-label">Est. Value</div><div class="info-value">${prospect.estimated_value_min || prospect.estimated_value_max ? 'RM ' + (prospect.estimated_value_min || 0).toLocaleString() + ' - RM ' + (prospect.estimated_value_max || 0).toLocaleString() : '-'}</div></div>
-                            <div class="info-row"><div class="info-label">Budget</div><div class="info-value">${prospect.budget_range || '-'}</div></div>
-                            <div class="info-row"><div class="info-label">Timeline</div><div class="info-value">${prospect.decision_timeline || '-'}</div></div>
-                            <div class="info-row"><div class="info-label">Decision Maker</div><div class="info-value">${prospect.decision_maker === 'yes' ? 'Yes' : prospect.decision_maker === 'no' ? 'No' : 'Unknown'}</div></div>
-                            ${prospect.pain_points ? `<div class="info-row"><div class="info-label">Pain Points</div><div class="info-value">${prospect.pain_points}</div></div>` : ''}
-                            ${prospect.interests ? `<div class="info-row"><div class="info-label">Interests</div><div class="info-value">${prospect.interests}</div></div>` : ''}
+                            <div class="acc-body" id="acc-body-protection-${prospect.id}" style="display:none" data-loaded="false"></div>
                         </div>
+
+                        <!-- ⑧ Tags -->
+                        <div class="acc-item" id="acc-tags-${prospect.id}">
+                            <div class="acc-hdr" onclick="app.toggleAccordion('tags',${prospect.id},this.parentElement)">
+                                <span><i class="fas fa-tags"></i> Tags</span>
+                                <i class="fas fa-chevron-down acc-chev"></i>
+                            </div>
+                            <div class="acc-body" id="acc-body-tags-${prospect.id}" style="display:none" data-loaded="false"></div>
+                        </div>
+
+                        <!-- ⑨ Potential & Opportunities -->
+                        <div class="acc-item" id="acc-potential-${prospect.id}">
+                            <div class="acc-hdr" onclick="app.toggleAccordion('potential',${prospect.id},this.parentElement)">
+                                <span><i class="fas fa-bolt"></i> Potential &amp; Opportunities</span>
+                                <i class="fas fa-chevron-down acc-chev"></i>
+                            </div>
+                            <div class="acc-body" id="acc-body-potential-${prospect.id}" style="display:none" data-loaded="false"></div>
+                        </div>
+
+                        <!-- ⑩ Next Actions -->
+                        <div class="acc-item" id="acc-nextactions-${prospect.id}">
+                            <div class="acc-hdr" onclick="app.toggleAccordion('nextactions',${prospect.id},this.parentElement)">
+                                <span><i class="fas fa-tasks"></i> Next Actions</span>
+                                <i class="fas fa-chevron-down acc-chev"></i>
+                            </div>
+                            <div class="acc-body" id="acc-body-nextactions-${prospect.id}" style="display:none" data-loaded="false"></div>
+                        </div>
+
+                        <!-- ⑪ Closing Record -->
+                        <div class="acc-item" id="acc-closing-${prospect.id}">
+                            <div class="acc-hdr" onclick="app.toggleAccordion('closing',${prospect.id},this.parentElement)">
+                                <span><i class="fas fa-handshake"></i> Closing Record</span>
+                                <i class="fas fa-chevron-down acc-chev"></i>
+                            </div>
+                            <div class="acc-body" id="acc-body-closing-${prospect.id}" style="display:none" data-loaded="false"></div>
+                        </div>
+
                     </div>
-                </div>
             </div>
         `;
         // Pre-load the Info accordion body (open by default)
@@ -12837,162 +12836,147 @@ function _wireLoginBtn() {
         if (!container || !prospect) return;
 
         if (tab === 'info') {
-            const cpsFormHtml = prospect.cps_form_data ? `
-            <div class="profile-section" style="margin-top:12px;">
-                <h2><i class="fas fa-file-image"></i> CPS Form</h2>
-                <div class="detail-section">
-                    <div class="info-row"><div class="info-label">Uploaded</div><div class="info-value">${prospect.cps_form_date || '-'}</div></div>
-                    <div class="info-row"><div class="info-label">File</div><div class="info-value">${prospect.cps_form_name || 'CPS Form'}</div></div>
-                </div>
+            const cpsHtml = prospect.cps_form_data ? `
+                <div class="pv-sub">CPS Form</div>
+                <div class="pv-row"><span class="pv-lbl">Uploaded</span><span class="pv-val">${prospect.cps_form_date || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">File</span><span class="pv-val">${prospect.cps_form_name || 'CPS Form'}</span></div>
                 ${prospect.cps_form_data.startsWith('data:image') ? `
-                    <div style="margin-top:10px; text-align:center;">
-                        <img src="${prospect.cps_form_data}" alt="CPS Form" style="max-width:100%; max-height:320px; border-radius:8px; border:1px solid var(--border); cursor:pointer;" onclick="window.open(this.src,'_blank')">
-                        <div style="font-size:11px; color:var(--gray-400); margin-top:4px;">Tap to view full size</div>
+                    <div style="margin-top:10px;text-align:center;">
+                        <img src="${prospect.cps_form_data}" alt="CPS Form" style="max-width:100%;max-height:280px;border-radius:8px;border:1px solid var(--border);cursor:pointer;" onclick="window.open(this.src,'_blank')">
+                        <div style="font-size:11px;color:var(--gray-400);margin-top:4px;">Tap to view full size</div>
                     </div>
                 ` : `
-                    <div style="margin-top:10px; text-align:center;">
+                    <div style="margin-top:8px;">
                         <a href="${prospect.cps_form_data}" download="${prospect.cps_form_name || 'cps_form.pdf'}" class="btn secondary btn-sm"><i class="fas fa-download"></i> Download PDF</a>
                     </div>
                 `}
-            </div>` : '';
+            ` : '';
             container.innerHTML = `
-    <div class="profile-grid">
-        <div class="main-content">
-            <div class="profile-section">
-                <h2><i class="fas fa-info-circle"></i> Basic Information</h2>
-                <div class="detail-section">
-                    <div class="info-row"><div class="info-label">Title</div><div class="info-value">${prospect.title || '-'}</div></div>
-                    <div class="info-row"><div class="info-label">Gender</div><div class="info-value">${prospect.gender || '-'}</div></div>
-                    <div class="info-row"><div class="info-label">Nationality</div><div class="info-value">${prospect.nationality || '-'}</div></div>
-                    <div class="info-row"><div class="info-label">Phone</div><div class="info-value">${prospect.phone}</div></div>
-                    <div class="info-row"><div class="info-label">Email</div><div class="info-value">${prospect.email || '-'}</div></div>
-                </div>
-            </div>
-            ${cpsFormHtml}
-            <div class="profile-section">
-                <h2><i class="fas fa-user-shield"></i> Registration & Referral</h2>
-                <div class="detail-section">
-                    <div class="info-row"><div class="info-label">Referrer</div><div class="info-value">${prospect.referred_by || '-'}</div></div>
-                    <div class="info-row"><div class="info-label">Relation</div><div class="info-value">${prospect.referral_relationship || '-'}</div></div>
-                    <div class="info-row"><div class="info-label">Created At</div><div class="info-value">${new Date(prospect.created_at).toLocaleDateString()}</div></div>
-                </div>
-            </div>
-        </div>
-                </div>
-    `;
+                <div class="pv-sub">Contact</div>
+                <div class="pv-row"><span class="pv-lbl">Phone</span><span class="pv-val">${prospect.phone || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Email</span><span class="pv-val">${prospect.email || '-'}</span></div>
+                <div class="pv-sub">Identity</div>
+                <div class="pv-row"><span class="pv-lbl">Title</span><span class="pv-val">${prospect.title || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Gender</span><span class="pv-val">${prospect.gender || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Nationality</span><span class="pv-val">${prospect.nationality || '-'}</span></div>
+                <div class="pv-sub">Registration</div>
+                <div class="pv-row"><span class="pv-lbl">Referrer</span><span class="pv-val">${prospect.referred_by || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Relation</span><span class="pv-val">${prospect.referral_relationship || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Created</span><span class="pv-val">${new Date(prospect.created_at).toLocaleDateString()}</span></div>
+                ${cpsHtml}
+            `;
         }
         else if (tab === 'personal') {
             container.innerHTML = `
-    <div class="profile-grid">
-        <div class="main-content">
-            <div class="profile-section">
-                <h2><i class="fas fa-user"></i> Personal Details</h2>
-                <div class="detail-grid">
-                    <div class="detail-section">
-                        <h3>Birth & Identity</h3>
-                        <div class="info-row"><div class="info-label">Date of Birth</div><div class="info-value">${prospect.date_of_birth || '-'}</div></div>
-                        <div class="info-row"><div class="info-label">Lunar Birth</div><div class="info-value">${prospect.lunar_birth || '-'}</div></div>
-                        <div class="info-row"><div class="info-label">IC Number</div><div class="info-value">${prospect.ic_number || '-'}</div></div>
-                        <div class="info-row"><div class="info-label">Ming Gua</div><div class="info-value"><span class="badge info">${prospect.ming_gua || 'MG4'}</span></div></div>
-                    </div>
-                    <div class="detail-section">
-                        <h3>Work</h3>
-                        <div class="info-row"><div class="info-label">Occupation</div><div class="info-value">${prospect.occupation || '-'}</div></div>
-                        <div class="info-row"><div class="info-label">Company</div><div class="info-value">${prospect.company_name || '-'}</div></div>
-                        <div class="info-row"><div class="info-label">Income Range</div><div class="info-value">${prospect.income_range || '-'}</div></div>
-                    </div>
-                    <div class="detail-section">
-                        <div class="info-row"><div class="info-label">Address</div><div class="info-value">${prospect.address || '-'}</div></div>
-                        <div class="info-row"><div class="info-label">City</div><div class="info-value">${prospect.city || '-'}</div></div>
-                        <div class="info-row"><div class="info-label">State</div><div class="info-value">${prospect.state || '-'}</div></div>
-                        <div class="info-row"><div class="info-label">Postal Code</div><div class="info-value">${prospect.postal_code || '-'}</div></div>
-                    </div>
-                </div>
-            </div>
-        </div>
-                </div>
-    `;
+                <div class="pv-sub">Birth &amp; Identity</div>
+                <div class="pv-row"><span class="pv-lbl">Date of Birth</span><span class="pv-val">${prospect.date_of_birth || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Lunar Birth</span><span class="pv-val">${prospect.lunar_birth || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">IC Number</span><span class="pv-val">${prospect.ic_number || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Ming Gua</span><span class="pv-val"><span class="badge info">${prospect.ming_gua || 'MG4'}</span></span></div>
+                <div class="pv-sub">Employment</div>
+                <div class="pv-row"><span class="pv-lbl">Occupation</span><span class="pv-val">${prospect.occupation || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Company</span><span class="pv-val">${prospect.company_name || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Job Description</span><span class="pv-val">${prospect.job_description || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Title &amp; Role</span><span class="pv-val">${prospect.emp_title_role || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Income Range</span><span class="pv-val">${prospect.income_range || '-'}</span></div>
+                <div class="pv-sub">Own Business</div>
+                <div class="pv-row"><span class="pv-lbl">Own Business?</span><span class="pv-val">${prospect.is_own_business ? '✅ Yes' : (prospect.is_own_business === false ? 'No' : '-')}</span></div>
+                ${prospect.is_own_business ? `
+                <div class="pv-row"><span class="pv-lbl">Business Name</span><span class="pv-val">${prospect.business_name || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Industry</span><span class="pv-val">${prospect.business_industry || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Business Area</span><span class="pv-val">${prospect.business_area || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Customer Title</span><span class="pv-val">${prospect.business_title_role || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Operating Since</span><span class="pv-val">${prospect.business_started || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Company Size</span><span class="pv-val">${prospect.company_size || '-'}</span></div>
+                ` : ''}
+                <div class="pv-sub">Address</div>
+                <div class="pv-row"><span class="pv-lbl">Address</span><span class="pv-val">${prospect.address || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">City</span><span class="pv-val">${prospect.city || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">State</span><span class="pv-val">${prospect.state || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Postal Code</span><span class="pv-val">${prospect.postal_code || '-'}</span></div>
+            `;
         }
         else if (tab === 'names') {
             const names = await AppDataStore.query('names', { prospect_id: prospectId });
             container.innerHTML = `
-    <div class="profile-section">
-                    <h2>
-                        <i class="fas fa-users"></i> Name List
-                        <span class="section-actions">
-                            <button class="btn primary btn-sm" onclick="app.openAddNameModal(${prospect.id})"><i class="fas fa-plus"></i> Add Name</button>
-                        </span>
-                    </h2>
-                    <table class="name-list-table">
-                        <thead>
-                            <tr>
-                                <th>Relation</th>
-                                <th>Name</th>
-                                <th>Date of Birth</th>
-                                <th>Notes</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${names.length > 0 ? names.map(n => `
-                                <tr>
-                                    <td>${n.relation}</td>
-                                    <td>${n.full_name}</td>
-                                    <td>${n.date_of_birth || '-'}</td>
-                                    <td>${n.notes || '-'}</td>
-                                    <td>
-                                        <button class="btn-icon" onclick="app.todo('Edit name')"><i class="fas fa-edit"></i></button>
-                                        <button class="btn-icon" onclick="app.deleteName(${prospect.id}, ${n.id})"><i class="fas fa-trash"></i></button>
-                                    </td>
-                                </tr>
-                            `).join('') : `
-                                <tr><td colspan="5" style="text-align:center; padding:20px;">No names added yet.</td></tr>
-                            `}
-                        </tbody>
-                    </table>
+                <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+                    <button class="btn primary btn-sm" onclick="app.openAddNameModal(${prospect.id})"><i class="fas fa-plus"></i> Add Name</button>
                 </div>
-    `;
+                ${names.length > 0 ? names.map(n => `
+                    <div style="background:var(--gray-50);border-radius:8px;padding:12px;margin-bottom:8px;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                            <span style="font-weight:600;font-size:15px;">${n.full_name}</span>
+                            <div style="display:flex;gap:6px;">
+                                <button class="btn-icon" onclick="app.openAddNameModal(${prospect.id},${n.id})"><i class="fas fa-edit"></i></button>
+                                <button class="btn-icon" onclick="app.deleteName(${prospect.id},${n.id})"><i class="fas fa-trash"></i></button>
+                            </div>
+                        </div>
+                        <div style="font-size:13px;color:var(--gray-600);">
+                            <span style="margin-right:12px;"><i class="fas fa-user-tag" style="color:var(--gray-400);margin-right:4px;"></i>${n.relation}</span>
+                            ${n.date_of_birth ? `<span><i class="fas fa-birthday-cake" style="color:var(--gray-400);margin-right:4px;"></i>${n.date_of_birth}</span>` : ''}
+                        </div>
+                        ${n.notes ? `<div style="font-size:13px;color:var(--gray-500);margin-top:6px;font-style:italic;">${n.notes}</div>` : ''}
+                    </div>
+                `).join('') : '<p style="text-align:center;padding:20px;color:var(--gray-400);">No names added yet.</p>'}
+            `;
         }
         else if (tab === 'activity') {
-            const activities =await  (await AppDataStore.getAll('activities')).filter(a => a.prospect_id == prospectId);
+            const MEETUP_TYPES = ['CPS','FTF','FSA','GR','XG','CALL','EMAIL','WHATSAPP'];
+            const activities = (await AppDataStore.getAll('activities')).filter(a => a.prospect_id == prospectId && MEETUP_TYPES.includes(a.activity_type));
+            const sorted = activities.sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date) || b.id - a.id);
             container.innerHTML = `
-    <div class="profile-section">
-                    <h2>
-                        <i class="fas fa-history"></i> Activity History
-                        <span class="section-actions">
-                            <button class="btn primary btn-sm" onclick="app.openActivityModal('', ${prospect.id})"><i class="fas fa-plus"></i> Add Activity</button>
-                        </span>
-                    </h2>
-                    <div class="history-timeline">
-                        ${activities.length > 0 ? activities.sort((a, b) => b.id - a.id).map(a => `
-                            <div class="history-item">
-                                <div class="history-date">${a.activity_date}</div>
-                                <div class="history-content">
-                                    <h4>${a.activity_type} - ${a.activity_title || 'Meeting'}</h4>
-                                    <p style="font-size:13px; color:var(--gray-500); margin-bottom:4px;">Agent: Michelle Tan ${a.score_value ? `| Score: +${a.score_value}` : ''}</p>
-                                    <p style="font-size:14px; margin-bottom:8px;">${a.summary || a.location_address || ''}</p>
-                                    <button class="btn btn-sm secondary" onclick="app.viewActivityDetails(${a.id})">View Details</button>
-                                </div>
-                            </div>
-                        `).join('') : `
-                            <p style="text-align:center; padding:20px;">No activity history.</p>
-                        `}
-                    </div>
+                <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+                    <button class="btn primary btn-sm" onclick="app.openActivityModal('', ${prospect.id})"><i class="fas fa-plus"></i> Add Meet Up</button>
                 </div>
-    `;
+                ${sorted.length > 0 ? sorted.map(a => `
+                    <div class="meet-card">
+                        <div class="meet-card-hdr">
+                            <div>
+                                <span class="meet-type"><i class="fas fa-user-friends"></i> ${a.activity_type || 'Meeting'}${a.activity_title ? ' — ' + a.activity_title : ''}</span>
+                                ${a.co_agents && a.co_agents.length > 0 ? `<span style="font-size:11px;color:var(--gray-500);margin-top:2px;display:block;"><i class="fas fa-user-plus"></i> ${a.co_agents.map(c => c.name || c.full_name).join(', ')}</span>` : ''}
+                                <span class="meet-date">${a.activity_date || ''}</span>
+                            </div>
+                            <button class="btn btn-sm secondary" style="font-size:12px;padding:4px 8px;" onclick="event.stopPropagation();app.viewActivityDetails(${a.id})">Details</button>
+                        </div>
+                        ${(a.core_problem || a.summary) ? `
+                        <div class="meet-section">
+                            <div class="meet-lbl">Core Problem</div>
+                            <div class="meet-txt">${a.core_problem || a.summary}</div>
+                        </div>` : ''}
+                        ${a.opportunity_potential ? `
+                        <div class="meet-section">
+                            <div class="meet-lbl">Opportunity Potential</div>
+                            <div class="meet-txt">${a.opportunity_potential}</div>
+                        </div>` : ''}
+                        ${a.next_action ? `
+                        <div class="meet-section">
+                            <div class="meet-lbl">Next Action</div>
+                            <div class="meet-txt" style="color:var(--primary);font-weight:500;">${a.next_action}</div>
+                        </div>` : ''}
+                        ${a.score_value ? `<div style="margin-bottom:6px;"><span class="badge success" style="font-size:11px;">+${a.score_value} pts</span></div>` : ''}
+                        <div class="meet-actions">
+                            <button class="btn btn-sm secondary" onclick="event.stopPropagation();app.attachActivityPhoto(${a.id})"><i class="fas fa-camera"></i> Photo</button>
+                            ${a.is_closed ? `<span class="badge success" style="align-self:center;font-size:12px;"><i class="fas fa-handshake"></i> Sale Closed</span>` : `<button class="btn btn-sm primary" onclick="event.stopPropagation();app.recordSalesClosure(${prospect.id},${a.id})"><i class="fas fa-handshake"></i> Close Sale</button>`}
+                        </div>
+                        ${a.photo_urls && a.photo_urls.length > 0 ? `
+                        <div class="meet-photos">
+                            ${a.photo_urls.map(url => `<img src="${url}" onclick="window.open('${url}','_blank')" style="height:60px;border-radius:4px;cursor:pointer;object-fit:cover;">`).join('')}
+                        </div>` : ''}
+                    </div>
+                `).join('') : '<p style="text-align:center;padding:20px;color:var(--gray-400);">No meet up history recorded yet.</p>'}
+            `;
         }
         else if (tab === 'notes') {
             const notes = await AppDataStore.query('notes', { prospect_id: prospectId });
             container.innerHTML = `
-    <div class="profile-section" style="margin-bottom: 24px;">
-                <h2><i class="fas fa-sticky-note"></i> Notes</h2>
-                    <div class="add-note-section">
-                        <textarea id="new-note-text" class="form-control" rows="3" placeholder="Add a new note..."></textarea>
-                        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
-                            <button class="btn-icon" onclick="app.openVoiceRecorder('new-note-text', 'prospect', ${prospect.id})" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
-                            <button class="btn primary btn-sm" onclick="app.addNote(${prospect.id})">Add Note</button>
-                        </div>
+                <div class="add-note-section">
+                    <textarea id="new-note-text" class="form-control" rows="3" placeholder="Add a new note..."></textarea>
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
+                        <button class="btn-icon" onclick="app.openVoiceRecorder('new-note-text', 'prospect', ${prospect.id})" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+                        <button class="btn primary btn-sm" onclick="app.addNote(${prospect.id})">Add Note</button>
                     </div>
+                </div>
+                <div style="margin-top:16px;">
                     ${notes.length > 0 ? notes.map(n => `
                         <div class="notes-item">
                             <div class="notes-header">
@@ -13001,37 +12985,310 @@ function _wireLoginBtn() {
                             </div>
                             <div>"${n.text}"</div>
                         </div>
-                    `).join('') : ''
-                }
+                    `).join('') : '<p style="text-align:center;padding:20px;color:var(--gray-400);">No notes yet.</p>'}
                 </div>
-
-    <div class="profile-section">
-        <h2>
-            <i class="fas fa-folder"></i> Documents
-            <span class="section-actions">
-                <button class="btn primary btn-sm" onclick="app.todo('Upload document')"><i class="fas fa-upload"></i> Upload</button>
-            </span>
-        </h2>
-        <p style="text-align:center; padding:20px; color:var(--gray-500);">No documents uploaded.</p>
-    </div>
-`;
+                <div style="margin-top:16px;border-top:1px solid var(--gray-200);padding-top:16px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                        <span style="font-weight:600;font-size:14px;"><i class="fas fa-folder"></i> Documents</span>
+                        <button class="btn primary btn-sm" onclick="app.todo('Upload document')"><i class="fas fa-upload"></i> Upload</button>
+                    </div>
+                    <p style="text-align:center;padding:16px;color:var(--gray-400);">No documents uploaded.</p>
+                </div>
+            `;
         }
         else if (tab === 'events') {
-            const registrations =await  (await AppDataStore.getAll('event_registrations')).filter(
+            const EVENT_TYPES = ['EVENT','AGENT_MEETING','AGENT_TRAINING','SITE'];
+            const activityEvents = (await AppDataStore.getAll('activities')).filter(
+                a => a.prospect_id == prospectId && EVENT_TYPES.includes(a.activity_type)
+            ).sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
+
+            const registrations = (await AppDataStore.getAll('event_registrations')).filter(
                 r => r.attendee_type === 'prospect' && r.attendee_id == prospectId
             );
-            let html = '<h2>Events Attended</h2>';
-            if (registrations.length === 0) {
-                html += '<p>No events attended.</p>';
+
+            const typeIcon = { EVENT: 'fa-calendar-star', AGENT_MEETING: 'fa-handshake', AGENT_TRAINING: 'fa-graduation-cap', SITE: 'fa-map-marker-alt' };
+            const typeLabel = { EVENT: 'Event', AGENT_MEETING: 'Agent Meeting', AGENT_TRAINING: 'Training', SITE: 'Site Visit' };
+
+            if (activityEvents.length === 0 && registrations.length === 0) {
+                container.innerHTML = '<p style="text-align:center;padding:20px;color:var(--gray-400);">No activities or events recorded yet.</p>';
             } else {
-                html += '<table class="events-table"><thead><tr><th>Event</th><th>Date</th><th>Status</th><th>Points</th></tr></thead><tbody>';
-                for (const r of registrations) {
-                    const event = await AppDataStore.getById('events', r.event_id);
-                    html += `<tr><td>${event?.title || 'Unknown'}</td><td>${r.event_date || '-'}</td><td>${r.attendance_status}</td><td>${r.points_awarded || 0}</td></tr> `;
+                let html = `<div style="display:flex;justify-content:flex-end;margin-bottom:12px;"><button class="btn primary btn-sm" onclick="app.openActivityModal('', ${prospect.id})"><i class="fas fa-plus"></i> Add Activity</button></div>`;
+                for (const a of activityEvents) {
+                    const icon = typeIcon[a.activity_type] || 'fa-calendar';
+                    const label = typeLabel[a.activity_type] || a.activity_type;
+                    html += `
+                        <div class="meet-card" style="margin-bottom:10px;">
+                            <div class="meet-card-hdr">
+                                <div>
+                                    <span class="meet-type"><i class="fas ${icon}"></i> ${label}${a.activity_title ? ' — ' + a.activity_title : ''}</span>
+                                    <span class="meet-date">${a.activity_date || ''}</span>
+                                </div>
+                                <button class="btn btn-sm secondary" style="font-size:12px;padding:4px 8px;" onclick="event.stopPropagation();app.viewActivityDetails(${a.id})">Details</button>
+                            </div>
+                            ${a.summary || a.note_key_points ? `<div class="meet-section"><div class="meet-lbl">Notes</div><div class="meet-txt">${a.summary || a.note_key_points}</div></div>` : ''}
+                            ${a.location_address ? `<div class="meet-section"><div class="meet-lbl">Location</div><div class="meet-txt">${a.location_address}</div></div>` : ''}
+                            ${a.score_value ? `<div style="margin-bottom:4px;"><span class="badge success" style="font-size:11px;">+${a.score_value} pts</span></div>` : ''}
+                        </div>
+                    `;
                 }
-                html += '</tbody></table>';
+                if (registrations.length > 0) {
+                    html += `<div class="pv-sub" style="margin-top:8px;">Event Registrations</div>`;
+                    html += '<div style="overflow-x:auto;"><table class="events-table" style="width:100%;"><thead><tr><th>Event</th><th>Date</th><th>Status</th><th>Pts</th></tr></thead><tbody>';
+                    for (const r of registrations) {
+                        const ev = await AppDataStore.getById('events', r.event_id);
+                        html += `<tr><td>${ev?.title || 'Unknown'}</td><td>${r.event_date || '-'}</td><td>${r.attendance_status}</td><td>${r.points_awarded || 0}</td></tr>`;
+                    }
+                    html += '</tbody></table></div>';
+                }
+                container.innerHTML = html;
             }
-            container.innerHTML = html;
+        }
+        else if (tab === 'protection') {
+            const daysLeft = calculateProtectionDays(prospect);
+            const protectionStatus = getProtectionStatus(daysLeft);
+            const statusColor = protectionStatus === 'normal' ? 'success' : protectionStatus === 'warning' ? 'secondary' : 'error';
+            const statusLabel = protectionStatus === 'normal' ? 'Normal' : protectionStatus === 'warning' ? 'Expiring Soon' : 'Critical';
+            container.innerHTML = `
+                <div class="pv-row"><span class="pv-lbl">Agent</span><span class="pv-val">Michelle Tan</span></div>
+                <div class="pv-row"><span class="pv-lbl">Assigned</span><span class="pv-val">${prospect.cps_assignment_date || '15 Feb 2026'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Deadline</span><span class="pv-val">${prospect.protection_deadline || '17 Mar 2026'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Days Left</span><span class="pv-val" style="font-size:16px;font-weight:700;color:var(--${statusColor});">${daysLeft} days</span></div>
+                <div class="pv-row"><span class="pv-lbl">Status</span><span class="pv-val">🟢 ${statusLabel}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Follow-up</span><span class="pv-val">92%</span></div>
+                <div class="progress-bar" style="margin:12px 0;">
+                    <div class="progress-fill" style="width:${Math.min(100, (daysLeft / 30) * 100)}%;background:var(--${statusColor});"></div>
+                </div>
+                <div style="display:flex;gap:8px;margin-top:4px;">
+                    <button class="btn secondary btn-sm" style="flex:1;" onclick="app.extendProtection(${prospect.id})">Extend</button>
+                    <button class="btn secondary btn-sm" style="flex:1;" onclick="app.transferProspect(${prospect.id})">Transfer</button>
+                    <button class="btn secondary btn-sm" style="flex:1;" onclick="app.reassignProspect(${prospect.id})">Reassign</button>
+                </div>
+            `;
+        }
+        else if (tab === 'tags') {
+            container.innerHTML = `
+                <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+                    <button class="btn primary btn-sm" onclick="app.openAddTagModal(${prospect.id})"><i class="fas fa-plus"></i> Add Tag</button>
+                </div>
+                <div class="tags-container" id="prospect-tags-container">
+                    ${prospect.tags && prospect.tags.length > 0 ? prospect.tags.map(t => `
+                        <span class="tag ${t.color}">${t.name} <i class="fas fa-times remove" onclick="app.removeTagFromProspect(${prospect.id}, ${t.id})"></i></span>
+                    `).join('') : '<span style="color:var(--gray-400);">No tags yet</span>'}
+                </div>
+            `;
+        }
+        else if (tab === 'potential') {
+            const allActivities = (await AppDataStore.getAll('activities')).filter(a => a.prospect_id == prospectId);
+            const sorted = allActivities.sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
+            const latestWithOpportunity = sorted.find(a => a.opportunity_potential);
+            const latestWithProblem = sorted.find(a => a.core_problem || a.summary);
+            const meetingCount = allActivities.length;
+            container.innerHTML = `
+                <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+                    <button class="btn secondary btn-sm" onclick="app.openEditPotentialModal(${prospect.id})"><i class="fas fa-edit"></i> Edit</button>
+                </div>
+                <div style="margin-bottom:12px;"><span class="badge ${(prospect.potential_level === 'High' || !prospect.potential_level) ? 'success' : prospect.potential_level === 'Medium' ? 'warning' : 'secondary'}">${prospect.potential_level || 'NOT SET'} POTENTIAL</span></div>
+                <div class="pv-row"><span class="pv-lbl">Close Prob.</span><span class="pv-val">${prospect.close_probability || 0}%</span></div>
+                <div class="progress-bar" style="margin-bottom:12px;">
+                    <div class="progress-fill" style="width:${prospect.close_probability || 0}%;background:var(--${(prospect.close_probability || 0) >= 60 ? 'success' : (prospect.close_probability || 0) >= 30 ? 'warning' : 'danger'});"></div>
+                </div>
+                <div class="pv-row"><span class="pv-lbl">Est. Value</span><span class="pv-val">${prospect.estimated_value_min || prospect.estimated_value_max ? 'RM ' + (prospect.estimated_value_min || 0).toLocaleString() + ' – RM ' + (prospect.estimated_value_max || 0).toLocaleString() : '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Budget</span><span class="pv-val">${prospect.budget_range || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Timeline</span><span class="pv-val">${prospect.decision_timeline || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Decision Maker</span><span class="pv-val">${prospect.decision_maker === 'yes' ? 'Yes' : prospect.decision_maker === 'no' ? 'No' : 'Unknown'}</span></div>
+                ${prospect.pain_points ? `<div class="pv-row"><span class="pv-lbl">Pain Points</span><span class="pv-val">${prospect.pain_points}</span></div>` : ''}
+                ${prospect.interests ? `<div class="pv-row"><span class="pv-lbl">Interests</span><span class="pv-val">${prospect.interests}</span></div>` : ''}
+                ${meetingCount > 0 ? `
+                <div class="pv-sub" style="margin-top:8px;">From Meetings (${meetingCount} total)</div>
+                ${latestWithProblem ? `<div class="pv-row"><span class="pv-lbl">Core Problem</span><span class="pv-val">${latestWithProblem.core_problem || latestWithProblem.summary}</span></div>` : ''}
+                ${latestWithOpportunity ? `<div class="pv-row"><span class="pv-lbl">Opportunity</span><span class="pv-val" style="color:var(--primary);font-weight:500;">${latestWithOpportunity.opportunity_potential}</span></div>` : ''}
+                ${allActivities.some(a => a.opportunity_potential) ? `
+                <div style="margin-top:10px;">
+                    <div class="pv-sub">All Opportunities</div>
+                    ${allActivities.filter(a => a.opportunity_potential).map(a => `
+                        <div class="meet-card" style="margin-bottom:8px;">
+                            <div class="meet-lbl">${a.activity_date || ''} — ${a.activity_type || 'Meeting'}</div>
+                            <div style="font-size:13px;margin-top:4px;">${a.opportunity_potential}</div>
+                        </div>
+                    `).join('')}
+                </div>` : ''}
+                ` : ''}
+            `;
+        }
+        else if (tab === 'nextactions') {
+            const activities = (await AppDataStore.getAll('activities')).filter(a => a.prospect_id == prospectId);
+            const withActions = activities.filter(a => a.next_action && a.next_action.trim());
+            if (withActions.length === 0) {
+                container.innerHTML = '<p style="text-align:center;padding:20px;color:var(--gray-400);">No next actions recorded yet. Add actions through 1-on-1 meetings.</p>';
+                return;
+            }
+            const rows = withActions.map(a => {
+                const key = `na_done_${prospectId}_${a.id}`;
+                const isDone = localStorage.getItem(key) === '1';
+                return `
+                    <div class="na-item${isDone ? ' done' : ''}" id="na-item-${a.id}">
+                        <input type="checkbox" class="na-cb" id="na-cb-${a.id}" ${isDone ? 'checked' : ''}
+                            onchange="app.toggleNextAction(${prospectId}, ${a.id}, this.checked)">
+                        <div style="flex:1;">
+                            <div class="na-text" id="na-text-${a.id}">${a.next_action}</div>
+                            <div style="font-size:11px;color:var(--gray-400);margin-top:2px;">${a.activity_date || ''} — ${a.activity_type || 'Meeting'}${a.activity_title ? ' · ' + a.activity_title : ''}</div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            const total = withActions.length;
+            const done = withActions.filter(a => localStorage.getItem(`na_done_${prospectId}_${a.id}`) === '1').length;
+            container.innerHTML = `
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                    <span data-na-count style="font-size:13px;color:var(--gray-500);">${done} of ${total} completed</span>
+                    <div class="progress-bar" style="flex:1;margin:0 12px;height:6px;">
+                        <div class="progress-fill" style="width:${total > 0 ? Math.round((done/total)*100) : 0}%;background:var(--success);transition:width 0.3s;"></div>
+                    </div>
+                    <span style="font-size:13px;font-weight:600;color:var(--success);">${total > 0 ? Math.round((done/total)*100) : 0}%</span>
+                </div>
+                ${rows}
+            `;
+        }
+        else if (tab === 'closing') {
+            const cr = prospect.closing_record || null;
+            const status = cr?.status || 'draft';
+            const isManager = isSystemAdmin(_currentUser) || isMarketingManager(_currentUser);
+            const products = (await AppDataStore.getAll('products')).filter(p => p.is_active !== false);
+            const productOptions = products.length
+                ? products.map(p => `<option value="${p.name}" ${(cr?.product === p.name) ? 'selected' : ''}>${p.name}</option>`).join('')
+                : '<option value="">No products available</option>';
+            if (!cr || status === 'draft') {
+                const d = cr || {};
+                const isPOP = d.payment_method === 'POP';
+                container.innerHTML = `
+                    <div class="cr-status draft" style="margin-bottom:14px;padding:8px 12px;border-radius:8px;background:#fff8e1;border:1px solid #ffc107;color:#856404;font-size:13px;font-weight:600;">
+                        <i class="fas fa-edit"></i> Draft — Fill in details and submit for manager approval
+                    </div>
+                    <div class="pv-sub">Customer Information</div>
+                    <div class="form-group" style="margin-bottom:10px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Full Name</label><input id="cr-full-name" class="form-control" value="${d.full_name || prospect.full_name || ''}" placeholder="Full name"></div>
+                    <div class="form-row" style="display:flex;gap:8px;margin-bottom:10px;">
+                        <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Phone</label><input id="cr-phone" class="form-control" value="${d.phone || prospect.phone || ''}" placeholder="Phone"></div>
+                        <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Email</label><input id="cr-email" class="form-control" value="${d.email || prospect.email || ''}" placeholder="Email"></div>
+                    </div>
+                    <div class="form-row" style="display:flex;gap:8px;margin-bottom:10px;">
+                        <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">IC Number</label><input id="cr-ic" class="form-control" value="${d.ic_number || prospect.ic_number || ''}" placeholder="NRIC/Passport"></div>
+                        <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Date of Birth</label><input id="cr-dob" type="date" class="form-control" value="${d.date_of_birth || prospect.date_of_birth || ''}"></div>
+                    </div>
+                    <div class="form-group" style="margin-bottom:14px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Address</label><textarea id="cr-address" class="form-control" rows="2" placeholder="Full address">${d.address || [prospect.address, prospect.city, prospect.state, prospect.postal_code].filter(Boolean).join(', ') || ''}</textarea></div>
+
+                    <div class="pv-sub">📝 Meeting Outcome</div>
+                    <div class="form-group" style="margin-bottom:10px;">
+                        <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Product/Service Sold</label>
+                        <select id="cr-product" class="form-control">${productOptions}</select>
+                    </div>
+                    <div class="form-row" style="display:flex;gap:8px;margin-bottom:10px;">
+                        <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Amount Closed (RM)</label><input id="cr-amount" type="number" class="form-control" value="${d.sale_amount || ''}" placeholder="0.00"></div>
+                        <div class="form-group" style="flex:1;">
+                            <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Payment Method</label>
+                            <select id="cr-payment-method" class="form-control" onchange="document.getElementById('cr-pop-fields').style.display=this.value==='POP'?'block':'none'">
+                                <option value="Cash" ${d.payment_method==='Cash'?'selected':''}>Cash</option>
+                                <option value="Bank Transfer" ${d.payment_method==='Bank Transfer'?'selected':''}>Bank Transfer</option>
+                                <option value="Credit Card" ${d.payment_method==='Credit Card'?'selected':''}>Credit Card</option>
+                                <option value="Cheque" ${d.payment_method==='Cheque'?'selected':''}>Cheque</option>
+                                <option value="EPP" ${d.payment_method==='EPP'?'selected':''}>EPP</option>
+                                <option value="POP" ${d.payment_method==='POP'?'selected':''}>POP</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div id="cr-pop-fields" style="display:${isPOP?'block':'none'};background:var(--gray-50);padding:12px;border-radius:6px;margin-bottom:10px;">
+                        <div class="form-row" style="display:flex;gap:8px;margin-bottom:8px;">
+                            <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Monthly Amount (RM)</label><input id="cr-pop-monthly" type="number" class="form-control" value="${d.pop_monthly || ''}" placeholder="0.00"></div>
+                            <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Tenure (months)</label><input id="cr-pop-tenure" type="number" class="form-control" value="${d.pop_tenure || ''}" placeholder="12"></div>
+                        </div>
+                        <div class="form-group"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Down Payment (RM)</label><input id="cr-pop-down" type="number" class="form-control" value="${d.pop_down_payment || ''}" placeholder="0.00"></div>
+                    </div>
+                    <div class="form-row" style="display:flex;gap:8px;margin-bottom:10px;">
+                        <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Invoice Number</label><input id="cr-invoice" class="form-control" value="${d.invoice_number || ''}" placeholder="INV-2026-001"></div>
+                        <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Collection Date</label><input id="cr-close-date" type="date" class="form-control" value="${d.closing_date || ''}"></div>
+                    </div>
+                    <div class="form-group" style="margin-bottom:14px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Upload Purchased Invoice</label><input id="cr-invoice-file" type="file" class="form-control" accept="image/png,image/jpeg,application/pdf"></div>
+
+                    <div class="pv-sub">📁 Case Study (Optional)</div>
+                    <div class="form-group" style="margin-bottom:10px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Sales Idea</label><textarea id="cr-sales-idea" class="form-control" rows="2" placeholder="Describe the sales idea...">${d.sales_idea || ''}</textarea></div>
+                    <div class="form-group" style="margin-bottom:10px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Plan Details</label><textarea id="cr-plan-details" class="form-control" rows="2" placeholder="Details of the plan proposed...">${d.plan_details || ''}</textarea></div>
+                    <div class="form-group" style="margin-bottom:14px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Success Story</label><textarea id="cr-success-story" class="form-control" rows="2" placeholder="What made this a success?">${d.success_story || ''}</textarea></div>
+
+                    <div style="display:flex;gap:8px;">
+                        <button class="btn secondary btn-sm" style="flex:1;" onclick="event.stopPropagation();app.saveClosingRecord(${prospect.id})"><i class="fas fa-save"></i> Save Draft</button>
+                        <button class="btn primary btn-sm" style="flex:1;" onclick="event.stopPropagation();app.submitClosingRecord(${prospect.id})"><i class="fas fa-paper-plane"></i> Submit for Approval</button>
+                    </div>
+                `;
+            } else if (status === 'submitted') {
+                const d = cr;
+                const managerButtons = isManager ? `
+                    <div style="display:flex;gap:8px;margin-top:14px;">
+                        <button class="btn primary btn-sm" style="flex:1;" onclick="event.stopPropagation();app.approveClosingRecord(${prospect.id})"><i class="fas fa-check"></i> Approve & Create Customer</button>
+                        <button class="btn danger btn-sm" style="flex:1;" onclick="event.stopPropagation();app.rejectClosingRecord(${prospect.id})"><i class="fas fa-times"></i> Reject</button>
+                    </div>
+                ` : `<p style="text-align:center;color:var(--gray-400);font-size:13px;margin-top:12px;"><i class="fas fa-clock"></i> Awaiting manager review.</p>`;
+                container.innerHTML = `
+                    <div class="cr-status submitted" style="margin-bottom:14px;padding:8px 12px;border-radius:8px;background:#e3f2fd;border:1px solid #2196f3;color:#1565c0;font-size:13px;font-weight:600;">
+                        <i class="fas fa-clock"></i> Submitted — Pending manager approval
+                    </div>
+                    <div class="pv-sub">Customer Information</div>
+                    <div class="pv-row"><span class="pv-lbl">Full Name</span><span class="pv-val">${d.full_name || '-'}</span></div>
+                    <div class="pv-row"><span class="pv-lbl">Phone</span><span class="pv-val">${d.phone || '-'}</span></div>
+                    <div class="pv-row"><span class="pv-lbl">Email</span><span class="pv-val">${d.email || '-'}</span></div>
+                    <div class="pv-row"><span class="pv-lbl">IC Number</span><span class="pv-val">${d.ic_number || '-'}</span></div>
+                    <div class="pv-row"><span class="pv-lbl">Date of Birth</span><span class="pv-val">${d.date_of_birth || '-'}</span></div>
+                    <div class="pv-row"><span class="pv-lbl">Address</span><span class="pv-val">${d.address || '-'}</span></div>
+                    <div class="pv-sub">Meeting Outcome</div>
+                    <div class="pv-row"><span class="pv-lbl">Product/Service</span><span class="pv-val">${d.product || '-'}</span></div>
+                    <div class="pv-row"><span class="pv-lbl">Amount Closed</span><span class="pv-val">${d.sale_amount ? 'RM ' + parseFloat(d.sale_amount).toLocaleString() : '-'}</span></div>
+                    <div class="pv-row"><span class="pv-lbl">Payment Method</span><span class="pv-val">${d.payment_method || '-'}</span></div>
+                    ${d.payment_method === 'POP' ? `
+                    <div class="pv-row"><span class="pv-lbl">Monthly (RM)</span><span class="pv-val">${d.pop_monthly || '-'}</span></div>
+                    <div class="pv-row"><span class="pv-lbl">Tenure</span><span class="pv-val">${d.pop_tenure ? d.pop_tenure + ' months' : '-'}</span></div>
+                    <div class="pv-row"><span class="pv-lbl">Down Payment</span><span class="pv-val">${d.pop_down_payment ? 'RM ' + parseFloat(d.pop_down_payment).toLocaleString() : '-'}</span></div>
+                    ` : ''}
+                    <div class="pv-row"><span class="pv-lbl">Invoice No.</span><span class="pv-val">${d.invoice_number || '-'}</span></div>
+                    <div class="pv-row"><span class="pv-lbl">Collection Date</span><span class="pv-val">${d.closing_date || '-'}</span></div>
+                    ${(d.sales_idea || d.plan_details || d.success_story) ? `
+                    <div class="pv-sub">Case Study</div>
+                    ${d.sales_idea ? `<div class="pv-row"><span class="pv-lbl">Sales Idea</span><span class="pv-val">${d.sales_idea}</span></div>` : ''}
+                    ${d.plan_details ? `<div class="pv-row"><span class="pv-lbl">Plan Details</span><span class="pv-val">${d.plan_details}</span></div>` : ''}
+                    ${d.success_story ? `<div class="pv-row"><span class="pv-lbl">Success Story</span><span class="pv-val">${d.success_story}</span></div>` : ''}
+                    ` : ''}
+                    ${managerButtons}
+                `;
+            } else if (status === 'approved') {
+                const d = cr;
+                container.innerHTML = `
+                    <div class="cr-status approved" style="margin-bottom:14px;padding:8px 12px;border-radius:8px;background:#e8f5e9;border:1px solid #4caf50;color:#2e7d32;font-size:13px;font-weight:600;">
+                        <i class="fas fa-check-circle"></i> Approved — Converted to Customer Profile
+                    </div>
+                    <div class="pv-sub">Customer Information</div>
+                    <div class="pv-row"><span class="pv-lbl">Full Name</span><span class="pv-val">${d.full_name || '-'}</span></div>
+                    <div class="pv-row"><span class="pv-lbl">Phone</span><span class="pv-val">${d.phone || '-'}</span></div>
+                    <div class="pv-row"><span class="pv-lbl">Email</span><span class="pv-val">${d.email || '-'}</span></div>
+                    <div class="pv-row"><span class="pv-lbl">IC Number</span><span class="pv-val">${d.ic_number || '-'}</span></div>
+                    <div class="pv-row"><span class="pv-lbl">Date of Birth</span><span class="pv-val">${d.date_of_birth || '-'}</span></div>
+                    <div class="pv-row"><span class="pv-lbl">Address</span><span class="pv-val">${d.address || '-'}</span></div>
+                    <div class="pv-sub">Meeting Outcome</div>
+                    <div class="pv-row"><span class="pv-lbl">Product/Service</span><span class="pv-val">${d.product || '-'}</span></div>
+                    <div class="pv-row"><span class="pv-lbl">Amount Closed</span><span class="pv-val">${d.sale_amount ? 'RM ' + parseFloat(d.sale_amount).toLocaleString() : '-'}</span></div>
+                    <div class="pv-row"><span class="pv-lbl">Payment Method</span><span class="pv-val">${d.payment_method || '-'}</span></div>
+                    ${d.payment_method === 'POP' ? `
+                    <div class="pv-row"><span class="pv-lbl">Monthly (RM)</span><span class="pv-val">${d.pop_monthly || '-'}</span></div>
+                    <div class="pv-row"><span class="pv-lbl">Tenure</span><span class="pv-val">${d.pop_tenure ? d.pop_tenure + ' months' : '-'}</span></div>
+                    <div class="pv-row"><span class="pv-lbl">Down Payment</span><span class="pv-val">${d.pop_down_payment ? 'RM ' + parseFloat(d.pop_down_payment).toLocaleString() : '-'}</span></div>
+                    ` : ''}
+                    <div class="pv-row"><span class="pv-lbl">Invoice No.</span><span class="pv-val">${d.invoice_number || '-'}</span></div>
+                    <div class="pv-row"><span class="pv-lbl">Collection Date</span><span class="pv-val">${d.closing_date || '-'}</span></div>
+                    ${(d.sales_idea || d.plan_details || d.success_story) ? `
+                    <div class="pv-sub">Case Study</div>
+                    ${d.sales_idea ? `<div class="pv-row"><span class="pv-lbl">Sales Idea</span><span class="pv-val">${d.sales_idea}</span></div>` : ''}
+                    ${d.plan_details ? `<div class="pv-row"><span class="pv-lbl">Plan Details</span><span class="pv-val">${d.plan_details}</span></div>` : ''}
+                    ${d.success_story ? `<div class="pv-row"><span class="pv-lbl">Success Story</span><span class="pv-val">${d.success_story}</span></div>` : ''}
+                    ` : ''}
+                    <p style="font-size:12px;color:var(--gray-400);margin-top:12px;text-align:center;"><i class="fas fa-lock"></i> This record is locked. Customer profile has been created.</p>
+                `;
+            }
         }
     };
 
@@ -13081,6 +13338,131 @@ const deleteNote = async (prospectId, noteId) => {
         await switchProspectTab('notes', prospectId, null, document.getElementById(`acc-body-notes-${prospectId}`));
     });
 };
+
+    const attachActivityPhoto = (activityId) => app.todo('Attach Activity Photo');
+
+    const recordSalesClosure = (prospectId, activityId) => {
+        // Scroll/open the Closing Record accordion
+        const closingItem = document.getElementById(`acc-closing-${prospectId}`);
+        if (closingItem) {
+            if (!closingItem.classList.contains('open')) {
+                const bodyEl = document.getElementById(`acc-body-closing-${prospectId}`);
+                if (bodyEl) {
+                    closingItem.classList.add('open');
+                    bodyEl.style.display = 'block';
+                    if (bodyEl.dataset.loaded === 'false') {
+                        bodyEl.dataset.loaded = 'true';
+                        bodyEl.innerHTML = '<div class="acc-loading"><i class="fas fa-spinner fa-spin"></i> Loading…</div>';
+                        switchProspectTab('closing', prospectId, null, bodyEl);
+                    }
+                }
+            }
+            closingItem.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+        UI.toast.success('Fill in the Closing Record below to record this sale');
+    };
+
+    const toggleNextAction = (prospectId, activityId, isDone) => {
+        const key = `na_done_${prospectId}_${activityId}`;
+        localStorage.setItem(key, isDone ? '1' : '0');
+        const itemEl = document.getElementById(`na-item-${activityId}`);
+        const textEl = document.getElementById(`na-text-${activityId}`);
+        if (itemEl) itemEl.classList.toggle('done', isDone);
+        if (textEl) textEl.style.textDecoration = isDone ? 'line-through' : '';
+        // Update progress bar
+        const container = document.getElementById(`acc-body-nextactions-${prospectId}`);
+        if (container) {
+            const allCbs = container.querySelectorAll('.na-cb');
+            const total = allCbs.length;
+            const done = [...allCbs].filter(cb => cb.checked).length;
+            const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+            const fill = container.querySelector('.progress-fill');
+            const countEl = container.querySelector('[data-na-count]');
+            if (fill) fill.style.width = pct + '%';
+            if (countEl) countEl.textContent = `${done} of ${total} completed`;
+        }
+    };
+
+    const gatherClosingFormData = () => {
+        const paymentMethod = document.getElementById('cr-payment-method')?.value || 'Cash';
+        return {
+            full_name: document.getElementById('cr-full-name')?.value?.trim() || '',
+            phone: document.getElementById('cr-phone')?.value?.trim() || '',
+            email: document.getElementById('cr-email')?.value?.trim() || '',
+            ic_number: document.getElementById('cr-ic')?.value?.trim() || '',
+            date_of_birth: document.getElementById('cr-dob')?.value || '',
+            address: document.getElementById('cr-address')?.value?.trim() || '',
+            product: document.getElementById('cr-product')?.value || '',
+            sale_amount: document.getElementById('cr-amount')?.value || '',
+            payment_method: paymentMethod,
+            pop_monthly: paymentMethod === 'POP' ? (document.getElementById('cr-pop-monthly')?.value || '') : '',
+            pop_tenure: paymentMethod === 'POP' ? (document.getElementById('cr-pop-tenure')?.value || '') : '',
+            pop_down_payment: paymentMethod === 'POP' ? (document.getElementById('cr-pop-down')?.value || '') : '',
+            invoice_number: document.getElementById('cr-invoice')?.value?.trim() || '',
+            closing_date: document.getElementById('cr-close-date')?.value || '',
+            sales_idea: document.getElementById('cr-sales-idea')?.value?.trim() || '',
+            plan_details: document.getElementById('cr-plan-details')?.value?.trim() || '',
+            success_story: document.getElementById('cr-success-story')?.value?.trim() || '',
+        };
+    };
+
+    const saveClosingRecord = async (prospectId) => {
+        const data = gatherClosingFormData();
+        if (!data.full_name) return UI.toast.error('Full name is required');
+        await AppDataStore.update('prospects', prospectId, { closing_record: { ...data, status: 'draft' } });
+        UI.toast.success('Draft saved');
+    };
+
+    const submitClosingRecord = async (prospectId) => {
+        const data = gatherClosingFormData();
+        if (!data.full_name) return UI.toast.error('Full name is required');
+        if (!data.product) return UI.toast.error('Product/service is required');
+        if (!data.sale_amount) return UI.toast.error('Amount closed is required');
+        if (!data.invoice_number) return UI.toast.error('Invoice number is required');
+        await AppDataStore.update('prospects', prospectId, { closing_record: { ...data, status: 'submitted', submitted_at: new Date().toISOString() } });
+        UI.toast.success('Closing record submitted for approval');
+        const bodyEl = document.getElementById(`acc-body-closing-${prospectId}`);
+        if (bodyEl) await switchProspectTab('closing', prospectId, null, bodyEl);
+    };
+
+    const approveClosingRecord = async (prospectId) => {
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect?.closing_record) return UI.toast.error('No closing record found');
+        const cr = prospect.closing_record;
+        // Create customer record from closing data
+        await AppDataStore.create('customers', {
+            id: Date.now(),
+            full_name: cr.full_name,
+            phone: cr.phone,
+            email: cr.email,
+            ic_number: cr.ic_number,
+            date_of_birth: cr.date_of_birth,
+            address: cr.address,
+            lifetime_value: parseFloat(cr.sale_amount) || 0,
+            status: 'active',
+            customer_since: cr.closing_date || new Date().toISOString().split('T')[0],
+            source_prospect_id: prospectId,
+        });
+        await AppDataStore.update('prospects', prospectId, {
+            closing_record: { ...cr, status: 'approved', approved_at: new Date().toISOString() },
+            status: 'converted'
+        });
+        UI.toast.success('Approved! Customer profile created.');
+        const bodyEl = document.getElementById(`acc-body-closing-${prospectId}`);
+        if (bodyEl) await switchProspectTab('closing', prospectId, null, bodyEl);
+    };
+
+    const rejectClosingRecord = async (prospectId) => {
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect?.closing_record) return UI.toast.error('No closing record found');
+        const cr = prospect.closing_record;
+        await AppDataStore.update('prospects', prospectId, {
+            closing_record: { ...cr, status: 'draft', rejected_at: new Date().toISOString() }
+        });
+        UI.toast.success('Record sent back to agent for revision');
+        const bodyEl = document.getElementById(`acc-body-closing-${prospectId}`);
+        if (bodyEl) await switchProspectTab('closing', prospectId, null, bodyEl);
+    };
 
     const openAddCustomerModal = async () => {
         const content = `
@@ -22094,6 +22476,13 @@ const initImportDemoData = async () => {
 
         addNote,
         deleteNote,
+        attachActivityPhoto,
+        recordSalesClosure,
+        toggleNextAction,
+        saveClosingRecord,
+        submitClosingRecord,
+        approveClosingRecord,
+        rejectClosingRecord,
         extendProtection,
         transferProspect,
         reassignProspect,
