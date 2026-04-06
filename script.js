@@ -9063,7 +9063,8 @@ function _wireLoginBtn() {
                         </td>
                         <td>
                             <button class="btn btn-sm secondary" onclick="app.viewActivityDetails(${a.id})">View</button>
-                            <button class="btn btn-sm secondary" onclick="app.postMeetupNotes(${a.id})">post MtUp</button>
+                            <button class="btn btn-sm secondary" onclick="(async()=>{await app.openMeetingOutcomeModal(${a.id});})()">📝 Outcome</button>
+                            <button class="btn btn-sm secondary" onclick="(async()=>{await app.openPostMeetupNotesModal(${a.id},${a.prospect_id || 'null'});})()">📝 Notes</button>
                             <button class="btn btn-sm secondary" onclick="app.editActivity(${a.id})">Edit</button>
                             <button class="btn btn-sm secondary" onclick="app.rescheduleActivity(${a.id})">Reschedule</button>
                             <button class="btn btn-sm secondary" onclick="app.addCoAgentToActivity(${a.id})">+ Add co</button>
@@ -9598,11 +9599,16 @@ function _wireLoginBtn() {
             { label: 'Edit', type: 'secondary', action: `app.editActivityTiming(${activityId})` }
         ];
 
+        modalActions.push({
+            label: '📝 Outcome',
+            type: 'secondary',
+            action: `(async () => { await app.openMeetingOutcomeModal(${activityId}); })()`
+        });
         if (activity.prospect_id) {
             modalActions.push({
-                label: '📝 Post MtUp',
+                label: '📝 Post Notes',
                 type: 'secondary',
-                action: `app.openPostMeetupModal(${activityId}, ${activity.prospect_id})`
+                action: `(async () => { await app.openPostMeetupNotesModal(${activityId}, ${activity.prospect_id}); })()`
             });
         }
 
@@ -9771,6 +9777,189 @@ function _wireLoginBtn() {
                 // Scroll to Potential & Opportunities
                 const potentialEl = document.getElementById(`acc-potential-${prospectId}`);
                 if (potentialEl) potentialEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }, 400);
+        }
+    };
+
+    const openMeetingOutcomeModal = async (activityId) => {
+        const activity = await AppDataStore.getById('activities', activityId) || {};
+        const products = (await AppDataStore.getAll('products')).filter(p => p.is_active !== false);
+        const productOptions = products.map(p => `<option value="${p.name}" ${activity.solution_sold === p.name ? 'selected' : ''}>${p.name}</option>`).join('') || '<option value="">No products available</option>';
+        const content = `
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="mo-is-closing" onchange="document.getElementById('mo-closing-fields').style.display = this.checked ? 'block' : 'none'" ${activity.is_closing ? 'checked' : ''}> Case Closed Well Done!
+                </label>
+            </div>
+            <div id="mo-closing-fields" style="display: ${activity.is_closing ? 'block' : 'none'}; padding-left: 20px;">
+                <div class="form-group">
+                    <label>Product/Service Sold</label>
+                    <select id="mo-solution-sold" class="form-control">${productOptions}</select>
+                </div>
+                <div class="form-row">
+                    <div class="form-group half">
+                        <label>Amount Closed (RM)</label>
+                        <input type="number" id="mo-amount-closed" class="form-control" value="${activity.amount_closed || ''}" placeholder="0.00">
+                    </div>
+                    <div class="form-group half">
+                        <label>Payment Method</label>
+                        <select id="mo-payment-method" class="form-control" onchange="document.getElementById('mo-pop-fields').style.display = this.value === 'POP' ? 'block' : 'none'">
+                            ${['Cash','Bank Transfer','Credit Card','Cheque','POP'].map(m => `<option value="${m}" ${activity.payment_method === m ? 'selected' : ''}>${m}</option>`).join('')}
+                        </select>
+                    </div>
+                </div>
+                <div id="mo-pop-fields" style="display: ${activity.payment_method === 'POP' ? 'block' : 'none'}; background: var(--gray-50); padding: 12px; border-radius: 6px; margin-bottom: 12px;">
+                    <div class="form-row">
+                        <div class="form-group half">
+                            <label>Payment Amount per Month (RM)</label>
+                            <input type="number" id="mo-pop-monthly" class="form-control" value="${activity.pop_monthly_amount || ''}" placeholder="0.00">
+                        </div>
+                        <div class="form-group half">
+                            <label>Tenure (months)</label>
+                            <input type="number" id="mo-pop-tenure" class="form-control" value="${activity.pop_tenure || ''}" placeholder="12">
+                        </div>
+                    </div>
+                    <div class="form-group half">
+                        <label>Down Payment (RM)</label>
+                        <input type="number" id="mo-pop-down" class="form-control" value="${activity.pop_down_payment || ''}" placeholder="0.00">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group half">
+                        <label>Invoice Number</label>
+                        <input type="text" id="mo-invoice-number" class="form-control" value="${activity.invoice_number || ''}" placeholder="INV-2026-001">
+                    </div>
+                    <div class="form-group half">
+                        <label>Collection Date</label>
+                        <input type="date" id="mo-collection-date" class="form-control" value="${activity.collection_date || ''}">
+                    </div>
+                </div>
+            </div>
+            <div class="form-group" style="margin-top:12px;">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="mo-unable-to-serve" onchange="document.getElementById('mo-unable-fields').style.display = this.checked ? 'block' : 'none'" ${activity.unable_to_serve ? 'checked' : ''}> Unable to Serve
+                </label>
+            </div>
+            <div id="mo-unable-fields" style="display: ${activity.unable_to_serve ? 'block' : 'none'}; padding-left: 20px;">
+                <div class="form-group">
+                    <label>Reason</label>
+                    <textarea id="mo-unable-reason" class="form-control" rows="2">${activity.unable_reason || ''}</textarea>
+                </div>
+            </div>
+            <div class="form-group" style="margin-top:12px;">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="mo-continue-follow-up" ${activity.continue_follow_up ? 'checked' : ''}> Continue Follow Up
+                </label>
+            </div>
+        `;
+        UI.showModal('📝 Meeting Outcome', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save', type: 'primary', action: `(async () => { await app.saveMeetingOutcome(${activityId}); })()` }
+        ]);
+    };
+
+    const saveMeetingOutcome = async (activityId) => {
+        const isClosed = document.getElementById('mo-is-closing')?.checked || false;
+        const updates = {
+            is_closing: isClosed,
+            unable_to_serve: document.getElementById('mo-unable-to-serve')?.checked || false,
+            continue_follow_up: document.getElementById('mo-continue-follow-up')?.checked || false,
+        };
+        if (isClosed) {
+            updates.solution_sold = document.getElementById('mo-solution-sold')?.value;
+            updates.amount_closed = document.getElementById('mo-amount-closed')?.value;
+            updates.closing_amount = document.getElementById('mo-amount-closed')?.value;
+            updates.payment_method = document.getElementById('mo-payment-method')?.value;
+            updates.invoice_number = document.getElementById('mo-invoice-number')?.value;
+            updates.collection_date = document.getElementById('mo-collection-date')?.value;
+            if (updates.payment_method === 'POP') {
+                updates.pop_monthly_amount = document.getElementById('mo-pop-monthly')?.value;
+                updates.pop_tenure = document.getElementById('mo-pop-tenure')?.value;
+                updates.pop_down_payment = document.getElementById('mo-pop-down')?.value;
+            }
+        }
+        if (updates.unable_to_serve) {
+            updates.unable_reason = document.getElementById('mo-unable-reason')?.value;
+        }
+        await AppDataStore.update('activities', activityId, updates);
+        UI.hideModal();
+        UI.toast.success('Meeting outcome saved');
+        if (document.querySelector('.calendar-view-container')) { await renderCalendar(); await renderTodayActivities(); }
+    };
+
+    const openPostMeetupNotesModal = async (activityId, prospectId) => {
+        const activity = await AppDataStore.getById('activities', activityId) || {};
+        const content = `
+            <div class="form-group">
+                <label>Key Points Discussed:</label>
+                <div style="display:flex; gap:8px;">
+                    <textarea id="pmn-key-points" class="form-control" rows="2" placeholder="Main discussion points...">${activity.note_key_points || ''}</textarea>
+                    <button class="btn-icon" onclick="app.openVoiceRecorder('pmn-key-points', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Outcome:</label>
+                <div style="display:flex; gap:8px;">
+                    <textarea id="pmn-outcome" class="form-control" rows="2" placeholder="What was the result?">${activity.note_outcome || ''}</textarea>
+                    <button class="btn-icon" onclick="app.openVoiceRecorder('pmn-outcome', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Next Steps:</label>
+                <div style="display:flex; gap:8px;">
+                    <textarea id="pmn-next-steps" class="form-control" rows="2" placeholder="Action items...">${activity.note_next_steps || ''}</textarea>
+                    <button class="btn-icon" onclick="app.openVoiceRecorder('pmn-next-steps', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Customer Needs/Interests:</label>
+                <div style="display:flex; gap:8px;">
+                    <textarea id="pmn-needs" class="form-control" rows="2" placeholder="What are they looking for?">${activity.note_needs || ''}</textarea>
+                    <button class="btn-icon" onclick="app.openVoiceRecorder('pmn-needs', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Pain Points:</label>
+                <div style="display:flex; gap:8px;">
+                    <textarea id="pmn-pain-points" class="form-control" rows="2" placeholder="Dislikes or problems to solve...">${activity.note_pain_points || ''}</textarea>
+                    <button class="btn-icon" onclick="app.openVoiceRecorder('pmn-pain-points', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+                </div>
+            </div>
+        `;
+        UI.showModal('📝 Post-Meetup Notes', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save', type: 'primary', action: `(async () => { await app.savePostMeetupNotes(${activityId}, ${prospectId}); })()` }
+        ]);
+    };
+
+    const savePostMeetupNotes = async (activityId, prospectId) => {
+        const updates = {
+            note_key_points: document.getElementById('pmn-key-points')?.value || '',
+            summary: document.getElementById('pmn-key-points')?.value || '',
+            note_outcome: document.getElementById('pmn-outcome')?.value || '',
+            note_next_steps: document.getElementById('pmn-next-steps')?.value || '',
+            note_needs: document.getElementById('pmn-needs')?.value || '',
+            note_pain_points: document.getElementById('pmn-pain-points')?.value || '',
+        };
+        await AppDataStore.update('activities', activityId, updates);
+        UI.hideModal();
+        UI.toast.success('Post-meetup notes saved');
+        if (prospectId) {
+            await showProspectDetail(prospectId);
+            setTimeout(async () => {
+                for (const tab of ['potential', 'nextactions']) {
+                    const itemEl = document.getElementById(`acc-${tab}-${prospectId}`);
+                    const bodyEl = document.getElementById(`acc-body-${tab}-${prospectId}`);
+                    if (itemEl && bodyEl && !itemEl.classList.contains('open')) {
+                        itemEl.classList.add('open');
+                        bodyEl.style.display = 'block';
+                        if (bodyEl.dataset.loaded === 'false') {
+                            bodyEl.dataset.loaded = 'true';
+                            await switchProspectTab(tab, prospectId, null, bodyEl);
+                        }
+                    }
+                }
+                document.getElementById(`acc-potential-${prospectId}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }, 400);
         }
     };
@@ -10045,7 +10234,7 @@ function _wireLoginBtn() {
                     </div>
                 </div>
                 
-                <div class="form-section">
+                <div class="form-section" style="display:none">
                     <h4>📝 Meeting Outcome</h4>
                     <div class="form-group">
                         <label class="checkbox-label">
@@ -10146,7 +10335,7 @@ function _wireLoginBtn() {
                     </div>
                 </div>
 
-                <div class="form-section">
+                <div class="form-section" style="display:none">
                     <h4>📝 Post-Meetup Notes</h4>
                     <div class="form-group">
                         <label>Key Points Discussed:</label>
@@ -23163,6 +23352,10 @@ const initImportDemoData = async () => {
         saveActivityTiming,
         openPostMeetupModal,
         savePostMeetup,
+        openMeetingOutcomeModal,
+        saveMeetingOutcome,
+        openPostMeetupNotesModal,
+        savePostMeetupNotes,
         editActivity,
         deleteActivity,
         confirmDeleteActivity,
