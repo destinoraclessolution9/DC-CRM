@@ -18467,18 +18467,22 @@ const exportKPIReport = async (format) => {
             if (!data.package_name) return UI.toast.error('Package Name is required');
         }
 
-        if (id) {
-            await AppDataStore.update(type, id, data);
-            UI.toast.success('Record updated successfully');
-        } else {
-            data.created_by = _currentUser ? _currentUser.id : null;
-            await AppDataStore.create(type, data);
-            UI.toast.success('Record added successfully');
+        try {
+            if (id) {
+                await AppDataStore.update(type, id, data);
+                UI.toast.success('Record updated successfully');
+            } else {
+                data.created_by = _currentUser ? _currentUser.id : null;
+                await AppDataStore.create(type, data);
+                UI.toast.success('Record added successfully');
+            }
+            UI.hideModal();
+            const viewport = document.getElementById('content-viewport');
+            await showMarketingListsView(viewport);
+        } catch (err) {
+            console.error('saveMarketingListItem error:', err);
+            UI.toast.error('Save failed: ' + (err.message || err));
         }
-
-        UI.hideModal();
-        const viewport = document.getElementById('content-viewport');
-        await showMarketingListsView(viewport);
     };
 
     const deleteMarketingListItem = async (id) => {
