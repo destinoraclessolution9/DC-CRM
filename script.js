@@ -18586,6 +18586,7 @@ const exportKPIReport = async (format) => {
                     <div style="text-align:center;padding:60px 20px;color:var(--gray-400);">
                         <i class="fas fa-tags" style="font-size:40px;margin-bottom:12px;display:block;"></i>
                         <p>No active promotions at the moment.</p>
+                        ${allPromos.length > 0 ? `<p style="font-size:12px;color:var(--gray-400);margin-top:8px;">(${allPromos.length} package(s) found but hidden — check Active status, End Date, or Visible To settings)</p>` : '<p style="font-size:12px;color:var(--gray-400);margin-top:8px;">No packages have been created yet. Go to Marketing Lists → Promotion Packages to create one.</p>'}
                     </div>
                 ` : `
                     <div style="display:grid;gap:16px;">
