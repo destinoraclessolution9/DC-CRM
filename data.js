@@ -101,8 +101,13 @@ class DataStore {
         }
     }
 
-    // Returns the write client (service-role if available, otherwise anon).
+    // Returns the service-role client if available, otherwise anon.
+    // Used for both reads and writes so Supabase RLS never blocks shared CRM data.
     _writeClient() {
+        return this._srClient || window.supabase;
+    }
+
+    _readClient() {
         return this._srClient || window.supabase;
     }
 
@@ -112,7 +117,7 @@ class DataStore {
 
     async getAll(tableName) {
         try {
-            const { data, error } = await window.supabase.from(tableName).select('*');
+            const { data, error } = await this._readClient().from(tableName).select('*');
             if (error) throw error;
             const result = data || [];
             // Supabase is authoritative — overwrite localStorage so deleted records
@@ -129,7 +134,7 @@ class DataStore {
     async get(tableName, id) {
         if (id == null || id === 'null' || id === 'undefined') return null;
         try {
-            const { data, error } = await window.supabase
+            const { data, error } = await this._readClient()
                 .from(tableName)
                 .select('*')
                 .eq('id', id)
@@ -252,7 +257,7 @@ class DataStore {
 
     async query(tableName, filters = {}) {
         try {
-            let q = window.supabase.from(tableName).select('*');
+            let q = this._readClient().from(tableName).select('*');
             for (const [key, value] of Object.entries(filters)) {
                 if (value == null || value === 'null' || value === 'undefined') continue;
                 q = q.eq(key, value);
