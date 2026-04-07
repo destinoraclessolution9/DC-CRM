@@ -42,7 +42,7 @@ const appLogic = (() => {
     let _filters = { agent: 'all', type: 'all', from: '', to: '' };
 
     // ========== ROLE HELPERS ==========
-    const isSystemAdmin = (user) => user?.role === 'super_admin' || user?.role?.includes('Level 1');
+    const isSystemAdmin = (user) => user?.role === 'super_admin' || user?.role === 'admin' || user?.role?.includes('Level 1');
     const isMarketingManager = (user) => user?.role === 'marketing_manager' || user?.role?.includes('Level 2');
     const isAgent = (user) => user?.role === 'consultant' || user?.role === 'agent' || user?.role?.includes('Level');
     const isManagement = (user) => isSystemAdmin(user) || isMarketingManager(user) || user?.role?.includes('Level 3');
