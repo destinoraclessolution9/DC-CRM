@@ -18448,7 +18448,7 @@ const exportKPIReport = async (format) => {
                     <tbody>
                         ${data.map(item => `
                             <tr style="${!item.is_active ? 'opacity: 0.6; background: #f9fafb;' : ''}">
-                                <td><strong>${item.title}</strong><br><small class="text-muted">${item.description || ''}</small></td>
+                                <td><strong>${item.event_title || item.title || ''}</strong><br><small class="text-muted">${item.description || ''}</small></td>
                                 <td>${item.ticket_price || 0}</td>
                                 <td>${item.duration || '-'}</td>
                                 <td>${item.target_group || '-'}</td>
@@ -18567,7 +18567,7 @@ const exportKPIReport = async (format) => {
             `;
         } else if (type === 'events') {
             content = `
-                <div class="form-group"><label>Title*</label><input type="text" id="mkt-title" class="form-control" value="${item.title}"></div>
+                <div class="form-group"><label>Title*</label><input type="text" id="mkt-title" class="form-control" value="${item.event_title || item.title || ''}"></div>
                 <div class="form-group"><label>Ticket Price (RM)</label><input type="number" id="mkt-price" class="form-control" value="${item.ticket_price || 0}"></div>
                 <div class="form-group"><label>Early Bird Price (RM)</label><input type="text" id="mkt-early-bird-price" class="form-control" value="${item.early_bird_price || ''}" placeholder="e.g. 199"></div>
                 <div class="form-group"><label>Group Purchase Price (RM)</label><input type="text" id="mkt-group-price" class="form-control" value="${item.group_purchase_price || ''}" placeholder="e.g. 299 (min 5 pax)"></div>
@@ -18629,7 +18629,7 @@ const exportKPIReport = async (format) => {
             data.delivery_lead_time = document.getElementById('mkt-lead').value;
             if (!data.name) return UI.toast.error('Name is required');
         } else if (type === 'events') {
-            data.title = document.getElementById('mkt-title').value.trim();
+            data.event_title = document.getElementById('mkt-title').value.trim();
             data.ticket_price = parseFloat(document.getElementById('mkt-price').value) || 0;
             data.early_bird_price = document.getElementById('mkt-early-bird-price').value;
             data.group_purchase_price = document.getElementById('mkt-group-price').value;
@@ -18638,7 +18638,7 @@ const exportKPIReport = async (format) => {
             data.location = document.getElementById('mkt-location').value;
             data.speaker = document.getElementById('mkt-speaker').value;
             data.description = document.getElementById('mkt-desc').value;
-            if (!data.title) return UI.toast.error('Title is required');
+            if (!data.event_title) return UI.toast.error('Title is required');
         } else {
             data.package_name = document.getElementById('mkt-pkname').value.trim();
             data.price = parseFloat(document.getElementById('mkt-price').value) || 0;
