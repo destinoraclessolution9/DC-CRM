@@ -212,12 +212,20 @@ const appLogic = (() => {
     // Similar for customers, activities, etc. – you can add as needed.
 
     const canViewNode = async (personId, personType) => {
-    if (personType === 'prospect') {
-        return await canViewProspect({ id: personId });
-    } else if (personType === 'customer') {
-        return await canViewCustomer({ id: personId });
-    }
-    return false;
+        const lvlMatch = _currentUser?.role?.match(/Level\s+(\d+)/i);
+        const level = lvlMatch ? parseInt(lvlMatch[1]) : 10;
+        // Level 1-2: Super Admin / Marketing Manager — can view every node
+        if (level <= 2) return true;
+        // 'user' type: only the agent themselves can be a root node for Level 3+
+        if (personType === 'user') {
+            return String(personId) === String(_currentUser?.id);
+        }
+        if (personType === 'prospect') {
+            return await canViewProspect({ id: personId });
+        } else if (personType === 'customer') {
+            return await canViewCustomer({ id: personId });
+        }
+        return false;
     };
 
     // ========== HELPER FUNCTIONS ==========
@@ -7187,31 +7195,13 @@ function _wireLoginBtn() {
 
         await renderReferralSummaryAndLeaderboard();
 
-        // Determine initial root for lower roles
+        // Determine initial tree root based on role level
         const user = _currentUser;
         if (user) {
-            const role = user.role?.toLowerCase();
-            const lowerRoles = ['consultant', 'junior_consultant', 'senior_consultant', 'agent', 'junior_agent', 'senior_agent'];
-            if (lowerRoles.includes(role)) {
-                // Show their own tree if they have any downline, else show placeholder
-                const rootPerson = await AppDataStore.getById('customers', user.id) || await AppDataStore.getById('prospects', user.id);
-                if (rootPerson) {
-                    await app.showReferralTree(rootPerson.id, rootPerson.id in await AppDataStore.getAll('customers') ? 'customer' : 'prospect');
-                } else {
-                    // Show placeholder – no data
-                    const ph = document.getElementById('referral-tree-placeholder');
-                    if (ph) {
-                        ph.style.display = 'flex';
-                        ph.innerHTML = `
-                            <i class="fas fa-user"></i>
-                            <p>You don't have any downline yet. Add a referral to start building your network.</p>
-                        `;
-                    }
-                    const svg = document.getElementById('referral-tree-svg');
-                    if (svg) svg.style.display = 'none';
-                }
-            } else {
-                // For higher roles, show a message to search
+            const lvlMatch = user.role?.match(/Level\s+(\d+)/i);
+            const level = lvlMatch ? parseInt(lvlMatch[1]) : 10;
+            if (level <= 2) {
+                // Level 1-2 (Super Admin / Marketing Manager): show search prompt — they can view anyone
                 const ph = document.getElementById('referral-tree-placeholder');
                 if (ph) {
                     ph.style.display = 'flex';
@@ -7222,6 +7212,9 @@ function _wireLoginBtn() {
                 }
                 const svg = document.getElementById('referral-tree-svg');
                 if (svg) svg.style.display = 'none';
+            } else {
+                // Level 3+: agent is first node — auto-load their own tree from themselves
+                await app.showReferralTree(user.id, 'user');
             }
         }
     };
@@ -7253,7 +7246,7 @@ function _wireLoginBtn() {
             .sort((a, b) => b[1] - a[1])
             .slice(0, 3)
             .map(async ([id, count]) => {
-                const person = await AppDataStore.getById('customers', id) || await AppDataStore.getById('prospects', id);
+                const person = await AppDataStore.getById('customers', id) || await AppDataStore.getById('prospects', id) || await AppDataStore.getById('users', id);
                 return { name: person?.full_name || `ID: ${id}`, count };
             });
         const top3 = await Promise.all(top3Promises);
@@ -7309,13 +7302,15 @@ function _wireLoginBtn() {
 
         const leaderboardItems = await Promise.all(sorted.map(async (item, idx) => {
             if (hiddenIds.includes(String(item.id))) return '';
-            const person = await AppDataStore.getById('customers', item.id) || await AppDataStore.getById('prospects', item.id);
+            const person = await AppDataStore.getById('customers', item.id) || await AppDataStore.getById('prospects', item.id) || await AppDataStore.getById('users', item.id);
             if (!person) return '';
             return `
                 <tr class="rank-${idx + 1}">
                     <td class="rank-cell">${idx + 1}</td>
-                    <td class="name-cell" onclick="app.showReferralTree(${item.id}, '${item.type}')">
-                        ${person.full_name} ${item.type === 'customer' ? '<span class="badge" style="background:#dcfce7; color:#166534">C</span>' : ''}
+                    <td class="name-cell" onclick="app.showReferralTree(${item.id}, '${item.type || 'prospect'}')">
+                        ${person.full_name}
+                        ${item.type === 'customer' ? '<span class="badge" style="background:#dcfce7; color:#166534">C</span>' : ''}
+                        ${item.type === 'user' ? '<span class="badge" style="background:#dbeafe; color:#1e40af">Agent</span>' : ''}
                     </td>
                     <td>${item.count}</td>
                     <td><span style="color:#10b981; font-weight:600">${item.converted}</span></td>
@@ -7455,7 +7450,12 @@ function _wireLoginBtn() {
     };
 
     const buildTreeData = async (rootId, rootType) => {
-        const person = await AppDataStore.getById(rootType === 'customer' ? 'customers' : 'prospects', rootId);
+        let person;
+        if (rootType === 'user') {
+            person = await AppDataStore.getById('users', rootId);
+        } else {
+            person = await AppDataStore.getById(rootType === 'customer' ? 'customers' : 'prospects', rootId);
+        }
         if (!person || !await canViewNode(rootId, rootType)) return null;
 
         const node = {
@@ -7552,6 +7552,8 @@ function _wireLoginBtn() {
         for (const d of nodesData) {
             if (d.data.type === 'customer') {
                 d.fillColor = '#ffffff';
+            } else if (d.data.type === 'user') {
+                d.fillColor = '#1e40af'; // Dark blue — agent/consultant root node
             } else {
                 d.fillColor = await getProspectColour(d.data.id);
             }
@@ -7583,7 +7585,7 @@ function _wireLoginBtn() {
             .attr("y", -22)
             .attr("rx", 6)
             .attr("fill", d => d.fillColor)
-            .attr("stroke", d => d.data.type === 'customer' ? '#0d9488' : 'none')
+            .attr("stroke", d => d.data.type === 'customer' ? '#0d9488' : d.data.type === 'user' ? '#93c5fd' : 'none')
             .attr("stroke-width", 2)
             .style("filter", "drop-shadow(0 2px 4px rgba(0,0,0,0.05))");
 
@@ -7594,7 +7596,7 @@ function _wireLoginBtn() {
             .attr("fill", d => d.data.type === 'customer' ? '#0d9488' : '#ffffff')
             .style("font-family", '"Font Awesome 5 Free"')
             .style("font-weight", "900")
-            .text(d => d.data.type === 'customer' ? "\uf0b1" : "\uf007"); // Briefcase vs User
+            .text(d => d.data.type === 'customer' ? "\uf0b1" : d.data.type === 'user' ? "\uf505" : "\uf007"); // Briefcase / user-tie / User
 
         // Name
         nodes.append("text")
@@ -7611,7 +7613,7 @@ function _wireLoginBtn() {
             .attr("y", 12)
             .attr("fill", d => d.data.type === 'customer' ? '#6b7280' : 'rgba(255,255,255,0.8)')
             .style("font-size", "9px")
-            .text(d => d.data.type.toUpperCase());
+            .text(d => d.data.type === 'user' ? 'AGENT' : d.data.type.toUpperCase());
 
         // Memo Button
         nodes.append("text")
@@ -11446,9 +11448,9 @@ function _wireLoginBtn() {
             const relation = document.getElementById('cps-relation')?.value;
             const referrerInputName = document.getElementById('cps-referrer')?.value.trim();
 
-            // Strict Validation: If name typed but not selected from list (matching FTF logic)
-            if (referrerInputName && !_selectedReferrer) {
-                UI.toast.error('Please select a referrer from the list. If the referrer is not found, create them as a prospect/customer/agent first.');
+            // All CPS must have a referrer — business runs by recommendation only
+            if (!_selectedReferrer) {
+                UI.toast.error('A referrer is required. All appointments must be by recommendation. Search and select the person who referred this prospect.');
                 return;
             }
 
@@ -11542,6 +11544,22 @@ function _wireLoginBtn() {
             }
             activity.prospect_id = prospect.id;
             activity.activity_title = `CPS With ${name}`;
+
+            // Auto-create referral record from CPS activity
+            const _refType = (_selectedReferrer.type || '').toLowerCase() === 'consultant' ? 'user' : 'prospect';
+            try {
+                await AppDataStore.create('referrals', {
+                    id: Date.now(),
+                    referrer_id: _selectedReferrer.id,
+                    referrer_type: _refType,
+                    referred_prospect_id: prospect.id,
+                    referral_source: 'CPS',
+                    memo: '',
+                    is_converted: false,
+                    status: 'Pending',
+                    created_at: new Date().toISOString()
+                });
+            } catch(e) { console.warn('Auto-referral creation failed:', e); }
 
             const inviteMethod = document.getElementById('cps-invitation-method')?.value;
             activity.cps_invitation_method = inviteMethod === 'Other' ? document.getElementById('cps-invitation-other')?.value : inviteMethod;
