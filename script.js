@@ -10936,7 +10936,7 @@ function _wireLoginBtn() {
                                 <label>Choose ${type.includes('AGENT') ? 'Meeting/Training' : 'Event'}</label>
                                 <select id="existing-event" class="form-control">
                                     <option value="">-- Select --</option>
-                                    ${(await AppDataStore.getAll('events')).filter(e => e.is_active !== false).map(e => `<option value="${e.id}">${e.title}</option>`).join('')}
+                                    ${(await AppDataStore.getAll('events')).filter(e => e.is_active !== false && e.status !== 'inactive').map(e => `<option value="${e.id}">${e.event_title || e.title || 'Untitled Event'}</option>`).join('')}
                                 </select>
                             </div>
                         </div>
