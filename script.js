@@ -19664,7 +19664,7 @@ ALTER TABLE public.promotions
 
         UI.showModal(isEdit ? 'Edit Template' : 'Create WhatsApp Template', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: isEdit ? 'Update Template' : 'Save Template', type: 'primary', action: `await app.saveTemplate(${isEdit ? templateId : 'null'})` }
+            { label: isEdit ? 'Update Template' : 'Save Template', type: 'primary', action: `(async () => { await app.saveTemplate(${isEdit ? templateId : 'null'}); })()` }
         ]);
     };
 
@@ -19672,19 +19672,22 @@ ALTER TABLE public.promotions
         if (!buttons || buttons.length === 0) {
             return `
             <div class="button-field-row">
-        <input type="text" class="form-control" placeholder="Button 1 text" value="Yes I'm interested">
-            <select class="form-control" style="width: 120px;">
-                <option value="quick_reply">Quick Reply</option>
-                <option value="url">URL</option>
-                <option value="phone">Phone Number</option>
-            </select>
-            <div class="button-field-row">
                 <input type="text" class="form-control" placeholder="Button 1 text" value="Yes I'm interested">
                 <select class="form-control" style="width: 120px;">
                     <option value="quick_reply">Quick Reply</option>
                     <option value="url">URL</option>
                     <option value="phone">Phone Number</option>
                 </select>
+                <button class="btn-icon" onclick="this.parentElement.remove()"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="button-field-row">
+                <input type="text" class="form-control" placeholder="Button 2 text" value="Yes I'm interested">
+                <select class="form-control" style="width: 120px;">
+                    <option value="quick_reply">Quick Reply</option>
+                    <option value="url">URL</option>
+                    <option value="phone">Phone Number</option>
+                </select>
+                <button class="btn-icon" onclick="this.parentElement.remove()"><i class="fas fa-times"></i></button>
             </div>
 `;
         }
