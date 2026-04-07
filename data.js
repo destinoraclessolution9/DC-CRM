@@ -132,24 +132,90 @@ class DataStore {
         try {
             const { data, error } = await this._readClient().from(tableName).select('*');
             if (error) throw error;
-            const result = data || [];
-            // Merge: preserve any locally-saved items not returned by Supabase
-            // (handles PGRST204 schema-mismatch saves and RLS-hidden records)
-            try {
-                const key = `fs_crm_${tableName}`;
-                const local = JSON.parse(localStorage.getItem(key) || '[]');
-                const supabaseIds = new Set(result.map(r => String(r.id)));
-                const localOnly = local.filter(r => !supabaseIds.has(String(r.id)));
-                const merged = [...result, ...localOnly];
-                localStorage.setItem(key, JSON.stringify(merged));
-                return merged;
-            } catch (_) {
-                return result;
-            }
+            const serverData = data || [];
+            // Auto-sync: push any locally-saved (offline) items to Supabase so ALL users can see them,
+            // then return the merged result (includes items still pending sync).
+            const result = await this._autoSync(tableName, serverData);
+            try { localStorage.setItem(`fs_crm_${tableName}`, JSON.stringify(result)); } catch (_) {}
+            return result;
         } catch (e) {
             console.warn(`Offline: falling back to localStorage for ${tableName}`, e);
             const local = localStorage.getItem(`fs_crm_${tableName}`);
             return local ? JSON.parse(local) : [];
+        }
+    }
+
+    // Auto-sync: pushes locally-saved (offline/network-error) records to Supabase
+    // when we have a live connection. Called by getAll() on every successful fetch.
+    // Handles BOTH:
+    //   (a) Items in the sync queue (fs_crm_sync_queue) — new mechanism
+    //   (b) Pre-existing localStorage items not in Supabase — migration for old offline saves
+    async _autoSync(tableName, serverData) {
+        try {
+            const serverIds = new Set(serverData.map(r => String(r.id)));
+            const merged = [...serverData];
+
+            // Step 1 — Migration: scan localStorage cache for items not in Supabase
+            // and add them to the sync queue (handles saves made before the queue existed).
+            try {
+                const localRaw = localStorage.getItem(`fs_crm_${tableName}`);
+                if (localRaw) {
+                    const localItems = JSON.parse(localRaw);
+                    const localOnly = localItems.filter(r => !serverIds.has(String(r.id)));
+                    if (localOnly.length > 0) {
+                        const queue = JSON.parse(localStorage.getItem('fs_crm_sync_queue') || '[]');
+                        const queuedIds = new Set(
+                            queue.filter(q => q.tableName === tableName).map(q => String(q.record.id))
+                        );
+                        let added = 0;
+                        for (const r of localOnly) {
+                            if (!queuedIds.has(String(r.id))) {
+                                queue.push({ tableName, record: r, timestamp: Date.now() });
+                                added++;
+                            }
+                        }
+                        if (added > 0) {
+                            localStorage.setItem('fs_crm_sync_queue', JSON.stringify(queue));
+                            console.log(`DataStore: migrated ${added} pre-existing local-only items from ${tableName} into sync queue`);
+                        }
+                    }
+                }
+            } catch (_) {}
+
+            // Step 2 — Process the sync queue: upsert queued items to Supabase
+            const queue = JSON.parse(localStorage.getItem('fs_crm_sync_queue') || '[]');
+            const forTable = queue.filter(q => q.tableName === tableName);
+            if (forTable.length === 0) return merged;
+
+            const otherTable = queue.filter(q => q.tableName !== tableName);
+            const stillPending = [];
+
+            for (const item of forTable) {
+                if (serverIds.has(String(item.record.id))) continue; // already in Supabase
+                try {
+                    const { data: inserted, error: uErr } = await this._writeClient()
+                        .from(tableName)
+                        .upsert(item.record)
+                        .select()
+                        .single();
+                    if (!uErr && inserted) {
+                        merged.push(inserted);
+                        serverIds.add(String(inserted.id));
+                        console.log(`DataStore: auto-synced local item ${item.record.id} to ${tableName}`);
+                    } else {
+                        // Sync failed — include item locally but keep in queue for next attempt
+                        if (!serverIds.has(String(item.record.id))) merged.push(item.record);
+                        stillPending.push(item);
+                    }
+                } catch (_) {
+                    if (!serverIds.has(String(item.record.id))) merged.push(item.record);
+                    stillPending.push(item);
+                }
+            }
+            localStorage.setItem('fs_crm_sync_queue', JSON.stringify([...otherTable, ...stillPending]));
+            return merged;
+        } catch (_) {
+            return serverData;
         }
     }
 
@@ -245,12 +311,18 @@ class DataStore {
             }
         }
 
-        // Full localStorage fallback
+        // Full localStorage fallback + sync queue so item gets pushed to Supabase when back online
         const key = `fs_crm_${tableName}`;
         try {
             const all = JSON.parse(localStorage.getItem(key) || '[]');
             all.push(dataToInsert);
             localStorage.setItem(key, JSON.stringify(all));
+        } catch (_) {}
+        // Queue for auto-sync to Supabase on next successful getAll()
+        try {
+            const syncQueue = JSON.parse(localStorage.getItem('fs_crm_sync_queue') || '[]');
+            syncQueue.push({ tableName, record: dataToInsert, timestamp: Date.now() });
+            localStorage.setItem('fs_crm_sync_queue', JSON.stringify(syncQueue));
         } catch (_) {}
         this.emit('dataChanged', { action: 'add', table: tableName, record: dataToInsert });
         return dataToInsert;
@@ -291,12 +363,22 @@ class DataStore {
             }
         }
         const key = `fs_crm_${tableName}`;
+        let updatedRecord;
         try {
             const all = JSON.parse(localStorage.getItem(key) || '[]');
             const idx = all.findIndex(r => r.id == id);
-            const updated = idx >= 0 ? { ...all[idx], ...updates } : { id, ...updates };
-            if (idx >= 0) all[idx] = updated; else all.push(updated);
+            updatedRecord = idx >= 0 ? { ...all[idx], ...updates } : { id, ...updates };
+            if (idx >= 0) all[idx] = updatedRecord; else all.push(updatedRecord);
             localStorage.setItem(key, JSON.stringify(all));
+        } catch (_) { updatedRecord = { id, ...updates }; }
+        // Queue for auto-sync to Supabase on next successful getAll()
+        try {
+            const syncQueue = JSON.parse(localStorage.getItem('fs_crm_sync_queue') || '[]');
+            // Replace existing queue entry for same id+table, or push new
+            const qIdx = syncQueue.findIndex(q => q.tableName === tableName && String(q.record.id) === String(id));
+            const qEntry = { tableName, record: updatedRecord, timestamp: Date.now() };
+            if (qIdx >= 0) syncQueue[qIdx] = qEntry; else syncQueue.push(qEntry);
+            localStorage.setItem('fs_crm_sync_queue', JSON.stringify(syncQueue));
         } catch (_) {}
         const record = { id, ...updates };
         this.emit('dataChanged', { action: 'update', table: tableName, record });
@@ -320,6 +402,12 @@ class DataStore {
                 const all = JSON.parse(localStorage.getItem(key) || '[]');
                 const filtered = all.filter(r => String(r.id) !== String(id));
                 localStorage.setItem(key, JSON.stringify(filtered));
+            } catch (_) {}
+            // Also remove from sync queue — no point syncing a deleted item
+            try {
+                const syncQueue = JSON.parse(localStorage.getItem('fs_crm_sync_queue') || '[]');
+                const filtered = syncQueue.filter(q => !(q.tableName === tableName && String(q.record.id) === String(id)));
+                localStorage.setItem('fs_crm_sync_queue', JSON.stringify(filtered));
             } catch (_) {}
         }
         this.emit('dataChanged', { action: 'delete', table: tableName, id });
