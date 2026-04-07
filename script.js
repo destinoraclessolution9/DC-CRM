@@ -15615,17 +15615,55 @@ const renderCurrentAssignments = async (agentId) => {
         } else {
             const tempPwd = document.getElementById('reset-temp-pwd')?.value?.trim();
             if (!tempPwd || tempPwd.length < 8) return UI.toast.error('Temporary password must be at least 8 characters');
-            await AppDataStore.update('users', agentId, {
-                password: tempPwd,
-                force_password_change: true
-            });
+
+            // Update CRM database
+            await AppDataStore.update('users', agentId, { password: tempPwd, force_password_change: true });
+
+            // Update Supabase Auth (create account if missing, update password if exists)
+            let authUpdated = false;
+            try {
+                const SR = window.SUPABASE_SR, BASE = window.SUPABASE_URL;
+                if (SR && BASE && agent.email) {
+                    // Try to find existing auth user by email
+                    const listResp = await fetch(`${BASE}/auth/v1/admin/users?per_page=1000`, {
+                        headers: { 'Authorization': `Bearer ${SR}`, 'apikey': SR }
+                    });
+                    const listData = await listResp.json();
+                    const existing = listData?.users?.find(u => u.email === agent.email);
+
+                    if (existing?.id) {
+                        // Update existing auth user password
+                        const upResp = await fetch(`${BASE}/auth/v1/admin/users/${existing.id}`, {
+                            method: 'PUT',
+                            headers: { 'Authorization': `Bearer ${SR}`, 'apikey': SR, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ password: tempPwd, email_confirm: true })
+                        });
+                        authUpdated = upResp.ok;
+                    } else {
+                        // Create new Supabase Auth account
+                        const crResp = await fetch(`${BASE}/auth/v1/admin/users`, {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${SR}`, 'apikey': SR, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ email: agent.email, password: tempPwd, email_confirm: true })
+                        });
+                        authUpdated = crResp.ok;
+                    }
+                }
+            } catch (authErr) {
+                console.warn('Supabase Auth update failed:', authErr.message);
+            }
+
             UI.hideModal();
             UI.showModal('Password Reset', `
                 <div style="text-align:center; padding:8px;">
                     <i class="fas fa-check-circle" style="font-size:36px; color:#22c55e; margin-bottom:12px;"></i>
                     <p>Password reset for <strong>${escapeHtml(agent.full_name)}</strong></p>
                     <div style="background:var(--gray-100); border-radius:8px; padding:12px; margin-top:12px;">
-                        <div><span style="color:var(--gray-500)">Temp Password:</span> <strong>${escapeHtml(tempPwd)}</strong></div>
+                        <div><span style="color:var(--gray-500)">Email:</span> <strong>${escapeHtml(agent.email || '—')}</strong></div>
+                        <div style="margin-top:4px;"><span style="color:var(--gray-500)">Temp Password:</span> <strong>${escapeHtml(tempPwd)}</strong></div>
+                        <div style="margin-top:8px;font-size:12px;color:${authUpdated ? '#16a34a' : '#dc2626'};">
+                            ${authUpdated ? '✅ Login credentials updated — agent can log in now.' : '⚠️ CRM updated but Supabase Auth sync failed. Try the "Send reset email" option instead.'}
+                        </div>
                     </div>
                     <p style="margin-top:8px; color:var(--gray-500); font-size:13px;">Agent must change password on next login.</p>
                 </div>`, [{ label: 'Done', type: 'primary', action: 'UI.hideModal()' }]);
