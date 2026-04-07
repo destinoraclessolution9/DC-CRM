@@ -18497,24 +18497,11 @@ const exportKPIReport = async (format) => {
         const today = new Date(); today.setHours(0,0,0,0);
         const allPromos = await AppDataStore.getAll('promotions');
 
-        // Determine current user's level
-        const userLvlMatch = (_currentUser?.role || '').match(/Level\s*(\d+)/i);
-        const userLevel = userLvlMatch ? parseInt(userLvlMatch[1]) : 0;
-        const isAdmin = isSystemAdmin(_currentUser) || isMarketingManager(_currentUser);
-
-        // Show active, non-expired promotions visible to current user
+        // Show active, non-expired promotions (Level 12+ cannot access this page via nav)
         const promotions = allPromos.filter(p => {
             if (p.is_active === false) return false;
             if (p.end_date) { const e = new Date(p.end_date); e.setHours(0,0,0,0); if (e < today) return false; }
-            // visible_to filter: normalize to array (Supabase may return JSON string)
-            let vt = p.visible_to;
-            if (!vt) vt = [];
-            else if (typeof vt === 'string') { try { vt = JSON.parse(vt); } catch (_) { vt = []; } }
-            if (!Array.isArray(vt)) vt = [];
-            if (vt.length === 0 || isAdmin) return true;
-            if (vt.includes('customer')) return true; // visible to all levels
-            if (vt.includes('agent') && (isAgent(_currentUser) || (userLevel >= 1 && userLevel <= 11))) return true;
-            return false;
+            return true;
         });
 
         // Pre-load product names for each promotion
