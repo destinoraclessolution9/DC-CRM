@@ -7195,27 +7195,10 @@ function _wireLoginBtn() {
 
         await renderReferralSummaryAndLeaderboard();
 
-        // Determine initial tree root based on role level
+        // Every user sees themselves as the first node of their own tree
         const user = _currentUser;
         if (user) {
-            const lvlMatch = user.role?.match(/Level\s+(\d+)/i);
-            const level = lvlMatch ? parseInt(lvlMatch[1]) : 10;
-            if (level <= 2) {
-                // Level 1-2 (Super Admin / Marketing Manager): show search prompt — they can view anyone
-                const ph = document.getElementById('referral-tree-placeholder');
-                if (ph) {
-                    ph.style.display = 'flex';
-                    ph.innerHTML = `
-                        <i class="fas fa-search"></i>
-                        <p>Search for a person above to view their referral network.</p>
-                    `;
-                }
-                const svg = document.getElementById('referral-tree-svg');
-                if (svg) svg.style.display = 'none';
-            } else {
-                // Level 3+: agent is first node — auto-load their own tree from themselves
-                await app.showReferralTree(user.id, 'user');
-            }
+            await app.showReferralTree(user.id, 'user');
         }
     };
 
