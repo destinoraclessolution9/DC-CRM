@@ -11098,36 +11098,66 @@ function _wireLoginBtn() {
 
     const showAddAttendeeSearch = async (eventId, activityId) => {
         const [prospects, customers] = await Promise.all([AppDataStore.getAll('prospects'), AppDataStore.getAll('customers')]);
-        const all = [...prospects.map(p => ({...p, _type:'prospect'})), ...customers.map(c => ({...c, _type:'customer'}))];
+        window._addAttAll = [...prospects.map(p => ({...p, _type:'prospect'})), ...customers.map(c => ({...c, _type:'customer'}))];
+        window._addAttSelected = null;
+        window._addAttEventId = eventId;
+        window._addAttActivityId = activityId;
         const content = `
             <div class="form-group">
                 <label>Search Prospect / Customer</label>
-                <input type="text" id="add-att-search" class="form-control" placeholder="Type name or phone..." oninput="(async()=>{
-                    const q=this.value.toLowerCase();
-                    const res=document.getElementById('add-att-results');
-                    if(q.length<2){res.innerHTML='';return;}
-                    const all=[...window._addAttAll||[]];
-                    const matches=all.filter(p=>(p.full_name||'').toLowerCase().includes(q)||(p.phone||'').includes(q)).slice(0,10);
-                    res.innerHTML=matches.map(p=>\`<div style='padding:8px;cursor:pointer;border-bottom:1px solid #eee;' onclick='window._addAttSelected={id:\${p.id},name:\${JSON.stringify(p.full_name)},type:\\\`\${p._type}\\\`};document.getElementById(\\'add-att-name\\').textContent=p.full_name;'>\${p.full_name} <small style=\\'color:gray;\\'>\${p._type}</small></div>\`).join('');
-                    res.style.display='block';
-                })()">
-                <div id="add-att-results" style="border:1px solid var(--border);border-radius:4px;max-height:160px;overflow-y:auto;display:none;"></div>
+                <input type="text" id="add-att-search" class="form-control" placeholder="Type name or phone..." oninput="app.searchAddAttendee(this.value)">
+                <div id="add-att-results" style="border:1px solid var(--border,#e5e0d8);border-radius:4px;max-height:160px;overflow-y:auto;display:none;background:#fff;"></div>
             </div>
-            <div id="add-att-name" style="margin-top:8px;font-weight:600;min-height:20px;"></div>
+            <div id="add-att-name" style="margin-top:8px;font-weight:600;color:var(--primary);min-height:20px;"></div>
         `;
-        window._addAttAll = all;
-        window._addAttSelected = null;
         UI.showModal('Add Attendee', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Add', type: 'primary', action: `(async()=>{
-                if(!window._addAttSelected){UI.toast.error('Please select a person');return;}
-                const s=window._addAttSelected;
-                await AppDataStore.create('event_attendees',{event_id:${eventId},entity_id:s.id,attendee_type:s.type,attendance_status:'Registered',added_by_agent_id:window._currentUser?.id||null,created_at:new Date().toISOString()});
-                UI.hideModal();
-                await app.viewActivityDetails(${activityId});
-                UI.toast.success(s.name+' added as attendee');
-            })()` }
+            { label: 'Add', type: 'primary', action: '(async()=>{ await app.confirmAddAttendee(); })()' }
         ]);
+    };
+
+    const searchAddAttendee = (query) => {
+        const q = (query || '').toLowerCase();
+        const res = document.getElementById('add-att-results');
+        if (!res) return;
+        if (q.length < 2) { res.style.display = 'none'; res.innerHTML = ''; return; }
+        const matches = (window._addAttAll || []).filter(p =>
+            (p.full_name || '').toLowerCase().includes(q) || (p.phone || '').includes(q)
+        ).slice(0, 10);
+        res.innerHTML = matches.map(p =>
+            `<div style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #eee;" onmousedown="app.selectAddAttendee(${p.id},'${(p.full_name||'').replace(/'/g,"\\'")}','${p._type}')">
+                ${p.full_name} <small style="color:gray;">${p._type}</small>
+            </div>`
+        ).join('');
+        res.style.display = matches.length ? 'block' : 'none';
+    };
+
+    const selectAddAttendee = (id, name, type) => {
+        window._addAttSelected = { id, name, type };
+        const nameEl = document.getElementById('add-att-name');
+        if (nameEl) nameEl.textContent = '✅ Selected: ' + name;
+        const res = document.getElementById('add-att-results');
+        if (res) res.style.display = 'none';
+        const input = document.getElementById('add-att-search');
+        if (input) input.value = name;
+    };
+
+    const confirmAddAttendee = async () => {
+        const s = window._addAttSelected;
+        if (!s) { UI.toast.error('Please select a person first'); return; }
+        const eventId = window._addAttEventId;
+        const activityId = window._addAttActivityId;
+        await AppDataStore.create('event_attendees', {
+            event_id: eventId,
+            entity_id: s.id,
+            attendee_type: s.type,
+            attendance_status: 'Registered',
+            added_by_agent_id: _currentUser?.id || null,
+            created_at: new Date().toISOString()
+        });
+        UI.hideModal();
+        await app.viewActivityDetails(activityId);
+        UI.toast.success(s.name + ' added as attendee');
     };
 
     const searchAttendees = () => {
@@ -23766,6 +23796,9 @@ const initImportDemoData = async () => {
         toggleAttendeeAttended,
         goToProspectEventNotes,
         showAddAttendeeSearch,
+        searchAddAttendee,
+        selectAddAttendee,
+        confirmAddAttendee,
         searchEntities,
         selectEntity,
         clearSelectedEntity,
