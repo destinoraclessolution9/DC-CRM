@@ -18348,6 +18348,11 @@ const exportKPIReport = async (format) => {
                 <div class="form-group"><label>Venue Name*</label><input type="text" id="mkt-vname" class="form-control" placeholder="e.g. MBB, Bujishu Premier"></div>
                 <div class="form-group"><label>Location*</label><input type="text" id="mkt-vlocation" class="form-control" placeholder="e.g. KL, JB, SG"></div>
 `;
+            UI.showModal('Add New Venue', content, [
+                { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+                { label: 'Save', type: 'primary', action: '(async () => { await app.saveVenue(); })()' }
+            ]);
+            return;
         } else {
             content = `
                 <div class="form-group"><label>Package Name*</label><input type="text" id="mkt-pkname" class="form-control"></div>
@@ -18396,6 +18401,11 @@ const exportKPIReport = async (format) => {
                 <div class="form-group"><label>Venue Name*</label><input type="text" id="mkt-vname" class="form-control" value="${item.name || ''}"></div>
                 <div class="form-group"><label>Location*</label><input type="text" id="mkt-vlocation" class="form-control" value="${item.location || ''}"></div>
             `;
+            UI.showModal('Edit Venue', content, [
+                { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+                { label: 'Save Changes', type: 'primary', action: `(async () => { await app.saveVenue('${id}'); })()` }
+            ]);
+            return;
         } else {
             content = `
                 <div class="form-group"><label>Package Name*</label><input type="text" id="mkt-pkname" class="form-control" value="${item.package_name}"></div>
@@ -18469,6 +18479,45 @@ const exportKPIReport = async (format) => {
             console.error('saveMarketingListItem error:', err);
             UI.toast.error('Save failed: ' + (err.message || err));
         }
+    };
+
+    const saveVenue = async (id = null) => {
+        const name = (document.getElementById('mkt-vname')?.value || '').trim();
+        const location = (document.getElementById('mkt-vlocation')?.value || '').trim();
+        if (!name) return UI.toast.error('Venue Name is required');
+        if (!location) return UI.toast.error('Location is required');
+
+        const key = 'fs_crm_venues';
+        const all = JSON.parse(localStorage.getItem(key) || '[]');
+
+        if (id) {
+            const idx = all.findIndex(r => String(r.id) === String(id));
+            if (idx >= 0) {
+                all[idx] = { ...all[idx], name, location, updated_at: new Date().toISOString() };
+            } else {
+                all.push({ id, name, location, updated_at: new Date().toISOString() });
+            }
+        } else {
+            const newId = 'venue_' + Date.now();
+            all.push({ id: newId, name, location, created_at: new Date().toISOString() });
+        }
+
+        localStorage.setItem(key, JSON.stringify(all));
+
+        // Also try to sync to Supabase, but don't block on failure
+        try {
+            if (id) {
+                await AppDataStore.update('venues', id, { name, location, updated_at: new Date().toISOString() });
+            } else {
+                const newRec = all[all.length - 1];
+                await AppDataStore.create('venues', newRec);
+            }
+        } catch (_) { /* table may not exist yet — localStorage is the source of truth */ }
+
+        UI.toast.success(id ? 'Venue updated' : 'Venue added');
+        UI.hideModal();
+        const viewport = document.getElementById('content-viewport');
+        await showMarketingListsView(viewport);
     };
 
     const deleteMarketingListItem = async (id) => {
@@ -24034,6 +24083,7 @@ const initImportDemoData = async () => {
         openMarketingListAddModal,
         openMarketingListEditModal,
         saveMarketingListItem,
+        saveVenue,
         deleteMarketingListItem,
 
         // Feature: Automated Scoring
