@@ -216,9 +216,11 @@ const appLogic = (() => {
         const level = lvlMatch ? parseInt(lvlMatch[1]) : 10;
         // Level 1-2: Super Admin / Marketing Manager — can view every node
         if (level <= 2) return true;
-        // 'user' type: only the agent themselves can be a root node for Level 3+
+        // 'user' type: can view self or any subordinate in the reporting tree
         if (personType === 'user') {
-            return String(personId) === String(_currentUser?.id);
+            const visibleIds = await getVisibleUserIds(_currentUser);
+            if (visibleIds === 'all') return true;
+            return visibleIds.map(String).includes(String(personId));
         }
         if (personType === 'prospect') {
             return await canViewProspect({ id: personId });
@@ -7452,12 +7454,20 @@ function _wireLoginBtn() {
             children: []
         };
 
-        // Find child referrals
-        const referrals = await AppDataStore.getAll('referrals');
-        // Match by referrer_id (new format)
-        const children = referrals.filter(r => String(r.referrer_id) === String(rootId));
+        // For user/agent nodes: include direct sub-agents (reporting_to) as children first
+        if (rootType === 'user') {
+            const allUsers = await AppDataStore.getAll('users');
+            const subAgents = allUsers.filter(u => String(u.reporting_to) === String(rootId) && u.status !== 'inactive');
+            for (const agent of subAgents) {
+                const childNode = await buildTreeData(agent.id, 'user');
+                if (childNode) node.children.push(childNode);
+            }
+        }
 
-        for (const r of children) {
+        // Find prospects directly referred by this person (from referrals table)
+        const referrals = await AppDataStore.getAll('referrals');
+        const refChildren = referrals.filter(r => String(r.referrer_id) === String(rootId));
+        for (const r of refChildren) {
             const childNode = await buildTreeData(r.referred_prospect_id, 'prospect');
             if (childNode) {
                 childNode.referralSource = r.referral_source;
