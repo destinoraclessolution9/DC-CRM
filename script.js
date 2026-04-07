@@ -8831,13 +8831,14 @@ function _wireLoginBtn() {
 
         let activities = await AppDataStore.getAll('activities');
 
-        // Apply visibility filters using the same logic as await async getVisibleActivities()
-        const calVisibility = await Promise.all(activities.map(a => canViewActivity(a)));
-        activities = activities.filter((_, i) => calVisibility[i]);
+        // Super admins see all activities — skip visibility filter and ignore agent filter
+        if (!isSystemAdmin(_currentUser)) {
+            const calVisibility = await Promise.all(activities.map(a => canViewActivity(a)));
+            activities = activities.filter((_, i) => calVisibility[i]);
 
-        // Apply filters if any
-        if (_filters.agent && _filters.agent !== 'all') {
-            activities = activities.filter(a => a.lead_agent_id == _filters.agent);
+            if (_filters.agent && _filters.agent !== 'all') {
+                activities = activities.filter(a => a.lead_agent_id == _filters.agent);
+            }
         }
         if (_filters.type && _filters.type !== 'all') {
             activities = activities.filter(a => a.activity_type === _filters.type);
@@ -9012,10 +9013,13 @@ function _wireLoginBtn() {
         const today = new Date();
         const dateStr = `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, '0')}-${today.getDate().toString().padStart(2, '0')}`;
 
-        let activities = (await getVisibleActivities()).filter(a => a.activity_date === dateStr);
+        let allActs = isSystemAdmin(_currentUser)
+            ? await AppDataStore.getAll('activities')
+            : await getVisibleActivities();
+        let activities = allActs.filter(a => a.activity_date === dateStr);
 
-        // Apply filters
-        if (_filters && _filters.agent && _filters.agent !== 'all') {
+        // Apply filters (super admin ignores agent filter)
+        if (!isSystemAdmin(_currentUser) && _filters && _filters.agent && _filters.agent !== 'all') {
             activities = activities.filter(a => a.lead_agent_id == _filters.agent);
         }
         if (_filters && _filters.type && _filters.type !== 'all') {
