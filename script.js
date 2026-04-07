@@ -9538,17 +9538,27 @@ function _wireLoginBtn() {
                     const name = person ? person.full_name : 'Unknown';
                     const agent = await AppDataStore.getById('users', att.added_by_agent_id);
                     const agentName = agent ? agent.full_name : 'Unknown';
+                    const paidChecked = att.paid ? 'checked' : '';
+                    const ticketChecked = att.ticket_created ? 'checked' : '';
+                    const attendedChecked = (att.attended || att.attendance_status === 'Attended') ? 'checked' : '';
                     return `
-                        <div class="info-row" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #eee; padding-bottom:5px; margin-bottom:5px;">
+                        <div class="info-row" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #eee; padding-bottom:8px; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
                             <div>
-                                <strong>${name}</strong> 
-                                <span class="status-badge" style="font-size:10px; margin-left:5px;">${att.attendance_status}</span>
+                                <strong>${name}</strong>
+                                <span style="font-size:10px; margin-left:5px; background:var(--gray-100); padding:1px 6px; border-radius:10px;">${att.attendee_type || 'prospect'}</span>
                                 <div style="font-size:11px; color:gray;">Added by: ${agentName}</div>
                             </div>
-                            <div style="display:flex; gap:8px; align-items:center;">
-                                <button class="btn btn-sm secondary" title="Outcome" onclick="app.openAttendeeOutcomeModal(${att.entity_id}, '${att.attendee_type}', ${activity.id})">📝 Outcome</button>
-                                <button class="btn btn-sm secondary" title="Notes" onclick="app.openAttendeeNotesModal(${att.entity_id}, '${att.attendee_type}', ${activity.id})">📋 Notes</button>
-                                <button class="btn btn-sm secondary" onclick="app.postEventFollowUp(${activity.event_id}, ${att.entity_id})">Follow-up</button>
+                            <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+                                <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
+                                    <input type="checkbox" ${paidChecked} onchange="app.toggleAttendeePaid(${att.id}, this.checked)"> Paid
+                                </label>
+                                <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
+                                    <input type="checkbox" ${ticketChecked} onchange="app.toggleAttendeeTicket(${att.id}, this.checked)"> Ticket Created
+                                </label>
+                                <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
+                                    <input type="checkbox" ${attendedChecked} onchange="app.toggleAttendeeAttended(${att.id}, this.checked, ${att.entity_id}, '${att.attendee_type}', ${activity.event_id}, '${activity.activity_date}')"> Attended
+                                </label>
+                                <button class="btn btn-sm secondary" onclick="app.goToProspectEventNotes(${att.entity_id}, ${activity.event_id})">Post Event</button>
                             </div>
                         </div>
                     `;
@@ -9559,6 +9569,9 @@ function _wireLoginBtn() {
                     <div class="detail-section">
                         <h4>Attendees</h4>
                         ${rows}
+                        <div style="margin-top:10px; text-align:right;">
+                            <button class="btn primary btn-sm" onclick="app.showAddAttendeeSearch(${activity.event_id}, ${activityId})">+ Add Attendee</button>
+                        </div>
                     </div>
                 `;
             } else {
@@ -9566,6 +9579,9 @@ function _wireLoginBtn() {
                     <div class="detail-section">
                         <h4>Attendees</h4>
                         <div class="info-row">No attendees registered.</div>
+                        <div style="margin-top:10px; text-align:right;">
+                            <button class="btn primary btn-sm" onclick="app.showAddAttendeeSearch(${activity.event_id}, ${activityId})">+ Add Attendee</button>
+                        </div>
                     </div>
                 `;
             }
@@ -10934,10 +10950,11 @@ function _wireLoginBtn() {
                         <div id="existing-event-section">
                             <div class="form-group">
                                 <label>Choose ${type.includes('AGENT') ? 'Meeting/Training' : 'Event'}</label>
-                                <select id="existing-event" class="form-control">
+                                <select id="existing-event" class="form-control" onchange="app.showSelectedEventDetails(this.value)">
                                     <option value="">-- Select --</option>
                                     ${(await AppDataStore.getAll('events')).filter(e => e.is_active !== false && e.status !== 'inactive').map(e => `<option value="${e.id}">${e.event_title || e.title || 'Untitled Event'}</option>`).join('')}
                                 </select>
+                                <div id="event-details-preview"></div>
                             </div>
                         </div>
                         
@@ -11009,6 +11026,108 @@ function _wireLoginBtn() {
         const next = document.getElementById('new-event-section');
         if (existing) existing.style.display = val === 'existing' ? 'block' : 'none';
         if (next) next.style.display = val === 'new' ? 'block' : 'none';
+    };
+
+    const showSelectedEventDetails = async (eventId) => {
+        const preview = document.getElementById('event-details-preview');
+        if (!preview) return;
+        if (!eventId) { preview.innerHTML = ''; return; }
+        const ev = await AppDataStore.getById('events', eventId);
+        if (!ev) { preview.innerHTML = ''; return; }
+        preview.innerHTML = `
+            <div style="margin-top:12px; padding:12px; background:var(--gray-50,#faf9f7); border:1px solid var(--border,#e5e0d8); border-radius:8px; font-size:13px;">
+                <div style="font-weight:600; margin-bottom:8px; color:var(--primary);">Event Details</div>
+                <div style="display:grid; grid-template-columns:110px 1fr; gap:4px 8px;">
+                    <span style="color:var(--gray-400);">Type:</span><span>${ev.event_type || '-'}</span>
+                    <span style="color:var(--gray-400);">Title:</span><span><strong>${ev.event_title || ev.title || '-'}</strong></span>
+                    <span style="color:var(--gray-400);">Speaker:</span><span>${ev.speaker || '-'}</span>
+                    <span style="color:var(--gray-400);">Duration:</span><span>${ev.duration || '-'}</span>
+                    <span style="color:var(--gray-400);">Venue:</span><span>${ev.location || ev.venue || '-'}</span>
+                    <span style="color:var(--gray-400);">Ticket Price:</span><span>${ev.ticket_price ? 'RM ' + ev.ticket_price : '-'}</span>
+                    <span style="color:var(--gray-400);">Early Bird:</span><span>${ev.early_bird_price || '-'}</span>
+                    <span style="color:var(--gray-400);">Group Price:</span><span>${ev.group_purchase_price || '-'}</span>
+                    <span style="color:var(--gray-400);">Target Group:</span><span>${ev.target_group || '-'}</span>
+                    <span style="color:var(--gray-400);">Description:</span><span>${ev.description || '-'}</span>
+                </div>
+            </div>
+        `;
+    };
+
+    const toggleAttendeePaid = async (attendeeId, checked) => {
+        await AppDataStore.update('event_attendees', attendeeId, { paid: checked });
+    };
+
+    const toggleAttendeeTicket = async (attendeeId, checked) => {
+        await AppDataStore.update('event_attendees', attendeeId, { ticket_created: checked });
+    };
+
+    const toggleAttendeeAttended = async (attendeeId, checked, entityId, entityType, eventId, activityDate) => {
+        const status = checked ? 'Attended' : 'Registered';
+        await AppDataStore.update('event_attendees', attendeeId, { attended: checked, attendance_status: status });
+
+        // Write back to event_registrations so it appears in prospect/customer profile
+        if (entityId && eventId) {
+            try {
+                const existing = (await AppDataStore.getAll('event_registrations')).find(
+                    r => r.event_id == eventId && r.attendee_id == entityId
+                );
+                if (existing) {
+                    await AppDataStore.update('event_registrations', existing.id, { attendance_status: status });
+                } else {
+                    await AppDataStore.create('event_registrations', {
+                        event_id: eventId,
+                        attendee_id: entityId,
+                        attendee_type: entityType || 'prospect',
+                        attendance_status: status,
+                        event_date: activityDate || new Date().toISOString().split('T')[0],
+                        points_awarded: 0,
+                        created_at: new Date().toISOString()
+                    });
+                }
+                UI.toast.success(checked ? 'Marked as Attended' : 'Attendance removed');
+            } catch (err) {
+                console.error('toggleAttendeeAttended write-back error:', err);
+            }
+        }
+    };
+
+    const goToProspectEventNotes = (prospectId, eventId) => {
+        UI.hideModal();
+        app.showProspectProfile(prospectId);
+    };
+
+    const showAddAttendeeSearch = async (eventId, activityId) => {
+        const [prospects, customers] = await Promise.all([AppDataStore.getAll('prospects'), AppDataStore.getAll('customers')]);
+        const all = [...prospects.map(p => ({...p, _type:'prospect'})), ...customers.map(c => ({...c, _type:'customer'}))];
+        const content = `
+            <div class="form-group">
+                <label>Search Prospect / Customer</label>
+                <input type="text" id="add-att-search" class="form-control" placeholder="Type name or phone..." oninput="(async()=>{
+                    const q=this.value.toLowerCase();
+                    const res=document.getElementById('add-att-results');
+                    if(q.length<2){res.innerHTML='';return;}
+                    const all=[...window._addAttAll||[]];
+                    const matches=all.filter(p=>(p.full_name||'').toLowerCase().includes(q)||(p.phone||'').includes(q)).slice(0,10);
+                    res.innerHTML=matches.map(p=>\`<div style='padding:8px;cursor:pointer;border-bottom:1px solid #eee;' onclick='window._addAttSelected={id:\${p.id},name:\${JSON.stringify(p.full_name)},type:\\\`\${p._type}\\\`};document.getElementById(\\'add-att-name\\').textContent=p.full_name;'>\${p.full_name} <small style=\\'color:gray;\\'>\${p._type}</small></div>\`).join('');
+                    res.style.display='block';
+                })()">
+                <div id="add-att-results" style="border:1px solid var(--border);border-radius:4px;max-height:160px;overflow-y:auto;display:none;"></div>
+            </div>
+            <div id="add-att-name" style="margin-top:8px;font-weight:600;min-height:20px;"></div>
+        `;
+        window._addAttAll = all;
+        window._addAttSelected = null;
+        UI.showModal('Add Attendee', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Add', type: 'primary', action: `(async()=>{
+                if(!window._addAttSelected){UI.toast.error('Please select a person');return;}
+                const s=window._addAttSelected;
+                await AppDataStore.create('event_attendees',{event_id:${eventId},entity_id:s.id,attendee_type:s.type,attendance_status:'Registered',added_by_agent_id:window._currentUser?.id||null,created_at:new Date().toISOString()});
+                UI.hideModal();
+                await app.viewActivityDetails(${activityId});
+                UI.toast.success(s.name+' added as attendee');
+            })()` }
+        ]);
     };
 
     const searchAttendees = () => {
@@ -13478,7 +13597,7 @@ function _wireLoginBtn() {
                     html += '<div style="overflow-x:auto;"><table class="events-table" style="width:100%;"><thead><tr><th>Event</th><th>Date</th><th>Status</th><th>Pts</th></tr></thead><tbody>';
                     for (const r of registrations) {
                         const ev = await AppDataStore.getById('events', r.event_id);
-                        html += `<tr><td>${ev?.title || 'Unknown'}</td><td>${r.event_date || '-'}</td><td>${r.attendance_status}</td><td>${r.points_awarded || 0}</td></tr>`;
+                        html += `<tr><td>${ev?.event_title || ev?.title || 'Unknown'}</td><td>${r.event_date || '-'}</td><td>${r.attendance_status}</td><td>${r.points_awarded || 0}</td></tr>`;
                     }
                     html += '</tbody></table></div>';
                 }
@@ -23641,6 +23760,12 @@ const initImportDemoData = async () => {
         calculateDuration,
         toggleCoAgentSection,
         toggleEventForm,
+        showSelectedEventDetails,
+        toggleAttendeePaid,
+        toggleAttendeeTicket,
+        toggleAttendeeAttended,
+        goToProspectEventNotes,
+        showAddAttendeeSearch,
         searchEntities,
         selectEntity,
         clearSelectedEntity,
