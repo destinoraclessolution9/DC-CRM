@@ -181,36 +181,58 @@ class DataStore {
         }
     }
 
+    _extractUnknownCol(msg) {
+        if (!msg) return null;
+        return msg.match(/column "?(\w+)"? of relation/)?.[1]
+            || msg.match(/column "?(\w+)"? does not exist/)?.[1]
+            || null;
+    }
+
     async add(tableName, record) {
         const dataToInsert = { ...record };
         if (!dataToInsert.id) dataToInsert.id = this._generateId();
-        try {
-            const { data, error } = await this._writeClient()
-                .from(tableName)
-                .insert(dataToInsert)
-                .select()
-                .single();
-            if (error) throw error;
-            // Also update localStorage cache
+
+        // Try inserting, stripping unknown columns one-by-one on schema errors
+        // so data reaches Supabase even when the table schema is missing new columns.
+        let insertData = { ...dataToInsert };
+        for (let attempt = 0; attempt < 15; attempt++) {
             try {
-                const key = `fs_crm_${tableName}`;
-                const all = JSON.parse(localStorage.getItem(key) || '[]');
-                all.push(data);
-                localStorage.setItem(key, JSON.stringify(all));
-            } catch (_) {}
-            this.emit('dataChanged', { action: 'add', table: tableName, record: data });
-            return data;
-        } catch (e) {
-            console.warn(`Error on insert to ${tableName}: ${e.message} (code: ${e.code}) — saving locally`);
-            const key = `fs_crm_${tableName}`;
-            try {
-                const all = JSON.parse(localStorage.getItem(key) || '[]');
-                all.push(dataToInsert);
-                localStorage.setItem(key, JSON.stringify(all));
-            } catch (_) {}
-            this.emit('dataChanged', { action: 'add', table: tableName, record: dataToInsert });
-            return dataToInsert;
+                const { data, error } = await this._writeClient()
+                    .from(tableName)
+                    .insert(insertData)
+                    .select()
+                    .single();
+                if (error) throw error;
+                // Save full record (including stripped fields) to localStorage
+                try {
+                    const key = `fs_crm_${tableName}`;
+                    const all = JSON.parse(localStorage.getItem(key) || '[]');
+                    all.push({ ...insertData, ...dataToInsert, ...data });
+                    localStorage.setItem(key, JSON.stringify(all));
+                } catch (_) {}
+                this.emit('dataChanged', { action: 'add', table: tableName, record: data });
+                return data;
+            } catch (e) {
+                const col = this._extractUnknownCol(e.message || e.details || '');
+                if (col && col in insertData) {
+                    delete insertData[col];
+                    continue; // retry without the unknown column
+                }
+                // Not a schema error — fall through to localStorage fallback
+                console.warn(`Error on insert to ${tableName}: ${e.message} (code: ${e.code}) — saving locally`);
+                break;
+            }
         }
+
+        // Full localStorage fallback
+        const key = `fs_crm_${tableName}`;
+        try {
+            const all = JSON.parse(localStorage.getItem(key) || '[]');
+            all.push(dataToInsert);
+            localStorage.setItem(key, JSON.stringify(all));
+        } catch (_) {}
+        this.emit('dataChanged', { action: 'add', table: tableName, record: dataToInsert });
+        return dataToInsert;
     }
 
     async update(tableName, id, updates) {
