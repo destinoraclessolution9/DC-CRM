@@ -223,9 +223,13 @@ const appLogic = (() => {
             return visibleIds.map(String).includes(String(personId));
         }
         if (personType === 'prospect') {
-            return await canViewProspect({ id: personId });
+            const fullProspect = await AppDataStore.getById('prospects', personId);
+            if (!fullProspect) return false;
+            return await canViewProspect(fullProspect);
         } else if (personType === 'customer') {
-            return await canViewCustomer({ id: personId });
+            const fullCustomer = await AppDataStore.getById('customers', personId);
+            if (!fullCustomer) return false;
+            return await canViewCustomer(fullCustomer);
         }
         return false;
     };
@@ -7536,7 +7540,7 @@ function _wireLoginBtn() {
 
         svgElement.call(_treeZoom);
 
-        const tree = d3.tree().nodeSize([60, 200]); // Vertical spacing, Horizontal spacing
+        const tree = d3.tree().nodeSize([190, 90]); // Horizontal spacing between siblings, Vertical depth per level
         const root = d3.hierarchy(rootData);
         tree(root);
 
@@ -7552,23 +7556,23 @@ function _wireLoginBtn() {
             }
         }
 
-        // Links
+        // Links — vertical top-down
         _treeSvg.selectAll(".link")
             .data(root.links())
             .enter()
             .append("path")
             .attr("class", "link")
-            .attr("d", d3.linkHorizontal()
-                .x(d => d.y)
-                .y(d => d.x));
+            .attr("d", d3.linkVertical()
+                .x(d => d.x)
+                .y(d => d.y));
 
-        // Nodes
+        // Nodes — vertical top-down
         const nodes = _treeSvg.selectAll(".node")
             .data(root.descendants())
             .enter()
             .append("g")
             .attr("class", "node")
-            .attr("transform", d => `translate(${d.y},${d.x})`);
+            .attr("transform", d => `translate(${d.x},${d.y})`);
 
         // Node Background
         nodes.append("rect")
@@ -7653,8 +7657,8 @@ function _wireLoginBtn() {
             return 1;
         });
 
-        // Center the tree
-        const initialTransform = d3.zoomIdentity.translate(width / 4, height / 2).scale(1);
+        // Position root at top-center
+        const initialTransform = d3.zoomIdentity.translate(width / 2, 60).scale(0.9);
         svgElement.call(_treeZoom.transform, initialTransform);
     };
 
