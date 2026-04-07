@@ -5788,7 +5788,14 @@ function _wireLoginBtn() {
                     .select('*')
                     .eq('email', authUser.email)
                     .single();
-                _currentUser = profile || authUser;
+                if (profile) {
+                    _currentUser = profile;
+                } else {
+                    // Auth session exists but no matching user profile — force sign out
+                    console.warn('No user profile found for:', authUser.email, '— signing out.');
+                    await window.supabase.auth.signOut();
+                    _currentUser = null;
+                }
             } else {
                 _currentUser = null;
             }
@@ -21116,7 +21123,7 @@ const simulateCampaignSending = async (campaignId) => {
     const batchShare = () => UI.toast.info('Batch share coming soon');
     const batchDownload = () => UI.toast.info('Batch download coming soon');
     const toggleUserMenu = async () => {
-        const currentUser = _currentUser || await Auth.getCurrentUser();
+        const currentUser = _currentUser;
 
         if (!currentUser) {
             // Guest mode - show demo users
