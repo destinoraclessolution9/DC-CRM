@@ -168,11 +168,22 @@ class DataStore {
         }
     }
 
-    _extractUnknownCol(msg) {
-        if (!msg) return null;
-        return msg.match(/column "?(\w+)"? of relation/)?.[1]
-            || msg.match(/column "?(\w+)"? does not exist/)?.[1]
+    _extractUnknownCol(e) {
+        // Check all error fields: message, details, hint
+        const sources = [e?.message, e?.details, e?.hint, e?.error].filter(Boolean).join(' ');
+        if (!sources) return null;
+        // PostgREST/Supabase: "Could not find the 'col' column of 'table' in the schema cache"
+        return sources.match(/find the '(\w+)' column/)?.[1]
+            || sources.match(/find the "(\w+)" column/)?.[1]
+            // PostgreSQL: column "col" of relation / column "col" does not exist
+            || sources.match(/column "?(\w+)"? of relation/)?.[1]
+            || sources.match(/column "?(\w+)"? does not exist/)?.[1]
             || null;
+    }
+
+    _isSchemaError(e) {
+        const s = [e?.code, e?.message, e?.details].filter(Boolean).join(' ');
+        return /PGRST204|42703|schema cache|does not exist|could not find/i.test(s);
     }
 
     async add(tableName, record) {
@@ -200,12 +211,22 @@ class DataStore {
                 this.emit('dataChanged', { action: 'add', table: tableName, record: data });
                 return data;
             } catch (e) {
-                const col = this._extractUnknownCol(e.message || e.details || '');
+                const col = this._extractUnknownCol(e);
                 if (col && col in insertData) {
                     delete insertData[col];
                     continue; // retry without the unknown column
                 }
-                // Not a schema error — fall through to localStorage fallback
+                // Broader schema error but no column name extracted — strip all non-primitive fields
+                if (this._isSchemaError(e)) {
+                    const stripped = {};
+                    for (const [k, v] of Object.entries(insertData)) {
+                        if (v === null || v === undefined || typeof v !== 'object') stripped[k] = v;
+                    }
+                    if (Object.keys(stripped).length < Object.keys(insertData).length) {
+                        insertData = stripped;
+                        continue;
+                    }
+                }
                 console.warn(`Error on insert to ${tableName}: ${e.message} (code: ${e.code}) — saving locally`);
                 break;
             }
@@ -223,37 +244,50 @@ class DataStore {
     }
 
     async update(tableName, id, updates) {
-        try {
-            const { data, error } = await this._writeClient()
-                .from(tableName)
-                .update(updates)
-                .eq('id', id)
-                .select()
-                .single();
-            if (error) throw error;
-            // Also update localStorage cache
+        let updateData = { ...updates };
+        for (let attempt = 0; attempt < 15; attempt++) {
             try {
-                const key = `fs_crm_${tableName}`;
-                const all = JSON.parse(localStorage.getItem(key) || '[]');
-                const idx = all.findIndex(r => String(r.id) === String(id));
-                if (idx >= 0) { all[idx] = data; localStorage.setItem(key, JSON.stringify(all)); }
-            } catch (_) {}
-            this.emit('dataChanged', { action: 'update', table: tableName, record: data });
-            return data;
-        } catch (e) {
-            console.warn(`Error on update to ${tableName}: ${e.message} (code: ${e.code}) — saving locally`);
-            const key = `fs_crm_${tableName}`;
-            try {
-                const all = JSON.parse(localStorage.getItem(key) || '[]');
-                const idx = all.findIndex(r => r.id == id);
-                const updated = idx >= 0 ? { ...all[idx], ...updates } : { id, ...updates };
-                if (idx >= 0) all[idx] = updated; else all.push(updated);
-                localStorage.setItem(key, JSON.stringify(all));
-            } catch (_) {}
-            const record = { id, ...updates };
-            this.emit('dataChanged', { action: 'update', table: tableName, record });
-            return record;
+                const { data, error } = await this._writeClient()
+                    .from(tableName)
+                    .update(updateData)
+                    .eq('id', id)
+                    .select()
+                    .single();
+                if (error) throw error;
+                try {
+                    const key = `fs_crm_${tableName}`;
+                    const all = JSON.parse(localStorage.getItem(key) || '[]');
+                    const idx = all.findIndex(r => String(r.id) === String(id));
+                    const full = { ...data, ...updates };
+                    if (idx >= 0) { all[idx] = full; localStorage.setItem(key, JSON.stringify(all)); }
+                } catch (_) {}
+                this.emit('dataChanged', { action: 'update', table: tableName, record: data });
+                return data;
+            } catch (e) {
+                const col = this._extractUnknownCol(e);
+                if (col && col in updateData) { delete updateData[col]; continue; }
+                if (this._isSchemaError(e)) {
+                    const stripped = {};
+                    for (const [k, v] of Object.entries(updateData)) {
+                        if (v === null || v === undefined || typeof v !== 'object') stripped[k] = v;
+                    }
+                    if (Object.keys(stripped).length < Object.keys(updateData).length) { updateData = stripped; continue; }
+                }
+                console.warn(`Error on update to ${tableName}: ${e.message} (code: ${e.code}) — saving locally`);
+                break;
+            }
         }
+        const key = `fs_crm_${tableName}`;
+        try {
+            const all = JSON.parse(localStorage.getItem(key) || '[]');
+            const idx = all.findIndex(r => r.id == id);
+            const updated = idx >= 0 ? { ...all[idx], ...updates } : { id, ...updates };
+            if (idx >= 0) all[idx] = updated; else all.push(updated);
+            localStorage.setItem(key, JSON.stringify(all));
+        } catch (_) {}
+        const record = { id, ...updates };
+        this.emit('dataChanged', { action: 'update', table: tableName, record });
+        return record;
     }
 
     async delete(tableName, id) {
