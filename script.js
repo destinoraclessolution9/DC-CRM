@@ -1687,7 +1687,7 @@ const appLogic = (() => {
         UI.showModal('New Folder', `
             <div class="form-group"><label>Folder Name</label><input type="text" id="new-folder-name" class="form-control" placeholder="Enter name..."></div>
             <div class="form-group"><label>Label Color</label><input type="color" id="new-folder-color" class="form-control" value="#f59e0b"></div>
-        `, [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Create', type: 'primary', action: 'await app.createFolder()' }]);
+        `, [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Create', type: 'primary', action: '(async () => { await app.createFolder(); })()' }]);
     };
 
     const createFolder = async () => {
@@ -1700,7 +1700,7 @@ const appLogic = (() => {
     const renameFolder = async (id) => {
         const folder = await AppDataStore.getById('folders', id);
         UI.showModal('Rename Folder', `<div class="form-group"><label>New Name</label><input type="text" id="rename-folder-input" class="form-control" value="${folder.name}"></div>`,
-            [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Rename', type: 'primary', action: `await app.confirmRenameFolder(${id})` }]);
+            [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Rename', type: 'primary', action: `(async () => { await app.confirmRenameFolder(${id}); })()` }]);
     };
     window.app.confirmRenameFolder = async (id) => {
         const name = document.getElementById('rename-folder-input')?.value;
@@ -1712,7 +1712,7 @@ const appLogic = (() => {
         const hasSub =(await AppDataStore.getAll('folders')).some(f => f.parent_id === id);
         const hasFiles = (await AppDataStore.getAll('documents')).some(d => d.folder_id === id);
         if (hasSub || hasFiles) return UI.toast.error('Cannot delete: Folder is not empty');
-        UI.showModal('Delete Folder', '<p>Are you sure?</p>', [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Delete', type: 'primary', action: `await app.confirmDeleteFolder(${id})` }]);
+        UI.showModal('Delete Folder', '<p>Are you sure?</p>', [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Delete', type: 'primary', action: `(async () => { await app.confirmDeleteFolder(${id}); })()` }]);
     };
     window.app.confirmDeleteFolder = async (id) => { await AppDataStore.delete('folders', id); UI.hideModal(); if (_currentFolder === id) _currentFolder = null; await renderFolderTree(); await loadFolderContents(); };
 
@@ -2145,7 +2145,7 @@ const appLogic = (() => {
     <p class="text-error">This action cannot be undone.</p>`,
             [
                 { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-                { label: 'Delete', type: 'primary', action: 'await app.confirmDeleteSelected()' }
+                { label: 'Delete', type: 'primary', action: '(async () => { await app.confirmDeleteSelected(); })()' }
             ]
         );
     };
@@ -2361,7 +2361,7 @@ In a production system, this would show the actual file contents.
 
         UI.showModal(`Preview: ${file.filename}`, previewContent, [
             { label: 'Download', type: 'secondary', action: `app.downloadFile(${fileId})` },
-            { label: 'Share', type: 'secondary', action: `await app.openShareModal(${fileId})` },
+            { label: 'Share', type: 'secondary', action: `(async () => { await app.openShareModal(${fileId}); })()` },
             { label: 'Close', type: 'primary', action: 'UI.hideModal()' }
         ], 'fullscreen');
     };
@@ -2443,7 +2443,7 @@ In a production system, this would show the actual file contents.
         `;
 
         UI.showModal('File Information', content, [
-            { label: 'Edit Description', type: 'secondary', action: `await app.editFileDescription(${fileId})` },
+            { label: 'Edit Description', type: 'secondary', action: `(async () => { await app.editFileDescription(${fileId}); })()` },
             { label: 'Close', type: 'primary', action: 'UI.hideModal()' }
         ]);
     };
@@ -2459,7 +2459,7 @@ In a production system, this would show the actual file contents.
     const editFileDescription = async (fileId) => {
         const file = await AppDataStore.getById('documents', fileId);
         UI.showModal('Edit Description', `<div class="form-group"><label>Description</label><textarea id="edit-file-desc" class="form-control" rows="4">${file.description || ''}</textarea></div>`,
-            [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Save', type: 'primary', action: `await app.saveFileDescription(${fileId})` }]);
+            [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Save', type: 'primary', action: `(async () => { await app.saveFileDescription(${fileId}); })()` }]);
     };
 
     const saveFileDescription = async (fileId) => {
@@ -3577,7 +3577,7 @@ In a production system, this would show the actual file contents.
             </div>
         `, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Simulate Connection', type: 'primary', action: 'await app.simulateGoogleConnection()' }
+            { label: 'Simulate Connection', type: 'primary', action: '(async () => { await app.simulateGoogleConnection(); })()' }
         ]);
     };
 
@@ -3759,7 +3759,7 @@ In a production system, this would show the actual file contents.
             <p class="warning-text" style="color:var(--error);font-weight:600;">Your existing activities will remain in both systems.</p>
         `, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Disconnect', type: 'error', action: 'await app.confirmDisconnectGoogle()' }
+            { label: 'Disconnect', type: 'error', action: '(async () => { await app.confirmDisconnectGoogle(); })()' }
         ]);
     };
 
@@ -4032,7 +4032,7 @@ In a production system, this would show the actual file contents.
             <p>This will stop all messaging and template sync.</p>
         `, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Disconnect', type: 'error', action: 'await app.confirmDisconnectWhatsApp()' }
+            { label: 'Disconnect', type: 'error', action: '(async () => { await app.confirmDisconnectWhatsApp(); })()' }
         ]);
     };
 
@@ -5900,7 +5900,7 @@ function _wireLoginBtn() {
 
         UI.showModal(isEdit ? 'Edit Name' : 'Add Name', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save', type: 'primary', action: `await app.saveName(${prospectId})` }
+            { label: 'Save', type: 'primary', action: `(async () => { await app.saveName(${prospectId}); })()` }
         ]);
     };
 
@@ -5935,7 +5935,7 @@ function _wireLoginBtn() {
     const deleteName = async (prospectId, nameId) => {
         UI.showModal('Confirm Delete', 'Are you sure you want to delete this name?', [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Delete', type: 'primary', action: `await app.confirmDeleteName(${prospectId}, ${nameId})` }
+            { label: 'Delete', type: 'primary', action: `(async () => { await app.confirmDeleteName(${prospectId}, ${nameId}); })()` }
         ]);
     };
 
@@ -8962,8 +8962,8 @@ function _wireLoginBtn() {
             `;
 
         UI.showModal('Calendar Filters', content, [
-            { label: 'Clear Filters', type: 'secondary', action: 'await app.clearCalendarFilters()' },
-            { label: 'Apply', type: 'primary', action: 'await app.applyCalendarFilters()' }
+            { label: 'Clear Filters', type: 'secondary', action: '(async () => { await app.clearCalendarFilters(); })()' },
+            { label: 'Apply', type: 'primary', action: '(async () => { await app.applyCalendarFilters(); })()' }
         ]);
     };
 
@@ -9475,8 +9475,8 @@ function _wireLoginBtn() {
 
         UI.showModal('Filter Calendar', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Apply Filters', type: 'primary', action: 'await app.applyFilters()' },
-            { label: 'Clear Filters', type: 'secondary', action: 'await app.clearFilters()' }
+            { label: 'Apply Filters', type: 'primary', action: '(async () => { await app.applyFilters(); })()' },
+            { label: 'Clear Filters', type: 'secondary', action: '(async () => { await app.clearFilters(); })()' }
         ]);
     };
 
@@ -9651,7 +9651,7 @@ function _wireLoginBtn() {
                 : { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
             ...(activity.activity_type === 'CPS' && activity.prospect_id
                 ? [{ label: '📷 Upload CPS Form', type: 'secondary', action: `app.uploadCPSForm(${activityId}, ${activity.prospect_id})` }]
-                : [{ label: 'Mark Complete', type: 'secondary', action: `await app.markActivityComplete(${activityId})` }]
+                : [{ label: 'Mark Complete', type: 'secondary', action: `(async () => { await app.markActivityComplete(${activityId}); })()` }]
             ),
             { label: 'Edit', type: 'secondary', action: `app.editActivityTiming(${activityId})` }
         ];
@@ -9669,7 +9669,7 @@ function _wireLoginBtn() {
             });
         }
 
-        modalActions.push({ label: 'Delete', type: 'primary', action: `await app.deleteActivity(${activityId})` });
+        modalActions.push({ label: 'Delete', type: 'primary', action: `(async () => { await app.deleteActivity(${activityId}); })()` });
 
         UI.showModal('Activity Details', content, modalActions);
     };
@@ -10035,7 +10035,7 @@ function _wireLoginBtn() {
             '<p>Are you sure you want to delete this activity? This action cannot be undone.</p>',
             [
                 { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-                { label: 'Delete', type: 'primary', action: `await app.confirmDeleteActivity(${activityId})` }
+                { label: 'Delete', type: 'primary', action: `(async () => { await app.confirmDeleteActivity(${activityId}); })()` }
             ]
         );
     };
@@ -10125,7 +10125,7 @@ function _wireLoginBtn() {
 
         UI.showModal('Meeting Outcome', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save Outcome', type: 'primary', action: `await app.saveAttendeeNote(${attendeeId}, '${attendeeType}', ${activityId}, 'outcome')` }
+            { label: 'Save Outcome', type: 'primary', action: `(async () => { await app.saveAttendeeNote(${attendeeId}, '${attendeeType}', ${activityId}, 'outcome'); })()` }
         ]);
     };
 
@@ -10148,7 +10148,7 @@ function _wireLoginBtn() {
 
         UI.showModal('Post-Meetup Notes', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save Notes', type: 'primary', action: `await app.saveAttendeeNote(${attendeeId}, '${attendeeType}', ${activityId}, 'post_meetup')` }
+            { label: 'Save Notes', type: 'primary', action: `(async () => { await app.saveAttendeeNote(${attendeeId}, '${attendeeType}', ${activityId}, 'post_meetup'); })()` }
         ]);
     };
 
@@ -14310,7 +14310,7 @@ const deleteNote = async (prospectId, noteId) => {
     `;
         UI.showModal(`Add Purchase for ${customer.full_name}`, content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Add Purchase', type: 'primary', action: `await app.savePurchase(${customerId})` }
+            { label: 'Add Purchase', type: 'primary', action: `(async () => { await app.savePurchase(${customerId}); })()` }
         ]);
     };
 
@@ -14411,7 +14411,7 @@ for (const p of allPackages) {
         UI.showModal('Delete Confirmation',
             '<p>Are you sure you want to delete this prospect? This action cannot be undone.</p>', [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Confirm Delete', type: 'primary', action: `await app.executeDelete(${id})` }
+            { label: 'Confirm Delete', type: 'primary', action: `(async () => { await app.executeDelete(${id}); })()` }
         ]
         );
     };
@@ -14464,7 +14464,7 @@ for (const p of allPackages) {
 
         UI.showModal('Add Tag', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Add Tag', type: 'primary', action: `await app.addTagToEntity(${entityId}, '${entityType}')` }
+            { label: 'Add Tag', type: 'primary', action: `(async () => { await app.addTagToEntity(${entityId}, '${entityType}'); })()` }
         ]);
     };
 
@@ -14576,7 +14576,7 @@ const openAddSolutionModal = async (prospectId) => {
 
     UI.showModal('Add Proposed Solution', content, [
         { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-        { label: 'Save', type: 'primary', action: `await app.saveSolution(${prospectId})` }
+        { label: 'Save', type: 'primary', action: `(async () => { await app.saveSolution(${prospectId}); })()` }
     ]);
 };
 
@@ -14711,7 +14711,7 @@ const openAddSolutionModal = async (prospectId) => {
                  </div>`,
                 [
                     { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-                    { label: 'Convert Manually', type: 'primary', action: `await app.confirmConvertToCustomer(${prospectId}, true)` }
+                    { label: 'Convert Manually', type: 'primary', action: `(async () => { await app.confirmConvertToCustomer(${prospectId}, true); })()` }
                 ]
             );
             return;
@@ -14733,7 +14733,7 @@ const openAddSolutionModal = async (prospectId) => {
 
         UI.showModal('Convert to Customer', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Convert', type: 'primary', action: `await app.confirmConvertToCustomer(${prospectId})` }
+            { label: 'Convert', type: 'primary', action: `(async () => { await app.confirmConvertToCustomer(${prospectId}); })()` }
         ]);
     };
 
@@ -15285,7 +15285,7 @@ const html = `
 
         UI.showModal('License Renewal', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Purchase Package', type: 'primary', action: `await app.executeRenewal(${agentId})` }
+            { label: 'Purchase Package', type: 'primary', action: `(async () => { await app.executeRenewal(${agentId}); })()` }
         ]);
     };
 
@@ -16010,7 +16010,7 @@ const renderCurrentAssignments = async (agentId) => {
 `;
         UI.showModal('Update Agent Targets', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save Targets', type: 'primary', action: `await app.saveAgentTargets(${agentId})` }
+            { label: 'Save Targets', type: 'primary', action: `(async () => { await app.saveAgentTargets(${agentId}); })()` }
         ]);
     };
 
@@ -16973,7 +16973,7 @@ const deactivateAgent = async (agentId) => {
                  </div>`,
                 [
                     { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-                    { label: 'Close Won', type: 'primary', action: `await app.closeDealWon(${prospect.id})` }
+                    { label: 'Close Won', type: 'primary', action: `(async () => { await app.closeDealWon(${prospect.id}); })()` }
                 ]
             );
         }
@@ -16998,7 +16998,7 @@ const deactivateAgent = async (agentId) => {
                  </div>`,
                 [
                     { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-                    { label: 'Close Lost', type: 'primary', action: `await app.closeDealLost(${prospect.id})` }
+                    { label: 'Close Lost', type: 'primary', action: `(async () => { await app.closeDealLost(${prospect.id}); })()` }
                 ]
             );
         }
@@ -19116,7 +19116,7 @@ const exportKPIReport = async (format) => {
 `;
         UI.showModal(id ? 'Edit Product' : 'Add Product', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save', type: 'primary', action: `await app.saveProduct(${id || 'null'})` }
+            { label: 'Save', type: 'primary', action: `(async () => { await app.saveProduct(${id || 'null'}); })()` }
         ]);
     };
 
@@ -20985,7 +20985,7 @@ const simulateCampaignSending = async (campaignId) => {
     `;
 
         UI.showModal('Recipient History', content, [
-            { label: 'Back', type: 'secondary', action: `await app.viewCampaignDetails(${msg.campaign_id})` }
+            { label: 'Back', type: 'secondary', action: `(async () => { await app.viewCampaignDetails(${msg.campaign_id}); })()` }
         ]);
     };
 
