@@ -18297,22 +18297,32 @@ const exportKPIReport = async (format) => {
                         <tr>
                             <th>Title</th>
                             <th>Price (RM)</th>
+                            <th>Early Bird (RM)</th>
+                            <th>Group Price (RM)</th>
                             <th>Duration</th>
                             <th>Target Group</th>
+                            <th>Location</th>
+                            <th>Speaker</th>
                             <th>Status</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody>
-                        ${data.map(item => `
-                            <tr style="${!item.is_active ? 'opacity: 0.6; background: #f9fafb;' : ''}">
+                        ${data.map(item => {
+                            const isActive = item.is_active || item.status === 'active' || item.status === 'Active';
+                            return `
+                            <tr style="${!isActive ? 'opacity: 0.6; background: #f9fafb;' : ''}">
                                 <td><strong>${item.event_title || item.title || ''}</strong><br><small class="text-muted">${item.description || ''}</small></td>
-                                <td>${item.ticket_price || 0}</td>
+                                <td>${item.ticket_price || '-'}</td>
+                                <td>${item.early_bird_price || '-'}</td>
+                                <td>${item.group_purchase_price || '-'}</td>
                                 <td>${item.duration || '-'}</td>
                                 <td>${item.target_group || '-'}</td>
+                                <td>${item.location || '-'}</td>
+                                <td>${item.speaker || '-'}</td>
                                 <td>
-                                    <span class="status-badge ${item.is_active ? 'status-active' : 'status-inactive'}">
-                                        ${item.is_active ? 'Active' : 'Inactive'}
+                                    <span class="status-badge ${isActive ? 'status-active' : 'status-inactive'}">
+                                        ${isActive ? 'Active' : 'Inactive'}
                                     </span>
                                 </td>
                                 <td>
@@ -18320,7 +18330,7 @@ const exportKPIReport = async (format) => {
                                     <button class="btn-icon text-danger" onclick="app.deleteMarketingListItem('${item.id}')" title="Delete"><i class="fas fa-trash-alt"></i></button>
                                 </td>
                             </tr>
-                        `).join('')}
+                        `}).join('')}
                     </tbody>
                 </table>
             `;
@@ -18434,7 +18444,7 @@ const exportKPIReport = async (format) => {
                 <div class="form-group"><label>Location</label><input type="text" id="mkt-location" class="form-control" value="${item.location || ''}" placeholder="e.g. KL, Online"></div>
                 <div class="form-group"><label>Speaker</label><input type="text" id="mkt-speaker" class="form-control" value="${item.speaker || ''}" placeholder="e.g. Master Tan"></div>
                 <div class="form-group"><label>Description</label><textarea id="mkt-desc" class="form-control">${item.description || ''}</textarea></div>
-                <div class="form-group"><label><input type="checkbox" id="mkt-active" ${item.is_active ? 'checked' : ''}> Is Active</label></div>
+                <div class="form-group"><label><input type="checkbox" id="mkt-active" ${(item.is_active || item.status === 'active' || item.status === 'Active') ? 'checked' : ''}> Is Active</label></div>
             `;
         } else if (type === 'venues') {
             content = `
@@ -18496,6 +18506,7 @@ const exportKPIReport = async (format) => {
             data.location = document.getElementById('mkt-location').value;
             data.speaker = document.getElementById('mkt-speaker').value;
             data.description = document.getElementById('mkt-desc').value;
+            data.status = data.is_active ? 'active' : 'inactive';
             if (!data.event_title) return UI.toast.error('Title is required');
         } else {
             data.package_name = document.getElementById('mkt-pkname').value.trim();
