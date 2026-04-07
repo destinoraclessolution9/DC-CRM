@@ -183,20 +183,15 @@ class DataStore {
             this.emit('dataChanged', { action: 'add', table: tableName, record: data });
             return data;
         } catch (e) {
-            const isNetworkError = e instanceof TypeError && e.message === 'Failed to fetch';
-            const isTableMissing = e.code === '42P01' || e.message?.includes('does not exist');
-            if (e.code === 'PGRST204' || isNetworkError || isTableMissing) {
-                console.warn(`${isNetworkError ? 'Network error' : 'Schema/table issue'} on insert to ${tableName}: ${e.message} — saving locally`);
-                const key = `fs_crm_${tableName}`;
-                try {
-                    const all = JSON.parse(localStorage.getItem(key) || '[]');
-                    all.push(dataToInsert);
-                    localStorage.setItem(key, JSON.stringify(all));
-                } catch (_) {}
-                this.emit('dataChanged', { action: 'add', table: tableName, record: dataToInsert });
-                return dataToInsert;
-            }
-            throw e;
+            console.warn(`Error on insert to ${tableName}: ${e.message} (code: ${e.code}) — saving locally`);
+            const key = `fs_crm_${tableName}`;
+            try {
+                const all = JSON.parse(localStorage.getItem(key) || '[]');
+                all.push(dataToInsert);
+                localStorage.setItem(key, JSON.stringify(all));
+            } catch (_) {}
+            this.emit('dataChanged', { action: 'add', table: tableName, record: dataToInsert });
+            return dataToInsert;
         }
     }
 
@@ -219,23 +214,18 @@ class DataStore {
             this.emit('dataChanged', { action: 'update', table: tableName, record: data });
             return data;
         } catch (e) {
-            const isNetworkError = e instanceof TypeError && e.message === 'Failed to fetch';
-            const isTableMissing = e.code === '42P01' || e.message?.includes('does not exist');
-            if (e.code === 'PGRST204' || isNetworkError || isTableMissing) {
-                console.warn(`${isNetworkError ? 'Network error' : 'Schema/table issue'} on update to ${tableName}: ${e.message} — saving locally`);
-                const key = `fs_crm_${tableName}`;
-                try {
-                    const all = JSON.parse(localStorage.getItem(key) || '[]');
-                    const idx = all.findIndex(r => r.id == id);
-                    const updated = idx >= 0 ? { ...all[idx], ...updates } : { id, ...updates };
-                    if (idx >= 0) all[idx] = updated; else all.push(updated);
-                    localStorage.setItem(key, JSON.stringify(all));
-                } catch (_) {}
-                const record = { id, ...updates };
-                this.emit('dataChanged', { action: 'update', table: tableName, record });
-                return record;
-            }
-            throw e;
+            console.warn(`Error on update to ${tableName}: ${e.message} (code: ${e.code}) — saving locally`);
+            const key = `fs_crm_${tableName}`;
+            try {
+                const all = JSON.parse(localStorage.getItem(key) || '[]');
+                const idx = all.findIndex(r => r.id == id);
+                const updated = idx >= 0 ? { ...all[idx], ...updates } : { id, ...updates };
+                if (idx >= 0) all[idx] = updated; else all.push(updated);
+                localStorage.setItem(key, JSON.stringify(all));
+            } catch (_) {}
+            const record = { id, ...updates };
+            this.emit('dataChanged', { action: 'update', table: tableName, record });
+            return record;
         }
     }
 
@@ -247,9 +237,7 @@ class DataStore {
                 .eq('id', id);
             if (error) throw error;
         } catch (e) {
-            const isNetworkError = e instanceof TypeError && e.message === 'Failed to fetch';
-            const isTableMissing = e.code === '42P01' || e.message?.includes('does not exist');
-            if (!isNetworkError && !isTableMissing) throw e;
+            console.warn(`Error on delete from ${tableName}: ${e.message} (code: ${e.code}) — removing locally`);
         } finally {
             // Always remove from localStorage cache regardless of Supabase outcome,
             // so the UI never resurfaces a stale/ghost record.
