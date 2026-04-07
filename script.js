@@ -9625,7 +9625,9 @@ function _wireLoginBtn() {
         `;
 
         const modalActions = [
-            { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
+            activity.prospect_id
+                ? { label: '👤 Prospect Profile', type: 'secondary', action: `UI.hideModal(); app.showProspectProfile(${activity.prospect_id})` }
+                : { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
             ...(activity.activity_type === 'CPS' && activity.prospect_id
                 ? [{ label: '📷 Upload CPS Form', type: 'secondary', action: `app.uploadCPSForm(${activityId}, ${activity.prospect_id})` }]
                 : [{ label: 'Mark Complete', type: 'secondary', action: `await app.markActivityComplete(${activityId})` }]
