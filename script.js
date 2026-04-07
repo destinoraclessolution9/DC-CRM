@@ -8869,15 +8869,26 @@ function _wireLoginBtn() {
                     const entityName = prospect ? prospect.full_name : (customer ? customer.full_name : (a.activity_title || a.customer_name || 'Event'));
 
                     if (entityName) {
-                        const agent = a.lead_agent_id ? await AppDataStore.getById('users', a.lead_agent_id) : null;
-                        const agentName = agent ? agent.full_name : 'No Agent';
+                        const isEvent = a.activity_type === 'EVENT';
+                        const agent = (!isEvent && a.lead_agent_id) ? await AppDataStore.getById('users', a.lead_agent_id) : null;
+                        const agentName = agent ? agent.full_name : null;
+
+                        // For EVENTs: show event title instead of agent/entity
+                        let eventTitle = null;
+                        if (isEvent && a.event_id) {
+                            const ev = await AppDataStore.getById('events', a.event_id);
+                            eventTitle = ev ? (ev.event_title || ev.title) : null;
+                        }
 
                         activityHtml += `
-                            <div class="calendar-appointment ${a.activity_type.toLowerCase()} ${a.closing_amount ? 'closed-case' : ''}" 
+                            <div class="calendar-appointment ${a.activity_type.toLowerCase()} ${a.closing_amount ? 'closed-case' : ''}"
                                 onclick="app.viewActivityDetails(${a.id})">
                                 <div class="appointment-time">${a.start_time || '00:00'} - ${a.end_time || '00:00'}</div>
-                                <div class="appointment-agent">👤 ${agentName} ${a.co_agents && a.co_agents.length > 0 ? '<small>+1</small>' : ''}</div>
-                                <div class="appointment-customer">📋 ${entityName}</div>
+                                ${isEvent
+                                    ? `<div class="appointment-customer">📅 ${eventTitle || a.activity_title || 'Event'}</div>`
+                                    : `<div class="appointment-agent">👤 ${agentName} ${a.co_agents && a.co_agents.length > 0 ? '<small>+1</small>' : ''}</div>
+                                <div class="appointment-customer">📋 ${entityName}</div>`
+                                }
                                 <div class="appointment-type">🏷️ ${a.activity_type}</div>
                                 ${a.closing_amount ? `
                                 <div class="appointment-closed">
