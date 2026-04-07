@@ -37,6 +37,7 @@ const appLogic = (() => {
     let _selectedEntity = null;
     let _selectedAttendees = [];
     let _selectedCoAgents = [];
+    let _selectedConsultants = []; // { id, name, status: 'pending'|'accepted'|'rejected' }
     let _selectedReferrer = null;
     let _currentDate = new Date(); // Dynamic start date
     let _filters = { agent: 'all', type: 'all', from: '', to: '' };
@@ -9588,8 +9589,32 @@ function _wireLoginBtn() {
                     <h4>Agents</h4>
                     <div class="info-row"><span class="info-label">Lead:</span> <span>${await getAgentName(activity.lead_agent_id)}</span></div>
                     ${activity.co_agents?.length ? `
-                        <div class="info-row"><span class="info-label">Co-Agents:</span> 
+                        <div class="info-row"><span class="info-label">Co-Agents:</span>
                             <span>${activity.co_agents.map(a => a.name).join(', ')}</span>
+                        </div>
+                    ` : ''}
+                    ${activity.consultants?.length ? `
+                        <div class="info-row" style="flex-direction:column;align-items:flex-start;gap:6px;">
+                            <span class="info-label">Consultants:</span>
+                            <div style="width:100%;">
+                                ${activity.consultants.map(c => {
+                                    const statusIcon = c.status === 'accepted'
+                                        ? '<i class="fas fa-check-circle" style="color:#16a34a;margin-right:4px;" title="Accepted"></i>'
+                                        : c.status === 'rejected'
+                                            ? '<i class="fas fa-times-circle" style="color:#dc2626;margin-right:4px;" title="Rejected"></i>'
+                                            : '<i class="fas fa-clock" style="color:#f59e0b;margin-right:4px;" title="Pending response"></i>';
+                                    const isCurrentConsultant = _currentUser && _currentUser.id === c.id;
+                                    const canRespond = isCurrentConsultant && c.status === 'pending';
+                                    return `<div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--gray-100);">
+                                        <span>${statusIcon}<strong>${c.name}</strong> <span style="font-size:11px;color:#888;">${c.role||''}</span></span>
+                                        ${canRespond ? `
+                                        <span>
+                                            <button class="btn btn-sm" style="background:#dcfce7;color:#166534;border:none;padding:3px 8px;border-radius:4px;cursor:pointer;margin-right:4px;" onclick="event.stopPropagation();app.respondConsultantInvite(${activityId},${c.id},'accepted')"><i class="fas fa-check"></i> Accept</button>
+                                            <button class="btn btn-sm" style="background:#fee2e2;color:#991b1b;border:none;padding:3px 8px;border-radius:4px;cursor:pointer;" onclick="event.stopPropagation();app.respondConsultantInvite(${activityId},${c.id},'rejected')"><i class="fas fa-times"></i> Reject</button>
+                                        </span>` : ''}
+                                    </div>`;
+                                }).join('')}
+                            </div>
                         </div>
                     ` : ''}
                 </div>
@@ -10166,6 +10191,7 @@ function _wireLoginBtn() {
         // Reset all temporary state to avoid interference between uses
         _selectedAttendees = [];
         _selectedCoAgents = [];
+        _selectedConsultants = [];
         _selectedEntity = null;
         _selectedReferrer = null;
         window._cpsDuplicateConfirmed = false;
@@ -10194,6 +10220,17 @@ function _wireLoginBtn() {
                     <!-- Fields will be dynamically inserted here -->
                 </div>
                 
+                <div class="form-section">
+                    <h4>🧑‍💼 Appointment's Consultant</h4>
+                    <div class="form-group">
+                        <div class="search-with-results" style="position:relative;">
+                            <input type="text" id="consultant-search-input" class="form-control" placeholder="Search consultant..." onkeyup="app.searchConsultants()">
+                            <div id="consultant-search-results" class="search-results-dropdown"></div>
+                        </div>
+                        <div id="selected-consultants-list" style="margin-top:8px;"></div>
+                    </div>
+                </div>
+
                 <div class="form-section">
                     <h4>👥 Co-Agent Assignment</h4>
                     <div class="form-group">
@@ -11192,6 +11229,81 @@ function _wireLoginBtn() {
         if (infoDiv) infoDiv.innerHTML = '';
     };
 
+    // ========== APPOINTMENT CONSULTANT ==========
+
+    const searchConsultants = async () => {
+        const term = document.getElementById('consultant-search-input')?.value.toLowerCase().trim();
+        const resultsDiv = document.getElementById('consultant-search-results');
+        if (!resultsDiv) return;
+        if (!term || term.length < 1) { resultsDiv.style.display = 'none'; return; }
+
+        const users = await AppDataStore.getAll('users');
+        // Consultants = Level 1–9 (any level user)
+        const consultants = users.filter(u => {
+            const lvl = parseInt(u.role?.match(/Level\s+(\d+)/i)?.[1] || 0);
+            return lvl >= 1 && lvl <= 9;
+        });
+
+        const matches = consultants
+            .filter(u => u.full_name && u.full_name.toLowerCase().includes(term))
+            .filter(u => !_selectedConsultants.find(c => c.id === u.id))
+            .slice(0, 10);
+
+        resultsDiv.innerHTML = matches.length
+            ? matches.map(u => `
+                <div class="search-result-item" onclick="app.selectConsultant(${u.id}, '${(u.full_name||'').replace(/'/g,"\\'")}', '${u.role||''}')" style="cursor:pointer;padding:8px;border-bottom:1px solid #eee;">
+                    <strong>${u.full_name}</strong> <span style="font-size:12px;color:#888;">${u.role || ''}</span>
+                </div>`).join('')
+            : '<div class="search-result-item" style="padding:8px;">No consultants found</div>';
+        resultsDiv.style.display = 'block';
+    };
+
+    const selectConsultant = (id, name, role) => {
+        if (_selectedConsultants.find(c => c.id === id)) return;
+        _selectedConsultants.push({ id, name, role, status: 'pending' });
+        const input = document.getElementById('consultant-search-input');
+        if (input) input.value = '';
+        const resultsDiv = document.getElementById('consultant-search-results');
+        if (resultsDiv) resultsDiv.style.display = 'none';
+        renderSelectedConsultants();
+    };
+
+    const removeConsultant = (id) => {
+        _selectedConsultants = _selectedConsultants.filter(c => c.id !== id);
+        renderSelectedConsultants();
+    };
+
+    const renderSelectedConsultants = () => {
+        const list = document.getElementById('selected-consultants-list');
+        if (!list) return;
+        if (_selectedConsultants.length === 0) { list.innerHTML = ''; return; }
+        list.innerHTML = _selectedConsultants.map(c => {
+            const icon = c.status === 'accepted'
+                ? '<i class="fas fa-check-circle" style="color:#16a34a;" title="Accepted"></i>'
+                : c.status === 'rejected'
+                    ? '<i class="fas fa-times-circle" style="color:#dc2626;" title="Rejected"></i>'
+                    : '<i class="fas fa-clock" style="color:#f59e0b;" title="Pending"></i>';
+            return `
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 10px;background:#fff;border:1px solid var(--gray-200);border-radius:6px;margin-bottom:4px;">
+                    <span style="font-size:13px;">${icon} <strong>${c.name}</strong> <span style="color:#888;font-size:11px;">${c.role||''}</span></span>
+                    <button class="btn-icon text-danger" onclick="event.stopPropagation();app.removeConsultant(${c.id})" title="Remove"><i class="fas fa-times"></i></button>
+                </div>`;
+        }).join('');
+    };
+
+    // Called by consultant to accept/reject — from notification or activity detail
+    const respondConsultantInvite = async (activityId, consultantId, response) => {
+        const activity = await AppDataStore.getById('activities', activityId);
+        if (!activity) return UI.toast.error('Activity not found');
+        const consultants = (activity.consultants || []).map(c =>
+            c.id === consultantId ? { ...c, status: response } : c
+        );
+        await AppDataStore.update('activities', activityId, { consultants });
+        UI.toast.success(response === 'accepted' ? 'Appointment accepted!' : 'Appointment rejected.');
+        UI.hideModal();
+        await viewActivityDetails(activityId);
+    };
+
     const searchEntities = async () => {
         const searchTerm = document.getElementById('entity-search')?.value.toLowerCase();
         const resultsDiv = document.getElementById('search-results');
@@ -11323,6 +11435,7 @@ function _wireLoginBtn() {
             start_time: start,
             end_time: end,
             co_agents: _selectedCoAgents,
+            consultants: _selectedConsultants,
             lead_agent_id: _currentUser ? _currentUser.id : 5,
             venue: document.getElementById('activity-venue')?.value || ''
         };
@@ -11652,8 +11765,9 @@ function _wireLoginBtn() {
         if (!stayOpen) {
             UI.hideModal();
         } else {
-            // Reset co-agents when staying open for another add
+            // Reset co-agents and consultants when staying open for another add
             _selectedCoAgents = [];
+            _selectedConsultants = [];
             await openActivityModal(date);
         }
     };
@@ -13362,6 +13476,10 @@ function _wireLoginBtn() {
                             <div>
                                 <span class="meet-type"><i class="fas fa-user-friends"></i> ${a.activity_type || 'Meeting'}${a.activity_title ? ' — ' + a.activity_title : ''}</span>
                                 ${a.co_agents && a.co_agents.length > 0 ? `<span style="font-size:11px;color:var(--gray-500);margin-top:2px;display:block;"><i class="fas fa-user-plus"></i> ${a.co_agents.map(c => c.name || c.full_name).join(', ')}</span>` : ''}
+                                ${a.consultants && a.consultants.length > 0 ? `<span style="font-size:11px;color:var(--gray-500);margin-top:2px;display:block;">${a.consultants.map(c => {
+                                    const icon = c.status === 'accepted' ? '✅' : c.status === 'rejected' ? '❌' : '⏳';
+                                    return `${icon} ${c.name}`;
+                                }).join(' &nbsp; ')}</span>` : ''}
                                 <span class="meet-date">${a.activity_date || ''}</span>
                             </div>
                             <button class="btn btn-sm secondary" style="font-size:12px;padding:4px 8px;" onclick="event.stopPropagation();app.viewActivityDetails(${a.id})">Details</button>
@@ -23679,6 +23797,11 @@ const initImportDemoData = async () => {
         searchReferrers,
         selectReferrer,
         clearSelectedReferrer,
+        searchConsultants,
+        selectConsultant,
+        removeConsultant,
+        renderSelectedConsultants,
+        respondConsultantInvite,
         updateLunarBirth,
 
         // Phase 3 Prospect Management Functions
