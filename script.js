@@ -16277,6 +16277,8 @@ const deactivateAgent = async (agentId) => {
     const getPipelineAmount = async (prospect, category) => {
         const solutions = await AppDataStore.query('proposed_solutions', { prospect_id: prospect.id });
         if (solutions.length > 0 && solutions[0].amount) return solutions[0].amount;
+        if (prospect.estimated_value_max) return prospect.estimated_value_max;
+        if (prospect.estimated_value_min) return prospect.estimated_value_min;
         return category?.defaultAmount || 0;
     };
 
@@ -16301,7 +16303,21 @@ const deactivateAgent = async (agentId) => {
         // Enrich and qualify prospects for Table 2
         const enriched = activeProspects.map(p => {
             const acts = allActivities.filter(a => a.prospect_id === p.id);
-            return { ...p, _pipeline: calcPipelineEntry(p, acts) };
+            const pipeline = calcPipelineEntry(p, acts);
+            // Also qualify prospects with explicit potential data set
+            if (!pipeline.qualified && (p.close_probability > 0 || p.potential_level)) {
+                const potentialProb = p.close_probability > 0
+                    ? p.close_probability
+                    : (p.potential_level === 'High' ? 70 : p.potential_level === 'Medium' ? 40 : 20);
+                pipeline.qualified = true;
+                pipeline.probability = potentialProb;
+                pipeline.fromPotential = true;
+                pipeline.potentialLevel = p.potential_level;
+                if (!pipeline.action || pipeline.action.startsWith('Complete prerequisite')) {
+                    pipeline.action = `Potential: <strong>${p.potential_level || 'Set'}</strong> – follow up to advance to close`;
+                }
+            }
+            return { ...p, _pipeline: pipeline };
         }).filter(p => p._pipeline.qualified)
           .sort((a, b) => {
               if (b._pipeline.probability !== a._pipeline.probability) return b._pipeline.probability - a._pipeline.probability;
@@ -16543,10 +16559,12 @@ const deactivateAgent = async (agentId) => {
         const amount = await getPipelineAmount(prospect, entry.category);
         const noteCount = await getNoteCount(prospect.id);
 
-        const prereqsHtml = (entry.category?.prerequisites || []).map(p => {
-            const done = entry.completedPrereqs.some(c => c.key === p.key);
-            return `<span style="background:${done ? '#D1FAE5' : '#FEE2E2'};color:${done ? '#065F46' : '#991B1B'};padding:2px 5px;border-radius:4px;font-size:10px;">${done ? '✓' : '✗'} ${escapeHtml(p.label)}</span>`;
-        }).join(' ');
+        const prereqsHtml = entry.fromPotential
+            ? `<span style="background:#EDE9FE;color:#5B21B6;padding:2px 5px;border-radius:4px;font-size:10px;">⭐ ${escapeHtml(entry.potentialLevel || 'Potential')} Potential</span>`
+            : (entry.category?.prerequisites || []).map(p => {
+                const done = entry.completedPrereqs.some(c => c.key === p.key);
+                return `<span style="background:${done ? '#D1FAE5' : '#FEE2E2'};color:${done ? '#065F46' : '#991B1B'};padding:2px 5px;border-radius:4px;font-size:10px;">${done ? '✓' : '✗'} ${escapeHtml(p.label)}</span>`;
+            }).join(' ');
 
         return `
             <tr style="border-bottom:1px solid #F3F4F6;" onmouseover="this.style.background='#F9FAFB'" onmouseout="this.style.background=''">
@@ -16555,7 +16573,7 @@ const deactivateAgent = async (agentId) => {
                     <div style="font-size:11px;color:#9CA3AF;">Last activity: ${entry.lastActivityDate ? entry.lastActivityDate.toLocaleDateString('en-GB') : 'None'}</div>
                 </td>
                 <td style="padding:14px 12px;">
-                    <div style="font-weight:500;color:#1E40AF;">${escapeHtml(entry.category?.name || '')}</div>
+                    <div style="font-weight:500;color:#1E40AF;">${entry.fromPotential ? 'Prospect Potential' : escapeHtml(entry.category?.name || '')}</div>
                     <div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:2px;">${prereqsHtml}</div>
                 </td>
                 <td style="padding:14px 12px;font-weight:600;color:#059669;">RM ${(amount || 0).toLocaleString()}</td>
