@@ -11944,52 +11944,57 @@ function _wireLoginBtn() {
                     <span>⚠️ DELETE IS NOT AVAILABLE - Customer records are permanent and cannot be deleted under any circumstances.</span>
                 </div>
 
-                <div class="filter-bar">
+                <div class="filter-bar" style="flex-direction:column; align-items:stretch; gap:8px;">
                     <div class="search-group">
                         <i class="fas fa-search"></i>
                         <input type="text" id="customer-search" placeholder="Search customers by name, phone, email, or ID" onkeyup="app.filterCustomers()">
                     </div>
-                    <div class="filter-group">
-                        <select id="filter-customer-type" onchange="app.filterCustomers()">
-                            <option value="">Customer Type: All</option>
-                            <option value="Regular">Regular</option>
-                            <option value="VIP">VIP</option>
-                            <option value="Agent Eligible">Agent Eligible</option>
-                        </select>
-                        <select id="filter-customer-gua" onchange="app.filterCustomers()">
-                            <option value="">Ming Gua: All</option>
-                            <option value="MG1">MG1 坎</option>
-                            <option value="MG2">MG2 坤</option>
-                            <option value="MG3">MG3 震</option>
-                            <option value="MG4">MG4 巽</option>
-                            <option value="MG5">MG5</option>
-                            <option value="MG6">MG6 乾</option>
-                            <option value="MG7">MG7 兑</option>
-                            <option value="MG8">MG8 艮</option>
-                            <option value="MG9">MG9 离</option>
-                        </select>
-                        <select id="filter-purchase-status" onchange="app.filterCustomers()">
-                            <option value="">Purchase Status: All</option>
-                            <option value="30d">Purchased Last 30 Days</option>
-                            <option value="90d">Purchased Last 90 Days</option>
-                            <option value="no90d">No Purchase 90+ Days</option>
-                        </select>
-                        <select id="filter-customer-deficiency" onchange="app.filterCustomers()">
-                            <option value="">Star Deficiency: All</option>
-                            <option value="Wealth">Wealth</option>
-                            <option value="Career">Career</option>
-                            <option value="Relationship">Romance/Relationship</option>
-                            <option value="Health">Health</option>
-                        </select>
-                        <select id="filter-customer-house-audit" onchange="app.filterCustomers()">
-                            <option value="">House Audit: All</option>
-                            <option value="Pending">Pending</option>
-                            <option value="Scheduled">Scheduled</option>
-                            <option value="Completed">Completed</option>
-                            <option value="None">Not Done</option>
-                        </select>
-                        <input type="number" id="filter-customer-min-events" min="0" placeholder="Min events attended" onchange="app.filterCustomers()" style="width:160px; padding:6px 10px; border:1px solid var(--border); border-radius:6px; background:var(--surface); color:var(--text);">
-                        <button class="btn primary" onclick="app.filterCustomers()">Apply Filters</button>
+                    <div>
+                        <button type="button" onclick="(function(){var p=document.getElementById('customer-adv-filters');var i=document.getElementById('customer-adv-icon');if(p.style.display==='none'){p.style.display='flex';i.className='fas fa-chevron-up';}else{p.style.display='none';i.className='fas fa-chevron-down';}})()" style="background:none;border:none;cursor:pointer;color:var(--primary);font-size:13px;padding:0;display:flex;align-items:center;gap:6px;">
+                            <i id="customer-adv-icon" class="fas fa-chevron-down"></i> Advanced Search
+                        </button>
+                        <div id="customer-adv-filters" style="display:none; flex-wrap:wrap; gap:8px; margin-top:8px;">
+                            <select id="filter-customer-type" onchange="app.filterCustomers()">
+                                <option value="">Customer Type: All</option>
+                                <option value="Regular">Regular</option>
+                                <option value="VIP">VIP</option>
+                                <option value="Agent Eligible">Agent Eligible</option>
+                            </select>
+                            <select id="filter-customer-gua" onchange="app.filterCustomers()">
+                                <option value="">Ming Gua: All</option>
+                                <option value="MG1">MG1 坎</option>
+                                <option value="MG2">MG2 坤</option>
+                                <option value="MG3">MG3 震</option>
+                                <option value="MG4">MG4 巽</option>
+                                <option value="MG5">MG5</option>
+                                <option value="MG6">MG6 乾</option>
+                                <option value="MG7">MG7 兑</option>
+                                <option value="MG8">MG8 艮</option>
+                                <option value="MG9">MG9 离</option>
+                            </select>
+                            <select id="filter-purchase-status" onchange="app.filterCustomers()">
+                                <option value="">Purchase Status: All</option>
+                                <option value="30d">Purchased Last 30 Days</option>
+                                <option value="90d">Purchased Last 90 Days</option>
+                                <option value="no90d">No Purchase 90+ Days</option>
+                            </select>
+                            <select id="filter-customer-deficiency" onchange="app.filterCustomers()">
+                                <option value="">Star Deficiency: All</option>
+                                <option value="Wealth">Wealth</option>
+                                <option value="Career">Career</option>
+                                <option value="Relationship">Romance/Relationship</option>
+                                <option value="Health">Health</option>
+                            </select>
+                            <select id="filter-customer-house-audit" onchange="app.filterCustomers()">
+                                <option value="">House Audit: All</option>
+                                <option value="Pending">Pending</option>
+                                <option value="Scheduled">Scheduled</option>
+                                <option value="Completed">Completed</option>
+                                <option value="None">Not Done</option>
+                            </select>
+                            <input type="number" id="filter-customer-min-events" min="0" placeholder="Min events attended" onchange="app.filterCustomers()" style="width:160px; padding:6px 10px; border:1px solid var(--border); border-radius:6px; background:var(--surface); color:var(--text);">
+                            <button class="btn primary" onclick="app.filterCustomers()">Apply Filters</button>
+                        </div>
                     </div>
                 </div>
 
