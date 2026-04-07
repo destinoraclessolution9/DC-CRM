@@ -8905,7 +8905,7 @@ function _wireLoginBtn() {
                         activityHtml += `
                             <div class="calendar-appointment ${a.activity_type.toLowerCase()} ${a.closing_amount ? 'closed-case' : ''}"
                                 onclick="app.viewActivityDetails(${a.id})">
-                                <div class="appointment-time">${a.start_time || '00:00'} - ${a.end_time || '00:00'}</div>
+                                <div class="appointment-time">${(a.start_time || '00:00').slice(0,5)} - ${(a.end_time || '00:00').slice(0,5)}</div>
                                 ${isEvent
                                     ? `<div class="appointment-customer">📅 ${eventTitle || a.activity_title || 'Event'}</div>`
                                     : `<div class="appointment-agent">👤 ${agentName} ${a.co_agents && a.co_agents.length > 0 ? '<small>+1</small>' : ''}</div>
