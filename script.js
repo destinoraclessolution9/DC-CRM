@@ -7478,12 +7478,27 @@ function _wireLoginBtn() {
         // Find prospects directly referred by this person (from referrals table)
         const referrals = await AppDataStore.getAll('referrals');
         const refChildren = referrals.filter(r => String(r.referrer_id) === String(rootId));
+        const refChildIds = new Set();
         for (const r of refChildren) {
             const childNode = await buildTreeData(r.referred_prospect_id, 'prospect');
             if (childNode) {
                 childNode.referralSource = r.referral_source;
                 childNode.referralDate = r.created_at;
                 node.children.push(childNode);
+                refChildIds.add(String(r.referred_prospect_id));
+            }
+        }
+
+        // For agent nodes: also include prospects assigned to this agent (responsible_agent_id)
+        // that aren't already in the tree via a referral record
+        if (rootType === 'user') {
+            const allProspects = await AppDataStore.getAll('prospects');
+            const agentProspects = allProspects.filter(p =>
+                String(p.responsible_agent_id) === String(rootId) && !refChildIds.has(String(p.id))
+            );
+            for (const prospect of agentProspects) {
+                const childNode = await buildTreeData(prospect.id, 'prospect');
+                if (childNode) node.children.push(childNode);
             }
         }
 
