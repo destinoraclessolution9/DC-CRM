@@ -139,10 +139,40 @@ class DataStore {
             try { localStorage.setItem(`fs_crm_${tableName}`, JSON.stringify(result)); } catch (_) {}
             return result;
         } catch (e) {
-            console.warn(`Offline: falling back to localStorage for ${tableName}`, e);
+            console.warn(`Offline/error: falling back to localStorage for ${tableName}`, e);
+            // Even when read fails, still try to push queued writes — write endpoint is separate from read
+            this._pushQueuedWrites(tableName).catch(() => {});
             const local = localStorage.getItem(`fs_crm_${tableName}`);
             return local ? JSON.parse(local) : [];
         }
+    }
+
+    // Push queued writes to Supabase even when reads are failing (e.g. 400 on activities).
+    // Fire-and-forget — called from getAll's catch block.
+    async _pushQueuedWrites(tableName) {
+        try {
+            const queue = JSON.parse(localStorage.getItem('fs_crm_sync_queue') || '[]');
+            const forTable = queue.filter(q => q.tableName === tableName);
+            if (forTable.length === 0) return;
+            const otherTable = queue.filter(q => q.tableName !== tableName);
+            const stillPending = [];
+            for (const item of forTable) {
+                try {
+                    const { error } = await this._writeClient()
+                        .from(tableName)
+                        .upsert(item.record);
+                    if (!error) {
+                        console.log(`DataStore: force-pushed queued item ${item.record.id} to ${tableName}`);
+                    } else {
+                        console.warn(`DataStore: force-push failed for ${item.record.id}: ${error.message}`);
+                        stillPending.push(item);
+                    }
+                } catch (_) {
+                    stillPending.push(item);
+                }
+            }
+            localStorage.setItem('fs_crm_sync_queue', JSON.stringify([...otherTable, ...stillPending]));
+        } catch (_) {}
     }
 
     // Auto-sync: pushes locally-saved (offline/network-error) records to Supabase
