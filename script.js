@@ -18970,7 +18970,8 @@ const exportKPIReport = async (format) => {
             start_date: '',
             end_date: '',
             remarks: '',
-            is_active: true
+            is_active: true,
+            visible_to: []
         };
 
         const allProducts =await  (await AppDataStore.getAll('products')).filter(p => p.is_active !== false);
@@ -19044,6 +19045,20 @@ const exportKPIReport = async (format) => {
             </div>
 
             <div class="form-group">
+                <label>Visible To</label>
+                <div style="display:flex;gap:24px;padding:8px 0;">
+                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;">
+                        <input type="checkbox" id="pkg-visible-customer" ${(pkg.visible_to||[]).includes('customer') ? 'checked' : ''}>
+                        Customer <span style="font-size:11px;color:var(--gray-400);">(all levels)</span>
+                    </label>
+                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;">
+                        <input type="checkbox" id="pkg-visible-agent" ${(pkg.visible_to||[]).includes('agent') ? 'checked' : ''}>
+                        Agent <span style="font-size:11px;color:var(--gray-400);">(level 1–11 only)</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="form-group">
                 <label style="display:flex;align-items:center;cursor:pointer;">
                     <input type="checkbox" id="pkg-active" ${pkg.is_active !== false ? 'checked' : ''} style="margin-right:8px;"> Mark as Active
                 </label>
@@ -19052,7 +19067,7 @@ const exportKPIReport = async (format) => {
 
         UI.showModal(isEdit ? 'Edit Promotion Package' : 'Create Promotion Package', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: isEdit ? 'Update Package' : 'Create Package', type: 'primary', action: `await app.savePackage(${id || 'null'})` }
+            { label: isEdit ? 'Update Package' : 'Create Package', type: 'primary', action: `(async () => { await app.savePackage(${id || 'null'}); })()` }
         ]);
     };
 
@@ -19068,6 +19083,9 @@ const exportKPIReport = async (format) => {
         const requirement   = document.getElementById('pkg-requirement').value.trim();
         const remarks       = document.getElementById('pkg-remarks').value.trim();
         const isActive      = document.getElementById('pkg-active').checked;
+        const visibleTo     = [];
+        if (document.getElementById('pkg-visible-customer').checked) visibleTo.push('customer');
+        if (document.getElementById('pkg-visible-agent').checked) visibleTo.push('agent');
 
         if (!name || isNaN(price) || productIds.length === 0) {
             UI.toast.error("Please fill in all required fields (Name, Price, and at least one Product)");
@@ -19091,6 +19109,7 @@ const exportKPIReport = async (format) => {
             end_date:       endDate,
             remarks:        remarks,
             is_active:      isActive,
+            visible_to:     visibleTo,
             updated_at:     new Date().toISOString()
         };
 
