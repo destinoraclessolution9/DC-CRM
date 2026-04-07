@@ -18506,11 +18506,14 @@ const exportKPIReport = async (format) => {
         const promotions = allPromos.filter(p => {
             if (p.is_active === false) return false;
             if (p.end_date) { const e = new Date(p.end_date); e.setHours(0,0,0,0); if (e < today) return false; }
-            // visible_to filter: empty = show to all (backward compat)
-            const vt = p.visible_to || [];
+            // visible_to filter: normalize to array (Supabase may return JSON string)
+            let vt = p.visible_to;
+            if (!vt) vt = [];
+            else if (typeof vt === 'string') { try { vt = JSON.parse(vt); } catch (_) { vt = []; } }
+            if (!Array.isArray(vt)) vt = [];
             if (vt.length === 0 || isAdmin) return true;
             if (vt.includes('customer')) return true; // visible to all levels
-            if (vt.includes('agent') && userLevel >= 1 && userLevel <= 11) return true;
+            if (vt.includes('agent') && (isAgent(_currentUser) || (userLevel >= 1 && userLevel <= 11))) return true;
             return false;
         });
 
