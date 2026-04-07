@@ -9585,10 +9585,22 @@ function _wireLoginBtn() {
                 </div>
                 
                 <div class="detail-section">
+                    <h4>Consultant</h4>
+                    ${await (async () => {
+                        const consultantId = prospect?.responsible_agent_id || customer?.responsible_agent_id;
+                        if (consultantId) {
+                            const consultantName = await getAgentName(consultantId);
+                            return `<div class="info-row"><span class="info-label">Consultant Name:</span> <span>✅ ${consultantName}</span></div>`;
+                        }
+                        return `<div class="info-row"><span class="info-label">Consultant Name:</span> <span>❌ Not Assigned</span></div>`;
+                    })()}
+                </div>
+
+                <div class="detail-section">
                     <h4>Agents</h4>
                     <div class="info-row"><span class="info-label">Lead:</span> <span>${await getAgentName(activity.lead_agent_id)}</span></div>
                     ${activity.co_agents?.length ? `
-                        <div class="info-row"><span class="info-label">Co-Agents:</span> 
+                        <div class="info-row"><span class="info-label">Co-Agents:</span>
                             <span>${activity.co_agents.map(a => a.name).join(', ')}</span>
                         </div>
                     ` : ''}
