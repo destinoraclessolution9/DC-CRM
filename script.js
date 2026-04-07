@@ -18512,8 +18512,12 @@ const exportKPIReport = async (format) => {
             content = `
                 <div class="form-group"><label>Title*</label><input type="text" id="mkt-title" class="form-control"></div>
                 <div class="form-group"><label>Ticket Price (RM)</label><input type="number" id="mkt-price" class="form-control" value="0"></div>
+                <div class="form-group"><label>Early Bird Price (RM)</label><input type="number" id="mkt-early-bird-price" class="form-control" value="0"></div>
+                <div class="form-group"><label>Group Purchase Price (RM)</label><input type="number" id="mkt-group-price" class="form-control" value="0"></div>
                 <div class="form-group"><label>Duration</label><input type="text" id="mkt-duration" class="form-control" placeholder="e.g. 2 hours"></div>
                 <div class="form-group"><label>Target Group</label><input type="text" id="mkt-target" class="form-control"></div>
+                <div class="form-group"><label>Location</label><input type="text" id="mkt-location" class="form-control" placeholder="e.g. KL, Online"></div>
+                <div class="form-group"><label>Speaker</label><input type="text" id="mkt-speaker" class="form-control" placeholder="e.g. Master Tan"></div>
                 <div class="form-group"><label>Description</label><textarea id="mkt-desc" class="form-control"></textarea></div>
                 <div class="form-group"><label><input type="checkbox" id="mkt-active" checked> Is Active</label></div>
 `;
@@ -18565,8 +18569,12 @@ const exportKPIReport = async (format) => {
             content = `
                 <div class="form-group"><label>Title*</label><input type="text" id="mkt-title" class="form-control" value="${item.title}"></div>
                 <div class="form-group"><label>Ticket Price (RM)</label><input type="number" id="mkt-price" class="form-control" value="${item.ticket_price || 0}"></div>
+                <div class="form-group"><label>Early Bird Price (RM)</label><input type="number" id="mkt-early-bird-price" class="form-control" value="${item.early_bird_price || 0}"></div>
+                <div class="form-group"><label>Group Purchase Price (RM)</label><input type="number" id="mkt-group-price" class="form-control" value="${item.group_purchase_price || 0}"></div>
                 <div class="form-group"><label>Duration</label><input type="text" id="mkt-duration" class="form-control" value="${item.duration || ''}"></div>
                 <div class="form-group"><label>Target Group</label><input type="text" id="mkt-target" class="form-control" value="${item.target_group || ''}"></div>
+                <div class="form-group"><label>Location</label><input type="text" id="mkt-location" class="form-control" value="${item.location || ''}" placeholder="e.g. KL, Online"></div>
+                <div class="form-group"><label>Speaker</label><input type="text" id="mkt-speaker" class="form-control" value="${item.speaker || ''}" placeholder="e.g. Master Tan"></div>
                 <div class="form-group"><label>Description</label><textarea id="mkt-desc" class="form-control">${item.description || ''}</textarea></div>
                 <div class="form-group"><label><input type="checkbox" id="mkt-active" ${item.is_active ? 'checked' : ''}> Is Active</label></div>
             `;
@@ -18623,8 +18631,12 @@ const exportKPIReport = async (format) => {
         } else if (type === 'events') {
             data.title = document.getElementById('mkt-title').value.trim();
             data.ticket_price = parseFloat(document.getElementById('mkt-price').value) || 0;
+            data.early_bird_price = parseFloat(document.getElementById('mkt-early-bird-price').value) || 0;
+            data.group_purchase_price = parseFloat(document.getElementById('mkt-group-price').value) || 0;
             data.duration = document.getElementById('mkt-duration').value;
             data.target_group = document.getElementById('mkt-target').value;
+            data.location = document.getElementById('mkt-location').value;
+            data.speaker = document.getElementById('mkt-speaker').value;
             data.description = document.getElementById('mkt-desc').value;
             if (!data.title) return UI.toast.error('Title is required');
         } else {
