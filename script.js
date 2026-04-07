@@ -6048,7 +6048,7 @@ function _wireLoginBtn() {
         const userDisplay = document.getElementById('user-name-label');
         const userAvatar = document.getElementById('user-avatar');
         if (_currentUser) {
-            if (userDisplay) userDisplay.textContent = `${_currentUser.full_name || _currentUser.username} [${_currentUser.role || 'no-role'}]`;
+            if (userDisplay) userDisplay.textContent = _currentUser.full_name || _currentUser.username;
             if (userAvatar) userAvatar.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(_currentUser.full_name || _currentUser.username)}&background=0D9488&color=fff`;
         } else {
             if (userDisplay) userDisplay.textContent = 'Guest';

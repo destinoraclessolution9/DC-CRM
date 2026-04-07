@@ -108,7 +108,20 @@ class DataStore {
     }
 
     _readClient() {
-        return this._srClient || window.supabase;
+        // If _srClient already created, use it
+        if (this._srClient) return this._srClient;
+        // Try to build service-role client on the fly (bypasses RLS)
+        try {
+            const factory = window._supabaseFactory;
+            if (factory && typeof factory.createClient === 'function' && window.SUPABASE_URL && window.SUPABASE_SR) {
+                this._srClient = factory.createClient(window.SUPABASE_URL, window.SUPABASE_SR, {
+                    auth: { persistSession: false, autoRefreshToken: false }
+                });
+                return this._srClient;
+            }
+        } catch (_) {}
+        // Last resort: anon client (subject to RLS)
+        return window.supabase;
     }
 
     _generateId() {
