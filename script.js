@@ -18424,7 +18424,7 @@ const exportKPIReport = async (format) => {
 
         UI.showModal('Edit ' + { products: 'Product', events: 'Event', venues: 'Venue', promotions: 'Promotion' }[type], content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save Changes', type: 'primary', action: `await app.saveMarketingListItem('${id}')` }
+            { label: 'Save Changes', type: 'primary', action: `(async () => { await app.saveMarketingListItem('${id}'); })()` }
         ]);
     };
 
@@ -18496,11 +18496,22 @@ const exportKPIReport = async (format) => {
     const showMonthlyPromotionView = async (container) => {
         const today = new Date(); today.setHours(0,0,0,0);
         const allPromos = await AppDataStore.getAll('promotions');
-        // Show active promotions that are not expired
+
+        // Determine current user's level
+        const userLvlMatch = (_currentUser?.role || '').match(/Level\s*(\d+)/i);
+        const userLevel = userLvlMatch ? parseInt(userLvlMatch[1]) : 0;
+        const isAdmin = isSystemAdmin(_currentUser) || isMarketingManager(_currentUser);
+
+        // Show active, non-expired promotions visible to current user
         const promotions = allPromos.filter(p => {
             if (p.is_active === false) return false;
             if (p.end_date) { const e = new Date(p.end_date); e.setHours(0,0,0,0); if (e < today) return false; }
-            return true;
+            // visible_to filter: empty = show to all (backward compat)
+            const vt = p.visible_to || [];
+            if (vt.length === 0 || isAdmin) return true;
+            if (vt.includes('customer')) return true; // visible to all levels
+            if (vt.includes('agent') && userLevel >= 1 && userLevel <= 11) return true;
+            return false;
         });
 
         // Pre-load product names for each promotion
