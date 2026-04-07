@@ -136,6 +136,22 @@ class DataStore {
             // Auto-sync: push any locally-saved (offline) items to Supabase so ALL users can see them,
             // then return the merged result (includes items still pending sync).
             const result = await this._autoSync(tableName, serverData);
+            // Merge with prior localStorage cache so extra fields saved locally
+            // (that Supabase stripped due to schema mismatch) are preserved.
+            // Server fields always win; local-only fields (extra columns) are kept.
+            try {
+                const localRaw = localStorage.getItem(`fs_crm_${tableName}`);
+                if (localRaw) {
+                    const localItems = JSON.parse(localRaw);
+                    const localMap = new Map(localItems.map(r => [String(r.id), r]));
+                    const merged = result.map(r => {
+                        const local = localMap.get(String(r.id));
+                        return local ? { ...local, ...r } : r;
+                    });
+                    localStorage.setItem(`fs_crm_${tableName}`, JSON.stringify(merged));
+                    return merged;
+                }
+            } catch (_) {}
             try { localStorage.setItem(`fs_crm_${tableName}`, JSON.stringify(result)); } catch (_) {}
             return result;
         } catch (e) {
