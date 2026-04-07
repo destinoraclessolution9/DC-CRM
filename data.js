@@ -215,34 +215,54 @@ class DataStore {
             // Step 2 — Process the sync queue: upsert queued items to Supabase
             const queue = JSON.parse(localStorage.getItem('fs_crm_sync_queue') || '[]');
             const forTable = queue.filter(q => q.tableName === tableName);
-            if (forTable.length === 0) return merged;
+            if (forTable.length > 0) {
+                const otherTable = queue.filter(q => q.tableName !== tableName);
+                const stillPending = [];
 
-            const otherTable = queue.filter(q => q.tableName !== tableName);
-            const stillPending = [];
-
-            for (const item of forTable) {
-                if (serverIds.has(String(item.record.id))) continue; // already in Supabase
-                try {
-                    const { data: inserted, error: uErr } = await this._writeClient()
-                        .from(tableName)
-                        .upsert(item.record)
-                        .select()
-                        .single();
-                    if (!uErr && inserted) {
-                        merged.push(inserted);
-                        serverIds.add(String(inserted.id));
-                        console.log(`DataStore: auto-synced local item ${item.record.id} to ${tableName}`);
-                    } else {
-                        // Sync failed — include item locally but keep in queue for next attempt
+                for (const item of forTable) {
+                    if (serverIds.has(String(item.record.id))) continue; // already in Supabase
+                    try {
+                        const { data: inserted, error: uErr } = await this._writeClient()
+                            .from(tableName)
+                            .upsert(item.record)
+                            .select()
+                            .single();
+                        if (!uErr && inserted) {
+                            merged.push(inserted);
+                            serverIds.add(String(inserted.id));
+                            console.log(`DataStore: auto-synced local item ${item.record.id} to ${tableName}`);
+                        } else {
+                            // Sync failed — include item locally but keep in queue for next attempt
+                            if (!serverIds.has(String(item.record.id))) merged.push(item.record);
+                            stillPending.push(item);
+                        }
+                    } catch (_) {
                         if (!serverIds.has(String(item.record.id))) merged.push(item.record);
                         stillPending.push(item);
                     }
-                } catch (_) {
-                    if (!serverIds.has(String(item.record.id))) merged.push(item.record);
-                    stillPending.push(item);
                 }
+                localStorage.setItem('fs_crm_sync_queue', JSON.stringify([...otherTable, ...stillPending]));
             }
-            localStorage.setItem('fs_crm_sync_queue', JSON.stringify([...otherTable, ...stillPending]));
+
+            // Step 3 — Merge local-only extra fields (e.g. schema-mismatch fields like potential_level,
+            // close_probability that Supabase stripped) back into server records so they survive the
+            // getAll → localStorage overwrite cycle. Runs always, not gated on sync queue.
+            try {
+                const localRaw = localStorage.getItem(`fs_crm_${tableName}`);
+                if (localRaw) {
+                    const localMap = new Map(JSON.parse(localRaw).map(r => [String(r.id), r]));
+                    for (let i = 0; i < merged.length; i++) {
+                        const localRec = localMap.get(String(merged[i].id));
+                        if (!localRec) continue;
+                        const extra = {};
+                        for (const [k, v] of Object.entries(localRec)) {
+                            if (!(k in merged[i]) && v != null) extra[k] = v;
+                        }
+                        if (Object.keys(extra).length > 0) merged[i] = { ...merged[i], ...extra };
+                    }
+                }
+            } catch (_) {}
+
             return merged;
         } catch (_) {
             return serverData;
