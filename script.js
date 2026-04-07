@@ -19126,6 +19126,54 @@ const exportKPIReport = async (format) => {
         ]);
     };
 
+    // Run once to add missing columns to the promotions table in Supabase
+    const migratePromotionsTable = async () => {
+        const migrationSQL = `
+ALTER TABLE public.promotions
+  ADD COLUMN IF NOT EXISTS product_ids  JSONB    DEFAULT '[]'::jsonb,
+  ADD COLUMN IF NOT EXISTS original_value NUMERIC,
+  ADD COLUMN IF NOT EXISTS payment_types  JSONB    DEFAULT '[]'::jsonb,
+  ADD COLUMN IF NOT EXISTS limited_slots  INTEGER,
+  ADD COLUMN IF NOT EXISTS start_date     DATE,
+  ADD COLUMN IF NOT EXISTS end_date       DATE,
+  ADD COLUMN IF NOT EXISTS visible_to     JSONB    DEFAULT '[]'::jsonb,
+  ADD COLUMN IF NOT EXISTS name           TEXT,
+  ADD COLUMN IF NOT EXISTS details        TEXT,
+  ADD COLUMN IF NOT EXISTS delivery_lead_time TEXT;`.trim();
+
+        // Try via Supabase rpc('sql') – works if the function exists
+        try {
+            const client = AppDataStore._srClient || window.supabase;
+            const { error } = await client.rpc('sql', { query: migrationSQL });
+            if (!error) { console.log('Promotions table migrated via rpc.'); return true; }
+        } catch (_) {}
+
+        // Try via direct fetch with service-role key
+        try {
+            const resp = await fetch(`${window.SUPABASE_URL}/rest/v1/rpc/sql`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'apikey': window.SUPABASE_SR,
+                    'Authorization': `Bearer ${window.SUPABASE_SR}`
+                },
+                body: JSON.stringify({ query: migrationSQL })
+            });
+            if (resp.ok) { console.log('Promotions table migrated via fetch rpc.'); return true; }
+        } catch (_) {}
+
+        // Both failed – show SQL to user
+        const escaped = migrationSQL.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        UI.showModal('⚠️ Database Migration Required', `
+            <p style="margin-bottom:12px;">The <strong>promotions</strong> table is missing columns needed to save full package data. Please run this SQL once in your <a href="https://supabase.com/dashboard/project/remuwhxvzkzjtgbzqjaa/sql/new" target="_blank" style="color:var(--primary);">Supabase SQL Editor ↗</a>:</p>
+            <textarea class="form-control" rows="12" id="migration-sql-box" style="font-family:monospace;font-size:11px;background:#1e1e1e;color:#d4d4d4;border:none;resize:none;">${migrationSQL}</textarea>
+            <button class="btn secondary" style="margin-top:8px;" onclick="document.getElementById('migration-sql-box').select();document.execCommand('copy');UI.toast.success('SQL copied!')">
+                <i class="fas fa-copy"></i> Copy SQL
+            </button>
+        `, [{ label: 'Close', type: 'primary', action: 'UI.hideModal()' }]);
+        return false;
+    };
+
     const savePackage = async (id) => {
         const name          = document.getElementById('pkg-name').value.trim();
         const price         = parseFloat(document.getElementById('pkg-price').value);
@@ -19150,6 +19198,9 @@ const exportKPIReport = async (format) => {
             UI.toast.error("End Date cannot be before Start Date");
             return;
         }
+
+        // Ensure Supabase promotions table has all required columns before saving
+        await migratePromotionsTable();
 
         const data = {
             package_name:   name,
@@ -23864,6 +23915,7 @@ const initImportDemoData = async () => {
         toggleProductStatus,
         renderPackagesTab,
         openCreatePackageModal,
+        migratePromotionsTable,
         savePackage,
         deletePackage,
         viewPackageCustomers,
