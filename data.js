@@ -184,8 +184,9 @@ class DataStore {
             return data;
         } catch (e) {
             const isNetworkError = e instanceof TypeError && e.message === 'Failed to fetch';
-            if (e.code === 'PGRST204' || isNetworkError) {
-                console.warn(`${isNetworkError ? 'Network error' : 'Schema mismatch'} on insert to ${tableName}: ${e.message} — saving locally`);
+            const isTableMissing = e.code === '42P01' || e.message?.includes('does not exist');
+            if (e.code === 'PGRST204' || isNetworkError || isTableMissing) {
+                console.warn(`${isNetworkError ? 'Network error' : 'Schema/table issue'} on insert to ${tableName}: ${e.message} — saving locally`);
                 const key = `fs_crm_${tableName}`;
                 try {
                     const all = JSON.parse(localStorage.getItem(key) || '[]');
@@ -219,8 +220,9 @@ class DataStore {
             return data;
         } catch (e) {
             const isNetworkError = e instanceof TypeError && e.message === 'Failed to fetch';
-            if (e.code === 'PGRST204' || isNetworkError) {
-                console.warn(`${isNetworkError ? 'Network error' : 'Schema mismatch'} on update to ${tableName}: ${e.message} — saving locally`);
+            const isTableMissing = e.code === '42P01' || e.message?.includes('does not exist');
+            if (e.code === 'PGRST204' || isNetworkError || isTableMissing) {
+                console.warn(`${isNetworkError ? 'Network error' : 'Schema/table issue'} on update to ${tableName}: ${e.message} — saving locally`);
                 const key = `fs_crm_${tableName}`;
                 try {
                     const all = JSON.parse(localStorage.getItem(key) || '[]');
@@ -245,7 +247,9 @@ class DataStore {
                 .eq('id', id);
             if (error) throw error;
         } catch (e) {
-            throw e;
+            const isNetworkError = e instanceof TypeError && e.message === 'Failed to fetch';
+            const isTableMissing = e.code === '42P01' || e.message?.includes('does not exist');
+            if (!isNetworkError && !isTableMissing) throw e;
         } finally {
             // Always remove from localStorage cache regardless of Supabase outcome,
             // so the UI never resurfaces a stale/ghost record.
