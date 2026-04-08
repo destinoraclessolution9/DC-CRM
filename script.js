@@ -11218,6 +11218,22 @@ function _wireLoginBtn() {
                 <div id="add-att-results" style="border:1px solid var(--border,#e5e0d8);border-radius:4px;max-height:160px;overflow-y:auto;display:none;background:#fff;"></div>
             </div>
             <div id="add-att-name" style="margin-top:8px;font-weight:600;color:var(--primary);min-height:20px;"></div>
+            <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border,#e5e0d8);">
+                <div style="font-size:12px;color:var(--gray-400);margin-bottom:6px;">New person not in system?</div>
+                <button class="btn secondary btn-sm" onclick="app.showFTFAttendeeForm()" style="width:100%;">➕ First Time Friend (New Prospect)</button>
+            </div>
+            <div id="ftf-att-form" style="display:none;margin-top:12px;padding:12px;background:var(--gray-50,#faf9f7);border-radius:8px;border:1px solid var(--border,#e5e0d8);">
+                <div class="form-row">
+                    <div class="form-group half">
+                        <label>Name <span class="required">*</span></label>
+                        <input type="text" id="ftf-att-name" class="form-control" placeholder="Full Name">
+                    </div>
+                    <div class="form-group half">
+                        <label>Phone <span class="required">*</span></label>
+                        <input type="text" id="ftf-att-phone" class="form-control" placeholder="Phone Number">
+                    </div>
+                </div>
+            </div>
         `;
         UI.showModal('Add Attendee', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
@@ -11251,11 +11267,52 @@ function _wireLoginBtn() {
         if (input) input.value = name;
     };
 
+    const showFTFAttendeeForm = () => {
+        const form = document.getElementById('ftf-att-form');
+        if (form) form.style.display = form.style.display === 'none' ? 'block' : 'none';
+    };
+
     const confirmAddAttendee = async () => {
-        const s = window._addAttSelected;
-        if (!s) { UI.toast.error('Please select a person first'); return; }
         const eventId = window._addAttEventId;
         const activityId = window._addAttActivityId;
+
+        // Check if FTF form is visible and filled
+        const ftfForm = document.getElementById('ftf-att-form');
+        const ftfName = document.getElementById('ftf-att-name')?.value.trim();
+        const ftfPhone = document.getElementById('ftf-att-phone')?.value.trim();
+        if (ftfForm && ftfForm.style.display !== 'none' && (ftfName || ftfPhone)) {
+            if (!ftfName) { UI.toast.error('Name is required for First Time Friend'); return; }
+            if (!ftfPhone) { UI.toast.error('Phone is required for First Time Friend'); return; }
+            // Create new prospect
+            const newProspect = await AppDataStore.create('prospects', {
+                full_name: ftfName,
+                phone: ftfPhone,
+                pipeline_stage: 'new',
+                responsible_agent_id: _currentUser?.id || null,
+                cps_assignment_date: new Date().toISOString().split('T')[0],
+                created_at: new Date().toISOString()
+            });
+            const prospectId = newProspect?.id || newProspect;
+            if (prospectId) {
+                await AppDataStore.create('event_attendees', {
+                    event_id: eventId,
+                    entity_id: prospectId,
+                    attendee_type: 'prospect',
+                    attendance_status: 'Registered',
+                    added_by_agent_id: _currentUser?.id || null,
+                    created_at: new Date().toISOString()
+                });
+                UI.hideModal();
+                await app.viewActivityDetails(activityId);
+                UI.toast.success(ftfName + ' added as new prospect & attendee');
+            } else {
+                UI.toast.error('Failed to create prospect');
+            }
+            return;
+        }
+
+        const s = window._addAttSelected;
+        if (!s) { UI.toast.error('Please select a person or fill in First Time Friend details'); return; }
         await AppDataStore.create('event_attendees', {
             event_id: eventId,
             entity_id: s.id,
@@ -24070,6 +24127,7 @@ const initImportDemoData = async () => {
         searchAddAttendee,
         selectAddAttendee,
         confirmAddAttendee,
+        showFTFAttendeeForm,
         searchEntities,
         selectEntity,
         clearSelectedEntity,
