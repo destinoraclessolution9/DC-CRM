@@ -201,13 +201,18 @@ class DataStore {
             const serverIds = new Set(serverData.map(r => String(r.id)));
             const merged = [...serverData];
 
+            // Load tombstones — IDs that were intentionally deleted; never re-create these
+            const _tombstoneRaw = localStorage.getItem('fs_crm_tombstones');
+            const _tombstones = _tombstoneRaw ? JSON.parse(_tombstoneRaw) : {};
+            const deletedIds = new Set(_tombstones[tableName] || []);
+
             // Step 1 — Migration: scan localStorage cache for items not in Supabase
             // and add them to the sync queue (handles saves made before the queue existed).
             try {
                 const localRaw = localStorage.getItem(`fs_crm_${tableName}`);
                 if (localRaw) {
                     const localItems = JSON.parse(localRaw);
-                    const localOnly = localItems.filter(r => !serverIds.has(String(r.id)));
+                    const localOnly = localItems.filter(r => !serverIds.has(String(r.id)) && !deletedIds.has(String(r.id)));
                     if (localOnly.length > 0) {
                         const queue = JSON.parse(localStorage.getItem('fs_crm_sync_queue') || '[]');
                         const queuedIds = new Set(
@@ -237,6 +242,7 @@ class DataStore {
 
                 for (const item of forTable) {
                     if (serverIds.has(String(item.record.id))) continue; // already in Supabase
+                    if (deletedIds.has(String(item.record.id))) continue; // was deleted — skip
                     try {
                         const { data: inserted, error: uErr } = await this._writeClient()
                             .from(tableName)
@@ -452,6 +458,7 @@ class DataStore {
     }
 
     async delete(tableName, id) {
+        let _deleteErr = null;
         try {
             const { error } = await this._writeClient()
                 .from(tableName)
@@ -460,6 +467,7 @@ class DataStore {
             if (error) throw error;
         } catch (e) {
             console.warn(`Error on delete from ${tableName}: ${e.message} (code: ${e.code}) — removing locally`);
+            _deleteErr = e;
         } finally {
             // Always remove from localStorage cache regardless of Supabase outcome,
             // so the UI never resurfaces a stale/ghost record.
@@ -475,7 +483,15 @@ class DataStore {
                 const filtered = syncQueue.filter(q => !(q.tableName === tableName && String(q.record.id) === String(id)));
                 localStorage.setItem('fs_crm_sync_queue', JSON.stringify(filtered));
             } catch (_) {}
+            // Add to tombstone so _autoSync never re-creates this record
+            try {
+                const tombstones = JSON.parse(localStorage.getItem('fs_crm_tombstones') || '{}');
+                if (!tombstones[tableName]) tombstones[tableName] = [];
+                if (!tombstones[tableName].includes(String(id))) tombstones[tableName].push(String(id));
+                localStorage.setItem('fs_crm_tombstones', JSON.stringify(tombstones));
+            } catch (_) {}
         }
+        if (_deleteErr) throw _deleteErr;
         this.emit('dataChanged', { action: 'delete', table: tableName, id });
     }
 
