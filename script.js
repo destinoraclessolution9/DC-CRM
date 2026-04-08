@@ -169,8 +169,8 @@ const appLogic = (() => {
     const canViewActivity = async (activity) => {
         const user = _currentUser;
         if (!user) return false;
-        // Public activities are visible to everyone
-        if (activity.is_public || activity.visibility === 'public') return true;
+        // Public/open activities are visible to everyone
+        if (activity.is_public || activity.visibility === 'public' || activity.visibility === 'open') return true;
         // If explicitly marked private, check ownership; any other value (open, null, undefined) allows role check
         if (activity.visibility === 'private') {
             if (isSystemAdmin(user)) return true;
