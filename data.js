@@ -136,7 +136,7 @@ class DataStore {
             const tombstoneRaw = localStorage.getItem('fs_crm_tombstones');
             const tombstones = tombstoneRaw ? JSON.parse(tombstoneRaw) : {};
             const deletedIds = new Set(tombstones[tableName] || []);
-            const serverData = (data || []).filter(r => !deletedIds.has(String(r.id)));
+            const serverData = (data || []).filter(r => !deletedIds.has(String(r.id)) && !(tableName === 'users' && r.status === 'deleted'));
             // Auto-sync: push any locally-saved (offline) items to Supabase so ALL users can see them,
             // then return the merged result (includes items still pending sync).
             const result = await this._autoSync(tableName, serverData);
