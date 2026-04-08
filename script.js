@@ -8878,7 +8878,8 @@ function _wireLoginBtn() {
         for (let i = 1; i <= daysInMonth; i++) {
             const isToday = isCurrentMonth && i === todayDate.getDate();
             const dateStr = `${year}-${(month + 1).toString().padStart(2, '0')}-${i.toString().padStart(2, '0')}`;
-            const dayActivities = activities.filter(a => a.activity_date === dateStr);
+            const dayActivities = activities.filter(a => a.activity_date === dateStr)
+                .sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
 
             let activityHtml = '';
             const seenIds = new Set();
