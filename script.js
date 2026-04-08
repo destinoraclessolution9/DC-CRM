@@ -120,12 +120,16 @@ const appLogic = (() => {
         if (level <= 2) return 'all';
         // Levels 12+ (Ambassador, Customer, Referrer) see only own records
         if (level >= 12) return [user.id];
-        // Levels 3–11: traverse down the reporting tree (team/subordinates)
+        // Levels 3–11: traverse down the reporting tree (team/subordinates), restricted to same team
         const allUsers = await AppDataStore.getAll('users');
+        const userTeamId = user.team_id;
         const result = [];
         const collect = (uid) => {
             result.push(uid);
-            allUsers.filter(u => String(u.reporting_to) === String(uid)).forEach(u => collect(u.id));
+            allUsers
+                .filter(u => String(u.reporting_to) === String(uid) &&
+                    (!userTeamId || !u.team_id || String(u.team_id) === String(userTeamId)))
+                .forEach(u => collect(u.id));
         };
         collect(user.id);
         return result;
@@ -170,8 +174,14 @@ const appLogic = (() => {
     const canViewActivity = async (activity) => {
         const user = _currentUser;
         if (!user) return false;
-        // Public/open activities are visible to everyone
-        if (activity.is_public || activity.visibility === 'public' || activity.visibility === 'open') return true;
+        // Public/open activities are visible to everyone in the same team
+        if (activity.is_public || activity.visibility === 'public' || activity.visibility === 'open') {
+            if (!user.team_id) return true;
+            const allUsersForTeam = await AppDataStore.getAll('users');
+            const leadAgent = allUsersForTeam.find(u => String(u.id) === String(activity.lead_agent_id));
+            if (!leadAgent || !leadAgent.team_id || String(leadAgent.team_id) === String(user.team_id)) return true;
+            return false;
+        }
         // If explicitly marked private, check ownership; any other value (open, null, undefined) allows role check
         if (activity.visibility === 'private') {
             if (isSystemAdmin(user)) return true;
