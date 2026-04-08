@@ -12699,6 +12699,10 @@ function _wireLoginBtn() {
                     </div>
                     <div class="form-row">
                         <div class="form-group half">
+                            <label>Nickname</label>
+                            <input type="text" id="prospect-nickname" class="form-control" value="${prospect?.nickname || ''}">
+                        </div>
+                        <div class="form-group half">
                             <label>Gender</label>
                             <select id="prospect-gender" class="form-control">
                                 <option value="Male" ${prospect?.gender === 'Male' ? 'selected' : ''}>Male</option>
@@ -12706,35 +12710,17 @@ function _wireLoginBtn() {
                                 <option value="Other" ${prospect?.gender === 'Other' ? 'selected' : ''}>Other</option>
                             </select>
                         </div>
+                    </div>
+                    <div class="form-row">
                         <div class="form-group half">
                             <label>Nationality</label>
                             <input type="text" id="prospect-nationality" class="form-control" value="${prospect?.nationality || 'Malaysian'}">
                         </div>
-                    </div>
-                    <div class="form-row">
                         <div class="form-group half">
                             <label>Phone <span class="required">*</span></label>
                             <input type="tel" id="prospect-phone" class="form-control" value="${prospect?.phone || ''}" required>
                         </div>
-                        <div class="form-group half">
-                            <label>Email</label>
-                            <input type="email" id="prospect-email" class="form-control" value="${prospect?.email || ''}">
-                        </div>
                     </div>
-                    <div class="form-row">
-                        <div class="form-group half">
-                            <label>IC Number</label>
-                            <input type="text" id="prospect-ic" class="form-control" value="${prospect?.ic_number || ''}">
-                        </div>
-                        <div class="form-group half">
-                            <label>Nickname</label>
-                            <input type="text" id="prospect-nickname" class="form-control" value="${prospect?.nickname || ''}">
-                        </div>
-                    </div>
-                </div>
-
-                <div class="form-section">
-                    <h4>Personal Information</h4>
                     <div class="form-row">
                         <div class="form-group half">
                             <label>Date of Birth</label>
@@ -12747,6 +12733,21 @@ function _wireLoginBtn() {
                     </div>
                     <div class="form-row">
                         <div class="form-group half">
+                            <label>Ming Gua</label>
+                            <select id="prospect-minggua" class="form-control">
+                                <option value="">-- Select --</option>
+                                ${[['MG1','MG1 坎'],['MG2','MG2 坤'],['MG3','MG3 震'],['MG4','MG4 巽'],['MG5','MG5'],['MG6','MG6 乾'],['MG7','MG7 兑'],['MG8','MG8 艮'],['MG9','MG9 离']].map(([val,lbl]) => `
+                                    <option value="${val}" ${prospect?.ming_gua === val ? 'selected' : ''}>${lbl}</option>
+                                `).join('')}
+                            </select>
+                        </div>
+                        <div class="form-group half">
+                            <label>IC Number</label>
+                            <input type="text" id="prospect-ic" class="form-control" value="${prospect?.ic_number || ''}">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group half">
                             <label>Occupation</label>
                             <input type="text" id="prospect-occupation" class="form-control" value="${prospect?.occupation || ''}">
                         </div>
@@ -12755,23 +12756,26 @@ function _wireLoginBtn() {
                             <input type="text" id="prospect-company" class="form-control" value="${prospect?.company_name || ''}">
                         </div>
                     </div>
-                    <div class="form-group">
-                        <label>Income Range</label>
-                        <select id="prospect-income" class="form-control">
-                            <option value="">Select range</option>
-                            <option value="< RM3k" ${prospect?.income_range === '< RM3k' ? 'selected' : ''}>Below RM 3,000</option>
-                            <option value="RM3-5k" ${prospect?.income_range === 'RM3-5k' ? 'selected' : ''}>RM 3,000 - RM 5,000</option>
-                            <option value="RM5-8k" ${prospect?.income_range === 'RM5-8k' ? 'selected' : ''}>RM 5,000 - RM 8,000</option>
-                            <option value="RM8-12k" ${prospect?.income_range === 'RM8-12k' ? 'selected' : ''}>RM 8,000 - RM 12,000</option>
-                            <option value="RM12-20k" ${prospect?.income_range === 'RM12-20k' ? 'selected' : ''}>RM 12,000 - RM 20,000</option>
-                            <option value="> RM20k" ${prospect?.income_range === '> RM20k' ? 'selected' : ''}>Above RM 20,000</option>
-                        </select>
+                    <div class="form-row">
+                        <div class="form-group half">
+                            <label>Income Range</label>
+                            <select id="prospect-income" class="form-control">
+                                <option value="">-- Select Range --</option>
+                                <option value="< RM3k" ${prospect?.income_range === '< RM3k' ? 'selected' : ''}>Below RM 3,000</option>
+                                <option value="RM3-5k" ${prospect?.income_range === 'RM3-5k' ? 'selected' : ''}>RM 3,000 - RM 5,000</option>
+                                <option value="RM5-8k" ${prospect?.income_range === 'RM5-8k' ? 'selected' : ''}>RM 5,000 - RM 8,000</option>
+                                <option value="RM8-12k" ${prospect?.income_range === 'RM8-12k' ? 'selected' : ''}>RM 8,000 - RM 12,000</option>
+                                <option value="RM12-20k" ${prospect?.income_range === 'RM12-20k' ? 'selected' : ''}>RM 12,000 - RM 20,000</option>
+                                <option value="> RM20k" ${prospect?.income_range === '> RM20k' ? 'selected' : ''}>Above RM 20,000</option>
+                            </select>
+                        </div>
+                        <div class="form-group half">
+                            <label>Email</label>
+                            <input type="email" id="prospect-email" class="form-control" value="${prospect?.email || ''}">
+                        </div>
                     </div>
-                </div>
-
-                <div class="form-section">
-                    <h4>Address</h4>
                     <div class="form-group">
+                        <label>Address</label>
                         <textarea id="prospect-address" class="form-control" rows="2" placeholder="Street address">${prospect?.address || ''}</textarea>
                     </div>
                     <div class="form-row">
@@ -12785,75 +12789,21 @@ function _wireLoginBtn() {
                     <div class="form-group">
                         <input type="text" id="prospect-postal" class="form-control" placeholder="Postal Code" value="${prospect?.postal_code || ''}">
                     </div>
-                </div>
-
-                <div class="form-section">
-                    <h4>Feng Shui</h4>
-                    <div class="form-group">
-                        <label>Ming Gua</label>
-                        <select id="prospect-minggua" class="form-control">
-                            <option value="">Auto-calculate from DOB</option>
-                            ${[['MG1','MG1 坎'],['MG2','MG2 坤'],['MG3','MG3 震'],['MG4','MG4 巽'],['MG5','MG5'],['MG6','MG6 乾'],['MG7','MG7 兑'],['MG8','MG8 艮'],['MG9','MG9 离']].map(([val,lbl]) => `
-                                <option value="${val}" ${prospect?.ming_gua === val ? 'selected' : ''}>${lbl}</option>
-                            `).join('')}
-                        </select>
-                    </div>
-                </div>
-
-                <div class="form-section">
-                    <h4>Referral Information</h4>
-                    <div class="form-group">
-                        <label>Referred By</label>
-                        <input type="text" id="prospect-referred" class="form-control" placeholder="Search customer/agent..." value="${prospect?.referred_by || ''}">
-                    </div>
-                    <div class="form-group">
-                        <label>Relationship</label>
-                        <select id="prospect-relationship" class="form-control">
-                            <option value="">Select</option>
-                            <option value="Family" ${prospect?.referral_relationship === 'Family' ? 'selected' : ''}>Family</option>
-                            <option value="Cousin" ${prospect?.referral_relationship === 'Cousin' ? 'selected' : ''}>Cousin</option>
-                            <option value="Friend" ${prospect?.referral_relationship === 'Friend' ? 'selected' : ''}>Friend</option>
-                            <option value="Colleague" ${prospect?.referral_relationship === 'Colleague' ? 'selected' : ''}>Colleague</option>
-                            <option value="Business Partner" ${prospect?.referral_relationship === 'Business Partner' ? 'selected' : ''}>Business Partner</option>
-                        </select>
-                    </div>
-                </div>
-
-                <div class="form-section">
-                    <h4>Assignment</h4>
                     <div class="form-row">
                         <div class="form-group half">
-                            <label>Assign to Agent</label>
-                            <select id="prospect-agent" class="form-control">
-                                <option value="">— Select Agent —</option>
-                                ${allUsers.map(u => `<option value="${u.id}" ${prospect?.responsible_agent_id == u.id ? 'selected' : ''}>${escapeHtml(u.full_name || u.name || '')}</option>`).join('')}
+                            <label>Referred By</label>
+                            <input type="text" id="prospect-referred" class="form-control" placeholder="Name of referrer" value="${prospect?.referred_by || ''}">
+                        </div>
+                        <div class="form-group half">
+                            <label>Relationship</label>
+                            <select id="prospect-relationship" class="form-control">
+                                <option value="">Select</option>
+                                <option value="Family" ${prospect?.referral_relationship === 'Family' ? 'selected' : ''}>Family</option>
+                                <option value="Cousin" ${prospect?.referral_relationship === 'Cousin' ? 'selected' : ''}>Cousin</option>
+                                <option value="Friend" ${prospect?.referral_relationship === 'Friend' ? 'selected' : ''}>Friend</option>
+                                <option value="Colleague" ${prospect?.referral_relationship === 'Colleague' ? 'selected' : ''}>Colleague</option>
+                                <option value="Business Partner" ${prospect?.referral_relationship === 'Business Partner' ? 'selected' : ''}>Business Partner</option>
                             </select>
-                        </div>
-                        <div class="form-group half">
-                            <label>CPS Date</label>
-                            <input type="date" id="prospect-cps-date" class="form-control" value="${prospect?.cps_assignment_date || new Date().toISOString().split('T')[0]}">
-                        </div>
-                    </div>
-
-                    <div class="form-group">
-                        <label>Pipeline Stage</label>
-                        <select id="prospect-stage" class="form-control">
-                            <option value="new" ${prospect?.pipeline_stage === 'new' ? 'selected' : ''}>New</option>
-                            <option value="contacted" ${prospect?.pipeline_stage === 'contacted' ? 'selected' : ''}>Contacted</option>
-                            <option value="qualified" ${prospect?.pipeline_stage === 'qualified' ? 'selected' : ''}>Qualified</option>
-                            <option value="proposal" ${prospect?.pipeline_stage === 'proposal' ? 'selected' : ''}>Proposal</option>
-                            <option value="negotiation" ${prospect?.pipeline_stage === 'negotiation' ? 'selected' : ''}>Negotiation</option>
-                        </select>
-                    </div>
-
-                    <div class="form-row">
-                        <div class="form-group half">
-                            <label>Expected Close Date</label>
-                            <input type="date" id="prospect-close-date" class="form-control" value="${prospect?.expected_close_date || ''}">
-                        </div>
-                        <div class="form-group half">
-                            <label>Deal Value (RM)</label>
-                            <input type="number" id="prospect-deal-value" class="form-control" value="${prospect?.deal_value || ''}">
                         </div>
                     </div>
                 </div>
