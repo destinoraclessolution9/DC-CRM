@@ -9646,7 +9646,7 @@ function _wireLoginBtn() {
                     return `
                         <div class="info-row" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #eee; padding-bottom:8px; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
                             <div>
-                                <strong>${name}</strong>
+                                <strong style="cursor:pointer;color:var(--primary);text-decoration:underline;" onclick="event.stopPropagation();app.showAttendeeDetails(${entityId},'${att.attendee_type||'prospect'}')">${name}</strong>
                                 <span style="font-size:10px; margin-left:5px; background:var(--gray-100); padding:1px 6px; border-radius:10px;">${att.attendee_type || 'prospect'}</span>
                                 <div style="font-size:11px; color:gray;">Added by: ${agentName}</div>
                             </div>
@@ -11270,6 +11270,32 @@ function _wireLoginBtn() {
                 console.error('toggleAttendeeAttended write-back error:', err);
             }
         }
+    };
+
+    const showAttendeeDetails = async (entityId, type) => {
+        if (!entityId) { UI.toast.error('No profile available'); return; }
+        const table = type === 'customer' ? 'customers' : 'prospects';
+        const person = await AppDataStore.getById(table, entityId);
+        if (!person) { UI.toast.error('Profile not found'); return; }
+        const agent = person.responsible_agent_id ? await AppDataStore.getById('users', person.responsible_agent_id) : null;
+        const row = (label, value) => `
+            <div style="display:flex;gap:8px;padding:8px 0;border-bottom:1px solid var(--border,#e5e0d8);">
+                <span style="width:140px;font-size:12px;color:var(--gray-400);flex-shrink:0;">${label}</span>
+                <span style="font-size:13px;font-weight:500;">${value || '—'}</span>
+            </div>`;
+        const content = `
+            <div style="padding:4px 0;">
+                ${row('Name', person.full_name)}
+                ${row('IC Number', person.ic_number)}
+                ${row('Email', person.email)}
+                ${row('Date of Birth', person.date_of_birth)}
+                ${row('Lunar Date of Birth', person.lunar_birth)}
+                ${row('Occupation', person.occupation)}
+                ${row('Agent', agent?.full_name)}
+            </div>`;
+        UI.showModal(person.full_name || 'Attendee Details', content, [
+            { label: 'Close', type: 'secondary', action: 'UI.hideModal()' }
+        ]);
     };
 
     const goToProspectEventNotes = async (entityId, eventId, entityType, activityDate) => {
@@ -24210,6 +24236,7 @@ const initImportDemoData = async () => {
         toggleAttendeeTicket,
         toggleAttendeeAttended,
         goToProspectEventNotes,
+        showAttendeeDetails,
         showAddAttendeeSearch,
         searchAddAttendee,
         selectAddAttendee,
