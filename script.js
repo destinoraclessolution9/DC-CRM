@@ -11148,6 +11148,22 @@ function _wireLoginBtn() {
         }
     };
 
+    const toggleLifeChartType = async (prospectId, dateType, checked) => {
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) return;
+        const current = prospect.life_chart_type || '';
+        let newType;
+        if (dateType === 'solar') {
+            const lunarOn = current === 'lunar' || current === 'both';
+            newType = checked ? (lunarOn ? 'both' : 'solar') : (lunarOn ? 'lunar' : null);
+        } else {
+            const solarOn = current === 'solar' || current === 'both';
+            newType = checked ? (solarOn ? 'both' : 'lunar') : (solarOn ? 'solar' : null);
+        }
+        await AppDataStore.update('prospects', prospectId, { life_chart_type: newType });
+        UI.toast.success('Life chart type updated');
+    };
+
     const showAttendeeDetails = async (entityId, type) => {
         if (!entityId) { UI.toast.error('No profile available'); return; }
         const table = type === 'customer' ? 'customers' : 'prospects';
@@ -11763,12 +11779,17 @@ function _wireLoginBtn() {
                 referral_relationship: relationDetails
             };
 
-            if (document.getElementById('has-dob')?.checked) {
+            const hasDob = document.getElementById('has-dob')?.checked;
+            const hasLunar = document.getElementById('has-lunar')?.checked;
+            if (hasDob) {
                 prospectData.date_of_birth = document.getElementById('cps-dob')?.value;
             }
-            if (document.getElementById('has-lunar')?.checked) {
+            if (hasLunar) {
                 prospectData.lunar_birth = document.getElementById('cps-lunar')?.value;
             }
+            if (hasDob && hasLunar) prospectData.life_chart_type = 'both';
+            else if (hasDob) prospectData.life_chart_type = 'solar';
+            else if (hasLunar) prospectData.life_chart_type = 'lunar';
 
             let prospect;
             try {
@@ -12638,11 +12659,17 @@ function _wireLoginBtn() {
                     </div>
                     <div class="form-row">
                         <div class="form-group half">
-                            <label>Date of Birth</label>
+                            <div style="display:flex;align-items:center;gap:8px;">
+                                <label style="margin-bottom:0;">Date of Birth</label>
+                                <input type="checkbox" id="prospect-use-dob" ${['solar','both'].includes(prospect?.life_chart_type) ? 'checked' : ''} title="Use for life chart">
+                            </div>
                             <input type="date" id="prospect-dob" class="form-control" value="${prospect?.date_of_birth || ''}">
                         </div>
                         <div class="form-group half">
-                            <label>Lunar Birth</label>
+                            <div style="display:flex;align-items:center;gap:8px;">
+                                <label style="margin-bottom:0;">Lunar Birth</label>
+                                <input type="checkbox" id="prospect-use-lunar" ${['lunar','both'].includes(prospect?.life_chart_type) || !prospect ? 'checked' : ''} title="Use for life chart">
+                            </div>
                             <input type="text" id="prospect-lunar" class="form-control" value="${prospect?.lunar_birth || ''}">
                         </div>
                     </div>
@@ -12847,7 +12874,15 @@ function _wireLoginBtn() {
             cps_assignment_date: new Date().toISOString().split('T')[0],
             pipeline_stage: 'new',
             expected_close_date: null,
-            deal_value: 0
+            deal_value: 0,
+            life_chart_type: (() => {
+                const d = document.getElementById('prospect-use-dob')?.checked;
+                const l = document.getElementById('prospect-use-lunar')?.checked;
+                if (d && l) return 'both';
+                if (d) return 'solar';
+                if (l) return 'lunar';
+                return null;
+            })()
         };
 
         try {
@@ -13622,8 +13657,8 @@ function _wireLoginBtn() {
         else if (tab === 'personal') {
             container.innerHTML = `
                 <div class="pv-sub">Birth &amp; Identity</div>
-                <div class="pv-row"><span class="pv-lbl">Date of Birth</span><span class="pv-val">${prospect.date_of_birth || '-'}</span></div>
-                <div class="pv-row"><span class="pv-lbl">Lunar Birth</span><span class="pv-val">${prospect.lunar_birth || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Date of Birth</span><span class="pv-val" style="display:flex;align-items:center;gap:8px;"><input type="checkbox" ${['solar','both'].includes(prospect.life_chart_type) ? 'checked' : ''} onchange="event.stopPropagation();app.toggleLifeChartType(${prospect.id},'solar',this.checked)" title="Use for life chart">${prospect.date_of_birth || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Lunar Birth</span><span class="pv-val" style="display:flex;align-items:center;gap:8px;"><input type="checkbox" ${['lunar','both'].includes(prospect.life_chart_type) ? 'checked' : ''} onchange="event.stopPropagation();app.toggleLifeChartType(${prospect.id},'lunar',this.checked)" title="Use for life chart">${prospect.lunar_birth || '-'}</span></div>
                 <div class="pv-row"><span class="pv-lbl">IC Number</span><span class="pv-val">${prospect.ic_number || '-'}</span></div>
                 <div class="pv-row"><span class="pv-lbl">Ming Gua</span><span class="pv-val"><span class="badge info">${prospect.ming_gua || 'MG4'}</span></span></div>
                 <div class="pv-sub">Employment</div>
@@ -23951,6 +23986,7 @@ const initImportDemoData = async () => {
         toggleAttendeeTicket,
         toggleAttendeeAttended,
         goToProspectEventNotes,
+        toggleLifeChartType,
         showAttendeeDetails,
         showAddAttendeeSearch,
         searchAddAttendee,
