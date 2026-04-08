@@ -1134,7 +1134,9 @@ const appLogic = (() => {
     };
 
     const performAgentSearch = async (filters) => {
-        let items = (await AppDataStore.getAll('users')).filter(u => isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'));
+        const allAgentUsers = (await AppDataStore.getAll('users')).filter(u => isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'));
+        const visibleAgentIds = await getVisibleUserIds(_currentUser);
+        let items = visibleAgentIds === 'all' ? allAgentUsers : allAgentUsers.filter(u => visibleAgentIds.map(String).includes(String(u.id)));
 
         // Basic filters
         if (filters.basic.name) {
@@ -1271,7 +1273,7 @@ const appLogic = (() => {
     };
 
     const performActivitySearch = async (filters) => {
-        let items = await AppDataStore.getAll('activities');
+        let items = await getVisibleActivities();
 
         const type = filters.basic['filter-activity-type'] || filters.basic.type;
         if (type) {
@@ -15277,7 +15279,9 @@ const openAddSolutionModal = async (prospectId) => {
             return;
         }
 
-        const agents = (await AppDataStore.getAll('users')).filter(u => isAgent(u) || u.agent_code);
+        const allAgents = (await AppDataStore.getAll('users')).filter(u => isAgent(u) || u.agent_code);
+        const visibleIds = await getVisibleUserIds(_currentUser);
+        const agents = visibleIds === 'all' ? allAgents : allAgents.filter(a => visibleIds.map(String).includes(String(a.id)));
         const searchQuery = document.getElementById('agent-search')?.value.toLowerCase() || '';
         const teamFilter = document.getElementById('filter-agent-team')?.value || '';
         const roleFilter = document.getElementById('filter-agent-role')?.value || '';
