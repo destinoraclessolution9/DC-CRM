@@ -1735,7 +1735,6 @@ const appLogic = (() => {
         if (hasSub || hasFiles) return UI.toast.error('Cannot delete: Folder is not empty');
         UI.showModal('Delete Folder', '<p>Are you sure?</p>', [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Delete', type: 'primary', action: `(async () => { await app.confirmDeleteFolder(${id}); })()` }]);
     };
-    window.app.confirmDeleteFolder = async (id) => { await AppDataStore.delete('folders', id); UI.hideModal(); if (_currentFolder === id) _currentFolder = null; await renderFolderTree(); await loadFolderContents(); };
 
     const showRecentFiles = async () => {
         const allFiles = (await AppDataStore.getAll('documents')).sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at));
@@ -6298,9 +6297,13 @@ function _wireLoginBtn() {
     };
 
     const deleteBookingSlot = async (slotId) => {
-        await AppDataStore.delete('booking_slots', slotId);
-        UI.toast.success('Slot removed.');
-        await showBookingSettingsView(document.getElementById('content-viewport'));
+        try {
+            await AppDataStore.delete('booking_slots', slotId);
+            UI.toast.success('Slot removed.');
+            await showBookingSettingsView(document.getElementById('content-viewport'));
+        } catch (err) {
+            UI.toast.error('Delete failed: ' + (err.message || 'Unknown error'));
+        }
     };
 
     const toggleSlotActive = async (slotId, isActive) => {
@@ -6499,9 +6502,16 @@ function _wireLoginBtn() {
     };
 
     const deleteLeadForm = async (formId) => {
-        await AppDataStore.delete('lead_forms', formId);
-        UI.toast.success('Form deleted.');
-        await showLeadFormsView(document.getElementById('content-viewport'));
+        try {
+            const submissions = await AppDataStore.getAll('lead_submissions').catch(() => []);
+            for (const s of submissions.filter(s => String(s.form_id) === String(formId)))
+                await AppDataStore.delete('lead_submissions', s.id);
+            await AppDataStore.delete('lead_forms', formId);
+            UI.toast.success('Form deleted.');
+            await showLeadFormsView(document.getElementById('content-viewport'));
+        } catch (err) {
+            UI.toast.error('Delete failed: ' + (err.message || 'Unknown error'));
+        }
     };
 
     const copyFormLink = (formId) => {
@@ -6644,9 +6654,16 @@ function _wireLoginBtn() {
     };
 
     const deleteSurvey = async (surveyId) => {
-        await AppDataStore.delete('surveys', surveyId);
-        UI.toast.success('Survey deleted.');
-        await showSurveysView(document.getElementById('content-viewport'));
+        try {
+            const responses = await AppDataStore.getAll('survey_responses').catch(() => []);
+            for (const r of responses.filter(r => String(r.survey_id) === String(surveyId)))
+                await AppDataStore.delete('survey_responses', r.id);
+            await AppDataStore.delete('surveys', surveyId);
+            UI.toast.success('Survey deleted.');
+            await showSurveysView(document.getElementById('content-viewport'));
+        } catch (err) {
+            UI.toast.error('Delete failed: ' + (err.message || 'Unknown error'));
+        }
     };
 
     const copySurveyLink = (surveyId) => {
@@ -6959,9 +6976,19 @@ function _wireLoginBtn() {
     };
 
     const deleteCustomFieldDefinition = async (fieldId) => {
-        await AppDataStore.delete('custom_field_definitions', fieldId);
-        UI.toast.success('Field removed.');
-        await showCustomFieldsAdmin(document.getElementById('content-viewport'));
+        try {
+            const def = await AppDataStore.getById('custom_field_definitions', fieldId);
+            if (def) {
+                const allVals = await AppDataStore.getAll('custom_field_values').catch(() => []);
+                for (const v of allVals.filter(v => v.field_key === def.field_key && v.entity_type === def.entity_type))
+                    await AppDataStore.delete('custom_field_values', v.id);
+            }
+            await AppDataStore.delete('custom_field_definitions', fieldId);
+            UI.toast.success('Field removed.');
+            await showCustomFieldsAdmin(document.getElementById('content-viewport'));
+        } catch (err) {
+            UI.toast.error('Delete failed: ' + (err.message || 'Unknown error'));
+        }
     };
 
     const renderCustomFieldInputs = async (entityType, entityId = null) => {
@@ -8638,9 +8665,16 @@ function _wireLoginBtn() {
 
     const deleteCaseStudy = async (id) => {
         if (confirm("Are you sure you want to delete this case? This action cannot be undone.")) {
-            await AppDataStore.delete('case_studies', id);
-            UI.toast.success("Case deleted.");
-            await renderCasesList();
+            try {
+                const tags = await AppDataStore.getAll('entity_tags').catch(() => []);
+                for (const t of tags.filter(t => t.entity_type === 'case_study' && String(t.entity_id) === String(id)))
+                    await AppDataStore.delete('entity_tags', t.id);
+                await AppDataStore.delete('case_studies', id);
+                UI.toast.success("Case deleted.");
+                await renderCasesList();
+            } catch (err) {
+                UI.toast.error('Delete failed: ' + (err.message || 'Unknown error'));
+            }
         }
     };
 
@@ -12885,10 +12919,32 @@ function _wireLoginBtn() {
     };
 
     const deleteProspect = async (id) => {
-        UI.showModal('Delete Prospect', '<p>This will permanently delete this prospect and cannot be undone. Continue?</p>', [
+        UI.showModal('Delete Prospect', '<p>This will permanently delete this prospect and all linked activities, notes, and names. This cannot be undone. Continue?</p>', [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Delete', type: 'primary', action: `(async () => { UI.hideModal(); try { await AppDataStore.delete('prospects', ${id}); UI.toast.success('Prospect deleted.'); await app.renderProspectsTable(); } catch(err) { UI.toast.error('Failed to delete: ' + (err.message || 'Unknown error')); } })()` }
+            { label: 'Delete', type: 'primary', action: `(async () => { await app.confirmDeleteProspect(${id}); })()` }
         ]);
+    };
+    const confirmDeleteProspect = async (id) => {
+        UI.hideModal();
+        try {
+            const [acts, allNotes, names] = await Promise.all([
+                AppDataStore.query('activities', { prospect_id: id }).catch(() => []),
+                AppDataStore.getAll('notes').catch(() => []),
+                AppDataStore.query('names', { prospect_id: id }).catch(() => [])
+            ]);
+            const notes = allNotes.filter(n =>
+                String(n.prospect_id) === String(id) ||
+                (n.entity_type === 'prospect' && String(n.entity_id) === String(id))
+            );
+            for (const a of acts) await AppDataStore.delete('activities', a.id);
+            for (const n of notes) await AppDataStore.delete('notes', n.id);
+            for (const n of names) await AppDataStore.delete('names', n.id);
+            await AppDataStore.delete('prospects', id);
+            UI.toast.success('Prospect deleted.');
+            await app.renderProspectsTable();
+        } catch (err) {
+            UI.toast.error('Failed to delete: ' + (err.message || 'Unknown error'));
+        }
     };
 
     const getScoreGrade = (score) => {
@@ -15000,9 +15056,25 @@ for (const p of allPackages) {
 
     const executeDelete = async (id) => {
         UI.hideModal();
-        await AppDataStore.delete('prospects', id);
-        UI.toast.success('Prospect deleted successfully');
-        await showProspectsView(document.getElementById('content-viewport'));
+        try {
+            const [acts, allNotes, names] = await Promise.all([
+                AppDataStore.query('activities', { prospect_id: id }).catch(() => []),
+                AppDataStore.getAll('notes').catch(() => []),
+                AppDataStore.query('names', { prospect_id: id }).catch(() => [])
+            ]);
+            const notes = allNotes.filter(n =>
+                String(n.prospect_id) === String(id) ||
+                (n.entity_type === 'prospect' && String(n.entity_id) === String(id))
+            );
+            for (const a of acts) await AppDataStore.delete('activities', a.id);
+            for (const n of notes) await AppDataStore.delete('notes', n.id);
+            for (const n of names) await AppDataStore.delete('names', n.id);
+            await AppDataStore.delete('prospects', id);
+            UI.toast.success('Prospect deleted successfully');
+            await showProspectsView(document.getElementById('content-viewport'));
+        } catch (err) {
+            UI.toast.error('Failed to delete: ' + (err.message || 'Unknown error'));
+        }
     };
 
     const calculateAge = (dob) => {
@@ -21795,10 +21867,16 @@ const simulateCampaignSending = async (campaignId) => {
         if (typeof loadFolderContents === 'function') await loadFolderContents();
     };
     const confirmDeleteFolder = async (folderId) => {
-        await AppDataStore.delete('folders', folderId);
-        UI.hideModal(); UI.toast.success('Folder deleted');
-        if (typeof renderFolderTree === 'function') await renderFolderTree();
-        if (typeof loadFolderContents === 'function') await loadFolderContents();
+        try {
+            await AppDataStore.delete('folders', folderId);
+            UI.hideModal();
+            if (_currentFolder === folderId) _currentFolder = null;
+            UI.toast.success('Folder deleted');
+            if (typeof renderFolderTree === 'function') await renderFolderTree();
+            if (typeof loadFolderContents === 'function') await loadFolderContents();
+        } catch (err) {
+            UI.toast.error('Delete failed: ' + (err.message || 'Unknown error'));
+        }
     };
     const batchMove = () => UI.toast.info('Batch move coming soon');
     const batchShare = () => UI.toast.info('Batch share coming soon');
@@ -24760,6 +24838,7 @@ const initImportDemoData = async () => {
         approveProspectConversion,
         rejectProspectConversion,
         deleteProspect,
+        confirmDeleteProspect,
         renderProspectsTable,
 
         // Phase 4 Customer Management Functions

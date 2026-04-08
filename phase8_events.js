@@ -269,8 +269,12 @@ Object.assign(window.app, (() => {
     };
 
     const deleteAttendee = async (regId, eventId) => {
-        await AppDataStore.delete('event_registrations', regId);
-        await app.openEventAttendeesModal(eventId);
+        try {
+            await AppDataStore.delete('event_registrations', regId);
+            await app.openEventAttendeesModal(eventId);
+        } catch (err) {
+            UI.toast.error('Delete failed: ' + (err.message || 'Unknown error'));
+        }
     };
 
     const showEventManagementView = (container) => {
@@ -398,24 +402,33 @@ Object.assign(window.app, (() => {
     };
 
     const deleteEvent = async (id) => {
-        if (!confirm('Delete this event? All linked activities and attendees will also be removed.')) return;
-        // Cascade delete linked activities
-        const allActivities = await AppDataStore.getAll('activities');
-        for (const act of allActivities.filter(a => String(a.event_id) === String(id))) {
-            await AppDataStore.delete('activities', act.id);
+        if (!confirm('Delete this event? All linked activities, registrations, and attendees will also be permanently removed.')) return;
+        try {
+            const [allActivities, allAttendees, allRegs] = await Promise.all([
+                AppDataStore.getAll('activities').catch(() => []),
+                AppDataStore.getAll('event_attendees').catch(() => []),
+                AppDataStore.getAll('event_registrations').catch(() => [])
+            ]);
+            for (const act of allActivities.filter(a => String(a.event_id) === String(id)))
+                await AppDataStore.delete('activities', act.id);
+            for (const att of allAttendees.filter(a => String(a.event_id) === String(id)))
+                await AppDataStore.delete('event_attendees', att.id);
+            for (const reg of allRegs.filter(r => String(r.event_id) === String(id)))
+                await AppDataStore.delete('event_registrations', reg.id);
+            await AppDataStore.delete('events', id);
+            await renderUpcomingEvents();
+        } catch (err) {
+            UI.toast.error('Delete failed: ' + (err.message || 'Unknown error'));
         }
-        // Cascade delete linked attendees
-        const allAttendees = await AppDataStore.getAll('event_attendees');
-        for (const att of allAttendees.filter(a => String(a.event_id) === String(id))) {
-            await AppDataStore.delete('event_attendees', att.id);
-        }
-        await AppDataStore.delete('events', id);
-        await renderUpcomingEvents();
     };
 
     const deleteTemplate = async (id) => {
-        await AppDataStore.delete('event_templates', id);
-        await renderEventTemplates();
+        try {
+            await AppDataStore.delete('event_templates', id);
+            await renderEventTemplates();
+        } catch (err) {
+            UI.toast.error('Delete failed: ' + (err.message || 'Unknown error'));
+        }
     };
 
     const editTemplate = async (templateId) => {

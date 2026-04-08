@@ -466,40 +466,36 @@ class DataStore {
     }
 
     async delete(tableName, id) {
-        let _deleteErr = null;
+        // Hard delete: must succeed in Supabase first — no silent failures.
+        // If Supabase rejects the delete, the error is thrown and localStorage is
+        // left untouched so the record stays visible (no ghost-resurrection later).
+        const { error } = await this._writeClient()
+            .from(tableName)
+            .delete()
+            .eq('id', id);
+        if (error) throw error;
+
+        // Supabase confirmed the delete — now clean up local cache
         try {
-            const { error } = await this._writeClient()
-                .from(tableName)
-                .delete()
-                .eq('id', id);
-            if (error) throw error;
-        } catch (e) {
-            console.warn(`Error on delete from ${tableName}: ${e.message} (code: ${e.code}) — removing locally`);
-            _deleteErr = e;
-        } finally {
-            // Always remove from localStorage cache regardless of Supabase outcome,
-            // so the UI never resurfaces a stale/ghost record.
-            try {
-                const key = `fs_crm_${tableName}`;
-                const all = JSON.parse(localStorage.getItem(key) || '[]');
-                const filtered = all.filter(r => String(r.id) !== String(id));
-                localStorage.setItem(key, JSON.stringify(filtered));
-            } catch (_) {}
-            // Also remove from sync queue — no point syncing a deleted item
-            try {
-                const syncQueue = JSON.parse(localStorage.getItem('fs_crm_sync_queue') || '[]');
-                const filtered = syncQueue.filter(q => !(q.tableName === tableName && String(q.record.id) === String(id)));
-                localStorage.setItem('fs_crm_sync_queue', JSON.stringify(filtered));
-            } catch (_) {}
-            // Write tombstone so the record is never re-surfaced from Supabase on next getAll
-            try {
-                const tombstones = JSON.parse(localStorage.getItem('fs_crm_tombstones') || '{}');
-                if (!tombstones[tableName]) tombstones[tableName] = [];
-                if (!tombstones[tableName].includes(String(id))) tombstones[tableName].push(String(id));
-                localStorage.setItem('fs_crm_tombstones', JSON.stringify(tombstones));
-            } catch (_) {}
-        }
-        if (_deleteErr) throw _deleteErr;
+            const key = `fs_crm_${tableName}`;
+            const all = JSON.parse(localStorage.getItem(key) || '[]');
+            localStorage.setItem(key, JSON.stringify(all.filter(r => String(r.id) !== String(id))));
+        } catch (_) {}
+        // Remove from sync queue — no point syncing a deleted item
+        try {
+            const syncQueue = JSON.parse(localStorage.getItem('fs_crm_sync_queue') || '[]');
+            localStorage.setItem('fs_crm_sync_queue', JSON.stringify(
+                syncQueue.filter(q => !(q.tableName === tableName && String(q.record.id) === String(id)))
+            ));
+        } catch (_) {}
+        // Tombstone so the record never re-surfaces from a stale cache on next getAll
+        try {
+            const tombstones = JSON.parse(localStorage.getItem('fs_crm_tombstones') || '{}');
+            if (!tombstones[tableName]) tombstones[tableName] = [];
+            if (!tombstones[tableName].includes(String(id))) tombstones[tableName].push(String(id));
+            localStorage.setItem('fs_crm_tombstones', JSON.stringify(tombstones));
+        } catch (_) {}
+
         this.emit('dataChanged', { action: 'delete', table: tableName, id });
     }
 
