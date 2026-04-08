@@ -9607,6 +9607,11 @@ function _wireLoginBtn() {
         const customer = activity.customer_id ? await AppDataStore.getById('customers', activity.customer_id) : null;
         const entityName = prospect?.full_name || customer?.full_name || 'Unknown';
 
+        // Fetch linked marketing event for description
+        const marketingEvent = (activity.activity_type === 'EVENT' && activity.event_id)
+            ? await AppDataStore.getById('events', activity.event_id)
+            : null;
+
         let attendeeHtml = '';
         if (activity.activity_type === 'EVENT' && activity.event_id) {
             const attendees = (await AppDataStore.getAll('event_attendees')).filter(a => a.event_id === activity.event_id);
@@ -9679,6 +9684,7 @@ function _wireLoginBtn() {
                     <div class="info-row"><span class="info-label">Time:</span> <span>${activity.start_time} - ${activity.end_time}</span></div>
                     ${activity.activity_type !== 'EVENT' ? `<div class="info-row"><span class="info-label">Entity:</span> <span>${entityName}</span></div>` : ''}
                     ${activity.location_address ? `<div class="info-row"><span class="info-label">Location:</span> <span>${activity.location_address}</span></div>` : ''}
+                    ${marketingEvent?.description ? `<div class="info-row" style="flex-direction:column; align-items:flex-start; gap:4px;"><span class="info-label">Description:</span> <span style="white-space:pre-wrap; color:var(--gray-700);">${marketingEvent.description}</span></div>` : ''}
                     ${activity.summary ? `<div class="info-row"><span class="info-label">Summary:</span> <span>${activity.summary}</span></div>` : ''}
                 </div>
                 
