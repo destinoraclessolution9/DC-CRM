@@ -18440,7 +18440,17 @@ const exportKPIReport = async (format) => {
     };
 
     const renderMarketingListTable = async () => {
-        const data = await AppDataStore.getAll(_currentMarketingListTab);
+        let data = await AppDataStore.getAll(_currentMarketingListTab);
+        // Deduplicate by name+location for venues (prevents double-write artifacts)
+        if (_currentMarketingListTab === 'venues') {
+            const seen = new Set();
+            data = data.filter(v => {
+                const key = (v.name || '') + '|' + (v.location || '');
+                if (seen.has(key)) return false;
+                seen.add(key);
+                return true;
+            });
+        }
 
         if (_currentMarketingListTab === 'products') {
             return `
@@ -18728,32 +18738,16 @@ const exportKPIReport = async (format) => {
         if (!name) return UI.toast.error('Venue Name is required');
         if (!location) return UI.toast.error('Location is required');
 
-        const key = 'fs_crm_venues';
-        const all = JSON.parse(localStorage.getItem(key) || '[]');
-
-        if (id) {
-            const idx = all.findIndex(r => String(r.id) === String(id));
-            if (idx >= 0) {
-                all[idx] = { ...all[idx], name, location, updated_at: new Date().toISOString() };
-            } else {
-                all.push({ id, name, location, updated_at: new Date().toISOString() });
-            }
-        } else {
-            const newId = 'venue_' + Date.now();
-            all.push({ id: newId, name, location, created_at: new Date().toISOString() });
-        }
-
-        localStorage.setItem(key, JSON.stringify(all));
-
-        // Also try to sync to Supabase, but don't block on failure
         try {
             if (id) {
                 await AppDataStore.update('venues', id, { name, location, updated_at: new Date().toISOString() });
             } else {
-                const newRec = all[all.length - 1];
-                await AppDataStore.create('venues', newRec);
+                await AppDataStore.create('venues', { name, location, created_at: new Date().toISOString() });
             }
-        } catch (_) { /* table may not exist yet — localStorage is the source of truth */ }
+        } catch (err) {
+            UI.toast.error('Save failed: ' + (err.message || err));
+            return;
+        }
 
         UI.toast.success(id ? 'Venue updated' : 'Venue added');
         UI.hideModal();
