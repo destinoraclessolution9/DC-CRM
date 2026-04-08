@@ -396,6 +396,17 @@ Object.assign(window.app, (() => {
     };
 
     const deleteEvent = async (id) => {
+        if (!confirm('Delete this event? All linked activities and attendees will also be removed.')) return;
+        // Cascade delete linked activities
+        const allActivities = await AppDataStore.getAll('activities');
+        for (const act of allActivities.filter(a => String(a.event_id) === String(id))) {
+            await AppDataStore.delete('activities', act.id);
+        }
+        // Cascade delete linked attendees
+        const allAttendees = await AppDataStore.getAll('event_attendees');
+        for (const att of allAttendees.filter(a => String(a.event_id) === String(id))) {
+            await AppDataStore.delete('event_attendees', att.id);
+        }
         await AppDataStore.delete('events', id);
         await renderUpcomingEvents();
     };
