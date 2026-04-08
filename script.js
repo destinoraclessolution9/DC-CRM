@@ -5713,13 +5713,11 @@ function _wireLoginBtn() {
             btn.textContent = 'Logging in...';
             const user = await Auth.login(email, password);
             
-            // Try to get profile from 'users' table
-            let { data: profile, error: profileError } = await window.supabase
-                .from('users')
-                .select('*')
-                .eq('email', user.email)
-                .single();
-            
+            // Try to get profile from 'users' table using service-role client to bypass RLS
+            const profileMatches = await AppDataStore.query('users', { email: user.email });
+            let profile = profileMatches[0] || null;
+            let profileError = profile ? null : { code: 'PGRST116' };
+
             // If profile not found, create one automatically
             if (profileError && profileError.code === 'PGRST116') {
                 console.log('Profile not found, creating one...');
