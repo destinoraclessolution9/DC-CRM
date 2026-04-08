@@ -9640,7 +9640,10 @@ function _wireLoginBtn() {
 
         let attendeeHtml = '';
         if (activity.activity_type === 'EVENT' && activity.event_id) {
-            const attendees = (await AppDataStore.getAll('event_attendees')).filter(a => String(a.event_id) === String(activity.event_id));
+            const attendees = (await AppDataStore.getAll('event_attendees')).filter(a =>
+                String(a.event_id) === String(activity.event_id) &&
+                String(a.activity_id) === String(activity.id)
+            );
             if (attendees.length > 0) {
                 const prospects = await AppDataStore.getAll('prospects');
                 const customers = await AppDataStore.getAll('customers');
@@ -12114,19 +12117,7 @@ function _wireLoginBtn() {
                 else activity.customer_id = _selectedEntity.id;
             }
 
-            // Save attendees
-            for (const att of _selectedAttendees) {
-                await AppDataStore.create('event_attendees', {
-                    event_id: parseInt(eventId),
-                    entity_id: att.id,
-                    entity_name: att.name || att.full_name || '',
-                    attendee_id: att.id,
-                    attendee_type: att.type, // 'prospect', 'customer', 'agent'
-                    attendance_status: att.status,
-                    added_by_agent_id: _currentUser?.id || null,
-                    added_by_name: _currentUser?.full_name || ''
-                });
-            }
+            // Attendees saved after activity is created (below) so activity_id is available
         } else {
             if (!_selectedEntity) {
                 UI.toast.error('Please select a prospect or customer.');
@@ -12198,6 +12189,24 @@ function _wireLoginBtn() {
         } catch (err) {
             UI.toast.error('Failed to save activity: ' + (err.message || 'Unknown error'));
             return;
+        }
+
+        // Save event attendees now that we have the activity ID — stored per-activity so
+        // different dates of the same event don't share attendees
+        if ((type === 'EVENT' || type === 'AGENT_MEETING' || type === 'AGENT_TRAINING') && _selectedAttendees.length > 0) {
+            for (const att of _selectedAttendees) {
+                await AppDataStore.create('event_attendees', {
+                    event_id: activity.event_id,
+                    activity_id: savedActivity.id,
+                    entity_id: att.id,
+                    entity_name: att.name || att.full_name || '',
+                    attendee_id: att.id,
+                    attendee_type: att.type,
+                    attendance_status: att.status,
+                    added_by_agent_id: _currentUser?.id || null,
+                    added_by_name: _currentUser?.full_name || ''
+                });
+            }
         }
 
         if (document.getElementById('is-closing')?.checked) {
