@@ -91,6 +91,14 @@ class DataStore {
             const { error } = await window.supabase.from('users').select('*').limit(1);
             if (error) throw error;
             this.initialized = true;
+
+            // Permanently tombstone records deleted externally (outside AppDataStore.delete).
+            // Add IDs here whenever a record is hard-deleted via Supabase API/dashboard
+            // to prevent the sync queue from resurrecting them.
+            this._ensureTombstones({
+                activities: ['1775653728135', '1775574315672']
+            });
+
             console.log('DataStore initialised (Supabase mode).');
             this.emit('ready');
             return true;
@@ -126,6 +134,25 @@ class DataStore {
 
     _generateId() {
         return Date.now() + Math.floor(Math.random() * 1000);
+    }
+
+    // Merge hard-coded tombstones into localStorage so externally-deleted records
+    // are never resurrected by the sync queue.
+    _ensureTombstones(map) {
+        try {
+            const tombstones = JSON.parse(localStorage.getItem('fs_crm_tombstones') || '{}');
+            let dirty = false;
+            for (const [table, ids] of Object.entries(map)) {
+                if (!tombstones[table]) tombstones[table] = [];
+                for (const id of ids) {
+                    if (!tombstones[table].includes(String(id))) {
+                        tombstones[table].push(String(id));
+                        dirty = true;
+                    }
+                }
+            }
+            if (dirty) localStorage.setItem('fs_crm_tombstones', JSON.stringify(tombstones));
+        } catch (_) {}
     }
 
     async getAll(tableName) {
@@ -210,32 +237,9 @@ class DataStore {
             const _tombstones = _tombstoneRaw ? JSON.parse(_tombstoneRaw) : {};
             const deletedIds = new Set(_tombstones[tableName] || []);
 
-            // Step 1 — Migration: scan localStorage cache for items not in Supabase
-            // and add them to the sync queue (handles saves made before the queue existed).
-            try {
-                const localRaw = localStorage.getItem(`fs_crm_${tableName}`);
-                if (localRaw) {
-                    const localItems = JSON.parse(localRaw);
-                    const localOnly = localItems.filter(r => !serverIds.has(String(r.id)) && !deletedIds.has(String(r.id)));
-                    if (localOnly.length > 0) {
-                        const queue = JSON.parse(localStorage.getItem('fs_crm_sync_queue') || '[]');
-                        const queuedIds = new Set(
-                            queue.filter(q => q.tableName === tableName).map(q => String(q.record.id))
-                        );
-                        let added = 0;
-                        for (const r of localOnly) {
-                            if (!queuedIds.has(String(r.id))) {
-                                queue.push({ tableName, record: r, timestamp: Date.now() });
-                                added++;
-                            }
-                        }
-                        if (added > 0) {
-                            localStorage.setItem('fs_crm_sync_queue', JSON.stringify(queue));
-                            console.log(`DataStore: migrated ${added} pre-existing local-only items from ${tableName} into sync queue`);
-                        }
-                    }
-                }
-            } catch (_) {}
+            // Step 1 — Migration: disabled. Auto-migrating all localStorage-only items back to
+            // Supabase causes externally-deleted records to be resurrected on every getAll().
+            // Only the explicit sync queue (step 2) is processed now.
 
             // Step 2 — Process the sync queue: upsert queued items to Supabase
             const queue = JSON.parse(localStorage.getItem('fs_crm_sync_queue') || '[]');
