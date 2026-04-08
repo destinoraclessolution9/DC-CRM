@@ -13498,8 +13498,31 @@ function _wireLoginBtn() {
         const purchases = await AppDataStore.query('purchases', { customer_id: customer.id });
         const container = document.getElementById(containerId);
 
+        // Fetch original closing record from the prospect this customer was converted from
+        let cr = null;
+        if (customer.converted_from_prospect_id) {
+            const origProspect = await AppDataStore.getById('prospects', customer.converted_from_prospect_id);
+            if (origProspect?.closing_record) cr = origProspect.closing_record;
+        }
+
         let totalPaid = 0;
         let totalPending = 0;
+
+        // Build closing record row (the original sale that triggered conversion)
+        const crRow = cr ? (() => {
+            const amt = parseFloat(cr.sale_amount) || 0;
+            totalPaid += amt;
+            return `
+                <tr style="background:#f0fdf4;">
+                    <td>${cr.closing_date || customer.customer_since || '-'}</td>
+                    <td>${cr.invoice_number || '-'}</td>
+                    <td><strong>${cr.product || '-'}</strong> <span style="font-size:11px;color:var(--gray-400);">(Conversion Sale)</span></td>
+                    <td>RM ${amt.toLocaleString()}</td>
+                    <td><span class="score-badge" style="font-size:11px;background:#dcfce7;color:#166534;">PAID</span></td>
+                    <td>${cr.invoice_file ? `<a href="${cr.invoice_file}" target="_blank" style="color:var(--primary);">View</a>` : '-'}</td>
+                    <td><span style="font-size:11px;color:var(--gray-400);">Locked</span></td>
+                </tr>`;
+        })() : '';
 
         container.innerHTML = `
             <table class="purchase-table">
@@ -13515,6 +13538,7 @@ function _wireLoginBtn() {
                     </tr>
                 </thead>
                 <tbody>
+                    ${crRow}
                     ${purchases.map(p => {
             if (p.status !== 'PENDING') totalPaid += p.amount;
             else totalPending += p.amount;
@@ -13535,6 +13559,7 @@ function _wireLoginBtn() {
                             </tr>
                         `;
         }).join('')}
+                    ${!cr && purchases.length === 0 ? '<tr><td colspan="7" style="text-align:center;color:var(--gray-400);padding:16px;">No purchase records yet.</td></tr>' : ''}
                 </tbody>
             </table>
             <div class="purchase-summary">
@@ -14351,7 +14376,8 @@ function _wireLoginBtn() {
                     </div>
                 </div>`;
 
-            if (!cr || status === 'draft') {
+            const isConverted = prospect.status === 'converted' || prospect.conversion_status === 'approved';
+            if ((!cr || status === 'draft') && !isConverted) {
                 const d = cr || {};
                 const isPOP = d.payment_method === 'POP';
                 container.innerHTML = pre2025Html + `
@@ -14412,7 +14438,7 @@ function _wireLoginBtn() {
                         <button class="btn primary btn-sm" style="flex:1;" onclick="event.stopPropagation();app.submitClosingRecord(${prospect.id})"><i class="fas fa-paper-plane"></i> Submit for Approval</button>
                     </div>
                 `;
-            } else if (status === 'submitted') {
+            } else if (status === 'submitted' && !isConverted) {
                 const d = cr;
                 const managerButtons = isManager ? `
                     <div style="display:flex;gap:8px;margin-top:14px;">
@@ -14450,8 +14476,8 @@ function _wireLoginBtn() {
                     ` : ''}
                     ${managerButtons}
                 `;
-            } else if (status === 'approved') {
-                const d = cr;
+            } else {
+                const d = cr || {};
                 container.innerHTML = pre2025Html + `
                     <div class="cr-status approved" style="margin-bottom:14px;padding:8px 12px;border-radius:8px;background:#e8f5e9;border:1px solid #4caf50;color:#2e7d32;font-size:13px;font-weight:600;">
                         <i class="fas fa-check-circle"></i> Approved — Converted to Customer Profile
