@@ -8890,6 +8890,7 @@ function _wireLoginBtn() {
                                 <div class="appointment-customer">📋 ${entityName}</div>`
                                 }
                                 <div class="appointment-type">🏷️ ${a.activity_type}</div>
+                                ${a.venue ? `<div class="appointment-venue">📍 ${a.venue}</div>` : ''}
                                 ${a.closing_amount ? `
                                 <div class="appointment-closed">
                                     <div class="closed-badge">✓ CLOSED</div>
@@ -10283,7 +10284,7 @@ function _wireLoginBtn() {
                         </div>
                     </div>
                     <div class="form-group">
-                        <label>Venue</label>
+                        <label>Venue <span id="venue-required-star" class="required" style="display:none;">*</span></label>
                         <select id="activity-venue" class="form-control">
                             <option value="">-- Select Venue --</option>
                             ${(await AppDataStore.getAll('venues')).map(v => `<option value="${v.name} | ${v.location}">${v.name} | ${v.location}</option>`).join('')}
@@ -10717,6 +10718,12 @@ function _wireLoginBtn() {
         const type = document.getElementById('modal-activity-type')?.value;
         const container = document.getElementById('dynamic-form-fields');
         if (!container) return;
+
+        // Show/hide venue required star
+        const venueStar = document.getElementById('venue-required-star');
+        if (venueStar) {
+            venueStar.style.display = ['CPS','FTF','EVENT','GR','XG'].includes(type) ? 'inline' : 'none';
+        }
 
         let html = '';
 
@@ -11500,6 +11507,13 @@ function _wireLoginBtn() {
             lead_agent_id: _currentUser ? _currentUser.id : 5,
             venue: document.getElementById('activity-venue')?.value || ''
         };
+
+        // Venue compulsory for these types
+        const venueRequiredTypes = ['CPS', 'FTF', 'EVENT', 'GR', 'XG'];
+        if (venueRequiredTypes.includes(type) && !activity.venue) {
+            UI.toast.error('Venue is required for ' + type + '. Please select a venue.');
+            return;
+        }
 
         if (type === 'CPS') {
             const name = document.getElementById('cps-name')?.value;
