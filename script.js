@@ -14094,8 +14094,11 @@ function _wireLoginBtn() {
         }
         else if (tab === 'events') {
             const EVENT_TYPES = ['EVENT','AGENT_MEETING','AGENT_TRAINING','SITE'];
+            // Pre-load valid event IDs so orphaned EVENT activities (whose event was deleted) are hidden
+            const validEventIds = new Set((await AppDataStore.getAll('events')).map(e => String(e.id)));
             const activityEvents = (await AppDataStore.getAll('activities')).filter(
                 a => a.prospect_id == prospectId && EVENT_TYPES.includes(a.activity_type)
+                    && (a.activity_type !== 'EVENT' || !a.event_id || validEventIds.has(String(a.event_id)))
             ).sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
 
             const registrations = (await AppDataStore.getAll('event_registrations')).filter(
@@ -19521,6 +19524,18 @@ const exportKPIReport = async (format) => {
 
     const deleteMarketingListItem = async (id) => {
         if (confirm('Are you sure you want to delete this record? This action cannot be undone.')) {
+            // When deleting an event, cascade-delete linked activities and attendees
+            // to prevent orphaned entries appearing on calendar and prospect profiles.
+            if (_currentMarketingListTab === 'events') {
+                const allActivities = await AppDataStore.getAll('activities');
+                for (const act of allActivities.filter(a => String(a.event_id) === String(id))) {
+                    await AppDataStore.delete('activities', act.id);
+                }
+                const allAttendees = await AppDataStore.getAll('event_attendees');
+                for (const att of allAttendees.filter(a => String(a.event_id) === String(id))) {
+                    await AppDataStore.delete('event_attendees', att.id);
+                }
+            }
             await AppDataStore.delete(_currentMarketingListTab, id);
             UI.toast.success('Record deleted');
             const viewport = document.getElementById('content-viewport');
