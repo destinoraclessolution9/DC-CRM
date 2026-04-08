@@ -184,9 +184,11 @@ Object.assign(window.app, (() => {
         await AppDataStore.create('activities', {
             activity_type: 'EVENT',
             activity_title: `Checked in to: ${event?.event_title || 'Event'}`,
-            activity_date: new Date().toISOString().split('T')[0],
-            start_time: '00:00',
-            end_time: '23:59',
+            activity_date: event?.event_date || new Date().toISOString().split('T')[0],
+            start_time: event?.start_time || '00:00',
+            end_time: event?.end_time || '23:59',
+            venue: event?.location || '',
+            event_id: reg.event_id,
             prospect_id: reg.attendee_type === 'prospect' ? reg.prospect_id : null,
             customer_id: reg.attendee_type === 'customer' ? reg.customer_id : null,
             lead_agent_id: entity ? entity.responsible_agent_id : (currentUser?.id || 5),
@@ -457,6 +459,8 @@ Object.assign(window.app, (() => {
         document.getElementById('event-category').value = template.event_category_id || 1;
         document.getElementById('event-description').value = template.description || '';
         document.getElementById('event-location').value = template.location || '';
+        if (document.getElementById('event-start-time')) document.getElementById('event-start-time').value = template.start_time || '';
+        if (document.getElementById('event-end-time')) document.getElementById('event-end-time').value = template.end_time || '';
         document.getElementById('event-capacity').value = template.capacity || '';
         document.getElementById('ticket-price').value = template.ticket_price || '';
         document.getElementById('base-score').value = template.base_score || 10;
@@ -481,6 +485,10 @@ Object.assign(window.app, (() => {
                     <div class="form-row">
                         <div class="form-group half"><label>Date *</label><input type="date" id="event-date" class="form-control" ${isTemplate ? '' : 'required'}></div>
                         <div class="form-group half"><label>Location</label><input type="text" id="event-location" class="form-control"></div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group half"><label>Start Time</label><input type="time" id="event-start-time" class="form-control"></div>
+                        <div class="form-group half"><label>End Time</label><input type="time" id="event-end-time" class="form-control"></div>
                     </div>
                     <div class="form-row">
                         <div class="form-group half"><label>Capacity</label><input type="number" id="event-capacity" class="form-control" value="0"></div>
@@ -555,6 +563,8 @@ Object.assign(window.app, (() => {
             event_category_id: parseInt(document.getElementById('event-category').value) || 1,
             description: document.getElementById('event-description').value,
             location: document.getElementById('event-location').value,
+            start_time: document.getElementById('event-start-time')?.value || '',
+            end_time: document.getElementById('event-end-time')?.value || '',
             capacity: parseInt(document.getElementById('event-capacity').value) || 0,
             ticket_price: parseFloat(document.getElementById('ticket-price').value) || 0,
             base_score: parseInt(document.getElementById('base-score').value) || 10,
