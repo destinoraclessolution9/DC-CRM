@@ -10341,6 +10341,15 @@ function _wireLoginBtn() {
         _selectedReferrer = null;
         window._cpsDuplicateConfirmed = false;
 
+        // Pre-fetch lookup data BEFORE building the template (safer than await inside template literals)
+        const _venueOptions = (await AppDataStore.getAll('venues'))
+            .map(v => `<option value="${v.name} | ${v.location}">${v.name} | ${v.location}</option>`)
+            .join('');
+        const _productOptions = (await AppDataStore.getAll('products'))
+            .filter(p => p.is_active !== false)
+            .map(p => `<option value="${p.name}">${p.name}</option>`)
+            .join('') || '<option value="">No products available</option>';
+
         const modalContent = `
             <div class="activity-modal-form">
                 <div class="form-group">
@@ -10427,7 +10436,7 @@ function _wireLoginBtn() {
                         <label>Venue <span id="venue-required-star" class="required" style="display:none;">*</span></label>
                         <select id="activity-venue" class="form-control">
                             <option value="">-- Select Venue --</option>
-                            ${(await AppDataStore.getAll('venues')).map(v => `<option value="${v.name} | ${v.location}">${v.name} | ${v.location}</option>`).join('')}
+                            ${_venueOptions}
                         </select>
                     </div>
                 </div>
@@ -10444,7 +10453,7 @@ function _wireLoginBtn() {
                         <div class="form-group">
                             <label>Product/Service Sold</label>
                             <select id="solution-sold" class="form-control">
-                                ${(await AppDataStore.getAll('products')).filter(p => p.is_active !== false).map(p => `<option value="${p.name}">${p.name}</option>`).join('') || '<option value="">No products available</option>'}
+                                ${_productOptions}
                             </select>
                         </div>
                         <div class="form-row">
