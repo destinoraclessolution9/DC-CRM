@@ -14275,10 +14275,13 @@ function _wireLoginBtn() {
                 ? products.map(p => `<option value="${p.name}" ${(cr?.product === p.name) ? 'selected' : ''}>${p.name}</option>`).join('')
                 : '<option value="">No products available</option>';
 
-            // ── Before 2025 Purchase Record ──
+            // ── Before 2025 Purchase Record (stored inside closing_record to reuse existing JSONB column) ──
             const pid = prospect.id;
             let pre2025 = [];
-            try { pre2025 = Array.isArray(prospect.pre2025_purchases) ? prospect.pre2025_purchases : JSON.parse(prospect.pre2025_purchases || '[]'); } catch(_) {}
+            try {
+                const src = prospect.closing_record?.pre2025_purchases || prospect.pre2025_purchases;
+                pre2025 = Array.isArray(src) ? src : JSON.parse(src || '[]');
+            } catch(_) {}
             const pre2025Rows = pre2025.length
                 ? pre2025.map((r, i) => `
                     <tr>
@@ -14588,9 +14591,13 @@ const deleteNote = async (prospectId, noteId) => {
             const prospect = await AppDataStore.getById('prospects', prospectId);
             if (!prospect) return;
             let records = [];
-            try { records = Array.isArray(prospect.pre2025_purchases) ? [...prospect.pre2025_purchases] : JSON.parse(prospect.pre2025_purchases || '[]'); } catch(_) {}
+            try {
+                const src = prospect.closing_record?.pre2025_purchases || prospect.pre2025_purchases;
+                records = Array.isArray(src) ? [...src] : JSON.parse(src || '[]');
+            } catch(_) {}
             records.push({ product, notes, attachment_data: attachment_data || null, attachment_name: attachment_name || null });
-            await AppDataStore.update('prospects', prospectId, { pre2025_purchases: records });
+            const cr = { ...(prospect.closing_record || {}), pre2025_purchases: records };
+            await AppDataStore.update('prospects', prospectId, { closing_record: cr });
             UI.toast.success('Record added');
             const bodyEl = document.getElementById(`acc-body-closing-${prospectId}`);
             if (bodyEl) await switchProspectTab('closing', prospectId, null, bodyEl);
@@ -14613,12 +14620,16 @@ const deleteNote = async (prospectId, noteId) => {
             const prospect = await AppDataStore.getById('prospects', prospectId);
             if (!prospect) return;
             let records = [];
-            try { records = Array.isArray(prospect.pre2025_purchases) ? [...prospect.pre2025_purchases] : JSON.parse(prospect.pre2025_purchases || '[]'); } catch(_) {}
+            try {
+                const src = prospect.closing_record?.pre2025_purchases || prospect.pre2025_purchases;
+                records = Array.isArray(src) ? [...src] : JSON.parse(src || '[]');
+            } catch(_) {}
             if (records[index]) {
                 records[index].attachment_name = file.name;
                 records[index].attachment_data = e.target.result;
             }
-            await AppDataStore.update('prospects', prospectId, { pre2025_purchases: records });
+            const cr = { ...(prospect.closing_record || {}), pre2025_purchases: records };
+            await AppDataStore.update('prospects', prospectId, { closing_record: cr });
             UI.toast.success('Attachment saved');
             const bodyEl = document.getElementById(`acc-body-closing-${prospectId}`);
             if (bodyEl) await switchProspectTab('closing', prospectId, null, bodyEl);
@@ -14631,9 +14642,13 @@ const deleteNote = async (prospectId, noteId) => {
         const prospect = await AppDataStore.getById('prospects', prospectId);
         if (!prospect) return;
         let records = [];
-        try { records = Array.isArray(prospect.pre2025_purchases) ? prospect.pre2025_purchases : JSON.parse(prospect.pre2025_purchases || '[]'); } catch(_) {}
+        try {
+            const src = prospect.closing_record?.pre2025_purchases || prospect.pre2025_purchases;
+            records = Array.isArray(src) ? [...src] : JSON.parse(src || '[]');
+        } catch(_) {}
         records.splice(index, 1);
-        await AppDataStore.update('prospects', prospectId, { pre2025_purchases: records });
+        const cr = { ...(prospect.closing_record || {}), pre2025_purchases: records };
+        await AppDataStore.update('prospects', prospectId, { closing_record: cr });
         UI.toast.success('Record removed');
         const bodyEl = document.getElementById(`acc-body-closing-${prospectId}`);
         if (bodyEl) await switchProspectTab('closing', prospectId, null, bodyEl);
