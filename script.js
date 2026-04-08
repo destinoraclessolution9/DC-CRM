@@ -9630,7 +9630,7 @@ function _wireLoginBtn() {
 
         let attendeeHtml = '';
         if (activity.activity_type === 'EVENT' && activity.event_id) {
-            const attendees = (await AppDataStore.getAll('event_attendees')).filter(a => a.event_id === activity.event_id);
+            const attendees = (await AppDataStore.getAll('event_attendees')).filter(a => String(a.event_id) === String(activity.event_id));
             if (attendees.length > 0) {
                 const prospects = await AppDataStore.getAll('prospects');
                 const customers = await AppDataStore.getAll('customers');
@@ -9638,7 +9638,7 @@ function _wireLoginBtn() {
 
                 const renderedRows = await Promise.all(attendees.map(async att => {
                     const entityId = att.entity_id || att.attendee_id;
-                    const person = all.find(p => p.id === entityId);
+                    const person = all.find(p => String(p.id) === String(entityId));
                     const name = person ? person.full_name : 'Unknown';
                     const agent = await AppDataStore.getById('users', att.added_by_agent_id);
                     const agentName = agent ? agent.full_name : 'Unknown';
@@ -9696,7 +9696,7 @@ function _wireLoginBtn() {
                 <div class="detail-section">
                     <h4>Activity Information</h4>
                     <div class="info-row"><span class="info-label">Type:</span> <span>${activity.activity_type}</span></div>
-                    <div class="info-row"><span class="info-label">Title:</span> <span>${activity.activity_title || 'N/A'}</span></div>
+                    <div class="info-row"><span class="info-label">Title:</span> <span>${marketingEvent?.event_title || marketingEvent?.title || activity.activity_title || 'N/A'}</span></div>
                     <div class="info-row"><span class="info-label">Date:</span> <span>${activity.activity_date}</span></div>
                     <div class="info-row"><span class="info-label">Time:</span> <span>${activity.start_time} - ${activity.end_time}</span></div>
                     ${activity.activity_type !== 'EVENT' ? `<div class="info-row"><span class="info-label">Entity:</span> <span>${entityName}</span></div>` : ''}
