@@ -410,25 +410,27 @@ const appLogic = (() => {
     // Ensure referrals have the new fields (id, referrer_id, referrer_type, referred_prospect_id)
     const ensureReferralFields = async () => {
         const referrals = await AppDataStore.getAll('referrals');
-        let changed = false;
-        referrals.forEach(r => {
+        for (const r of referrals) {
+            let needsUpdate = false;
+            const updates = {};
             if (r.referrer_customer_id && !r.referrer_id) {
                 // Old format: convert
-                r.referrer_id = r.referrer_customer_id;
-                r.referrer_type = 'customer';
-                delete r.referrer_customer_id; // optional, but we keep for backward compat
-                changed = true;
+                updates.referrer_id = r.referrer_customer_id;
+                updates.referrer_type = 'customer';
+                needsUpdate = true;
             }
-            if (!r.referrer_id) {
-                // Should not happen, but just in case
-                r.referrer_id = null;
-                r.referrer_type = null;
+            if (!r.referrer_id && !updates.referrer_id) {
+                updates.referrer_id = null;
+                updates.referrer_type = null;
             }
-            if (!r.created_at) r.created_at = r.date || new Date().toISOString();
-        });
-        if (changed) {
-            // Persist changes
-            localStorage.setItem('fs_crm_referrals', JSON.stringify(referrals));
+            if (!r.created_at) {
+                updates.created_at = r.date || new Date().toISOString();
+                needsUpdate = true;
+            }
+            if (needsUpdate) {
+                // Persist via Supabase — data.js handles localStorage cache update automatically
+                await AppDataStore.update('referrals', r.id, updates).catch(() => {});
+            }
         }
     };
 
@@ -3167,7 +3169,7 @@ In a production system, this would show the actual file contents.
         constructor() {
             this.googleCalendar = new GoogleCalendarService();
             this.syncInProgress = false;
-            this.lastSyncTime = localStorage.getItem('last_google_sync');
+            this.lastSyncTime = null; // updated in-memory after each sync
         }
 
         async syncCRMtoGoogle() {
@@ -3764,8 +3766,12 @@ In a production system, this would show the actual file contents.
 
     const exportSyncHistory = () => { UI.toast.info('Exporting sync history...'); };
     const clearSyncHistory = async () => {
-        const logs =await  (await AppDataStore.getAll('sync_history')).filter(h => h.user_id !== (_currentUser?.id || 1));
-        localStorage.setItem('fs_crm_sync_history', JSON.stringify(logs));
+        const userId = _currentUser?.id || 1;
+        const myLogs = await AppDataStore.getAll('sync_history');
+        const mine = myLogs.filter(h => h.user_id === userId);
+        for (const h of mine) {
+            await AppDataStore.delete('sync_history', h.id).catch(() => {});
+        }
         UI.toast.success('Sync history cleared');
         await viewSyncHistory();
     };
@@ -22867,8 +22873,10 @@ const initImportDemoData = async () => {
         const tables = ['import_jobs', 'reassignment_history'];
         for (const table of tables) {
             const all = await AppDataStore.getAll(table);
-            const nonDemo = all.filter(item => !item.is_demo);
-            localStorage.setItem(`fs_crm_${table}`, JSON.stringify(nonDemo));
+            const demoItems = all.filter(item => item.is_demo);
+            for (const item of demoItems) {
+                await AppDataStore.delete(table, item.id).catch(() => {});
+            }
         }
         UI.toast.info('Demo data cleared.');
     }
