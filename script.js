@@ -8997,10 +8997,13 @@ function _wireLoginBtn() {
 
                         // For EVENTs: show event title instead of agent/entity
                         let eventTitle = null;
+                        let eventVenue = null;
                         if (isEvent && a.event_id) {
                             const ev = await AppDataStore.getById('events', a.event_id);
                             eventTitle = ev ? (ev.event_title || ev.title) : null;
+                            eventVenue = ev ? (ev.location || null) : null;
                         }
+                        const displayVenue = a.venue || eventVenue || '';
 
                         activityHtml += `
                             <div class="calendar-appointment ${a.activity_type.toLowerCase()} ${a.closing_amount ? 'closed-case' : ''}"
@@ -9012,7 +9015,7 @@ function _wireLoginBtn() {
                                 <div class="appointment-customer">📋 ${entityName}</div>`
                                 }
                                 <div class="appointment-type">🏷️ ${a.activity_type}</div>
-                                ${a.venue ? `<div class="appointment-venue">📍 ${a.venue}</div>` : ''}
+                                ${displayVenue ? `<div class="appointment-venue">📍 ${displayVenue}</div>` : ''}
                                 ${a.closing_amount ? `
                                 <div class="appointment-closed">
                                     <div class="closed-badge">✓ CLOSED</div>
