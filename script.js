@@ -9547,7 +9547,8 @@ function _wireLoginBtn() {
                 const all = [...prospects, ...customers];
 
                 const renderedRows = await Promise.all(attendees.map(async att => {
-                    const person = all.find(p => p.id === att.entity_id);
+                    const entityId = att.entity_id || att.attendee_id;
+                    const person = all.find(p => p.id === entityId);
                     const name = person ? person.full_name : 'Unknown';
                     const agent = await AppDataStore.getById('users', att.added_by_agent_id);
                     const agentName = agent ? agent.full_name : 'Unknown';
@@ -9569,9 +9570,9 @@ function _wireLoginBtn() {
                                     <input type="checkbox" ${ticketChecked} onchange="app.toggleAttendeeTicket(${att.id}, this.checked)"> Ticket Created
                                 </label>
                                 <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
-                                    <input type="checkbox" ${attendedChecked} onchange="app.toggleAttendeeAttended(${att.id}, this.checked, ${att.entity_id}, '${att.attendee_type}', ${activity.event_id}, '${activity.activity_date}')"> Attended
+                                    <input type="checkbox" ${attendedChecked} onchange="app.toggleAttendeeAttended(${att.id}, this.checked, ${entityId}, '${att.attendee_type}', ${activity.event_id}, '${activity.activity_date}')"> Attended
                                 </label>
-                                <button class="btn btn-sm secondary" onclick="app.goToProspectEventNotes(${att.entity_id}, ${activity.event_id})">Post Event</button>
+                                ${entityId ? `<button class="btn btn-sm secondary" onclick="(async()=>{ await app.goToProspectEventNotes(${entityId}, ${activity.event_id}, '${att.attendee_type || 'prospect'}', '${activity.activity_date || ''}'); })()">Post Event</button>` : ''}
                             </div>
                         </div>
                     `;
@@ -11121,9 +11122,29 @@ function _wireLoginBtn() {
         }
     };
 
-    const goToProspectEventNotes = (prospectId, eventId) => {
+    const goToProspectEventNotes = async (entityId, eventId, entityType, activityDate) => {
+        if (!entityId) return;
+        // Ensure event_registrations record exists so it shows in prospect's Activities & Events tab
+        try {
+            const existing = (await AppDataStore.getAll('event_registrations')).find(
+                r => r.event_id == eventId && r.attendee_id == entityId
+            );
+            if (!existing) {
+                await AppDataStore.create('event_registrations', {
+                    event_id: eventId,
+                    attendee_id: entityId,
+                    attendee_type: entityType || 'prospect',
+                    attendance_status: 'Registered',
+                    event_date: activityDate || new Date().toISOString().split('T')[0],
+                    points_awarded: 0,
+                    created_at: new Date().toISOString()
+                });
+            }
+        } catch (err) {
+            console.warn('goToProspectEventNotes: could not write event_registrations', err);
+        }
         UI.hideModal();
-        app.showProspectProfile(prospectId);
+        app.showProspectProfile(entityId);
     };
 
     const showAddAttendeeSearch = async (eventId, activityId) => {
