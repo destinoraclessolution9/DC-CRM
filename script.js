@@ -9639,7 +9639,8 @@ function _wireLoginBtn() {
                 const renderedRows = await Promise.all(attendees.map(async att => {
                     const entityId = att.entity_id || att.attendee_id;
                     const person = all.find(p => String(p.id) === String(entityId));
-                    const name = person?.full_name || att.entity_name || 'Unknown';
+                    const name = person?.full_name || att.entity_name || '';
+                    const isUnresolved = !name;
                     const agent = await AppDataStore.getById('users', att.added_by_agent_id);
                     const agentName = agent?.full_name || att.added_by_name || 'Unknown';
                     const paidChecked = att.paid ? 'checked' : '';
@@ -9648,11 +9649,19 @@ function _wireLoginBtn() {
                     return `
                         <div class="info-row" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #eee; padding-bottom:8px; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
                             <div>
-                                <strong style="cursor:pointer;color:var(--primary);text-decoration:underline;" onclick="event.stopPropagation();app.showAttendeeDetails(${entityId},'${att.attendee_type||'prospect'}')">${name}</strong>
+                                ${isUnresolved
+                                    ? `<span style="color:var(--gray-400);font-style:italic;">⚠️ Unresolved prospect</span>`
+                                    : `<strong style="cursor:pointer;color:var(--primary);text-decoration:underline;" onclick="event.stopPropagation();app.showAttendeeDetails(${entityId},'${att.attendee_type||'prospect'}')">${name}</strong>`
+                                }
                                 <span style="font-size:10px; margin-left:5px; background:var(--gray-100); padding:1px 6px; border-radius:10px;">${att.attendee_type || 'prospect'}</span>
                                 <div style="font-size:11px; color:gray;">Added by: ${agentName}</div>
                             </div>
                             <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+                                ${isUnresolved ? `
+                                <button class="btn btn-sm" style="background:#fee2e2;color:#991b1b;border:none;padding:3px 10px;border-radius:4px;cursor:pointer;"
+                                    onclick="event.stopPropagation();(async()=>{ if(confirm('Remove this unresolved attendee?')){ await AppDataStore.delete('event_attendees','${att.id}'); await app.viewActivityDetails(${activityId}); } })()">
+                                    🗑 Remove
+                                </button>` : `
                                 <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
                                     <input type="checkbox" ${paidChecked} onchange="app.toggleAttendeePaid(${att.id}, this.checked)"> Paid
                                 </label>
@@ -9662,7 +9671,7 @@ function _wireLoginBtn() {
                                 <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
                                     <input type="checkbox" ${attendedChecked} onchange="app.toggleAttendeeAttended(${att.id}, this.checked, ${entityId}, '${att.attendee_type}', ${activity.event_id}, '${activity.activity_date}')"> Attended
                                 </label>
-                                ${entityId ? `<button class="btn btn-sm secondary" onclick="(async()=>{ await app.goToProspectEventNotes(${entityId}, ${activity.event_id}, '${att.attendee_type || 'prospect'}', '${activity.activity_date || ''}'); })()">Post Event</button>` : ''}
+                                ${entityId ? `<button class="btn btn-sm secondary" onclick="(async()=>{ await app.goToProspectEventNotes(${entityId}, ${activity.event_id}, '${att.attendee_type || 'prospect'}', '${activity.activity_date || ''}'); })()">Post Event</button>` : ''}`}
                             </div>
                         </div>
                     `;
