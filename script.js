@@ -411,16 +411,25 @@ const appLogic = (() => {
     const ensureReferralFields = async () => {
         const referrals = await AppDataStore.getAll('referrals');
         for (const r of referrals) {
+            let needsUpdate = false;
             const updates = {};
             if (r.referrer_customer_id && !r.referrer_id) {
+                // Old format: convert
                 updates.referrer_id = r.referrer_customer_id;
                 updates.referrer_type = 'customer';
+                needsUpdate = true;
+            }
+            if (!r.referrer_id && !updates.referrer_id) {
+                updates.referrer_id = null;
+                updates.referrer_type = null;
             }
             if (!r.created_at) {
                 updates.created_at = r.date || new Date().toISOString();
+                needsUpdate = true;
             }
-            if (Object.keys(updates).length > 0) {
-                await AppDataStore.update('referrals', r.id, updates);
+            if (needsUpdate) {
+                // Persist via Supabase — data.js handles localStorage cache update automatically
+                await AppDataStore.update('referrals', r.id, updates).catch(() => {});
             }
         }
     };
@@ -3160,7 +3169,7 @@ In a production system, this would show the actual file contents.
         constructor() {
             this.googleCalendar = new GoogleCalendarService();
             this.syncInProgress = false;
-            this.lastSyncTime = localStorage.getItem('last_google_sync');
+            this.lastSyncTime = null; // updated in-memory after each sync
         }
 
         async syncCRMtoGoogle() {
@@ -3757,8 +3766,12 @@ In a production system, this would show the actual file contents.
 
     const exportSyncHistory = () => { UI.toast.info('Exporting sync history...'); };
     const clearSyncHistory = async () => {
-        const logs =await  (await AppDataStore.getAll('sync_history')).filter(h => h.user_id !== (_currentUser?.id || 1));
-        localStorage.setItem('fs_crm_sync_history', JSON.stringify(logs));
+        const userId = _currentUser?.id || 1;
+        const myLogs = await AppDataStore.getAll('sync_history');
+        const mine = myLogs.filter(h => h.user_id === userId);
+        for (const h of mine) {
+            await AppDataStore.delete('sync_history', h.id).catch(() => {});
+        }
         UI.toast.success('Sync history cleared');
         await viewSyncHistory();
     };
@@ -14081,8 +14094,11 @@ function _wireLoginBtn() {
         }
         else if (tab === 'events') {
             const EVENT_TYPES = ['EVENT','AGENT_MEETING','AGENT_TRAINING','SITE'];
+            // Pre-load valid event IDs so orphaned EVENT activities (whose event was deleted) are hidden
+            const validEventIds = new Set((await AppDataStore.getAll('events')).map(e => String(e.id)));
             const activityEvents = (await AppDataStore.getAll('activities')).filter(
                 a => a.prospect_id == prospectId && EVENT_TYPES.includes(a.activity_type)
+                    && (a.activity_type !== 'EVENT' || !a.event_id || validEventIds.has(String(a.event_id)))
             ).sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
 
             const registrations = (await AppDataStore.getAll('event_registrations')).filter(
@@ -19522,6 +19538,18 @@ const exportKPIReport = async (format) => {
 
     const deleteMarketingListItem = async (id) => {
         if (confirm('Are you sure you want to delete this record? This action cannot be undone.')) {
+            // When deleting an event, cascade-delete linked activities and attendees
+            // to prevent orphaned entries appearing on calendar and prospect profiles.
+            if (_currentMarketingListTab === 'events') {
+                const allActivities = await AppDataStore.getAll('activities');
+                for (const act of allActivities.filter(a => String(a.event_id) === String(id))) {
+                    await AppDataStore.delete('activities', act.id);
+                }
+                const allAttendees = await AppDataStore.getAll('event_attendees');
+                for (const att of allAttendees.filter(a => String(a.event_id) === String(id))) {
+                    await AppDataStore.delete('event_attendees', att.id);
+                }
+            }
             await AppDataStore.delete(_currentMarketingListTab, id);
             UI.toast.success('Record deleted');
             const viewport = document.getElementById('content-viewport');
@@ -22876,7 +22904,7 @@ const initImportDemoData = async () => {
             const all = await AppDataStore.getAll(table);
             const demoItems = all.filter(item => item.is_demo);
             for (const item of demoItems) {
-                await AppDataStore.delete(table, item.id);
+                await AppDataStore.delete(table, item.id).catch(() => {});
             }
         }
         UI.toast.info('Demo data cleared.');
