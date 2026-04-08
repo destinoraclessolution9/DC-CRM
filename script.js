@@ -10747,19 +10747,44 @@ function _wireLoginBtn() {
                         <h4>👤 New Customer Information</h4>
                         <div class="form-row">
                             <div class="form-group half">
-                                <label>Full Name <span class="required">*</span></label>
-                                <input type="text" id="cps-name" class="form-control" placeholder="e.g., Tan Ah Kow" required>
+                                <label>Title</label>
+                                <select id="cps-title" class="form-control">
+                                    <option value="Mr.">Mr.</option>
+                                    <option value="Ms.">Ms.</option>
+                                    <option value="Mrs.">Mrs.</option>
+                                    <option value="Dr.">Dr.</option>
+                                </select>
                             </div>
                             <div class="form-group half">
-                                <label>Nickname</label>
-                                <input type="text" id="cps-nickname" class="form-control" placeholder="e.g., Ah Kow">
+                                <label>Full Name <span class="required">*</span></label>
+                                <input type="text" id="cps-name" class="form-control" placeholder="e.g., Tan Ah Kow" required>
                             </div>
                         </div>
                         <div class="form-row">
                             <div class="form-group half">
+                                <label>Nickname</label>
+                                <input type="text" id="cps-nickname" class="form-control" placeholder="e.g., Ah Kow">
+                            </div>
+                            <div class="form-group half">
+                                <label>Gender</label>
+                                <select id="cps-gender" class="form-control">
+                                    <option value="Male">Male</option>
+                                    <option value="Female">Female</option>
+                                    <option value="Other">Other</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group half">
+                                <label>Nationality</label>
+                                <input type="text" id="cps-nationality" class="form-control" placeholder="e.g., Malaysian" value="Malaysian">
+                            </div>
+                            <div class="form-group half">
                                 <label>Phone Number <span class="required">*</span></label>
                                 <input type="tel" id="cps-phone" class="form-control" placeholder="e.g., 012-3456789" required>
                             </div>
+                        </div>
+                        <div class="form-row">
                             <div class="form-group half">
                                 <div style="display:flex; align-items:center; gap:8px;">
                                     <label style="margin-bottom:0;">Date of Birth</label>
@@ -10767,8 +10792,6 @@ function _wireLoginBtn() {
                                 </div>
                                 <input type="date" id="cps-dob" class="form-control" onchange="app.updateLunarBirth()">
                             </div>
-                        </div>
-                        <div class="form-row">
                             <div class="form-group half">
                                 <div style="display:flex; align-items:center; gap:8px;">
                                     <label style="margin-bottom:0;">Lunar Birth</label>
@@ -10776,6 +10799,8 @@ function _wireLoginBtn() {
                                 </div>
                                 <input type="text" id="cps-lunar" class="form-control" placeholder="Lunar date">
                             </div>
+                        </div>
+                        <div class="form-row">
                             <div class="form-group half">
                                 <label>Ming Gua</label>
                                 <select id="cps-gua" class="form-control">
@@ -11670,8 +11695,11 @@ function _wireLoginBtn() {
             const relationDetails = relation === 'Other' ? document.getElementById('cps-relation-other')?.value : relation;
 
             const prospectData = {
+                title: document.getElementById('cps-title')?.value || '',
                 full_name: name,
                 nickname: document.getElementById('cps-nickname')?.value || '',
+                gender: document.getElementById('cps-gender')?.value || '',
+                nationality: document.getElementById('cps-nationality')?.value || 'Malaysian',
                 phone,
                 ic_number: document.getElementById('cps-ic')?.value || '',
                 email: document.getElementById('cps-email')?.value || '',
@@ -12563,12 +12591,18 @@ function _wireLoginBtn() {
                             <input type="email" id="prospect-email" class="form-control" value="${prospect?.email || ''}">
                         </div>
                     </div>
-                    <div class="form-group">
-                        <label>IC Number</label>
-                        <input type="text" id="prospect-ic" class="form-control" value="${prospect?.ic_number || ''}">
+                    <div class="form-row">
+                        <div class="form-group half">
+                            <label>IC Number</label>
+                            <input type="text" id="prospect-ic" class="form-control" value="${prospect?.ic_number || ''}">
+                        </div>
+                        <div class="form-group half">
+                            <label>Nickname</label>
+                            <input type="text" id="prospect-nickname" class="form-control" value="${prospect?.nickname || ''}">
+                        </div>
                     </div>
                 </div>
-                
+
                 <div class="form-section">
                     <h4>Personal Information</h4>
                     <div class="form-row">
@@ -12779,6 +12813,7 @@ function _wireLoginBtn() {
         const data = {
             title: d('prospect-title'),
             full_name: name,
+            nickname: d('prospect-nickname') || null,
             gender: d('prospect-gender'),
             nationality: d('prospect-nationality'),
             phone: phone,
