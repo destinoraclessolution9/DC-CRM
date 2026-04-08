@@ -10928,7 +10928,7 @@ function _wireLoginBtn() {
                         </div>
                         <div class="form-row">
                             <div class="form-group half">
-                                <label>Referrer</label>
+                                <label>Referrer <span class="required">*</span></label>
                                 <div class="search-with-results" style="position: relative;">
                                     <input type="text" id="cps-referrer" class="form-control" placeholder="Search referrer..." onkeyup="app.searchReferrers()">
                                     <div id="referrer-results" class="search-results-dropdown" style="display:none; position:absolute; z-index:1000; background:white; border:1px solid #ddd; width:100%;"></div>
