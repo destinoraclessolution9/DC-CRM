@@ -308,7 +308,19 @@ class DataStore {
                 .eq('id', id)
                 .maybeSingle();
             if (error) throw error;
-            if (data) return data;
+            if (data) {
+                // Merge with localStorage to preserve extra fields not in Supabase schema
+                // (same logic as getAll) — server fields always win
+                try {
+                    const local = localStorage.getItem(`fs_crm_${tableName}`);
+                    if (local) {
+                        const records = JSON.parse(local);
+                        const localRecord = records.find(r => String(r.id) === String(id));
+                        if (localRecord) return { ...localRecord, ...data };
+                    }
+                } catch (_) {}
+                return data;
+            }
             // Not found in Supabase — check localStorage fallback (schema-mismatch saves)
             const local = localStorage.getItem(`fs_crm_${tableName}`);
             if (local) {
