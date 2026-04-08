@@ -132,7 +132,11 @@ class DataStore {
         try {
             const { data, error } = await this._readClient().from(tableName).select('*');
             if (error) throw error;
-            const serverData = data || [];
+            // Filter out tombstoned records before caching — prevents deleted items reappearing
+            const tombstoneRaw = localStorage.getItem('fs_crm_tombstones');
+            const tombstones = tombstoneRaw ? JSON.parse(tombstoneRaw) : {};
+            const deletedIds = new Set(tombstones[tableName] || []);
+            const serverData = (data || []).filter(r => !deletedIds.has(String(r.id)));
             // Auto-sync: push any locally-saved (offline) items to Supabase so ALL users can see them,
             // then return the merged result (includes items still pending sync).
             const result = await this._autoSync(tableName, serverData);
@@ -483,7 +487,7 @@ class DataStore {
                 const filtered = syncQueue.filter(q => !(q.tableName === tableName && String(q.record.id) === String(id)));
                 localStorage.setItem('fs_crm_sync_queue', JSON.stringify(filtered));
             } catch (_) {}
-            // Add to tombstone so _autoSync never re-creates this record
+            // Write tombstone so the record is never re-surfaced from Supabase on next getAll
             try {
                 const tombstones = JSON.parse(localStorage.getItem('fs_crm_tombstones') || '{}');
                 if (!tombstones[tableName]) tombstones[tableName] = [];
