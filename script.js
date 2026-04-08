@@ -14274,10 +14274,45 @@ function _wireLoginBtn() {
             const productOptions = products.length
                 ? products.map(p => `<option value="${p.name}" ${(cr?.product === p.name) ? 'selected' : ''}>${p.name}</option>`).join('')
                 : '<option value="">No products available</option>';
+
+            // ── Before 2025 Purchase Record ──
+            const pid = prospect.id;
+            let pre2025 = [];
+            try { pre2025 = Array.isArray(prospect.pre2025_purchases) ? prospect.pre2025_purchases : JSON.parse(prospect.pre2025_purchases || '[]'); } catch(_) {}
+            const pre2025Rows = pre2025.length
+                ? pre2025.map((r, i) => `
+                    <tr>
+                        <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;">${escapeHtml(r.product || '')}</td>
+                        <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;color:var(--gray-500);">${escapeHtml(r.notes || '-')}</td>
+                        <td style="padding:4px 8px;border-bottom:1px solid #f3f4f6;text-align:center;">
+                            <button class="btn-icon" style="color:var(--error);" onclick="event.stopPropagation();app.deletePrePurchaseRecord(${pid},${i})" title="Remove"><i class="fas fa-times"></i></button>
+                        </td>
+                    </tr>`).join('')
+                : `<tr><td colspan="3" style="padding:10px;text-align:center;color:var(--gray-400);font-size:12px;font-style:italic;">No past records yet</td></tr>`;
+            const pre2025Html = `
+                <div style="margin-bottom:16px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
+                    <div style="background:#fef9ec;padding:8px 12px;font-weight:600;font-size:13px;border-bottom:1px solid #e5e7eb;color:#78400b;">
+                        📋 Before 2025 Purchase Record
+                    </div>
+                    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                        <thead><tr style="background:#fafafa;">
+                            <th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e5e7eb;font-weight:600;">Product / Service</th>
+                            <th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e5e7eb;font-weight:600;">Notes</th>
+                            <th style="padding:4px;width:36px;border-bottom:1px solid #e5e7eb;"></th>
+                        </tr></thead>
+                        <tbody id="pre2025-rows-${pid}">${pre2025Rows}</tbody>
+                    </table>
+                    <div style="padding:8px 10px;border-top:1px solid #e5e7eb;display:flex;gap:6px;align-items:center;">
+                        <input id="pre2025-product-${pid}" class="form-control" style="flex:1;height:32px;font-size:12px;" placeholder="Product / Service">
+                        <input id="pre2025-notes-${pid}" class="form-control" style="flex:1;height:32px;font-size:12px;" placeholder="Notes (optional)">
+                        <button class="btn secondary btn-sm" onclick="event.stopPropagation();app.addPrePurchaseRow(${pid})" style="white-space:nowrap;height:32px;"><i class="fas fa-plus"></i> Add</button>
+                    </div>
+                </div>`;
+
             if (!cr || status === 'draft') {
                 const d = cr || {};
                 const isPOP = d.payment_method === 'POP';
-                container.innerHTML = `
+                container.innerHTML = pre2025Html + `
                     <div class="cr-status draft" style="margin-bottom:14px;padding:8px 12px;border-radius:8px;background:#fff8e1;border:1px solid #ffc107;color:#856404;font-size:13px;font-weight:600;">
                         <i class="fas fa-edit"></i> Draft — Fill in details and submit for manager approval
                     </div>
@@ -14343,7 +14378,7 @@ function _wireLoginBtn() {
                         <button class="btn danger btn-sm" style="flex:1;" onclick="event.stopPropagation();app.rejectClosingRecord(${prospect.id})"><i class="fas fa-times"></i> Reject</button>
                     </div>
                 ` : `<p style="text-align:center;color:var(--gray-400);font-size:13px;margin-top:12px;"><i class="fas fa-clock"></i> Awaiting manager review.</p>`;
-                container.innerHTML = `
+                container.innerHTML = pre2025Html + `
                     <div class="cr-status submitted" style="margin-bottom:14px;padding:8px 12px;border-radius:8px;background:#e3f2fd;border:1px solid #2196f3;color:#1565c0;font-size:13px;font-weight:600;">
                         <i class="fas fa-clock"></i> Submitted — Pending manager approval
                     </div>
@@ -14375,7 +14410,7 @@ function _wireLoginBtn() {
                 `;
             } else if (status === 'approved') {
                 const d = cr;
-                container.innerHTML = `
+                container.innerHTML = pre2025Html + `
                     <div class="cr-status approved" style="margin-bottom:14px;padding:8px 12px;border-radius:8px;background:#e8f5e9;border:1px solid #4caf50;color:#2e7d32;font-size:13px;font-weight:600;">
                         <i class="fas fa-check-circle"></i> Approved — Converted to Customer Profile
                     </div>
@@ -14526,6 +14561,36 @@ const deleteNote = async (prospectId, noteId) => {
             plan_details: document.getElementById('cr-plan-details')?.value?.trim() || '',
             success_story: document.getElementById('cr-success-story')?.value?.trim() || '',
         };
+    };
+
+    const addPrePurchaseRow = async (prospectId) => {
+        const productInput = document.getElementById(`pre2025-product-${prospectId}`);
+        const notesInput = document.getElementById(`pre2025-notes-${prospectId}`);
+        const product = productInput?.value?.trim();
+        if (!product) { UI.toast.error('Please enter a product / service name'); return; }
+        const notes = notesInput?.value?.trim() || '';
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) return;
+        let records = [];
+        try { records = Array.isArray(prospect.pre2025_purchases) ? prospect.pre2025_purchases : JSON.parse(prospect.pre2025_purchases || '[]'); } catch(_) {}
+        records.push({ product, notes });
+        await AppDataStore.update('prospects', prospectId, { pre2025_purchases: records });
+        UI.toast.success('Record added');
+        const bodyEl = document.getElementById(`acc-body-closing-${prospectId}`);
+        if (bodyEl) await switchProspectTab('closing', prospectId, null, bodyEl);
+    };
+
+    const deletePrePurchaseRecord = async (prospectId, index) => {
+        if (!confirm('Remove this record?')) return;
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) return;
+        let records = [];
+        try { records = Array.isArray(prospect.pre2025_purchases) ? prospect.pre2025_purchases : JSON.parse(prospect.pre2025_purchases || '[]'); } catch(_) {}
+        records.splice(index, 1);
+        await AppDataStore.update('prospects', prospectId, { pre2025_purchases: records });
+        UI.toast.success('Record removed');
+        const bodyEl = document.getElementById(`acc-body-closing-${prospectId}`);
+        if (bodyEl) await switchProspectTab('closing', prospectId, null, bodyEl);
     };
 
     const saveClosingRecord = async (prospectId) => {
@@ -24529,6 +24594,8 @@ const initImportDemoData = async () => {
         toggleNextActionItem,
         saveClosingRecord,
         submitClosingRecord,
+        addPrePurchaseRow,
+        deletePrePurchaseRecord,
         approveClosingRecord,
         rejectClosingRecord,
         extendProtection,
