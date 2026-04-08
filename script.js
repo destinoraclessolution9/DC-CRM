@@ -9687,7 +9687,7 @@ function _wireLoginBtn() {
 
         const modalActions = [
             activity.prospect_id
-                ? { label: '👤 Prospect Profile', type: 'secondary', action: `UI.hideModal(); app.showProspectProfile(${activity.prospect_id})` }
+                ? { label: '👤 Prospect Profile', type: 'secondary', action: `UI.hideModal(); app.showProspectDetail(${activity.prospect_id})` }
                 : { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
             ...(activity.activity_type === 'CPS' && activity.prospect_id
                 ? [{ label: '📷 Upload CPS Form', type: 'secondary', action: `app.uploadCPSForm(${activityId}, ${activity.prospect_id})` }]
@@ -11202,7 +11202,7 @@ function _wireLoginBtn() {
             console.warn('goToProspectEventNotes: could not write event_registrations', err);
         }
         UI.hideModal();
-        app.showProspectProfile(entityId);
+        app.showProspectDetail(entityId);
     };
 
     const showAddAttendeeSearch = async (eventId, activityId) => {
