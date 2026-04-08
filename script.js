@@ -39,6 +39,7 @@ const appLogic = (() => {
     let _selectedCoAgents = [];
     let _selectedConsultants = []; // { id, name, status: 'pending'|'accepted'|'rejected' }
     let _selectedReferrer = null;
+    let _selectedProspectReferrer = null;
     let _currentDate = new Date(); // Dynamic start date
     let _filters = { agent: 'all', type: 'all', from: '', to: '' };
 
@@ -11595,6 +11596,49 @@ function _wireLoginBtn() {
         await viewActivityDetails(activityId);
     };
 
+    const searchProspectReferrers = async () => {
+        try {
+            const term = document.getElementById('prospect-referrer')?.value.toLowerCase();
+            const resultsDiv = document.getElementById('prospect-referrer-results');
+            if (!term || term.length < 1) { if (resultsDiv) resultsDiv.style.display = 'none'; return; }
+
+            const allProspects = (await AppDataStore.getAll('prospects')).filter(p => !p.status || p.status === 'active');
+            const allUsers = (await AppDataStore.getAll('users')).filter(u => parseInt(u.role?.match(/Level\s+(\d+)/i)?.[1] || 0) >= 3);
+
+            const matchedProspects = allProspects.filter(p => p.full_name?.toLowerCase().includes(term)).slice(0, 5);
+            const matchedConsultants = allUsers.filter(u => u.full_name?.toLowerCase().includes(term)).slice(0, 5);
+
+            let html = '';
+            if (matchedProspects.length) {
+                html += `<div style="padding:4px 10px;font-size:11px;font-weight:600;color:#6b7280;background:#f9fafb;border-bottom:1px solid #e5e7eb;text-transform:uppercase;letter-spacing:0.05em;">Prospects</div>`;
+                html += matchedProspects.map(p => `<div style="cursor:pointer;padding:8px 12px;border-bottom:1px solid #f3f4f6;" onmousedown="app.selectProspectReferrer(${p.id},'${(p.full_name||'').replace(/'/g,"\\'")}','Prospect')"><strong>${p.full_name}</strong><br><small style="color:#6b7280;">${p.phone||''}</small></div>`).join('');
+            }
+            if (matchedConsultants.length) {
+                html += `<div style="padding:4px 10px;font-size:11px;font-weight:600;color:#6b7280;background:#f9fafb;border-bottom:1px solid #e5e7eb;text-transform:uppercase;letter-spacing:0.05em;">Consultants</div>`;
+                html += matchedConsultants.map(u => `<div style="cursor:pointer;padding:8px 12px;border-bottom:1px solid #f3f4f6;" onmousedown="app.selectProspectReferrer(${u.id},'${(u.full_name||'').replace(/'/g,"\\'")}','Consultant')"><strong>${u.full_name}</strong><br><small style="color:#6b7280;">${u.agent_code||u.role||''}</small></div>`).join('');
+            }
+            if (!html) html = '<div style="padding:10px 12px;color:#6b7280;font-size:13px;">No results found</div>';
+
+            if (resultsDiv) { resultsDiv.innerHTML = html; resultsDiv.style.display = 'block'; }
+        } catch (e) { console.error('searchProspectReferrers:', e); }
+    };
+
+    const selectProspectReferrer = (id, name, type) => {
+        _selectedProspectReferrer = { id, name, type };
+        const infoDiv = document.getElementById('prospect-referrer-info');
+        if (infoDiv) infoDiv.innerHTML = `<div class="selected-entity-badge"><span>${type}: <strong>${name}</strong></span><button class="btn btn-sm secondary" onclick="app.clearProspectReferrer()">Clear</button></div>`;
+        const results = document.getElementById('prospect-referrer-results');
+        if (results) results.style.display = 'none';
+        const input = document.getElementById('prospect-referrer');
+        if (input) input.value = '';
+    };
+
+    const clearProspectReferrer = () => {
+        _selectedProspectReferrer = null;
+        const infoDiv = document.getElementById('prospect-referrer-info');
+        if (infoDiv) infoDiv.innerHTML = '';
+    };
+
     const searchEntities = async () => {
         const searchTerm = document.getElementById('entity-search')?.value.toLowerCase();
         const resultsDiv = document.getElementById('search-results');
@@ -12674,6 +12718,7 @@ function _wireLoginBtn() {
             }
         }
         const prospect = prospectId ? await AppDataStore.getById('prospects', prospectId) : null;
+        _selectedProspectReferrer = prospect?.referred_by ? { name: prospect.referred_by, id: prospect.referred_by_id || null, type: prospect.referred_by_type || null } : null;
         const allUsers = await AppDataStore.getAll('users');
         const isEdit = !!prospect;
 
@@ -12791,13 +12836,17 @@ function _wireLoginBtn() {
                     </div>
                     <div class="form-row">
                         <div class="form-group half">
-                            <label>Referred By</label>
-                            <input type="text" id="prospect-referred" class="form-control" placeholder="Name of referrer" value="${prospect?.referred_by || ''}">
+                            <label>Referred By <span class="required">*</span></label>
+                            <div style="position:relative;">
+                                <input type="text" id="prospect-referrer" class="form-control" placeholder="Search prospect or consultant..." onkeyup="app.searchProspectReferrers()">
+                                <div id="prospect-referrer-results" style="display:none;position:absolute;z-index:1000;background:white;border:1px solid #ddd;border-radius:4px;width:100%;max-height:180px;overflow-y:auto;box-shadow:0 4px 8px rgba(0,0,0,0.1);"></div>
+                            </div>
+                            <div id="prospect-referrer-info" style="margin-top:6px;">${prospect?.referred_by ? `<div class="selected-entity-badge"><span><strong>${prospect.referred_by}</strong></span><button class="btn btn-sm secondary" onclick="app.clearProspectReferrer()">Clear</button></div>` : ''}</div>
                         </div>
                         <div class="form-group half">
-                            <label>Relationship</label>
+                            <label>Relationship <span class="required">*</span></label>
                             <select id="prospect-relationship" class="form-control">
-                                <option value="">Select</option>
+                                <option value="">-- Select --</option>
                                 <option value="Family" ${prospect?.referral_relationship === 'Family' ? 'selected' : ''}>Family</option>
                                 <option value="Cousin" ${prospect?.referral_relationship === 'Cousin' ? 'selected' : ''}>Cousin</option>
                                 <option value="Friend" ${prospect?.referral_relationship === 'Friend' ? 'selected' : ''}>Friend</option>
@@ -12889,6 +12938,17 @@ function _wireLoginBtn() {
             }
         }
 
+        // Validate compulsory referral fields
+        if (!_selectedProspectReferrer) {
+            UI.toast.error('Referred By is required. Please search and select a referrer.');
+            return;
+        }
+        const relationship = document.getElementById('prospect-relationship')?.value;
+        if (!relationship) {
+            UI.toast.error('Relationship is required.');
+            return;
+        }
+
         const d = (id) => document.getElementById(id)?.value || null;
         const data = {
             title: d('prospect-title'),
@@ -12909,13 +12969,15 @@ function _wireLoginBtn() {
             state: d('prospect-state') || null,
             postal_code: d('prospect-postal') || null,
             ming_gua: d('prospect-minggua') || null,
-            referred_by: d('prospect-referred') || null,
-            referral_relationship: d('prospect-relationship') || null,
-            responsible_agent_id: parseInt(document.getElementById('prospect-agent')?.value) || _currentUser?.id || null,
-            cps_assignment_date: d('prospect-cps-date') || new Date().toISOString().split('T')[0],
-            pipeline_stage: d('prospect-stage') || 'new',
-            expected_close_date: d('prospect-close-date') || null,
-            deal_value: parseFloat(document.getElementById('prospect-deal-value')?.value) || 0
+            referred_by: _selectedProspectReferrer?.name || null,
+            referred_by_id: _selectedProspectReferrer?.id || null,
+            referred_by_type: _selectedProspectReferrer?.type || null,
+            referral_relationship: relationship,
+            responsible_agent_id: _currentUser?.id || null,
+            cps_assignment_date: new Date().toISOString().split('T')[0],
+            pipeline_stage: 'new',
+            expected_close_date: null,
+            deal_value: 0
         };
 
         try {
@@ -24122,6 +24184,9 @@ const initImportDemoData = async () => {
         addCoAgentToActivity,
         postEventFollowUp,
         searchReferrers,
+        searchProspectReferrers,
+        selectProspectReferrer,
+        clearProspectReferrer,
         selectReferrer,
         clearSelectedReferrer,
         searchConsultants,
