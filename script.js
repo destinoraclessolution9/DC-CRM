@@ -14285,10 +14285,17 @@ function _wireLoginBtn() {
                         <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;">${escapeHtml(r.product || '')}</td>
                         <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;color:var(--gray-500);">${escapeHtml(r.notes || '-')}</td>
                         <td style="padding:4px 8px;border-bottom:1px solid #f3f4f6;text-align:center;">
+                            ${r.attachment_data
+                                ? `<a href="${r.attachment_data}" target="_blank" title="${escapeHtml(r.attachment_name||'View attachment')}" style="color:var(--primary);margin-right:4px;"><i class="fas fa-paperclip"></i></a>`
+                                : `<label for="pre2025-att-${pid}-${i}" title="Attach file" style="cursor:pointer;color:var(--gray-400);margin-right:4px;"><i class="fas fa-paperclip"></i></label>`
+                            }
+                            <input type="file" id="pre2025-att-${pid}-${i}" style="display:none" accept="image/*,application/pdf" onchange="event.stopPropagation();app.addPrePurchaseAttachment(${pid},${i},this)">
+                        </td>
+                        <td style="padding:4px 8px;border-bottom:1px solid #f3f4f6;text-align:center;">
                             <button class="btn-icon" style="color:var(--error);" onclick="event.stopPropagation();app.deletePrePurchaseRecord(${pid},${i})" title="Remove"><i class="fas fa-times"></i></button>
                         </td>
                     </tr>`).join('')
-                : `<tr><td colspan="3" style="padding:10px;text-align:center;color:var(--gray-400);font-size:12px;font-style:italic;">No past records yet</td></tr>`;
+                : `<tr><td colspan="4" style="padding:10px;text-align:center;color:var(--gray-400);font-size:12px;font-style:italic;">No past records yet</td></tr>`;
             const pre2025Html = `
                 <div style="margin-bottom:16px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
                     <div style="background:#fef9ec;padding:8px 12px;font-weight:600;font-size:13px;border-bottom:1px solid #e5e7eb;color:#78400b;">
@@ -14298,6 +14305,7 @@ function _wireLoginBtn() {
                         <thead><tr style="background:#fafafa;">
                             <th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e5e7eb;font-weight:600;">Product / Service</th>
                             <th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e5e7eb;font-weight:600;">Notes</th>
+                            <th style="padding:4px;width:36px;border-bottom:1px solid #e5e7eb;text-align:center;font-weight:600;font-size:11px;">File</th>
                             <th style="padding:4px;width:36px;border-bottom:1px solid #e5e7eb;"></th>
                         </tr></thead>
                         <tbody id="pre2025-rows-${pid}">${pre2025Rows}</tbody>
@@ -14305,6 +14313,10 @@ function _wireLoginBtn() {
                     <div style="padding:8px 10px;border-top:1px solid #e5e7eb;display:flex;gap:6px;align-items:center;">
                         <input id="pre2025-product-${pid}" class="form-control" style="flex:1;height:32px;font-size:12px;" placeholder="Product / Service">
                         <input id="pre2025-notes-${pid}" class="form-control" style="flex:1;height:32px;font-size:12px;" placeholder="Notes (optional)">
+                        <label for="pre2025-file-${pid}" title="Attach a file" style="cursor:pointer;height:32px;padding:0 10px;display:flex;align-items:center;border:1px solid #e5e7eb;border-radius:6px;background:#f9fafb;color:var(--gray-500);">
+                            <i class="fas fa-paperclip"></i>
+                        </label>
+                        <input id="pre2025-file-${pid}" type="file" style="display:none" accept="image/*,application/pdf">
                         <button class="btn secondary btn-sm" onclick="event.stopPropagation();app.addPrePurchaseRow(${pid})" style="white-space:nowrap;height:32px;"><i class="fas fa-plus"></i> Add</button>
                     </div>
                 </div>`;
@@ -14566,18 +14578,52 @@ const deleteNote = async (prospectId, noteId) => {
     const addPrePurchaseRow = async (prospectId) => {
         const productInput = document.getElementById(`pre2025-product-${prospectId}`);
         const notesInput = document.getElementById(`pre2025-notes-${prospectId}`);
+        const fileInput = document.getElementById(`pre2025-file-${prospectId}`);
         const product = productInput?.value?.trim();
         if (!product) { UI.toast.error('Please enter a product / service name'); return; }
         const notes = notesInput?.value?.trim() || '';
-        const prospect = await AppDataStore.getById('prospects', prospectId);
-        if (!prospect) return;
-        let records = [];
-        try { records = Array.isArray(prospect.pre2025_purchases) ? prospect.pre2025_purchases : JSON.parse(prospect.pre2025_purchases || '[]'); } catch(_) {}
-        records.push({ product, notes });
-        await AppDataStore.update('prospects', prospectId, { pre2025_purchases: records });
-        UI.toast.success('Record added');
-        const bodyEl = document.getElementById(`acc-body-closing-${prospectId}`);
-        if (bodyEl) await switchProspectTab('closing', prospectId, null, bodyEl);
+        const file = fileInput?.files[0] || null;
+
+        const saveRow = async (attachment_data, attachment_name) => {
+            const prospect = await AppDataStore.getById('prospects', prospectId);
+            if (!prospect) return;
+            let records = [];
+            try { records = Array.isArray(prospect.pre2025_purchases) ? [...prospect.pre2025_purchases] : JSON.parse(prospect.pre2025_purchases || '[]'); } catch(_) {}
+            records.push({ product, notes, attachment_data: attachment_data || null, attachment_name: attachment_name || null });
+            await AppDataStore.update('prospects', prospectId, { pre2025_purchases: records });
+            UI.toast.success('Record added');
+            const bodyEl = document.getElementById(`acc-body-closing-${prospectId}`);
+            if (bodyEl) await switchProspectTab('closing', prospectId, null, bodyEl);
+        };
+
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = async (e) => await saveRow(e.target.result, file.name);
+            reader.readAsDataURL(file);
+        } else {
+            await saveRow(null, null);
+        }
+    };
+
+    const addPrePurchaseAttachment = async (prospectId, index, fileInput) => {
+        const file = fileInput?.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            const prospect = await AppDataStore.getById('prospects', prospectId);
+            if (!prospect) return;
+            let records = [];
+            try { records = Array.isArray(prospect.pre2025_purchases) ? [...prospect.pre2025_purchases] : JSON.parse(prospect.pre2025_purchases || '[]'); } catch(_) {}
+            if (records[index]) {
+                records[index].attachment_name = file.name;
+                records[index].attachment_data = e.target.result;
+            }
+            await AppDataStore.update('prospects', prospectId, { pre2025_purchases: records });
+            UI.toast.success('Attachment saved');
+            const bodyEl = document.getElementById(`acc-body-closing-${prospectId}`);
+            if (bodyEl) await switchProspectTab('closing', prospectId, null, bodyEl);
+        };
+        reader.readAsDataURL(file);
     };
 
     const deletePrePurchaseRecord = async (prospectId, index) => {
@@ -24595,6 +24641,7 @@ const initImportDemoData = async () => {
         saveClosingRecord,
         submitClosingRecord,
         addPrePurchaseRow,
+        addPrePurchaseAttachment,
         deletePrePurchaseRecord,
         approveClosingRecord,
         rejectClosingRecord,
