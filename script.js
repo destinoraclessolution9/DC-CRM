@@ -5733,7 +5733,8 @@ function _wireLoginBtn() {
                     if (aTeam !== bTeam) return aTeam - bTeam;
                     const aLvl = parseInt(a.role?.match(/Level\s*(\d+)/i)?.[1] ?? 99);
                     const bLvl = parseInt(b.role?.match(/Level\s*(\d+)/i)?.[1] ?? 99);
-                    return aLvl - bLvl;
+                    if (aLvl !== bLvl) return aLvl - bLvl;
+                    return (b.id ?? 0) - (a.id ?? 0); // prefer newer (higher id)
                 });
                 profile = profileMatches[0];
             }
@@ -5815,11 +5816,21 @@ function _wireLoginBtn() {
             if (authUser) {
                 // Fetch the full profile from the users table (has integer id + role),
                 // same as the login flow – avoids using the raw Auth UUID as _currentUser.id
-                const { data: profile } = await window.supabase
-                    .from('users')
-                    .select('*')
-                    .eq('email', authUser.email)
-                    .single();
+                const profileMatches = await AppDataStore.query('users', { email: authUser.email });
+                let profile = null;
+                if (profileMatches && profileMatches.length > 0) {
+                    // If duplicates exist, prefer: 1) has team_id, 2) lowest level, 3) highest id (newest)
+                    profileMatches.sort((a, b) => {
+                        const aTeam = a.team_id ? 0 : 1;
+                        const bTeam = b.team_id ? 0 : 1;
+                        if (aTeam !== bTeam) return aTeam - bTeam;
+                        const aLvl = parseInt(a.role?.match(/Level\s*(\d+)/i)?.[1] ?? 99);
+                        const bLvl = parseInt(b.role?.match(/Level\s*(\d+)/i)?.[1] ?? 99);
+                        if (aLvl !== bLvl) return aLvl - bLvl;
+                        return (b.id ?? 0) - (a.id ?? 0); // prefer newer (higher id)
+                    });
+                    profile = profileMatches[0];
+                }
                 if (profile) {
                     _currentUser = profile;
                 } else {
