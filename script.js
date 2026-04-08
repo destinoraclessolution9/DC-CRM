@@ -12752,7 +12752,12 @@ function _wireLoginBtn() {
                     <td onclick="event.stopPropagation()">
                         <button class="btn-icon" title="Edit" onclick="app.openProspectModal(${p.id})"><i class="fas fa-edit"></i></button>
                         <button class="btn-icon" title="Add Activity" onclick="app.openActivityModal('', ${p.id})"><i class="fas fa-calendar-plus"></i></button>
-                        <button class="btn-icon" title="Convert to Customer" onclick="app.convertToCustomer(${p.id})"><i class="fas fa-user-check"></i></button>
+                        ${p.conversion_status === 'pending_approval' ? `
+                            <span title="Conversion pending manager approval" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;background:#fef3c7;border-radius:6px;cursor:default;"><i class="fas fa-user-clock" style="color:#d97706;font-size:12px;"></i></span>
+                            ${(isSystemAdmin(_currentUser) || isMarketingManager(_currentUser)) ? `<button class="btn-icon" title="Review & Approve Conversion" style="color:#d97706;" onclick="event.stopPropagation();app.showConversionApprovalModal(${p.id})"><i class="fas fa-check-circle"></i></button>` : ''}
+                        ` : (p.status !== 'converted' ? `
+                            <button class="btn-icon" title="Convert to Customer" onclick="app.convertToCustomer(${p.id})"><i class="fas fa-user-check"></i></button>
+                        ` : '')}
                         ${canDelete ? `<button class="btn-icon" title="Delete" style="color:var(--red-500);" onclick="app.deleteProspect(${p.id})"><i class="fas fa-trash"></i></button>` : ''}
                     </td>
                 </tr>
@@ -13137,7 +13142,7 @@ function _wireLoginBtn() {
                         </div>
                     </div>
                     <div class="header-actions">
-                        <button class="btn secondary" onclick="app.openProspectModal(${customer.id})"><i class="fas fa-edit"></i> Edit</button>
+                        ${(isSystemAdmin(_currentUser) || isMarketingManager(_currentUser)) ? `<button class="btn secondary" onclick="app.openProspectModal(${customer.id})"><i class="fas fa-edit"></i> Edit</button>` : ''}
                         <button class="btn secondary" onclick="app.openAddPurchaseModal(${customer.id})"><i class="fas fa-plus"></i> Add Purchase</button>
                         <button class="btn secondary" onclick="app.todo('Refer a Friend')"><i class="fas fa-user-plus"></i> Refer a Friend</button>
                         <button class="btn secondary" onclick="app.openSendWhatsAppModal('customer', ${customer.id})"><i class="fab fa-whatsapp"></i> WhatsApp</button>
@@ -14443,8 +14448,24 @@ const deleteNote = async (prospectId, noteId) => {
         if (!data.product) return UI.toast.error('Product/service is required');
         if (!data.sale_amount) return UI.toast.error('Amount closed is required');
         if (!data.invoice_number) return UI.toast.error('Invoice number is required');
-        await AppDataStore.update('prospects', prospectId, { closing_record: { ...data, status: 'submitted', submitted_at: new Date().toISOString() } });
-        UI.toast.success('Closing record submitted for approval');
+
+        const saleAmount = parseFloat(data.sale_amount) || 0;
+        const updates = { closing_record: { ...data, status: 'submitted', submitted_at: new Date().toISOString() } };
+
+        // Auto-trigger conversion approval when sale >= RM 2,000
+        if (saleAmount >= 2000) {
+            updates.conversion_status = 'pending_approval';
+            updates.conversion_requested_at = new Date().toISOString();
+            updates.conversion_requested_by = _currentUser?.id;
+        }
+
+        await AppDataStore.update('prospects', prospectId, updates);
+
+        if (saleAmount >= 2000) {
+            UI.toast.success('Closing record submitted. Sale ≥ RM 2,000 — conversion request auto-submitted for manager approval!');
+        } else {
+            UI.toast.success('Closing record submitted for approval');
+        }
         const bodyEl = document.getElementById(`acc-body-closing-${prospectId}`);
         if (bodyEl) await switchProspectTab('closing', prospectId, null, bodyEl);
     };
@@ -14452,26 +14473,8 @@ const deleteNote = async (prospectId, noteId) => {
     const approveClosingRecord = async (prospectId) => {
         const prospect = await AppDataStore.getById('prospects', prospectId);
         if (!prospect?.closing_record) return UI.toast.error('No closing record found');
-        const cr = prospect.closing_record;
-        // Create customer record from closing data
-        await AppDataStore.create('customers', {
-            id: Date.now(),
-            full_name: cr.full_name,
-            phone: cr.phone,
-            email: cr.email,
-            ic_number: cr.ic_number,
-            date_of_birth: cr.date_of_birth,
-            address: cr.address,
-            lifetime_value: parseFloat(cr.sale_amount) || 0,
-            status: 'active',
-            customer_since: cr.closing_date || new Date().toISOString().split('T')[0],
-            source_prospect_id: prospectId,
-        });
-        await AppDataStore.update('prospects', prospectId, {
-            closing_record: { ...cr, status: 'approved', approved_at: new Date().toISOString() },
-            status: 'converted'
-        });
-        UI.toast.success('Approved! Customer profile created.');
+        // Reuse the full-copy conversion — copies ALL prospect fields to customer
+        await approveProspectConversion(prospectId);
         const bodyEl = document.getElementById(`acc-body-closing-${prospectId}`);
         if (bodyEl) await switchProspectTab('closing', prospectId, null, bodyEl);
     };
@@ -14975,50 +14978,164 @@ const openAddSolutionModal = async (prospectId) => {
     const convertToCustomer = async (prospectId) => {
         const prospect = await AppDataStore.getById('prospects', prospectId);
         if (!prospect) return;
+        if (prospect.status === 'converted') return UI.toast.info('This prospect has already been converted to a customer.');
+        if (prospect.conversion_status === 'pending_approval') return UI.toast.info('Conversion is already pending manager approval.');
 
-        const totalPurchases = await AppDataStore.getAll('purchases')
-            .filter(p => p.prospect_id === prospectId)
-            .reduce((sum, p) => sum + (p.amount || 0), 0);
+        const isManager = isSystemAdmin(_currentUser) || isMarketingManager(_currentUser);
 
-        if (totalPurchases < 2000) {
-            UI.showModal('Cannot Convert Automatically',
-                `<p> Prospect requires RM 2,000 in purchases to convert automatically.</p>
-                 <p>Current total: RM ${totalPurchases.toLocaleString()}</p>
-                 <p style="margin-top: 10px; font-size: 13px; color: var(--gray-500);">Alternatively, convert manually below:</p>
-                 <div class="form-group" style="margin-top: 15px;">
-                     <label>Manual Conversion Amount (RM)</label>
-                     <input type="number" id="manual-conversion-amount" class="form-control" value="${totalPurchases}">
-                 </div>
-                 <div class="form-group">
-                     <label>Customer Since</label>
-                     <input type="date" id="manual-customer-since" class="form-control" value="${new Date().toISOString().split('T')[0]}">
-                 </div>`,
-                [
-                    { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-                    { label: 'Convert Manually', type: 'primary', action: `(async () => { await app.confirmConvertToCustomer(${prospectId}, true); })()` }
-                ]
-            );
-            return;
-        }
-
-        const content = `
-    <div class="convert-modal">
-                <p>Convert <strong>${prospect.full_name}</strong> to customer?</p>
-                <div class="form-group">
-                    <label>Conversion Amount (RM)</label>
-                    <input type="number" id="conversion-amount" class="form-control" value="${totalPurchases}" readonly>
+        if (isManager) {
+            await showConversionApprovalModal(prospectId);
+        } else {
+            const saleAmount = parseFloat(prospect.closing_record?.sale_amount) || 0;
+            UI.showModal('Request Conversion to Customer', `
+                <div style="display:flex; flex-direction:column; gap:12px;">
+                    <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:12px; font-size:13px; color:#1e40af;">
+                        <i class="fas fa-info-circle" style="margin-right:6px;"></i>
+                        Your request will be reviewed by a manager before the customer profile is created.
+                    </div>
+                    <div style="font-size:13px; display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                        <div><span style="color:var(--gray-500);">Prospect:</span> <strong>${prospect.full_name}</strong></div>
+                        <div><span style="color:var(--gray-500);">Phone:</span> ${prospect.phone}</div>
+                        ${saleAmount > 0 ? `<div><span style="color:var(--gray-500);">Sale Amount:</span> <strong>RM ${saleAmount.toLocaleString()}</strong></div>` : ''}
+                        <div><span style="color:var(--gray-500);">Referrer:</span> ${prospect.referred_by || '-'}</div>
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label>Customer Since</label>
-                    <input type="date" id="customer-since" class="form-control" value="${new Date().toISOString().split('T')[0]}">
+            `, [
+                { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+                { label: '<i class="fas fa-paper-plane"></i> Submit for Approval', type: 'primary', action: `(async () => { await app.requestProspectConversion(${prospectId}); })()` }
+            ]);
+        }
+    };
+
+    const requestProspectConversion = async (prospectId) => {
+        await AppDataStore.update('prospects', prospectId, {
+            conversion_status: 'pending_approval',
+            conversion_requested_at: new Date().toISOString(),
+            conversion_requested_by: _currentUser?.id
+        });
+        UI.hideModal();
+        UI.toast.success('Conversion request submitted. A manager will review and approve shortly.');
+        await renderProspectsTable();
+    };
+
+    const showConversionApprovalModal = async (prospectId) => {
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) return;
+        const cr = prospect.closing_record;
+        const saleAmount = parseFloat(cr?.sale_amount) || 0;
+        const requestedBy = prospect.conversion_requested_by
+            ? await getAgentName(prospect.conversion_requested_by)
+            : 'Agent';
+
+        UI.showModal('Review & Approve Conversion', `
+            <div style="display:flex; flex-direction:column; gap:14px;">
+                <div style="background:#fef3c7; border:1px solid #fcd34d; border-radius:8px; padding:12px; font-size:13px; color:#92400e;">
+                    <i class="fas fa-user-clock" style="margin-right:6px;"></i>
+                    Conversion requested by <strong>${requestedBy}</strong>. Review all data before approving.
+                </div>
+                <div style="font-size:13px; display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                    <div><span style="color:var(--gray-500);">Name:</span> <strong>${prospect.full_name}</strong></div>
+                    <div><span style="color:var(--gray-500);">Phone:</span> ${prospect.phone}</div>
+                    <div><span style="color:var(--gray-500);">IC:</span> ${prospect.ic_number || '-'}</div>
+                    <div><span style="color:var(--gray-500);">DOB:</span> ${prospect.date_of_birth || '-'}</div>
+                    <div><span style="color:var(--gray-500);">Occupation:</span> ${prospect.occupation || '-'}</div>
+                    <div><span style="color:var(--gray-500);">Ming Gua:</span> ${prospect.ming_gua || '-'}</div>
+                    <div><span style="color:var(--gray-500);">Referrer:</span> ${prospect.referred_by || '-'}</div>
+                    <div><span style="color:var(--gray-500);">Relation:</span> ${prospect.referral_relationship || '-'}</div>
+                </div>
+                ${cr ? `
+                    <div style="border-top:1px solid var(--gray-200); padding-top:12px;">
+                        <div style="font-weight:600; margin-bottom:8px; font-size:13px;">Sales Record</div>
+                        <div style="font-size:13px; display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                            <div><span style="color:var(--gray-500);">Product:</span> ${cr.product || '-'}</div>
+                            <div><span style="color:var(--gray-500);">Amount:</span> <strong style="color:#166534;">RM ${saleAmount.toLocaleString()}</strong></div>
+                            <div><span style="color:var(--gray-500);">Invoice:</span> ${cr.invoice_number || '-'}</div>
+                            <div><span style="color:var(--gray-500);">Date:</span> ${cr.closing_date || '-'}</div>
+                        </div>
+                    </div>
+                ` : '<div style="color:var(--gray-400); font-size:13px; font-style:italic;">No closing record submitted yet.</div>'}
+                <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; padding:12px; font-size:13px; color:#166534;">
+                    <i class="fas fa-copy" style="margin-right:6px;"></i>
+                    Approving will <strong>copy all prospect data</strong> into a permanent Customer profile. The prospect will be marked Converted.
                 </div>
             </div>
-    `;
-
-        UI.showModal('Convert to Customer', content, [
-            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Convert', type: 'primary', action: `(async () => { await app.confirmConvertToCustomer(${prospectId}); })()` }
+        `, [
+            { label: 'Reject', type: 'secondary', action: `(async () => { await app.rejectProspectConversion(${prospectId}); })()` },
+            { label: '<i class="fas fa-user-check"></i> Approve Conversion', type: 'primary', action: `(async () => { await app.approveProspectConversion(${prospectId}); })()` }
         ]);
+    };
+
+    const approveProspectConversion = async (prospectId) => {
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) return;
+        const cr = prospect.closing_record;
+        const saleAmount = parseFloat(cr?.sale_amount) || 0;
+        const now = new Date().toISOString();
+
+        // Full data copy — every field from prospect goes to customer
+        const customer = {
+            id: Date.now(),
+            title: prospect.title || '',
+            full_name: prospect.full_name,
+            nickname: prospect.nickname || '',
+            gender: prospect.gender || '',
+            nationality: prospect.nationality || '',
+            phone: prospect.phone,
+            email: prospect.email || '',
+            ic_number: prospect.ic_number || '',
+            date_of_birth: prospect.date_of_birth || '',
+            lunar_birth: prospect.lunar_birth || '',
+            ming_gua: prospect.ming_gua || '',
+            occupation: prospect.occupation || '',
+            company_name: prospect.company_name || '',
+            income_range: prospect.income_range || '',
+            address: prospect.address || '',
+            city: prospect.city || '',
+            state: prospect.state || '',
+            postal_code: prospect.postal_code || '',
+            referred_by: prospect.referred_by || '',
+            referred_by_id: prospect.referred_by_id || null,
+            referred_by_type: prospect.referred_by_type || '',
+            referral_relationship: prospect.referral_relationship || '',
+            responsible_agent_id: prospect.responsible_agent_id || null,
+            lifetime_value: saleAmount,
+            status: 'active',
+            customer_since: cr?.closing_date || now.split('T')[0],
+            converted_from_prospect_id: prospectId,
+            approved_by: _currentUser?.id,
+            approved_at: now,
+            created_at: now
+        };
+
+        await AppDataStore.create('customers', customer);
+
+        const updatedFields = {
+            status: 'converted',
+            conversion_status: 'approved',
+            conversion_approved_at: now,
+            conversion_approved_by: _currentUser?.id
+        };
+        // Also mark closing record approved if it was submitted
+        if (cr?.status === 'submitted') {
+            updatedFields.closing_record = { ...cr, status: 'approved', approved_at: now };
+        }
+        await AppDataStore.update('prospects', prospectId, updatedFields);
+
+        UI.hideModal();
+        UI.toast.success(`${prospect.full_name} is now a Customer!`);
+        const viewport = document.getElementById('content-viewport');
+        if (viewport && _currentView === 'prospects') await showProspectsView(viewport);
+    };
+
+    const rejectProspectConversion = async (prospectId) => {
+        await AppDataStore.update('prospects', prospectId, {
+            conversion_status: 'rejected',
+            conversion_rejected_at: new Date().toISOString(),
+            conversion_rejected_by: _currentUser?.id
+        });
+        UI.hideModal();
+        UI.toast.info('Conversion rejected. Agent can resubmit after reviewing.');
+        await renderProspectsTable();
     };
 
     const showAgentsView = async (container) => {
@@ -24323,6 +24440,10 @@ const initImportDemoData = async () => {
         reassignProspect,
         convertToCustomer,
         confirmConvertToCustomer,
+        requestProspectConversion,
+        showConversionApprovalModal,
+        approveProspectConversion,
+        rejectProspectConversion,
         deleteProspect,
         renderProspectsTable,
 
