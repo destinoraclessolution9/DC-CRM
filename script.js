@@ -9752,6 +9752,9 @@ function _wireLoginBtn() {
         const all = await AppDataStore.getAll('activities');
         const activity = (await AppDataStore.getById('activities', activityId)) || all.find(a => a.id == activityId);
         if (!activity) return;
+        const venues = await AppDataStore.getAll('venues');
+        const venueRequiredTypes = ['CPS','FTF','EVENT','GR','XG'];
+        const venueRequired = venueRequiredTypes.includes(activity.activity_type);
         UI.showModal('Edit Appointment Timing', `
             <div class="form-group">
                 <label>Date</label>
@@ -9766,6 +9769,13 @@ function _wireLoginBtn() {
                     <label>End Time</label>
                     <input type="time" id="edit-timing-end" class="form-control" value="${activity.end_time || ''}" data-manual="false" onchange="this.dataset.manual='true'">
                 </div>
+            </div>
+            <div class="form-group">
+                <label>Venue${venueRequired ? ' <span class="required">*</span>' : ''}</label>
+                <select id="edit-timing-venue" class="form-control">
+                    <option value="">-- Select Venue --</option>
+                    ${venues.map(v => `<option value="${v.name} | ${v.location}" ${activity.venue === v.name + ' | ' + v.location ? 'selected' : ''}>${v.name} | ${v.location}</option>`).join('')}
+                </select>
             </div>
         `, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
@@ -9787,8 +9797,9 @@ function _wireLoginBtn() {
         const date = document.getElementById('edit-timing-date')?.value;
         const start = document.getElementById('edit-timing-start')?.value;
         const end = document.getElementById('edit-timing-end')?.value;
+        const venue = document.getElementById('edit-timing-venue')?.value || '';
         if (!date || !start || !end) { UI.toast.error('Please fill in all timing fields'); return; }
-        const updates = { activity_date: date, start_time: start, end_time: end };
+        const updates = { activity_date: date, start_time: start, end_time: end, venue };
         try {
             await AppDataStore.update('activities', activityId, updates);
         } catch (e) {
