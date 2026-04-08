@@ -11189,18 +11189,6 @@ function _wireLoginBtn() {
                 <div style="font-size:12px;color:var(--gray-400);margin-bottom:6px;">New person not in system?</div>
                 <button class="btn secondary btn-sm" onclick="app.showFTFAttendeeForm()" style="width:100%;">➕ First Time Friend (New Prospect)</button>
             </div>
-            <div id="ftf-att-form" style="display:none;margin-top:12px;padding:12px;background:var(--gray-50,#faf9f7);border-radius:8px;border:1px solid var(--border,#e5e0d8);">
-                <div class="form-row">
-                    <div class="form-group half">
-                        <label>Name <span class="required">*</span></label>
-                        <input type="text" id="ftf-att-name" class="form-control" placeholder="Full Name">
-                    </div>
-                    <div class="form-group half">
-                        <label>Phone <span class="required">*</span></label>
-                        <input type="text" id="ftf-att-phone" class="form-control" placeholder="Phone Number">
-                    </div>
-                </div>
-            </div>
         `;
         UI.showModal('Add Attendee', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
@@ -11235,51 +11223,37 @@ function _wireLoginBtn() {
     };
 
     const showFTFAttendeeForm = () => {
-        const form = document.getElementById('ftf-att-form');
-        if (form) form.style.display = form.style.display === 'none' ? 'block' : 'none';
+        // Save event context, then open full Add New Prospect modal
+        const eventId = window._addAttEventId;
+        const activityId = window._addAttActivityId;
+
+        // One-time listener: after prospect is created, add as attendee
+        const handler = async (e) => {
+            document.removeEventListener('prospectCreated', handler);
+            const prospect = e.detail;
+            if (!prospect?.id || !eventId) return;
+            await AppDataStore.create('event_attendees', {
+                event_id: eventId,
+                entity_id: prospect.id,
+                attendee_type: 'prospect',
+                attendance_status: 'Registered',
+                added_by_agent_id: _currentUser?.id || null,
+                created_at: new Date().toISOString()
+            });
+            await app.viewActivityDetails(activityId);
+            UI.toast.success((prospect.full_name || 'New prospect') + ' added as attendee');
+        };
+        document.addEventListener('prospectCreated', handler);
+
+        openProspectModal(); // opens the full Add New Prospect form
     };
 
     const confirmAddAttendee = async () => {
         const eventId = window._addAttEventId;
         const activityId = window._addAttActivityId;
 
-        // Check if FTF form is visible and filled
-        const ftfForm = document.getElementById('ftf-att-form');
-        const ftfName = document.getElementById('ftf-att-name')?.value.trim();
-        const ftfPhone = document.getElementById('ftf-att-phone')?.value.trim();
-        if (ftfForm && ftfForm.style.display !== 'none' && (ftfName || ftfPhone)) {
-            if (!ftfName) { UI.toast.error('Name is required for First Time Friend'); return; }
-            if (!ftfPhone) { UI.toast.error('Phone is required for First Time Friend'); return; }
-            // Create new prospect
-            const newProspect = await AppDataStore.create('prospects', {
-                full_name: ftfName,
-                phone: ftfPhone,
-                pipeline_stage: 'new',
-                responsible_agent_id: _currentUser?.id || null,
-                cps_assignment_date: new Date().toISOString().split('T')[0],
-                created_at: new Date().toISOString()
-            });
-            const prospectId = newProspect?.id || newProspect;
-            if (prospectId) {
-                await AppDataStore.create('event_attendees', {
-                    event_id: eventId,
-                    entity_id: prospectId,
-                    attendee_type: 'prospect',
-                    attendance_status: 'Registered',
-                    added_by_agent_id: _currentUser?.id || null,
-                    created_at: new Date().toISOString()
-                });
-                UI.hideModal();
-                await app.viewActivityDetails(activityId);
-                UI.toast.success(ftfName + ' added as new prospect & attendee');
-            } else {
-                UI.toast.error('Failed to create prospect');
-            }
-            return;
-        }
-
         const s = window._addAttSelected;
-        if (!s) { UI.toast.error('Please select a person or fill in First Time Friend details'); return; }
+        if (!s) { UI.toast.error('Please select a person first'); return; }
         await AppDataStore.create('event_attendees', {
             event_id: eventId,
             entity_id: s.id,
