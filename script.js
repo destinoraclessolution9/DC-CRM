@@ -6152,7 +6152,7 @@ function _wireLoginBtn() {
                     <h3 style="margin:0 0 8px; font-size:15px;">Your Booking Link</h3>
                     <div style="display:flex; align-items:center; gap:12px;">
                         <input type="text" value="${bookingUrl}" readonly style="flex:1; padding:8px 12px; border:1px solid var(--border); border-radius:6px; background:white; font-size:13px;">
-                        <button class="btn secondary" onclick="app.copyBookingLink()"><i class="fas fa-copy"></i> Copy</button>
+                        <button class="btn secondary" onclick="app.openShareBookingLinkModal()"><i class="fas fa-share-alt"></i> Share</button>
                         <a href="${bookingUrl}" target="_blank" class="btn secondary"><i class="fas fa-external-link-alt"></i> Preview</a>
                     </div>
                 </div>
@@ -6193,6 +6193,8 @@ function _wireLoginBtn() {
                                     <div>
                                         <strong>${appt.prospect_name}</strong>
                                         <div style="font-size:12px; color:var(--gray-500);">${appt.booking_date} ${appt.start_time} · ${appt.prospect_phone || appt.prospect_email || ''}</div>
+                                        ${appt.referred_by ? `<div style="font-size:11px; color:var(--gray-400); margin-top:2px;"><i class="fas fa-user-friends" style="margin-right:3px;"></i>Ref: ${appt.referred_by}${appt.referral_relationship ? ` (${appt.referral_relationship})` : ''}</div>` : ''}
+                                        ${appt.prospect_occupation || appt.prospect_company ? `<div style="font-size:11px; color:var(--gray-400); margin-top:2px;">${[appt.prospect_occupation, appt.prospect_company].filter(Boolean).join(' · ')}</div>` : ''}
                                     </div>
                                     <div style="display:flex; gap:6px;">
                                         ${appt.status === 'pending' ? `
@@ -6267,6 +6269,64 @@ function _wireLoginBtn() {
     const copyBookingLink = () => {
         const url = `${window.location.origin}/booking.html?agent=${_currentUser?.id || 1}`;
         navigator.clipboard.writeText(url).then(() => UI.toast.success('Booking link copied!')).catch(() => UI.toast.info(`Link: ${url}`));
+    };
+
+    const openShareBookingLinkModal = () => {
+        const baseUrl = `${window.location.origin}/booking.html?agent=${_currentUser?.id || 1}`;
+        UI.showModal('Share Booking Link', `
+            <div style="display:flex; flex-direction:column; gap:16px;">
+                <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; padding:12px; font-size:13px; color:#166534;">
+                    <i class="fas fa-info-circle" style="margin-right:6px;"></i>
+                    Pre-fill the referral info below, then send the link to the customer. The customer will fill in their own personal details on the booking page.
+                </div>
+                <div>
+                    <label style="display:block; font-weight:500; margin-bottom:6px;">Referred By <span style="color:var(--gray-400); font-weight:400;">(optional)</span></label>
+                    <input type="text" id="share-referrer" class="form-control" placeholder="e.g. Tan Ah Kow" oninput="app.updateShareLinkPreview()">
+                </div>
+                <div>
+                    <label style="display:block; font-weight:500; margin-bottom:6px;">Relation to Referrer</label>
+                    <select id="share-relation" class="form-control" onchange="app.updateShareLinkPreview()">
+                        <option value="">-- Select Relation --</option>
+                        <option value="Friend">Friend</option>
+                        <option value="Family">Family</option>
+                        <option value="Colleague">Colleague</option>
+                        <option value="Business Partner">Business Partner</option>
+                        <option value="Other">Other</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="display:block; font-weight:500; margin-bottom:6px;">Generated Link</label>
+                    <input type="text" id="share-link-preview" class="form-control" readonly value="${baseUrl}" style="font-size:12px; color:var(--gray-600); background:var(--gray-50);">
+                    <p style="font-size:11px; color:var(--gray-400); margin:4px 0 0;">Link updates as you fill in the fields above.</p>
+                </div>
+            </div>
+        `, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: '<i class="fas fa-copy"></i> Copy Link', type: 'primary', action: 'app.copySmartBookingLink()' }
+        ]);
+    };
+
+    const updateShareLinkPreview = () => {
+        const baseUrl = `${window.location.origin}/booking.html?agent=${_currentUser?.id || 1}`;
+        const ref = document.getElementById('share-referrer')?.value.trim();
+        const rel = document.getElementById('share-relation')?.value;
+        let url = baseUrl;
+        if (ref) url += `&ref=${encodeURIComponent(ref)}`;
+        if (rel) url += `&rel=${encodeURIComponent(rel)}`;
+        const linkEl = document.getElementById('share-link-preview');
+        if (linkEl) linkEl.value = url;
+    };
+
+    const copySmartBookingLink = () => {
+        const linkEl = document.getElementById('share-link-preview');
+        const url = linkEl?.value || `${window.location.origin}/booking.html?agent=${_currentUser?.id || 1}`;
+        navigator.clipboard.writeText(url).then(() => {
+            UI.hideModal();
+            UI.toast.success('Booking link copied!');
+        }).catch(() => {
+            UI.hideModal();
+            UI.toast.info(`Link: ${url}`);
+        });
     };
 
     const confirmBookingAppointment = async (apptId) => {
@@ -24780,6 +24840,9 @@ const initImportDemoData = async () => {
         deleteBookingSlot,
         toggleSlotActive,
         copyBookingLink,
+        openShareBookingLinkModal,
+        updateShareLinkPreview,
+        copySmartBookingLink,
         confirmBookingAppointment,
         cancelBookingAppointment,
 
