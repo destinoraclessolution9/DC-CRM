@@ -410,25 +410,18 @@ const appLogic = (() => {
     // Ensure referrals have the new fields (id, referrer_id, referrer_type, referred_prospect_id)
     const ensureReferralFields = async () => {
         const referrals = await AppDataStore.getAll('referrals');
-        let changed = false;
-        referrals.forEach(r => {
+        for (const r of referrals) {
+            const updates = {};
             if (r.referrer_customer_id && !r.referrer_id) {
-                // Old format: convert
-                r.referrer_id = r.referrer_customer_id;
-                r.referrer_type = 'customer';
-                delete r.referrer_customer_id; // optional, but we keep for backward compat
-                changed = true;
+                updates.referrer_id = r.referrer_customer_id;
+                updates.referrer_type = 'customer';
             }
-            if (!r.referrer_id) {
-                // Should not happen, but just in case
-                r.referrer_id = null;
-                r.referrer_type = null;
+            if (!r.created_at) {
+                updates.created_at = r.date || new Date().toISOString();
             }
-            if (!r.created_at) r.created_at = r.date || new Date().toISOString();
-        });
-        if (changed) {
-            // Persist changes
-            localStorage.setItem('fs_crm_referrals', JSON.stringify(referrals));
+            if (Object.keys(updates).length > 0) {
+                await AppDataStore.update('referrals', r.id, updates);
+            }
         }
     };
 
@@ -14252,8 +14245,9 @@ function _wireLoginBtn() {
             }
 
             const rows = actionItems.map(item => {
-                const key = `na_done_${prospectId}_${item.id}`;
-                const isDone = localStorage.getItem(key) === '1';
+                const _act = activities.find(a => String(a.id) === String(item.activityId));
+                const isDone = (item.id.endsWith('_na') ? _act?.next_action_done : _act?.note_next_steps_done)
+                    || localStorage.getItem(`na_done_${prospectId}_${item.id}`) === '1';
                 return `
                     <div class="na-item${isDone ? ' done' : ''}" id="na-item-${item.id}">
                         <input type="checkbox" class="na-cb" id="na-cb-${item.id}" ${isDone ? 'checked' : ''}
@@ -14267,7 +14261,11 @@ function _wireLoginBtn() {
             }).join('');
 
             const total = actionItems.length;
-            const done = actionItems.filter(item => localStorage.getItem(`na_done_${prospectId}_${item.id}`) === '1').length;
+            const done = actionItems.filter(item => {
+                const _act = activities.find(a => String(a.id) === String(item.activityId));
+                return (item.id.endsWith('_na') ? _act?.next_action_done : _act?.note_next_steps_done)
+                    || localStorage.getItem(`na_done_${prospectId}_${item.id}`) === '1';
+            }).length;
             container.innerHTML = `
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
                     <span data-na-count style="font-size:13px;color:var(--gray-500);">${done} of ${total} completed</span>
@@ -14547,7 +14545,16 @@ const deleteNote = async (prospectId, noteId) => {
         toggleNextActionItem(prospectId, activityId, isDone);
     };
 
-    const toggleNextActionItem = (prospectId, itemId, isDone) => {
+    const toggleNextActionItem = async (prospectId, itemId, isDone) => {
+        // Persist to Supabase so completion state syncs across users/devices.
+        // itemId is like "${activityId}_na" or "${activityId}_ns"
+        const isNa = itemId.endsWith('_na');
+        const activityId = parseInt(itemId.slice(0, -3));
+        const field = isNa ? 'next_action_done' : 'note_next_steps_done';
+        if (!isNaN(activityId)) {
+            AppDataStore.update('activities', activityId, { [field]: isDone }).catch(() => {});
+        }
+        // Keep localStorage key for immediate UI feedback and backward compatibility
         const key = `na_done_${prospectId}_${itemId}`;
         localStorage.setItem(key, isDone ? '1' : '0');
         const itemEl = document.getElementById(`na-item-${itemId}`);
@@ -22867,8 +22874,10 @@ const initImportDemoData = async () => {
         const tables = ['import_jobs', 'reassignment_history'];
         for (const table of tables) {
             const all = await AppDataStore.getAll(table);
-            const nonDemo = all.filter(item => !item.is_demo);
-            localStorage.setItem(`fs_crm_${table}`, JSON.stringify(nonDemo));
+            const demoItems = all.filter(item => item.is_demo);
+            for (const item of demoItems) {
+                await AppDataStore.delete(table, item.id);
+            }
         }
         UI.toast.info('Demo data cleared.');
     }
