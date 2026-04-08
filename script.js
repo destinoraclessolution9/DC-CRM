@@ -8926,6 +8926,13 @@ function _wireLoginBtn() {
 
         let activities = await AppDataStore.getAll('activities');
 
+        // Remove orphaned EVENT activities whose linked event no longer exists
+        const allEvents = await AppDataStore.getAll('events');
+        const eventIds = new Set(allEvents.map(e => String(e.id)));
+        activities = activities.filter(a =>
+            a.activity_type !== 'EVENT' || !a.event_id || eventIds.has(String(a.event_id))
+        );
+
         // Super admins see all activities — skip visibility filter and ignore agent filter
         if (!isSystemAdmin(_currentUser)) {
             const calVisibility = await Promise.all(activities.map(a => canViewActivity(a)));
@@ -9124,6 +9131,11 @@ function _wireLoginBtn() {
         let allActs = isSystemAdmin(_currentUser)
             ? await AppDataStore.getAll('activities')
             : await getVisibleActivities();
+        // Filter out orphaned EVENT activities whose linked event no longer exists
+        const existingEventIds = new Set((await AppDataStore.getAll('events')).map(e => String(e.id)));
+        allActs = allActs.filter(a =>
+            a.activity_type !== 'EVENT' || !a.event_id || existingEventIds.has(String(a.event_id))
+        );
         let activities = allActs.filter(a => a.activity_date === dateStr);
 
         // Apply filters (super admin ignores agent filter)
