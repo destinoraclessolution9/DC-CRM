@@ -9639,9 +9639,9 @@ function _wireLoginBtn() {
                 const renderedRows = await Promise.all(attendees.map(async att => {
                     const entityId = att.entity_id || att.attendee_id;
                     const person = all.find(p => String(p.id) === String(entityId));
-                    const name = person ? person.full_name : 'Unknown';
+                    const name = person?.full_name || att.entity_name || 'Unknown';
                     const agent = await AppDataStore.getById('users', att.added_by_agent_id);
-                    const agentName = agent ? agent.full_name : 'Unknown';
+                    const agentName = agent?.full_name || att.added_by_name || 'Unknown';
                     const paidChecked = att.paid ? 'checked' : '';
                     const ticketChecked = att.ticket_created ? 'checked' : '';
                     const attendedChecked = (att.attended || att.attendance_status === 'Attended') ? 'checked' : '';
@@ -11413,9 +11413,11 @@ function _wireLoginBtn() {
             await AppDataStore.create('event_attendees', {
                 event_id: eventId,
                 entity_id: prospect.id,
+                entity_name: prospect.full_name || '',
                 attendee_type: 'prospect',
                 attendance_status: 'Registered',
                 added_by_agent_id: _currentUser?.id || null,
+                added_by_name: _currentUser?.full_name || '',
                 created_at: new Date().toISOString()
             });
             await app.viewActivityDetails(activityId);
@@ -11435,9 +11437,11 @@ function _wireLoginBtn() {
         await AppDataStore.create('event_attendees', {
             event_id: eventId,
             entity_id: s.id,
+            entity_name: s.name || s.full_name || '',
             attendee_type: s.type,
             attendance_status: 'Registered',
             added_by_agent_id: _currentUser?.id || null,
+            added_by_name: _currentUser?.full_name || '',
             created_at: new Date().toISOString()
         });
         UI.hideModal();
@@ -12095,10 +12099,13 @@ function _wireLoginBtn() {
             for (const att of _selectedAttendees) {
                 await AppDataStore.create('event_attendees', {
                     event_id: parseInt(eventId),
+                    entity_id: att.id,
+                    entity_name: att.name || att.full_name || '',
                     attendee_id: att.id,
                     attendee_type: att.type, // 'prospect', 'customer', 'agent'
                     attendance_status: att.status,
-                    added_by_agent_id: 5 // Default Michelle Tan
+                    added_by_agent_id: _currentUser?.id || null,
+                    added_by_name: _currentUser?.full_name || ''
                 });
             }
         } else {
