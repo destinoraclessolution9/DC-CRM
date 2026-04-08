@@ -5717,7 +5717,20 @@ function _wireLoginBtn() {
             
             // Try to get profile from 'users' table using service-role client to bypass RLS
             const profileMatches = await AppDataStore.query('users', { email: user.email });
-            let profile = profileMatches[0] || null;
+            // If multiple profiles share the email (e.g. old auto-created Level 12 ghosts),
+            // prefer: 1) profiles with a team_id (explicitly set up), 2) lowest level number
+            let profile = null;
+            if (profileMatches.length > 0) {
+                profileMatches.sort((a, b) => {
+                    const aTeam = a.team_id ? 0 : 1;
+                    const bTeam = b.team_id ? 0 : 1;
+                    if (aTeam !== bTeam) return aTeam - bTeam;
+                    const aLvl = parseInt(a.role?.match(/Level\s*(\d+)/i)?.[1] ?? 99);
+                    const bLvl = parseInt(b.role?.match(/Level\s*(\d+)/i)?.[1] ?? 99);
+                    return aLvl - bLvl;
+                });
+                profile = profileMatches[0];
+            }
             let profileError = profile ? null : { code: 'PGRST116' };
 
             // If profile not found, create one automatically
