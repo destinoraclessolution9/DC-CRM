@@ -10383,8 +10383,8 @@ function _wireLoginBtn() {
                         <label>Search and Add Co-Agents</label>
                         <div class="co-agent-search" style="position:relative;">
                             <input type="text" id="co-agent-search-input" class="form-control" placeholder="Type consultant name..." onkeyup="app.searchAgents()">
+                            <div id="agent-search-results" class="search-results-dropdown"></div>
                         </div>
-                        <div id="agent-search-results" class="search-results-dropdown"></div>
                     </div>
                     
                     <div id="selected-co-agents" class="co-agent-list">
