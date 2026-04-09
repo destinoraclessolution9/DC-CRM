@@ -6216,29 +6216,15 @@ function _wireLoginBtn() {
         await safeInsert('activities', a);
     }
 
-    // ----- 4. Demo customers record for customer1 -----
-    await safeInsert('customers', {
-        id: 9001, full_name: 'Lim Ah Kow', phone: '012-5551234',
-        email: 'limahkow@demo.com', status: 'active',
-        created_at: new Date().toISOString()
-    });
+    // ----- 4. Demo customers record removed (was Lim Ah Kow id:9001) -----
 
     // ----- 5. Demo users: Level 13 Customer & Level 14 Referrer -----
-    // customer1 is linked to customers record 9001 via customer_id
     const demoLevel1314 = [
-        { id: 101, username: 'customer1', password: 'cust123', full_name: 'Lim Ah Kow (Customer)', role: 'Level 13 Customer', status: 'active', customer_id: 9001 },
         { id: 102, username: 'referrer1', password: 'ref123',  full_name: 'Tan Mei Mei (Referrer)', role: 'Level 14 Referrer', status: 'active' }
     ];
     for (const u of demoLevel1314) { await safeInsert('users', u); }
 
-    // ----- 6. Demo purchases for customer1 -----
-    // Reserved ID range: 90001–90099 (L13/14 demo purchases)
-    const demoPurchases = [
-        { id: 90001, customer_id: 9001, product_name: 'CPS Consultation Package', amount: 888.00, status: 'completed', purchase_date: '2026-02-10', created_at: new Date().toISOString() },
-        { id: 90002, customer_id: 9001, product_name: '九运课 Masterclass', amount: 1280.00, status: 'completed', purchase_date: '2026-03-05', created_at: new Date().toISOString() },
-        { id: 90003, customer_id: 9001, product_name: 'Advance Class Module 1', amount: 2200.00, status: 'pending',   purchase_date: '2026-04-01', created_at: new Date().toISOString() }
-    ];
-    for (const p of demoPurchases) { await safeInsert('purchases', p); }
+    // ----- 6. Demo purchases removed (was for customer1 id:9001) -----
 
     // ----- 7. News highlights (for 福德 tab) -----
     // Reserved ID range: 10001–10099 (news_highlights)
@@ -6257,10 +6243,7 @@ function _wireLoginBtn() {
         // referrer1 rewards
         { id: 80001, user_id: 102, recommended_user_id: 1,    action_type: 'recommendation',   fudi_points: 50, sharing_return: 0,      description: 'Referred Tan Ah Kow to CPS session',                       created_at: '2026-02-15T10:00:00Z' },
         { id: 80002, user_id: 102, recommended_user_id: null, action_type: 'sharing',           fudi_points: 30, sharing_return: 120.00, description: 'Shared 9 Stars workshop to WhatsApp group (8 attendees)',    created_at: '2026-03-10T14:00:00Z' },
-        { id: 80003, user_id: 102, recommended_user_id: null, action_type: 'class_attendance',  fudi_points: 20, sharing_return: 0,      description: 'Attended 福气课 class',                                      created_at: '2026-03-20T09:00:00Z' },
-        // customer1 rewards
-        { id: 80004, user_id: 101, recommended_user_id: null, action_type: 'recommendation',   fudi_points: 40, sharing_return: 0,      description: 'Recommended friend to attend 9 Stars class',               created_at: '2026-03-01T09:00:00Z' },
-        { id: 80005, user_id: 101, recommended_user_id: null, action_type: 'class_attendance', fudi_points: 20, sharing_return: 0,      description: 'Attended Advance Class Module 1',                           created_at: '2026-04-01T10:00:00Z' }
+        { id: 80003, user_id: 102, recommended_user_id: null, action_type: 'class_attendance',  fudi_points: 20, sharing_return: 0,      description: 'Attended 福气课 class',                                      created_at: '2026-03-20T09:00:00Z' }
     ];
     for (const r of demoRewards) { await safeInsert('recommendation_rewards', r); }
 
