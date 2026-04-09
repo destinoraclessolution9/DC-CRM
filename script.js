@@ -11888,6 +11888,7 @@ function _wireLoginBtn() {
             if (!prospect?.id || !eventId) return;
             await AppDataStore.create('event_attendees', {
                 event_id: eventId,
+                activity_id: activityId,
                 entity_id: prospect.id,
                 entity_name: prospect.full_name || '',
                 attendee_type: 'prospect',
@@ -11912,6 +11913,7 @@ function _wireLoginBtn() {
         if (!s) { UI.toast.error('Please select a person first'); return; }
         await AppDataStore.create('event_attendees', {
             event_id: eventId,
+            activity_id: activityId,
             entity_id: s.id,
             entity_name: s.name || s.full_name || '',
             attendee_type: s.type,
