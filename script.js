@@ -11885,11 +11885,6 @@ function _wireLoginBtn() {
     const updateLunarBirth = () => {
         const dob = document.getElementById('cps-dob')?.value;
         const lunarField = document.getElementById('cps-lunar');
-        // Auto-check has-dob when a date is entered so it actually gets saved
-        if (dob) {
-            const hasDobChk = document.getElementById('has-dob');
-            if (hasDobChk) hasDobChk.checked = true;
-        }
         if (dob && lunarField) {
             const lunarDate = convertSolarToLunar(dob);
             if (lunarDate) {
@@ -12334,14 +12329,14 @@ function _wireLoginBtn() {
                 referral_relationship: relationDetails
             };
 
+            // Always save both dates if entered — checkbox only controls life_chart_type
+            const dobVal = document.getElementById('cps-dob')?.value || '';
+            const lunarVal = document.getElementById('cps-lunar')?.value || '';
+            if (dobVal) prospectData.date_of_birth = dobVal;
+            if (lunarVal) prospectData.lunar_birth = lunarVal;
+
             const hasDob = document.getElementById('has-dob')?.checked;
             const hasLunar = document.getElementById('has-lunar')?.checked;
-            if (hasDob) {
-                prospectData.date_of_birth = document.getElementById('cps-dob')?.value;
-            }
-            if (hasLunar) {
-                prospectData.lunar_birth = document.getElementById('cps-lunar')?.value;
-            }
             if (hasDob && hasLunar) prospectData.life_chart_type = 'both';
             else if (hasDob) prospectData.life_chart_type = 'solar';
             else if (hasLunar) prospectData.life_chart_type = 'lunar';
