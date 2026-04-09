@@ -40,6 +40,7 @@ class DataStore {
             'portal_sessions',
             'monthly_promotions',
             'tree_interested',
+            'approval_queue',
             // Level 13/14 account type tables
             'user_milestones', 'news_highlights', 'recommendation_rewards', 'user_fudi_summary'
         ];
