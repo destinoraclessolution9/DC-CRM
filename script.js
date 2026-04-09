@@ -12240,6 +12240,45 @@ function _wireLoginBtn() {
         if (infoDiv) infoDiv.innerHTML = '';
     };
 
+    const addProspectChildRow = (age = '', gender = '') => {
+        const list = document.getElementById('prospect-children-list');
+        if (!list) return;
+        const row = document.createElement('div');
+        row.className = 'prospect-child-row';
+        row.style.cssText = 'display:flex;gap:8px;align-items:center;';
+        row.innerHTML = `
+            <input type="number" min="0" class="form-control prospect-child-age" placeholder="Age" style="max-width:90px;" value="${age}">
+            <select class="form-control prospect-child-gender" style="max-width:130px;">
+                <option value="">Gender</option>
+                <option value="Male" ${gender === 'Male' ? 'selected' : ''}>Male</option>
+                <option value="Female" ${gender === 'Female' ? 'selected' : ''}>Female</option>
+                <option value="Other" ${gender === 'Other' ? 'selected' : ''}>Other</option>
+            </select>
+            <button type="button" class="btn-icon text-danger" onclick="this.closest('.prospect-child-row').remove()"><i class="fas fa-trash-alt"></i></button>
+        `;
+        list.appendChild(row);
+    };
+
+    const prefillProspectChildren = (kidsData) => {
+        const list = document.getElementById('prospect-children-list');
+        if (!list) return;
+        list.innerHTML = '';
+        let kids = [];
+        try { kids = Array.isArray(kidsData) ? kidsData : (kidsData ? JSON.parse(kidsData) : []); } catch(e) { kids = []; }
+        kids.forEach(k => addProspectChildRow(k.age || '', k.gender || ''));
+    };
+
+    const collectProspectChildren = () => {
+        const rows = document.querySelectorAll('#prospect-children-list .prospect-child-row');
+        const out = [];
+        rows.forEach(r => {
+            const age = r.querySelector('.prospect-child-age')?.value?.trim();
+            const gender = r.querySelector('.prospect-child-gender')?.value || '';
+            if (age || gender) out.push({ age: age ? parseInt(age, 10) : null, gender });
+        });
+        return out;
+    };
+
     const searchEntities = async () => {
         const searchTerm = document.getElementById('entity-search')?.value.toLowerCase();
         const resultsDiv = document.getElementById('search-results');
@@ -13796,6 +13835,22 @@ function _wireLoginBtn() {
                         </div>
                     </div>
                     <div class="form-group">
+                        <label>Marital Status</label>
+                        <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
+                            ${['Single','Married','Others'].map(opt => `
+                                <label style="display:flex;align-items:center;gap:6px;font-weight:normal;margin:0;cursor:pointer;">
+                                    <input type="checkbox" class="prospect-marital-cb" value="${opt}" ${prospect?.marital_status === opt ? 'checked' : ''} onchange="document.querySelectorAll('.prospect-marital-cb').forEach(cb=>{if(cb!==this)cb.checked=false;});">
+                                    ${opt}
+                                </label>
+                            `).join('')}
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Children</label>
+                        <div id="prospect-children-list" style="display:flex;flex-direction:column;gap:8px;"></div>
+                        <button type="button" class="btn secondary btn-sm" style="margin-top:8px;" onclick="app.addProspectChildRow()"><i class="fas fa-plus"></i> Add Child</button>
+                    </div>
+                    <div class="form-group">
                         <label>Address</label>
                         <textarea id="prospect-address" class="form-control" rows="2" placeholder="Street address">${prospect?.address || ''}</textarea>
                     </div>
@@ -13839,6 +13894,9 @@ function _wireLoginBtn() {
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
             { label: isEdit ? 'Update Prospect' : 'Create Prospect', type: 'primary', action: '(async () => { await app.saveProspect(); })()' }
         ]);
+
+        // Pre-populate children rows after modal mounts
+        setTimeout(() => prefillProspectChildren(prospect?.children), 0);
     };
 
 
@@ -13940,6 +13998,8 @@ function _wireLoginBtn() {
             occupation: d('prospect-occupation') || null,
             company_name: d('prospect-company') || null,
             income_range: d('prospect-income') || null,
+            marital_status: (document.querySelector('.prospect-marital-cb:checked')?.value) || null,
+            children: JSON.stringify(collectProspectChildren()),
             address: d('prospect-address') || null,
             city: d('prospect-city') || null,
             state: d('prospect-state') || null,
@@ -14997,6 +15057,20 @@ function _wireLoginBtn() {
                 <div class="pv-row"><span class="pv-lbl">Lunar Birth</span><span class="pv-val" style="display:flex;align-items:center;gap:8px;"><input type="checkbox" ${['lunar','both'].includes(prospect.life_chart_type) ? 'checked' : ''} onchange="event.stopPropagation();app.toggleLifeChartType(${prospect.id},'lunar',this.checked)" title="Use for life chart">${prospect.lunar_birth || '-'}</span></div>
                 <div class="pv-row"><span class="pv-lbl">IC Number</span><span class="pv-val">${prospect.ic_number || '-'}</span></div>
                 <div class="pv-row"><span class="pv-lbl">Ming Gua</span><span class="pv-val"><span class="badge info">${prospect.ming_gua || 'MG4'}</span></span></div>
+                <div class="pv-sub">Family</div>
+                <div class="pv-row"><span class="pv-lbl">Marital Status</span><span class="pv-val">${prospect.marital_status || '-'}</span></div>
+                ${(() => {
+                    let kids = [];
+                    try { kids = Array.isArray(prospect.children) ? prospect.children : (prospect.children ? JSON.parse(prospect.children) : []); } catch(e) { kids = []; }
+                    const count = kids.length;
+                    let html = `<div class="pv-row"><span class="pv-lbl">Children</span><span class="pv-val">${count}</span></div>`;
+                    kids.forEach((c, i) => {
+                        const age = c.age || '-';
+                        const gender = c.gender || '-';
+                        html += `<div class="pv-row"><span class="pv-lbl">Child ${i + 1}</span><span class="pv-val">${age} y/o · ${gender}</span></div>`;
+                    });
+                    return html;
+                })()}
                 <div class="pv-sub">Employment</div>
                 <div class="pv-row"><span class="pv-lbl">Occupation</span><span class="pv-val">${prospect.occupation || '-'}</span></div>
                 <div class="pv-row"><span class="pv-lbl">Company</span><span class="pv-val">${prospect.company_name || '-'}</span></div>
@@ -26098,6 +26172,7 @@ const initImportDemoData = async () => {
         searchProspectReferrers,
         selectProspectReferrer,
         clearProspectReferrer,
+        addProspectChildRow,
         selectReferrer,
         clearSelectedReferrer,
         searchConsultants,
