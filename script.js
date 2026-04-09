@@ -8354,12 +8354,21 @@ function _wireLoginBtn() {
                     <table class="crm-table">
                         <thead>
                             <tr>
+                                ${isCps ? `
+                                <th>Relation</th>
+                                <th>Occupation</th>
+                                <th>Age</th>
+                                <th>Gender</th>
+                                <th>Inv. Method</th>
+                                <th>Details</th>
+                                ` : `
                                 <th>Title</th>
                                 <th>Prospect / Customer</th>
                                 <th>Product</th>
                                 <th>Amount (RM)</th>
                                 <th>Closing Date</th>
                                 <th>Tags</th>
+                                `}
                                 <th class="text-right">Actions</th>
                             </tr>
                         </thead>
@@ -8483,12 +8492,14 @@ function _wireLoginBtn() {
         const caseRows = await Promise.all(cases.map(async c => {
             let entityName = '-';
             let entityLink = 'return false';
+            let prospectData = null;
             if (c.customer_id) {
                 const cust = await AppDataStore.getById('customers', c.customer_id);
                 entityName = cust ? `<i class="fas fa-user-check" title="Customer"></i> ${cust.full_name}` : 'Unknown Customer';
                 entityLink = `app.showCustomerDetail(${c.customer_id})`;
             } else if (c.prospect_id) {
                 const pros = await AppDataStore.getById('prospects', c.prospect_id);
+                prospectData = pros || null;
                 entityName = pros ? `<i class="fas fa-user" title="Prospect"></i> ${pros.full_name}` : 'Unknown Prospect';
                 entityLink = `app.showProspectDetail(${c.prospect_id})`;
             }
@@ -8500,6 +8511,37 @@ function _wireLoginBtn() {
             const caseMappings = allTagMappings.filter(et => et.entity_type === 'case_study' && et.entity_id === c.id);
             const caseTags = caseMappings.map(m => allTags.find(t => t.id === m.tag_id)).filter(Boolean);
             const tagBadges = caseTags.map(t => `<span class="badge" style="background:${t.color || '#e5e7eb'};color:#1f2937;margin-right:4px;font-size:11px;">${t.name}</span>`).join('');
+
+            const ageText = prospectData?.date_of_birth
+                ? Math.floor((Date.now() - new Date(prospectData.date_of_birth)) / (365.25 * 24 * 60 * 60 * 1000)) + 'y'
+                : '-';
+            const detailsPreview = c.cps_invitation_details
+                ? (c.cps_invitation_details.length > 80 ? c.cps_invitation_details.substring(0, 80) + '…' : c.cps_invitation_details)
+                : '-';
+
+            const actionButtons = `
+                <td class="text-right">
+                    <div class="actions">
+                        <button class="btn-icon" title="View" onclick="event.stopPropagation(); app.showCaseStudyDetail(${c.id})"><i class="fas fa-eye"></i></button>
+                        ${(isOwner || isAdmin) ? `
+                            <button class="btn-icon" title="Edit" onclick="event.stopPropagation(); app.openCaseStudyModal(${c.id})"><i class="fas fa-edit"></i></button>
+                            <button class="btn-icon text-danger" title="Delete" onclick="event.stopPropagation(); app.deleteCaseStudy(${c.id})"><i class="fas fa-trash"></i></button>
+                        ` : ''}
+                    </div>
+                </td>`;
+
+            if (_caseActiveTab === 'cps') {
+                return `
+                <tr class="clickable" onclick="app.showCaseStudyDetail(${c.id})">
+                    <td>${prospectData?.referral_relationship || '-'}</td>
+                    <td>${prospectData?.occupation || '-'}</td>
+                    <td>${ageText}</td>
+                    <td>${prospectData?.gender || '-'}</td>
+                    <td>${c.cps_invitation_method || '-'}</td>
+                    <td style="max-width:200px;" title="${(c.cps_invitation_details || '').replace(/"/g, '&quot;')}">${detailsPreview}</td>
+                    ${actionButtons}
+                </tr>`;
+            }
 
             return `
                 <tr class="clickable" onclick="app.showCaseStudyDetail(${c.id})">
@@ -8517,15 +8559,7 @@ function _wireLoginBtn() {
                         ${tagBadges}
                         <button class="btn-icon" title="Add Tag" style="font-size:11px;" onclick="event.stopPropagation(); app.addTagToCase(${c.id})"><i class="fas fa-tag"></i></button>
                     </td>
-                    <td class="text-right">
-                        <div class="actions">
-                            <button class="btn-icon" title="View" onclick="event.stopPropagation(); app.showCaseStudyDetail(${c.id})"><i class="fas fa-eye"></i></button>
-                            ${(isOwner || isAdmin) ? `
-                                <button class="btn-icon" title="Edit" onclick="event.stopPropagation(); app.openCaseStudyModal(${c.id})"><i class="fas fa-edit"></i></button>
-                                <button class="btn-icon text-danger" title="Delete" onclick="event.stopPropagation(); app.deleteCaseStudy(${c.id})"><i class="fas fa-trash"></i></button>
-                            ` : ''}
-                        </div>
-                    </td>
+                    ${actionButtons}
                 </tr>
             `;
         }));
@@ -8540,13 +8574,16 @@ function _wireLoginBtn() {
         const isOwner = c.created_by === currentUser?.id;
         const isAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || currentUser?.role?.includes('Level 3') || currentUser?.role?.includes('Level 7') || currentUser?.role === 'team_leader' || currentUser?.role === 'admin';
 
-        let entityInfo = 'Generic Case';
+        const isCpsCase = (c.case_type || 'cps') === 'cps';
+        let entityInfo = '';
+        let prospectProfile = null;
         if (c.customer_id) {
             const cust = await AppDataStore.getById('customers', c.customer_id);
-            entityInfo = cust ? `Customer: ${cust.full_name}` : 'Unknown Customer';
+            if (!isCpsCase) entityInfo = cust ? `Customer: ${cust.full_name}` : 'Unknown Customer';
         } else if (c.prospect_id) {
             const pros = await AppDataStore.getById('prospects', c.prospect_id);
-            entityInfo = pros ? `Prospect: ${pros.full_name}` : 'Unknown Prospect';
+            prospectProfile = pros || null;
+            if (!isCpsCase) entityInfo = pros ? `Prospect: ${pros.full_name}` : 'Unknown Prospect';
         }
 
         const creator = await AppDataStore.getById('users', c.created_by);
@@ -8569,10 +8606,20 @@ function _wireLoginBtn() {
             <div style="padding:0 4px;">
                 <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px;color:var(--gray-500);font-size:13px;">
                     <span><i class="fas fa-tag"></i> ${typeLabel}</span>
-                    <span><i class="fas fa-user-circle"></i> ${entityInfo}</span>
+                    ${isCpsCase ? (() => {
+                        const age = prospectProfile?.date_of_birth
+                            ? Math.floor((Date.now() - new Date(prospectProfile.date_of_birth)) / (365.25 * 24 * 60 * 60 * 1000)) + 'y'
+                            : null;
+                        return [
+                            prospectProfile?.referral_relationship ? `<span><i class="fas fa-people-arrows"></i> ${prospectProfile.referral_relationship}</span>` : '',
+                            prospectProfile?.occupation ? `<span><i class="fas fa-briefcase"></i> ${prospectProfile.occupation}</span>` : '',
+                            age ? `<span><i class="fas fa-birthday-cake"></i> ${age}</span>` : '',
+                            prospectProfile?.gender ? `<span><i class="fas fa-venus-mars"></i> ${prospectProfile.gender}</span>` : '',
+                        ].filter(Boolean).join('');
+                    })() : `<span><i class="fas fa-user-circle"></i> ${entityInfo}</span>
                     <span><i class="fas fa-calendar-alt"></i> Closed: ${c.closing_date || 'N/A'}</span>
                     <span><i class="fas fa-box"></i> ${c.product || 'N/A'}</span>
-                    <span><i class="fas fa-money-bill-wave"></i> RM ${parseFloat(c.amount || 0).toLocaleString()}</span>
+                    <span><i class="fas fa-money-bill-wave"></i> RM ${parseFloat(c.amount || 0).toLocaleString()}</span>`}
                     ${c.is_public ? '<span class="badge badge-success">Public</span>' : ''}
                 </div>
 
@@ -8586,6 +8633,7 @@ function _wireLoginBtn() {
 
                 <div class="case-section card" style="margin-bottom:12px;">
                     <h3 style="font-size:14px;font-weight:600;margin-bottom:8px;"><i class="fas fa-handshake"></i> Part 1: CPS Invitation</h3>
+                    ${c.cps_invitation_method ? `<p style="font-size:12px;color:var(--gray-500);margin-bottom:6px;"><strong>Method:</strong> ${c.cps_invitation_method}</p>` : ''}
                     <p style="white-space:pre-wrap;">${c.cps_invitation_details || '<em style="color:var(--gray-400);">No details provided.</em>'}</p>
                 </div>
 
@@ -12312,6 +12360,26 @@ function _wireLoginBtn() {
                 } catch (err) {
                     console.warn('Case study save failed:', err.message);
                 }
+            }
+        }
+
+        // Auto-create CPS Invitation Case in Success Case Library
+        if (type === 'CPS' && (activity.cps_invitation_method || activity.cps_invitation_details)) {
+            try {
+                await AppDataStore.create('case_studies', {
+                    title: `CPS: ${activity.activity_title}`,
+                    prospect_id: activity.prospect_id || null,
+                    customer_id: null,
+                    activity_id: savedActivity.id,
+                    case_type: 'cps',
+                    cps_invitation_method: activity.cps_invitation_method || '',
+                    cps_invitation_details: activity.cps_invitation_details || '',
+                    closing_date: activity.activity_date,
+                    created_by: _currentUser?.id || null,
+                    is_public: false
+                });
+            } catch (err) {
+                console.warn('CPS case study auto-create failed:', err.message);
             }
         }
 
