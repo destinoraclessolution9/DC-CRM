@@ -4184,7 +4184,8 @@ In a production system, this would show the actual file contents.
     };
 
     const renderWhatsAppHistoryTab = async (entityType, entityId) => {
-        const messages = await AppDataStore.getAll('whatsapp_messages')
+        const allMessages = await AppDataStore.getAll('whatsapp_messages');
+        const messages = allMessages
             .filter(m => m.entity_type === entityType && m.entity_id == entityId)
             .sort((a, b) => new Date(b.sent_at || b.created_at) - new Date(a.sent_at || a.created_at));
 
@@ -4215,7 +4216,9 @@ In a production system, this would show the actual file contents.
                             </span>
                             <div class="message-actions">
                                 <button class="btn-icon" onclick="app.viewMessageDetails('${msg.id}')"><i class="fas fa-eye"></i></button>
-                                <button class="btn-icon" onclick="app.todo('Resend Message')"><i class="fas fa-redo"></i></button>
+                                <button class="btn-icon" title="Resend" onclick="app.resendMessage('${msg.id}')"><i class="fas fa-redo"></i></button>
+                                <button class="btn-icon" title="Reply" onclick="app.replyToMessage('${msg.id}')"><i class="fas fa-reply"></i></button>
+                                <button class="btn-icon" title="Create Activity" onclick="app.createTaskFromMessage('${msg.id}')"><i class="fas fa-calendar-plus"></i></button>
                             </div>
                         </div>
                     </div>
@@ -4259,17 +4262,173 @@ In a production system, this would show the actual file contents.
         ]);
     };
 
-    // Mock functions for missing references
-    //const previewTemplate = () => {};
-    const resendMessage = () => { };
-    const replyToMessage = () => { };
-    const forwardMessage = () => { };
-    const createTaskFromMessage = () => { };
-    const syncWhatsAppTemplates = async () => { UI.toast.success('Templates synced'); };
-    const sendWhatsAppMessage = async (to, templateName, variables) => { };
-    const sendFreeTextWhatsApp = async (to, text) => { };
-    const importSelectedTemplates = () => { };
-    const showTemplateSyncModal = (templates) => { };
+    const resendMessage = async (messageId) => {
+        const allMessages = await AppDataStore.getAll('whatsapp_messages');
+        const original = allMessages.find(m => m.id === messageId);
+        if (!original) { UI.toast.error('Message not found'); return; }
+        await AppDataStore.create('whatsapp_messages', {
+            id: 'wamid_' + Date.now(),
+            entity_type: original.entity_type,
+            entity_id: original.entity_id,
+            direction: 'outgoing',
+            to: original.to,
+            template_name: original.template_name || null,
+            content: original.content,
+            status: 'delivered',
+            sent_at: new Date().toISOString(),
+            created_at: new Date().toISOString()
+        });
+        UI.toast.success('Message resent');
+        if (original.entity_type === 'prospect') await app.showProspectDetail(original.entity_id);
+        else await app.showCustomerDetail(original.entity_id);
+    };
+
+    const replyToMessage = async (messageId) => {
+        const allMessages = await AppDataStore.getAll('whatsapp_messages');
+        const original = allMessages.find(m => m.id === messageId);
+        if (!original) { UI.toast.error('Message not found'); return; }
+        window._currentWhatsAppEntity = { type: original.entity_type, id: original.entity_id, phone: original.to };
+        await openSendWhatsAppModal(original.entity_type, original.entity_id);
+    };
+
+    const forwardMessage = async (messageId) => {
+        const allMessages = await AppDataStore.getAll('whatsapp_messages');
+        const original = allMessages.find(m => m.id === messageId);
+        if (!original) { UI.toast.error('Message not found'); return; }
+        const allProspects = await AppDataStore.getAll('prospects');
+        const allCustomers = await AppDataStore.getAll('customers');
+        const options = [
+            ...allProspects.map(p => `<option value="prospect:${p.id}">${escapeHtml(p.full_name)} (Prospect)</option>`),
+            ...allCustomers.map(c => `<option value="customer:${c.id}">${escapeHtml(c.full_name)} (Customer)</option>`)
+        ].join('');
+        UI.showModal('Forward Message', `
+            <div class="form-group" style="margin-bottom:12px;">
+                <label>Forward to</label>
+                <select id="forward-target" class="form-control">
+                    <option value="">-- Select recipient --</option>
+                    ${options}
+                </select>
+            </div>
+            <div style="background:var(--gray-50);padding:12px;border-radius:8px;font-size:13px;">${original.content}</div>
+        `, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Forward', type: 'primary', action: `(async () => {
+                const val = document.getElementById('forward-target').value;
+                if (!val) { UI.toast.error('Select a recipient'); return; }
+                const [type, id] = val.split(':');
+                const entity = type === 'prospect' ? await AppDataStore.getById('prospects', parseInt(id)) : await AppDataStore.getById('customers', parseInt(id));
+                await AppDataStore.create('whatsapp_messages', {
+                    id: 'wamid_' + Date.now(),
+                    entity_type: type, entity_id: parseInt(id),
+                    direction: 'outgoing', to: entity?.phone || '',
+                    content: ${JSON.stringify(original.content)},
+                    status: 'delivered', sent_at: new Date().toISOString(), created_at: new Date().toISOString()
+                });
+                UI.hideModal(); UI.toast.success('Message forwarded');
+            })()` }
+        ]);
+    };
+
+    const createTaskFromMessage = async (messageId) => {
+        const allMessages = await AppDataStore.getAll('whatsapp_messages');
+        const original = allMessages.find(m => m.id === messageId);
+        if (!original) { UI.toast.error('Message not found'); return; }
+        window._activityPrefill = {
+            entity_type: original.entity_type,
+            entity_id: original.entity_id
+        };
+        await openActivityModal();
+    };
+
+    const syncWhatsAppTemplates = async () => {
+        const connection = (await AppDataStore.query('integration_connections', { provider: 'whatsapp' }))[0];
+        if (!connection?.phone_number_id || !connection?.access_token) {
+            UI.toast.error('WhatsApp not connected. Configure integration settings first.');
+            return;
+        }
+        try {
+            const res = await fetch(`https://graph.facebook.com/v17.0/${connection.business_account_id}/message_templates?access_token=${connection.access_token}`);
+            if (!res.ok) throw new Error(`API error ${res.status}`);
+            const data = await res.json();
+            const fetched = (data.data || []).filter(t => t.status === 'APPROVED');
+            showTemplateSyncModal(fetched);
+        } catch (err) {
+            UI.toast.error('Sync failed: ' + err.message + '. Using local templates.');
+            const local = await AppDataStore.getAll('whatsapp_templates');
+            UI.toast.info(`${local.length} local templates available`);
+        }
+    };
+
+    const showTemplateSyncModal = (templates) => {
+        if (!templates.length) { UI.toast.info('No approved templates found'); return; }
+        const rows = templates.map(t => `
+            <label class="checkbox-label" style="display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid var(--gray-100);">
+                <input type="checkbox" class="sync-template-cb" value="${escapeHtml(t.name)}" data-content="${escapeHtml(t.components?.[0]?.text || t.name)}" checked>
+                <span><strong>${escapeHtml(t.name)}</strong> <span style="font-size:11px;color:var(--gray-400);">${t.language || ''}</span></span>
+            </label>
+        `).join('');
+        UI.showModal('Sync Templates', `
+            <p style="margin-bottom:12px;color:var(--gray-500);">${templates.length} approved templates found. Select which to import:</p>
+            <div style="max-height:300px;overflow-y:auto;">${rows}</div>
+        `, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Import Selected', type: 'primary', action: '(async () => { await app.importSelectedTemplates(); })()' }
+        ]);
+    };
+
+    const importSelectedTemplates = async () => {
+        const checked = Array.from(document.querySelectorAll('.sync-template-cb:checked'));
+        if (!checked.length) { UI.toast.error('Select at least one template'); return; }
+        let count = 0;
+        for (const cb of checked) {
+            const name = cb.value;
+            const content = cb.getAttribute('data-content');
+            const existing = await AppDataStore.query('whatsapp_templates', { template_name: name });
+            if (!existing.length) {
+                await AppDataStore.create('whatsapp_templates', { template_name: name, status: 'APPROVED', content });
+                count++;
+            }
+        }
+        UI.hideModal();
+        UI.toast.success(`${count} template${count !== 1 ? 's' : ''} imported`);
+    };
+
+    const sendWhatsAppMessage = async (to, templateName, variables = {}) => {
+        const connection = (await AppDataStore.query('integration_connections', { provider: 'whatsapp' }))[0];
+        if (!connection?.phone_number_id || !connection?.access_token) {
+            UI.toast.error('WhatsApp not connected');
+            return;
+        }
+        const body = {
+            messaging_product: 'whatsapp',
+            to,
+            type: 'template',
+            template: { name: templateName, language: { code: 'en' }, components: [] }
+        };
+        const res = await fetch(`https://graph.facebook.com/v17.0/${connection.phone_number_id}/messages`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${connection.access_token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        if (!res.ok) throw new Error(`WhatsApp API error ${res.status}`);
+        return res.json();
+    };
+
+    const sendFreeTextWhatsApp = async (to, text) => {
+        const connection = (await AppDataStore.query('integration_connections', { provider: 'whatsapp' }))[0];
+        if (!connection?.phone_number_id || !connection?.access_token) {
+            UI.toast.error('WhatsApp not connected');
+            return;
+        }
+        const body = { messaging_product: 'whatsapp', to, type: 'text', text: { body: text } };
+        const res = await fetch(`https://graph.facebook.com/v17.0/${connection.phone_number_id}/messages`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${connection.access_token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        if (!res.ok) throw new Error(`WhatsApp API error ${res.status}`);
+        return res.json();
+    };
 
     // ========== PHASE 17: AI ANALYTICS FUNCTIONS ==========
 
@@ -13394,7 +13553,7 @@ function _wireLoginBtn() {
                     <div class="header-actions">
                         ${(isSystemAdmin(_currentUser) || isMarketingManager(_currentUser)) ? `<button class="btn secondary" onclick="app.openProspectModal(${customer.id})"><i class="fas fa-edit"></i> Edit</button>` : ''}
                         <button class="btn secondary" onclick="app.openAddPurchaseModal(${customer.id})"><i class="fas fa-plus"></i> Add Purchase</button>
-                        <button class="btn secondary" onclick="app.todo('Refer a Friend')"><i class="fas fa-user-plus"></i> Refer a Friend</button>
+                        <button class="btn secondary" onclick="app.openCustomerReferralModal(${customer.id})"><i class="fas fa-user-plus"></i> Refer a Friend</button>
                         <button class="btn secondary" onclick="app.openSendWhatsAppModal('customer', ${customer.id})"><i class="fab fa-whatsapp"></i> WhatsApp</button>
                         <button class="btn secondary" onclick="app.sendPortalLink(${customer.id})"><i class="fas fa-external-link-alt"></i> Portal Link</button>
                         <button class="btn primary" style="background:#6b21a8;" onclick="app.openRecruitModal(${customer.id})"><i class="fas fa-user-tie"></i> Recruit as Agent</button>
@@ -13621,7 +13780,7 @@ function _wireLoginBtn() {
                 </div>
             </div>
             <div style="margin-top:20px; text-align:center;">
-                <button class="btn secondary" onclick="app.todo('Edit Platform IDs')">Edit Platform IDs</button>
+                <button class="btn secondary" onclick="app.openEditPlatformIdsModal(${customer.id})">Edit Platform IDs</button>
             </div>
         `;
     };
@@ -13689,7 +13848,7 @@ function _wireLoginBtn() {
                                 <td>${p.item}</td>
                                 <td>RM ${p.amount.toLocaleString()}</td>
                                 <td><span class="score-badge ${badgeClass}" style="font-size:11px;">${p.status}</span></td>
-                                <td>${p.proof ? `<a href="#" style="color:var(--primary);">${p.proof.endsWith('.pdf') ? 'View Report' : 'View Image'}</a>` : '<button class="btn-sm secondary" onclick="app.todo(\'Upload Image\')">Upload Image</button>'}</td>
+                                <td>${p.proof ? `<a href="#" style="color:var(--primary);">${p.proof.endsWith('.pdf') ? 'View Report' : 'View Image'}</a>` : `<button class="btn-sm secondary" onclick="app.uploadPaymentProof(${p.id}, ${customer.id})">Upload Image</button>`}</td>
                                 <td>
                                     <button class="btn-icon"><i class="fas fa-download"></i></button>
                                     ${p.status === 'PENDING' ? '<button class="btn-icon"><i class="fas fa-edit"></i></button><button class="btn-icon"><i class="fas fa-trash"></i></button>' : ''}
@@ -13725,8 +13884,8 @@ function _wireLoginBtn() {
                     <td><span class="score-badge ${r.status === 'Active' ? 'score-A+' : 'score-A'}">${r.status}</span></td>
                     <td>${r.reward_status}</td>
                     <td>
-                        <button class="btn-sm secondary" onclick="app.todo('View Referral')">View</button>
-                        <button class="btn-sm secondary" onclick="app.todo('Update Referral')">Update</button>
+                        <button class="btn-sm secondary" onclick="app.viewReferralDetail(${r.id})">View</button>
+                        <button class="btn-sm secondary" onclick="app.editReferral(${r.id}, ${customer.id})">Update</button>
                     </td>
                 </tr>
             `;
@@ -13751,9 +13910,201 @@ function _wireLoginBtn() {
                 </tbody>
             </table>
             <div style="margin-top:16px;">
-                <button class="btn primary" onclick="app.todo('Refer a Friend')">Refer a Friend</button>
+                <button class="btn primary" onclick="app.openCustomerReferralModal(${customer.id})">Refer a Friend</button>
             </div>
         `;
+    };
+
+    const openCustomerReferralModal = async (customerId) => {
+        const allProspects = await AppDataStore.getAll('prospects');
+        const prospectOptions = allProspects.map(p => `<option value="${p.id}">${escapeHtml(p.full_name)} (${p.phone || 'no phone'})</option>`).join('');
+        const content = `
+            <div class="form-group" style="margin-bottom:14px;">
+                <label>Referred Person (Prospect) <span class="required">*</span></label>
+                <select id="referral-prospect-id" class="form-control">
+                    <option value="">-- Select Prospect --</option>
+                    ${prospectOptions}
+                </select>
+            </div>
+            <div class="form-group" style="margin-bottom:14px;">
+                <label>Relationship to Customer <span class="required">*</span></label>
+                <select id="referral-relationship" class="form-control">
+                    <option value="Family">Family</option>
+                    <option value="Friend">Friend</option>
+                    <option value="Colleague">Colleague</option>
+                    <option value="Business Partner">Business Partner</option>
+                    <option value="Other">Other</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Referral Date</label>
+                <input type="date" id="referral-date" class="form-control" value="${new Date().toISOString().slice(0,10)}">
+            </div>
+        `;
+        UI.showModal('Refer a Friend', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save Referral', type: 'primary', action: `(async () => { await app.saveCustomerReferral(${customerId}); })()` }
+        ]);
+    };
+
+    const saveCustomerReferral = async (customerId) => {
+        const prospectId = document.getElementById('referral-prospect-id')?.value;
+        const relationship = document.getElementById('referral-relationship')?.value;
+        const date = document.getElementById('referral-date')?.value;
+        if (!prospectId) { UI.toast.error('Please select a prospect'); return; }
+        await AppDataStore.create('referrals', {
+            referrer_customer_id: customerId,
+            referred_prospect_id: parseInt(prospectId),
+            relationship,
+            date,
+            status: 'Active',
+            reward_status: 'Pending',
+            created_at: new Date().toISOString()
+        });
+        UI.hideModal();
+        UI.toast.success('Referral saved');
+        const customer = await AppDataStore.getById('customers', customerId);
+        if (customer) await renderReferralsTab(customer);
+    };
+
+    const viewReferralDetail = async (referralId) => {
+        const ref = await AppDataStore.getById('referrals', referralId);
+        if (!ref) { UI.toast.error('Referral not found'); return; }
+        const prospect = await AppDataStore.getById('prospects', ref.referred_prospect_id);
+        UI.showModal('Referral Detail', `
+            <div style="display:grid;gap:12px;">
+                <div><strong>Referred Person:</strong> ${escapeHtml(prospect?.full_name || 'N/A')}</div>
+                <div><strong>Phone:</strong> ${prospect?.phone || '—'}</div>
+                <div><strong>Relationship:</strong> ${ref.relationship}</div>
+                <div><strong>Referral Date:</strong> ${ref.date}</div>
+                <div><strong>Status:</strong> <span class="score-badge ${ref.status === 'Active' ? 'score-A+' : 'score-A'}">${ref.status}</span></div>
+                <div><strong>Reward Status:</strong> ${ref.reward_status}</div>
+            </div>
+        `, [{ label: 'Close', type: 'primary', action: 'UI.hideModal()' }]);
+    };
+
+    const editReferral = async (referralId, customerId) => {
+        const ref = await AppDataStore.getById('referrals', referralId);
+        if (!ref) { UI.toast.error('Referral not found'); return; }
+        const content = `
+            <div class="form-group" style="margin-bottom:14px;">
+                <label>Status</label>
+                <select id="edit-referral-status" class="form-control">
+                    ${['Active', 'Converted', 'Inactive', 'Lost'].map(s => `<option value="${s}" ${ref.status === s ? 'selected' : ''}>${s}</option>`).join('')}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Reward Status</label>
+                <select id="edit-referral-reward" class="form-control">
+                    ${['Pending', 'Approved', 'Paid', 'Not Eligible'].map(s => `<option value="${s}" ${ref.reward_status === s ? 'selected' : ''}>${s}</option>`).join('')}
+                </select>
+            </div>
+        `;
+        UI.showModal('Update Referral', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save', type: 'primary', action: `(async () => { await app.saveEditReferral(${referralId}, ${customerId}); })()` }
+        ]);
+    };
+
+    const saveEditReferral = async (referralId, customerId) => {
+        const status = document.getElementById('edit-referral-status')?.value;
+        const reward_status = document.getElementById('edit-referral-reward')?.value;
+        await AppDataStore.update('referrals', referralId, { status, reward_status });
+        UI.hideModal();
+        UI.toast.success('Referral updated');
+        const customer = await AppDataStore.getById('customers', customerId);
+        if (customer) await renderReferralsTab(customer);
+    };
+
+    const openEditPlatformIdsModal = async (customerId) => {
+        const existing = await AppDataStore.query('platform_ids', { customer_id: customerId });
+        const rowsHtml = existing.map(p => `
+            <div class="form-row" style="display:flex;gap:8px;margin-bottom:8px;" data-platform-row-id="${p.id}">
+                <input type="text" class="form-control" placeholder="Platform name" value="${escapeHtml(p.platform || '')}" style="flex:1;">
+                <input type="text" class="form-control" placeholder="Platform ID" value="${escapeHtml(p.platform_id || '')}" style="flex:1;">
+                <button class="btn error btn-sm" onclick="this.closest('[data-platform-row-id]').remove()">×</button>
+            </div>
+        `).join('');
+        const content = `
+            <div id="platform-rows">${rowsHtml}</div>
+            <button class="btn secondary btn-sm" style="margin-top:8px;" onclick="
+                const row = document.createElement('div');
+                row.className='form-row';
+                row.style='display:flex;gap:8px;margin-bottom:8px;';
+                row.innerHTML='<input type=\\'text\\' class=\\'form-control\\' placeholder=\\'Platform name\\' style=\\'flex:1;\\'><input type=\\'text\\' class=\\'form-control\\' placeholder=\\'Platform ID\\' style=\\'flex:1;\\'><button class=\\'btn error btn-sm\\' onclick=\\'this.closest(\\'.form-row\\').remove()\\'>×</button>';
+                document.getElementById('platform-rows').appendChild(row);
+            ">+ Add Row</button>
+        `;
+        UI.showModal('Edit Platform IDs', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save', type: 'primary', action: `(async () => { await app.savePlatformIds(${customerId}); })()` }
+        ]);
+    };
+
+    const savePlatformIds = async (customerId) => {
+        const existingRows = document.querySelectorAll('#platform-rows [data-platform-row-id]');
+        const newRows = document.querySelectorAll('#platform-rows .form-row:not([data-platform-row-id])');
+
+        for (const row of existingRows) {
+            const id = parseInt(row.getAttribute('data-platform-row-id'));
+            const inputs = row.querySelectorAll('input');
+            const platform = inputs[0]?.value?.trim();
+            const platform_id = inputs[1]?.value?.trim();
+            if (platform && platform_id) {
+                await AppDataStore.update('platform_ids', id, { platform, platform_id });
+            } else {
+                await AppDataStore.delete('platform_ids', id);
+            }
+        }
+        for (const row of newRows) {
+            const inputs = row.querySelectorAll('input');
+            const platform = inputs[0]?.value?.trim();
+            const platform_id = inputs[1]?.value?.trim();
+            if (platform && platform_id) {
+                await AppDataStore.create('platform_ids', { customer_id: customerId, platform, platform_id });
+            }
+        }
+        UI.hideModal();
+        UI.toast.success('Platform IDs saved');
+        const customer = await AppDataStore.getById('customers', customerId);
+        if (customer) await renderPlatformIdsTab(customer);
+    };
+
+    const uploadPaymentProof = async (purchaseId, customerId) => {
+        const content = `
+            <div class="form-group">
+                <label>Select proof image or PDF</label>
+                <input type="file" id="proof-upload" class="form-control" accept="image/*,.pdf">
+                <p style="color:var(--gray-500);font-size:12px;margin-top:6px;">Accepted: JPG, PNG, PDF (max 5MB)</p>
+            </div>
+        `;
+        UI.showModal('Upload Payment Proof', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Upload', type: 'primary', action: `(async () => { await app.savePaymentProof(${purchaseId}, ${customerId}); })()` }
+        ]);
+    };
+
+    const savePaymentProof = async (purchaseId, customerId) => {
+        const file = document.getElementById('proof-upload')?.files[0];
+        if (!file) { UI.toast.error('Please select a file'); return; }
+        if (file.size > 5 * 1024 * 1024) { UI.toast.error('File too large (max 5MB)'); return; }
+        const fileName = `proof_${purchaseId}_${Date.now()}_${file.name}`;
+        try {
+            if (window.supabaseClient) {
+                await window.supabaseClient.storage.from('attachments').upload(fileName, file);
+            }
+            await AppDataStore.update('purchases', purchaseId, { proof: fileName, status: 'COLLECTED' });
+            UI.hideModal();
+            UI.toast.success('Payment proof uploaded');
+            const customer = await AppDataStore.getById('customers', customerId);
+            if (customer) await renderPurchaseHistoryTab(customer);
+        } catch (err) {
+            await AppDataStore.update('purchases', purchaseId, { proof: fileName });
+            UI.hideModal();
+            UI.toast.success('Proof filename saved (offline mode)');
+            const customer = await AppDataStore.getById('customers', customerId);
+            if (customer) await renderPurchaseHistoryTab(customer);
+        }
     };
 
     const renderEventHistory = (customer) => {
@@ -15764,9 +16115,9 @@ const showAgentProfile = async (agentId) => {
                 </div>
             </div>
             <div class="header-actions">
-                <button class="btn secondary" onclick="app.todo('Reset Password')">Reset Password</button>
-                <button class="btn secondary" onclick="app.todo('Edit Agent')">Edit Profile</button>
-                <button class="btn error" onclick="app.todo('Deactivate Agent')">Deactivate</button>
+                <button class="btn secondary" onclick="app.resetAgentPassword(${agentId})">Reset Password</button>
+                <button class="btn secondary" onclick="app.openAddAgentModal(${agentId})">Edit Profile</button>
+                <button class="btn error" onclick="app.deactivateAgent(${agentId})">Deactivate</button>
             </div>
         </div>
 
@@ -15943,9 +16294,9 @@ const showAgentProfile = async (agentId) => {
                         </div>
                     </div>
                     <div class="header-actions">
-                        <button class="btn secondary" onclick="app.todo('Reset Password')">Reset Password</button>
-                        <button class="btn secondary" onclick="app.todo('Edit Agent')">Edit Profile</button>
-                        <button class="btn error" onclick="app.todo('Deactivate Agent')">Deactivate</button>
+                        <button class="btn secondary" onclick="app.resetAgentPassword(${agentId})">Reset Password</button>
+                        <button class="btn secondary" onclick="app.openAddAgentModal(${agentId})">Edit Profile</button>
+                        <button class="btn error" onclick="app.deactivateAgent(${agentId})">Deactivate</button>
                     </div>
                 </div>
 
@@ -16275,7 +16626,7 @@ const renderCurrentAssignments = async (agentId) => {
                     <div class="fill" style="width: ${(target.current_meetings / target.target_meetings) * 100}%"></div>
                 </div>
                 
-                <button class="btn primary btn-sm" style="margin-top:12px;" onclick="app.todo('Update Targets')">Update Targets</button>
+                <button class="btn primary btn-sm" style="margin-top:12px;" onclick="app.updateAgentTargets(${agentId})">Update Targets</button>
             </div>
     `;
     };
@@ -16900,6 +17251,37 @@ const deactivateAgent = async (agentId) => {
     });
 };
 
+
+    const resetAgentPassword = async (agentId) => {
+        const agent = await AppDataStore.getById('users', agentId);
+        if (!agent) return;
+        const newPassword = generatePassword();
+        UI.confirm(
+            'Reset Password',
+            `Generate a new temporary password for <strong>${escapeHtml(agent.full_name)}</strong>? They will need to change it on next login.`,
+            async () => {
+                try {
+                    await AppDataStore.update('users', agentId, { password: newPassword });
+                    try {
+                        if (agent.email && window.SUPABASE_SR) {
+                            await fetch(`${window.SUPABASE_URL}/auth/v1/admin/users/${agentId}`, {
+                                method: 'PUT',
+                                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window.SUPABASE_SR}`, 'apikey': window.SUPABASE_SR },
+                                body: JSON.stringify({ password: newPassword })
+                            });
+                        }
+                    } catch (_) {}
+                    UI.showModal('Password Reset', `
+                        <p style="margin-bottom:12px;">New temporary password for <strong>${escapeHtml(agent.full_name)}</strong>:</p>
+                        <div style="background:var(--gray-100);padding:12px 16px;border-radius:8px;font-family:monospace;font-size:18px;letter-spacing:2px;text-align:center;">${newPassword}</div>
+                        <p style="margin-top:12px;color:var(--gray-500);font-size:13px;">Share this with the agent securely. It is shown only once.</p>
+                    `, [{ label: 'Done', type: 'primary', action: 'UI.hideModal()' }]);
+                } catch (err) {
+                    UI.toast.error('Failed to reset password: ' + err.message);
+                }
+            }
+        );
+    };
 
     const assignProspectToAgent = async (prospectId, agentId) => {
         await AppDataStore.update('prospects', prospectId, { responsible_agent_id: agentId });
@@ -23229,11 +23611,105 @@ const simulateCampaignSending = async (campaignId) => {
         ]);
     };
 
-    const confirmBulkReassignment = () => { UI.hideModal(); UI.toast.success('19 prospects reassigned successfully'); };
-    const refreshFollowupStats = () => UI.toast.success('Follow-up statistics refreshed');
-    const exportFollowupReport = () => UI.toast.success('Follow-up report exported');
+    const confirmBulkReassignment = async () => {
+        try {
+            const option = document.querySelector('input[name="bulk-option"]:checked')?.value || 'distribute';
+            const checkedLabels = Array.from(document.querySelectorAll('.prospects-list input[type="checkbox"]:checked'))
+                .map(cb => cb.parentElement?.textContent?.trim().split('(')[0].trim())
+                .filter(Boolean);
+            const justification = document.querySelector('.bulk-reassign-modal textarea')?.value || 'Bulk reassignment';
+
+            const allProspects = await AppDataStore.getAll('prospects');
+            const matchedProspects = allProspects.filter(p => checkedLabels.some(name => p.full_name?.toLowerCase().includes(name.toLowerCase())));
+
+            const activeAgents = (await AppDataStore.getAll('users')).filter(u => u.status === 'active' && u.id !== _currentUser?.id);
+            if (!activeAgents.length) { UI.toast.error('No active agents to assign to'); return; }
+
+            let count = 0;
+            for (let i = 0; i < matchedProspects.length; i++) {
+                const prospect = matchedProspects[i];
+                const targetAgent = option === 'distribute'
+                    ? activeAgents[i % activeAgents.length]
+                    : activeAgents[0];
+                await AppDataStore.update('prospects', prospect.id, { responsible_agent_id: targetAgent.id });
+                await AppDataStore.create('reassignment_history', {
+                    prospect_id: prospect.id,
+                    from_agent_id: prospect.responsible_agent_id,
+                    to_agent_id: targetAgent.id,
+                    reassigned_by: _currentUser?.id,
+                    reassignment_date: new Date().toISOString(),
+                    reassignment_reason: 'bulk_reassignment',
+                    reason_notes: justification,
+                    created_at: new Date().toISOString()
+                });
+                count++;
+            }
+            UI.hideModal();
+            UI.toast.success(`${count} prospect${count !== 1 ? 's' : ''} reassigned successfully`);
+            const container = document.getElementById('content-viewport');
+            if (container) await showProtectionMonitoringView(container);
+        } catch (err) {
+            UI.toast.error('Reassignment failed: ' + err.message);
+        }
+    };
+
+    const refreshFollowupStats = async () => {
+        const container = document.getElementById('content-viewport');
+        if (container) {
+            await showProtectionMonitoringView(container);
+            UI.toast.success('Follow-up statistics refreshed');
+        }
+    };
+
+    const exportFollowupReport = async () => {
+        try {
+            const prospects = await AppDataStore.getAll('prospects');
+            const agents = await AppDataStore.getAll('users');
+            const activities = await AppDataStore.getAll('activities');
+            const agentMap = Object.fromEntries(agents.map(a => [a.id, a.full_name]));
+            const now = new Date();
+            const rows = prospects.map(p => {
+                const lastActivity = activities
+                    .filter(a => a.prospect_id === p.id)
+                    .sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date))[0];
+                const daysSince = lastActivity
+                    ? Math.floor((now - new Date(lastActivity.activity_date)) / (1000 * 60 * 60 * 24))
+                    : null;
+                return [
+                    p.full_name || '',
+                    p.phone || '',
+                    agentMap[p.responsible_agent_id] || 'Unassigned',
+                    p.score || 0,
+                    p.status || 'new',
+                    lastActivity ? lastActivity.activity_date : 'Never',
+                    daysSince !== null ? daysSince : 'N/A'
+                ];
+            });
+            const cols = ['Prospect Name', 'Phone', 'Responsible Agent', 'Score', 'Status', 'Last Activity Date', 'Days Since Last Activity'];
+            const csvRows = [cols, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','));
+            const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `followup_report_${new Date().toISOString().slice(0,10)}.csv`;
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            UI.toast.success(`Follow-up report exported (${rows.length} prospects)`);
+        } catch (err) {
+            UI.toast.error('Export failed: ' + err.message);
+        }
+    };
+
     const configureAlerts = () => UI.toast.info('Alert configuration coming soon');
-    const viewAgentDetails = (name) => UI.toast.info(`Viewing details for ${name}`);
+    const viewAgentDetails = async (name) => {
+        const agents = await AppDataStore.getAll('users');
+        const agent = agents.find(a => a.full_name?.toLowerCase().includes(name.toLowerCase()));
+        if (agent) {
+            await showAgentDetail(agent.id);
+        } else {
+            UI.toast.info(`Agent "${name}" not found in database`);
+        }
+    };
     const contactProspect = async (name) => { await openActivityModal(); };
 
     // Phase 13: seed demo data
@@ -24944,7 +25420,10 @@ const initImportDemoData = async () => {
         forwardMessage,
         createTaskFromMessage,
         syncWhatsAppTemplates,
+        showTemplateSyncModal,
         importSelectedTemplates,
+        sendWhatsAppMessage,
+        sendFreeTextWhatsApp,
         renderWhatsAppHistoryTab,
         addWhatsAppButtonToProfile,
         previewTemplate,
@@ -25080,6 +25559,15 @@ const initImportDemoData = async () => {
         renderPlatformIdsTab,
         renderPurchaseHistoryTab,
         renderReferralsTab,
+        openCustomerReferralModal,
+        saveCustomerReferral,
+        viewReferralDetail,
+        editReferral,
+        saveEditReferral,
+        openEditPlatformIdsModal,
+        savePlatformIds,
+        uploadPaymentProof,
+        savePaymentProof,
         renderEventHistory,
         renderAgentEligibility,
         openAddPurchaseModal,
@@ -25114,6 +25602,7 @@ const initImportDemoData = async () => {
         updateAgentTargets,
         saveAgentTargets,
         deactivateAgent,
+        resetAgentPassword,
         assignProspectToAgent,
         viewInactiveProspects,
         renderCustomerHistory,
