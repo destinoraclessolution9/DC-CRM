@@ -14957,6 +14957,7 @@ function _wireLoginBtn() {
                         <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Invoice Number</label><input id="cr-invoice" class="form-control" value="${d.invoice_number || ''}" placeholder="INV-2026-001"></div>
                         <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Collection Date</label><input id="cr-close-date" type="date" class="form-control" value="${d.closing_date || ''}"></div>
                     </div>
+                    <div class="form-group" style="margin-bottom:10px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Remarks</label><textarea id="cr-remarks" class="form-control" rows="2" placeholder="e.g. Ring Size, Special Request...">${d.closing_remarks || ''}</textarea></div>
                     <div class="form-group" style="margin-bottom:14px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Upload Purchased Invoice</label><input id="cr-invoice-file" type="file" class="form-control" accept="image/png,image/jpeg,application/pdf"></div>
 
                     <div class="pv-sub">📁 Case Study (Optional)</div>
@@ -15164,6 +15165,7 @@ const deleteNote = async (prospectId, noteId) => {
             pop_tenure: paymentMethod === 'POP' ? (document.getElementById('cr-pop-tenure')?.value || '') : '',
             pop_down_payment: paymentMethod === 'POP' ? (document.getElementById('cr-pop-down')?.value || '') : '',
             invoice_number: document.getElementById('cr-invoice')?.value?.trim() || '',
+            closing_remarks: document.getElementById('cr-remarks')?.value?.trim() || '',
             closing_date: document.getElementById('cr-close-date')?.value || '',
             sales_idea: document.getElementById('cr-sales-idea')?.value?.trim() || '',
             plan_details: document.getElementById('cr-plan-details')?.value?.trim() || '',
