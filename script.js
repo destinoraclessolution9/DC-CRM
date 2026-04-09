@@ -13864,6 +13864,14 @@ function _wireLoginBtn() {
         `;
     };
 
+    const zoomCpsPhoto = (url) => {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;z-index:9999;cursor:zoom-out;';
+        overlay.onclick = () => overlay.remove();
+        overlay.innerHTML = `<img src="${url}" style="max-width:90vw;max-height:90vh;object-fit:contain;border-radius:8px;box-shadow:0 8px 32px rgba(0,0,0,.5);" onclick="event.stopPropagation()">`;
+        document.body.appendChild(overlay);
+    };
+
     const showProspectDetail = async (prospectId) => {
         const prospect = await AppDataStore.getById('prospects', prospectId);
         if (!prospect || !await canViewProspect(prospect)) {
@@ -13896,6 +13904,10 @@ function _wireLoginBtn() {
         const protectionStatus = getProtectionStatus(daysLeft);
         const statusColor = protectionStatus === 'normal' ? 'success' : protectionStatus === 'warning' ? 'secondary' : 'error';
         const statusLabel = protectionStatus === 'normal' ? 'Normal' : protectionStatus === 'warning' ? 'Expiring Soon' : 'Critical';
+
+        const cpsPhoto = activities
+            .filter(a => a.type === 'CPS' && a.cps_attachment?.url && a.cps_attachment?.type?.startsWith('image/'))
+            .sort((a, b) => (b.id || 0) - (a.id || 0))[0]?.cps_attachment;
 
         setTimeout(async () => {
             await addWhatsAppButtonToProfile('prospect', prospectId);
@@ -13951,16 +13963,19 @@ function _wireLoginBtn() {
                         <i class="fas fa-arrow-left"></i> Back to List
                     </button>
                 </div>
-                <div class="pv-hdr">
-                    <div class="pv-hdr-meta">
-                        <span>ID: P100${prospect.id}</span>
-                        <span class="badge success">Active</span>
-                        <span class="badge info">Grade ${getScoreGrade(prospect.score)}</span>
+                <div class="pv-hdr" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
+                    <div style="flex:1;min-width:0;">
+                        <div class="pv-hdr-meta">
+                            <span>ID: P100${prospect.id}</span>
+                            <span class="badge success">Active</span>
+                            <span class="badge info">Grade ${getScoreGrade(prospect.score)}</span>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:6px 0 8px;">
+                            <span style="font-size:22px;font-weight:700;line-height:1.3;flex-shrink:0;">${prospect.full_name}</span>${prospect.nickname ? `<span style="font-size:15px;font-weight:400;color:var(--gray-500);">"${prospect.nickname}"</span>` : ''}
+                            <button title="Edit" onclick="app.editProspect(${prospect.id})" style="width:24px;height:24px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--gray-500);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fas fa-edit"></i></button><button title="Convert to Customer" onclick="app.convertToCustomer(${prospect.id})" style="width:24px;height:24px;border-radius:50%;border:none;background:var(--primary);color:#fff;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'"><i class="fas fa-user-check"></i></button>
+                        </div>
                     </div>
-                    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:6px 0 8px;">
-                        <span style="font-size:22px;font-weight:700;line-height:1.3;flex-shrink:0;">${prospect.full_name}</span>${prospect.nickname ? `<span style="font-size:15px;font-weight:400;color:var(--gray-500);">"${prospect.nickname}"</span>` : ''}
-                        <button title="Edit" onclick="app.editProspect(${prospect.id})" style="width:24px;height:24px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--gray-500);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fas fa-edit"></i></button><button title="Convert to Customer" onclick="app.convertToCustomer(${prospect.id})" style="width:24px;height:24px;border-radius:50%;border:none;background:var(--primary);color:#fff;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'"><i class="fas fa-user-check"></i></button>
-                    </div>
+                    ${cpsPhoto ? `<img src="${cpsPhoto.url}" onclick="event.stopPropagation();app.zoomCpsPhoto('${cpsPhoto.url}')" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:2px solid var(--gray-200);cursor:zoom-in;flex-shrink:0;margin-top:4px;" title="CPS Photo — click to enlarge">` : ''}
                 </div>
 
                     <div class="acc-container" id="acc-container-${prospect.id}">
@@ -25009,6 +25024,7 @@ const initImportDemoData = async () => {
         // Phase 3 Prospect Management Functions
         showProspectsView,
         showProspectDetail,
+        zoomCpsPhoto,
         openAddProspectModal: openProspectModal,
         openProspectModal,
         editProspect,
