@@ -12028,6 +12028,11 @@ function _wireLoginBtn() {
     const updateLunarBirth = () => {
         const dob = document.getElementById('cps-dob')?.value;
         const lunarField = document.getElementById('cps-lunar');
+        // Auto-check has-dob when a date is entered so it actually gets saved
+        if (dob) {
+            const hasDobChk = document.getElementById('has-dob');
+            if (hasDobChk) hasDobChk.checked = true;
+        }
         if (dob && lunarField) {
             const lunarDate = convertSolarToLunar(dob);
             if (lunarDate) {
