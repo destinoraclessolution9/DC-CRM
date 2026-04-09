@@ -19317,6 +19317,16 @@ const exportKPIReport = async (format) => {
                          style="padding: 10px 16px; cursor: pointer; border-bottom: 2px solid ${_currentMarketingListTab === 'venues' ? 'var(--primary-600)' : 'transparent'}; color: ${_currentMarketingListTab === 'venues' ? 'var(--primary-600)' : 'var(--gray-600)'}; font-weight: 500;">
                         Venues
                     </div>
+                    <div class="tab-item ${_currentMarketingListTab === 'bujishu' ? 'active' : ''}"
+                         onclick="app.switchMarketingListTab('bujishu')"
+                         style="padding: 10px 16px; cursor: pointer; border-bottom: 2px solid ${_currentMarketingListTab === 'bujishu' ? 'var(--primary-600)' : 'transparent'}; color: ${_currentMarketingListTab === 'bujishu' ? 'var(--primary-600)' : 'var(--gray-600)'}; font-weight: 500;">
+                        Bujishu
+                    </div>
+                    <div class="tab-item ${_currentMarketingListTab === 'formula' ? 'active' : ''}"
+                         onclick="app.switchMarketingListTab('formula')"
+                         style="padding: 10px 16px; cursor: pointer; border-bottom: 2px solid ${_currentMarketingListTab === 'formula' ? 'var(--primary-600)' : 'transparent'}; color: ${_currentMarketingListTab === 'formula' ? 'var(--primary-600)' : 'var(--gray-600)'}; font-weight: 500;">
+                        Formula
+                    </div>
                 </div>
 
                 <div id="marketing-list-content">
@@ -19352,6 +19362,7 @@ const exportKPIReport = async (format) => {
                         <tr>
                             <th>Name</th>
                             <th>Category</th>
+                            <th>Functions Description</th>
                             <th>Price (RM)</th>
                             <th>Lead Time</th>
                             <th>Status</th>
@@ -19363,6 +19374,7 @@ const exportKPIReport = async (format) => {
                             <tr style="${!item.is_active ? 'opacity: 0.6; background: #f9fafb;' : ''}">
                                 <td><strong>${item.name}</strong><br><small class="text-muted">${item.remarks || ''}</small></td>
                                 <td>${item.category || '-'}</td>
+                                <td>${item.functions_description || '-'}</td>
                                 <td>${item.price || 0}</td>
                                 <td>${item.delivery_lead_time || '-'}</td>
                                 <td>
@@ -19447,6 +19459,80 @@ const exportKPIReport = async (format) => {
                     </tbody>
                 </table>
             `;
+        } else if (_currentMarketingListTab === 'bujishu') {
+            return `
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Category</th>
+                            <th>Function</th>
+                            <th>Price (RM)</th>
+                            <th>Lead Time</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${data.length === 0 ? '<tr><td colspan="7" style="text-align:center; color: var(--gray-400); padding: 32px;">No Bujishu items added yet.</td></tr>' : data.map(item => `
+                            <tr style="${!item.is_active ? 'opacity: 0.6; background: #f9fafb;' : ''}">
+                                <td><strong>${item.name}</strong></td>
+                                <td>${item.category || '-'}</td>
+                                <td>${item.function_desc || '-'}</td>
+                                <td>${item.price || 0}</td>
+                                <td>${item.delivery_lead_time || '-'}</td>
+                                <td>
+                                    <span class="status-badge ${item.is_active ? 'status-active' : 'status-inactive'}">
+                                        ${item.is_active ? 'Active' : 'Inactive'}
+                                    </span>
+                                </td>
+                                <td>
+                                    <button class="btn-icon" onclick="app.openMarketingListEditModal('${item.id}')" title="Edit"><i class="fas fa-pencil-alt"></i></button>
+                                    <button class="btn-icon text-danger" onclick="app.deleteMarketingListItem('${item.id}')" title="Delete"><i class="fas fa-trash-alt"></i></button>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        } else if (_currentMarketingListTab === 'formula') {
+            return `
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Category</th>
+                            <th>Functions</th>
+                            <th>Pills/Bottles</th>
+                            <th>Price (RM)</th>
+                            <th>Lead Time</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${data.length === 0 ? '<tr><td colspan="8" style="text-align:center; color: var(--gray-400); padding: 32px;">No Formula items added yet.</td></tr>' : data.map(item => `
+                            <tr style="${!item.is_active ? 'opacity: 0.6; background: #f9fafb;' : ''}">
+                                <td><strong>${item.name}</strong></td>
+                                <td>${item.category || '-'}</td>
+                                <td>${item.functions || '-'}</td>
+                                <td>${item.pills_bottles || '-'}</td>
+                                <td>${item.price || 0}</td>
+                                <td>${item.delivery_lead_time || '-'}</td>
+                                <td>
+                                    <span class="status-badge ${item.is_active ? 'status-active' : 'status-inactive'}">
+                                        ${item.is_active ? 'Active' : 'Inactive'}
+                                    </span>
+                                </td>
+                                <td>
+                                    <button class="btn-icon" onclick="app.openMarketingListEditModal('${item.id}')" title="Edit"><i class="fas fa-pencil-alt"></i></button>
+                                    <button class="btn-icon text-danger" onclick="app.deleteMarketingListItem('${item.id}')" title="Delete"><i class="fas fa-trash-alt"></i></button>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
         } else {
             return await renderPackagesTab();
         }
@@ -19460,6 +19546,7 @@ const exportKPIReport = async (format) => {
             content = `
                 <div class="form-group"><label>Name*</label><input type="text" id="mkt-name" class="form-control"></div>
                 <div class="form-group"><label>Category</label><input type="text" id="mkt-category" class="form-control" placeholder="e.g. Power Ring, 画作, 风水方案"></div>
+                <div class="form-group"><label>Functions Description</label><textarea id="mkt-functions-desc" class="form-control" placeholder="Describe functions..."></textarea></div>
                 <div class="form-group"><label>Price (RM)</label><input type="number" id="mkt-price" class="form-control" value="0"></div>
                 <div class="form-group"><label>Remarks</label><input type="text" id="mkt-remarks" class="form-control"></div>
                 <div class="form-group"><label>Delivery Lead Time</label><input type="text" id="mkt-lead" class="form-control" placeholder="e.g. 3-5 days"></div>
@@ -19488,6 +19575,25 @@ const exportKPIReport = async (format) => {
                 { label: 'Save', type: 'primary', action: '(async () => { await app.saveVenue(); })()' }
             ]);
             return;
+        } else if (type === 'bujishu') {
+            content = `
+                <div class="form-group"><label>Name*</label><input type="text" id="mkt-name" class="form-control"></div>
+                <div class="form-group"><label>Category</label><input type="text" id="mkt-category" class="form-control"></div>
+                <div class="form-group"><label>Function</label><textarea id="mkt-function-desc" class="form-control" placeholder="Describe function..."></textarea></div>
+                <div class="form-group"><label>Price (RM)</label><input type="number" id="mkt-price" class="form-control" value="0"></div>
+                <div class="form-group"><label>Delivery Lead Time</label><input type="text" id="mkt-lead" class="form-control" placeholder="e.g. 3-5 days"></div>
+                <div class="form-group"><label><input type="checkbox" id="mkt-active" checked> Is Active</label></div>
+`;
+        } else if (type === 'formula') {
+            content = `
+                <div class="form-group"><label>Name*</label><input type="text" id="mkt-name" class="form-control"></div>
+                <div class="form-group"><label>Category</label><input type="text" id="mkt-category" class="form-control"></div>
+                <div class="form-group"><label>Functions</label><textarea id="mkt-functions" class="form-control" placeholder="Describe functions..."></textarea></div>
+                <div class="form-group"><label>Pills/Bottles</label><input type="text" id="mkt-pills-bottles" class="form-control" placeholder="e.g. 60 pills, 1 bottle"></div>
+                <div class="form-group"><label>Price (RM)</label><input type="number" id="mkt-price" class="form-control" value="0"></div>
+                <div class="form-group"><label>Delivery Lead Time</label><input type="text" id="mkt-lead" class="form-control" placeholder="e.g. 3-5 days"></div>
+                <div class="form-group"><label><input type="checkbox" id="mkt-active" checked> Is Active</label></div>
+`;
         } else {
             content = `
                 <div class="form-group"><label>Package Name*</label><input type="text" id="mkt-pkname" class="form-control"></div>
@@ -19500,7 +19606,7 @@ const exportKPIReport = async (format) => {
 `;
         }
 
-        UI.showModal('Add New ' + { products: 'Product', events: 'Event', venues: 'Venue', promotions: 'Promotion' }[type], content, [
+        UI.showModal('Add New ' + { products: 'Product', events: 'Event', venues: 'Venue', promotions: 'Promotion', bujishu: 'Bujishu', formula: 'Formula' }[type], content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
             { label: 'Save', type: 'primary', action: '(async () => { await app.saveMarketingListItem(); })()' }
         ]);
@@ -19517,6 +19623,7 @@ const exportKPIReport = async (format) => {
             content = `
                 <div class="form-group"><label>Name*</label><input type="text" id="mkt-name" class="form-control" value="${item.name}"></div>
                 <div class="form-group"><label>Category</label><input type="text" id="mkt-category" class="form-control" value="${item.category || ''}" placeholder="e.g. Power Ring, 画作, 风水方案"></div>
+                <div class="form-group"><label>Functions Description</label><textarea id="mkt-functions-desc" class="form-control" placeholder="Describe functions...">${item.functions_description || ''}</textarea></div>
                 <div class="form-group"><label>Price (RM)</label><input type="number" id="mkt-price" class="form-control" value="${item.price || 0}"></div>
                 <div class="form-group"><label>Remarks</label><input type="text" id="mkt-remarks" class="form-control" value="${item.remarks || ''}"></div>
                 <div class="form-group"><label>Delivery Lead Time</label><input type="text" id="mkt-lead" class="form-control" value="${item.delivery_lead_time || ''}"></div>
@@ -19545,6 +19652,25 @@ const exportKPIReport = async (format) => {
                 { label: 'Save Changes', type: 'primary', action: `(async () => { await app.saveVenue('${id}'); })()` }
             ]);
             return;
+        } else if (type === 'bujishu') {
+            content = `
+                <div class="form-group"><label>Name*</label><input type="text" id="mkt-name" class="form-control" value="${item.name || ''}"></div>
+                <div class="form-group"><label>Category</label><input type="text" id="mkt-category" class="form-control" value="${item.category || ''}"></div>
+                <div class="form-group"><label>Function</label><textarea id="mkt-function-desc" class="form-control" placeholder="Describe function...">${item.function_desc || ''}</textarea></div>
+                <div class="form-group"><label>Price (RM)</label><input type="number" id="mkt-price" class="form-control" value="${item.price || 0}"></div>
+                <div class="form-group"><label>Delivery Lead Time</label><input type="text" id="mkt-lead" class="form-control" value="${item.delivery_lead_time || ''}"></div>
+                <div class="form-group"><label><input type="checkbox" id="mkt-active" ${item.is_active ? 'checked' : ''}> Is Active</label></div>
+            `;
+        } else if (type === 'formula') {
+            content = `
+                <div class="form-group"><label>Name*</label><input type="text" id="mkt-name" class="form-control" value="${item.name || ''}"></div>
+                <div class="form-group"><label>Category</label><input type="text" id="mkt-category" class="form-control" value="${item.category || ''}"></div>
+                <div class="form-group"><label>Functions</label><textarea id="mkt-functions" class="form-control" placeholder="Describe functions...">${item.functions || ''}</textarea></div>
+                <div class="form-group"><label>Pills/Bottles</label><input type="text" id="mkt-pills-bottles" class="form-control" value="${item.pills_bottles || ''}" placeholder="e.g. 60 pills, 1 bottle"></div>
+                <div class="form-group"><label>Price (RM)</label><input type="number" id="mkt-price" class="form-control" value="${item.price || 0}"></div>
+                <div class="form-group"><label>Delivery Lead Time</label><input type="text" id="mkt-lead" class="form-control" value="${item.delivery_lead_time || ''}"></div>
+                <div class="form-group"><label><input type="checkbox" id="mkt-active" ${item.is_active ? 'checked' : ''}> Is Active</label></div>
+            `;
         } else {
             content = `
                 <div class="form-group"><label>Package Name*</label><input type="text" id="mkt-pkname" class="form-control" value="${item.package_name}"></div>
@@ -19557,7 +19683,7 @@ const exportKPIReport = async (format) => {
             `;
         }
 
-        UI.showModal('Edit ' + { products: 'Product', events: 'Event', venues: 'Venue', promotions: 'Promotion' }[type], content, [
+        UI.showModal('Edit ' + { products: 'Product', events: 'Event', venues: 'Venue', promotions: 'Promotion', bujishu: 'Bujishu', formula: 'Formula' }[type], content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
             { label: 'Save Changes', type: 'primary', action: `(async () => { await app.saveMarketingListItem('${id}'); })()` }
         ]);
@@ -19581,8 +19707,24 @@ const exportKPIReport = async (format) => {
         } else if (type === 'products') {
             data.name = document.getElementById('mkt-name').value.trim();
             data.category = document.getElementById('mkt-category').value.trim();
+            data.functions_description = document.getElementById('mkt-functions-desc').value;
             data.price = parseFloat(document.getElementById('mkt-price').value) || 0;
             data.remarks = document.getElementById('mkt-remarks').value;
+            data.delivery_lead_time = document.getElementById('mkt-lead').value;
+            if (!data.name) return UI.toast.error('Name is required');
+        } else if (type === 'bujishu') {
+            data.name = document.getElementById('mkt-name').value.trim();
+            data.category = document.getElementById('mkt-category').value.trim();
+            data.function_desc = document.getElementById('mkt-function-desc').value;
+            data.price = parseFloat(document.getElementById('mkt-price').value) || 0;
+            data.delivery_lead_time = document.getElementById('mkt-lead').value;
+            if (!data.name) return UI.toast.error('Name is required');
+        } else if (type === 'formula') {
+            data.name = document.getElementById('mkt-name').value.trim();
+            data.category = document.getElementById('mkt-category').value.trim();
+            data.functions = document.getElementById('mkt-functions').value;
+            data.pills_bottles = document.getElementById('mkt-pills-bottles').value;
+            data.price = parseFloat(document.getElementById('mkt-price').value) || 0;
             data.delivery_lead_time = document.getElementById('mkt-lead').value;
             if (!data.name) return UI.toast.error('Name is required');
         } else if (type === 'events') {
