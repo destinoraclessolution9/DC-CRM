@@ -20282,19 +20282,29 @@ const exportKPIReport = async (format) => {
 
     const deleteMarketingListItem = async (id) => {
         if (confirm('Are you sure you want to delete this record? This action cannot be undone.')) {
-            // When deleting an event, cascade-delete linked activities and attendees
-            // to prevent orphaned entries appearing on calendar and prospect profiles.
-            if (_currentMarketingListTab === 'events') {
-                const allActivities = await AppDataStore.getAll('activities');
-                for (const act of allActivities.filter(a => String(a.event_id) === String(id))) {
-                    await AppDataStore.delete('activities', act.id);
+            try {
+                // When deleting an event, cascade-delete linked activities and attendees
+                // to prevent orphaned entries appearing on calendar and prospect profiles.
+                if (_currentMarketingListTab === 'events') {
+                    const allActivities = await AppDataStore.getAll('activities');
+                    for (const act of allActivities.filter(a => String(a.event_id) === String(id))) {
+                        await AppDataStore.delete('activities', act.id);
+                    }
+                    const allAttendees = await AppDataStore.getAll('event_attendees');
+                    for (const att of allAttendees.filter(a => String(a.event_id) === String(id))) {
+                        await AppDataStore.delete('event_attendees', att.id);
+                    }
                 }
-                const allAttendees = await AppDataStore.getAll('event_attendees');
-                for (const att of allAttendees.filter(a => String(a.event_id) === String(id))) {
-                    await AppDataStore.delete('event_attendees', att.id);
-                }
+                await AppDataStore.delete(_currentMarketingListTab, id);
+            } catch (e) {
+                console.warn('Supabase delete failed, cleaning up localStorage:', e);
+                // If Supabase delete fails (e.g. table missing), still remove from localStorage
+                try {
+                    const key = `fs_crm_${_currentMarketingListTab}`;
+                    const all = JSON.parse(localStorage.getItem(key) || '[]');
+                    localStorage.setItem(key, JSON.stringify(all.filter(r => String(r.id) !== String(id))));
+                } catch (_) {}
             }
-            await AppDataStore.delete(_currentMarketingListTab, id);
             UI.toast.success('Record deleted');
             const viewport = document.getElementById('content-viewport');
             await showMarketingListsView(viewport);
