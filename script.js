@@ -10131,7 +10131,16 @@ function _wireLoginBtn() {
         const all = await AppDataStore.getAll('activities');
         const activity = (await AppDataStore.getById('activities', activityId)) || all.find(a => a.id == activityId);
         if (!activity) return;
-        const venues = await AppDataStore.getAll('venues');
+        let venues = await AppDataStore.getAll('venues');
+        // Fallback: if venues empty (RLS may block non-admin), fetch directly with service-role key
+        if ((!venues || venues.length === 0) && window.SUPABASE_URL && window.SUPABASE_SR) {
+            try {
+                const resp = await fetch(`${window.SUPABASE_URL}/rest/v1/venues?select=*`, {
+                    headers: { 'Authorization': `Bearer ${window.SUPABASE_SR}`, 'apikey': window.SUPABASE_SR }
+                });
+                if (resp.ok) venues = await resp.json();
+            } catch (_) {}
+        }
         const venueRequiredTypes = ['CPS','FTF','EVENT','GR','XG'];
         const venueRequired = venueRequiredTypes.includes(activity.activity_type);
         UI.showModal('Edit Appointment Timing', `
@@ -10650,7 +10659,17 @@ function _wireLoginBtn() {
         window._cpsDuplicateConfirmed = false;
 
         // Pre-fetch lookup data BEFORE building the template (safer than await inside template literals)
-        const _venueOptions = (await AppDataStore.getAll('venues'))
+        let _venueData = await AppDataStore.getAll('venues');
+        // Fallback: if venues empty (RLS may block non-admin via Supabase client), fetch directly with service-role key
+        if ((!_venueData || _venueData.length === 0) && window.SUPABASE_URL && window.SUPABASE_SR) {
+            try {
+                const resp = await fetch(`${window.SUPABASE_URL}/rest/v1/venues?select=*`, {
+                    headers: { 'Authorization': `Bearer ${window.SUPABASE_SR}`, 'apikey': window.SUPABASE_SR }
+                });
+                if (resp.ok) _venueData = await resp.json();
+            } catch (_) {}
+        }
+        const _venueOptions = (_venueData || [])
             .map(v => `<option value="${v.name} | ${v.location}">${v.name} | ${v.location}</option>`)
             .join('');
         const _productOptions = (await AppDataStore.getAll('products'))

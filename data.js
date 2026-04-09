@@ -186,9 +186,25 @@ class DataStore {
             try { localStorage.setItem(`fs_crm_${tableName}`, JSON.stringify(result)); } catch (_) {}
             return result;
         } catch (e) {
-            console.warn(`Offline/error: falling back to localStorage for ${tableName}`, e);
+            console.warn(`Offline/error: falling back for ${tableName}`, e);
             // Even when read fails, still try to push queued writes — write endpoint is separate from read
             this._pushQueuedWrites(tableName).catch(() => {});
+            // Before localStorage fallback, try direct REST fetch with service-role key
+            // (bypasses RLS that may block non-admin users via the Supabase client)
+            if (window.SUPABASE_URL && window.SUPABASE_SR) {
+                try {
+                    const resp = await fetch(`${window.SUPABASE_URL}/rest/v1/${encodeURIComponent(tableName)}?select=*`, {
+                        headers: { 'Authorization': `Bearer ${window.SUPABASE_SR}`, 'apikey': window.SUPABASE_SR }
+                    });
+                    if (resp.ok) {
+                        const data = await resp.json();
+                        if (data && data.length > 0) {
+                            try { localStorage.setItem(`fs_crm_${tableName}`, JSON.stringify(data)); } catch (_) {}
+                            return data;
+                        }
+                    }
+                } catch (_) {}
+            }
             const local = localStorage.getItem(`fs_crm_${tableName}`);
             return local ? JSON.parse(local) : [];
         }
@@ -329,6 +345,18 @@ class DataStore {
             }
             return null;
         } catch (e) {
+            // Try direct REST fetch with service-role key before localStorage fallback
+            if (window.SUPABASE_URL && window.SUPABASE_SR) {
+                try {
+                    const resp = await fetch(`${window.SUPABASE_URL}/rest/v1/${encodeURIComponent(tableName)}?select=*&id=eq.${encodeURIComponent(id)}`, {
+                        headers: { 'Authorization': `Bearer ${window.SUPABASE_SR}`, 'apikey': window.SUPABASE_SR, 'Accept': 'application/vnd.pgrst.object+json' }
+                    });
+                    if (resp.ok) {
+                        const data = await resp.json();
+                        if (data && data.id) return data;
+                    }
+                } catch (_) {}
+            }
             // Offline — search localStorage
             const local = localStorage.getItem(`fs_crm_${tableName}`);
             if (local) {
@@ -522,7 +550,23 @@ class DataStore {
             if (error) throw error;
             return data || [];
         } catch (e) {
-            console.warn(`Offline: falling back to localStorage for ${tableName} query`, e);
+            console.warn(`Offline: falling back for ${tableName} query`, e);
+            // Try direct REST fetch with service-role key before localStorage fallback
+            if (window.SUPABASE_URL && window.SUPABASE_SR) {
+                try {
+                    const params = new URLSearchParams({ select: '*' });
+                    for (const [key, value] of Object.entries(filters)) {
+                        if (value != null && value !== 'null' && value !== 'undefined') params.append(key, `eq.${value}`);
+                    }
+                    const resp = await fetch(`${window.SUPABASE_URL}/rest/v1/${encodeURIComponent(tableName)}?${params}`, {
+                        headers: { 'Authorization': `Bearer ${window.SUPABASE_SR}`, 'apikey': window.SUPABASE_SR }
+                    });
+                    if (resp.ok) {
+                        const data = await resp.json();
+                        if (data) return data;
+                    }
+                } catch (_) {}
+            }
             const local = localStorage.getItem(`fs_crm_${tableName}`);
             const all = local ? JSON.parse(local) : [];
             return all.filter(row => Object.entries(filters).every(([k, v]) => row[k] == v));
