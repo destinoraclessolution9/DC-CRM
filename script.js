@@ -10372,8 +10372,81 @@ function _wireLoginBtn() {
         if (document.querySelector('.calendar-view-container')) { await renderCalendar(); await renderTodayActivities(); }
     };
 
+    // ── Helpers for multi-select checkbox fields in Post-Meetup Notes ──
+    const parseSelectedItems = (savedText) => {
+        if (!savedText) return { selected: [], remarks: '' };
+        const remarksMatch = savedText.match(/\|\s*Remarks:\s*([\s\S]*)/);
+        const remarks = remarksMatch ? remarksMatch[1].trim() : '';
+        const itemsPart = remarksMatch ? savedText.slice(0, remarksMatch.index).trim() : savedText;
+        const selected = [];
+        const groupRegex = /\[([^\]]+)\]\s*([^[|]*)/g;
+        let match;
+        while ((match = groupRegex.exec(itemsPart)) !== null) {
+            const names = match[2].split(',').map(n => n.trim()).filter(Boolean);
+            selected.push(...names);
+        }
+        // Old free-text data without group markers → treat as remarks
+        if (selected.length === 0 && !remarksMatch) return { selected: [], remarks: savedText };
+        return { selected, remarks };
+    };
+
+    const serializeMultiSelectToText = (checkboxName, remarksId) => {
+        const checked = Array.from(document.querySelectorAll(`input[name="${checkboxName}"]:checked`));
+        const groups = {};
+        for (const cb of checked) {
+            const group = cb.dataset.group || 'Items';
+            if (!groups[group]) groups[group] = [];
+            groups[group].push(cb.value);
+        }
+        const parts = Object.entries(groups).map(([g, items]) => `[${g}] ${items.join(', ')}`);
+        const remarks = document.getElementById(remarksId)?.value?.trim() || '';
+        let result = parts.join(' | ');
+        if (remarks) result += (result ? ' | ' : '') + 'Remarks: ' + remarks;
+        return result;
+    };
+
+    const serializeEventSelectToText = (checkboxName, remarksId) => {
+        const checked = Array.from(document.querySelectorAll(`input[name="${checkboxName}"]:checked`));
+        const items = checked.map(cb => cb.value);
+        const remarks = document.getElementById(remarksId)?.value?.trim() || '';
+        let result = items.join(', ');
+        if (remarks) result += (result ? ' | ' : '') + 'Remarks: ' + remarks;
+        return result;
+    };
+
     const openPostMeetupNotesModal = async (activityId, prospectId) => {
         const activity = await AppDataStore.getById('activities', activityId) || {};
+
+        // Fetch product/event data for multi-select dropdowns
+        const [products, bujishuItems, formulaItems, events] = await Promise.all([
+            AppDataStore.getAll('products').then(r => r.filter(p => p.is_active !== false)),
+            AppDataStore.getAll('bujishu').then(r => r.filter(b => b.is_active !== false)),
+            AppDataStore.getAll('formula').then(r => r.filter(f => f.is_active !== false)),
+            AppDataStore.getAll('events').then(r => r.filter(e => e.is_active !== false && e.status !== 'inactive')),
+        ]);
+
+        const parsedOpp = parseSelectedItems(activity.opportunity_potential || '');
+        const parsedNA = parseSelectedItems(activity.next_action || '');
+
+        const makeCheckbox = (name, value, group, selectedArr) => {
+            const checked = selectedArr.includes(value) ? 'checked' : '';
+            const groupAttr = group ? ` data-group="${escapeHtml(group)}"` : '';
+            return `<label style="display:flex;align-items:center;gap:6px;margin-bottom:4px;cursor:pointer;font-size:13px;padding:3px 8px;border-radius:4px;" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background=''">
+                <input type="checkbox" name="${name}" value="${escapeHtml(value)}"${groupAttr} ${checked}> ${escapeHtml(value)}
+            </label>`;
+        };
+
+        const oppCheckboxes = [
+            ...(products.length ? [`<div style="font-weight:600;font-size:12px;color:var(--primary);margin-bottom:4px;border-bottom:1px solid var(--gray-200);padding-bottom:3px;">Products</div>`] : []),
+            ...products.map(p => makeCheckbox('pmn-opp-items', p.name, 'Products', parsedOpp.selected)),
+            ...(bujishuItems.length ? [`<div style="font-weight:600;font-size:12px;color:var(--primary);margin:8px 0 4px;border-bottom:1px solid var(--gray-200);padding-bottom:3px;">Bujishu</div>`] : []),
+            ...bujishuItems.map(b => makeCheckbox('pmn-opp-items', b.name, 'Bujishu', parsedOpp.selected)),
+            ...(formulaItems.length ? [`<div style="font-weight:600;font-size:12px;color:var(--primary);margin:8px 0 4px;border-bottom:1px solid var(--gray-200);padding-bottom:3px;">Formula</div>`] : []),
+            ...formulaItems.map(f => makeCheckbox('pmn-opp-items', f.name, 'Formula', parsedOpp.selected)),
+        ];
+
+        const naCheckboxes = events.map(e => makeCheckbox('pmn-na-items', e.event_title || e.title || '', '', parsedNA.selected));
+
         const content = `
             <div class="form-group">
                 <label>Key Points Discussed:</label>
@@ -10398,19 +10471,25 @@ function _wireLoginBtn() {
             </div>
             <div class="form-group">
                 <label>Potential &amp; Opportunities:</label>
-                <div style="display:flex; gap:8px;">
-                    <textarea id="pmn-opportunity" class="form-control" rows="2" placeholder="Solution proposed or opportunity identified...">${activity.opportunity_potential || ''}</textarea>
-                    <button class="btn-icon" onclick="app.openVoiceRecorder('pmn-opportunity', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+                <div style="border:1px solid var(--gray-300);border-radius:6px;padding:10px;max-height:180px;overflow-y:auto;background:#fafafa;">
+                    ${oppCheckboxes.length > 0 ? oppCheckboxes.join('') : '<p style="color:var(--gray-400);font-size:12px;margin:0;">No products/items available.</p>'}
                 </div>
-                <div style="font-size:11px;color:var(--gray-400);margin-top:3px;"><i class="fas fa-link"></i> Linked to prospect profile → Potential &amp; Opportunities</div>
+                <div style="display:flex; gap:8px; margin-top:6px;">
+                    <textarea id="pmn-opportunity-remarks" class="form-control" rows="2" placeholder="Additional remarks...">${parsedOpp.remarks}</textarea>
+                    <button class="btn-icon" onclick="app.openVoiceRecorder('pmn-opportunity-remarks', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+                </div>
+                <div style="font-size:11px;color:var(--gray-400);margin-top:3px;"><i class="fas fa-link"></i> Linked to prospect profile → Potential &amp; Opportunities / Pipeline → Target to Sign</div>
             </div>
             <div class="form-group">
                 <label>Next Actions:</label>
-                <div style="display:flex; gap:8px;">
-                    <textarea id="pmn-next-action" class="form-control" rows="2" placeholder="What is the next action to take?">${activity.next_action || ''}</textarea>
-                    <button class="btn-icon" onclick="app.openVoiceRecorder('pmn-next-action', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+                <div style="border:1px solid var(--gray-300);border-radius:6px;padding:10px;max-height:180px;overflow-y:auto;background:#fafafa;">
+                    ${naCheckboxes.length > 0 ? naCheckboxes.join('') : '<p style="color:var(--gray-400);font-size:12px;margin:0;">No active events found.</p>'}
                 </div>
-                <div style="font-size:11px;color:var(--gray-400);margin-top:3px;"><i class="fas fa-link"></i> Linked to prospect profile → Next Actions</div>
+                <div style="display:flex; gap:8px; margin-top:6px;">
+                    <textarea id="pmn-next-action-remarks" class="form-control" rows="2" placeholder="Additional remarks...">${parsedNA.remarks}</textarea>
+                    <button class="btn-icon" onclick="app.openVoiceRecorder('pmn-next-action-remarks', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+                </div>
+                <div style="font-size:11px;color:var(--gray-400);margin-top:3px;"><i class="fas fa-link"></i> Linked to prospect profile → Next Actions / Pipeline → Action Needed to Close Deal</div>
             </div>
         `;
         UI.showModal('📝 Post-Meetup Notes', content, [
@@ -10425,8 +10504,8 @@ function _wireLoginBtn() {
             summary: document.getElementById('pmn-key-points')?.value || '',
             note_needs: document.getElementById('pmn-needs')?.value || '',
             note_pain_points: document.getElementById('pmn-pain-points')?.value || '',
-            opportunity_potential: document.getElementById('pmn-opportunity')?.value || '',
-            next_action: document.getElementById('pmn-next-action')?.value || '',
+            opportunity_potential: serializeMultiSelectToText('pmn-opp-items', 'pmn-opportunity-remarks'),
+            next_action: serializeEventSelectToText('pmn-na-items', 'pmn-next-action-remarks'),
         };
         await AppDataStore.update('activities', activityId, updates);
         UI.hideModal();
@@ -17378,9 +17457,13 @@ const deactivateAgent = async (agentId) => {
         const now = new Date();
 
         let lastActivityDate = null;
+        let latestOppPotential = '';
+        let latestNextAction = '';
         if (prospectActivities.length > 0) {
             const sorted = [...prospectActivities].sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
             lastActivityDate = new Date(sorted[0].activity_date);
+            latestOppPotential = sorted.find(a => a.opportunity_potential?.trim())?.opportunity_potential || '';
+            latestNextAction = sorted.find(a => a.next_action?.trim())?.next_action || '';
         }
 
         const daysSinceLast = lastActivityDate
@@ -17419,7 +17502,7 @@ const deactivateAgent = async (agentId) => {
         const probability = isQualified ? Math.round(100 * getMultiplier(daysSinceLast)) : 0;
         const action = generatePipelineAction(category, missingPrereqs, daysSinceLast, isQualified);
 
-        return { category, probability, missingPrereqs, completedPrereqs, daysSinceLast, lastActivityDate, action, qualified: isQualified };
+        return { category, probability, missingPrereqs, completedPrereqs, daysSinceLast, lastActivityDate, action, qualified: isQualified, latestOppPotential, latestNextAction };
     };
 
     const generatePipelineAction = (category, missingPrereqs, daysSinceLast, isQualified) => {
@@ -17715,11 +17798,11 @@ const deactivateAgent = async (agentId) => {
                 </td>
                 <td style="padding:14px 12px;">
                     <div style="font-weight:500;color:#1E40AF;">${escapeHtml(entry.category?.name || 'Unknown')}</div>
-                    <div style="font-size:11px;color:#9CA3AF;">${escapeHtml(entry.category?.products || '')}</div>
+                    <div style="font-size:11px;color:#9CA3AF;">${escapeHtml(entry.latestOppPotential || entry.category?.products || '')}</div>
                 </td>
                 <td style="padding:14px 12px;font-weight:600;color:#059669;">RM ${(amount || 0).toLocaleString()}</td>
                 <td style="padding:14px 12px;">${probBadge(entry.probability)}</td>
-                <td style="padding:14px 12px;font-size:13px;line-height:1.5;max-width:260px;">${entry.action}</td>
+                <td style="padding:14px 12px;font-size:13px;line-height:1.5;max-width:260px;">${entry.latestNextAction ? escapeHtml(entry.latestNextAction) : entry.action}</td>
                 <td style="padding:14px 12px;">
                     <div style="display:flex;gap:6px;">
                         <button class="btn-icon" onclick="event.stopPropagation();app.showProspectMenu(${prospect.id})" title="View Profile"><i class="fas fa-eye"></i></button>
@@ -17754,10 +17837,11 @@ const deactivateAgent = async (agentId) => {
                 <td style="padding:14px 12px;">
                     <div style="font-weight:500;color:#1E40AF;">${entry.fromPotential ? 'Prospect Potential' : escapeHtml(entry.category?.name || '')}</div>
                     <div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:2px;">${prereqsHtml}</div>
+                    ${entry.latestOppPotential ? `<div style="font-size:11px;color:#9CA3AF;margin-top:4px;">${escapeHtml(entry.latestOppPotential)}</div>` : ''}
                 </td>
                 <td style="padding:14px 12px;font-weight:600;color:#059669;">RM ${(amount || 0).toLocaleString()}</td>
                 <td style="padding:14px 12px;">${probBadge(entry.probability)}</td>
-                <td style="padding:14px 12px;font-size:13px;line-height:1.5;max-width:260px;">${entry.action}</td>
+                <td style="padding:14px 12px;font-size:13px;line-height:1.5;max-width:260px;">${entry.latestNextAction ? escapeHtml(entry.latestNextAction) : entry.action}</td>
                 <td style="padding:14px 12px;">
                     <div style="display:flex;gap:6px;flex-wrap:wrap;">
                         <button class="btn secondary btn-sm" style="padding:4px 10px;font-size:11px;" onclick="app.addToFocusList(${prospect.id})"><i class="fas fa-plus"></i> Add to Focus</button>
