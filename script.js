@@ -20420,6 +20420,7 @@ const exportKPIReport = async (format) => {
                             <th>Name</th>
                             <th>Category</th>
                             <th>Functions Description</th>
+                            <th>Product Description</th>
                             <th>Price (RM)</th>
                             <th>Lead Time</th>
                             <th>Status</th>
@@ -20432,6 +20433,7 @@ const exportKPIReport = async (format) => {
                                 <td><strong>${item.name}</strong><br><small class="text-muted">${item.remarks || ''}</small></td>
                                 <td>${item.category || '-'}</td>
                                 <td>${item.functions_description || '-'}</td>
+                                <td>${item.description || '-'}</td>
                                 <td>${item.price || 0}</td>
                                 <td>${item.delivery_lead_time || '-'}</td>
                                 <td>
@@ -20604,6 +20606,7 @@ const exportKPIReport = async (format) => {
                 <div class="form-group"><label>Name*</label><input type="text" id="mkt-name" class="form-control"></div>
                 <div class="form-group"><label>Category</label><input type="text" id="mkt-category" class="form-control" placeholder="e.g. Power Ring, 画作, 风水方案"></div>
                 <div class="form-group"><label>Functions Description</label><textarea id="mkt-functions-desc" class="form-control" placeholder="Describe functions..."></textarea></div>
+                <div class="form-group"><label>Product Description</label><textarea id="mkt-desc" class="form-control" placeholder="Describe the product..."></textarea></div>
                 <div class="form-group"><label>Price (RM)</label><input type="number" id="mkt-price" class="form-control" value="0"></div>
                 <div class="form-group"><label>Remarks</label><input type="text" id="mkt-remarks" class="form-control"></div>
                 <div class="form-group"><label>Delivery Lead Time</label><input type="text" id="mkt-lead" class="form-control" placeholder="e.g. 3-5 days"></div>
@@ -20681,6 +20684,7 @@ const exportKPIReport = async (format) => {
                 <div class="form-group"><label>Name*</label><input type="text" id="mkt-name" class="form-control" value="${item.name}"></div>
                 <div class="form-group"><label>Category</label><input type="text" id="mkt-category" class="form-control" value="${item.category || ''}" placeholder="e.g. Power Ring, 画作, 风水方案"></div>
                 <div class="form-group"><label>Functions Description</label><textarea id="mkt-functions-desc" class="form-control" placeholder="Describe functions...">${item.functions_description || ''}</textarea></div>
+                <div class="form-group"><label>Product Description</label><textarea id="mkt-desc" class="form-control" placeholder="Describe the product...">${item.description || ''}</textarea></div>
                 <div class="form-group"><label>Price (RM)</label><input type="number" id="mkt-price" class="form-control" value="${item.price || 0}"></div>
                 <div class="form-group"><label>Remarks</label><input type="text" id="mkt-remarks" class="form-control" value="${item.remarks || ''}"></div>
                 <div class="form-group"><label>Delivery Lead Time</label><input type="text" id="mkt-lead" class="form-control" value="${item.delivery_lead_time || ''}"></div>
@@ -20765,6 +20769,7 @@ const exportKPIReport = async (format) => {
             data.name = document.getElementById('mkt-name').value.trim();
             data.category = document.getElementById('mkt-category').value.trim();
             data.functions_description = document.getElementById('mkt-functions-desc').value;
+            data.description = document.getElementById('mkt-desc')?.value || '';
             data.price = parseFloat(document.getElementById('mkt-price').value) || 0;
             data.remarks = document.getElementById('mkt-remarks').value;
             data.delivery_lead_time = document.getElementById('mkt-lead').value;
