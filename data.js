@@ -42,7 +42,9 @@ class DataStore {
             'tree_interested',
             'approval_queue',
             // Level 13/14 account type tables
-            'user_milestones', 'news_highlights', 'recommendation_rewards', 'user_fudi_summary'
+            'user_milestones', 'news_highlights', 'recommendation_rewards', 'user_fudi_summary',
+            // User preferences (migrated from localStorage)
+            'user_preferences'
         ];
         this.initialized = false;
         this._events = {};

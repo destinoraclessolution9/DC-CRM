@@ -1,9 +1,9 @@
 // ========== MOBILE SETTINGS ==========
 
 const showMobileSettings = () => {
-    const biometricEnabled = localStorage.getItem('biometric_enabled') === 'true';
+    const biometricEnabled = typeof UserPreferences !== 'undefined' ? UserPreferences.getSync('biometric_enabled', false) : localStorage.getItem('biometric_enabled') === 'true';
     const notificationsEnabled = Notification.permission === 'granted';
-    const offlineMode = localStorage.getItem('offline_mode') === 'true';
+    const offlineMode = typeof UserPreferences !== 'undefined' ? UserPreferences.getSync('offline_mode', false) : localStorage.getItem('offline_mode') === 'true';
 
     const content = `
         <div class="mobile-settings">
@@ -192,17 +192,24 @@ const showMobileSettings = () => {
 };
 
 // Save mobile settings
-const saveMobileSettings = () => {
+const saveMobileSettings = async () => {
     const biometricEnabled = document.getElementById('biometric-toggle')?.checked;
     const offlineMode = document.getElementById('offline-toggle')?.checked;
     const autoLockTime = document.getElementById('auto-lock-time')?.value;
     const syncFrequency = document.getElementById('sync-frequency')?.value;
     const notificationsEnabled = document.getElementById('notifications-toggle')?.checked;
 
-    localStorage.setItem('biometric_enabled', biometricEnabled);
-    localStorage.setItem('offline_mode', offlineMode);
-    localStorage.setItem('auto_lock_time', autoLockTime);
-    localStorage.setItem('sync_frequency', syncFrequency);
+    if (typeof UserPreferences !== 'undefined') {
+        await UserPreferences.save('biometric_enabled', !!biometricEnabled);
+        await UserPreferences.save('offline_mode', !!offlineMode);
+        await UserPreferences.save('auto_lock_time', parseInt(autoLockTime) || 5);
+        await UserPreferences.save('sync_frequency', parseInt(syncFrequency) || 15);
+    } else {
+        localStorage.setItem('biometric_enabled', biometricEnabled);
+        localStorage.setItem('offline_mode', offlineMode);
+        localStorage.setItem('auto_lock_time', autoLockTime);
+        localStorage.setItem('sync_frequency', syncFrequency);
+    }
 
     if (notificationsEnabled && Notification.permission !== 'granted') {
         requestNotificationPermission();
