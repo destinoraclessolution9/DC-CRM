@@ -80,13 +80,18 @@ const ConfigManager = {
     config: {},
 
     // Load configuration
-    loadConfig: () => {
-        // Try to load from localStorage
+    loadConfig: async () => {
+        // Try Supabase first, then localStorage fallback
         let saved = null;
         try {
-            saved = localStorage.getItem('system_config');
-        } catch (e) {
-            console.warn('ConfigManager: localStorage load blocked');
+            if (typeof AppDataStore !== 'undefined') {
+                const configs = await AppDataStore.getAll('system_config');
+                const row = (configs || []).find(c => c.config_key === 'system_config');
+                if (row && row.config_value) saved = JSON.stringify(row.config_value);
+            }
+        } catch (_) {}
+        if (!saved) {
+            try { saved = localStorage.getItem('system_config'); } catch (e) { console.warn('ConfigManager: localStorage load blocked'); }
         }
 
         if (saved) {
@@ -106,8 +111,21 @@ const ConfigManager = {
     },
 
     // Save configuration
-    saveConfig: (newConfig) => {
+    saveConfig: async (newConfig) => {
         ConfigManager.config = ConfigManager.mergeDefaults(newConfig, ConfigManager.defaults);
+        // Write to Supabase
+        try {
+            if (typeof AppDataStore !== 'undefined') {
+                const configs = await AppDataStore.getAll('system_config');
+                const existing = (configs || []).find(c => c.config_key === 'system_config');
+                if (existing) {
+                    await AppDataStore.update('system_config', existing.id, { config_value: ConfigManager.config, updated_at: new Date().toISOString() });
+                } else {
+                    await AppDataStore.create('system_config', { config_key: 'system_config', config_value: ConfigManager.config, updated_at: new Date().toISOString() });
+                }
+            }
+        } catch (_) {}
+        // Also write to localStorage as cache
         try {
             localStorage.setItem('system_config', JSON.stringify(ConfigManager.config));
         } catch (e) {

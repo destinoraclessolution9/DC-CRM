@@ -29,6 +29,91 @@ window.onerror = (msg, url, line) => {
     console.error(`GLOBAL ERROR: ${msg} at ${url}:${line}`);
 };
 
+// ==================== USER PREFERENCES (Supabase-backed, localStorage cache) ====================
+const UserPreferences = {
+    _cache: {},       // { pref_key: { id, value } }
+    _userId: null,
+    _loaded: false,
+
+    async load(userId) {
+        this._userId = userId;
+        this._cache = {};
+        try {
+            const allPrefs = await AppDataStore.getAll('user_preferences');
+            const myPrefs = (allPrefs || []).filter(p => String(p.user_id) === String(userId));
+            for (const pref of myPrefs) {
+                this._cache[pref.pref_key] = { id: pref.id, value: pref.pref_value };
+            }
+        } catch (e) {
+            console.warn('UserPreferences.load failed, using localStorage fallback:', e.message);
+        }
+        // One-time migration from localStorage
+        if (!this._cache['_migrated']) {
+            await this._migrateFromLocalStorage(userId);
+        }
+        this._loaded = true;
+    },
+
+    getSync(key, defaultValue) {
+        const entry = this._cache[key];
+        if (entry !== undefined && entry.value !== undefined && entry.value !== null) return entry.value;
+        return defaultValue;
+    },
+
+    async save(key, value) {
+        const existing = this._cache[key];
+        const now = new Date().toISOString();
+        try {
+            if (existing && existing.id) {
+                await AppDataStore.update('user_preferences', existing.id, {
+                    pref_value: value, updated_at: now
+                });
+                this._cache[key] = { id: existing.id, value };
+            } else {
+                const row = await AppDataStore.create('user_preferences', {
+                    user_id: this._userId, pref_key: key, pref_value: value, updated_at: now
+                });
+                this._cache[key] = { id: row?.id || Date.now(), value };
+            }
+        } catch (e) {
+            console.warn('UserPreferences.save failed:', e.message);
+            // Still update in-memory cache so getSync works this session
+            this._cache[key] = { id: existing?.id || null, value };
+        }
+    },
+
+    async remove(key) {
+        const existing = this._cache[key];
+        if (existing && existing.id) {
+            try { await AppDataStore.delete('user_preferences', existing.id); } catch (_) {}
+        }
+        delete this._cache[key];
+    },
+
+    async _migrateFromLocalStorage(userId) {
+        const migrations = [
+            { lsKey: 'voice_settings', prefKey: 'voice_settings', parse: v => { try { return JSON.parse(v); } catch(_) { return null; } } },
+            { lsKey: `hidden_top_referrers_v2_${userId}`, prefKey: 'hidden_referrers', parse: v => { try { return JSON.parse(v); } catch(_) { return null; } } },
+            { lsKey: 'session_timeout', prefKey: 'session_timeout', parse: v => parseInt(v) || 30 },
+            { lsKey: 'biometric_enabled', prefKey: 'biometric_enabled', parse: v => v === 'true' },
+            { lsKey: 'offline_mode', prefKey: 'offline_mode', parse: v => v === 'true' },
+            { lsKey: 'auto_lock_time', prefKey: 'auto_lock_time', parse: v => parseInt(v) || 5 },
+            { lsKey: 'sync_frequency', prefKey: 'sync_frequency', parse: v => parseInt(v) || 15 },
+            { lsKey: 'last_username', prefKey: 'last_username', parse: v => v },
+        ];
+        for (const m of migrations) {
+            try {
+                const raw = localStorage.getItem(m.lsKey);
+                if (raw != null && !this._cache[m.prefKey]) {
+                    const value = m.parse(raw);
+                    if (value != null) await this.save(m.prefKey, value);
+                }
+            } catch (_) {}
+        }
+        try { await this.save('_migrated', true); } catch (_) {}
+    }
+};
+window.UserPreferences = UserPreferences;
 
 const appLogic = (() => {
     let _currentView = 'dashboard';
@@ -2679,7 +2764,7 @@ In a production system, this would show the actual file contents.
     };
 
     const processRecording = async () => {
-        const voiceSettings = JSON.parse(localStorage.getItem('voice_settings') || '{}');
+        const voiceSettings = UserPreferences.getSync('voice_settings', {});
         const delay = voiceSettings.quality === 'high' ? 3000 : voiceSettings.quality === 'fast' ? 1000 : 2000;
 
         (() => {
@@ -2792,7 +2877,7 @@ In a production system, this would show the actual file contents.
     };
 
     const openVoiceSettings = () => {
-        const saved = JSON.parse(localStorage.getItem('voice_settings') || '{}');
+        const saved = UserPreferences.getSync('voice_settings', {});
         const lang = saved.language || 'en';
         const quality = saved.quality || 'balanced';
         const deleteAudioPref = saved.deleteAudio !== false;
@@ -2826,14 +2911,14 @@ In a production system, this would show the actual file contents.
         ]);
     };
 
-    const saveVoiceSettings = () => {
+    const saveVoiceSettings = async () => {
         const settings = {
             language: document.querySelector('input[name="voice-language"]:checked')?.value || 'en',
             quality: document.querySelector('input[name="voice-quality"]:checked')?.value || 'balanced',
             deleteAudio: document.getElementById('voice-delete-audio')?.checked ?? true,
             saveAudio: document.getElementById('voice-save-audio')?.checked ?? false
         };
-        localStorage.setItem('voice_settings', JSON.stringify(settings));
+        await UserPreferences.save('voice_settings', settings);
         UI.hideModal();
         UI.toast.success('Voice settings saved');
     };
@@ -5917,6 +6002,7 @@ function _wireLoginBtn() {
             }
             
             _currentUser = profile;
+            await UserPreferences.load(profile.id);
             document.getElementById('login-container').style.display = 'none';
             document.getElementById('app-shell').style.display = 'block';
             updateUserDisplay();
@@ -5991,6 +6077,7 @@ function _wireLoginBtn() {
                 }
                 if (profile) {
                     _currentUser = profile;
+                    await UserPreferences.load(profile.id);
                 } else {
                     // Auth session exists but no matching user profile — force sign out
                     console.warn('No user profile found for:', authUser.email, '— signing out.');
@@ -7567,10 +7654,8 @@ function _wireLoginBtn() {
         const container = document.getElementById('referral-leaderboard-container');
         if (!container) return;
 
-        const userId = _currentUser?.id || 'guest';
-        const hiddenKey = `hidden_top_referrers_v2_${userId}`;
-        const hiddenIds = JSON.parse(localStorage.getItem(hiddenKey) || '[]');
-        
+        const hiddenIds = UserPreferences.getSync('hidden_referrers', []);
+
         const referrals = await AppDataStore.getAll('referrals');
         const grouped = {};
         referrals.forEach(r => {
@@ -7648,24 +7733,20 @@ function _wireLoginBtn() {
     };
 
     const toggleHideReferrer = async (id) => {
-        const userId = _currentUser?.id || 'guest';
-        const hiddenKey = `hidden_top_referrers_v2_${userId}`;
-        let hiddenIds = JSON.parse(localStorage.getItem(hiddenKey) || '[]');
+        let hiddenIds = UserPreferences.getSync('hidden_referrers', []);
         id = String(id);
         if (hiddenIds.includes(id)) {
             hiddenIds = hiddenIds.filter(hid => hid !== id);
         } else {
             hiddenIds.push(id);
         }
-        localStorage.setItem(hiddenKey, JSON.stringify(hiddenIds));
+        await UserPreferences.save('hidden_referrers', hiddenIds);
         await renderLeaderboard();
         UI.toast.info("Leaderboard preferences updated.");
     };
 
     const resetHiddenReferrers = async () => {
-        const userId = _currentUser?.id || 'guest';
-        const hiddenKey = `hidden_top_referrers_v2_${userId}`;
-        localStorage.removeItem(hiddenKey);
+        await UserPreferences.save('hidden_referrers', []);
         await renderLeaderboard();
         UI.toast.success("Hidden referrers reset.");
     };
@@ -26315,7 +26396,7 @@ const initSecurity = async () => {
 
 let sessionTimeoutTimer;
 const initSessionTimeout = async () => {
-    const timeoutMinutes = parseInt(localStorage.getItem('session_timeout') || '30');
+    const timeoutMinutes = parseInt(UserPreferences.getSync('session_timeout', 30));
     const resetTimeout = async () => {
         clearTimeout(sessionTimeoutTimer);
         sessionTimeoutTimer = (window.app.logoutDueToInactivity, timeoutMinutes * 60 * 1000);
@@ -26337,13 +26418,27 @@ const logoutDueToInactivity = async () => {
     }
 };
 
-const monitorLoginAttempts = () => {
-    const failedAttempts = JSON.parse(localStorage.getItem('login_attempts') || '{}');
+const monitorLoginAttempts = async () => {
+    let failedAttempts = {};
+    try {
+        const rows = await AppDataStore.getAll('login_attempts');
+        if (rows && rows.length > 0) failedAttempts = rows[0].attempts_data || {};
+    } catch (_) {
+        failedAttempts = JSON.parse(localStorage.getItem('login_attempts') || '{}');
+    }
     const now = Date.now();
     Object.keys(failedAttempts).forEach(ip => {
         failedAttempts[ip] = failedAttempts[ip].filter(t => now - t < 24 * 60 * 60 * 1000);
         if (failedAttempts[ip].length === 0) delete failedAttempts[ip];
     });
+    try {
+        const rows = await AppDataStore.getAll('login_attempts');
+        if (rows && rows.length > 0) {
+            await AppDataStore.update('login_attempts', rows[0].id, { attempts_data: failedAttempts, updated_at: new Date().toISOString() });
+        } else {
+            await AppDataStore.create('login_attempts', { attempts_data: failedAttempts, updated_at: new Date().toISOString() });
+        }
+    } catch (_) {}
     localStorage.setItem('login_attempts', JSON.stringify(failedAttempts));
 };
 
@@ -26391,15 +26486,31 @@ const checkExpiredConsents = async () => {
 
 const scheduleRetentionJobs = async () => {
     if (typeof RetentionPolicy === 'undefined') return;
-    const runRetention = () => {
-        const lastRun = localStorage.getItem('last_retention_run');
+    const runRetention = async () => {
+        let lastRun = null;
+        try {
+            const configs = await AppDataStore.getAll('system_config');
+            const retentionConfig = (configs || []).find(c => c.config_key === 'last_retention_run');
+            if (retentionConfig) lastRun = retentionConfig.config_value;
+        } catch (_) {}
+        if (!lastRun) lastRun = localStorage.getItem('last_retention_run');
         if (!lastRun || Date.now() - parseInt(lastRun) > 24 * 60 * 60 * 1000) {
             RetentionPolicy.applyRetention();
-            localStorage.setItem('last_retention_run', Date.now().toString());
+            const now = Date.now().toString();
+            try {
+                const configs = await AppDataStore.getAll('system_config');
+                const existing = (configs || []).find(c => c.config_key === 'last_retention_run');
+                if (existing) {
+                    await AppDataStore.update('system_config', existing.id, { config_value: now, updated_at: new Date().toISOString() });
+                } else {
+                    await AppDataStore.create('system_config', { config_key: 'last_retention_run', config_value: now, updated_at: new Date().toISOString() });
+                }
+            } catch (_) {}
+            localStorage.setItem('last_retention_run', now);
         }
     };
-    runRetention();
-    (runRetention, 24 * 60 * 60 * 1000);
+    await runRetention();
+    setInterval(runRetention, 24 * 60 * 60 * 1000);
 };
 
 const showSecurityDashboard = async () => {

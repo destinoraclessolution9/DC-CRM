@@ -71,7 +71,7 @@ const registerBiometric = async (username, userId) => {
 
         if (result.success) {
             UI.toast.success('Biometric authentication enabled');
-            localStorage.setItem('biometric_enabled', 'true');
+            if (typeof UserPreferences !== 'undefined') { UserPreferences.save('biometric_enabled', true); } else { localStorage.setItem('biometric_enabled', 'true'); }
             return result;
         } else {
             throw new Error(result.error);
@@ -96,7 +96,7 @@ const authenticateWithBiometric = async () => {
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ username: localStorage.getItem('last_username') })
+            body: JSON.stringify({ username: (typeof UserPreferences !== 'undefined' ? UserPreferences.getSync('last_username', '') : localStorage.getItem('last_username')) || '' })
         });
 
         const options = await challengeResponse.json();
@@ -168,7 +168,7 @@ const arrayBufferToBase64 = (buffer) => {
 
 // Show biometric login option
 const showBiometricLogin = () => {
-    if (!localStorage.getItem('biometric_enabled')) return null;
+    if (typeof UserPreferences !== 'undefined' ? !UserPreferences.getSync('biometric_enabled', false) : !localStorage.getItem('biometric_enabled')) return null;
 
     const button = document.createElement('button');
     button.className = 'biometric-login-btn';
