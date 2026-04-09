@@ -3177,7 +3177,7 @@ In a production system, this would show the actual file contents.
 
             try {
                 const activities = await AppDataStore.getAll('activities');
-                const syncLog = this.getSyncLog();
+                const syncLog = await this.getSyncLog();
 
                 let synced = 0, created = 0, updated = 0, deleted = 0;
 
@@ -3205,7 +3205,11 @@ In a production system, this would show the actual file contents.
                 }
 
                 this.lastSyncTime = new Date().toISOString();
-                localStorage.setItem('last_google_sync', this.lastSyncTime);
+                // Persist last sync time to Supabase via sync_history
+                const _syncConn = await getGoogleConnection();
+                if (_syncConn) {
+                    AppDataStore.update('integration_connections', _syncConn.id, { last_sync_at: this.lastSyncTime }).catch(() => {});
+                }
 
                 if (created || updated || deleted) {
                     // Only show toast if something actually synced to avoid spam
@@ -3227,7 +3231,7 @@ In a production system, this would show the actual file contents.
                 const googleEvents = await this.googleCalendar.listEvents(timeMin, timeMax);
                 if (!googleEvents.length) { this.syncInProgress = false; return; }
 
-                const syncLog = this.getSyncLog();
+                const syncLog = await this.getSyncLog();
                 let imported = 0;
                 for (const gEvent of googleEvents) {
                     // Skip events that originated from CRM
@@ -3256,7 +3260,7 @@ In a production system, this would show the actual file contents.
                     syncLog.push({ google_event_id: gEvent.id, last_synced_at: new Date().toISOString() });
                     imported++;
                 }
-                localStorage.setItem('google_sync_log', JSON.stringify(syncLog));
+                // sync_history records are created per-event in addSyncRecord — no localStorage needed
                 if (imported > 0) UI.toast.success(`Imported ${imported} events from Google Calendar`);
             } catch (error) {
                 console.error('Import error:', error);
@@ -3272,21 +3276,18 @@ In a production system, this would show the actual file contents.
             return activityUpdated > syncUpdated;
         }
 
-        getSyncLog() {
-            const log = localStorage.getItem('google_sync_log');
-            return log ? JSON.parse(log) : [];
+        async getSyncLog() {
+            try {
+                const records = await AppDataStore.getAll('sync_history');
+                return records.map(r => ({
+                    activity_id: r.activity_id,
+                    google_event_id: r.google_event_id,
+                    last_synced_at: r.synced_at || r.last_synced_at
+                }));
+            } catch (_) { return []; }
         }
 
         async addSyncRecord(activityId, googleEventId) {
-            const log = this.getSyncLog();
-            log.push({
-                activity_id: activityId,
-                google_event_id: googleEventId,
-                last_synced_at: new Date().toISOString()
-            });
-            localStorage.setItem('google_sync_log', JSON.stringify(log));
-
-            // Also add to sync_history table
             const connection = await getGoogleConnection();
             if (connection && _currentUser) {
                 await AppDataStore.create('sync_history', {
@@ -3303,19 +3304,6 @@ In a production system, this would show the actual file contents.
         }
 
         async updateSyncRecord(activityId, googleEventId) {
-            const log = this.getSyncLog();
-            const record = log.find(r => r.activity_id === activityId);
-            if (record) {
-                record.last_synced_at = new Date().toISOString();
-            } else {
-                log.push({
-                    activity_id: activityId,
-                    google_event_id: googleEventId,
-                    last_synced_at: new Date().toISOString()
-                });
-            }
-            localStorage.setItem('google_sync_log', JSON.stringify(log));
-
             const connection = await getGoogleConnection();
             if (connection && _currentUser) {
                 await AppDataStore.create('sync_history', {
@@ -3331,10 +3319,13 @@ In a production system, this would show the actual file contents.
             }
         }
 
-        removeSyncRecord(activityId) {
-            const log = this.getSyncLog();
-            const filtered = log.filter(r => r.activity_id !== activityId);
-            localStorage.setItem('google_sync_log', JSON.stringify(filtered));
+        async removeSyncRecord(activityId) {
+            try {
+                const records = await AppDataStore.query('sync_history', { activity_id: activityId });
+                for (const r of records) {
+                    await AppDataStore.delete('sync_history', r.id);
+                }
+            } catch (_) {}
         }
 
         resolveConflict(choice, activityId, eventId) {
@@ -7568,9 +7559,12 @@ function _wireLoginBtn() {
         if (!container) return;
 
         const userId = _currentUser?.id || 'guest';
-        const hiddenKey = `hidden_top_referrers_v2_${userId}`;
-        const hiddenIds = JSON.parse(localStorage.getItem(hiddenKey) || '[]');
-        
+        let hiddenIds = [];
+        try {
+            const user = _currentUser?.id ? await AppDataStore.getById('users', _currentUser.id) : null;
+            hiddenIds = user?.hidden_referrers ? JSON.parse(user.hidden_referrers) : [];
+        } catch (_) {}
+
         const referrals = await AppDataStore.getAll('referrals');
         const grouped = {};
         referrals.forEach(r => {
@@ -7648,24 +7642,26 @@ function _wireLoginBtn() {
     };
 
     const toggleHideReferrer = async (id) => {
-        const userId = _currentUser?.id || 'guest';
-        const hiddenKey = `hidden_top_referrers_v2_${userId}`;
-        let hiddenIds = JSON.parse(localStorage.getItem(hiddenKey) || '[]');
+        if (!_currentUser?.id) return;
+        let hiddenIds = [];
+        try {
+            const user = await AppDataStore.getById('users', _currentUser.id);
+            hiddenIds = user?.hidden_referrers ? JSON.parse(user.hidden_referrers) : [];
+        } catch (_) {}
         id = String(id);
         if (hiddenIds.includes(id)) {
             hiddenIds = hiddenIds.filter(hid => hid !== id);
         } else {
             hiddenIds.push(id);
         }
-        localStorage.setItem(hiddenKey, JSON.stringify(hiddenIds));
+        await AppDataStore.update('users', _currentUser.id, { hidden_referrers: JSON.stringify(hiddenIds) });
         await renderLeaderboard();
         UI.toast.info("Leaderboard preferences updated.");
     };
 
     const resetHiddenReferrers = async () => {
-        const userId = _currentUser?.id || 'guest';
-        const hiddenKey = `hidden_top_referrers_v2_${userId}`;
-        localStorage.removeItem(hiddenKey);
+        if (!_currentUser?.id) return;
+        await AppDataStore.update('users', _currentUser.id, { hidden_referrers: null });
         await renderLeaderboard();
         UI.toast.success("Hidden referrers reset.");
     };
@@ -10182,12 +10178,8 @@ function _wireLoginBtn() {
         try {
             await AppDataStore.update('activities', activityId, updates);
         } catch (e) {
-            // Fallback: update localStorage directly for local-only activities
-            const key = 'fs_crm_activities';
-            const all = JSON.parse(localStorage.getItem(key) || '[]');
-            const idx = all.findIndex(r => r.id == activityId);
-            if (idx >= 0) { all[idx] = { ...all[idx], ...updates }; localStorage.setItem(key, JSON.stringify(all)); }
-            else { UI.toast.error('Could not save: ' + e.message); return; }
+            UI.toast.error('Could not save: ' + e.message);
+            return;
         }
         UI.hideModal();
         UI.toast.success('Appointment timing updated');
@@ -14791,8 +14783,7 @@ function _wireLoginBtn() {
 
             const rows = actionItems.map(item => {
                 const _act = activities.find(a => String(a.id) === String(item.activityId));
-                const isDone = (item.id.endsWith('_na') ? _act?.next_action_done : _act?.note_next_steps_done)
-                    || localStorage.getItem(`na_done_${prospectId}_${item.id}`) === '1';
+                const isDone = !!(item.id.endsWith('_na') ? _act?.next_action_done : _act?.note_next_steps_done);
                 return `
                     <div class="na-item${isDone ? ' done' : ''}" id="na-item-${item.id}">
                         <input type="checkbox" class="na-cb" id="na-cb-${item.id}" ${isDone ? 'checked' : ''}
@@ -14808,8 +14799,7 @@ function _wireLoginBtn() {
             const total = actionItems.length;
             const done = actionItems.filter(item => {
                 const _act = activities.find(a => String(a.id) === String(item.activityId));
-                return (item.id.endsWith('_na') ? _act?.next_action_done : _act?.note_next_steps_done)
-                    || localStorage.getItem(`na_done_${prospectId}_${item.id}`) === '1';
+                return !!(item.id.endsWith('_na') ? _act?.next_action_done : _act?.note_next_steps_done);
             }).length;
             container.innerHTML = `
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
@@ -15100,9 +15090,6 @@ const deleteNote = async (prospectId, noteId) => {
         if (!isNaN(activityId)) {
             AppDataStore.update('activities', activityId, { [field]: isDone }).catch(() => {});
         }
-        // Keep localStorage key for immediate UI feedback and backward compatibility
-        const key = `na_done_${prospectId}_${itemId}`;
-        localStorage.setItem(key, isDone ? '1' : '0');
         const itemEl = document.getElementById(`na-item-${itemId}`);
         const textEl = document.getElementById(`na-text-${itemId}`);
         if (itemEl) itemEl.classList.toggle('done', isDone);
@@ -26206,7 +26193,12 @@ const initSecurity = async () => {
 
 let sessionTimeoutTimer;
 const initSessionTimeout = async () => {
-    const timeoutMinutes = parseInt(localStorage.getItem('session_timeout') || '30');
+    let timeoutMinutes = 30;
+    try {
+        if (typeof ConfigManager !== 'undefined' && ConfigManager.config?.security?.sessionTimeout) {
+            timeoutMinutes = parseInt(ConfigManager.config.security.sessionTimeout) || 30;
+        }
+    } catch (_) {}
     const resetTimeout = async () => {
         clearTimeout(sessionTimeoutTimer);
         sessionTimeoutTimer = (window.app.logoutDueToInactivity, timeoutMinutes * 60 * 1000);
@@ -26228,14 +26220,16 @@ const logoutDueToInactivity = async () => {
     }
 };
 
-const monitorLoginAttempts = () => {
-    const failedAttempts = JSON.parse(localStorage.getItem('login_attempts') || '{}');
-    const now = Date.now();
-    Object.keys(failedAttempts).forEach(ip => {
-        failedAttempts[ip] = failedAttempts[ip].filter(t => now - t < 24 * 60 * 60 * 1000);
-        if (failedAttempts[ip].length === 0) delete failedAttempts[ip];
-    });
-    localStorage.setItem('login_attempts', JSON.stringify(failedAttempts));
+const monitorLoginAttempts = async () => {
+    try {
+        const attempts = await AppDataStore.getAll('login_attempts');
+        const now = Date.now();
+        for (const attempt of attempts) {
+            if (attempt.timestamp && now - attempt.timestamp > 24 * 60 * 60 * 1000) {
+                await AppDataStore.delete('login_attempts', attempt.id).catch(() => {});
+            }
+        }
+    } catch (_) {}
 };
 
 const checkForSecurityIncidents = async () => {
@@ -26282,15 +26276,23 @@ const checkExpiredConsents = async () => {
 
 const scheduleRetentionJobs = async () => {
     if (typeof RetentionPolicy === 'undefined') return;
-    const runRetention = () => {
-        const lastRun = localStorage.getItem('last_retention_run');
-        if (!lastRun || Date.now() - parseInt(lastRun) > 24 * 60 * 60 * 1000) {
-            RetentionPolicy.applyRetention();
-            localStorage.setItem('last_retention_run', Date.now().toString());
-        }
+    const runRetention = async () => {
+        try {
+            const configs = await AppDataStore.getAll('system_config');
+            const retentionConfig = configs.find(c => c.key === 'last_retention_run');
+            const lastRun = retentionConfig?.value ? parseInt(retentionConfig.value) : 0;
+            if (!lastRun || Date.now() - lastRun > 24 * 60 * 60 * 1000) {
+                RetentionPolicy.applyRetention();
+                if (retentionConfig) {
+                    await AppDataStore.update('system_config', retentionConfig.id, { value: Date.now().toString() });
+                } else {
+                    await AppDataStore.create('system_config', { key: 'last_retention_run', value: Date.now().toString() });
+                }
+            }
+        } catch (_) {}
     };
-    runRetention();
-    (runRetention, 24 * 60 * 60 * 1000);
+    await runRetention();
+    setInterval(runRetention, 24 * 60 * 60 * 1000);
 };
 
 const showSecurityDashboard = async () => {

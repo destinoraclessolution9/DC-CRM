@@ -99,8 +99,8 @@ const BackupManager = {
                 backupJson = await Encryption.encrypt(backupJson, await Encryption.importKey(key));
             }
 
-            // Store backup data
-            localStorage.setItem(`backup_${backupId}`, backupJson);
+            // Store backup data in Supabase backups table
+            await AppDataStore.update('backups', backupId, { backup_data: backupJson });
 
             // Update backup record
             backup.status = BackupStatus.COMPLETED;
@@ -157,8 +157,9 @@ const BackupManager = {
         AppDataStore.update('backups', backupId, backup);
 
         try {
-            // Get backup data
-            const backupJson = localStorage.getItem(`backup_${backupId}`);
+            // Get backup data from Supabase
+            const backupRecord = await AppDataStore.getById('backups', backupId);
+            const backupJson = backupRecord?.backup_data;
             if (!backupJson) throw new Error('Backup file not found');
 
             let backupData = backupJson;
@@ -285,8 +286,8 @@ const BackupManager = {
 
         backups.forEach(backup => {
             if (backup.expires_at && new Date(backup.expires_at) < now) {
-                // Delete backup file
-                localStorage.removeItem(`backup_${backup.id}`);
+                // Clear backup data from Supabase record before deleting
+                AppDataStore.update('backups', backup.id, { backup_data: null }).catch(() => {});
 
                 // Delete record
                 AppDataStore.delete('backups', backup.id);
@@ -320,11 +321,12 @@ const BackupManager = {
     },
 
     // Download backup
-    downloadBackup: (backupId) => {
-        const backup = AppDataStore.getById('backups', backupId);
+    downloadBackup: async (backupId) => {
+        const backup = await AppDataStore.getById('backups', backupId);
         if (!backup) return;
 
-        const backupData = localStorage.getItem(`backup_${backupId}`);
+        const backupRecord = await AppDataStore.getById('backups', backupId);
+        const backupData = backupRecord?.backup_data;
         if (!backupData) return;
 
         const blob = new Blob([backupData], { type: 'application/json' });

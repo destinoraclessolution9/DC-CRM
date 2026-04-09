@@ -79,23 +79,20 @@ const ConfigManager = {
     // Current configuration
     config: {},
 
-    // Load configuration
-    loadConfig: () => {
-        // Try to load from localStorage
-        let saved = null;
+    // Load configuration from Supabase (falls back to defaults)
+    loadConfig: async () => {
         try {
-            saved = localStorage.getItem('system_config');
-        } catch (e) {
-            console.warn('ConfigManager: localStorage load blocked');
-        }
-
-        if (saved) {
-            try {
-                ConfigManager.config = JSON.parse(saved);
-            } catch (e) {
+            const configs = await AppDataStore.getAll('system_config');
+            const configRecord = configs.find(c => c.key === 'app_config');
+            if (configRecord?.value) {
+                ConfigManager.config = typeof configRecord.value === 'string'
+                    ? JSON.parse(configRecord.value) : configRecord.value;
+                ConfigManager._configId = configRecord.id;
+            } else {
                 ConfigManager.config = { ...ConfigManager.defaults };
             }
-        } else {
+        } catch (e) {
+            console.warn('ConfigManager: Supabase load failed, using defaults');
             ConfigManager.config = { ...ConfigManager.defaults };
         }
 
@@ -105,13 +102,23 @@ const ConfigManager = {
         return ConfigManager.config;
     },
 
-    // Save configuration
-    saveConfig: (newConfig) => {
+    // Save configuration to Supabase
+    saveConfig: async (newConfig) => {
         ConfigManager.config = ConfigManager.mergeDefaults(newConfig, ConfigManager.defaults);
         try {
-            localStorage.setItem('system_config', JSON.stringify(ConfigManager.config));
+            if (ConfigManager._configId) {
+                await AppDataStore.update('system_config', ConfigManager._configId, {
+                    value: JSON.stringify(ConfigManager.config)
+                });
+            } else {
+                const record = await AppDataStore.create('system_config', {
+                    key: 'app_config',
+                    value: JSON.stringify(ConfigManager.config)
+                });
+                ConfigManager._configId = record?.id;
+            }
         } catch (e) {
-            console.warn('ConfigManager: localStorage save blocked');
+            console.warn('ConfigManager: Supabase save failed:', e.message);
         }
 
         // Apply configuration changes
@@ -260,8 +267,8 @@ const ConfigManager = {
 };
 
 // Initialize configuration
-const initConfig = () => {
-    ConfigManager.loadConfig();
+const initConfig = async () => {
+    await ConfigManager.loadConfig();
     ConfigManager.applyConfig();
     console.log('Configuration loaded');
 };

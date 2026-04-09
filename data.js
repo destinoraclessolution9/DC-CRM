@@ -46,6 +46,11 @@ class DataStore {
         this.initialized = false;
         this._events = {};
         this._srClient = null; // Service-role client (bypasses RLS for writes)
+        // In-memory cache replaces localStorage — data lives in Supabase,
+        // these are session-only caches for performance and offline resilience.
+        this._cache = {};        // replaces localStorage fs_crm_{tableName}
+        this._syncQueue = [];    // replaces localStorage fs_crm_sync_queue
+        this._tombstones = {};   // replaces localStorage fs_crm_tombstones
     }
 
     on(event, callback) {
@@ -136,22 +141,18 @@ class DataStore {
         return Date.now() + Math.floor(Math.random() * 1000);
     }
 
-    // Merge hard-coded tombstones into localStorage so externally-deleted records
+    // Merge hard-coded tombstones into in-memory store so externally-deleted records
     // are never resurrected by the sync queue.
     _ensureTombstones(map) {
         try {
-            const tombstones = JSON.parse(localStorage.getItem('fs_crm_tombstones') || '{}');
-            let dirty = false;
             for (const [table, ids] of Object.entries(map)) {
-                if (!tombstones[table]) tombstones[table] = [];
+                if (!this._tombstones[table]) this._tombstones[table] = [];
                 for (const id of ids) {
-                    if (!tombstones[table].includes(String(id))) {
-                        tombstones[table].push(String(id));
-                        dirty = true;
+                    if (!this._tombstones[table].includes(String(id))) {
+                        this._tombstones[table].push(String(id));
                     }
                 }
             }
-            if (dirty) localStorage.setItem('fs_crm_tombstones', JSON.stringify(tombstones));
         } catch (_) {}
     }
 
@@ -159,38 +160,34 @@ class DataStore {
         try {
             const { data, error } = await this._readClient().from(tableName).select('*');
             if (error) throw error;
-            // Filter out tombstoned records before caching — prevents deleted items reappearing
-            const tombstoneRaw = localStorage.getItem('fs_crm_tombstones');
-            const tombstones = tombstoneRaw ? JSON.parse(tombstoneRaw) : {};
-            const deletedIds = new Set(tombstones[tableName] || []);
+            // Filter out tombstoned records — prevents deleted items reappearing
+            const deletedIds = new Set(this._tombstones[tableName] || []);
             const serverData = (data || []).filter(r => !deletedIds.has(String(r.id)) && !(tableName === 'users' && r.status === 'deleted'));
             // Auto-sync: push any locally-saved (offline) items to Supabase so ALL users can see them,
             // then return the merged result (includes items still pending sync).
             const result = await this._autoSync(tableName, serverData);
-            // Merge with prior localStorage cache so extra fields saved locally
+            // Merge with prior in-memory cache so extra fields saved locally
             // (that Supabase stripped due to schema mismatch) are preserved.
             // Server fields always win; local-only fields (extra columns) are kept.
             try {
-                const localRaw = localStorage.getItem(`fs_crm_${tableName}`);
-                if (localRaw) {
-                    const localItems = JSON.parse(localRaw);
-                    const localMap = new Map(localItems.map(r => [String(r.id), r]));
+                const cached = this._cache[tableName];
+                if (cached && cached.length) {
+                    const localMap = new Map(cached.map(r => [String(r.id), r]));
                     const merged = result.map(r => {
                         const local = localMap.get(String(r.id));
                         return local ? { ...local, ...r } : r;
                     });
-                    localStorage.setItem(`fs_crm_${tableName}`, JSON.stringify(merged));
+                    this._cache[tableName] = merged;
                     return merged;
                 }
             } catch (_) {}
-            try { localStorage.setItem(`fs_crm_${tableName}`, JSON.stringify(result)); } catch (_) {}
+            this._cache[tableName] = result;
             return result;
         } catch (e) {
-            console.warn(`Offline/error: falling back to localStorage for ${tableName}`, e);
+            console.warn(`Offline/error: falling back to cache for ${tableName}`, e);
             // Even when read fails, still try to push queued writes — write endpoint is separate from read
             this._pushQueuedWrites(tableName).catch(() => {});
-            const local = localStorage.getItem(`fs_crm_${tableName}`);
-            return local ? JSON.parse(local) : [];
+            return this._cache[tableName] || [];
         }
     }
 
@@ -198,10 +195,9 @@ class DataStore {
     // Fire-and-forget — called from getAll's catch block.
     async _pushQueuedWrites(tableName) {
         try {
-            const queue = JSON.parse(localStorage.getItem('fs_crm_sync_queue') || '[]');
-            const forTable = queue.filter(q => q.tableName === tableName);
+            const forTable = this._syncQueue.filter(q => q.tableName === tableName);
             if (forTable.length === 0) return;
-            const otherTable = queue.filter(q => q.tableName !== tableName);
+            const otherTable = this._syncQueue.filter(q => q.tableName !== tableName);
             const stillPending = [];
             for (const item of forTable) {
                 try {
@@ -218,7 +214,7 @@ class DataStore {
                     stillPending.push(item);
                 }
             }
-            localStorage.setItem('fs_crm_sync_queue', JSON.stringify([...otherTable, ...stillPending]));
+            this._syncQueue = [...otherTable, ...stillPending];
         } catch (_) {}
     }
 
@@ -233,19 +229,16 @@ class DataStore {
             const merged = [...serverData];
 
             // Load tombstones — IDs that were intentionally deleted; never re-create these
-            const _tombstoneRaw = localStorage.getItem('fs_crm_tombstones');
-            const _tombstones = _tombstoneRaw ? JSON.parse(_tombstoneRaw) : {};
-            const deletedIds = new Set(_tombstones[tableName] || []);
+            const deletedIds = new Set(this._tombstones[tableName] || []);
 
-            // Step 1 — Migration: disabled. Auto-migrating all localStorage-only items back to
+            // Step 1 — Migration: disabled. Auto-migrating all cache-only items back to
             // Supabase causes externally-deleted records to be resurrected on every getAll().
             // Only the explicit sync queue (step 2) is processed now.
 
             // Step 2 — Process the sync queue: upsert queued items to Supabase
-            const queue = JSON.parse(localStorage.getItem('fs_crm_sync_queue') || '[]');
-            const forTable = queue.filter(q => q.tableName === tableName);
+            const forTable = this._syncQueue.filter(q => q.tableName === tableName);
             if (forTable.length > 0) {
-                const otherTable = queue.filter(q => q.tableName !== tableName);
+                const otherTable = this._syncQueue.filter(q => q.tableName !== tableName);
                 const stillPending = [];
 
                 for (const item of forTable) {
@@ -271,16 +264,16 @@ class DataStore {
                         stillPending.push(item);
                     }
                 }
-                localStorage.setItem('fs_crm_sync_queue', JSON.stringify([...otherTable, ...stillPending]));
+                this._syncQueue = [...otherTable, ...stillPending];
             }
 
             // Step 3 — Merge local-only extra fields (e.g. schema-mismatch fields like potential_level,
             // close_probability that Supabase stripped) back into server records so they survive the
-            // getAll → localStorage overwrite cycle. Runs always, not gated on sync queue.
+            // getAll → cache overwrite cycle. Runs always, not gated on sync queue.
             try {
-                const localRaw = localStorage.getItem(`fs_crm_${tableName}`);
-                if (localRaw) {
-                    const localMap = new Map(JSON.parse(localRaw).map(r => [String(r.id), r]));
+                const cached = this._cache[tableName];
+                if (cached && cached.length) {
+                    const localMap = new Map(cached.map(r => [String(r.id), r]));
                     for (let i = 0; i < merged.length; i++) {
                         const localRec = localMap.get(String(merged[i].id));
                         if (!localRec) continue;
@@ -309,31 +302,28 @@ class DataStore {
                 .maybeSingle();
             if (error) throw error;
             if (data) {
-                // Merge with localStorage to preserve extra fields not in Supabase schema
+                // Merge with in-memory cache to preserve extra fields not in Supabase schema
                 // (same logic as getAll) — server fields always win
                 try {
-                    const local = localStorage.getItem(`fs_crm_${tableName}`);
-                    if (local) {
-                        const records = JSON.parse(local);
-                        const localRecord = records.find(r => String(r.id) === String(id));
+                    const cached = this._cache[tableName];
+                    if (cached) {
+                        const localRecord = cached.find(r => String(r.id) === String(id));
                         if (localRecord) return { ...localRecord, ...data };
                     }
                 } catch (_) {}
                 return data;
             }
-            // Not found in Supabase — check localStorage fallback (schema-mismatch saves)
-            const local = localStorage.getItem(`fs_crm_${tableName}`);
-            if (local) {
-                const records = JSON.parse(local);
-                return records.find(r => String(r.id) === String(id)) || null;
+            // Not found in Supabase — check in-memory cache fallback
+            const cached = this._cache[tableName];
+            if (cached) {
+                return cached.find(r => String(r.id) === String(id)) || null;
             }
             return null;
         } catch (e) {
-            // Offline — search localStorage
-            const local = localStorage.getItem(`fs_crm_${tableName}`);
-            if (local) {
-                const records = JSON.parse(local);
-                return records.find(r => String(r.id) === String(id)) || null;
+            // Offline — search in-memory cache
+            const cached = this._cache[tableName];
+            if (cached) {
+                return cached.find(r => String(r.id) === String(id)) || null;
             }
             return null;
         }
@@ -372,12 +362,10 @@ class DataStore {
                     .select()
                     .single();
                 if (error) throw error;
-                // Save full record (including stripped fields) to localStorage
+                // Save full record (including stripped fields) to in-memory cache
                 try {
-                    const key = `fs_crm_${tableName}`;
-                    const all = JSON.parse(localStorage.getItem(key) || '[]');
-                    all.push({ ...insertData, ...dataToInsert, ...data });
-                    localStorage.setItem(key, JSON.stringify(all));
+                    if (!this._cache[tableName]) this._cache[tableName] = [];
+                    this._cache[tableName].push({ ...insertData, ...dataToInsert, ...data });
                 } catch (_) {}
                 this.emit('dataChanged', { action: 'add', table: tableName, record: data });
                 return data;
@@ -403,19 +391,13 @@ class DataStore {
             }
         }
 
-        // Full localStorage fallback + sync queue so item gets pushed to Supabase when back online
-        const key = `fs_crm_${tableName}`;
+        // In-memory fallback + sync queue so item gets pushed to Supabase when back online
         try {
-            const all = JSON.parse(localStorage.getItem(key) || '[]');
-            all.push(dataToInsert);
-            localStorage.setItem(key, JSON.stringify(all));
+            if (!this._cache[tableName]) this._cache[tableName] = [];
+            this._cache[tableName].push(dataToInsert);
         } catch (_) {}
         // Queue for auto-sync to Supabase on next successful getAll()
-        try {
-            const syncQueue = JSON.parse(localStorage.getItem('fs_crm_sync_queue') || '[]');
-            syncQueue.push({ tableName, record: dataToInsert, timestamp: Date.now() });
-            localStorage.setItem('fs_crm_sync_queue', JSON.stringify(syncQueue));
-        } catch (_) {}
+        this._syncQueue.push({ tableName, record: dataToInsert, timestamp: Date.now() });
         this.emit('dataChanged', { action: 'add', table: tableName, record: dataToInsert });
         return dataToInsert;
     }
@@ -432,11 +414,10 @@ class DataStore {
                     .single();
                 if (error) throw error;
                 try {
-                    const key = `fs_crm_${tableName}`;
-                    const all = JSON.parse(localStorage.getItem(key) || '[]');
+                    const all = this._cache[tableName] || [];
                     const idx = all.findIndex(r => String(r.id) === String(id));
                     const full = { ...data, ...updates };
-                    if (idx >= 0) { all[idx] = full; localStorage.setItem(key, JSON.stringify(all)); }
+                    if (idx >= 0) { all[idx] = full; this._cache[tableName] = all; }
                 } catch (_) {}
                 this.emit('dataChanged', { action: 'update', table: tableName, record: data });
                 return data;
@@ -454,24 +435,18 @@ class DataStore {
                 break;
             }
         }
-        const key = `fs_crm_${tableName}`;
         let updatedRecord;
         try {
-            const all = JSON.parse(localStorage.getItem(key) || '[]');
+            const all = this._cache[tableName] || [];
             const idx = all.findIndex(r => r.id == id);
             updatedRecord = idx >= 0 ? { ...all[idx], ...updates } : { id, ...updates };
             if (idx >= 0) all[idx] = updatedRecord; else all.push(updatedRecord);
-            localStorage.setItem(key, JSON.stringify(all));
+            this._cache[tableName] = all;
         } catch (_) { updatedRecord = { id, ...updates }; }
         // Queue for auto-sync to Supabase on next successful getAll()
-        try {
-            const syncQueue = JSON.parse(localStorage.getItem('fs_crm_sync_queue') || '[]');
-            // Replace existing queue entry for same id+table, or push new
-            const qIdx = syncQueue.findIndex(q => q.tableName === tableName && String(q.record.id) === String(id));
-            const qEntry = { tableName, record: updatedRecord, timestamp: Date.now() };
-            if (qIdx >= 0) syncQueue[qIdx] = qEntry; else syncQueue.push(qEntry);
-            localStorage.setItem('fs_crm_sync_queue', JSON.stringify(syncQueue));
-        } catch (_) {}
+        const qIdx = this._syncQueue.findIndex(q => q.tableName === tableName && String(q.record.id) === String(id));
+        const qEntry = { tableName, record: updatedRecord, timestamp: Date.now() };
+        if (qIdx >= 0) this._syncQueue[qIdx] = qEntry; else this._syncQueue.push(qEntry);
         const record = { id, ...updates };
         this.emit('dataChanged', { action: 'update', table: tableName, record });
         return record;
@@ -487,26 +462,17 @@ class DataStore {
             .eq('id', id);
         if (error) throw error;
 
-        // Supabase confirmed the delete — now clean up local cache
+        // Supabase confirmed the delete — now clean up in-memory cache
         try {
-            const key = `fs_crm_${tableName}`;
-            const all = JSON.parse(localStorage.getItem(key) || '[]');
-            localStorage.setItem(key, JSON.stringify(all.filter(r => String(r.id) !== String(id))));
+            if (this._cache[tableName]) {
+                this._cache[tableName] = this._cache[tableName].filter(r => String(r.id) !== String(id));
+            }
         } catch (_) {}
         // Remove from sync queue — no point syncing a deleted item
-        try {
-            const syncQueue = JSON.parse(localStorage.getItem('fs_crm_sync_queue') || '[]');
-            localStorage.setItem('fs_crm_sync_queue', JSON.stringify(
-                syncQueue.filter(q => !(q.tableName === tableName && String(q.record.id) === String(id)))
-            ));
-        } catch (_) {}
+        this._syncQueue = this._syncQueue.filter(q => !(q.tableName === tableName && String(q.record.id) === String(id)));
         // Tombstone so the record never re-surfaces from a stale cache on next getAll
-        try {
-            const tombstones = JSON.parse(localStorage.getItem('fs_crm_tombstones') || '{}');
-            if (!tombstones[tableName]) tombstones[tableName] = [];
-            if (!tombstones[tableName].includes(String(id))) tombstones[tableName].push(String(id));
-            localStorage.setItem('fs_crm_tombstones', JSON.stringify(tombstones));
-        } catch (_) {}
+        if (!this._tombstones[tableName]) this._tombstones[tableName] = [];
+        if (!this._tombstones[tableName].includes(String(id))) this._tombstones[tableName].push(String(id));
 
         this.emit('dataChanged', { action: 'delete', table: tableName, id });
     }
@@ -522,9 +488,8 @@ class DataStore {
             if (error) throw error;
             return data || [];
         } catch (e) {
-            console.warn(`Offline: falling back to localStorage for ${tableName} query`, e);
-            const local = localStorage.getItem(`fs_crm_${tableName}`);
-            const all = local ? JSON.parse(local) : [];
+            console.warn(`Offline: falling back to cache for ${tableName} query`, e);
+            const all = this._cache[tableName] || [];
             return all.filter(row => Object.entries(filters).every(([k, v]) => row[k] == v));
         }
     }

@@ -1,9 +1,15 @@
 // ========== MOBILE SETTINGS ==========
 
-const showMobileSettings = () => {
-    const biometricEnabled = localStorage.getItem('biometric_enabled') === 'true';
+const showMobileSettings = async () => {
+    let biometricEnabled = false;
+    let offlineMode = false;
+    try {
+        const user = window._currentUser?.id ? await AppDataStore.getById('users', window._currentUser.id) : null;
+        const mobileSettings = user?.mobile_settings ? (typeof user.mobile_settings === 'string' ? JSON.parse(user.mobile_settings) : user.mobile_settings) : {};
+        biometricEnabled = !!mobileSettings.biometric_enabled;
+        offlineMode = !!mobileSettings.offline_mode;
+    } catch (_) {}
     const notificationsEnabled = Notification.permission === 'granted';
-    const offlineMode = localStorage.getItem('offline_mode') === 'true';
 
     const content = `
         <div class="mobile-settings">
@@ -192,17 +198,17 @@ const showMobileSettings = () => {
 };
 
 // Save mobile settings
-const saveMobileSettings = () => {
+const saveMobileSettings = async () => {
     const biometricEnabled = document.getElementById('biometric-toggle')?.checked;
     const offlineMode = document.getElementById('offline-toggle')?.checked;
     const autoLockTime = document.getElementById('auto-lock-time')?.value;
     const syncFrequency = document.getElementById('sync-frequency')?.value;
     const notificationsEnabled = document.getElementById('notifications-toggle')?.checked;
 
-    localStorage.setItem('biometric_enabled', biometricEnabled);
-    localStorage.setItem('offline_mode', offlineMode);
-    localStorage.setItem('auto_lock_time', autoLockTime);
-    localStorage.setItem('sync_frequency', syncFrequency);
+    if (window._currentUser?.id) {
+        const mobileSettings = { biometric_enabled: biometricEnabled, offline_mode: offlineMode, auto_lock_time: autoLockTime, sync_frequency: syncFrequency };
+        await AppDataStore.update('users', window._currentUser.id, { mobile_settings: JSON.stringify(mobileSettings) });
+    }
 
     if (notificationsEnabled && Notification.permission !== 'granted') {
         requestNotificationPermission();
