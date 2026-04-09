@@ -9970,7 +9970,7 @@ function _wireLoginBtn() {
                                 <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
                                     <input type="checkbox" ${attendedChecked} onchange="app.toggleAttendeeAttended(${att.id}, this.checked, ${entityId}, '${att.attendee_type}', ${activity.event_id}, '${activity.activity_date}')"> Attended
                                 </label>
-                                ${entityId ? `<button class="btn btn-sm secondary" onclick="(async()=>{ await app.goToProspectEventNotes(${entityId}, ${activity.event_id}, '${att.attendee_type || 'prospect'}', '${activity.activity_date || ''}'); })()">Post Event</button>` : ''}`}
+                                ${entityId ? `<button class="btn btn-sm secondary" onclick="(async()=>{ await app.openPostMeetupNotesModal(${activityId}, ${entityId}); })()">Post Event</button>` : ''}`}
                             </div>
                         </div>
                     `;
