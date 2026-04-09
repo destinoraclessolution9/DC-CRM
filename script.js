@@ -12874,6 +12874,37 @@ function _wireLoginBtn() {
                     <span>⚠️ DELETE IS NOT AVAILABLE - Customer records are permanent and cannot be deleted under any circumstances.</span>
                 </div>
 
+                ${(isSystemAdmin(_currentUser) || isMarketingManager(_currentUser)) ? `
+                <div id="approval-queue-section" style="margin-bottom:24px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                        <h2 style="font-size:18px; font-weight:600; display:flex; align-items:center; gap:8px; margin:0;">
+                            <i class="fas fa-clipboard-check" style="color:#d97706;"></i>
+                            Manager Approval Queue
+                            <span id="approval-queue-count" style="background:#fef3c7; color:#92400e; padding:2px 10px; border-radius:12px; font-size:12px; font-weight:600;">0</span>
+                        </h2>
+                        <button class="btn secondary" onclick="app.refreshApprovalQueue()" style="font-size:12px; padding:4px 12px;">
+                            <i class="fas fa-sync-alt"></i> Refresh
+                        </button>
+                    </div>
+                    <div class="prospects-table-container">
+                        <table class="prospects-table">
+                            <thead>
+                                <tr>
+                                    <th>Type</th>
+                                    <th>Prospect / Customer</th>
+                                    <th>Submitted By</th>
+                                    <th>Date</th>
+                                    <th>Description</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="approval-queue-body">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                ` : ''}
+
                 <div class="filter-bar" style="flex-direction:column; align-items:stretch; gap:8px;">
                     <div class="search-group">
                         <i class="fas fa-search"></i>
@@ -12950,6 +12981,7 @@ function _wireLoginBtn() {
             </div>
         `;
         await renderCustomersTable();
+        await renderApprovalQueue();
     };
 
     const renderCustomersTable = async () => {
@@ -12998,7 +13030,7 @@ function _wireLoginBtn() {
             html += `
                 <tr onclick="app.showCustomerDetail(${c.id})">
                     <td><strong>${c.full_name}</strong></td>
-                    <td>RM ${c.lifetime_value.toLocaleString()} <span style="color:var(--success); font-size:12px;"><i class="fas fa-caret-up"></i></span></td>
+                    <td>RM ${(c.lifetime_value || 0).toLocaleString()} <span style="color:var(--success); font-size:12px;"><i class="fas fa-caret-up"></i></span></td>
                     <td>${c.customer_since}</td>
                     <td>${c.ming_gua}</td>
                     <td>Michelle Tan</td>
@@ -13017,6 +13049,282 @@ function _wireLoginBtn() {
     };
 
     const filterCustomers = async () => await renderCustomersTable();
+
+    // ========== MANAGER APPROVAL QUEUE ==========
+
+    const renderApprovalQueue = async () => {
+        const tbody = document.getElementById('approval-queue-body');
+        if (!tbody) return;
+
+        const allEntries = await AppDataStore.getAll('approval_queue');
+        const pending = allEntries
+            .filter(e => e.status === 'pending')
+            .sort((a, b) => new Date(b.submitted_at) - new Date(a.submitted_at));
+
+        const countEl = document.getElementById('approval-queue-count');
+        if (countEl) countEl.textContent = pending.length;
+
+        if (pending.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:24px; color:var(--gray-400);"><i class="fas fa-check-circle" style="margin-right:6px;"></i>No pending approvals</td></tr>';
+            return;
+        }
+
+        let html = '';
+        for (const entry of pending) {
+            const agentName = await getAgentName(entry.submitted_by);
+            const name = entry.snapshot_after?.full_name || '-';
+            const typeConfig = {
+                new_customer: { label: 'New Customer', icon: 'fa-user-plus', bg: '#dbeafe', color: '#1e40af' },
+                info_update: { label: 'Info Update', icon: 'fa-edit', bg: '#fef3c7', color: '#92400e' },
+                new_sale: { label: 'New Sale', icon: 'fa-dollar-sign', bg: '#d1fae5', color: '#065f46' }
+            };
+            const tc = typeConfig[entry.approval_type] || { label: entry.approval_type, icon: 'fa-question', bg: '#f3f4f6', color: '#374151' };
+            const dateStr = entry.submitted_at ? new Date(entry.submitted_at).toLocaleDateString('en-MY', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-';
+
+            html += `<tr>
+                <td><span style="background:${tc.bg}; color:${tc.color}; padding:3px 10px; border-radius:6px; font-size:12px; font-weight:600; white-space:nowrap;"><i class="fas ${tc.icon}" style="margin-right:4px;"></i>${tc.label}</span></td>
+                <td><strong>${name}</strong></td>
+                <td>${agentName}</td>
+                <td style="font-size:12px; white-space:nowrap;">${dateStr}</td>
+                <td style="max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px;">${entry.description || '-'}</td>
+                <td onclick="event.stopPropagation()">
+                    <button class="btn-icon" title="View Details" onclick="event.stopPropagation();app.showApprovalDetail(${entry.id})"><i class="fas fa-eye"></i></button>
+                    <button class="btn-icon" title="Approve" style="color:#16a34a;" onclick="event.stopPropagation();app.approveQueueEntry(${entry.id})"><i class="fas fa-check-circle"></i></button>
+                    <button class="btn-icon" title="Reject" style="color:#dc2626;" onclick="event.stopPropagation();app.rejectQueueEntry(${entry.id})"><i class="fas fa-times-circle"></i></button>
+                </td>
+            </tr>`;
+        }
+        tbody.innerHTML = html;
+    };
+
+    const showApprovalDetail = async (entryId) => {
+        const entry = await AppDataStore.getById('approval_queue', entryId);
+        if (!entry) return UI.toast.error('Approval entry not found');
+
+        const agentName = await getAgentName(entry.submitted_by);
+        const snapshot = entry.snapshot_after || {};
+        let detailHtml = '';
+
+        if (entry.approval_type === 'new_customer') {
+            const cr = snapshot.closing_record;
+            const saleAmount = parseFloat(cr?.sale_amount) || 0;
+            detailHtml = `
+                <div style="background:#dbeafe; border:1px solid #93c5fd; border-radius:8px; padding:12px; font-size:13px; color:#1e40af; margin-bottom:14px;">
+                    <i class="fas fa-user-plus" style="margin-right:6px;"></i>
+                    New customer conversion requested by <strong>${agentName}</strong>. Approving will create a permanent Customer profile.
+                </div>
+                <div style="font-size:13px; display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                    <div><span style="color:var(--gray-500);">Name:</span> <strong>${snapshot.full_name || '-'}</strong></div>
+                    <div><span style="color:var(--gray-500);">Phone:</span> ${snapshot.phone || '-'}</div>
+                    <div><span style="color:var(--gray-500);">IC:</span> ${snapshot.ic_number || '-'}</div>
+                    <div><span style="color:var(--gray-500);">DOB:</span> ${snapshot.date_of_birth || '-'}</div>
+                    <div><span style="color:var(--gray-500);">Email:</span> ${snapshot.email || '-'}</div>
+                    <div><span style="color:var(--gray-500);">Occupation:</span> ${snapshot.occupation || '-'}</div>
+                    <div><span style="color:var(--gray-500);">Ming Gua:</span> ${snapshot.ming_gua || '-'}</div>
+                    <div><span style="color:var(--gray-500);">Referrer:</span> ${snapshot.referred_by || '-'}</div>
+                </div>
+                ${cr ? `
+                    <div style="border-top:1px solid var(--gray-200); padding-top:12px; margin-top:12px;">
+                        <div style="font-weight:600; margin-bottom:8px; font-size:13px;">Sales Record</div>
+                        <div style="font-size:13px; display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                            <div><span style="color:var(--gray-500);">Product:</span> ${cr.product || '-'}</div>
+                            <div><span style="color:var(--gray-500);">Amount:</span> <strong style="color:#166534;">RM ${saleAmount.toLocaleString()}</strong></div>
+                            <div><span style="color:var(--gray-500);">Invoice:</span> ${cr.invoice_number || '-'}</div>
+                            <div><span style="color:var(--gray-500);">Date:</span> ${cr.closing_date || '-'}</div>
+                        </div>
+                    </div>
+                ` : ''}`;
+        } else if (entry.approval_type === 'info_update') {
+            const before = entry.snapshot_before || {};
+            const after = entry.snapshot_after || {};
+            const fields = ['full_name','nickname','phone','email','ic_number','date_of_birth','lunar_birth','ming_gua','occupation','company_name','income_range','address','city','state','postal_code','title','gender','nationality','referred_by','referral_relationship'];
+            const changedFields = fields.filter(f => before[f] !== undefined && after[f] !== undefined && String(before[f] || '') !== String(after[f] || ''));
+
+            detailHtml = `
+                <div style="background:#fef3c7; border:1px solid #fcd34d; border-radius:8px; padding:12px; font-size:13px; color:#92400e; margin-bottom:14px;">
+                    <i class="fas fa-edit" style="margin-right:6px;"></i>
+                    Information updated by <strong>${agentName}</strong>. Review changes below.
+                </div>
+                ${changedFields.length > 0 ? `
+                    <table style="width:100%; border-collapse:collapse; font-size:13px;">
+                        <thead><tr>
+                            <th style="text-align:left; padding:6px 8px; border-bottom:2px solid var(--gray-200); color:var(--gray-500);">Field</th>
+                            <th style="text-align:left; padding:6px 8px; border-bottom:2px solid var(--gray-200); color:#dc2626;">Before</th>
+                            <th style="text-align:left; padding:6px 8px; border-bottom:2px solid var(--gray-200); color:#16a34a;">After</th>
+                        </tr></thead>
+                        <tbody>${changedFields.map(f => `<tr>
+                            <td style="padding:6px 8px; border-bottom:1px solid var(--gray-100); font-weight:500;">${f.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</td>
+                            <td style="padding:6px 8px; border-bottom:1px solid var(--gray-100); color:#dc2626; text-decoration:line-through;">${before[f] || '<em>empty</em>'}</td>
+                            <td style="padding:6px 8px; border-bottom:1px solid var(--gray-100); color:#16a34a; font-weight:600;">${after[f] || '<em>empty</em>'}</td>
+                        </tr>`).join('')}</tbody>
+                    </table>
+                ` : '<div style="color:var(--gray-400); font-size:13px; font-style:italic; padding:12px;">No field differences detected.</div>'}`;
+        } else if (entry.approval_type === 'new_sale') {
+            const cr = entry.snapshot_after || {};
+            const saleAmount = parseFloat(cr.sale_amount) || 0;
+            detailHtml = `
+                <div style="background:#d1fae5; border:1px solid #6ee7b7; border-radius:8px; padding:12px; font-size:13px; color:#065f46; margin-bottom:14px;">
+                    <i class="fas fa-dollar-sign" style="margin-right:6px;"></i>
+                    New sale submitted by <strong>${agentName}</strong>. Review closing record below.
+                </div>
+                <div style="font-size:13px; display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                    <div><span style="color:var(--gray-500);">Prospect:</span> <strong>${cr.full_name || snapshot.prospect_name || '-'}</strong></div>
+                    <div><span style="color:var(--gray-500);">Product:</span> ${cr.product || '-'}</div>
+                    <div><span style="color:var(--gray-500);">Sale Amount:</span> <strong style="color:#166534;">RM ${saleAmount.toLocaleString()}</strong></div>
+                    <div><span style="color:var(--gray-500);">Payment:</span> ${cr.payment_method || '-'}</div>
+                    <div><span style="color:var(--gray-500);">Invoice:</span> ${cr.invoice_number || '-'}</div>
+                    <div><span style="color:var(--gray-500);">Closing Date:</span> ${cr.closing_date || '-'}</div>
+                    ${cr.sales_idea ? `<div style="grid-column:1/-1;"><span style="color:var(--gray-500);">Sales Idea:</span> ${cr.sales_idea}</div>` : ''}
+                </div>`;
+        }
+
+        UI.showModal('Approval Details', `
+            <div style="display:flex; flex-direction:column; gap:14px;">
+                ${detailHtml}
+                <div style="font-size:12px; color:var(--gray-400); border-top:1px solid var(--gray-100); padding-top:8px;">
+                    Submitted: ${new Date(entry.submitted_at).toLocaleString('en-MY')} | By: ${agentName}
+                </div>
+            </div>
+        `, [
+            { label: '<i class="fas fa-times-circle"></i> Reject', type: 'secondary', action: `(async () => { UI.hideModal(); await app.rejectQueueEntry(${entryId}); })()` },
+            { label: '<i class="fas fa-check-circle"></i> Approve', type: 'primary', action: `(async () => { await app.approveQueueEntry(${entryId}); })()` }
+        ]);
+    };
+
+    const approveQueueEntry = async (entryId) => {
+        const entry = await AppDataStore.getById('approval_queue', entryId);
+        if (!entry || entry.status !== 'pending') return UI.toast.error('Entry not found or already processed.');
+
+        const now = new Date().toISOString();
+
+        if (entry.approval_type === 'new_customer') {
+            await approveProspectConversion(entry.prospect_id);
+        } else if (entry.approval_type === 'info_update') {
+            const prospect = await AppDataStore.getById('prospects', entry.prospect_id);
+            if (prospect?.status === 'converted') {
+                const customers = await AppDataStore.getAll('customers');
+                const customer = customers.find(c => c.converted_from_prospect_id == entry.prospect_id);
+                if (customer) {
+                    const syncable = ['title','full_name','nickname','gender','nationality','phone','email','ic_number','date_of_birth','lunar_birth','ming_gua','occupation','company_name','income_range','address','city','state','postal_code','referred_by','referred_by_id','referred_by_type','referral_relationship'];
+                    const syncFields = {};
+                    for (const field of syncable) {
+                        if (entry.snapshot_after[field] !== undefined) {
+                            syncFields[field] = entry.snapshot_after[field];
+                        }
+                    }
+                    if (Object.keys(syncFields).length > 0) {
+                        await AppDataStore.update('customers', customer.id, syncFields);
+                    }
+                }
+            }
+        } else if (entry.approval_type === 'new_sale') {
+            const prospect = await AppDataStore.getById('prospects', entry.prospect_id);
+            if (prospect?.status === 'converted') {
+                const customers = await AppDataStore.getAll('customers');
+                const customer = customers.find(c => c.converted_from_prospect_id == entry.prospect_id);
+                if (customer) {
+                    const cr = entry.snapshot_after;
+                    const amt = parseFloat(cr.sale_amount) || 0;
+                    await AppDataStore.create('purchases', {
+                        id: Date.now(),
+                        customer_id: customer.id,
+                        date: cr.closing_date || now.split('T')[0],
+                        invoice: cr.invoice_number || '',
+                        item: cr.product || '',
+                        amount: amt,
+                        status: 'COMPLETED',
+                        payment_method: cr.payment_method || 'Cash'
+                    });
+                    await AppDataStore.update('customers', customer.id, {
+                        lifetime_value: (customer.lifetime_value || 0) + amt
+                    });
+                }
+            }
+            if (prospect?.closing_record?.status === 'submitted') {
+                await AppDataStore.update('prospects', entry.prospect_id, {
+                    closing_record: { ...prospect.closing_record, status: 'approved', approved_at: now }
+                });
+            }
+        }
+
+        await AppDataStore.update('approval_queue', entryId, {
+            status: 'approved',
+            reviewed_by: _currentUser?.id,
+            reviewed_at: now
+        });
+
+        UI.hideModal();
+        UI.toast.success('Approved successfully!');
+        await renderApprovalQueue();
+        await renderCustomersTable();
+    };
+
+    const rejectQueueEntry = async (entryId) => {
+        const entry = await AppDataStore.getById('approval_queue', entryId);
+        if (!entry || entry.status !== 'pending') return UI.toast.error('Entry not found or already processed.');
+
+        UI.showModal('Reject Approval', `
+            <div style="display:flex; flex-direction:column; gap:12px;">
+                <div style="background:#fef2f2; border:1px solid #fecaca; border-radius:8px; padding:12px; font-size:13px; color:#991b1b;">
+                    <i class="fas fa-exclamation-circle" style="margin-right:6px;"></i>
+                    You are rejecting: <strong>${entry.description || 'this entry'}</strong>
+                </div>
+                <div class="form-group">
+                    <label>Reason for rejection</label>
+                    <textarea id="reject-reason" class="form-control" rows="3" placeholder="Explain why this is being rejected..." style="width:100%;"></textarea>
+                </div>
+            </div>
+        `, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: '<i class="fas fa-times"></i> Confirm Reject', type: 'primary', action: `(async () => { await app.confirmRejectQueueEntry(${entryId}); })()` }
+        ]);
+    };
+
+    const confirmRejectQueueEntry = async (entryId) => {
+        const reason = document.getElementById('reject-reason')?.value?.trim() || '';
+        const entry = await AppDataStore.getById('approval_queue', entryId);
+        if (!entry) return;
+
+        if (entry.approval_type === 'info_update' && entry.snapshot_before) {
+            const revertFields = {};
+            for (const key of Object.keys(entry.snapshot_after)) {
+                if (entry.snapshot_before[key] !== undefined) {
+                    revertFields[key] = entry.snapshot_before[key];
+                }
+            }
+            if (Object.keys(revertFields).length > 0) {
+                await AppDataStore.update('prospects', entry.prospect_id, revertFields);
+            }
+        }
+
+        if (entry.approval_type === 'new_customer') {
+            await AppDataStore.update('prospects', entry.prospect_id, {
+                conversion_status: 'rejected',
+                conversion_rejected_at: new Date().toISOString(),
+                conversion_rejected_by: _currentUser?.id
+            });
+        }
+
+        if (entry.approval_type === 'new_sale') {
+            const prospect = await AppDataStore.getById('prospects', entry.prospect_id);
+            if (prospect?.closing_record?.status === 'submitted') {
+                await AppDataStore.update('prospects', entry.prospect_id, {
+                    closing_record: { ...prospect.closing_record, status: 'draft', rejected_at: new Date().toISOString(), reject_reason: reason }
+                });
+            }
+        }
+
+        await AppDataStore.update('approval_queue', entryId, {
+            status: 'rejected',
+            reviewed_by: _currentUser?.id,
+            reviewed_at: new Date().toISOString(),
+            reject_reason: reason
+        });
+
+        UI.hideModal();
+        UI.toast.info('Approval rejected.');
+        await renderApprovalQueue();
+    };
 
     const _downloadSheet = (cols, rows, sheetName, filename, format) => {
         if (format === 'xlsx') {
@@ -13590,10 +13898,35 @@ function _wireLoginBtn() {
             })()
         };
 
+        // Capture snapshot before update for approval queue
+        let snapshotBefore = null;
+        if (editId) {
+            snapshotBefore = await AppDataStore.getById('prospects', parseInt(editId));
+        }
+
         try {
             if (editId) {
                 await AppDataStore.update('prospects', parseInt(editId), data);
                 UI.toast.success('Prospect updated successfully');
+
+                // Create approval entry for non-manager edits
+                const isManager = isSystemAdmin(_currentUser) || isMarketingManager(_currentUser);
+                if (!isManager) {
+                    try {
+                        await AppDataStore.create('approval_queue', {
+                            id: Date.now(),
+                            approval_type: 'info_update',
+                            status: 'pending',
+                            prospect_id: parseInt(editId),
+                            customer_id: null,
+                            submitted_by: _currentUser?.id,
+                            submitted_at: new Date().toISOString(),
+                            snapshot_before: snapshotBefore,
+                            snapshot_after: data,
+                            description: `Information update for ${name}`
+                        });
+                    } catch (e) { /* approval queue write failed silently */ }
+                }
             } else {
                 data.id = Date.now();
                 data.protection_deadline = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
@@ -13808,7 +14141,7 @@ function _wireLoginBtn() {
                     <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
                         <div style="background:var(--gray-50); padding:12px; border-radius:8px; text-align:center;">
                             <div style="font-size:12px; color:var(--gray-500);">Lifetime Value</div>
-                            <div style="font-size:18px; font-weight:700; color:var(--primary);">RM ${customer.lifetime_value.toLocaleString()}</div>
+                            <div style="font-size:18px; font-weight:700; color:var(--primary);">RM ${(customer.lifetime_value || 0).toLocaleString()}</div>
                         </div>
                         <div style="background:var(--gray-50); padding:12px; border-radius:8px; text-align:center;">
                             <div style="font-size:12px; color:var(--gray-500);">Total Purchases</div>
@@ -15350,6 +15683,42 @@ const deleteNote = async (prospectId, noteId) => {
 
         await AppDataStore.update('prospects', prospectId, updates);
 
+        // Create approval queue entries for non-managers
+        const isManager = isSystemAdmin(_currentUser) || isMarketingManager(_currentUser);
+        if (!isManager) {
+            const prospect = await AppDataStore.getById('prospects', prospectId);
+            try {
+                // New sale approval entry
+                await AppDataStore.create('approval_queue', {
+                    id: Date.now(),
+                    approval_type: 'new_sale',
+                    status: 'pending',
+                    prospect_id: prospectId,
+                    customer_id: null,
+                    submitted_by: _currentUser?.id,
+                    submitted_at: new Date().toISOString(),
+                    snapshot_before: null,
+                    snapshot_after: { ...data, sale_amount: saleAmount, prospect_name: prospect?.full_name },
+                    description: `New sale RM ${saleAmount.toLocaleString()} for ${prospect?.full_name || 'prospect'}`
+                });
+                // If auto-conversion triggered, also create new_customer entry
+                if (saleAmount >= 2000) {
+                    await AppDataStore.create('approval_queue', {
+                        id: Date.now() + 1,
+                        approval_type: 'new_customer',
+                        status: 'pending',
+                        prospect_id: prospectId,
+                        customer_id: null,
+                        submitted_by: _currentUser?.id,
+                        submitted_at: new Date().toISOString(),
+                        snapshot_before: null,
+                        snapshot_after: prospect,
+                        description: `New customer conversion for ${prospect?.full_name} (auto-triggered by sale RM ${saleAmount.toLocaleString()})`
+                    });
+                }
+            } catch (e) { /* approval queue write failed silently */ }
+        }
+
         if (saleAmount >= 2000) {
             UI.toast.success('Closing record submitted. Sale ≥ RM 2,000 — conversion request auto-submitted for manager approval!');
         } else {
@@ -15918,6 +16287,24 @@ const openAddSolutionModal = async (prospectId) => {
             conversion_requested_at: new Date().toISOString(),
             conversion_requested_by: _currentUser?.id
         });
+
+        // Create approval queue entry for new customer conversion
+        try {
+            const prospect = await AppDataStore.getById('prospects', prospectId);
+            await AppDataStore.create('approval_queue', {
+                id: Date.now(),
+                approval_type: 'new_customer',
+                status: 'pending',
+                prospect_id: prospectId,
+                customer_id: null,
+                submitted_by: _currentUser?.id,
+                submitted_at: new Date().toISOString(),
+                snapshot_before: null,
+                snapshot_after: prospect,
+                description: `New customer conversion for ${prospect?.full_name || 'prospect'}`
+            });
+        } catch (e) { /* approval queue write failed silently */ }
+
         UI.hideModal();
         UI.toast.success('Conversion request submitted. A manager will review and approve shortly.');
         await renderProspectsTable();
@@ -16026,6 +16413,19 @@ const openAddSolutionModal = async (prospectId) => {
         }
         await AppDataStore.update('prospects', prospectId, updatedFields);
 
+        // Sync approval queue — mark matching new_customer entry as approved
+        try {
+            const allQueue = await AppDataStore.getAll('approval_queue');
+            const matchingEntry = allQueue.find(e => e.prospect_id == prospectId && e.approval_type === 'new_customer' && e.status === 'pending');
+            if (matchingEntry) {
+                await AppDataStore.update('approval_queue', matchingEntry.id, {
+                    status: 'approved',
+                    reviewed_by: _currentUser?.id,
+                    reviewed_at: now
+                });
+            }
+        } catch (e) { /* queue sync failed silently */ }
+
         UI.hideModal();
         UI.toast.success(`${prospect.full_name} is now a Customer!`);
         const viewport = document.getElementById('content-viewport');
@@ -16033,11 +16433,26 @@ const openAddSolutionModal = async (prospectId) => {
     };
 
     const rejectProspectConversion = async (prospectId) => {
+        const now = new Date().toISOString();
         await AppDataStore.update('prospects', prospectId, {
             conversion_status: 'rejected',
-            conversion_rejected_at: new Date().toISOString(),
+            conversion_rejected_at: now,
             conversion_rejected_by: _currentUser?.id
         });
+
+        // Sync approval queue — mark matching new_customer entry as rejected
+        try {
+            const allQueue = await AppDataStore.getAll('approval_queue');
+            const matchingEntry = allQueue.find(e => e.prospect_id == prospectId && e.approval_type === 'new_customer' && e.status === 'pending');
+            if (matchingEntry) {
+                await AppDataStore.update('approval_queue', matchingEntry.id, {
+                    status: 'rejected',
+                    reviewed_by: _currentUser?.id,
+                    reviewed_at: now
+                });
+            }
+        } catch (e) { /* queue sync failed silently */ }
+
         UI.hideModal();
         UI.toast.info('Conversion rejected. Agent can resubmit after reviewing.');
         await renderProspectsTable();
@@ -25651,6 +26066,13 @@ const initImportDemoData = async () => {
         showConversionApprovalModal,
         approveProspectConversion,
         rejectProspectConversion,
+        // Approval Queue
+        renderApprovalQueue,
+        refreshApprovalQueue: renderApprovalQueue,
+        showApprovalDetail,
+        approveQueueEntry,
+        rejectQueueEntry,
+        confirmRejectQueueEntry,
         deleteProspect,
         confirmDeleteProspect,
         renderProspectsTable,
