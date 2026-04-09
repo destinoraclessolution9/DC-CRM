@@ -96,7 +96,7 @@ class DataStore {
             // Add IDs here whenever a record is hard-deleted via Supabase API/dashboard
             // to prevent the sync queue from resurrecting them.
             this._ensureTombstones({
-                activities: ['1775653728135', '1775574315672']
+                activities: ['1775653728135', '1775574315672', '1775574533626']
             });
 
             console.log('DataStore initialised (Supabase mode).');
