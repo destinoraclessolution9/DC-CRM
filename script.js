@@ -21123,6 +21123,8 @@ const exportKPIReport = async (format) => {
                             <th>Product Description</th>
                             <th>Price (RM)</th>
                             <th>Lead Time</th>
+                            <th>Dimension</th>
+                            <th>Weight</th>
                             <th>Status</th>
                             <th>Actions</th>
                         </tr>
@@ -21136,6 +21138,8 @@ const exportKPIReport = async (format) => {
                                 <td>${item.description || '-'}</td>
                                 <td>${item.price || 0}</td>
                                 <td>${item.delivery_lead_time || '-'}</td>
+                                <td>${item.product_dimension || '-'}</td>
+                                <td>${item.product_weight || '-'}</td>
                                 <td>
                                     <span class="status-badge ${item.is_active ? 'status-active' : 'status-inactive'}">
                                         ${item.is_active ? 'Active' : 'Inactive'}
@@ -21234,18 +21238,22 @@ const exportKPIReport = async (format) => {
                             <th>Function</th>
                             <th>Price (RM)</th>
                             <th>Lead Time</th>
+                            <th>Dimension</th>
+                            <th>Weight</th>
                             <th>Status</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody>
-                        ${data.length === 0 ? '<tr><td colspan="7" style="text-align:center; color: var(--gray-400); padding: 32px;">No Bujishu items added yet.</td></tr>' : data.map(item => `
+                        ${data.length === 0 ? '<tr><td colspan="9" style="text-align:center; color: var(--gray-400); padding: 32px;">No Bujishu items added yet.</td></tr>' : data.map(item => `
                             <tr style="${!item.is_active ? 'opacity: 0.6; background: #f9fafb;' : ''}">
                                 <td><strong>${item.name}</strong></td>
                                 <td>${item.category || '-'}</td>
                                 <td>${item.function_desc || '-'}</td>
                                 <td>${item.price || 0}</td>
                                 <td>${item.delivery_lead_time || '-'}</td>
+                                <td>${item.product_dimension || '-'}</td>
+                                <td>${item.product_weight || '-'}</td>
                                 <td>
                                     <span class="status-badge ${item.is_active ? 'status-active' : 'status-inactive'}">
                                         ${item.is_active ? 'Active' : 'Inactive'}
@@ -21316,6 +21324,8 @@ const exportKPIReport = async (format) => {
                 <div class="form-group"><label>Price (RM)</label><input type="number" id="mkt-price" class="form-control" value="0"></div>
                 <div class="form-group"><label>Remarks</label><input type="text" id="mkt-remarks" class="form-control"></div>
                 <div class="form-group"><label>Delivery Lead Time</label><input type="text" id="mkt-lead" class="form-control" placeholder="e.g. 3-5 days"></div>
+                <div class="form-group"><label>Product Dimension</label><input type="text" id="mkt-dimension" class="form-control" placeholder="e.g. 30cm x 20cm x 10cm"></div>
+                <div class="form-group"><label>Product Weight</label><input type="text" id="mkt-weight" class="form-control" placeholder="e.g. 500g, 1.2kg"></div>
                 <div class="form-group"><label><input type="checkbox" id="mkt-active" checked> Is Active</label></div>
 `;
         } else if (type === 'events') {
@@ -21349,6 +21359,8 @@ const exportKPIReport = async (format) => {
                 <div class="form-group"><label>Function</label><textarea id="mkt-function-desc" class="form-control" placeholder="Describe function..."></textarea></div>
                 <div class="form-group"><label>Price (RM)</label><input type="number" id="mkt-price" class="form-control" value="0"></div>
                 <div class="form-group"><label>Delivery Lead Time</label><input type="text" id="mkt-lead" class="form-control" placeholder="e.g. 3-5 days"></div>
+                <div class="form-group"><label>Product Dimension</label><input type="text" id="mkt-dimension" class="form-control" placeholder="e.g. 30cm x 20cm x 10cm"></div>
+                <div class="form-group"><label>Product Weight</label><input type="text" id="mkt-weight" class="form-control" placeholder="e.g. 500g, 1.2kg"></div>
                 <div class="form-group"><label><input type="checkbox" id="mkt-active" checked> Is Active</label></div>
 `;
         } else if (type === 'formula') {
@@ -21395,6 +21407,8 @@ const exportKPIReport = async (format) => {
                 <div class="form-group"><label>Price (RM)</label><input type="number" id="mkt-price" class="form-control" value="${item.price || 0}"></div>
                 <div class="form-group"><label>Remarks</label><input type="text" id="mkt-remarks" class="form-control" value="${item.remarks || ''}"></div>
                 <div class="form-group"><label>Delivery Lead Time</label><input type="text" id="mkt-lead" class="form-control" value="${item.delivery_lead_time || ''}"></div>
+                <div class="form-group"><label>Product Dimension</label><input type="text" id="mkt-dimension" class="form-control" value="${item.product_dimension || ''}" placeholder="e.g. 30cm x 20cm x 10cm"></div>
+                <div class="form-group"><label>Product Weight</label><input type="text" id="mkt-weight" class="form-control" value="${item.product_weight || ''}" placeholder="e.g. 500g, 1.2kg"></div>
                 <div class="form-group"><label><input type="checkbox" id="mkt-active" ${item.is_active ? 'checked' : ''}> Is Active</label></div>
             `;
         } else if (type === 'events') {
@@ -21428,6 +21442,8 @@ const exportKPIReport = async (format) => {
                 <div class="form-group"><label>Function</label><textarea id="mkt-function-desc" class="form-control" placeholder="Describe function...">${item.function_desc || ''}</textarea></div>
                 <div class="form-group"><label>Price (RM)</label><input type="number" id="mkt-price" class="form-control" value="${item.price || 0}"></div>
                 <div class="form-group"><label>Delivery Lead Time</label><input type="text" id="mkt-lead" class="form-control" value="${item.delivery_lead_time || ''}"></div>
+                <div class="form-group"><label>Product Dimension</label><input type="text" id="mkt-dimension" class="form-control" value="${item.product_dimension || ''}" placeholder="e.g. 30cm x 20cm x 10cm"></div>
+                <div class="form-group"><label>Product Weight</label><input type="text" id="mkt-weight" class="form-control" value="${item.product_weight || ''}" placeholder="e.g. 500g, 1.2kg"></div>
                 <div class="form-group"><label><input type="checkbox" id="mkt-active" ${item.is_active ? 'checked' : ''}> Is Active</label></div>
             `;
         } else if (type === 'formula') {
@@ -21481,6 +21497,8 @@ const exportKPIReport = async (format) => {
             data.price = parseFloat(document.getElementById('mkt-price').value) || 0;
             data.remarks = document.getElementById('mkt-remarks').value;
             data.delivery_lead_time = document.getElementById('mkt-lead').value;
+            data.product_dimension = document.getElementById('mkt-dimension')?.value || '';
+            data.product_weight = document.getElementById('mkt-weight')?.value || '';
             if (!data.name) return UI.toast.error('Name is required');
         } else if (type === 'bujishu') {
             data.name = document.getElementById('mkt-name').value.trim();
@@ -21488,6 +21506,8 @@ const exportKPIReport = async (format) => {
             data.function_desc = document.getElementById('mkt-function-desc').value;
             data.price = parseFloat(document.getElementById('mkt-price').value) || 0;
             data.delivery_lead_time = document.getElementById('mkt-lead').value;
+            data.product_dimension = document.getElementById('mkt-dimension')?.value || '';
+            data.product_weight = document.getElementById('mkt-weight')?.value || '';
             if (!data.name) return UI.toast.error('Name is required');
         } else if (type === 'formula') {
             data.name = document.getElementById('mkt-name').value.trim();
