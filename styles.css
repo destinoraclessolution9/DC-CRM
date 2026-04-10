@@ -3355,6 +3355,16 @@ body {
     align-items: center;
 }
 
+.stat-card-clickable {
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.stat-card-clickable:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(139, 26, 26, 0.12);
+}
+
 .stat-info h3 {
     font-size: 14px;
     color: var(--gray-500);

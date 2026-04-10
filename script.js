@@ -19821,6 +19821,315 @@ const getActivityHeadcount = async (from, to) => {
     return count;
 };
 
+// ========== KPI DRILL-DOWN: detail builders ==========
+const renderDetailTable = (headers, rows, emptyMsg = 'No records in this period') => {
+    if (!rows.length) return `<div style="padding:32px;text-align:center;color:var(--gray-400);">${emptyMsg}</div>`;
+    return `
+        <div style="max-height:55vh;overflow:auto;border:1px solid var(--border,#e5e0d8);border-radius:6px;">
+            <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                <thead style="background:var(--gray-50,#f7f4ed);position:sticky;top:0;z-index:1;">
+                    <tr>${headers.map(h => `<th style="padding:10px 12px;text-align:left;font-weight:600;color:var(--gray-500);border-bottom:1px solid var(--border,#e5e0d8);">${h}</th>`).join('')}</tr>
+                </thead>
+                <tbody>
+                    ${rows.map(r => `<tr>${r.map(cell => `<td style="padding:10px 12px;border-bottom:1px solid var(--gray-100,#f1ede3);">${cell ?? '—'}</td>`).join('')}</tr>`).join('')}
+                </tbody>
+            </table>
+        </div>
+        <div style="text-align:right;margin-top:8px;font-size:12px;color:var(--gray-400);">${rows.length} record${rows.length === 1 ? '' : 's'}</div>
+    `;
+};
+
+const buildCPSDetails = async (from, to) => {
+    const [activities, users, customers, prospects] = await Promise.all([
+        AppDataStore.getAll('activities'),
+        AppDataStore.getAll('users'),
+        AppDataStore.getAll('customers'),
+        AppDataStore.getAll('prospects')
+    ]);
+    const userMap = {}; users.forEach(u => { userMap[u.id] = u; });
+    const custMap = {}; customers.forEach(c => { custMap[c.id] = c; });
+    const prospMap = {}; prospects.forEach(p => { prospMap[p.id] = p; });
+    const rows = [];
+    for (const a of activities) {
+        if (a.activity_type !== 'CPS' || a.activity_date < from || a.activity_date > to) continue;
+        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(a.lead_agent_id)) continue;
+        if (_currentRoleFilter !== 'All') {
+            const agent = userMap[a.lead_agent_id];
+            if (!agent || agent.role !== _currentRoleFilter) continue;
+        }
+        const agentName = userMap[a.lead_agent_id]?.full_name || 'Unknown';
+        const cust = a.customer_id ? custMap[a.customer_id] : null;
+        const prosp = a.prospect_id ? prospMap[a.prospect_id] : null;
+        const entityName = cust?.full_name || prosp?.full_name || a.customer_name || '—';
+        rows.push([a.activity_date, agentName, entityName, a.activity_title || 'CPS Session']);
+    }
+    return renderDetailTable(['Date', 'Lead Agent', 'Customer / Prospect', 'Title'], rows);
+};
+
+const buildTotalSalesDetails = async (from, to) => {
+    const [purchases, users, customers] = await Promise.all([
+        AppDataStore.getAll('purchases'),
+        AppDataStore.getAll('users'),
+        AppDataStore.getAll('customers')
+    ]);
+    const userMap = {}; users.forEach(u => { userMap[u.id] = u; });
+    const custMap = {}; customers.forEach(c => { custMap[c.id] = c; });
+    const rows = [];
+    let total = 0;
+    for (const p of purchases) {
+        if (p.date < from || p.date > to || p.is_agent_package) continue;
+        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(p.agent_id)) continue;
+        if (_currentRoleFilter !== 'All') {
+            const agent = userMap[p.agent_id];
+            if (!agent || agent.role !== _currentRoleFilter) continue;
+        }
+        const agentName = userMap[p.agent_id]?.full_name
+            || userMap[custMap[p.customer_id]?.responsible_agent_id]?.full_name
+            || '—';
+        const custName = custMap[p.customer_id]?.full_name || '—';
+        total += p.amount || 0;
+        rows.push([p.date, agentName, custName, `RM ${(p.amount || 0).toLocaleString()}`, p.payment_method || '—', p.item || '—']);
+    }
+    const summary = `<div style="background:#ecfdf5;border:1px solid #a7f3d0;border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:13px;">Total: <strong>RM ${total.toLocaleString()}</strong> across ${rows.length} sale${rows.length===1?'':'s'}</div>`;
+    return summary + renderDetailTable(['Date', 'Agent', 'Customer', 'Amount', 'Method', 'Item'], rows);
+};
+
+const buildPOPDetails = async (from, to) => {
+    const [purchases, users, customers] = await Promise.all([
+        AppDataStore.getAll('purchases'),
+        AppDataStore.getAll('users'),
+        AppDataStore.getAll('customers')
+    ]);
+    const userMap = {}; users.forEach(u => { userMap[u.id] = u; });
+    const custMap = {}; customers.forEach(c => { custMap[c.id] = c; });
+    const rows = [];
+    let total = 0;
+    for (const p of purchases) {
+        if (p.payment_method !== 'POP' || p.date < from || p.date > to) continue;
+        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(p.agent_id)) continue;
+        if (_currentRoleFilter !== 'All') {
+            const agent = userMap[p.agent_id];
+            if (!agent || agent.role !== _currentRoleFilter) continue;
+        }
+        const agentName = userMap[p.agent_id]?.full_name || '—';
+        const custName = custMap[p.customer_id]?.full_name || '—';
+        total += p.amount || 0;
+        rows.push([p.date, agentName, custName, `RM ${(p.amount || 0).toLocaleString()}`, p.pop_tenure ? `${p.pop_tenure} mo` : '—', p.item || '—']);
+    }
+    const summary = `<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:13px;">Total: <strong>RM ${total.toLocaleString()}</strong> across ${rows.length} POP case${rows.length===1?'':'s'}</div>`;
+    return summary + renderDetailTable(['Date', 'Agent', 'Customer', 'Amount', 'Tenure', 'Item'], rows);
+};
+
+const buildEPPCasesDetails = async (from, to) => {
+    const [purchases, users, customers] = await Promise.all([
+        AppDataStore.getAll('purchases'),
+        AppDataStore.getAll('users'),
+        AppDataStore.getAll('customers')
+    ]);
+    const userMap = {}; users.forEach(u => { userMap[u.id] = u; });
+    const custMap = {}; customers.forEach(c => { custMap[c.id] = c; });
+    const rows = [];
+    const byBank = {};
+    let total = 0;
+    for (const p of purchases) {
+        if (p.payment_method !== 'EPP' || p.date < from || p.date > to) continue;
+        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(p.agent_id)) continue;
+        if (_currentRoleFilter !== 'All') {
+            const agent = userMap[p.agent_id];
+            if (!agent || agent.role !== _currentRoleFilter) continue;
+        }
+        const agentName = userMap[p.agent_id]?.full_name || '—';
+        const custName = custMap[p.customer_id]?.full_name || '—';
+        const bank = p.epp_bank || 'Unknown';
+        const months = p.epp_months || '-';
+        total += p.amount || 0;
+        byBank[bank] = (byBank[bank] || 0) + 1;
+        rows.push([p.date, agentName, custName, `RM ${(p.amount || 0).toLocaleString()}`, bank, `${months} mo`]);
+    }
+    const bankPills = Object.entries(byBank).map(([b, c]) => `<span style="display:inline-block;background:#ede9fe;color:#6d28d9;padding:3px 10px;border-radius:12px;font-size:11px;margin-right:6px;">${b}: ${c}</span>`).join('');
+    const summary = `<div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:13px;">Total: <strong>RM ${total.toLocaleString()}</strong> across ${rows.length} EPP case${rows.length===1?'':'s'}${bankPills ? '<br/><div style="margin-top:6px;">' + bankPills + '</div>' : ''}</div>`;
+    return summary + renderDetailTable(['Date', 'Agent', 'Customer', 'Amount', 'Bank', 'Months'], rows);
+};
+
+const buildNewAgentsDetails = async (from, to) => {
+    const users = await AppDataStore.getAll('users');
+    const userMap = {}; users.forEach(u => { userMap[u.id] = u; });
+    const rows = [];
+    for (const u of users) {
+        if (u.join_date < from || u.join_date > to) continue;
+        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(u.id)) continue;
+        if (_currentRoleFilter !== 'All') {
+            if (u.role !== _currentRoleFilter) continue;
+        } else {
+            if (!isAgent(u)) continue;
+        }
+        const upline = u.upline_id ? (userMap[u.upline_id]?.full_name || '—') : '—';
+        rows.push([u.join_date, u.full_name || '—', u.role || '—', upline]);
+    }
+    return renderDetailTable(['Join Date', 'Name', 'Role', 'Upline'], rows);
+};
+
+const buildNewCustomersDetails = async (from, to) => {
+    const [customers, users] = await Promise.all([
+        AppDataStore.getAll('customers'),
+        AppDataStore.getAll('users')
+    ]);
+    const userMap = {}; users.forEach(u => { userMap[u.id] = u; });
+    const rows = [];
+    for (const c of customers) {
+        if (c.customer_since < from || c.customer_since > to) continue;
+        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(c.responsible_agent_id)) continue;
+        const agent = c.responsible_agent_id ? (userMap[c.responsible_agent_id]?.full_name || '—') : '—';
+        rows.push([c.customer_since, c.full_name || '—', agent, c.source || '—']);
+    }
+    return renderDetailTable(['Since', 'Name', 'Agent', 'Source'], rows);
+};
+
+const buildConversionDetails = async (from, to) => {
+    const [prospects, customers, users] = await Promise.all([
+        AppDataStore.getAll('prospects'),
+        AppDataStore.getAll('customers'),
+        AppDataStore.getAll('users')
+    ]);
+    const userMap = {}; users.forEach(u => { userMap[u.id] = u; });
+    const pRows = [];
+    for (const p of prospects) {
+        if (p.created_at < from || p.created_at > to) continue;
+        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(p.responsible_agent_id)) continue;
+        const agent = p.responsible_agent_id ? (userMap[p.responsible_agent_id]?.full_name || '—') : '—';
+        pRows.push([(p.created_at || '').slice(0, 10), p.full_name || '—', agent, p.status || '—']);
+    }
+    const cRows = [];
+    for (const c of customers) {
+        if (c.customer_since < from || c.customer_since > to) continue;
+        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(c.responsible_agent_id)) continue;
+        const agent = c.responsible_agent_id ? (userMap[c.responsible_agent_id]?.full_name || '—') : '—';
+        cRows.push([c.customer_since, c.full_name || '—', agent]);
+    }
+    const rate = pRows.length === 0 ? 0 : Math.round((cRows.length / pRows.length) * 100);
+    const summary = `
+        <div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:6px;padding:12px 16px;margin-bottom:14px;">
+            <div style="font-size:13px;color:var(--gray-500);">Conversion Rate: <strong style="color:var(--primary,#8B1A1A);font-size:18px;">${rate}%</strong></div>
+            <div style="font-size:12px;color:var(--gray-400);margin-top:4px;">${cRows.length} converted customer${cRows.length===1?'':'s'} ÷ ${pRows.length} new prospect${pRows.length===1?'':'s'}</div>
+        </div>`;
+    return summary +
+        `<h4 style="margin:0 0 8px;font-size:13px;">Prospects (${pRows.length})</h4>` +
+        renderDetailTable(['Created', 'Name', 'Agent', 'Status'], pRows, 'No prospects in this period') +
+        `<h4 style="margin:14px 0 8px;font-size:13px;">Converted Customers (${cRows.length})</h4>` +
+        renderDetailTable(['Since', 'Name', 'Agent'], cRows, 'No conversions in this period');
+};
+
+const buildMeetingsDetails = async (from, to) => {
+    const [activities, users, customers, prospects] = await Promise.all([
+        AppDataStore.getAll('activities'),
+        AppDataStore.getAll('users'),
+        AppDataStore.getAll('customers'),
+        AppDataStore.getAll('prospects')
+    ]);
+    const userMap = {}; users.forEach(u => { userMap[u.id] = u; });
+    const custMap = {}; customers.forEach(c => { custMap[c.id] = c; });
+    const prospMap = {}; prospects.forEach(p => { prospMap[p.id] = p; });
+    const rows = [];
+    for (const a of activities) {
+        if (a.activity_date < from || a.activity_date > to) continue;
+        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(a.lead_agent_id)) continue;
+        if (_currentRoleFilter !== 'All') {
+            const agent = userMap[a.lead_agent_id];
+            if (!agent || agent.role !== _currentRoleFilter) continue;
+        }
+        const agentName = userMap[a.lead_agent_id]?.full_name || '—';
+        const cust = a.customer_id ? custMap[a.customer_id] : null;
+        const prosp = a.prospect_id ? prospMap[a.prospect_id] : null;
+        const entityName = cust?.full_name || prosp?.full_name || '—';
+        rows.push([a.activity_date, a.activity_type || '—', a.activity_title || '—', agentName, entityName]);
+    }
+    return renderDetailTable(['Date', 'Type', 'Title', 'Lead Agent', 'Customer / Prospect'], rows);
+};
+
+const buildActivityHeadcountDetails = async (from, to) => {
+    const [regs, events, prospects, customers] = await Promise.all([
+        AppDataStore.getAll('event_registrations'),
+        AppDataStore.getAll('events'),
+        AppDataStore.getAll('prospects'),
+        AppDataStore.getAll('customers')
+    ]);
+    const eventMap = {}; events.forEach(e => { eventMap[e.id] = e; });
+    const prospMap = {}; prospects.forEach(p => { prospMap[p.id] = p; });
+    const custMap = {}; customers.forEach(c => { custMap[c.id] = c; });
+    const rows = [];
+    const byEvent = {};
+    for (const r of regs) {
+        if (!r.checked_in || r.checked_in_at < from || r.checked_in_at > to) continue;
+        const ev = eventMap[r.event_id];
+        const eventTitle = ev?.event_title || ev?.title || `Event #${r.event_id}`;
+        const attendee = r.attendee_type === 'customer'
+            ? custMap[r.customer_id || r.attendee_id]?.full_name
+            : prospMap[r.prospect_id || r.attendee_id]?.full_name;
+        const dateStr = (r.checked_in_at || '').slice(0, 10);
+        rows.push([dateStr, eventTitle, attendee || '—', r.attendee_type || '—']);
+        byEvent[eventTitle] = (byEvent[eventTitle] || 0) + 1;
+    }
+    const summary = Object.keys(byEvent).length
+        ? `<div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:6px;padding:12px 16px;margin-bottom:14px;">
+             <div style="font-size:12px;color:var(--gray-500);margin-bottom:8px;font-weight:600;">By Event:</div>
+             ${Object.entries(byEvent).sort((a,b) => b[1]-a[1]).map(([name, c]) => `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;"><span>${name}</span><strong>${c} attendee${c===1?'':'s'}</strong></div>`).join('')}
+           </div>`
+        : '';
+    return summary + renderDetailTable(['Check-in Date', 'Event', 'Attendee', 'Type'], rows);
+};
+
+const showKPIDetails = async (key) => {
+    const ranges = getDateRanges(_currentTimeFilter, _customDateFrom, _customDateTo);
+    const { from, to } = ranges.current;
+    const titles = {
+        cpsCount: 'CPS Consultations',
+        totalSales: 'Total Sales',
+        popCaseCount: 'POP Cases',
+        eppCaseCount: 'EPP Cases',
+        newAgents: 'New Agents',
+        newCustomers: 'New Customers',
+        conversionRate: 'Conversion Rate',
+        totalMeetings: 'Total Meetings',
+        activityHeadcount: 'Activity Attendance'
+    };
+    const title = titles[key] || 'Details';
+
+    const filterStrip = `
+        <div style="background:var(--gray-50,#f7f4ed);padding:10px 14px;border-radius:6px;margin-bottom:14px;font-size:12px;color:var(--gray-500);">
+            <strong>Date range:</strong> ${from} to ${to}
+            &nbsp;·&nbsp; <strong>Role filter:</strong> ${_currentRoleFilter}
+            ${_visibleUserIds !== 'all' ? ' &nbsp;·&nbsp; <strong>Scoped to your team</strong>' : ''}
+        </div>`;
+
+    UI.showModal(title + ' — Breakdown',
+        filterStrip + '<div style="text-align:center;padding:24px;color:var(--gray-400);"><i class="fas fa-spinner fa-spin"></i> Loading details...</div>',
+        [{ label: 'Close', type: 'primary', action: 'UI.hideModal()' }],
+        'fullscreen');
+
+    let body;
+    try {
+        if (key === 'cpsCount')              body = await buildCPSDetails(from, to);
+        else if (key === 'totalSales')       body = await buildTotalSalesDetails(from, to);
+        else if (key === 'popCaseCount')     body = await buildPOPDetails(from, to);
+        else if (key === 'eppCaseCount')     body = await buildEPPCasesDetails(from, to);
+        else if (key === 'newAgents')        body = await buildNewAgentsDetails(from, to);
+        else if (key === 'newCustomers')     body = await buildNewCustomersDetails(from, to);
+        else if (key === 'conversionRate')   body = await buildConversionDetails(from, to);
+        else if (key === 'totalMeetings')    body = await buildMeetingsDetails(from, to);
+        else if (key === 'activityHeadcount') body = await buildActivityHeadcountDetails(from, to);
+        else body = '<p>No details available for this metric.</p>';
+    } catch (e) {
+        console.error('showKPIDetails error', e);
+        body = '<p style="color:#dc2626;padding:16px;">Failed to load details. See console for error.</p>';
+    }
+
+    // Re-render modal with loaded body
+    UI.showModal(title + ' — Breakdown',
+        filterStrip + body,
+        [{ label: 'Close', type: 'primary', action: 'UI.hideModal()' }],
+        'fullscreen');
+};
+
     const renderKPIStats = (kpis, prevKpis) => {
         const grid = document.getElementById('kpi-stats-grid');
         if (!grid) return;
@@ -19849,11 +20158,11 @@ const getActivityHeadcount = async (from, to) => {
             const trendIcon = diff >= 0 ? 'fa-arrow-up' : 'fa-arrow-down';
 
             return `
-                <div class="stat-card">
+                <div class="stat-card stat-card-clickable" onclick="app.showKPIDetails('${c.key}')" title="Click to view breakdown">
                     <div class="stat-info">
                         <h3>
                             ${c.label}
-                            <div class="kpi-tooltip">
+                            <div class="kpi-tooltip" onclick="event.stopPropagation();">
                                 <i class="fas fa-info-circle"></i>
                                 <span class="tooltip-text">${KPI_DEFINITIONS[c.key]}</span>
                             </div>
@@ -26838,6 +27147,7 @@ const initImportDemoData = async () => {
         setTimeFilter,
         setCustomDateRange,
         refreshKPIDashboard,
+        showKPIDetails,
         exportKPIReport,
 
         // Action Plan
