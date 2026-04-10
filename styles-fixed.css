@@ -8875,7 +8875,7 @@ input:checked+.slider:before {
     position: relative;
     width: 100%;
     max-width: 420px;
-    aspect-ratio: 9 / 19.5;
+    aspect-ratio: 9 / 16.5;
     background-image: url('assets/milestone-scroll-bg.jpg');
     background-size: 100% 100%;
     background-repeat: no-repeat;
@@ -8885,24 +8885,24 @@ input:checked+.slider:before {
     position: absolute;
     left: 8.5%;
     right: 8.5%;
-    top: 8.2%;
-    bottom: 9%;
+    top: 9%;
+    bottom: 9.5%;
     background: #f5ecd7;
     border-radius: 4px;
-    padding: 18px 14px 14px;
+    padding: 14px 14px 10px;
     display: flex;
     flex-direction: column;
-    overflow-y: auto;
+    overflow-y: hidden;
     overflow-x: hidden;
     box-shadow: inset 0 0 20px rgba(139, 0, 0, 0.05);
 }
 .milestone-header {
     text-align: center;
-    margin-bottom: 10px;
+    margin-bottom: 6px;
 }
 .milestone-header h1 {
     margin: 0;
-    font-size: 1.5rem;
+    font-size: 1.35rem;
     color: #8B0000;
     letter-spacing: 0.08em;
     font-weight: 700;
@@ -8930,13 +8930,13 @@ input:checked+.slider:before {
 .nine-method-grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    gap: 8px 6px;
-    margin-bottom: 14px;
+    gap: 4px 4px;
+    margin-bottom: 6px;
 }
 .nine-method-card {
     background: transparent;
     border: none;
-    padding: 4px 2px;
+    padding: 2px 2px;
     text-align: center;
     cursor: default;
     display: flex;
@@ -8944,8 +8944,8 @@ input:checked+.slider:before {
     align-items: center;
 }
 .nine-method-card .mc-icon {
-    width: 62px;
-    height: 62px;
+    width: 72px;
+    height: 72px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -8979,14 +8979,14 @@ input:checked+.slider:before {
     color: #d97706;
 }
 .four-pillar-section {
-    margin-top: 8px;
-    padding-top: 14px;
+    margin-top: 4px;
+    padding-top: 8px;
     border-top: 1px dashed #c9a86a;
 }
 .four-pillar-section h2 {
-    margin: 0 0 10px;
+    margin: 0 0 6px;
     text-align: center;
-    font-size: 1.1rem;
+    font-size: 1.05rem;
     color: #1e3a5f;
     letter-spacing: 0.06em;
     font-weight: 700;
@@ -8994,19 +8994,19 @@ input:checked+.slider:before {
 .four-pillar-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 10px 8px;
+    gap: 6px 6px;
 }
 .four-pillar-card {
     background: transparent;
     text-align: center;
-    padding: 4px 2px;
+    padding: 2px 2px;
     display: flex;
     flex-direction: column;
     align-items: center;
 }
 .four-pillar-card .pc-icon {
-    width: 78px;
-    height: 62px;
+    width: 130px;
+    height: 90px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -9022,10 +9022,11 @@ input:checked+.slider:before {
     filter: none;
 }
 .four-pillar-card .pc-label {
-    margin-top: 4px;
-    font-size: 0.68rem;
+    margin-top: 2px;
+    font-size: 0.72rem;
     color: #5c3a1a;
     line-height: 1.2;
+    font-weight: 600;
 }
 .four-pillar-card .pc-admin {
     margin-top: 3px;
