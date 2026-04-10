@@ -15864,7 +15864,130 @@ const deleteNote = async (prospectId, noteId) => {
     });
 };
 
-    const attachActivityPhoto = (activityId) => app.todo('Attach Activity Photo');
+    // Shows a modal with SQL that adds the photo_urls column. Pattern follows migratePromotionsTable.
+    const showPhotoUrlsMigrationModal = () => {
+        const migrationSQL = `ALTER TABLE public.activities
+  ADD COLUMN IF NOT EXISTS photo_urls jsonb DEFAULT '[]'::jsonb;
+
+NOTIFY pgrst, 'reload schema';`;
+        const escaped = migrationSQL.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        UI.showModal('⚠️ One-time Database Setup Required', `
+            <p style="margin-bottom:12px;">The <strong>activities</strong> table is missing the <code>photo_urls</code> column needed to store meet-up photos so they sync across devices. Run this SQL once in your <a href="https://supabase.com/dashboard/project/remuwhxvzkzjtgbzqjaa/sql/new" target="_blank" style="color:var(--primary);font-weight:600;">Supabase SQL Editor ↗</a>:</p>
+            <textarea class="form-control" rows="6" id="photo-migration-sql" style="font-family:monospace;font-size:12px;background:#1e1e1e;color:#d4d4d4;border:none;resize:none;width:100%;">${escaped}</textarea>
+            <button class="btn secondary" style="margin-top:8px;" onclick="document.getElementById('photo-migration-sql').select();document.execCommand('copy');UI.toast.success('SQL copied to clipboard!')">
+                <i class="fas fa-copy"></i> Copy SQL
+            </button>
+            <p style="margin-top:12px;font-size:12px;color:var(--gray-600);">After running the SQL, come back and click the Photo button again.</p>
+        `, [{ label: 'Close', type: 'primary', action: 'UI.hideModal()' }]);
+    };
+
+    // Probes whether activities.photo_urls exists by writing a no-op update. Returns true if column exists.
+    const checkPhotoUrlsColumn = async () => {
+        try {
+            const sb = window.supabase || window.supabaseClient;
+            if (!sb) return false;
+            const { error } = await sb.from('activities').select('photo_urls').limit(1);
+            if (!error) return true;
+            if (error.message && /photo_urls/i.test(error.message)) return false;
+            return false;
+        } catch (e) { return false; }
+    };
+
+    const attachActivityPhoto = async (activityId) => {
+        const activity = await AppDataStore.getById('activities', activityId);
+        if (!activity) { UI.toast.error('Meet up record not found'); return; }
+
+        // Verify the Supabase schema is ready — otherwise photos would only live in localStorage
+        const columnOk = await checkPhotoUrlsColumn();
+        if (!columnOk) { showPhotoUrlsMigrationModal(); return; }
+
+        const existing = Array.isArray(activity.photo_urls) ? activity.photo_urls : [];
+        const content = `
+            <div class="form-group">
+                <label>Select one or more photos</label>
+                <input type="file" id="activity-photo-upload" class="form-control" accept="image/*" multiple>
+                <p style="color:var(--gray-500);font-size:12px;margin-top:6px;">JPG/PNG, max 5MB each. You can pick multiple files.</p>
+            </div>
+            ${existing.length > 0 ? `
+            <div class="form-group">
+                <label>Existing Photos (${existing.length})</label>
+                <div style="display:flex;flex-wrap:wrap;gap:8px;max-height:180px;overflow:auto;padding:6px;border:1px solid var(--gray-200);border-radius:6px;">
+                    ${existing.map((url, i) => `
+                        <div style="position:relative;">
+                            <img src="${url}" style="height:70px;border-radius:4px;object-fit:cover;cursor:pointer;" onclick="window.open('${url}','_blank')">
+                            <button type="button" class="btn-icon" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:white;border-radius:50%;width:20px;height:20px;font-size:10px;padding:0;" title="Remove" onclick="app.removeActivityPhoto(${activityId}, ${i})"><i class="fas fa-times"></i></button>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>` : ''}
+        `;
+        UI.showModal('Attach Meet Up Photo', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Upload', type: 'primary', action: `(async () => { await app.saveActivityPhoto(${activityId}); })()` }
+        ]);
+    };
+
+    const saveActivityPhoto = async (activityId) => {
+        const input = document.getElementById('activity-photo-upload');
+        const files = input?.files;
+        if (!files || files.length === 0) { UI.toast.error('Please select at least one photo'); return; }
+
+        const activity = await AppDataStore.getById('activities', activityId);
+        if (!activity) { UI.toast.error('Meet up record not found'); return; }
+        const existing = Array.isArray(activity.photo_urls) ? activity.photo_urls : [];
+        const newUrls = [];
+
+        const sb = window.supabase || window.supabaseClient;
+        if (!sb || !sb.storage) { UI.toast.error('Supabase not connected — cannot upload photos'); return; }
+
+        try {
+            for (const file of files) {
+                if (file.size > 5 * 1024 * 1024) {
+                    UI.toast.error(`"${file.name}" too large (max 5MB)`);
+                    continue;
+                }
+                const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+                const path = `activity_photos/${activityId}_${Date.now()}_${safeName}`;
+                const { error: upErr } = await sb.storage.from('attachments').upload(path, file, { upsert: false, contentType: file.type });
+                if (upErr) { throw upErr; }
+                const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
+                if (urlData?.publicUrl) newUrls.push(urlData.publicUrl);
+            }
+
+            if (newUrls.length === 0) { UI.toast.error('No photos were uploaded'); return; }
+
+            const updated = [...existing, ...newUrls];
+            await AppDataStore.update('activities', activityId, { photo_urls: updated });
+
+            UI.hideModal();
+            UI.toast.success(`${newUrls.length} photo(s) uploaded`);
+
+            const prospectId = activity.prospect_id;
+            const bodyEl = document.getElementById(`acc-body-activity-${prospectId}`);
+            if (bodyEl) {
+                await switchProspectTab('activity', prospectId, null, bodyEl);
+            }
+        } catch (err) {
+            console.error('Activity photo upload failed:', err);
+            UI.toast.error('Upload failed: ' + (err.message || 'Unknown error'));
+        }
+    };
+
+    const removeActivityPhoto = async (activityId, index) => {
+        const activity = await AppDataStore.getById('activities', activityId);
+        if (!activity) return;
+        const existing = Array.isArray(activity.photo_urls) ? [...activity.photo_urls] : [];
+        if (index < 0 || index >= existing.length) return;
+        existing.splice(index, 1);
+        await AppDataStore.update('activities', activityId, { photo_urls: existing });
+        UI.hideModal();
+        UI.toast.success('Photo removed');
+        const prospectId = activity.prospect_id;
+        const bodyEl = document.getElementById(`acc-body-activity-${prospectId}`);
+        if (bodyEl) {
+            await switchProspectTab('activity', prospectId, null, bodyEl);
+        }
+    };
 
     const recordSalesClosure = (prospectId, activityId) => {
         // Scroll/open the Closing Record accordion
@@ -27474,6 +27597,8 @@ const initImportDemoData = async () => {
         addNote,
         deleteNote,
         attachActivityPhoto,
+        saveActivityPhoto,
+        removeActivityPhoto,
         recordSalesClosure,
         toggleNextAction,
         toggleNextActionItem,
