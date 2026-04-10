@@ -12924,6 +12924,113 @@ function _wireLoginBtn() {
 
     const saveAndAddAnother = async () => await saveActivity(true);
 
+    // ========== PAST RECORD ENTRY (for old customers with historical meet ups) ==========
+    const openPastRecordModal = async (prospectId) => {
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) {
+            UI.toast.error('Prospect not found.');
+            return;
+        }
+
+        const today = new Date().toISOString().split('T')[0];
+        const modalContent = `
+            <div class="activity-modal-form">
+                <p style="background:#fff8e1;border:1px solid #ffe082;color:#7a5c00;padding:10px 12px;border-radius:6px;font-size:13px;margin-bottom:14px;">
+                    <i class="fas fa-history"></i> Log a historical meet up for <strong>${prospect.full_name}</strong>. This entry will <strong>not</strong> award scoring points or extend protection — it is only for record keeping.
+                </p>
+                <div class="form-row">
+                    <div class="form-group half">
+                        <label>Date <span class="required">*</span></label>
+                        <input type="date" id="past-record-date" class="form-control" max="${today}">
+                    </div>
+                    <div class="form-group half">
+                        <label>Activity Type <span class="required">*</span></label>
+                        <select id="past-record-type" class="form-control">
+                            <option value="CPS">CPS - Consultation/Planning Session</option>
+                            <option value="FTF">FTF - Face to Face Meeting</option>
+                            <option value="FSA">FSA - Feng Shui Analysis</option>
+                            <option value="GR">GR - Golden Road</option>
+                            <option value="XG">XG - Xin Gua</option>
+                            <option value="SITE">Site Visit</option>
+                            <option value="CALL">Call</option>
+                            <option value="EMAIL">Email</option>
+                            <option value="WHATSAPP">WhatsApp</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Title</label>
+                    <input type="text" id="past-record-title" class="form-control" placeholder="e.g. House FSA visit">
+                </div>
+                <div class="form-group">
+                    <label>Core Problem / Summary</label>
+                    <textarea id="past-record-summary" class="form-control" rows="3" placeholder="What was discussed or done during this meet up?"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Outcome</label>
+                    <textarea id="past-record-outcome" class="form-control" rows="2" placeholder="What was the result?"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Next Action</label>
+                    <input type="text" id="past-record-next" class="form-control" placeholder="Optional follow up note">
+                </div>
+            </div>
+        `;
+        UI.showModal('Add Past Record', modalContent, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save Past Record', type: 'primary', action: `(async () => { await app.savePastRecord(${prospectId}); })()` }
+        ]);
+    };
+
+    const savePastRecord = async (prospectId) => {
+        const date = document.getElementById('past-record-date')?.value;
+        const type = document.getElementById('past-record-type')?.value;
+        const title = document.getElementById('past-record-title')?.value?.trim() || '';
+        const summary = document.getElementById('past-record-summary')?.value?.trim() || '';
+        const outcome = document.getElementById('past-record-outcome')?.value?.trim() || '';
+        const nextAction = document.getElementById('past-record-next')?.value?.trim() || '';
+
+        if (!date) {
+            UI.toast.error('Date is required.');
+            return;
+        }
+        if (!type) {
+            UI.toast.error('Activity type is required.');
+            return;
+        }
+
+        const activity = {
+            prospect_id: prospectId,
+            activity_type: type,
+            activity_date: date,
+            activity_title: title || `${type} (Past Record)`,
+            summary: summary,
+            core_problem: summary,
+            note_outcome: outcome,
+            note_next_steps: nextAction,
+            next_action: nextAction,
+            is_past_record: true,
+            lead_agent_id: _currentUser ? _currentUser.id : null,
+            co_agents: [],
+            consultants: []
+        };
+
+        try {
+            await AppDataStore.create('activities', activity);
+        } catch (err) {
+            UI.toast.error('Failed to save past record: ' + (err.message || 'Unknown error'));
+            return;
+        }
+
+        UI.toast.success('Past record saved.');
+        UI.hideModal();
+
+        const bodyEl = document.getElementById(`acc-body-activity-${prospectId}`);
+        if (bodyEl) {
+            await switchProspectTab('activity', prospectId, null, bodyEl);
+        }
+    };
+
     // ========== PHASE 3: PROSPECT MANAGEMENT FUNCTIONS ==========
 
     let _sortField = 'score';
@@ -15238,7 +15345,8 @@ function _wireLoginBtn() {
             const activities = (await AppDataStore.getAll('activities')).filter(a => a.prospect_id == prospectId && MEETUP_TYPES.includes(a.activity_type));
             const sorted = activities.sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date) || b.id - a.id);
             container.innerHTML = `
-                <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+                <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:12px;">
+                    <button class="btn secondary btn-sm" onclick="app.openPastRecordModal(${prospect.id})" title="Log a historical meet up for an old customer"><i class="fas fa-history"></i> Past Record</button>
                     <button class="btn primary btn-sm" onclick="app.openActivityModal('', ${prospect.id})"><i class="fas fa-plus"></i> Add Meet Up</button>
                 </div>
                 ${sorted.length > 0 ? sorted.map(a => `
@@ -27144,6 +27252,8 @@ const initImportDemoData = async () => {
 
         // Phase 2 Functions
         openActivityModal,
+        openPastRecordModal,
+        savePastRecord,
         updateActivityForm,
         calculateDuration,
         toggleCoAgentSection,
