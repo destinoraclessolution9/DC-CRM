@@ -216,6 +216,19 @@
 
 
 <script>
+    // ⚠️  CRITICAL SECURITY TODO — SERVICE-ROLE KEY EXPOSED IN CLIENT CODE ⚠️
+    // `window.SUPABASE_SR` is the Supabase *service_role* JWT. Anyone who loads
+    // this HTML can read/write/delete every row in every table, bypassing RLS.
+    // This MUST be migrated to a backend proxy (edge function / server) that
+    // signs requests server-side. Until then, rotate the key in the Supabase
+    // dashboard IMMEDIATELY if this file has ever been served publicly.
+    //
+    // Interim mitigations:
+    //   1. Enable Row Level Security on every table in Supabase.
+    //   2. Write RLS policies that rely on `auth.uid()` and user role claims.
+    //   3. Switch `data.js` and all `fetch` calls to use the anon key below and
+    //      `supabase.auth.getSession()` instead of `SUPABASE_SR`.
+    //   4. Delete the `SUPABASE_SR` assignment once the migration is done.
     window.SUPABASE_URL = 'https://remuwhxvzkzjtgbzqjaa.supabase.co';
     window.SUPABASE_SR  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJlbXV3aHh2emt6anRnYnpxamFhIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NDM2NzMwMywiZXhwIjoyMDg5OTQzMzAzfQ.ZLTYpmvxnpLVZGbPvMtd6Kk6TO9hmRuFyHLt1NJ14ec';
     // Save the factory BEFORE replacing it so DataStore can create a service-role client.

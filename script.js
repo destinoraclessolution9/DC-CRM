@@ -428,15 +428,23 @@ const appLogic = (() => {
     // ========== HELPER FUNCTIONS ==========
 
     const generateId = () => {
+        // Prefer cryptographically-random UUIDs when available; fall back to a
+        // timestamp+random combo for very old browsers.
+        if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+            return 'id_' + crypto.randomUUID();
+        }
         return 'id_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
     };
 
     const generateModelId = () => {
+        if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+            return 'model_' + crypto.randomUUID();
+        }
         return 'model_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
     };
 
     // Check lunar library after a short delay
-    (() => {
+    setTimeout(() => {
         if (typeof LunarCalendar === 'undefined' && typeof lunarCalendar === 'undefined' && typeof Lunar === 'undefined') {
             console.error('LunarCalendar library failed to load. Check network tab.');
         } else {
@@ -2420,7 +2428,7 @@ const appLogic = (() => {
             { label: 'Upload', type: 'primary', action: 'app.uploadFiles()' }
         ]);
 
-        await setTimeout(initUploadDragDrop, 100);
+        setTimeout(initUploadDragDrop, 100);
     };
 
     const initUploadDragDrop = () => {
@@ -3410,7 +3418,7 @@ In a production system, this would show the actual file contents.
         }
 
         async createEvent(activity) {
-            const token = await this. getAccessToken();
+            const token = await this.getAccessToken();
             if (!token) return null;
 
             const event = {
@@ -3452,7 +3460,7 @@ In a production system, this would show the actual file contents.
         }
 
         async updateEvent(activity, googleEventId) {
-            const token = await this. getAccessToken();
+            const token = await this.getAccessToken();
             if (!token) return false;
 
             try {
@@ -3474,7 +3482,7 @@ In a production system, this would show the actual file contents.
         }
 
         async deleteEvent(googleEventId) {
-            const token = await this. getAccessToken();
+            const token = await this.getAccessToken();
             if (!token) return false;
 
             try {
@@ -3490,7 +3498,7 @@ In a production system, this would show the actual file contents.
         }
 
         async listEvents(timeMin, timeMax) {
-            const token = await this. getAccessToken();
+            const token = await this.getAccessToken();
             if (!token) return [];
 
             try {
@@ -3533,17 +3541,17 @@ In a production system, this would show the actual file contents.
 
                     if (this.needsSync(activity, syncRecord)) {
                         if (activity.status === 'cancelled' && syncRecord?.google_event_id) {
-                            await this.googleCalendar. deleteEvent(syncRecord.google_event_id);
+                            await this.googleCalendar.deleteEvent(syncRecord.google_event_id);
                             this.removeSyncRecord(activity.id);
                             deleted++;
                         } else if (syncRecord?.google_event_id) {
-                            await this.googleCalendar. updateEvent(activity, syncRecord.google_event_id);
-                            await this. updateSyncRecord(activity.id, syncRecord.google_event_id);
+                            await this.googleCalendar.updateEvent(activity, syncRecord.google_event_id);
+                            await this.updateSyncRecord(activity.id, syncRecord.google_event_id);
                             updated++;
                         } else {
-                            const googleEventId = await this.googleCalendar. createEvent(activity);
+                            const googleEventId = await this.googleCalendar.createEvent(activity);
                             if (googleEventId) {
-                                await this. addSyncRecord(activity.id, googleEventId);
+                                await this.addSyncRecord(activity.id, googleEventId);
                                 created++;
                             }
                         }
@@ -4024,8 +4032,8 @@ In a production system, this would show the actual file contents.
 
         UI.toast.info('Starting Google Calendar sync...');
 
-        await _syncManager. syncCRMtoGoogle();
-        await _syncManager. syncGoogleToCRM();
+        await _syncManager.syncCRMtoGoogle();
+        await _syncManager.syncGoogleToCRM();
 
         const connection = await getGoogleConnection();
         if (connection) {
@@ -4148,7 +4156,7 @@ In a production system, this would show the actual file contents.
     };
 
     const resolveConflict = async (choice, activityId, eventId) => {
-        if (_syncManager) _syncManager. resolveConflict(choice, activityId, eventId);
+        if (_syncManager) _syncManager.resolveConflict(choice, activityId, eventId);
     };
 
     // Hook into activity CRUD for auto-sync
@@ -4159,10 +4167,10 @@ In a production system, this would show the actual file contents.
     AppDataStore.create = async function (tableName, data) {
         const result = await originalCreateActivity.call(this, tableName, data);
         if (tableName === 'activities' && _syncManager) {
-            await setTimeout(async () => {
+            setTimeout(async () => {
                 const connection = await getGoogleConnection();
                 if (connection && connection.sync_settings?.syncTypes[data.activity_type?.toLowerCase()]) {
-                    await _syncManager. syncCRMtoGoogle().catch(console.error);
+                    await _syncManager.syncCRMtoGoogle().catch(console.error);
                 }
             }, 1000);
         }
@@ -4172,11 +4180,11 @@ In a production system, this would show the actual file contents.
     AppDataStore.update = async function (tableName, id, data) {
         const result = await originalUpdateActivity.call(this, tableName, id, data);
         if (tableName === 'activities' && _syncManager) {
-            await setTimeout(async () => {
+            setTimeout(async () => {
                 const connection = await getGoogleConnection();
                 const activity = await AppDataStore.getById('activities', id);
                 if (connection && activity && connection.sync_settings?.syncTypes[activity.activity_type?.toLowerCase()]) {
-                    await _syncManager. syncCRMtoGoogle().catch(console.error);
+                    await _syncManager.syncCRMtoGoogle().catch(console.error);
                 }
             }, 1000);
         }
@@ -4186,10 +4194,10 @@ In a production system, this would show the actual file contents.
     AppDataStore.delete = async function (tableName, id) {
         const result = await originalDeleteActivity.call(this, tableName, id);
         if (tableName === 'activities' && _syncManager) {
-            await setTimeout(async () => {
+            setTimeout(async () => {
                 const connection = await getGoogleConnection();
                 if (connection) {
-                    await _syncManager. syncCRMtoGoogle().catch(console.error);
+                    await _syncManager.syncCRMtoGoogle().catch(console.error);
                 }
             }, 1000);
         }
@@ -4491,7 +4499,7 @@ In a production system, this would show the actual file contents.
             const templateId = document.getElementById('template-select')?.value;
             if (!templateId) { UI.toast.error('Please select a template'); return; }
             const template = await AppDataStore.getById('whatsapp_templates', parseInt(templateId));
-            await setTimeout(async () => {
+            setTimeout(async () => {
                 await AppDataStore.create('whatsapp_messages', {
                     id: 'wamid_' + Date.now(),
                     entity_type: entityType,
@@ -4511,7 +4519,7 @@ In a production system, this would show the actual file contents.
         } else {
             const message = document.getElementById('free-message')?.value;
             if (!message) { UI.toast.error('Please enter a message'); return; }
-            await setTimeout(async () => {
+            setTimeout(async () => {
                 await AppDataStore.create('whatsapp_messages', {
                     id: 'wamid_' + Date.now(),
                     entity_type: entityType,
@@ -4798,7 +4806,7 @@ In a production system, this would show the actual file contents.
         await ensureAIModelsExist();
 
         // Run initial predictions
-        await setTimeout(async () => {
+        setTimeout(async () => {
             await batchUpdateLeadScores();
             await batchUpdateChurnRisks();
         }, 2000);
@@ -5992,11 +6000,11 @@ In a production system, this would show the actual file contents.
     // Generate insights for an agent
     const generateAgentInsights = async (agentId) => {
         // Get agent stats
-        const stats = await AppDataStore.query('agent_stats', { agent_id: agentId })[0];
+        const stats = (await AppDataStore.query('agent_stats', { agent_id: agentId }))[0];
         if (!stats) return null;
 
         // Get agent targets
-        const target = await AppDataStore.query('monthly_targets', { agent_id: agentId })[0];
+        const target = (await AppDataStore.query('monthly_targets', { agent_id: agentId }))[0];
 
         // Mock data for demo
         const actual = 435000 + Math.floor(Math.random() * 150000);
@@ -6215,7 +6223,7 @@ const Auth = {
     }
 
     async function logout() {
-        await Auth. logout();
+        await Auth.logout();
         _currentUser = null;
         document.getElementById('app-shell').style.display = 'none';
         document.getElementById('login-container').style.display = 'flex';
@@ -6565,13 +6573,17 @@ function _wireLoginBtn() {
     };
 
     // ----- 1. Users -----
+    // SECURITY: Plaintext demo passwords removed. Real authentication goes through
+    // Supabase Auth (email/password). These records only seed user metadata for
+    // role/team lookups in local mock-mode. Do NOT re-add password fields here —
+    // if a user needs a login, create it in Supabase Auth and let RLS handle it.
     const demoUsers = [
-        { id: 1, username: 'admin', password: 'admin123', full_name: 'System Admin', role: 'Level 1 Super Admin', status: 'active' },
-        { id: 2, username: 'marketing', password: 'mkt123', full_name: 'Marketing Manager', role: 'Level 2 Marketing Manager', status: 'active' },
-        { id: 3, username: 'teamlead', password: 'tl123', full_name: 'Team Leader', role: 'Level 5 Team Leader', team_id: 1, reporting_to: 10, status: 'active' },
-        { id: 4, username: 'consultant', password: 'cons123', full_name: 'Consultant', role: 'Level 10 Agent', team_id: 1, status: 'active' },
-        { id: 5, username: 'michelle', password: 'michelle123', full_name: 'Michelle Tan', role: 'Level 6 Senior Consultant', team_id: 1, reporting_to: 3, status: 'active' },
-        { id: 10, username: 'manager', password: 'manager123', full_name: 'Manager', role: 'Level 4 Managers', team_id: 1, status: 'active' }
+        { id: 1, username: 'admin', full_name: 'System Admin', role: 'Level 1 Super Admin', status: 'active' },
+        { id: 2, username: 'marketing', full_name: 'Marketing Manager', role: 'Level 2 Marketing Manager', status: 'active' },
+        { id: 3, username: 'teamlead', full_name: 'Team Leader', role: 'Level 5 Team Leader', team_id: 1, reporting_to: 10, status: 'active' },
+        { id: 4, username: 'consultant', full_name: 'Consultant', role: 'Level 10 Agent', team_id: 1, status: 'active' },
+        { id: 5, username: 'michelle', full_name: 'Michelle Tan', role: 'Level 6 Senior Consultant', team_id: 1, reporting_to: 3, status: 'active' },
+        { id: 10, username: 'manager', full_name: 'Manager', role: 'Level 4 Managers', team_id: 1, status: 'active' }
     ];
     for (const u of demoUsers) {
         await safeInsert('users', u);
@@ -7774,7 +7786,7 @@ function _wireLoginBtn() {
                 .ref-v2-actions { display: flex; gap: 12px; align-items: center; }
                 
                 .search-box-v2 { position: relative; width: 300px; }
-                .search-box-v2 i { position: absolute; left: 12px; top: 50%; transform: await translateY(-50%); color: var(--gray-400); }
+                .search-box-v2 i { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--gray-400); }
                 .search-box-v2 input { width: 100%; padding: 8px 12px 8px 36px; border-radius: 8px; border: 1px solid var(--gray-200); }
                 .search-results-v2 { position: absolute; top: 100%; left: 0; right: 0; background: white; border-radius: 8px; border: 1px solid var(--gray-200); box-shadow: var(--shadow-lg); z-index: 100; display: none; margin-top: 4px; max-height: 300px; overflow-y: auto; }
                 .result-item-v2 { padding: 10px 16px; border-bottom: 1px solid var(--gray-100); cursor: pointer; display: flex; align-items: center; gap: 10px; }
@@ -9690,7 +9702,7 @@ function _wireLoginBtn() {
                     <label>Agent</label>
                     <select id="cal-filter-agent" class="form-control">
                         <option value="all" ${_filters.agent === 'all' ? 'selected' : ''}>All Agents</option>
-                        ${agents.map(a => `<option value="${a.id}" ${_filters.agent == a.id ? 'selected' : ''}>${a.full_name}</option>`).join('')}
+                        ${agents.map(a => `<option value="${a.id}" ${String(_filters.agent) === String(a.id) ? 'selected' : ''}>${a.full_name}</option>`).join('')}
                     </select>
                 </div>
                 <div class="form-group">
@@ -12660,7 +12672,8 @@ function _wireLoginBtn() {
     const selectProspectReferrer = (id, name, type) => {
         _selectedProspectReferrer = { id, name, type };
         const infoDiv = document.getElementById('prospect-referrer-info');
-        if (infoDiv) infoDiv.innerHTML = `<div class="selected-entity-badge"><span>${type}: <strong>${name}</strong></span><button class="btn btn-sm secondary" onclick="app.clearProspectReferrer()">Clear</button></div>`;
+        // SECURITY: escape user-controlled name/type to prevent XSS (e.g. "<img onerror=...>")
+        if (infoDiv) infoDiv.innerHTML = `<div class="selected-entity-badge"><span>${escapeHtml(type)}: <strong>${escapeHtml(name)}</strong></span><button class="btn btn-sm secondary" onclick="app.clearProspectReferrer()">Clear</button></div>`;
         const results = document.getElementById('prospect-referrer-results');
         if (results) results.style.display = 'none';
         const input = document.getElementById('prospect-referrer');
@@ -14250,12 +14263,34 @@ function _wireLoginBtn() {
     };
 
     const deleteProspect = async (id) => {
+        // SECURITY TODO: the `canDelete` check above is client-side only and can
+        // be bypassed via DevTools (any agent could call `app.deleteProspect(id)`
+        // directly). The real fix is a Supabase RLS policy on `prospects` that
+        // restricts DELETE to level ≤ 5 users, e.g.
+        //   CREATE POLICY "prospects_delete_lead" ON prospects FOR DELETE
+        //     USING (auth.jwt() ->> 'role' IN ('super_admin','marketing_manager','manager','team_leader'));
+        // Until RLS is in place, treat this as UI-only gating.
+        const userLvlMatch = _currentUser?.role?.match(/Level\s+(\d+)/i);
+        const userLevel = userLvlMatch ? parseInt(userLvlMatch[1]) : 99;
+        if (userLevel > 5) {
+            UI.toast.error('You do not have permission to delete prospects.');
+            return;
+        }
         UI.showModal('Delete Prospect', '<p>This will permanently delete this prospect and all linked activities, notes, and names. This cannot be undone. Continue?</p>', [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
             { label: 'Delete', type: 'primary', action: `(async () => { await app.confirmDeleteProspect(${id}); })()` }
         ]);
     };
     const confirmDeleteProspect = async (id) => {
+        // Re-check the role here too — the modal action runs through a global
+        // callback and could theoretically be invoked directly.
+        const userLvlMatch = _currentUser?.role?.match(/Level\s+(\d+)/i);
+        const userLevel = userLvlMatch ? parseInt(userLvlMatch[1]) : 99;
+        if (userLevel > 5) {
+            UI.hideModal();
+            UI.toast.error('You do not have permission to delete prospects.');
+            return;
+        }
         UI.hideModal();
         try {
             const [acts, allNotes, names] = await Promise.all([
@@ -15397,7 +15432,7 @@ function _wireLoginBtn() {
         if (!container) return;
 
         const solutions = await AppDataStore.query('proposed_solutions', { prospect_id: prospectId });
-        const activities =await  (await AppDataStore.getAll('activities')).filter(a => a.prospect_id == prospectId);
+        const activities = (await AppDataStore.getAll('activities')).filter(a => a.prospect_id == prospectId);
         const notes = await AppDataStore.query('notes', { prospect_id: prospectId });
         const names = await AppDataStore.query('names', { prospect_id: prospectId });
 
@@ -16468,7 +16503,11 @@ NOTIFY pgrst, 'reload schema';`;
         const activityId = parseInt(itemId.slice(0, -3));
         const field = isNa ? 'next_action_done' : 'note_next_steps_done';
         if (!isNaN(activityId)) {
-            AppDataStore.update('activities', activityId, { [field]: isDone }).catch(() => {});
+            try {
+                await AppDataStore.update('activities', activityId, { [field]: isDone });
+            } catch (err) {
+                console.warn('toggleNextActionItem persist failed:', err);
+            }
         }
         // Keep localStorage key for immediate UI feedback and backward compatibility
         const key = `na_done_${prospectId}_${itemId}`;
@@ -17558,7 +17597,7 @@ const openAddSolutionModal = async (prospectId) => {
             if (roleFilter && agent.role !== roleFilter) continue;
             if (statusFilter && agent.status !== statusFilter) continue;
 
-            const stats = await AppDataStore.query('agent_stats', { agent_id: agent.id })[0] || { total_assigned: 0, followup_rate: 0 };
+            const stats = (await AppDataStore.query('agent_stats', { agent_id: agent.id }))[0] || { total_assigned: 0, followup_rate: 0 };
             const rateClass = stats.followup_rate >= 90 ? 'rate-good' : (stats.followup_rate >= 70 ? 'rate-warning' : 'rate-critical');
             const status = agent.status || 'active';
 
@@ -18048,7 +18087,7 @@ const html = `
     };
 
     const renderFollowupStats = async (agentId) => {
-        const stats = await AppDataStore.query('agent_stats', { agent_id: agentId })[0];
+        const stats = (await AppDataStore.query('agent_stats', { agent_id: agentId }))[0];
         if (!stats) return '<p>No performance data available.</p>';
 
         return `
@@ -22458,7 +22497,7 @@ const exportKPIReport = async (format) => {
 
     // ========== PRODUCTS TAB ==========
     const renderProductsTab = async () => {
-        const products =await  await AppDataStore.getAll('products');
+        const products = await AppDataStore.getAll('products');
         return `
             <div class="products-layout" style="padding: 24px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
@@ -22758,7 +22797,7 @@ const exportKPIReport = async (format) => {
             visible_to: []
         };
 
-        const allProducts =await  (await AppDataStore.getAll('products')).filter(p => p.is_active !== false);
+        const allProducts = (await AppDataStore.getAll('products')).filter(p => p.is_active !== false);
         const paymentOptions = ['Cash', 'Credit Card', 'Bank Transfer', 'EPP', 'POP', 'Cheque'];
 
         const content = `
@@ -23435,7 +23474,7 @@ ALTER TABLE public.promotions
     // ========== CAMPAIGNS TAB ==========
 
     const renderCampaignsTab = async () => {
-        const campaigns =await  await AppDataStore.getAll('whatsapp_campaigns');
+        const campaigns = await AppDataStore.getAll('whatsapp_campaigns');
 
         return `
             <div class="campaigns-filters">
@@ -25787,7 +25826,7 @@ const initImportDemoData = async () => {
 
             // 1. Initialize Offline Storage & Sync
             if (typeof SyncManager !== 'undefined') {
-                await SyncManager. init();
+                await SyncManager.init();
             }
 
             // 2. Setup Push Notifications
@@ -29067,7 +29106,7 @@ const logoutDueToInactivity = async () => {
     if (typeof window.app.logout === 'function') {
         window.app.logout();
     } else if (typeof Auth !== 'undefined') {
-        await Auth. logout();
+        await Auth.logout();
         window.location.reload();
     }
 };
@@ -29331,37 +29370,37 @@ const showAdminDashboard = async () => {
 
             <div class="admin-modules-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;">
                 
-                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="app.showTenantManagement()" onmouseover="this.style.transform='await translateY(-5px)'" onmouseout="this.style.transform='await translateY(0)'">
+                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="app.showTenantManagement()" onmouseover="this.style.transform='translateY(-5px)'" onmouseout="this.style.transform='translateY(0)'">
                     <i class="fas fa-building" style="font-size: 40px; color: var(--primary-color); margin-bottom: 16px;"></i>
                     <h3>Tenant Management</h3>
                     <p style="color: var(--gray-600); font-size: 14px; margin-top: 8px;">Manage multi-tenant architecture, provision new tenants, and monitor usage.</p>
                 </div>
 
-                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="app.showSystemHealth()" onmouseover="this.style.transform='await translateY(-5px)'" onmouseout="this.style.transform='await translateY(0)'">
+                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="app.showSystemHealth()" onmouseover="this.style.transform='translateY(-5px)'" onmouseout="this.style.transform='translateY(0)'">
                     <i class="fas fa-heartbeat" style="font-size: 40px; color: var(--success-color); margin-bottom: 16px;"></i>
                     <h3>System Health</h3>
                     <p style="color: var(--gray-600); font-size: 14px; margin-top: 8px;">Monitor database, API, storage, and external service connectivity.</p>
                 </div>
 
-                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="app.showBackupManager()" onmouseover="this.style.transform='await translateY(-5px)'" onmouseout="this.style.transform='await translateY(0)'">
+                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="app.showBackupManager()" onmouseover="this.style.transform='translateY(-5px)'" onmouseout="this.style.transform='translateY(0)'">
                     <i class="fas fa-database" style="font-size: 40px; color: var(--secondary-color); margin-bottom: 16px;"></i>
                     <h3>Backup & Restore</h3>
                     <p style="color: var(--gray-600); font-size: 14px; margin-top: 8px;">Configure automated backups, manage snapshots, and perform data restoration.</p>
                 </div>
 
-                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="app.showPerformanceMonitor()" onmouseover="this.style.transform='await translateY(-5px)'" onmouseout="this.style.transform='await translateY(0)'">
+                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="app.showPerformanceMonitor()" onmouseover="this.style.transform='translateY(-5px)'" onmouseout="this.style.transform='translateY(0)'">
                     <i class="fas fa-tachometer-alt" style="font-size: 40px; color: var(--warning-color); margin-bottom: 16px;"></i>
                     <h3>Performance Monitor</h3>
                     <p style="color: var(--gray-600); font-size: 14px; margin-top: 8px;">Track query execution times, memory usage, and application delays.</p>
                 </div>
 
-                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="app.showDeploymentCenter()" onmouseover="this.style.transform='await translateY(-5px)'" onmouseout="this.style.transform='await translateY(0)'">
+                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="app.showDeploymentCenter()" onmouseover="this.style.transform='translateY(-5px)'" onmouseout="this.style.transform='translateY(0)'">
                     <i class="fas fa-rocket" style="font-size: 40px; color: #8b5cf6; margin-bottom: 16px;"></i>
                     <h3>Deployment Center</h3>
                     <p style="color: var(--gray-600); font-size: 14px; margin-top: 8px;">Manage CI/CD pipelines, rollouts to different environments, and zero-downtime updates.</p>
                 </div>
 
-                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="app.showSystemLogs()" onmouseover="this.style.transform='await translateY(-5px)'" onmouseout="this.style.transform='async translateY(0)'">
+                <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="app.showSystemLogs()" onmouseover="this.style.transform='translateY(-5px)'" onmouseout="this.style.transform='translateY(0)'">
                     <i class="fas fa-terminal" style="font-size: 40px; color: var(--gray-800); margin-bottom: 16px;"></i>
                     <h3>System Logs</h3>
                     <p style="color: var(--gray-600); font-size: 14px; margin-top: 8px;">View consolidated application, database, and system error logs.</p>
@@ -29447,7 +29486,7 @@ const openCreateTenantModal = () => {
     if (window.UI) {
         UI.showModal('Provision New Tenant', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Provision Tenant', type: 'primary', action: 'app.submitNewTenant()' }
+            { label: 'Provision Tenant', type: 'primary', action: '(async () => { await app.submitNewTenant(); })()' }
         ]);
     }
 };
@@ -29548,7 +29587,7 @@ const createBackup = async (type) => {
     if (typeof BackupManager !== 'undefined') {
         const id = await BackupManager.createBackup(type);
         if (window.UI) UI.toast.success(`Backup ${id} initiated successfully`);
-        (showBackupManager, 1000); // Refresh view after a simulated delay
+        setTimeout(showBackupManager, 1000); // Refresh view after a simulated delay
     }
 };
 
@@ -29576,7 +29615,7 @@ const showPerformanceMonitor = async () => {
     if (view) {
         view.innerHTML = content;
         // Mock chart
-        (() => {
+        setTimeout(() => {
             const ctx = document.getElementById('performanceChart');
             if (ctx && window.Chart) {
                 new Chart(ctx, {
@@ -29637,16 +29676,16 @@ const executeDeployment = async () => {
         const version = 'v' + (8.7 + Math.random() * 0.1).toFixed(2);
         DeploymentManager.createDeployment(version, 'PRODUCTION', { 'feature_x': true });
         if (window.UI) UI.toast.success(`Deployment ${version} started`);
-        (showDeploymentCenter, 1000);
+        setTimeout(showDeploymentCenter, 1000);
     }
 };
 
 const rollbackDeployment = async (version) => {
     if (confirm(`Are you sure you want to rollback from ${version}?`)) {
         if (typeof DeploymentManager !== 'undefined') {
-            await DeploymentManager. rollbackDeployment(version);
+            await DeploymentManager.rollbackDeployment(version);
             if (window.UI) UI.toast.success('Rollback initiated');
-            (showDeploymentCenter, 1000);
+            setTimeout(showDeploymentCenter, 1000);
         }
     }
 };

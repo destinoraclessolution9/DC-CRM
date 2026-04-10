@@ -310,7 +310,10 @@ Object.assign(window.app, (() => {
         const container = document.getElementById('event-tab-content');
         if (!container) return;
         const allEvents = await AppDataStore.getAll('events');
-        const events = allEvents.filter(e => e.status !== 'completed');
+        // Only events that are (a) not completed AND (b) scheduled on/after today.
+        // Previously this filter ignored event_date, so stale events stuck here forever.
+        const todayStr = new Date().toISOString().split('T')[0];
+        const events = allEvents.filter(e => e.status !== 'completed' && (!e.event_date || e.event_date >= todayStr));
         let html = `<div class="events-table-container"><table class="events-table"><thead><tr><th>Event Title</th><th>Date</th><th>Expected</th><th>Price</th><th>Score</th><th>Actions</th></tr></thead><tbody>`;
         if (events.length === 0) html += `<tr><td colspan="6" style="text-align:center;">No upcoming events.</td></tr>`;
         for (const e of events) {
@@ -322,7 +325,7 @@ Object.assign(window.app, (() => {
                     <td>RM ${e.ticket_price || 0}</td>
                     <td>+${e.base_score || 0}</td>
                     <td>
-                        <button class="btn-icon" onclick="app.openCreateEventModal()"><i class="fas fa-edit"></i></button>
+                        <button class="btn-icon" onclick="app.openCreateEventModal(${e.id})"><i class="fas fa-edit"></i></button>
                         <button class="btn-icon" onclick="app.deleteEvent(${e.id})"><i class="fas fa-trash"></i></button>
                         <button class="btn secondary btn-sm" onclick="app.openEventAttendeesModal(${e.id})">View</button>
                     </td>
@@ -335,38 +338,27 @@ Object.assign(window.app, (() => {
     const renderPastEvents = async () => {
         const container = document.getElementById('event-tab-content');
         if (!container) return;
-        let allEvents = await AppDataStore.getAll('events');
-        let events = allEvents.filter(e => e.status === 'completed');
-        if (events.length === 0) {
-            const pastEvents = [
-                { id: 991, event_title: 'New Year Blessing', event_date: '2026-01-15', status: 'completed' },
-                { id: 992, event_title: 'Wealth Workshop', event_date: '2026-02-10', status: 'completed' }
-            ];
-            for (const e of pastEvents) {
-                if (!(await AppDataStore.getById('events', e.id))) {
-                    await AppDataStore.create('events', e);
-                }
-            }
-            allEvents = await AppDataStore.getAll('events');
-            events = allEvents.filter(e => e.status === 'completed');
-        }
+        const allEvents = await AppDataStore.getAll('events');
+        // Past = explicitly completed OR event_date has passed.
+        // Removed the phantom-event seeding (ids 991/992) that polluted real data.
+        const todayStr = new Date().toISOString().split('T')[0];
+        const events = allEvents.filter(e => e.status === 'completed' || (e.event_date && e.event_date < todayStr));
         let html = `
             <div style="margin-bottom: 10px; text-align: right;">
                 <button class="btn secondary" onclick="app.exportEventData('csv')"><i class="fas fa-file-csv"></i> Export All Past Events</button>
             </div>
             <div class="events-table-container"><table class="events-table"><thead><tr><th>Event Title</th><th>Date</th><th>Actual</th><th>Score</th><th>Actions</th></tr></thead><tbody>`;
+        if (events.length === 0) html += `<tr><td colspan="5" style="text-align:center;">No past events.</td></tr>`;
         for (const e of events) {
             const allRegs = await AppDataStore.getAll('event_registrations');
             const regs = allRegs.filter(r => r.event_id === e.id && r.checked_in);
             const avgScore = regs.length ? (regs.reduce((sum, r) => sum + (r.points_awarded || 0), 0) / regs.length).toFixed(1) : 0;
-            const attds = e.id === 991 ? 120 : (e.id === 992 ? 85 : regs.length);
-            const scr = e.id === 991 ? 15 : (e.id === 992 ? 20 : avgScore);
             html += `
                 <tr>
                     <td><strong>${e.event_title}</strong></td>
                     <td>${e.event_date}</td>
-                    <td>${attds}</td>
-                    <td>+${scr}</td>
+                    <td>${regs.length}</td>
+                    <td>+${avgScore}</td>
                     <td>
                         <button class="btn secondary btn-sm" onclick="app.openEventReports()">Report</button>
                         <button class="btn secondary btn-sm" onclick="app.exportEventData('csv')">Export</button>
