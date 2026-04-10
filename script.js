@@ -10997,7 +10997,15 @@ function _wireLoginBtn() {
                         </select>
                     </div>
                 </div>
-                
+
+                <div id="cps-summary-section" class="form-section" style="display:none">
+                    <h4>📝 Summary</h4>
+                    <div class="form-group">
+                        <label>Summary</label>
+                        <textarea id="cps-summary" class="form-control" rows="3" placeholder="What was discussed or planned during this CPS session?"></textarea>
+                    </div>
+                </div>
+
                 <div class="form-section" style="display:none">
                     <h4>📝 Meeting Outcome</h4>
                     <div class="form-group">
@@ -11339,6 +11347,7 @@ function _wireLoginBtn() {
                         setField('cps-city', prospect.city);
                         setField('cps-state', prospect.state);
                         setField('cps-zip', prospect.postal_code);
+                        setField('cps-summary', activity.summary);
                         clearInterval(cpsInterval);
                     } else if (++attempts >= 30) {
                         console.warn('CPS fields did not appear after polling');
@@ -11368,7 +11377,7 @@ function _wireLoginBtn() {
         activity_date: document.getElementById('activity-date')?.value,
         start_time: document.getElementById('start-time')?.value,
         end_time: document.getElementById('end-time')?.value,
-        summary: document.getElementById('note-key-points')?.value,
+        summary: document.getElementById('cps-summary')?.value?.trim() || document.getElementById('note-key-points')?.value,
         note_key_points: document.getElementById('note-key-points')?.value,
         note_outcome: document.getElementById('note-outcome')?.value,
         note_next_steps: document.getElementById('note-next-steps')?.value,
@@ -11447,6 +11456,12 @@ function _wireLoginBtn() {
         const venueStar = document.getElementById('venue-required-star');
         if (venueStar) {
             venueStar.style.display = ['CPS','FTF','EVENT','GR','XG'].includes(type) ? 'inline' : 'none';
+        }
+
+        // Show/hide CPS Summary section (only visible for CPS)
+        const cpsSummarySection = document.getElementById('cps-summary-section');
+        if (cpsSummarySection) {
+            cpsSummarySection.style.display = type === 'CPS' ? 'block' : 'none';
         }
 
         let html = '';
@@ -12698,6 +12713,7 @@ function _wireLoginBtn() {
             const inviteMethod = document.getElementById('cps-invitation-method')?.value;
             activity.cps_invitation_method = inviteMethod === 'Other' ? document.getElementById('cps-invitation-other')?.value : inviteMethod;
             activity.cps_invitation_details = document.getElementById('cps-invitation-details')?.value || '';
+            activity.summary = document.getElementById('cps-summary')?.value?.trim() || '';
         } else if (type === 'FSA' || type === 'SITE') {
             const address = document.getElementById('location-address')?.value;
             if (!address) {
