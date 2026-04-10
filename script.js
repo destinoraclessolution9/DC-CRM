@@ -20401,6 +20401,7 @@ container.innerHTML = `
 
     let _currentTimeFilter = 'monthly';
     let _currentRoleFilter = 'All';
+    let _currentAgentFilter = 'all';
     let _visibleUserIds = 'all';
     const toLocalDateStr = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
     let _customDateFrom = toLocalDateStr(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
@@ -20409,6 +20410,12 @@ container.innerHTML = `
 
     const showKPIDashboard = async (container) => {
         _selectedEntity = null; // Clear selection
+        // Agents list for the agent filter dropdown (admins/team leaders see this)
+        const _kpiAgents = (await AppDataStore.getAll('users')).filter(u =>
+            isAgent(u) || u.role === 'team_leader' || (u.role || '').includes('Level 7')
+        );
+        const _kpiAgentOptions = `<option value="all">All Agents</option>` +
+            _kpiAgents.map(a => `<option value="${a.id}" ${String(_currentAgentFilter) === String(a.id) ? 'selected' : ''}>${escapeHtml(a.full_name || '')}</option>`).join('');
         container.innerHTML = `
             <div class="kpi-dashboard">
                 <div class="dashboard-header">
@@ -20448,6 +20455,11 @@ container.innerHTML = `
                         <select id="kpi-role-filter" class="form-control" onchange="app.setRoleFilter(this.value)" style="width: 200px;">
                             <option value="All">All Roles</option>
                             ${USER_ROLES.map(r => `<option value="${r}" ${_currentRoleFilter === r ? 'selected' : ''}>${r}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="role-filter-group" style="margin-left: 12px;">
+                        <select id="kpi-agent-filter" class="form-control" onchange="app.setAgentFilter(this.value)" style="width: 200px;">
+                            ${_kpiAgentOptions}
                         </select>
                     </div>
                     <div class="date-range-picker" style="margin-left: auto;">
@@ -20516,6 +20528,11 @@ container.innerHTML = `
         await refreshKPIDashboard();
     };
 
+    const setAgentFilter = async (agentId) => {
+        _currentAgentFilter = agentId || 'all';
+        await refreshKPIDashboard();
+    };
+
     const setCustomDateRange = async (from, to) => {
         _customDateFrom = from;
         _customDateTo = to;
@@ -20525,6 +20542,16 @@ container.innerHTML = `
 
     const refreshKPIDashboard = async () => {
         _visibleUserIds = await getVisibleUserIds(_currentUser);
+        // Narrow visibility to a single agent if the agent filter is active
+        if (_currentAgentFilter && _currentAgentFilter !== 'all') {
+            const agentId = parseInt(_currentAgentFilter);
+            if (Array.isArray(_visibleUserIds)) {
+                _visibleUserIds = _visibleUserIds.filter(id => String(id) === String(agentId));
+                if (_visibleUserIds.length === 0) _visibleUserIds = [agentId];
+            } else if (_visibleUserIds === 'all') {
+                _visibleUserIds = [agentId];
+            }
+        }
         const ranges = getDateRanges(_currentTimeFilter, _customDateFrom, _customDateTo);
         // Sync date inputs to reflect the computed range (fixes timezone display)
         const fromEl = document.getElementById('kpi-date-from');
@@ -29683,6 +29710,7 @@ const initImportDemoData = async () => {
         populateLoginDropdown,
         updateNavVisibility,
         setRoleFilter,
+        setAgentFilter,
         setTimeFilter,
         setCustomDateRange,
         refreshKPIDashboard,
