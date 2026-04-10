@@ -44,7 +44,9 @@ class DataStore {
             // Level 13/14 account type tables
             'user_milestones', 'news_highlights', 'recommendation_rewards', 'user_fudi_summary',
             // User preferences (migrated from localStorage)
-            'user_preferences'
+            'user_preferences',
+            // Special Program Fighting (incentive programs for selected agents)
+            'special_programs', 'special_program_participants'
         ];
         this.initialized = false;
         this._events = {};

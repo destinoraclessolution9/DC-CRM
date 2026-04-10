@@ -155,6 +155,8 @@ const appLogic = (() => {
         return lvl >= 3 && lvl <= 12;
     };
     const isManagement = (user) => _getUserLevel(user) <= 3;
+    // Team Leader and above = Level 1-5 (Super Admin, Marketing Manager, Senior Manager, Manager, Team Leader)
+    const isTeamLeaderOrAbove = (user) => _getUserLevel(user) <= 5;
 
     // Phase 10: Search Panel State
     let _searchPanelVisible = false;
@@ -9278,6 +9280,9 @@ function _wireLoginBtn() {
         await renderCalendar();
         await renderTodayActivities();
         await renderBirthdaySection();
+
+        // Show Special Program progress popup (once per session, for participating agents)
+        try { await checkSpecialProgramPopup(); } catch (e) { console.warn('Special Program popup failed:', e); }
     };
 
     const renderCalendar = async () => {
@@ -19493,6 +19498,9 @@ container.innerHTML = `
                 `<button class="btn primary" onclick="app.openKPITargetsModal()">
                                 <i class="fas fa-bullseye"></i> Set Yearly Targets
                              </button>
+                             <button class="btn primary" onclick="app.openQuarterlyTargetsModal()">
+                                <i class="fas fa-calendar-alt"></i> Set Quarterly Targets
+                             </button>
                              <button class="btn secondary" onclick="app.openTargetManagementModal()">
                                 <i class="fas fa-user-cog"></i> Agent Targets
                              </button>` : ''
@@ -19569,6 +19577,12 @@ container.innerHTML = `
                 <div id="kpi-target-comparison-section" style="margin-top:24px;">
                     <!-- Loaded by refreshKPIDashboard -->
                 </div>
+
+                <!-- Special Program Fighting Section (Team Leader+) -->
+                ${isTeamLeaderOrAbove(_currentUser) ? `
+                <div id="special-programs-section" style="margin-top:24px;">
+                    <!-- Loaded by refreshKPIDashboard -->
+                </div>` : ''}
             </div>
 `;
 
@@ -19619,6 +19633,17 @@ container.innerHTML = `
             } catch (e) {
                 console.warn('KPI target comparison render failed:', e);
                 targetSection.innerHTML = '';
+            }
+        }
+
+        // Render Special Program Fighting section (team-leader gated)
+        const spSection = document.getElementById('special-programs-section');
+        if (spSection && isTeamLeaderOrAbove(_currentUser)) {
+            try {
+                spSection.innerHTML = await renderSpecialPrograms();
+            } catch (e) {
+                console.warn('Special Programs render failed:', e);
+                spSection.innerHTML = '';
             }
         }
     };
@@ -25391,6 +25416,492 @@ const initImportDemoData = async () => {
         if (typeof refreshKPIDashboard === 'function') await refreshKPIDashboard();
     };
 
+    // ========== QUARTERLY TARGETS (standalone modal) ==========
+    const openQuarterlyTargetsModal = async () => {
+        const currentYear = new Date().getFullYear();
+        const allQ = (await AppDataStore.getAll('quarterly_targets')).filter(t => t.year === currentYear);
+        const getQ = (q, field) => { const qt = allQ.find(t => t.quarter === q); return qt?.[field] ?? ''; };
+
+        const qRow = (label, field, qkey) => `
+            <tr style="border-bottom:1px solid var(--gray-200);">
+                <td style="padding:6px 8px; font-size:12px; white-space:nowrap; font-weight:500;">${label}</td>
+                ${[1,2,3,4].map(q => `<td style="padding:4px;"><input type="number" id="qo-q${q}-${qkey}" class="form-control" style="min-width:90px; font-size:12px; padding:5px 7px;" placeholder="0" value="${getQ(q, field)}"></td>`).join('')}
+            </tr>`;
+
+        const content = `
+            <div style="max-height:70vh; overflow-y:auto; padding-right:4px;">
+                <p style="font-size:12px;color:var(--gray-500);margin-bottom:12px;">
+                    Set per-quarter targets for ${currentYear}. These values override the yearly auto-split.
+                </p>
+                <div style="overflow-x:auto;">
+                    <table style="width:100%; border-collapse:collapse; min-width:560px;">
+                        <thead>
+                            <tr style="background:var(--gray-100);">
+                                <th style="text-align:left; padding:8px; font-size:12px; font-weight:600;">Metric</th>
+                                <th style="text-align:center; padding:8px; font-size:12px; font-weight:600;">Q1 (Jan–Mar)</th>
+                                <th style="text-align:center; padding:8px; font-size:12px; font-weight:600;">Q2 (Apr–Jun)</th>
+                                <th style="text-align:center; padding:8px; font-size:12px; font-weight:600;">Q3 (Jul–Sep)</th>
+                                <th style="text-align:center; padding:8px; font-size:12px; font-weight:600;">Q4 (Oct–Dec)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${qRow('CPS Count', 'cps_count_target', 'cps')}
+                            ${qRow('Total Sales (RM)', 'total_sales_target', 'sales')}
+                            ${qRow('POP Cases', 'pop_case_count_target', 'pop-count')}
+                            ${qRow('POP Sales (RM)', 'pop_sales_target', 'pop-sales')}
+                            ${qRow('EPP Cases', 'epp_case_count_target', 'epp-count')}
+                            ${qRow('EPP Sales (RM)', 'epp_sales_target', 'epp-sales')}
+                            ${qRow('New Agents', 'new_agents_target', 'agents')}
+                            ${qRow('New Customers', 'new_customers_target', 'customers')}
+                            ${qRow('Total Meetings', 'total_meetings_target', 'meetings')}
+                            ${qRow('Activity Headcount', 'activity_headcount_target', 'headcount')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>`;
+        UI.showModal(`Set Quarterly Targets — ${currentYear}`, content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save Quarterly Targets', type: 'primary', action: `(async () => { await app.saveQuarterlyTargets(${currentYear}); })()` }
+        ]);
+    };
+
+    const saveQuarterlyTargets = async (year) => {
+        const d = (id) => {
+            const el = document.getElementById(id);
+            if (!el || el.value === '') return null;
+            const n = parseFloat(el.value);
+            return isNaN(n) ? null : n;
+        };
+        const metrics = ['cps_count_target', 'total_sales_target', 'pop_case_count_target', 'pop_sales_target', 'epp_case_count_target', 'epp_sales_target', 'new_agents_target', 'new_customers_target', 'total_meetings_target', 'activity_headcount_target'];
+        const qkeys = ['cps', 'sales', 'pop-count', 'pop-sales', 'epp-count', 'epp-sales', 'agents', 'customers', 'meetings', 'headcount'];
+
+        for (let q = 1; q <= 4; q++) {
+            const qData = { quarter: q, year: year };
+            let hasValue = false;
+            metrics.forEach((m, i) => {
+                const val = d(`qo-q${q}-${qkeys[i]}`);
+                if (val !== null) { qData[m] = val; hasValue = true; }
+                else { qData[m] = 0; }
+            });
+            const existingQ = (await AppDataStore.getAll('quarterly_targets')).find(t => t.quarter === q && t.year === year);
+            if (existingQ) {
+                await AppDataStore.update('quarterly_targets', existingQ.id, qData);
+            } else if (hasValue) {
+                qData.id = Date.now() + q;
+                await AppDataStore.create('quarterly_targets', qData);
+            }
+        }
+
+        UI.hideModal();
+        UI.toast.success(`Quarterly targets saved for ${year}`);
+        if (typeof refreshKPIDashboard === 'function') await refreshKPIDashboard();
+    };
+
+    // ========== SPECIAL PROGRAM FIGHTING ==========
+    // Incentive programs for selected agents (e.g. close RM200k in 60 days → China trip)
+
+    const _today = () => new Date().toISOString().slice(0, 10);
+
+    // Compute one participant's progress toward a program's targets
+    const calculateProgramProgress = async (program, agentId) => {
+        const from = program.start_date;
+        const to = program.end_date;
+        const [purchases, customers, activities] = await Promise.all([
+            AppDataStore.getAll('purchases'),
+            AppDataStore.getAll('customers'),
+            AppDataStore.getAll('activities')
+        ]);
+        let salesActual = 0;
+        for (const p of purchases) {
+            if (p.agent_id !== agentId) continue;
+            if (p.date < from || p.date > to) continue;
+            if (p.is_agent_package) continue;
+            salesActual += (p.amount || 0);
+        }
+        let customersActual = 0;
+        for (const c of customers) {
+            if (c.responsible_agent_id !== agentId) continue;
+            if (!c.customer_since || c.customer_since < from || c.customer_since > to) continue;
+            customersActual++;
+        }
+        let cpsActual = 0;
+        for (const a of activities) {
+            if (a.activity_type !== 'CPS') continue;
+            if (a.lead_agent_id !== agentId) continue;
+            if (a.activity_date < from || a.activity_date > to) continue;
+            cpsActual++;
+        }
+        const targets = [];
+        if (program.sales_target > 0) {
+            targets.push({
+                label: 'Total Sales',
+                actual: salesActual,
+                target: program.sales_target,
+                display: `RM ${salesActual.toLocaleString()} / RM ${program.sales_target.toLocaleString()}`,
+                pct: Math.min(100, Math.round((salesActual / program.sales_target) * 100))
+            });
+        }
+        if (program.new_customers_target > 0) {
+            targets.push({
+                label: 'New Customers',
+                actual: customersActual,
+                target: program.new_customers_target,
+                display: `${customersActual} / ${program.new_customers_target}`,
+                pct: Math.min(100, Math.round((customersActual / program.new_customers_target) * 100))
+            });
+        }
+        if (program.cps_target > 0) {
+            targets.push({
+                label: 'CPS Count',
+                actual: cpsActual,
+                target: program.cps_target,
+                display: `${cpsActual} / ${program.cps_target}`,
+                pct: Math.min(100, Math.round((cpsActual / program.cps_target) * 100))
+            });
+        }
+        const allHit = targets.length > 0 && targets.every(t => t.actual >= t.target);
+        return { targets, qualified: allHit };
+    };
+
+    // Render the Special Programs section on the KPI dashboard
+    const renderSpecialPrograms = async () => {
+        const [programs, allParts, users] = await Promise.all([
+            AppDataStore.getAll('special_programs'),
+            AppDataStore.getAll('special_program_participants'),
+            AppDataStore.getAll('users')
+        ]);
+        const userMap = {}; users.forEach(u => { userMap[u.id] = u; });
+        const active = programs.filter(p => p.status !== 'cancelled' && p.status !== 'deleted');
+        active.sort((a, b) => (a.end_date || '').localeCompare(b.end_date || ''));
+
+        const canManage = isTeamLeaderOrAbove(_currentUser);
+        const newBtn = canManage
+            ? `<button class="btn primary btn-sm" onclick="app.openSpecialProgramModal()"><i class="fas fa-plus"></i> New Program</button>`
+            : '';
+
+        if (active.length === 0) {
+            return `
+                <div class="card" style="padding:20px;border:2px dashed var(--gray-200);">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                        <h3 style="margin:0;">🏆 Special Program Fighting</h3>
+                        ${newBtn}
+                    </div>
+                    <p style="text-align:center;color:var(--gray-400);padding:24px 0;margin:0;">No active special programs. Create one to launch a new challenge for selected agents.</p>
+                </div>`;
+        }
+
+        const cards = [];
+        for (const program of active) {
+            const parts = allParts.filter(p => p.program_id === program.id);
+            const today = _today();
+            const daysLeft = program.end_date ? Math.max(0, Math.ceil((new Date(program.end_date) - new Date(today)) / 86400000)) : 0;
+            const isExpired = program.end_date && today > program.end_date;
+
+            // Calculate progress for each participant (concurrent)
+            const partProgress = await Promise.all(parts.map(async (part) => {
+                const progress = await calculateProgramProgress(program, part.agent_id);
+                return {
+                    agentId: part.agent_id,
+                    agentName: userMap[part.agent_id]?.full_name || `Agent #${part.agent_id}`,
+                    agentRole: userMap[part.agent_id]?.role || '',
+                    progress
+                };
+            }));
+
+            // Count how many qualified
+            const qualifiedCount = partProgress.filter(p => p.progress.qualified).length;
+
+            const partsHtml = partProgress.length > 0 ? `
+                <table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:12px;">
+                    <thead>
+                        <tr style="background:var(--gray-50,#f7f4ed);">
+                            <th style="text-align:left;padding:8px;border-bottom:1px solid var(--gray-200);">Agent</th>
+                            ${program.sales_target > 0 ? '<th style="text-align:left;padding:8px;border-bottom:1px solid var(--gray-200);">Sales</th>' : ''}
+                            ${program.new_customers_target > 0 ? '<th style="text-align:left;padding:8px;border-bottom:1px solid var(--gray-200);">New Customers</th>' : ''}
+                            ${program.cps_target > 0 ? '<th style="text-align:left;padding:8px;border-bottom:1px solid var(--gray-200);">CPS</th>' : ''}
+                            <th style="text-align:center;padding:8px;border-bottom:1px solid var(--gray-200);">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${partProgress.map(p => {
+                            const barsHtml = (metric) => {
+                                const t = p.progress.targets.find(t => t.label === metric);
+                                if (!t) return '';
+                                const color = t.actual >= t.target ? '#16a34a' : (t.pct >= 60 ? '#f59e0b' : '#dc2626');
+                                return `
+                                    <td style="padding:8px;border-bottom:1px solid var(--gray-100);">
+                                        <div style="font-size:11px;margin-bottom:2px;">${t.display}</div>
+                                        <div style="background:#eee;border-radius:4px;height:6px;overflow:hidden;">
+                                            <div style="background:${color};height:100%;width:${t.pct}%;transition:width .3s;"></div>
+                                        </div>
+                                    </td>`;
+                            };
+                            const statusBadge = p.progress.qualified
+                                ? '<span style="background:#dcfce7;color:#166534;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600;">✓ Qualified</span>'
+                                : '<span style="background:#fef3c7;color:#92400e;padding:3px 10px;border-radius:12px;font-size:11px;">In Progress</span>';
+                            return `
+                                <tr>
+                                    <td style="padding:8px;border-bottom:1px solid var(--gray-100);"><strong>${p.agentName}</strong><br/><span style="font-size:10px;color:var(--gray-400);">${p.agentRole}</span></td>
+                                    ${program.sales_target > 0 ? barsHtml('Total Sales') : ''}
+                                    ${program.new_customers_target > 0 ? barsHtml('New Customers') : ''}
+                                    ${program.cps_target > 0 ? barsHtml('CPS Count') : ''}
+                                    <td style="padding:8px;border-bottom:1px solid var(--gray-100);text-align:center;">${statusBadge}</td>
+                                </tr>`;
+                        }).join('')}
+                    </tbody>
+                </table>` : '<p style="color:var(--gray-400);text-align:center;padding:16px;margin:12px 0 0;">No participants assigned yet.</p>';
+
+            const manageBtns = canManage ? `
+                <button class="btn secondary btn-sm" onclick="app.openSpecialProgramModal(${program.id})" title="Edit"><i class="fas fa-edit"></i></button>
+                <button class="btn btn-sm" style="background:#fee2e2;color:#991b1b;" onclick="app.deleteSpecialProgram(${program.id})" title="Delete"><i class="fas fa-trash"></i></button>
+            ` : '';
+
+            cards.push(`
+                <div class="card" style="padding:20px;margin-bottom:16px;${isExpired ? 'opacity:0.75;' : ''}">
+                    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
+                        <div style="flex:1;">
+                            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                                <h3 style="margin:0;font-size:16px;">🏆 ${program.program_name || 'Untitled Program'}</h3>
+                                ${isExpired ? '<span style="background:#f3f4f6;color:#6b7280;padding:3px 8px;border-radius:10px;font-size:11px;">EXPIRED</span>' : `<span style="background:#fef3c7;color:#92400e;padding:3px 8px;border-radius:10px;font-size:11px;">${daysLeft} days left</span>`}
+                            </div>
+                            <div style="font-size:13px;color:var(--gray-500);margin-top:4px;">
+                                🎁 <strong>${program.reward || '—'}</strong>
+                                &nbsp;·&nbsp; ${program.start_date || '?'} to ${program.end_date || '?'}
+                                &nbsp;·&nbsp; ${parts.length} participant${parts.length===1?'':'s'}
+                                ${qualifiedCount > 0 ? `&nbsp;·&nbsp; <span style="color:#16a34a;font-weight:600;">${qualifiedCount} qualified</span>` : ''}
+                            </div>
+                            ${program.description ? `<p style="font-size:12px;color:var(--gray-500);margin:6px 0 0;">${program.description}</p>` : ''}
+                        </div>
+                        <div style="display:flex;gap:6px;">${manageBtns}</div>
+                    </div>
+                    ${partsHtml}
+                </div>`);
+        }
+
+        return `
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+                <h2 style="margin:0;font-size:18px;">🏆 Special Program Fighting</h2>
+                ${newBtn}
+            </div>
+            ${cards.join('')}`;
+    };
+
+    // Open create/edit modal for a special program
+    const openSpecialProgramModal = async (programId = null) => {
+        const existing = programId ? (await AppDataStore.getAll('special_programs')).find(p => p.id === programId) : null;
+        const participants = programId
+            ? (await AppDataStore.getAll('special_program_participants')).filter(p => p.program_id === programId)
+            : [];
+        const selectedIds = new Set(participants.map(p => p.agent_id));
+
+        // Pull eligible agents: Level 6-12 (Senior Consultant through Ambassador)
+        const allUsers = await AppDataStore.getAll('users');
+        const eligible = allUsers.filter(u => {
+            if (u.status === 'deleted') return false;
+            const m = u.role?.match(/Level\s*(\d+)/);
+            if (!m) return false;
+            const lvl = parseInt(m[1]);
+            return lvl >= 6 && lvl <= 12;
+        });
+
+        const todayStr = _today();
+        const defaultEnd = (() => { const d = new Date(); d.setDate(d.getDate() + 60); return d.toISOString().slice(0, 10); })();
+
+        const agentRows = eligible.map(u => `
+            <tr>
+                <td style="padding:6px 8px;"><input type="checkbox" class="sp-agent-cb" value="${u.id}" ${selectedIds.has(u.id) ? 'checked' : ''}></td>
+                <td style="padding:6px 8px;"><strong>${u.full_name || u.username || '—'}</strong></td>
+                <td style="padding:6px 8px;font-size:11px;color:var(--gray-500);">${u.role || '—'}</td>
+            </tr>`).join('');
+
+        const content = `
+            <div style="max-height:75vh;overflow-y:auto;padding-right:4px;">
+                <h4 style="margin:0 0 10px;">Program Details</h4>
+                <div class="form-group"><label>Program Name *</label>
+                    <input type="text" id="sp-name" class="form-control" value="${existing?.program_name || ''}" placeholder="e.g. China Trip Challenge"></div>
+                <div class="form-group"><label>Reward *</label>
+                    <input type="text" id="sp-reward" class="form-control" value="${existing?.reward || ''}" placeholder="e.g. China 5D4N Trip"></div>
+                <div class="form-group"><label>Description</label>
+                    <textarea id="sp-desc" class="form-control" rows="2" placeholder="Optional details about the program">${existing?.description || ''}</textarea></div>
+                <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                    <div class="form-group"><label>Start Date *</label>
+                        <input type="date" id="sp-start" class="form-control" value="${existing?.start_date || todayStr}"></div>
+                    <div class="form-group"><label>End Date *</label>
+                        <input type="date" id="sp-end" class="form-control" value="${existing?.end_date || defaultEnd}"></div>
+                </div>
+
+                <h4 style="margin:16px 0 10px;">Targets (all must be hit to qualify)</h4>
+                <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
+                    <div class="form-group"><label>Sales Target (RM)</label>
+                        <input type="number" id="sp-sales" class="form-control" value="${existing?.sales_target || ''}" placeholder="e.g. 200000"></div>
+                    <div class="form-group"><label>New Customers</label>
+                        <input type="number" id="sp-customers" class="form-control" value="${existing?.new_customers_target || ''}" placeholder="e.g. 5"></div>
+                    <div class="form-group"><label>CPS Count</label>
+                        <input type="number" id="sp-cps" class="form-control" value="${existing?.cps_target || ''}" placeholder="optional"></div>
+                </div>
+                <p style="font-size:11px;color:var(--gray-400);margin:0 0 14px;">Leave a target blank to exclude it from the program.</p>
+
+                <h4 style="margin:16px 0 6px;">Participating Agents (${eligible.length} eligible)</h4>
+                <p style="font-size:11px;color:var(--gray-400);margin:0 0 8px;">Pick from Consultant/Agent roles (Level 6–12)</p>
+                <div style="max-height:260px;overflow-y:auto;border:1px solid var(--gray-200);border-radius:6px;">
+                    <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                        <thead style="background:var(--gray-50,#f7f4ed);position:sticky;top:0;">
+                            <tr>
+                                <th style="padding:8px;width:40px;"><input type="checkbox" id="sp-select-all" onchange="document.querySelectorAll('.sp-agent-cb').forEach(cb => cb.checked = this.checked)"></th>
+                                <th style="text-align:left;padding:8px;">Name</th>
+                                <th style="text-align:left;padding:8px;">Role</th>
+                            </tr>
+                        </thead>
+                        <tbody>${agentRows || '<tr><td colspan="3" style="padding:16px;text-align:center;color:var(--gray-400);">No eligible agents found</td></tr>'}</tbody>
+                    </table>
+                </div>
+            </div>`;
+
+        UI.showModal(existing ? 'Edit Special Program' : 'New Special Program', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: existing ? 'Save Changes' : 'Create Program', type: 'primary', action: `(async () => { await app.saveSpecialProgram(${programId || 'null'}); })()` }
+        ]);
+    };
+
+    const saveSpecialProgram = async (programId = null) => {
+        const name = document.getElementById('sp-name')?.value?.trim();
+        const reward = document.getElementById('sp-reward')?.value?.trim();
+        const description = document.getElementById('sp-desc')?.value?.trim() || '';
+        const startDate = document.getElementById('sp-start')?.value;
+        const endDate = document.getElementById('sp-end')?.value;
+        const salesTarget = parseFloat(document.getElementById('sp-sales')?.value) || 0;
+        const customersTarget = parseInt(document.getElementById('sp-customers')?.value) || 0;
+        const cpsTarget = parseInt(document.getElementById('sp-cps')?.value) || 0;
+
+        if (!name) return UI.toast.error('Program name is required');
+        if (!reward) return UI.toast.error('Reward is required');
+        if (!startDate || !endDate) return UI.toast.error('Start and end dates are required');
+        if (endDate < startDate) return UI.toast.error('End date must be after start date');
+        if (salesTarget <= 0 && customersTarget <= 0 && cpsTarget <= 0) return UI.toast.error('At least one target must be set');
+
+        const selectedAgents = Array.from(document.querySelectorAll('.sp-agent-cb:checked')).map(cb => parseInt(cb.value));
+
+        const programData = {
+            program_name: name,
+            reward: reward,
+            description: description,
+            start_date: startDate,
+            end_date: endDate,
+            sales_target: salesTarget,
+            new_customers_target: customersTarget,
+            cps_target: cpsTarget,
+            qualify_mode: 'all',
+            status: 'active',
+            created_by: _currentUser?.id || null,
+            created_at: new Date().toISOString()
+        };
+
+        let savedProgramId = programId;
+        if (programId) {
+            await AppDataStore.update('special_programs', programId, programData);
+            // Remove old participants
+            const oldParts = (await AppDataStore.getAll('special_program_participants')).filter(p => p.program_id === programId);
+            for (const p of oldParts) {
+                await AppDataStore.delete('special_program_participants', p.id);
+            }
+        } else {
+            programData.id = Date.now();
+            savedProgramId = programData.id;
+            await AppDataStore.create('special_programs', programData);
+        }
+
+        // Create new participants
+        for (const agentId of selectedAgents) {
+            await AppDataStore.create('special_program_participants', {
+                id: Date.now() + agentId,
+                program_id: savedProgramId,
+                agent_id: agentId,
+                joined_at: new Date().toISOString()
+            });
+        }
+
+        UI.hideModal();
+        UI.toast.success(programId ? 'Program updated' : `Program created with ${selectedAgents.length} participant${selectedAgents.length===1?'':'s'}`);
+        if (typeof refreshKPIDashboard === 'function') await refreshKPIDashboard();
+    };
+
+    const deleteSpecialProgram = async (programId) => {
+        UI.showModal('Delete Program', '<p>Are you sure you want to delete this special program? Participants and progress history will be removed.</p>', [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Delete', type: 'primary', action: `(async () => { await app.confirmDeleteSpecialProgram(${programId}); })()` }
+        ]);
+    };
+
+    const confirmDeleteSpecialProgram = async (programId) => {
+        await AppDataStore.delete('special_programs', programId);
+        const parts = (await AppDataStore.getAll('special_program_participants')).filter(p => p.program_id === programId);
+        for (const p of parts) {
+            await AppDataStore.delete('special_program_participants', p.id);
+        }
+        UI.hideModal();
+        UI.toast.success('Program deleted');
+        if (typeof refreshKPIDashboard === 'function') await refreshKPIDashboard();
+    };
+
+    // Calendar popup — show on first calendar visit per session if current user is in any active program
+    const checkSpecialProgramPopup = async () => {
+        if (!_currentUser) return;
+        if (sessionStorage.getItem('specialProgramPopupShown') === '1') return;
+
+        const [programs, parts] = await Promise.all([
+            AppDataStore.getAll('special_programs'),
+            AppDataStore.getAll('special_program_participants')
+        ]);
+        const today = _today();
+        const myParts = parts.filter(p => p.agent_id === _currentUser.id);
+        if (myParts.length === 0) return;
+
+        const myActive = [];
+        for (const part of myParts) {
+            const program = programs.find(pr => pr.id === part.program_id);
+            if (!program || program.status === 'cancelled' || program.status === 'deleted') continue;
+            if (program.start_date > today || program.end_date < today) continue;
+            myActive.push(program);
+        }
+        if (myActive.length === 0) return;
+
+        // Build progress cards
+        const cards = [];
+        for (const program of myActive) {
+            const progress = await calculateProgramProgress(program, _currentUser.id);
+            const daysLeft = program.end_date ? Math.max(0, Math.ceil((new Date(program.end_date) - new Date(today)) / 86400000)) : 0;
+            const barsHtml = progress.targets.map(t => {
+                const color = t.actual >= t.target ? '#16a34a' : (t.pct >= 60 ? '#f59e0b' : '#dc2626');
+                return `
+                    <div style="margin-bottom:10px;">
+                        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px;">
+                            <span>${t.label}</span>
+                            <strong>${t.display}</strong>
+                        </div>
+                        <div style="background:#eee;border-radius:6px;height:10px;overflow:hidden;">
+                            <div style="background:${color};height:100%;width:${t.pct}%;transition:width .4s;"></div>
+                        </div>
+                    </div>`;
+            }).join('');
+            const statusBanner = progress.qualified
+                ? '<div style="background:#dcfce7;color:#166534;padding:10px;border-radius:6px;margin-bottom:10px;font-weight:600;text-align:center;">🎉 You\'ve qualified for this reward!</div>'
+                : `<div style="background:#fef3c7;color:#92400e;padding:10px;border-radius:6px;margin-bottom:10px;text-align:center;font-size:13px;">⏳ <strong>${daysLeft} days left</strong> — keep pushing!</div>`;
+
+            cards.push(`
+                <div style="background:var(--white,#fff);border:2px solid #8B1A1A;border-radius:10px;padding:16px;margin-bottom:14px;">
+                    <h3 style="margin:0 0 4px;color:#8B1A1A;">🏆 ${program.program_name}</h3>
+                    <p style="font-size:13px;color:var(--gray-500);margin:0 0 10px;">🎁 Reward: <strong>${program.reward}</strong></p>
+                    ${statusBanner}
+                    ${barsHtml}
+                </div>`);
+        }
+
+        sessionStorage.setItem('specialProgramPopupShown', '1');
+        UI.showModal('Your Special Programs', cards.join(''), [
+            { label: 'Let\'s Go! 💪', type: 'primary', action: 'UI.hideModal()' }
+        ]);
+    };
+
     const renderKPITargetComparison = async () => {
         const year = new Date().getFullYear();
         const quarter = Math.ceil((new Date().getMonth() + 1) / 3);
@@ -27247,6 +27758,12 @@ const initImportDemoData = async () => {
         refreshKPIDashboard,
         showKPIDetails,
         exportKPIReport,
+        openQuarterlyTargetsModal,
+        saveQuarterlyTargets,
+        openSpecialProgramModal,
+        saveSpecialProgram,
+        deleteSpecialProgram,
+        confirmDeleteSpecialProgram,
 
         // Action Plan
         openActionPlanModal,
