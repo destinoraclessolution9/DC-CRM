@@ -20817,6 +20817,77 @@ const exportKPIReport = async (format) => {
     // ========== PHASE: MARKETING MANAGER LISTS ==========
     let _currentMarketingListTab = 'products'; // 'products', 'events', 'promotions', 'venues'
 
+    // Predefined event categories (multi-select)
+    const EVENT_CATEGORIES = [
+        '个人风水基础课',
+        '环境风水基础课',
+        '老板每月主题课',
+        '运程讲座',
+        '新春活动',
+        '博物馆',
+        '汇聚-专案',
+        '汇集-商业',
+        '汇集-灵活',
+        '汇集-简易',
+        '个人改命分享会',
+        '风水改命分享会-简易',
+        '风水改命分享会-专案',
+        '画作分享会',
+        '艺品分享会',
+        'Bujishu 分享会',
+        'Bujishu 新品发布会',
+        'DC 招商会',
+        'DC 日',
+        'Formula 新品发布会',
+        'Formula 分享会',
+        'Formula 展览',
+        'Formula Member Day',
+        '游一游'
+    ];
+
+    // Helper: parse stored categories (string JSON or array) into array of strings
+    const parseEventCategories = (raw) => {
+        if (!raw) return [];
+        if (Array.isArray(raw)) return raw;
+        try {
+            const parsed = JSON.parse(raw);
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (e) {
+            // Fallback: comma-separated string
+            return String(raw).split(',').map(s => s.trim()).filter(Boolean);
+        }
+    };
+
+    // Helper: build the categories multi-select checkbox UI for the event modal
+    const buildEventCategoriesField = (selected = []) => {
+        const known = new Set(EVENT_CATEGORIES);
+        const sel = new Set(selected);
+        // Anything in selected that is not a known category goes into the Others free-text
+        const others = selected.filter(s => !known.has(s));
+        const hasOthers = others.length > 0;
+        const othersText = others.join(', ').replace(/"/g, '&quot;');
+
+        const items = EVENT_CATEGORIES.map((cat) => `
+            <label style="display:flex;align-items:center;gap:6px;padding:6px 8px;border:1px solid var(--gray-200);border-radius:6px;background:#fff;cursor:pointer;font-size:13px;">
+                <input type="checkbox" class="mkt-event-category-cb" value="${cat.replace(/"/g, '&quot;')}" ${sel.has(cat) ? 'checked' : ''}>
+                <span>${cat}</span>
+            </label>
+        `).join('');
+        return `
+            <div class="form-group">
+                <label>Categories <small class="text-muted">(select one or more)</small></label>
+                <div id="mkt-event-categories" style="display:flex;flex-wrap:wrap;gap:6px;max-height:200px;overflow-y:auto;padding:8px;border:1px solid var(--gray-200);border-radius:6px;background:var(--gray-50, #f9fafb);">
+                    ${items}
+                    <label style="display:flex;align-items:center;gap:6px;padding:6px 8px;border:1px solid var(--gray-200);border-radius:6px;background:#fff;cursor:pointer;font-size:13px;">
+                        <input type="checkbox" id="mkt-event-cat-others-cb" ${hasOthers ? 'checked' : ''} onchange="document.getElementById('mkt-event-cat-others-input').style.display = this.checked ? 'block' : 'none'; if (this.checked) document.getElementById('mkt-event-cat-others-input').focus();">
+                        <span>Others</span>
+                    </label>
+                </div>
+                <input type="text" id="mkt-event-cat-others-input" class="form-control" placeholder="Type custom category, separate multiple with commas" value="${othersText}" style="margin-top:8px;display:${hasOthers ? 'block' : 'none'};">
+            </div>
+        `;
+    };
+
     const showMarketingListsView = async (container) => {
         container.innerHTML = `
             <div class="marketing-lists-view" style="padding: 24px;">
@@ -20935,6 +21006,7 @@ const exportKPIReport = async (format) => {
                 <table class="data-table">
                     <thead>
                         <tr>
+                            <th style="min-width:160px;">Categories</th>
                             <th>Title</th>
                             <th>Price (RM)</th>
                             <th>Early Bird (RM)</th>
@@ -20950,8 +21022,13 @@ const exportKPIReport = async (format) => {
                     <tbody>
                         ${data.map(item => {
                             const isActive = item.is_active || item.status === 'active' || item.status === 'Active';
+                            const cats = parseEventCategories(item.categories);
+                            const catsHtml = cats.length
+                                ? cats.map(c => `<span style="display:inline-block;background:var(--primary-50,#fef3c7);color:var(--primary-700,#92400e);border:1px solid var(--primary-200,#fde68a);border-radius:10px;padding:2px 8px;margin:2px 2px 2px 0;font-size:11px;white-space:nowrap;">${c}</span>`).join('')
+                                : '<span class="text-muted">-</span>';
                             return `
                             <tr style="${!isActive ? 'opacity: 0.6; background: #f9fafb;' : ''}">
+                                <td>${catsHtml}</td>
                                 <td><strong>${item.event_title || item.title || ''}</strong><br><small class="text-muted">${item.description || ''}</small></td>
                                 <td>${item.ticket_price || '-'}</td>
                                 <td>${item.early_bird_price || '-'}</td>
@@ -21094,6 +21171,7 @@ const exportKPIReport = async (format) => {
 `;
         } else if (type === 'events') {
             content = `
+                ${buildEventCategoriesField([])}
                 <div class="form-group"><label>Title*</label><input type="text" id="mkt-title" class="form-control"></div>
                 <div class="form-group"><label>Ticket Price (RM)</label><input type="number" id="mkt-price" class="form-control" value="0"></div>
                 <div class="form-group"><label>Early Bird Price (RM)</label><input type="text" id="mkt-early-bird-price" class="form-control" placeholder="e.g. 199"></div>
@@ -21172,6 +21250,7 @@ const exportKPIReport = async (format) => {
             `;
         } else if (type === 'events') {
             content = `
+                ${buildEventCategoriesField(parseEventCategories(item.categories))}
                 <div class="form-group"><label>Title*</label><input type="text" id="mkt-title" class="form-control" value="${item.event_title || item.title || ''}"></div>
                 <div class="form-group"><label>Ticket Price (RM)</label><input type="number" id="mkt-price" class="form-control" value="${item.ticket_price || 0}"></div>
                 <div class="form-group"><label>Early Bird Price (RM)</label><input type="text" id="mkt-early-bird-price" class="form-control" value="${item.early_bird_price || ''}" placeholder="e.g. 199"></div>
@@ -21280,6 +21359,16 @@ const exportKPIReport = async (format) => {
             data.speaker = document.getElementById('mkt-speaker').value;
             data.description = document.getElementById('mkt-desc').value;
             data.status = data.is_active ? 'active' : 'inactive';
+            // Collect selected categories from checkboxes + Others free-text (stored as JSON string)
+            const catCheckboxes = document.querySelectorAll('#mkt-event-categories .mkt-event-category-cb:checked');
+            const selectedCats = Array.from(catCheckboxes).map(cb => cb.value);
+            const othersCb = document.getElementById('mkt-event-cat-others-cb');
+            const othersInput = document.getElementById('mkt-event-cat-others-input');
+            if (othersCb && othersCb.checked && othersInput && othersInput.value.trim()) {
+                const customCats = othersInput.value.split(',').map(s => s.trim()).filter(Boolean);
+                customCats.forEach(c => { if (!selectedCats.includes(c)) selectedCats.push(c); });
+            }
+            data.categories = JSON.stringify(selectedCats);
             if (!data.event_title) return UI.toast.error('Title is required');
         } else {
             data.package_name = document.getElementById('mkt-pkname').value.trim();
