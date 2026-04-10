@@ -4380,11 +4380,35 @@ In a production system, this would show the actual file contents.
         await showWhatsAppIntegration();
     };
 
+    // Centralised WhatsApp Cloud API caller — handles auth, URL, parsing, error surfacing
+    const _callWhatsAppAPI = async (method, path, body = null) => {
+        const conn = await getWhatsAppConnection();
+        if (!conn?.access_token) throw new Error('WhatsApp not connected. Please configure credentials in Integrations.');
+        const url = `https://graph.facebook.com/v18.0/${path}`;
+        const opts = {
+            method,
+            headers: {
+                'Authorization': `Bearer ${conn.access_token}`,
+                'Content-Type': 'application/json'
+            }
+        };
+        if (body) opts.body = JSON.stringify(body);
+        const res = await fetch(url, opts);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error?.message || `WhatsApp API error ${res.status}`);
+        return { data, conn };
+    };
+
     const testWhatsAppConnection = async () => {
         UI.toast.info('Testing connection...');
-        (() => {
-            UI.toast.success('Connection successful!');
-        }, 1500);
+        try {
+            const conn = await getWhatsAppConnection();
+            if (!conn?.phone_number_id) { UI.toast.error('No connection configured'); return; }
+            const { data } = await _callWhatsAppAPI('GET', conn.phone_number_id);
+            UI.toast.success(`Connected: ${data.display_phone_number || data.verified_name || 'OK'}`);
+        } catch (e) {
+            UI.toast.error(`Connection failed: ${e.message}`);
+        }
     };
 
     const verifyWebhook = async () => {
@@ -4493,49 +4517,25 @@ In a production system, this would show the actual file contents.
 
     const sendWhatsApp = async (entityType, entityId) => {
         const isTemplate = document.querySelector('input[name="msg-type"]:checked')?.value === 'template';
-        const isNow = document.querySelector('input[name="schedule"]:checked')?.value === 'now';
+        const entity = window._currentWhatsAppEntity;
+        if (!entity?.phone) { UI.toast.error('No recipient phone'); return; }
 
         if (isTemplate) {
             const templateId = document.getElementById('template-select')?.value;
             if (!templateId) { UI.toast.error('Please select a template'); return; }
             const template = await AppDataStore.getById('whatsapp_templates', parseInt(templateId));
-            setTimeout(async () => {
-                await AppDataStore.create('whatsapp_messages', {
-                    id: 'wamid_' + Date.now(),
-                    entity_type: entityType,
-                    entity_id: entityId,
-                    direction: 'outgoing',
-                    to: window._currentWhatsAppEntity.phone,
-                    template_name: template.template_name,
-                    content: template.content,
-                    status: 'delivered',
-                    sent_at: new Date().toISOString()
-                });
-                UI.hideModal();
-                UI.toast.success('Message sent successfully');
-                if (entityType === 'prospect') await app.showProspectDetail(entityId);
-                else await app.showCustomerDetail(entityId);
-            }, 800);
+            UI.hideModal();
+            UI.toast.info('Sending...');
+            await sendWhatsAppMessage(entity.phone, template.template_name, {});
         } else {
             const message = document.getElementById('free-message')?.value;
             if (!message) { UI.toast.error('Please enter a message'); return; }
-            setTimeout(async () => {
-                await AppDataStore.create('whatsapp_messages', {
-                    id: 'wamid_' + Date.now(),
-                    entity_type: entityType,
-                    entity_id: entityId,
-                    direction: 'outgoing',
-                    to: window._currentWhatsAppEntity.phone,
-                    content: message,
-                    status: 'delivered',
-                    sent_at: new Date().toISOString()
-                });
-                UI.hideModal();
-                UI.toast.success('Message sent successfully');
-                if (entityType === 'prospect') await app.showProspectDetail(entityId);
-                else await app.showCustomerDetail(entityId);
-            }, 800);
+            UI.hideModal();
+            UI.toast.info('Sending...');
+            await sendFreeTextWhatsApp(entity.phone, message);
         }
+        if (entityType === 'prospect') await app.showProspectDetail(entityId);
+        else await app.showCustomerDetail(entityId);
     };
 
     const renderWhatsAppHistoryTab = async (entityType, entityId) => {
@@ -4749,40 +4749,97 @@ In a production system, this would show the actual file contents.
     };
 
     const sendWhatsAppMessage = async (to, templateName, variables = {}) => {
-        const connection = (await AppDataStore.query('integration_connections', { provider: 'whatsapp' }))[0];
-        if (!connection?.phone_number_id || !connection?.access_token) {
-            UI.toast.error('WhatsApp not connected');
-            return;
-        }
-        const body = {
-            messaging_product: 'whatsapp',
-            to,
-            type: 'template',
-            template: { name: templateName, language: { code: 'en' }, components: [] }
-        };
-        const res = await fetch(`https://graph.facebook.com/v17.0/${connection.phone_number_id}/messages`, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${connection.access_token}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify(body)
+        const phone = (to || '').replace(/^\+/, '').replace(/\s/g, '');
+        const conn = await getWhatsAppConnection();
+        if (!conn?.phone_number_id) { UI.toast.error('WhatsApp not connected'); return; }
+
+        // Resolve local template for content preview
+        const localTemplate = (await AppDataStore.getAll('whatsapp_templates'))
+            .find(t => t.template_name === templateName);
+        let content = localTemplate?.content || templateName;
+        Object.entries(variables).forEach(([k, v]) => {
+            content = content.replace(new RegExp(`{{${k}}}`, 'g'), v);
         });
-        if (!res.ok) throw new Error(`WhatsApp API error ${res.status}`);
-        return res.json();
+
+        // Build Meta API body
+        const params = Object.values(variables).map(v => ({ type: 'text', text: String(v) }));
+        const components = params.length ? [{ type: 'body', parameters: params }] : [];
+        const langCode = phone.startsWith('60') ? 'ms' : 'en_US';
+        const metaTemplateName = templateName.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+
+        let wamid = 'wamid_' + Date.now();
+        let status = 'failed';
+        try {
+            const { data } = await _callWhatsAppAPI('POST', `${conn.phone_number_id}/messages`, {
+                messaging_product: 'whatsapp',
+                recipient_type: 'individual',
+                to: phone,
+                type: 'template',
+                template: { name: metaTemplateName, language: { code: langCode }, components }
+            });
+            wamid = data.messages?.[0]?.id || wamid;
+            status = 'sent';
+            UI.toast.success('WhatsApp message sent');
+        } catch (e) {
+            UI.toast.error(`Send failed: ${e.message}`);
+        }
+
+        // Persist message record + resolve entity for UI history
+        const allEntities = [
+            ...(await AppDataStore.getAll('prospects')).map(e => ({ ...e, _type: 'prospect' })),
+            ...(await AppDataStore.getAll('customers')).map(e => ({ ...e, _type: 'customer' }))
+        ];
+        const entity = allEntities.find(e => (e.phone || '').replace(/^\+/, '').replace(/\s/g, '') === phone);
+        await AppDataStore.create('whatsapp_messages', {
+            id: wamid,
+            entity_type: entity?._type || 'prospect',
+            entity_id: entity?.id || null,
+            direction: 'outgoing',
+            to,
+            template_name: templateName,
+            content,
+            status,
+            sent_at: new Date().toISOString()
+        });
     };
 
     const sendFreeTextWhatsApp = async (to, text) => {
-        const connection = (await AppDataStore.query('integration_connections', { provider: 'whatsapp' }))[0];
-        if (!connection?.phone_number_id || !connection?.access_token) {
-            UI.toast.error('WhatsApp not connected');
-            return;
+        if (!text) return;
+        const phone = (to || '').replace(/^\+/, '').replace(/\s/g, '');
+        const conn = await getWhatsAppConnection();
+        if (!conn?.phone_number_id) { UI.toast.error('WhatsApp not connected'); return; }
+
+        let wamid = 'wamid_' + Date.now();
+        let status = 'failed';
+        try {
+            const { data } = await _callWhatsAppAPI('POST', `${conn.phone_number_id}/messages`, {
+                messaging_product: 'whatsapp',
+                recipient_type: 'individual',
+                to: phone,
+                type: 'text',
+                text: { preview_url: false, body: text }
+            });
+            wamid = data.messages?.[0]?.id || wamid;
+            status = 'sent';
+            UI.toast.success('WhatsApp message sent');
+        } catch (e) {
+            UI.toast.error(`Send failed: ${e.message}`);
         }
-        const body = { messaging_product: 'whatsapp', to, type: 'text', text: { body: text } };
-        const res = await fetch(`https://graph.facebook.com/v17.0/${connection.phone_number_id}/messages`, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${connection.access_token}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify(body)
+        const allEntities = [
+            ...(await AppDataStore.getAll('prospects')).map(e => ({ ...e, _type: 'prospect' })),
+            ...(await AppDataStore.getAll('customers')).map(e => ({ ...e, _type: 'customer' }))
+        ];
+        const entity = allEntities.find(e => (e.phone || '').replace(/^\+/, '').replace(/\s/g, '') === phone);
+        await AppDataStore.create('whatsapp_messages', {
+            id: wamid,
+            entity_type: entity?._type || 'prospect',
+            entity_id: entity?.id || null,
+            direction: 'outgoing',
+            to,
+            content: text,
+            status,
+            sent_at: new Date().toISOString()
         });
-        if (!res.ok) throw new Error(`WhatsApp API error ${res.status}`);
-        return res.json();
     };
 
     // ========== PHASE 17: AI ANALYTICS FUNCTIONS ==========
@@ -28291,6 +28348,7 @@ const initImportDemoData = async () => {
         // Phase 16 WhatsApp Integration Functions
         showWhatsAppIntegration,
         saveWhatsAppConnection,
+        _callWhatsAppAPI,
         testWhatsAppConnection,
         verifyWebhook,
         copyWebhookUrl,
