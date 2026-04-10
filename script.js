@@ -6421,9 +6421,10 @@ function _wireLoginBtn() {
 
     // ==================== INIT ====================
 
+    let _initStarted = false;
     const init = async () => {
-    if (window.app && window.app._initRunning) return;
-    if (window.app) window.app._initRunning = true;
+    if (_initStarted) return; // prevent double-init (synchronous guard)
+    _initStarted = true;
     await AppDataStore.init();
     console.log('App initializing...');
 
