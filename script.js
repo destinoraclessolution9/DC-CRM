@@ -1976,7 +1976,7 @@ const appLogic = (() => {
     const downloadVersion = (versionId) => { UI.toast.info(`Downloading version ${versionId}...`); };
     const restoreVersion = async (versionId) => {
         const ver = await AppDataStore.getById('document_versions', versionId);
-        await AppDataStore.update('documents', ver.document_id, { current_version: ver.version_number, updatedAt: new Date().toISOString() });
+        await AppDataStore.update('documents', ver.document_id, { current_version: ver.version_number, updated_at: new Date().toISOString() });
         UI.toast.success(`Restored to version ${ver.version_number}`); UI.hideModal(); await loadFolderContents();
     };
 
@@ -19086,9 +19086,9 @@ const deactivateAgent = async (agentId) => {
         }
         await AppDataStore.create('notes', {
             prospect_id: prospectId,
-            content: content.trim(),
-            created_at: new Date().toISOString(),
-            created_by: _currentUser?.id || 5
+            text: content.trim(),
+            date: new Date().toISOString().split('T')[0],
+            author: _currentUser?.full_name || 'System'
         });
         UI.toast.success('Note added.');
         await showComments(prospectId);
@@ -25511,15 +25511,19 @@ const initImportDemoData = async () => {
             UI.hideModal();
             UI.toast.success(`${actionType === 'call' ? 'Call' : 'Meeting'} scheduled for ${personName} on ${actionDate}`);
         } else {
-            // Create as a note/task
-            await AppDataStore.create('notes', {
-                entity_type: entityType,
-                entity_id: entityId,
-                content: `[Birthday ${actionType === 'gift' ? 'Gift' : 'Task'}] ${personName} — ${notes || 'Prepare birthday follow-up'}`,
-                created_by: _currentUser?.id || 5,
-                created_at: new Date().toISOString(),
+            // Create as a note/task. Schema uses prospect_id/customer_id/agent_id
+            // directly — `entity_type`/`entity_id` are not columns (they would be
+            // stripped). Route to the correct FK based on entity type.
+            const noteRow = {
+                text: `[Birthday ${actionType === 'gift' ? 'Gift' : 'Task'}] ${personName} — ${notes || 'Prepare birthday follow-up'}`,
+                author: _currentUser?.full_name || 'System',
+                date: new Date().toISOString().split('T')[0],
                 due_date: actionDate
-            });
+            };
+            if (entityType === 'prospect') noteRow.prospect_id = entityId;
+            else if (entityType === 'customer') noteRow.customer_id = entityId;
+            else if (entityType === 'agent') noteRow.agent_id = entityId;
+            await AppDataStore.create('notes', noteRow);
             UI.hideModal();
             UI.toast.success(`Birthday ${actionType} created for ${personName}`);
         }
