@@ -9509,12 +9509,31 @@ function _wireLoginBtn() {
             </div>
         `;
 
-        await renderCalendar();
-        await renderTodayActivities();
-        await renderBirthdaySection();
+        // Previously these 3 sections ran sequentially and each one independently
+        // re-fetched the same 5 tables (activities, events, prospects, customers,
+        // users). That was the main cause of "calendar page still lagging".
+        // Now: kick off the network for every table ONCE in parallel, then run
+        // the render functions in parallel — the internal getAll calls will hit
+        // the in-memory cache instead of re-fetching.
+        await Promise.all([
+            AppDataStore.getAll('activities'),
+            AppDataStore.getAll('events'),
+            AppDataStore.getAll('prospects'),
+            AppDataStore.getAll('customers'),
+            AppDataStore.getAll('users'),
+            AppDataStore.getAll('names'),
+        ]);
+        await Promise.all([
+            renderCalendar(),
+            renderTodayActivities(),
+            renderBirthdaySection(),
+        ]);
 
         // Show Special Program progress popup (once per session, for participating agents)
-        try { await checkSpecialProgramPopup(); } catch (e) { console.warn('Special Program popup failed:', e); }
+        // Deferred so it doesn't block the calendar paint.
+        setTimeout(() => {
+            checkSpecialProgramPopup().catch(e => console.warn('Special Program popup failed:', e));
+        }, 100);
     };
 
     const renderCalendar = async () => {
@@ -9878,10 +9897,16 @@ function _wireLoginBtn() {
         const day2 = new Date(today); day2.setDate(today.getDate() + 2);
         const day2Str = mmdd(day2);
 
-        const prospects = await AppDataStore.getAll('prospects');
-        const customers = await AppDataStore.getAll('customers');
-        const names = await AppDataStore.getAll('names');
+        // Fetch everything in parallel instead of serialized awaits.
+        const [prospects, customers, names, allUsers] = await Promise.all([
+            AppDataStore.getAll('prospects'),
+            AppDataStore.getAll('customers'),
+            AppDataStore.getAll('names'),
+            AppDataStore.getAll('users'),
+        ]);
         const all = [...prospects, ...customers];
+        const userMap = new Map(allUsers.map(u => [String(u.id), u]));
+        const prospectById = new Map(all.map(p => [String(p.id), p]));
 
         // Safely extract MM-DD from a date_of_birth string (YYYY-MM-DD)
         const getMMDD = (dob) => {
@@ -9890,8 +9915,9 @@ function _wireLoginBtn() {
             return '';
         };
 
-        const getBdayInfo = async (p) => {
-            const agent = await AppDataStore.getById('users', p.responsible_agent_id || p.lead_agent_id);
+        // Sync versions — no more per-row awaits. Agent resolved from the map.
+        const getBdayInfo = (p) => {
+            const agent = userMap.get(String(p.responsible_agent_id || p.lead_agent_id));
             return {
                 id: p.id,
                 name: p.full_name,
@@ -9902,9 +9928,8 @@ function _wireLoginBtn() {
             };
         };
 
-        // Build bday info for a family member entry from the names table
-        const getNameBdayInfo = async (n) => {
-            const prospect = all.find(p => String(p.id) === String(n.prospect_id));
+        const getNameBdayInfo = (n) => {
+            const prospect = prospectById.get(String(n.prospect_id));
             return {
                 id: n.prospect_id || n.id,
                 name: `${n.full_name} (${n.relation || 'Family'} of ${prospect?.full_name || 'Contact'})`,
@@ -9915,31 +9940,29 @@ function _wireLoginBtn() {
             };
         };
 
-        const todayBdays = await Promise.all([
+        const todayBdays = [
             ...all.filter(p => getMMDD(p.date_of_birth) === todayStr).map(getBdayInfo),
             ...names.filter(n => getMMDD(n.date_of_birth) === todayStr).map(getNameBdayInfo)
-        ]);
+        ];
 
-        const upcomingBdays = await Promise.all([
+        const upcomingBdays = [
             ...all.filter(p => {
                 const md = getMMDD(p.date_of_birth);
                 return md === tomorrowStr || md === day2Str;
-            }).map(async p => {
-                const info = await getBdayInfo(p);
+            }).map(p => {
+                const info = getBdayInfo(p);
                 info.info += ` · ${getMMDD(p.date_of_birth) === tomorrowStr ? 'Tomorrow' : 'In 2 days'}`;
                 return info;
             }),
             ...names.filter(n => {
                 const md = getMMDD(n.date_of_birth);
                 return md === tomorrowStr || md === day2Str;
-            }).map(async n => {
-                const info = await getNameBdayInfo(n);
+            }).map(n => {
+                const info = getNameBdayInfo(n);
                 info.info += ` · ${getMMDD(n.date_of_birth) === tomorrowStr ? 'Tomorrow' : 'In 2 days'}`;
                 return info;
             })
-        ]);
-
-        console.log("Birthday Data:", todayBdays, upcomingBdays);
+        ];
 
         const renderBday = (data) => {
             if (data.length === 0) return '<div class="text-muted" style="padding:10px; font-size:12px;">No birthdays found.</div>';
