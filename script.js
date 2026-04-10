@@ -1976,7 +1976,7 @@ const appLogic = (() => {
     const downloadVersion = (versionId) => { UI.toast.info(`Downloading version ${versionId}...`); };
     const restoreVersion = async (versionId) => {
         const ver = await AppDataStore.getById('document_versions', versionId);
-        await AppDataStore.update('documents', ver.document_id, { current_version: ver.version_number, updated_at: new Date().toISOString() });
+        await AppDataStore.update('documents', ver.document_id, { current_version: ver.version_number, updatedAt: new Date().toISOString() });
         UI.toast.success(`Restored to version ${ver.version_number}`); UI.hideModal(); await loadFolderContents();
     };
 
@@ -3056,14 +3056,60 @@ In a production system, this would show the actual file contents.
         },
     ];
 
+    // Map drawer view names → nav ID suffix (only where they differ)
+    const _drawerViewToNavId = { 'marketing_automation': 'marketing-automation' };
+
+    // Returns the set of allowed nav IDs for the current user (mirrors updateNavVisibility logic)
+    const _getAllowedNavIds = () => {
+        const _l12 = ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'reports', 'documents', 'settings', 'fude', 'milestones'];
+        const perms = {
+            1: ['calendar','prospects','referrals','pipeline','promotions','marketing-automation','marketing-lists','cases','agents','performance','reports','risk','ai-insights','security','admin','protection','documents','import','integrations','settings','fude','milestones','workflows','lead_forms','surveys','contracts','custom_fields','booking_settings'],
+            2: ['calendar','prospects','referrals','pipeline','promotions','marketing-automation','marketing-lists','cases','agents','performance','reports','risk','ai-insights','security','admin','protection','documents','import','integrations','settings','fude','milestones','workflows','lead_forms','surveys','contracts','custom_fields','booking_settings'],
+            3: ['calendar','prospects','referrals','pipeline','promotions','cases','performance','reports','protection','documents','settings','fude'],
+            4: ['calendar','prospects','referrals','pipeline','promotions','cases','performance','reports','protection','documents','settings','fude'],
+            5: _l12, 6: _l12, 7: _l12, 8: _l12, 9: _l12, 10: _l12,
+            11: ['calendar','prospects','referrals','promotions','cases','settings','fude','milestones'],
+            12: ['calendar','prospects','referrals','fude','milestones'],
+            13: ['calendar','prospects','fude','milestones'],
+            14: ['calendar','prospects','fude','milestones'],
+        };
+        let level = 12;
+        const user = _currentUser;
+        if (user?.role) {
+            const m = user.role.match(/Level\s+(\d+)/i);
+            if (m) { level = parseInt(m[1]); }
+            else {
+                const r = user.role.toLowerCase();
+                if (r === 'super_admin' || r === 'admin') level = 1;
+                else if (r === 'marketing_manager') level = 2;
+                else if (r === 'manager') level = 4;
+                else if (r === 'team_leader') level = 5;
+                else if (r === 'consultant') level = 7;
+                else if (r === 'agent') level = 10;
+                else if (r === 'customer') level = 13;
+                else if (r === 'referrer') level = 14;
+            }
+        }
+        return new Set(perms[level] || perms[12]);
+    };
+
     const renderMobileDrawer = () => {
         const body = document.getElementById('mobile-drawer-body');
         if (!body) return;
 
+        const allowedIds = _getAllowedNavIds();
+
         let html = '';
         DRAWER_SECTIONS.forEach(section => {
+            // Only include items the current user is allowed to see
+            const visibleItems = section.items.filter(item => {
+                const navId = _drawerViewToNavId[item.view] || item.view;
+                return allowedIds.has(navId);
+            });
+            if (visibleItems.length === 0) return;
+
             html += `<div class="mobile-drawer-section-title">${section.title}</div>`;
-            section.items.forEach(item => {
+            visibleItems.forEach(item => {
                 const isActive = _currentView === item.view ? ' active' : '';
                 html += `
                     <button class="mobile-drawer-item${isActive}" onclick="app.navigateTo('${item.view}'); app.closeMobileDrawer()">
@@ -15390,31 +15436,13 @@ function _wireLoginBtn() {
                             <div class="acc-body" id="acc-body-nextactions-${prospect.id}" style="display:none" data-loaded="false"></div>
                         </div>
 
-                        <!-- ⑦ DC Closing Record -->
+                        <!-- ⑦ Closing Record -->
                         <div class="acc-item" id="acc-closing-${prospect.id}">
                             <div class="acc-hdr" onclick="app.toggleAccordion('closing',${prospect.id},this.parentElement)">
-                                <span><i class="fas fa-handshake"></i> DC Closing Record</span>
+                                <span><i class="fas fa-handshake"></i> Closing Record</span>
                                 <i class="fas fa-chevron-down acc-chev"></i>
                             </div>
                             <div class="acc-body" id="acc-body-closing-${prospect.id}" style="display:none" data-loaded="false"></div>
-                        </div>
-
-                        <!-- ⑦a Bujishu Product Purchase History -->
-                        <div class="acc-item" id="acc-bujishu-${prospect.id}">
-                            <div class="acc-hdr" onclick="app.toggleAccordion('bujishu',${prospect.id},this.parentElement)">
-                                <span><i class="fas fa-gem"></i> Bujishu Product Purchase History</span>
-                                <i class="fas fa-chevron-down acc-chev"></i>
-                            </div>
-                            <div class="acc-body" id="acc-body-bujishu-${prospect.id}" style="display:none" data-loaded="false"></div>
-                        </div>
-
-                        <!-- ⑦b Formula Healthcare Product Purchase History -->
-                        <div class="acc-item" id="acc-formula-${prospect.id}">
-                            <div class="acc-hdr" onclick="app.toggleAccordion('formula',${prospect.id},this.parentElement)">
-                                <span><i class="fas fa-heartbeat"></i> Formula Healthcare Product Purchase History</span>
-                                <i class="fas fa-chevron-down acc-chev"></i>
-                            </div>
-                            <div class="acc-body" id="acc-body-formula-${prospect.id}" style="display:none" data-loaded="false"></div>
                         </div>
 
                         <!-- ⑧ Notes -->
@@ -16051,69 +16079,6 @@ function _wireLoginBtn() {
                 `;
             }
         }
-        else if (tab === 'bujishu' || tab === 'formula') {
-            const cfg = tab === 'bujishu'
-                ? { key: 'bujishu_purchases', title: '💎 Bujishu Product Purchase History', headerBg: '#f3e8ff', headerColor: '#6b21a8' }
-                : { key: 'formula_healthcare_purchases', title: '🧬 Formula Healthcare Product Purchase History', headerBg: '#dcfce7', headerColor: '#15803d' };
-            const pid = prospect.id;
-            let records = [];
-            try {
-                const src = prospect.closing_record?.[cfg.key];
-                records = Array.isArray(src) ? src : JSON.parse(src || '[]');
-            } catch(_) {}
-            const rowsHtml = records.length
-                ? records.map((r, i) => `
-                    <tr>
-                        <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;">${escapeHtml(r.product || '')}</td>
-                        <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;color:var(--gray-600);">${escapeHtml(r.purchase_date || '-')}</td>
-                        <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;text-align:right;">${r.amount ? 'RM ' + parseFloat(r.amount).toLocaleString() : '-'}</td>
-                        <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;color:var(--gray-500);">${escapeHtml(r.notes || '-')}</td>
-                        <td style="padding:4px 8px;border-bottom:1px solid #f3f4f6;text-align:center;">
-                            ${r.attachment_data
-                                ? `<a href="${r.attachment_data}" target="_blank" title="${escapeHtml(r.attachment_name||'View attachment')}" style="color:var(--primary);margin-right:4px;"><i class="fas fa-paperclip"></i></a>`
-                                : `<label for="${tab}-att-${pid}-${i}" title="Attach file" style="cursor:pointer;color:var(--gray-400);margin-right:4px;"><i class="fas fa-paperclip"></i></label>`
-                            }
-                            <input type="file" id="${tab}-att-${pid}-${i}" style="display:none" accept="image/*,application/pdf" onchange="event.stopPropagation();app.addProductPurchaseAttachment(${pid},'${tab}',${i},this)">
-                        </td>
-                        <td style="padding:4px 8px;border-bottom:1px solid #f3f4f6;text-align:center;">
-                            <button class="btn-icon" style="color:var(--error);" onclick="event.stopPropagation();app.deleteProductPurchaseRecord(${pid},'${tab}',${i})" title="Remove"><i class="fas fa-times"></i></button>
-                        </td>
-                    </tr>`).join('')
-                : `<tr><td colspan="6" style="padding:10px;text-align:center;color:var(--gray-400);font-size:12px;font-style:italic;">No purchase records yet</td></tr>`;
-            const totalAmount = records.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
-            container.innerHTML = `
-                <div style="margin-bottom:12px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
-                    <div style="background:${cfg.headerBg};padding:8px 12px;font-weight:600;font-size:13px;border-bottom:1px solid #e5e7eb;color:${cfg.headerColor};display:flex;justify-content:space-between;align-items:center;">
-                        <span>${cfg.title}</span>
-                        <span style="font-size:12px;">Total: RM ${totalAmount.toLocaleString()}</span>
-                    </div>
-                    <div style="overflow-x:auto;">
-                    <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:560px;">
-                        <thead><tr style="background:#fafafa;">
-                            <th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e5e7eb;font-weight:600;">Product</th>
-                            <th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e5e7eb;font-weight:600;">Date</th>
-                            <th style="padding:6px 10px;text-align:right;border-bottom:1px solid #e5e7eb;font-weight:600;">Amount</th>
-                            <th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e5e7eb;font-weight:600;">Notes</th>
-                            <th style="padding:4px;width:36px;border-bottom:1px solid #e5e7eb;text-align:center;font-weight:600;font-size:11px;">File</th>
-                            <th style="padding:4px;width:36px;border-bottom:1px solid #e5e7eb;"></th>
-                        </tr></thead>
-                        <tbody id="${tab}-rows-${pid}">${rowsHtml}</tbody>
-                    </table>
-                    </div>
-                    <div style="padding:8px 10px;border-top:1px solid #e5e7eb;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-                        <input id="${tab}-product-${pid}" class="form-control" style="flex:2;min-width:140px;height:32px;font-size:12px;" placeholder="Product name">
-                        <input id="${tab}-date-${pid}" type="date" class="form-control" style="flex:1;min-width:120px;height:32px;font-size:12px;">
-                        <input id="${tab}-amount-${pid}" type="number" step="0.01" class="form-control" style="flex:1;min-width:100px;height:32px;font-size:12px;" placeholder="Amount (RM)">
-                        <input id="${tab}-notes-${pid}" class="form-control" style="flex:2;min-width:140px;height:32px;font-size:12px;" placeholder="Notes (optional)">
-                        <label for="${tab}-file-${pid}" title="Attach a file" style="cursor:pointer;height:32px;padding:0 10px;display:flex;align-items:center;border:1px solid #e5e7eb;border-radius:6px;background:#f9fafb;color:var(--gray-500);">
-                            <i class="fas fa-paperclip"></i>
-                        </label>
-                        <input id="${tab}-file-${pid}" type="file" style="display:none" accept="image/*,application/pdf">
-                        <button class="btn secondary btn-sm" onclick="event.stopPropagation();app.addProductPurchaseRow(${pid},'${tab}')" style="white-space:nowrap;height:32px;"><i class="fas fa-plus"></i> Add</button>
-                    </div>
-                </div>
-            `;
-        }
     };
 
     // Accordion toggle — expand/collapse a prospect profile section.
@@ -16442,87 +16407,6 @@ NOTIFY pgrst, 'reload schema';`;
         UI.toast.success('Record removed');
         const bodyEl = document.getElementById(`acc-body-closing-${prospectId}`);
         if (bodyEl) await switchProspectTab('closing', prospectId, null, bodyEl);
-    };
-
-    // ── Bujishu / Formula Healthcare Product Purchase History ──
-    // type = 'bujishu' | 'formula'. Records are stored inside closing_record JSONB
-    // under keys `bujishu_purchases` / `formula_healthcare_purchases`.
-    const _productPurchaseKey = (type) => type === 'bujishu' ? 'bujishu_purchases' : 'formula_healthcare_purchases';
-    const _readProductPurchases = (prospect, type) => {
-        try {
-            const src = prospect.closing_record?.[_productPurchaseKey(type)];
-            return Array.isArray(src) ? [...src] : JSON.parse(src || '[]');
-        } catch(_) { return []; }
-    };
-    const _writeProductPurchases = async (prospectId, prospect, type, records) => {
-        const cr = { ...(prospect.closing_record || {}), [_productPurchaseKey(type)]: records };
-        await AppDataStore.update('prospects', prospectId, { closing_record: cr });
-    };
-    const _refreshProductPurchaseTab = async (prospectId, type) => {
-        const bodyEl = document.getElementById(`acc-body-${type}-${prospectId}`);
-        if (bodyEl) await switchProspectTab(type, prospectId, null, bodyEl);
-    };
-
-    const addProductPurchaseRow = async (prospectId, type) => {
-        const productInput = document.getElementById(`${type}-product-${prospectId}`);
-        const dateInput = document.getElementById(`${type}-date-${prospectId}`);
-        const amountInput = document.getElementById(`${type}-amount-${prospectId}`);
-        const notesInput = document.getElementById(`${type}-notes-${prospectId}`);
-        const fileInput = document.getElementById(`${type}-file-${prospectId}`);
-        const product = productInput?.value?.trim();
-        if (!product) { UI.toast.error('Please enter a product name'); return; }
-        const purchase_date = dateInput?.value || '';
-        const amount = amountInput?.value || '';
-        const notes = notesInput?.value?.trim() || '';
-        const file = fileInput?.files[0] || null;
-
-        const saveRow = async (attachment_data, attachment_name) => {
-            const prospect = await AppDataStore.getById('prospects', prospectId);
-            if (!prospect) return;
-            const records = _readProductPurchases(prospect, type);
-            records.push({ product, purchase_date, amount, notes, attachment_data: attachment_data || null, attachment_name: attachment_name || null });
-            await _writeProductPurchases(prospectId, prospect, type, records);
-            UI.toast.success('Record added');
-            await _refreshProductPurchaseTab(prospectId, type);
-        };
-
-        if (file) {
-            const reader = new FileReader();
-            reader.onload = async (e) => await saveRow(e.target.result, file.name);
-            reader.readAsDataURL(file);
-        } else {
-            await saveRow(null, null);
-        }
-    };
-
-    const addProductPurchaseAttachment = async (prospectId, type, index, fileInput) => {
-        const file = fileInput?.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = async (e) => {
-            const prospect = await AppDataStore.getById('prospects', prospectId);
-            if (!prospect) return;
-            const records = _readProductPurchases(prospect, type);
-            if (records[index]) {
-                records[index].attachment_name = file.name;
-                records[index].attachment_data = e.target.result;
-            }
-            await _writeProductPurchases(prospectId, prospect, type, records);
-            UI.toast.success('Attachment saved');
-            await _refreshProductPurchaseTab(prospectId, type);
-        };
-        reader.readAsDataURL(file);
-    };
-
-    const deleteProductPurchaseRecord = async (prospectId, type, index) => {
-        if (!confirm('Remove this record?')) return;
-        const prospect = await AppDataStore.getById('prospects', prospectId);
-        if (!prospect) return;
-        const records = _readProductPurchases(prospect, type);
-        records.splice(index, 1);
-        await _writeProductPurchases(prospectId, prospect, type, records);
-        UI.toast.success('Record removed');
-        await _refreshProductPurchaseTab(prospectId, type);
     };
 
     const saveClosingRecord = async (prospectId) => {
@@ -19561,9 +19445,9 @@ const deactivateAgent = async (agentId) => {
         }
         await AppDataStore.create('notes', {
             prospect_id: prospectId,
-            text: content.trim(),
-            date: new Date().toISOString().split('T')[0],
-            author: _currentUser?.full_name || 'System'
+            content: content.trim(),
+            created_at: new Date().toISOString(),
+            created_by: _currentUser?.id || 5
         });
         UI.toast.success('Note added.');
         await showComments(prospectId);
@@ -26006,19 +25890,15 @@ const initImportDemoData = async () => {
             UI.hideModal();
             UI.toast.success(`${actionType === 'call' ? 'Call' : 'Meeting'} scheduled for ${personName} on ${actionDate}`);
         } else {
-            // Create as a note/task. Schema uses prospect_id/customer_id/agent_id
-            // directly — `entity_type`/`entity_id` are not columns (they would be
-            // stripped). Route to the correct FK based on entity type.
-            const noteRow = {
-                text: `[Birthday ${actionType === 'gift' ? 'Gift' : 'Task'}] ${personName} — ${notes || 'Prepare birthday follow-up'}`,
-                author: _currentUser?.full_name || 'System',
-                date: new Date().toISOString().split('T')[0],
+            // Create as a note/task
+            await AppDataStore.create('notes', {
+                entity_type: entityType,
+                entity_id: entityId,
+                content: `[Birthday ${actionType === 'gift' ? 'Gift' : 'Task'}] ${personName} — ${notes || 'Prepare birthday follow-up'}`,
+                created_by: _currentUser?.id || 5,
+                created_at: new Date().toISOString(),
                 due_date: actionDate
-            };
-            if (entityType === 'prospect') noteRow.prospect_id = entityId;
-            else if (entityType === 'customer') noteRow.customer_id = entityId;
-            else if (entityType === 'agent') noteRow.agent_id = entityId;
-            await AppDataStore.create('notes', noteRow);
+            });
             UI.hideModal();
             UI.toast.success(`Birthday ${actionType} created for ${personName}`);
         }
@@ -28211,9 +28091,6 @@ const initImportDemoData = async () => {
         addPrePurchaseRow,
         addPrePurchaseAttachment,
         deletePrePurchaseRecord,
-        addProductPurchaseRow,
-        addProductPurchaseAttachment,
-        deleteProductPurchaseRecord,
         approveClosingRecord,
         rejectClosingRecord,
         extendProtection,
