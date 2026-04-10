@@ -12774,22 +12774,18 @@ function _wireLoginBtn() {
         activity.note_needs = document.getElementById('note-needs')?.value || '';
         activity.note_pain_points = document.getElementById('note-pain-points')?.value || '';
 
+        // CPS attachment upload — store the file in Supabase storage so it's viewable everywhere.
+        // We stash it here and upload AFTER the activity row exists so the path can reference the activity id.
+        let _pendingCpsFile = null;
         if (type === 'CPS') {
             const attInput = document.getElementById('cps-attachment');
             if (attInput && attInput.files.length > 0) {
                 const file = attInput.files[0];
-
                 if (file.size > 5 * 1024 * 1024) {
                     UI.toast.error('File size exceeds 5MB limit');
                     return;
                 }
-
-                activity.cps_attachment = {
-                    name: file.name,
-                    size: file.size,
-                    type: file.type,
-                    url: URL.createObjectURL(file)
-                };
+                _pendingCpsFile = file;
             }
         }
 
@@ -12799,6 +12795,31 @@ function _wireLoginBtn() {
         } catch (err) {
             UI.toast.error('Failed to save activity: ' + (err.message || 'Unknown error'));
             return;
+        }
+
+        // Upload CPS attachment to Supabase storage and save URL into activities.photo_urls.
+        // Kept non-blocking for the rest of the save flow — errors show a toast but don't fail the activity.
+        if (_pendingCpsFile && savedActivity?.id) {
+            try {
+                const sb = window.supabase || window.supabaseClient;
+                if (sb && sb.storage) {
+                    const safeName = _pendingCpsFile.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+                    const path = `activity_photos/${savedActivity.id}_${Date.now()}_${safeName}`;
+                    const { error: upErr } = await sb.storage.from('attachments').upload(path, _pendingCpsFile, { upsert: false, contentType: _pendingCpsFile.type });
+                    if (upErr) throw upErr;
+                    const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
+                    if (urlData?.publicUrl) {
+                        const existing = Array.isArray(savedActivity.photo_urls) ? savedActivity.photo_urls : [];
+                        await AppDataStore.update('activities', savedActivity.id, { photo_urls: [...existing, urlData.publicUrl] });
+                        savedActivity.photo_urls = [...existing, urlData.publicUrl];
+                    }
+                } else {
+                    UI.toast.error('CPS attachment not uploaded — Supabase not connected');
+                }
+            } catch (err) {
+                console.error('CPS attachment upload failed:', err);
+                UI.toast.error('CPS attachment upload failed: ' + (err.message || 'Unknown error'));
+            }
         }
 
         // Save event attendees now that we have the activity ID — stored per-activity so
