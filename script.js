@@ -9595,25 +9595,18 @@ function _wireLoginBtn() {
             </div>
         `;
 
-        // Previously these 3 sections ran sequentially and each one independently
-        // re-fetched the same 5 tables (activities, events, prospects, customers,
-        // users). That was the main cause of "calendar page still lagging".
-        // Now: kick off the network for every table ONCE in parallel, then run
-        // the render functions in parallel — the internal getAll calls will hit
-        // the in-memory cache instead of re-fetching.
-        await Promise.all([
-            AppDataStore.getAll('activities'),
-            AppDataStore.getAll('events'),
-            AppDataStore.getAll('prospects'),
-            AppDataStore.getAll('customers'),
-            AppDataStore.getAll('users'),
-            AppDataStore.getAll('names'),
-        ]);
-        await Promise.all([
-            renderCalendar(),
-            renderTodayActivities(),
-            renderBirthdaySection(),
-        ]);
+        // Fire all 3 section renders IMMEDIATELY — no more blocking prefetch.
+        // Each section hits its own AppDataStore.getAll calls; the in-flight
+        // deduplication layer in data.js ensures overlapping tables (activities,
+        // prospects, customers, users) are fetched exactly once across all
+        // three concurrent callers. Each section paints as soon as its own
+        // data arrives, so the user sees progressive fill-in instead of a
+        // frozen empty template for the full duration of the slowest request.
+        // We don't await these here — we return immediately so the caller
+        // (navigateTo) can finish, and each render resolves on its own.
+        renderCalendar().catch(e => console.warn('renderCalendar failed:', e));
+        renderTodayActivities().catch(e => console.warn('renderTodayActivities failed:', e));
+        renderBirthdaySection().catch(e => console.warn('renderBirthdaySection failed:', e));
 
         // Show Special Program progress popup (once per session, for participating agents)
         // Deferred so it doesn't block the calendar paint.
@@ -29829,9 +29822,6 @@ const monitorLoginAttempts = async () => {
 };
 
 const checkForSecurityIncidents = async () => {
-console.log('AppDataStore value:', AppDataStore);
-console.log('AppDataStore.getAll type:', typeof AppDataStore.getAll);
-console.log('Property descriptor:', Object.getOwnPropertyDescriptor(window, 'AppDataStore'));
     if (!window.AppDataStore) return;
     const incidents = (await AppDataStore.getAll('security_incidents')).filter(i => i.status === 'new' && !i.acknowledged);
     if (incidents.length > 0) {
