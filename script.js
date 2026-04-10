@@ -8562,11 +8562,11 @@ function _wireLoginBtn() {
                     </button>
                 </div>
 
-                <div style="display:flex; gap:8px; margin-bottom:12px;">
-                    <button class="btn ${isCps ? 'primary' : 'secondary'}" onclick="app.switchCaseTab('cps')">
+                <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:12px;">
+                    <button class="btn ${isCps ? 'primary' : 'secondary'}" onclick="app.switchCaseTab('cps')" style="width:100%;">
                         <i class="fas fa-handshake"></i> CPS Invitation Cases
                     </button>
-                    <button class="btn ${!isCps ? 'primary' : 'secondary'}" onclick="app.switchCaseTab('closed')">
+                    <button class="btn ${!isCps ? 'primary' : 'secondary'}" onclick="app.switchCaseTab('closed')" style="width:100%;">
                         <i class="fas fa-check-circle"></i> Closed Cases
                     </button>
                 </div>
