@@ -198,6 +198,25 @@ class DataStore {
         const cached = this._cacheGet(tableName);
         if (cached) return cached;
 
+        // In-flight promise deduplication: if another caller already started a
+        // fetch for this table on the current cold cache, await the same promise
+        // instead of firing a second network request. This is critical during
+        // page loads where multiple render functions concurrently ask for the
+        // same tables (activities, prospects, customers, users). Without this
+        // dedupe, N concurrent callers create N Supabase round trips; with it,
+        // they all share one.
+        if (!this._inFlightGetAll) this._inFlightGetAll = new Map();
+        const existingPromise = this._inFlightGetAll.get(tableName);
+        if (existingPromise) return existingPromise;
+
+        const fetchPromise = this._getAllImpl(tableName).finally(() => {
+            this._inFlightGetAll.delete(tableName);
+        });
+        this._inFlightGetAll.set(tableName, fetchPromise);
+        return fetchPromise;
+    }
+
+    async _getAllImpl(tableName) {
         try {
             const { data, error } = await this._readClient().from(tableName).select('*');
             if (error) throw error;
@@ -212,6 +231,9 @@ class DataStore {
             // Merge with prior localStorage cache so extra fields saved locally
             // (that Supabase stripped due to schema mismatch) are preserved.
             // Server fields always win; local-only fields (extra columns) are kept.
+            // The localStorage write itself is deferred off the critical path —
+            // setting a ~500KB JSON string synchronously was measurably blocking
+            // the calendar render on cold cache.
             try {
                 const localRaw = localStorage.getItem(`fs_crm_${tableName}`);
                 if (localRaw) {
@@ -221,13 +243,17 @@ class DataStore {
                         const local = localMap.get(String(r.id));
                         return local ? { ...local, ...r } : r;
                     });
-                    localStorage.setItem(`fs_crm_${tableName}`, JSON.stringify(merged));
                     this._cacheSet(tableName, merged);
+                    setTimeout(() => {
+                        try { localStorage.setItem(`fs_crm_${tableName}`, JSON.stringify(merged)); } catch (_) {}
+                    }, 0);
                     return merged;
                 }
             } catch (_) {}
-            try { localStorage.setItem(`fs_crm_${tableName}`, JSON.stringify(result)); } catch (_) {}
             this._cacheSet(tableName, result);
+            setTimeout(() => {
+                try { localStorage.setItem(`fs_crm_${tableName}`, JSON.stringify(result)); } catch (_) {}
+            }, 0);
             return result;
         } catch (e) {
             console.warn(`Offline/error: falling back for ${tableName}`, e);
