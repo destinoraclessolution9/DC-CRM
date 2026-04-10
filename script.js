@@ -25516,6 +25516,186 @@ const initImportDemoData = async () => {
         }
     };
 
+    // ---------- 增运九法 + 丁财贵寿四柱 definitions ----------
+    // 9 icons -> event category matchers (by event_categories.category_name OR
+    //   regex fallback on event_title/notes if the category isn't wired up yet).
+    // Icon 9 (传) is a referral-chain check, no category list.
+    const NINE_METHOD_DEFS = [
+        { key: 'icon-1', icon: 'assets/milestone-icons/icon-1-beidou.png',
+          categories: ['个人风水基础课', '个人改命分享会'],
+          regex: /(个人风水基础|个人改命|personal.?fengshui|personal.?sharing)/i },
+        { key: 'icon-2', icon: 'assets/milestone-icons/icon-2-house.png',
+          categories: ['环境风水基础课', '风水改命分享会'],
+          regex: /(环境风水|风水改命|fengshui.?diy|environment.?fengshui)/i },
+        { key: 'icon-3', icon: 'assets/milestone-icons/icon-3-ancient.png',
+          categories: ['博物馆'],
+          regex: /(博物馆|museum)/i },
+        { key: 'icon-4', icon: 'assets/milestone-icons/icon-4-hui.png',
+          categories: ['汇聚-专案', '汇集-商业', '汇集-灵活', '汇集-简易'],
+          regex: /(汇聚|汇集|hui.?ji)/i },
+        { key: 'icon-5', icon: 'assets/milestone-icons/icon-5-fu.png',
+          categories: ['福气分享会'],
+          regex: /(福气分享|福气课|fu.?qi)/i },
+        { key: 'icon-6', icon: 'assets/milestone-icons/icon-6-fire.png',
+          categories: ['DC 招商会', 'DC招商会'],
+          regex: /(dc.?招商|招商会)/i },
+        { key: 'icon-7', icon: 'assets/milestone-icons/icon-7-wang.png',
+          categories: ['Bujishu 分享会', 'Bujishu新品发布会', 'Bujishu 新品发布会'],
+          regex: /(bujishu|bu.?ji.?shu)/i },
+        { key: 'icon-8', icon: 'assets/milestone-icons/icon-8-bagua.png',
+          categories: ['画作分享会', '艺品分享会'],
+          regex: /(画作|艺品|calligraphy.?sharing|painting.?sharing)/i },
+        { key: 'icon-9', icon: 'assets/milestone-icons/icon-9-chuan.png',
+          isReferral: true },
+    ];
+
+    // 4 pillar icons -> product category matchers (by products.category OR
+    //   regex fallback on purchases.item)
+    const FOUR_PILLAR_DEFS = [
+        { key: 'pillar-1', icon: 'assets/milestone-icons/pillar-1-stars.png',
+          label: '九星助命', source: 'products', categories: ['Power Ring'],
+          regex: /power.?ring|pr[0-9]/i },
+        { key: 'pillar-2', icon: 'assets/milestone-icons/pillar-2-identify.png',
+          label: '寻旺用旺', source: 'products', categories: ['风水方案'],
+          regex: /风水方案|fengshui.?solution|fengshui.?audit/i },
+        { key: 'pillar-3', icon: 'assets/milestone-icons/pillar-3-guide.png',
+          label: '泰山北斗', source: 'bujishu', categories: ['满堂系列', '旺床'],
+          regex: /满堂系列|旺床|bujishu.?set|mattress/i },
+        { key: 'pillar-4', icon: 'assets/milestone-icons/pillar-4-qi.png',
+          label: '以卦聚气', source: 'products', categories: ['画作'],
+          regex: /画作|calligraphy|painting/i },
+    ];
+
+    // Compute 9-icon attendance statuses for a given subject (user / prospect / customer).
+    // Admin overrides in user_milestones (name='icon-1'..'icon-9', with completed boolean) win.
+    const computeNineMethodStatuses = async (subject) => {
+        const result = {};
+        // Admin overrides
+        let overrides = {};
+        try {
+            const rows = await AppDataStore.query('user_milestones', { user_id: subject.user_id });
+            rows.forEach(r => { overrides[r.milestone_name] = r.completed; });
+        } catch(e) {}
+
+        // Preload data for auto-detect
+        let categories = [], events = [], regs = [], activities = [], referrals = [];
+        try { categories = await AppDataStore.getAll('event_categories'); } catch(e) {}
+        try { events     = await AppDataStore.getAll('events'); } catch(e) {}
+        try { regs       = await AppDataStore.getAll('event_registrations'); } catch(e) {}
+        try { activities = await AppDataStore.getAll('activities'); } catch(e) {}
+        try { referrals  = await AppDataStore.getAll('referrals'); } catch(e) {}
+
+        const catByName = new Map(categories.map(c => [String(c.category_name || '').trim(), c.id]));
+        const eventById = new Map(events.map(e => [String(e.id), e]));
+
+        // Helper: has the subject attended any event in the given category list?
+        const subjectAttendedCategory = (def) => {
+            const wantedCatIds = new Set(
+                (def.categories || [])
+                    .map(name => catByName.get(name))
+                    .filter(id => id != null)
+                    .map(String)
+            );
+
+            // 1) Proper event_registrations route
+            const attendedRegs = regs.filter(r =>
+                String(r.attendance_status || '').toLowerCase() === 'attended' &&
+                (
+                    (subject.prospect_id && String(r.attendee_id) === String(subject.prospect_id)) ||
+                    (subject.customer_id && String(r.attendee_id) === String(subject.customer_id))
+                )
+            );
+            for (const r of attendedRegs) {
+                const ev = eventById.get(String(r.event_id));
+                if (!ev) continue;
+                const evCatId = String(ev.event_category_id || '');
+                if (wantedCatIds.has(evCatId)) return true;
+            }
+
+            // 2) Fallback: scan activities by event title / notes regex
+            if (def.regex) {
+                const mine = activities.filter(a =>
+                    (subject.prospect_id && String(a.prospect_id) === String(subject.prospect_id)) ||
+                    (subject.customer_id && String(a.customer_id) === String(subject.customer_id))
+                );
+                if (mine.some(a => def.regex.test((a.event_title || '') + ' ' + (a.notes || '') + ' ' + (a.activity_type || '')))) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        // Icon 9: did subject refer a NEW prospect who has completed CPS?
+        const referralLeadToCPS = () => {
+            if (!subject.prospect_id && !subject.customer_id) return false;
+            const myRefs = referrals.filter(r =>
+                (subject.prospect_id && String(r.referrer_id) === String(subject.prospect_id)) ||
+                (subject.customer_id && String(r.referrer_id) === String(subject.customer_id))
+            );
+            if (myRefs.length === 0) return false;
+            // For each referred prospect, check if they've done CPS (activity_type='CPS' OR event-regex CPS)
+            for (const r of myRefs) {
+                const refId = r.referred_prospect_id;
+                if (!refId) continue;
+                const refActs = activities.filter(a => String(a.prospect_id) === String(refId));
+                if (refActs.some(a => a.activity_type === 'CPS' || /\bcps\b/i.test((a.event_title || '') + ' ' + (a.notes || '')))) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        for (const def of NINE_METHOD_DEFS) {
+            if (overrides[def.key] === true)  { result[def.key] = true;  continue; }
+            if (overrides[def.key] === false) { result[def.key] = false; continue; }
+            result[def.key] = def.isReferral ? referralLeadToCPS() : subjectAttendedCategory(def);
+        }
+        return result;
+    };
+
+    // Compute 4-pillar purchase statuses for the subject's customer_id.
+    const computeFourPillarStatuses = async (subject) => {
+        const result = {};
+        let overrides = {};
+        try {
+            const rows = await AppDataStore.query('user_milestones', { user_id: subject.user_id });
+            rows.forEach(r => { overrides[r.milestone_name] = r.completed; });
+        } catch(e) {}
+
+        let purchases = [], products = [], bujishuList = [];
+        if (subject.customer_id) {
+            try { purchases = await AppDataStore.query('purchases', { customer_id: subject.customer_id }); } catch(e) {}
+        }
+        try { products = await AppDataStore.getAll('products'); } catch(e) {}
+        try { bujishuList = await AppDataStore.getAll('bujishu'); } catch(e) {}
+
+        const nameMatches = (source, def, item) => {
+            const pool = source === 'bujishu' ? bujishuList : products;
+            const matches = pool.filter(p =>
+                def.categories.some(cat =>
+                    String(p.category || '').trim().includes(cat) ||
+                    String(cat).includes(String(p.category || '').trim())
+                )
+            );
+            if (matches.length === 0) return false;
+            const itemStr = String(item || '').toLowerCase();
+            return matches.some(p => itemStr.includes(String(p.name || '').toLowerCase()));
+        };
+
+        for (const def of FOUR_PILLAR_DEFS) {
+            if (overrides[def.key] === true)  { result[def.key] = true;  continue; }
+            if (overrides[def.key] === false) { result[def.key] = false; continue; }
+            let owned = false;
+            for (const pur of purchases) {
+                if (nameMatches(def.source, def, pur.item)) { owned = true; break; }
+                // Fallback regex on the item text
+                if (def.regex && def.regex.test(String(pur.item || ''))) { owned = true; break; }
+            }
+            result[def.key] = owned;
+        }
+        return result;
+    };
+
     // showMilestonesView(container, targetUserId?)
     // If targetUserId is supplied (admin use), shows that user's progress instead of the current user's.
     const showMilestonesView = async (container, targetUserId = null) => {
@@ -25529,88 +25709,105 @@ const initImportDemoData = async () => {
         })();
         const isAdmin = viewerLevel <= 2;
 
-        // Resolve which user's milestones to show
-        const subjectId   = (isAdmin && targetUserId) ? parseInt(targetUserId) : currentUser.id;
-        const subjectUser = (isAdmin && targetUserId) ? (await AppDataStore.getById('users', subjectId) || currentUser) : currentUser;
-        const viewingOther = isAdmin && subjectId !== currentUser.id;
+        // Resolve subject (whose milestones to show)
+        const subjectUserId = (isAdmin && targetUserId) ? parseInt(targetUserId) : currentUser.id;
+        const subjectUser   = (isAdmin && targetUserId) ? (await AppDataStore.getById('users', subjectUserId) || currentUser) : currentUser;
+        const viewingOther  = isAdmin && subjectUserId !== currentUser.id;
 
-        const milestones = [
-            { name: 'CPS',           label: 'CPS' },
-            { name: '9 Stars',       label: '9 Stars' },
-            { name: 'DIY',           label: 'DIY' },
-            { name: '福气课',         label: '福气课' },
-            { name: '九运课',         label: '九运课' },
-            { name: 'Museum',        label: 'Museum' },
-            { name: 'HuiJi',         label: 'HuiJi' },
-            { name: 'Advance Class', label: 'Advance Class' },
-            { name: 'Sharing',       label: 'Sharing' }
-        ];
+        const subject = {
+            user_id: subjectUserId,
+            customer_id: subjectUser.customer_id || null,
+            prospect_id: subjectUser.prospect_id || null,
+        };
 
-        let userMilestones = [];
-        try { userMilestones = await AppDataStore.query('user_milestones', { user_id: subjectId }); } catch(e) {}
-        const completedMap = {};
-        userMilestones.forEach(m => { completedMap[m.milestone_name] = m.completed; });
+        // Compute statuses
+        const nineStatuses = await computeNineMethodStatuses(subject);
+        const pillarStatuses = await computeFourPillarStatuses(subject);
 
-        const completedCount = milestones.filter(m => completedMap[m.name]).length;
-        const progressPercent = Math.round((completedCount / milestones.length) * 100);
-
-        // Admin: user picker for viewing other accounts
+        // Admin user picker
         let adminPicker = '';
         if (isAdmin) {
             let allUsers = [];
             try { allUsers = (await AppDataStore.getAll('users')).filter(u => u.role && u.role.match(/Level\s+1[34]/i)); } catch(e) {}
             if (allUsers.length) {
                 adminPicker = `
-                    <div style="margin-bottom:16px; display:flex; align-items:center; gap:10px;">
-                        <label style="font-weight:600; font-size:0.9rem;">View user:</label>
-                        <select class="form-control" style="max-width:240px;" onchange="(async()=>{ const vp=document.getElementById('content-viewport'); if(vp) await app.showMilestonesView(vp, this.value||null); })()">
-                            <option value="">— My own milestones —</option>
-                            ${allUsers.map(u => `<option value="${u.id}" ${u.id === subjectId && viewingOther ? 'selected' : ''}>${u.full_name} (${u.role})</option>`).join('')}
+                    <div class="milestone-admin-picker">
+                        <span>View:</span>
+                        <select onchange="(async()=>{ const vp=document.getElementById('content-viewport'); if(vp) await app.showMilestonesView(vp, this.value||null); })()">
+                            <option value="">— My own —</option>
+                            ${allUsers.map(u => `<option value="${u.id}" ${u.id === subjectUserId && viewingOther ? 'selected' : ''}>${u.full_name}</option>`).join('')}
                         </select>
                     </div>`;
             }
         }
 
+        const reloadAfter = `setTimeout(() => { const vp=document.getElementById('content-viewport'); if(vp) app.showMilestonesView(vp, ${targetUserId ? targetUserId : 'null'}); }, 120)`;
+        const adminBtn = (key, isOn) => {
+            if (!isAdmin) return '';
+            if (isOn) {
+                return `<button class="mc-admin reset" onclick="event.stopPropagation(); app.resetMilestone(${subjectUserId},'${key}').then(()=>{${reloadAfter}})">Reset</button>`;
+            }
+            return `<button class="mc-admin" onclick="event.stopPropagation(); app.markMilestoneCompleted(${subjectUserId},'${key}').then(()=>{${reloadAfter}})">Mark ✓</button>`;
+        };
+        const adminBtnPillar = (key, isOn) => {
+            if (!isAdmin) return '';
+            if (isOn) {
+                return `<button class="pc-admin reset" onclick="event.stopPropagation(); app.resetMilestone(${subjectUserId},'${key}').then(()=>{${reloadAfter}})">Reset</button>`;
+            }
+            return `<button class="pc-admin" onclick="event.stopPropagation(); app.markMilestoneCompleted(${subjectUserId},'${key}').then(()=>{${reloadAfter}})">Mark ✓</button>`;
+        };
+
         container.innerHTML = `
-            <div class="milestone-container">
-                ${adminPicker}
-                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
-                    <div>
-                        <h1 style="margin:0; font-size:1.6rem; color:var(--primary,#8B0000);">增运9步路</h1>
-                        ${viewingOther ? `<p style="margin:4px 0 0; font-size:0.85rem; color:var(--gray-500);">Viewing: ${subjectUser.full_name}</p>` : ''}
-                    </div>
-                    <span style="font-size:0.95rem; color:var(--gray-500,#6b7280);">${completedCount} / ${milestones.length} completed</span>
-                </div>
-                <div class="progress-bar-wrapper">
-                    <div class="progress-bar-fill" style="width:${progressPercent}%;"></div>
-                </div>
-                <div class="milestones-grid">
-                    ${milestones.map((m, i) => `
-                        <div class="milestone-card ${completedMap[m.name] ? 'completed' : ''}">
-                            <div class="milestone-step">Step ${i + 1}</div>
-                            <div class="milestone-name">${m.label}</div>
-                            <div class="milestone-icon">${completedMap[m.name]
-                                ? `<i class="fas fa-check-circle" style="color:#065f46;"></i>${isAdmin ? `<br><button class="btn danger btn-sm" style="margin-top:6px;font-size:0.7rem;" onclick="event.stopPropagation(); app.resetMilestone(${subjectId},'${m.name}')">Reset</button>` : ''}`
-                                : `<i class="far fa-circle" style="color:#9ca3af;"></i>${isAdmin ? `<br><button class="btn secondary btn-sm" style="margin-top:6px;font-size:0.7rem;" onclick="event.stopPropagation(); app.markMilestoneCompleted(${subjectId},'${m.name}').then(()=>{ const vp=document.getElementById('content-viewport'); if(vp) app.showMilestonesView(vp,${targetUserId||'null'}); })">Mark ✓</button>` : ''}`
-                            }</div>
+            <div class="milestone-view-wrap">
+                <div class="milestone-container">
+                    <div class="milestone-inner">
+                        <div class="milestone-header">
+                            <h1>增运九法</h1>
+                            ${viewingOther ? `<div class="viewer-note">Viewing: ${subjectUser.full_name}</div>` : ''}
                         </div>
-                    `).join('')}
+                        ${adminPicker}
+                        <div class="nine-method-grid">
+                            ${NINE_METHOD_DEFS.map(def => {
+                                const on = !!nineStatuses[def.key];
+                                return `
+                                    <div class="nine-method-card ${on ? 'attended' : ''}">
+                                        <div class="mc-icon"><img src="${def.icon}" alt=""></div>
+                                        ${adminBtn(def.key, on)}
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+
+                        <div class="four-pillar-section">
+                            <h2>丁财贵寿四柱</h2>
+                            <div class="four-pillar-grid">
+                                ${FOUR_PILLAR_DEFS.map(def => {
+                                    const on = !!pillarStatuses[def.key];
+                                    return `
+                                        <div class="four-pillar-card ${on ? 'owned' : ''}">
+                                            <div class="pc-icon"><img src="${def.icon}" alt=""></div>
+                                            <div class="pc-label">${def.label}</div>
+                                            ${adminBtnPillar(def.key, on)}
+                                        </div>
+                                    `;
+                                }).join('')}
+                            </div>
+                        </div>
+                    </div>
                 </div>
-                <p class="milestone-hint">${isAdmin ? 'As admin you can manually mark or reset any milestone step.' : 'Attend the corresponding class or activity to unlock each milestone step.'}</p>
             </div>
         `;
     };
 
-    // Reset a milestone back to incomplete
+    // Reset a milestone — removes the admin override row so auto-detect takes over.
+    // (Previously set completed=false; that prevented auto-detect from re-lighting the icon.)
     const resetMilestone = async (userId, milestoneName) => {
         try {
             const existing = await AppDataStore.query('user_milestones', { user_id: userId, milestone_name: milestoneName });
-            if (existing.length > 0) {
-                await AppDataStore.update('user_milestones', existing[0].id, { completed: false, completed_date: null });
-                UI.toast.success(`Milestone "${milestoneName}" reset.`);
+            for (const row of existing) {
+                await AppDataStore.delete('user_milestones', row.id);
             }
-            const viewport = document.getElementById('content-viewport');
-            if (viewport) await showMilestonesView(viewport, userId !== _currentUser?.id ? userId : null);
+            if (existing.length > 0) UI.toast.success(`Override removed for "${milestoneName}".`);
         } catch(err) {
             UI.toast.error('Reset failed: ' + (err.message || 'Unknown error'));
         }
