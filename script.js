@@ -219,16 +219,36 @@ const appLogic = (() => {
 
     // Get all subordinate user IDs (including self) for a given user based on reporting_to.
     // Returns an array of user IDs, or 'all' for roles that see everything.
+    // Cache visible user IDs per user for ~5 s so per-row permission checks
+    // (canViewActivity, canViewProspect, etc.) don't re-traverse the reporting
+    // tree and re-fetch the users table hundreds of times per render.
+    const _visibleUserIdsCache = new Map(); // userId -> { data, ts }
+    const _VISIBLE_IDS_TTL = 5000;
+    const invalidateVisibleUserIdsCache = () => _visibleUserIdsCache.clear();
+
     const getVisibleUserIds = async (user) => {
         if (!user) return [];
+        const key = String(user.id);
+        const cached = _visibleUserIdsCache.get(key);
+        if (cached && (Date.now() - cached.ts) < _VISIBLE_IDS_TTL) return cached.data;
         // Super admin / marketing manager roles (both level-based and named roles) see everything
-        if (isSystemAdmin(user) || isMarketingManager(user)) return 'all';
+        if (isSystemAdmin(user) || isMarketingManager(user)) {
+            _visibleUserIdsCache.set(key, { data: 'all', ts: Date.now() });
+            return 'all';
+        }
         const lvlMatch = user.role?.match(/Level\s+(\d+)/i);
         const level = lvlMatch ? parseInt(lvlMatch[1]) : 99;
         // Levels 1–2 see everything (fallback, already covered above)
-        if (level <= 2) return 'all';
+        if (level <= 2) {
+            _visibleUserIdsCache.set(key, { data: 'all', ts: Date.now() });
+            return 'all';
+        }
         // Levels 12+ (Ambassador, Customer, Referrer) see only own records
-        if (level >= 12) return [user.id];
+        if (level >= 12) {
+            const self = [user.id];
+            _visibleUserIdsCache.set(key, { data: self, ts: Date.now() });
+            return self;
+        }
         // Levels 3–11: traverse down the reporting tree (team/subordinates), restricted to same team
         const allUsers = await AppDataStore.getAll('users');
         const userTeamId = user.team_id;
@@ -241,6 +261,7 @@ const appLogic = (() => {
                 .forEach(u => collect(u.id));
         };
         collect(user.id);
+        _visibleUserIdsCache.set(key, { data: result, ts: Date.now() });
         return result;
     };
 
@@ -556,12 +577,25 @@ const appLogic = (() => {
         return textExts.includes(getFileExtension(filename));
     };
 
-    const debounce = async (fn, delay) => {
+    // Real debounce: returns a function that defers `fn` until `delay` ms of idle.
+    // Previous implementation used a comma expression and never actually deferred anything,
+    // so every keystroke on search inputs re-ran the full filter/render pipeline.
+    const debounce = (fn, delay = 200) => {
         let timer;
-        return (...args) => {
+        return function (...args) {
             clearTimeout(timer);
-            timer = (() => fn(...args), delay);
+            timer = setTimeout(() => fn.apply(this, args), delay);
         };
+    };
+
+    // Per-key debounce so we can wire search-input handlers without declaring a
+    // dedicated debounced wrapper for each one. `delay` defaults to 200 ms.
+    const _debounceTimers = {};
+    const debounceCall = (key, fn, delay = 200) => {
+        clearTimeout(_debounceTimers[key]);
+        _debounceTimers[key] = setTimeout(() => {
+            try { fn(); } catch (e) { console.error('debounceCall error:', e); }
+        }, delay);
     };
 
     // Ensure referrals have the new fields (id, referrer_id, referrer_type, referred_prospect_id)
@@ -7646,7 +7680,8 @@ function _wireLoginBtn() {
             `;
         }
 
-        UI.toast.info(`Switched to ${viewId} view.`);
+        // Silent nav switch — previous info toast was firing on every click, spamming
+        // the DOM with toast nodes + timers and contributing to the perceived lag.
 
         // Mobile: update bottom nav active state + apply table card labels
         if (isMobile()) {
@@ -7670,7 +7705,7 @@ function _wireLoginBtn() {
                     <div class="ref-v2-actions">
                         <div class="search-box-v2">
                             <i class="fas fa-search"></i>
-                            <input type="text" id="tree-search-input" placeholder="Search person to view tree..." autocomplete="off" onkeyup="app.debounce(await app.searchTreePerson(this.value), 300)">
+                            <input type="text" id="tree-search-input" placeholder="Search person to view tree..." autocomplete="off" oninput="app.debounceCall('tree-search', () => app.searchTreePerson(this.value), 260)">
                             <div id="tree-search-results" class="search-results-v2"></div>
                         </div>
                         <button class="btn primary" onclick="app.openAddReferralModal()">
@@ -9512,17 +9547,30 @@ function _wireLoginBtn() {
             html += `<div class="calendar-cell"><span class="date-num other-month">${dateNum}</span></div>`;
         }
 
-        let activities = await AppDataStore.getAll('activities');
-
-        // Remove orphaned EVENT activities whose linked event no longer exists
-        const allEvents = await AppDataStore.getAll('events');
+        // Prefetch every lookup table we'll need during the month render in parallel.
+        // Previously the inner day-loop did 4 sequential `await AppDataStore.getById(...)`
+        // calls per activity, which (even with cache hits) added hundreds of microtask
+        // yields per render and made the calendar feel laggy after navigation clicks.
+        const [rawActivities, allEvents, allProspects, allCustomers, allUsers] = await Promise.all([
+            AppDataStore.getAll('activities'),
+            AppDataStore.getAll('events'),
+            AppDataStore.getAll('prospects'),
+            AppDataStore.getAll('customers'),
+            AppDataStore.getAll('users'),
+        ]);
         const eventIds = new Set(allEvents.map(e => String(e.id)));
-        activities = activities.filter(a =>
+        const prospectMap = new Map(allProspects.map(p => [String(p.id), p]));
+        const customerMap = new Map(allCustomers.map(c => [String(c.id), c]));
+        const userMap = new Map(allUsers.map(u => [String(u.id), u]));
+        const eventMap = new Map(allEvents.map(e => [String(e.id), e]));
+
+        let activities = rawActivities.filter(a =>
             a.activity_type !== 'EVENT' || !a.event_id || eventIds.has(String(a.event_id))
         );
 
         // Super admins see all activities — skip visibility filter and ignore agent filter
         if (!isSystemAdmin(_currentUser)) {
+            // Resolve permission once, in parallel, reusing the cached visibleUserIds.
             const calVisibility = await Promise.all(activities.map(a => canViewActivity(a)));
             activities = activities.filter((_, i) => calVisibility[i]);
 
@@ -9555,20 +9603,21 @@ function _wireLoginBtn() {
             for (const a of dayActivities) {
                 if (!seenIds.has(a.id)) {
                     seenIds.add(a.id);
-                    const prospect = a.prospect_id ? await AppDataStore.getById('prospects', a.prospect_id) : null;
-                    const customer = a.customer_id ? await AppDataStore.getById('customers', a.customer_id) : null;
+                    // Synchronous lookups from the prefetched maps — no awaits per row.
+                    const prospect = a.prospect_id ? prospectMap.get(String(a.prospect_id)) : null;
+                    const customer = a.customer_id ? customerMap.get(String(a.customer_id)) : null;
                     const entityName = prospect ? prospect.full_name : (customer ? customer.full_name : (a.activity_title || a.customer_name || 'Event'));
 
                     if (entityName) {
                         const isEvent = a.activity_type === 'EVENT';
-                        const agent = (!isEvent && a.lead_agent_id) ? await AppDataStore.getById('users', a.lead_agent_id) : null;
+                        const agent = (!isEvent && a.lead_agent_id) ? userMap.get(String(a.lead_agent_id)) : null;
                         const agentName = agent ? agent.full_name : null;
 
                         // For EVENTs: show event title instead of agent/entity
                         let eventTitle = null;
                         let eventVenue = null;
                         if (isEvent && a.event_id) {
-                            const ev = await AppDataStore.getById('events', a.event_id);
+                            const ev = eventMap.get(String(a.event_id));
                             eventTitle = ev ? (ev.event_title || ev.title) : null;
                             eventVenue = ev ? (ev.location || null) : null;
                         }
@@ -9723,12 +9772,22 @@ function _wireLoginBtn() {
         const today = new Date();
         const dateStr = `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, '0')}-${today.getDate().toString().padStart(2, '0')}`;
 
-        let allActs = isSystemAdmin(_currentUser)
-            ? await AppDataStore.getAll('activities')
-            : await getVisibleActivities();
-        // Filter out orphaned EVENT activities whose linked event no longer exists
-        const existingEventIds = new Set((await AppDataStore.getAll('events')).map(e => String(e.id)));
-        allActs = allActs.filter(a =>
+        // Prefetch all lookup tables in parallel so the per-row loop below can
+        // resolve agent/prospect/customer names synchronously instead of awaiting
+        // AppDataStore.getById() three times per row.
+        const [rawActs, allEventsRTA, allProspectsRTA, allCustomersRTA, allUsersRTA] = await Promise.all([
+            isSystemAdmin(_currentUser) ? AppDataStore.getAll('activities') : getVisibleActivities(),
+            AppDataStore.getAll('events'),
+            AppDataStore.getAll('prospects'),
+            AppDataStore.getAll('customers'),
+            AppDataStore.getAll('users'),
+        ]);
+        const existingEventIds = new Set(allEventsRTA.map(e => String(e.id)));
+        const prospectMapRTA = new Map(allProspectsRTA.map(p => [String(p.id), p]));
+        const customerMapRTA = new Map(allCustomersRTA.map(c => [String(c.id), c]));
+        const userMapRTA = new Map(allUsersRTA.map(u => [String(u.id), u]));
+
+        const allActs = rawActs.filter(a =>
             a.activity_type !== 'EVENT' || !a.event_id || existingEventIds.has(String(a.event_id))
         );
         let activities = allActs.filter(a => a.activity_date === dateStr);
@@ -9769,9 +9828,10 @@ function _wireLoginBtn() {
             `;
 
         for (const a of activities) {
-            const agent = await AppDataStore.getById('users', a.lead_agent_id) || { full_name: 'Unknown Agent' };
-            const prospect = a.prospect_id ? await AppDataStore.getById('prospects', a.prospect_id) : null;
-            const customer = a.customer_id ? await AppDataStore.getById('customers', a.customer_id) : null;
+            // Sync lookups from prefetched maps (no awaits per row).
+            const agent = userMapRTA.get(String(a.lead_agent_id)) || { full_name: 'Unknown Agent' };
+            const prospect = a.prospect_id ? prospectMapRTA.get(String(a.prospect_id)) : null;
+            const customer = a.customer_id ? customerMapRTA.get(String(a.customer_id)) : null;
             const entityName = prospect ? prospect.full_name : (customer ? customer.full_name : (a.customer_name || 'N/A'));
 
             html += `
@@ -13359,7 +13419,7 @@ function _wireLoginBtn() {
                     <div style="display:flex;gap:8px;align-items:center;">
                         <div class="search-group" style="flex:1;">
                             <i class="fas fa-search"></i>
-                            <input type="text" id="prospect-search" placeholder="Search by name, phone, email, or ID..." onkeyup="app.filterProspects()">
+                            <input type="text" id="prospect-search" placeholder="Search by name, phone, email, or ID..." oninput="app.debounceCall('prospect-search', app.filterProspects, 220)">
                         </div>
                         <button class="btn secondary btn-sm" onclick="(function(btn){var p=document.getElementById('prospect-adv-filters');var open=p.style.display!=='none';p.style.display=open?'none':'block';btn.innerHTML=open?'<i class=\\'fas fa-sliders-h\\'></i> Filters':'<i class=\\'fas fa-sliders-h\\'></i> Filters <i class=\\'fas fa-chevron-up\\'></i>';})(this)" style="white-space:nowrap;"><i class="fas fa-sliders-h"></i> Filters</button>
                     </div>
@@ -13520,7 +13580,7 @@ function _wireLoginBtn() {
                 <div class="filter-bar" style="flex-direction:column; align-items:stretch; gap:8px;">
                     <div class="search-group">
                         <i class="fas fa-search"></i>
-                        <input type="text" id="customer-search" placeholder="Search customers by name, phone, email, or ID" onkeyup="app.filterCustomers()">
+                        <input type="text" id="customer-search" placeholder="Search customers by name, phone, email, or ID" oninput="app.debounceCall('customer-search', app.filterCustomers, 220)">
                     </div>
                     <div>
                         <button type="button" onclick="(function(){var p=document.getElementById('customer-adv-filters');var i=document.getElementById('customer-adv-icon');if(p.style.display==='none'){p.style.display='flex';i.className='fas fa-chevron-up';}else{p.style.display='none';i.className='fas fa-chevron-down';}})()" style="background:none;border:none;cursor:pointer;color:var(--primary);font-size:13px;padding:0;display:flex;align-items:center;gap:6px;">
@@ -14008,9 +14068,31 @@ function _wireLoginBtn() {
         const tbody = document.getElementById('prospects-table-body');
         if (!tbody) return;
 
-        let prospects = await getVisibleProspects();
-        const activities = await getVisibleActivities();
-        const allUsers = await AppDataStore.getAll('users');
+        // Fetch everything we need in parallel — previously these were serialized.
+        const [prospectsRaw, activities, allUsers] = await Promise.all([
+            getVisibleProspects(),
+            getVisibleActivities(),
+            AppDataStore.getAll('users'),
+        ]);
+        let prospects = prospectsRaw;
+
+        // Index activities by prospect_id so both sorting AND the per-row
+        // "Last Activity" lookup become O(1) instead of O(N) per row.
+        // Previously `activities.filter(a => a.prospect_id == p.id)` was called
+        // twice per row (once in sort, once in the loop) — that's O(N*M) work
+        // that ran on every keystroke in the search box.
+        const latestActivityByProspect = new Map();
+        for (const a of activities) {
+            if (a.prospect_id == null) continue;
+            const key = String(a.prospect_id);
+            const current = latestActivityByProspect.get(key);
+            if (!current) { latestActivityByProspect.set(key, a); continue; }
+            const curKey = (current.activity_date || '') + '|' + (current.id || 0);
+            const newKey = (a.activity_date || '') + '|' + (a.id || 0);
+            if (newKey > curKey) latestActivityByProspect.set(key, a);
+        }
+        const userById = new Map(allUsers.map(u => [String(u.id), u]));
+
         const _userLvlMatch = _currentUser?.role?.match(/Level\s+(\d+)/i);
         const _userLevel = _userLvlMatch ? parseInt(_userLvlMatch[1]) : 99;
         const canDelete = _userLevel <= 5;
@@ -14046,8 +14128,8 @@ function _wireLoginBtn() {
                 valB = b.score || 0;
                 return _sortDirection === 'asc' ? valA - valB : valB - valA;
             } else if (_sortField === 'activity') {
-                const lastA = activities.filter(act => act.prospect_id == a.id).sort((act1, act2) => (act2.activity_date || '').localeCompare(act1.activity_date || '') || (act2.id - act1.id))[0];
-                const lastB = activities.filter(act => act.prospect_id == b.id).sort((act1, act2) => (act2.activity_date || '').localeCompare(act1.activity_date || '') || (act2.id - act1.id))[0];
+                const lastA = latestActivityByProspect.get(String(a.id));
+                const lastB = latestActivityByProspect.get(String(b.id));
                 valA = lastA ? lastA.activity_date : '0000-00-00';
                 valB = lastB ? lastB.activity_date : '0000-00-00';
                 return _sortDirection === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
@@ -14079,10 +14161,8 @@ function _wireLoginBtn() {
             // Ming Gua filter
             if (guaFilter && p.ming_gua !== guaFilter) continue;
 
-            // Get last activity
-            const lastActivity = activities
-                .filter(a => a.prospect_id == p.id)
-                .sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date))[0];
+            // O(1) last-activity lookup from the pre-built index.
+            const lastActivity = latestActivityByProspect.get(String(p.id));
 
             const lastActivityText = lastActivity
                 ? `${lastActivity.activity_date} ${lastActivity.activity_type}`
@@ -14127,7 +14207,7 @@ function _wireLoginBtn() {
                 if (attendedCount < minEventsFilter) continue;
             }
 
-            const agent = allUsers.find(u => u.id === p.responsible_agent_id);
+            const agent = userById.get(String(p.responsible_agent_id));
             const agentName = agent ? agent.full_name : '—';
 
             html += `
@@ -17410,7 +17490,7 @@ const openAddSolutionModal = async (prospectId) => {
                 <div class="agent-filters">
                     <div class="search-group" style="flex:1; min-width:200px; display:flex; align-items:center; gap:8px; background:var(--gray-50); padding:8px 12px; border-radius:6px; border:1px solid var(--gray-200);">
                         <i class="fas fa-search" style="color:var(--gray-400);"></i>
-                        <input type="text" id="agent-search" placeholder="Search agents by name, code, or phone" onkeyup="app.filterAgents()" style="border:none; background:transparent; outline:none; width:100%;">
+                        <input type="text" id="agent-search" placeholder="Search agents by name, code, or phone" oninput="app.debounceCall('agent-search', app.filterAgents, 220)" style="border:none; background:transparent; outline:none; width:100%;">
                     </div>
                     <select id="filter-agent-team" onchange="app.filterAgents()" class="form-control" style="width:140px;">
                         <option value="">All Teams</option>
@@ -28135,6 +28215,7 @@ const initImportDemoData = async () => {
 
         // Helpers
         debounce,
+        debounceCall,
         ensureReferralFields,
         canViewNode,
 
