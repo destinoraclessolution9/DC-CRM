@@ -20842,7 +20842,14 @@ const exportKPIReport = async (format) => {
         'Formula 分享会',
         'Formula 展览',
         'Formula Member Day',
-        '游一游'
+        '游一游',
+        '福气分享会',
+        '代理重要会议',
+        '代理培训',
+        '代理补习班',
+        '课程',
+        '聚餐-代理',
+        '聚餐-客户'
     ];
 
     // Helper: parse stored categories (string JSON or array) into array of strings
