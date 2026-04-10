@@ -6268,8 +6268,38 @@ function _wireLoginBtn() {
             }
             let profileError = profile ? null : { code: 'PGRST116' };
 
-            // If profile not found, create one automatically
-            if (profileError && profileError.code === 'PGRST116') {
+            // If not found by email, try case-insensitive email match then name-based fallback
+            // (handles cases where admin created the agent record without email or with different case)
+            if (!profile) {
+                const allUsers = await AppDataStore.getAll('users');
+                // 1. Case-insensitive email match
+                const lowerEmail = user.email.toLowerCase();
+                const caseMatch = allUsers.find(u => u.email && u.email.toLowerCase() === lowerEmail);
+                if (caseMatch) {
+                    // Normalise email casing in the record
+                    await AppDataStore.update('users', caseMatch.id, { email: user.email });
+                    profile = { ...caseMatch, email: user.email };
+                    profileError = null;
+                } else {
+                    // 2. Name-based fallback: match by full_name where email is empty/null
+                    const authName = (user.user_metadata?.full_name || '').trim();
+                    if (authName) {
+                        const nameMatch = allUsers.find(u =>
+                            u.full_name && u.full_name.trim().toLowerCase() === authName.toLowerCase() && !u.email
+                        );
+                        if (nameMatch) {
+                            // Link this existing admin-created record to the login email
+                            await AppDataStore.update('users', nameMatch.id, { email: user.email });
+                            profile = { ...nameMatch, email: user.email };
+                            profileError = null;
+                            console.log(`Linked existing agent record "${nameMatch.full_name}" (id ${nameMatch.id}) to email ${user.email}`);
+                        }
+                    }
+                }
+            }
+
+            // If profile still not found, create one automatically
+            if (!profile && profileError && profileError.code === 'PGRST116') {
                 console.log('Profile not found, creating one...');
                 const newProfile = {
                     id: Date.now(),
@@ -6282,7 +6312,7 @@ function _wireLoginBtn() {
                 };
                 // Use AppDataStore.create() so the service-role client is used (bypasses RLS)
                 profile = await AppDataStore.create('users', newProfile);
-            } else if (profileError) {
+            } else if (!profile && profileError) {
                 throw profileError;
             }
             
