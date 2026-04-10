@@ -9375,7 +9375,11 @@ function _wireLoginBtn() {
                             eventTitle = ev ? (ev.event_title || ev.title) : null;
                             eventVenue = ev ? (ev.location || null) : null;
                         }
-                        const displayVenue = a.venue || eventVenue || '';
+                        // Fall back to location_address: the `venue` column may be missing from
+                        // the Supabase schema, in which case it gets stripped on save and only
+                        // survives in the creator's localStorage. We mirror to location_address
+                        // (which IS persisted server-side) so other users see the venue too.
+                        const displayVenue = a.venue || eventVenue || a.location_address || '';
 
                         activityHtml += `
                             <div class="calendar-appointment ${a.activity_type.toLowerCase()} ${a.closing_amount ? 'closed-case' : ''}"
@@ -10328,6 +10332,10 @@ function _wireLoginBtn() {
         const venue = document.getElementById('edit-timing-venue')?.value || '';
         if (!date || !start || !end) { UI.toast.error('Please fill in all timing fields'); return; }
         const updates = { activity_date: date, start_time: start, end_time: end, venue };
+        // Mirror venue to location_address so it persists server-side (the `venue` column may
+        // be missing from the Supabase schema and silently stripped on save). Only mirror when
+        // the venue is non-empty so we don't clobber existing FSA/SITE site addresses.
+        if (venue) updates.location_address = venue;
         try {
             await AppDataStore.update('activities', activityId, updates);
         } catch (e) {
@@ -11235,6 +11243,10 @@ function _wireLoginBtn() {
         setField('note-needs', activity.note_needs);
         setField('note-pain-points', activity.note_pain_points);
         setField('location-address', activity.location_address);
+        // Restore venue dropdown selection — fall back to location_address since we mirror
+        // venue there for cross-device persistence (the `venue` column may be missing from
+        // the Supabase schema).
+        setField('activity-venue', activity.venue || activity.location_address);
 
         // 4. Restore selected entity (store in module variable)
         let entityRestored = false;
@@ -11349,6 +11361,8 @@ function _wireLoginBtn() {
     const activity = await AppDataStore.getById('activities', activityId);
     if (!activity) return;
 
+    const venueVal = document.getElementById('activity-venue')?.value;
+    const locationAddressEl = document.getElementById('location-address');
     const updatedData = {
         activity_type: document.getElementById('modal-activity-type')?.value,
         activity_date: document.getElementById('activity-date')?.value,
@@ -11360,11 +11374,23 @@ function _wireLoginBtn() {
         note_next_steps: document.getElementById('note-next-steps')?.value,
         note_needs: document.getElementById('note-needs')?.value,
         note_pain_points: document.getElementById('note-pain-points')?.value,
-        location_address: document.getElementById('location-address')?.value,
         co_agents: _selectedCoAgents,
         // Type‑specific fields
         activity_title: document.getElementById('meeting-title')?.value
     };
+    // Save the venue dropdown value when it exists in the form
+    if (document.getElementById('activity-venue')) {
+        updatedData.venue = venueVal || '';
+    }
+    // Set location_address from the FSA/SITE address textarea if present, otherwise mirror
+    // the venue (so it persists server-side even when the `venue` column is missing from the
+    // Supabase schema). Skip entirely if neither is available — don't clobber existing data
+    // with `undefined`.
+    if (locationAddressEl) {
+        updatedData.location_address = locationAddressEl.value || '';
+    } else if (venueVal) {
+        updatedData.location_address = venueVal;
+    }
 
     // Update entity IDs based on current _selectedEntity
     if (_selectedEntity) {
@@ -12519,6 +12545,7 @@ function _wireLoginBtn() {
             return;
         }
 
+        const venueVal = document.getElementById('activity-venue')?.value || '';
         const activity = {
             activity_type: type,
             activity_date: date,
@@ -12527,7 +12554,11 @@ function _wireLoginBtn() {
             co_agents: _selectedCoAgents,
             consultants: _selectedConsultants,
             lead_agent_id: _currentUser ? _currentUser.id : 5,
-            venue: document.getElementById('activity-venue')?.value || ''
+            venue: venueVal,
+            // Mirror venue to location_address so it persists server-side (the `venue` column
+            // may be missing from the Supabase schema and silently stripped on save). For
+            // FSA/SITE the type-specific block below will override this with the site address.
+            location_address: venueVal || null
         };
 
         // Venue compulsory for these types
