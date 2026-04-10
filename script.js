@@ -19723,12 +19723,6 @@ container.innerHTML = `
                 <div id="kpi-target-comparison-section" style="margin-top:24px;">
                     <!-- Loaded by refreshKPIDashboard -->
                 </div>
-
-                <!-- Special Program Fighting Section (Team Leader+) -->
-                ${isTeamLeaderOrAbove(_currentUser) ? `
-                <div id="special-programs-section" style="margin-top:24px;">
-                    <!-- Loaded by refreshKPIDashboard -->
-                </div>` : ''}
             </div>
 `;
 
@@ -19779,17 +19773,6 @@ container.innerHTML = `
             } catch (e) {
                 console.warn('KPI target comparison render failed:', e);
                 targetSection.innerHTML = '';
-            }
-        }
-
-        // Render Special Program Fighting section (team-leader gated)
-        const spSection = document.getElementById('special-programs-section');
-        if (spSection && isTeamLeaderOrAbove(_currentUser)) {
-            try {
-                spSection.innerHTML = await renderSpecialPrograms();
-            } catch (e) {
-                console.warn('Special Programs render failed:', e);
-                spSection.innerHTML = '';
             }
         }
     };
@@ -21050,10 +21033,14 @@ const exportKPIReport = async (format) => {
                         <p class="text-muted">Manage master data for products, events, and monthly promotions.</p>
                     </div>
                     <div class="header-actions">
-                        ${(_currentMarketingListTab !== 'promotions') ? `
+                        ${_currentMarketingListTab === 'special_programs'
+                            ? (isTeamLeaderOrAbove(_currentUser)
+                                ? `<button class="btn primary" onclick="app.openSpecialProgramModal()"><i class="fas fa-plus"></i> New Program</button>`
+                                : '')
+                            : ((_currentMarketingListTab !== 'promotions') ? `
                         <button class="btn primary" onclick="app.openMarketingListAddModal()">
                             <i class="fas fa-plus"></i> New ${{ products: 'Product', events: 'Event', venues: 'Venue' }[_currentMarketingListTab] || _currentMarketingListTab}
-                        </button>` : ''}
+                        </button>` : '')}
                     </div>
                 </div>
 
@@ -21088,6 +21075,11 @@ const exportKPIReport = async (format) => {
                          style="padding: 10px 16px; cursor: pointer; border-bottom: 2px solid ${_currentMarketingListTab === 'formula' ? 'var(--primary-600)' : 'transparent'}; color: ${_currentMarketingListTab === 'formula' ? 'var(--primary-600)' : 'var(--gray-600)'}; font-weight: 500;">
                         Formula
                     </div>
+                    <div class="tab-item ${_currentMarketingListTab === 'special_programs' ? 'active' : ''}"
+                         onclick="app.switchMarketingListTab('special_programs')"
+                         style="padding: 10px 16px; cursor: pointer; border-bottom: 2px solid ${_currentMarketingListTab === 'special_programs' ? 'var(--primary-600)' : 'transparent'}; color: ${_currentMarketingListTab === 'special_programs' ? 'var(--primary-600)' : 'var(--gray-600)'}; font-weight: 500;">
+                        🏆 Special Programs
+                    </div>
                 </div>
 
                 <div id="marketing-list-content">
@@ -21104,6 +21096,10 @@ const exportKPIReport = async (format) => {
     };
 
     const renderMarketingListTable = async () => {
+        // Special Programs tab uses its own renderer (KPI-style, not master-data style)
+        if (_currentMarketingListTab === 'special_programs') {
+            return await renderSpecialProgramsTable();
+        }
         let data = await AppDataStore.getAll(_currentMarketingListTab);
         // Deduplicate by name+location for venues (prevents double-write artifacts)
         if (_currentMarketingListTab === 'venues') {
@@ -25928,6 +25924,132 @@ const initImportDemoData = async () => {
             ${cards.join('')}`;
     };
 
+    // ===== Special Programs Table (Marketing List tab) =====
+    // Flat KPI-style table — one row per (program × agent), showing how much they made and how far to target
+    const renderSpecialProgramsTable = async () => {
+        const [programs, allParts, users] = await Promise.all([
+            AppDataStore.getAll('special_programs'),
+            AppDataStore.getAll('special_program_participants'),
+            AppDataStore.getAll('users')
+        ]);
+        const userMap = {}; users.forEach(u => { userMap[u.id] = u; });
+        const active = programs.filter(p => p.status !== 'cancelled' && p.status !== 'deleted');
+        active.sort((a, b) => (a.end_date || '').localeCompare(b.end_date || ''));
+
+        const canManage = isTeamLeaderOrAbove(_currentUser);
+        const today = _today();
+
+        if (active.length === 0) {
+            return `
+                <div class="card" style="padding:32px;border:2px dashed var(--gray-200);text-align:center;">
+                    <h3 style="margin:0 0 8px;">🏆 No Active Special Programs</h3>
+                    <p style="color:var(--gray-400);margin:0;">${canManage ? 'Click "New Program" to launch a new challenge for selected agents.' : 'No special programs have been launched yet.'}</p>
+                </div>`;
+        }
+
+        // Build flat rows: one per (program, participant)
+        const rows = [];
+        for (const program of active) {
+            const parts = allParts.filter(p => p.program_id === program.id);
+            const isExpired = program.end_date && today > program.end_date;
+            const daysLeft = program.end_date ? Math.max(0, Math.ceil((new Date(program.end_date) - new Date(today)) / 86400000)) : 0;
+
+            if (parts.length === 0) {
+                rows.push({
+                    program, isExpired, daysLeft,
+                    agentName: '—', agentRole: '',
+                    progress: { targets: [], qualified: false },
+                    noParticipants: true
+                });
+                continue;
+            }
+            for (const part of parts) {
+                const progress = await calculateProgramProgress(program, part.agent_id);
+                rows.push({
+                    program, isExpired, daysLeft,
+                    agentId: part.agent_id,
+                    agentName: userMap[part.agent_id]?.full_name || `Agent #${part.agent_id}`,
+                    agentRole: userMap[part.agent_id]?.role || '',
+                    progress
+                });
+            }
+        }
+
+        const fmtRM = (n) => 'RM ' + (Number(n) || 0).toLocaleString();
+        const cell = (t) => {
+            if (!t) return '<td style="padding:10px;color:var(--gray-300);text-align:center;">—</td>';
+            const color = t.actual >= t.target ? '#16a34a' : (t.pct >= 60 ? '#f59e0b' : '#dc2626');
+            const remaining = Math.max(0, t.target - t.actual);
+            const remainingDisplay = t.label === 'Total Sales' ? fmtRM(remaining) : remaining;
+            return `
+                <td style="padding:10px;border-bottom:1px solid var(--gray-100);min-width:160px;">
+                    <div style="font-size:12px;font-weight:600;margin-bottom:3px;">${t.display}</div>
+                    <div style="background:#eee;border-radius:4px;height:6px;overflow:hidden;margin-bottom:3px;">
+                        <div style="background:${color};height:100%;width:${t.pct}%;transition:width .3s;"></div>
+                    </div>
+                    <div style="font-size:11px;color:var(--gray-500);">${t.pct}% · ${remaining > 0 ? remainingDisplay + ' to go' : '✓ Hit'}</div>
+                </td>`;
+        };
+
+        const tbody = rows.map(r => {
+            const salesT = r.progress.targets.find(t => t.label === 'Total Sales');
+            const custT = r.progress.targets.find(t => t.label === 'New Customers');
+            const cpsT = r.progress.targets.find(t => t.label === 'CPS Count');
+            const statusBadge = r.noParticipants
+                ? '<span style="background:#f3f4f6;color:#6b7280;padding:3px 10px;border-radius:12px;font-size:11px;">No Agents</span>'
+                : (r.progress.qualified
+                    ? '<span style="background:#dcfce7;color:#166534;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600;">✓ Qualified</span>'
+                    : '<span style="background:#fef3c7;color:#92400e;padding:3px 10px;border-radius:12px;font-size:11px;">In Progress</span>');
+            const expiredBadge = r.isExpired
+                ? '<span style="background:#f3f4f6;color:#6b7280;padding:2px 6px;border-radius:8px;font-size:10px;margin-left:6px;">EXPIRED</span>'
+                : `<span style="background:#fef3c7;color:#92400e;padding:2px 6px;border-radius:8px;font-size:10px;margin-left:6px;">${r.daysLeft}d left</span>`;
+            const actionBtns = canManage ? `
+                <button class="btn-icon" onclick="app.openSpecialProgramModal(${r.program.id})" title="Edit"><i class="fas fa-pencil-alt"></i></button>
+                <button class="btn-icon text-danger" onclick="app.deleteSpecialProgram(${r.program.id})" title="Delete"><i class="fas fa-trash-alt"></i></button>
+            ` : '';
+            return `
+                <tr style="${r.isExpired ? 'opacity:0.6;background:#f9fafb;' : ''}">
+                    <td style="padding:10px;border-bottom:1px solid var(--gray-100);min-width:200px;">
+                        <strong style="font-size:13px;">🏆 ${r.program.program_name || 'Untitled'}</strong>${expiredBadge}
+                        <div style="font-size:11px;color:var(--gray-500);margin-top:3px;">🎁 ${r.program.reward || '—'}</div>
+                        <div style="font-size:10px;color:var(--gray-400);margin-top:2px;">${r.program.start_date || '?'} → ${r.program.end_date || '?'}</div>
+                    </td>
+                    <td style="padding:10px;border-bottom:1px solid var(--gray-100);min-width:160px;">
+                        ${r.noParticipants ? '<span style="color:var(--gray-400);font-style:italic;">No participants</span>' : `
+                            <strong style="font-size:13px;">${r.agentName}</strong>
+                            <div style="font-size:11px;color:var(--gray-500);margin-top:2px;">${r.agentRole}</div>
+                        `}
+                    </td>
+                    ${cell(salesT)}
+                    ${cell(custT)}
+                    ${cell(cpsT)}
+                    <td style="padding:10px;border-bottom:1px solid var(--gray-100);text-align:center;">${statusBadge}</td>
+                    <td style="padding:10px;border-bottom:1px solid var(--gray-100);white-space:nowrap;">${actionBtns}</td>
+                </tr>`;
+        }).join('');
+
+        return `
+            <div style="margin-bottom:12px;color:var(--gray-500);font-size:13px;">
+                Track each agent's progress toward their special program targets. Bars show how much they have made and how far to go.
+            </div>
+            <div style="overflow-x:auto;">
+                <table class="data-table" style="width:100%;">
+                    <thead>
+                        <tr>
+                            <th style="text-align:left;">Program</th>
+                            <th style="text-align:left;">Agent</th>
+                            <th style="text-align:left;">Total Sales</th>
+                            <th style="text-align:left;">New Customers</th>
+                            <th style="text-align:left;">CPS Count</th>
+                            <th style="text-align:center;">Status</th>
+                            <th style="text-align:left;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>${tbody}</tbody>
+                </table>
+            </div>`;
+    };
+
     // Open create/edit modal for a special program
     const openSpecialProgramModal = async (programId = null) => {
         const existing = programId ? (await AppDataStore.getAll('special_programs')).find(p => p.id === programId) : null;
@@ -26064,6 +26186,16 @@ const initImportDemoData = async () => {
 
         UI.hideModal();
         UI.toast.success(programId ? 'Program updated' : `Program created with ${selectedAgents.length} participant${selectedAgents.length===1?'':'s'}`);
+        await refreshSpecialProgramView();
+    };
+
+    // Refresh whichever view currently hosts the special programs UI
+    const refreshSpecialProgramView = async () => {
+        const mlContent = document.getElementById('marketing-list-content');
+        if (mlContent && _currentMarketingListTab === 'special_programs') {
+            mlContent.innerHTML = await renderMarketingListTable();
+            return;
+        }
         if (typeof refreshKPIDashboard === 'function') await refreshKPIDashboard();
     };
 
@@ -26082,7 +26214,7 @@ const initImportDemoData = async () => {
         }
         UI.hideModal();
         UI.toast.success('Program deleted');
-        if (typeof refreshKPIDashboard === 'function') await refreshKPIDashboard();
+        await refreshSpecialProgramView();
     };
 
     // Calendar popup — show on first calendar visit per session if current user is in any active program
