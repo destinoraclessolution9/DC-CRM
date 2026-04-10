@@ -8739,68 +8739,183 @@ input:checked+.slider:before {
     margin-top: 2px;
 }
 
-/* ========== LEVEL 13/14: Milestone Bar (增运9步路) ========== */
-.milestone-container {
-    background: white;
-    border-radius: 12px;
-    padding: 28px 24px;
-    margin: 20px;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+/* ========== LEVEL 13/14: Milestone View (增运九法) ========== */
+.milestone-view-wrap {
+    padding: 16px 12px 40px;
+    display: flex;
+    justify-content: center;
+    background: #f5f1e8;
+    min-height: 100%;
 }
-.progress-bar-wrapper {
-    background: #e5e7eb;
-    border-radius: 10px;
-    height: 14px;
-    margin: 16px 0 24px;
+.milestone-container {
+    position: relative;
+    width: 100%;
+    max-width: 420px;
+    aspect-ratio: 9 / 19.5;
+    background-image: url('assets/milestone-scroll-bg.jpg');
+    background-size: 100% 100%;
+    background-repeat: no-repeat;
+    background-position: center;
+}
+.milestone-inner {
+    position: absolute;
+    left: 8.5%;
+    right: 8.5%;
+    top: 8.2%;
+    bottom: 9%;
+    background: #f5ecd7;
+    border-radius: 4px;
+    padding: 18px 14px 14px;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    overflow-x: hidden;
+    box-shadow: inset 0 0 20px rgba(139, 0, 0, 0.05);
+}
+.milestone-header {
+    text-align: center;
+    margin-bottom: 10px;
+}
+.milestone-header h1 {
+    margin: 0;
+    font-size: 1.5rem;
+    color: #8B0000;
+    letter-spacing: 0.08em;
+    font-weight: 700;
+}
+.milestone-header .viewer-note {
+    margin-top: 4px;
+    font-size: 0.72rem;
+    color: #8a6a3a;
+}
+.milestone-admin-picker {
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.72rem;
+}
+.milestone-admin-picker select {
+    flex: 1;
+    font-size: 0.72rem;
+    padding: 4px 6px;
+    border-radius: 4px;
+    border: 1px solid #d1b98a;
+    background: #fffaf0;
+}
+.nine-method-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px 6px;
+    margin-bottom: 14px;
+}
+.nine-method-card {
+    background: transparent;
+    border: none;
+    padding: 4px 2px;
+    text-align: center;
+    cursor: default;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+.nine-method-card .mc-icon {
+    width: 62px;
+    height: 62px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border-radius: 8px;
     overflow: hidden;
 }
-.progress-bar-fill {
-    background: linear-gradient(90deg, #8B0000, #c0392b);
+.nine-method-card .mc-icon img {
+    width: 100%;
     height: 100%;
-    width: 0%;
-    transition: width 0.5s ease;
-    border-radius: 10px;
+    object-fit: contain;
+    filter: grayscale(1) opacity(0.32);
+    transition: filter 0.3s ease;
 }
-.milestones-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
-    gap: 14px;
+.nine-method-card.attended .mc-icon img {
+    filter: none;
+}
+.nine-method-card .mc-admin {
+    margin-top: 4px;
+    font-size: 0.6rem;
+    padding: 2px 6px;
+    border-radius: 3px;
+    border: 1px solid #c9a86a;
+    background: #fffaf0;
+    color: #8B0000;
+    cursor: pointer;
+    line-height: 1.1;
+}
+.nine-method-card .mc-admin.reset {
+    border-color: #d97706;
+    color: #d97706;
+}
+.four-pillar-section {
     margin-top: 8px;
+    padding-top: 14px;
+    border-top: 1px dashed #c9a86a;
 }
-.milestone-card {
-    background: #f3f4f6;
-    border: 2px solid #e5e7eb;
-    padding: 14px 10px;
-    border-radius: 10px;
+.four-pillar-section h2 {
+    margin: 0 0 10px;
     text-align: center;
-    transition: all 0.2s;
-}
-.milestone-card.completed {
-    background: #d1fae5;
-    border-color: #6ee7b7;
-    color: #065f46;
-}
-.milestone-step {
-    font-size: 0.7rem;
-    color: #9ca3af;
-    margin-bottom: 4px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-}
-.milestone-card.completed .milestone-step { color: #10b981; }
-.milestone-name {
+    font-size: 1.1rem;
+    color: #1e3a5f;
+    letter-spacing: 0.06em;
     font-weight: 700;
-    font-size: 0.85rem;
-    margin-bottom: 8px;
-    color: #374151;
 }
-.milestone-card.completed .milestone-name { color: #065f46; }
-.milestone-icon { font-size: 1.2rem; }
-.milestone-hint {
-    margin-top: 20px;
-    color: #9ca3af;
-    font-size: 0.85rem;
+.four-pillar-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px 8px;
+}
+.four-pillar-card {
+    background: transparent;
     text-align: center;
+    padding: 4px 2px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+.four-pillar-card .pc-icon {
+    width: 78px;
+    height: 62px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.four-pillar-card .pc-icon img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    filter: grayscale(1) opacity(0.32);
+    transition: filter 0.3s ease;
+}
+.four-pillar-card.owned .pc-icon img {
+    filter: none;
+}
+.four-pillar-card .pc-label {
+    margin-top: 4px;
+    font-size: 0.68rem;
+    color: #5c3a1a;
+    line-height: 1.2;
+}
+.four-pillar-card .pc-admin {
+    margin-top: 3px;
+    font-size: 0.58rem;
+    padding: 2px 5px;
+    border-radius: 3px;
+    border: 1px solid #c9a86a;
+    background: #fffaf0;
+    color: #8B0000;
+    cursor: pointer;
+}
+.four-pillar-card .pc-admin.reset {
+    border-color: #d97706;
+    color: #d97706;
 }
 
 /* ========== LEVEL 13/14: 福德 Tab ========== */
