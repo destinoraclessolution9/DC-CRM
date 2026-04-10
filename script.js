@@ -12509,6 +12509,24 @@ function _wireLoginBtn() {
     };
 
     const saveActivity = async (stayOpen = false) => {
+        // Re-entrancy guard: blocks double-clicks during the async save flow (file upload,
+        // prospect creation, activity creation, referral creation, etc.) which previously
+        // allowed 5+ duplicate prospects/activities when the user clicked Save while lagging.
+        if (window._savingActivity) { return; }
+        window._savingActivity = true;
+
+        // Visually disable every Save button in open modals so the user sees the click landed.
+        const saveBtns = Array.from(document.querySelectorAll('.modal-overlay .modal-footer button.primary, .modal .modal-footer button.primary'));
+        const _origSaveLabels = saveBtns.map(b => ({ el: b, html: b.innerHTML, disabled: b.disabled }));
+        saveBtns.forEach(b => { b.disabled = true; b.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving…'; });
+
+        const _releaseSaveGuard = () => {
+            window._savingActivity = false;
+            _origSaveLabels.forEach(o => { try { o.el.disabled = o.disabled; o.el.innerHTML = o.html; } catch (_) {} });
+        };
+
+        try {
+
         const type = document.getElementById('modal-activity-type')?.value;
         const date = document.getElementById('activity-date')?.value;
         const start = document.getElementById('start-time')?.value;
@@ -12940,6 +12958,9 @@ function _wireLoginBtn() {
             _selectedCoAgents = [];
             _selectedConsultants = [];
             await openActivityModal(date);
+        }
+        } finally {
+            _releaseSaveGuard();
         }
     };
 
