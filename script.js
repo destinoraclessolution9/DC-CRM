@@ -255,6 +255,51 @@ const appLogic = (() => {
         return (await AppDataStore.getAll('customers')).filter(c => c.agent_id === _currentUser?.id);
     };
 
+    // Role-based referral visibility:
+    //   - Admin / Marketing Manager / Level 1-2: see every referral
+    //   - Upline (Level 3-11): see referrals owned by themselves or anyone in their reporting subtree
+    //   - Agent / Level 12+: see only referrals where they are the owning agent
+    // A referral is considered "owned" by the agent tied to either side of it:
+    //   - referrer is a user -> that user's id
+    //   - referrer is a customer/prospect -> its responsible_agent_id
+    //   - referred_prospect's responsible_agent_id
+    const getVisibleReferrals = async () => {
+        const all = await AppDataStore.getAll('referrals');
+        const user = _currentUser;
+        if (!user) return [];
+        const visibleIds = await getVisibleUserIds(user);
+        if (visibleIds === 'all') return all;
+        const visibleSet = new Set(visibleIds.map(String));
+
+        // Prefetch lookup maps so we don't re-query per referral
+        const [allProspects, allCustomers] = await Promise.all([
+            AppDataStore.getAll('prospects'),
+            AppDataStore.getAll('customers')
+        ]);
+        const prospectMap = new Map(allProspects.map(p => [String(p.id), p]));
+        const customerMap = new Map(allCustomers.map(c => [String(c.id), c]));
+
+        const ownerAgentOf = (id, type) => {
+            if (!id) return null;
+            if (type === 'user') return String(id);
+            if (type === 'customer') {
+                const c = customerMap.get(String(id));
+                return c?.responsible_agent_id != null ? String(c.responsible_agent_id) : null;
+            }
+            // default prospect
+            const p = prospectMap.get(String(id));
+            return p?.responsible_agent_id != null ? String(p.responsible_agent_id) : null;
+        };
+
+        return all.filter(r => {
+            const referrerOwner = ownerAgentOf(r.referrer_id, r.referrer_type || 'prospect');
+            if (referrerOwner && visibleSet.has(referrerOwner)) return true;
+            const referredOwner = ownerAgentOf(r.referred_prospect_id, 'prospect');
+            if (referredOwner && visibleSet.has(referredOwner)) return true;
+            return false;
+        });
+    };
+
     // For activities: visible if current user is lead, co-agent, or the activity is 'open', or if the lead agent is within visible users.
     const canViewActivity = async (activity) => {
         const user = _currentUser;
@@ -7583,7 +7628,7 @@ function _wireLoginBtn() {
         const container = document.getElementById('referral-summary-container');
         if (!container) return;
 
-        const referrals = await AppDataStore.getAll('referrals');
+        const referrals = await getVisibleReferrals();
         const totalReferrals = referrals.length;
         const totalReferrers = new Set(referrals.map(r => r.referrer_id)).size;
         
@@ -7639,7 +7684,7 @@ function _wireLoginBtn() {
 
         const hiddenIds = UserPreferences.getSync('hidden_referrers', []);
 
-        const referrals = await AppDataStore.getAll('referrals');
+        const referrals = await getVisibleReferrals();
         const grouped = {};
         referrals.forEach(r => {
             if (!r.referrer_id) return;
@@ -7741,8 +7786,15 @@ function _wireLoginBtn() {
             return;
         }
 
-        const prospects = await AppDataStore.getAll('prospects');
-        const customers = await AppDataStore.getAll('customers');
+        const visibleIds = await getVisibleUserIds(_currentUser);
+        const allProspects = await AppDataStore.getAll('prospects');
+        const allCustomers = await AppDataStore.getAll('customers');
+        const prospects = visibleIds === 'all'
+            ? allProspects
+            : allProspects.filter(p => visibleIds.map(String).includes(String(p.responsible_agent_id)));
+        const customers = visibleIds === 'all'
+            ? allCustomers
+            : allCustomers.filter(c => visibleIds.map(String).includes(String(c.responsible_agent_id || c.agent_id)));
         const all = [
             ...prospects.map(p => ({ ...p, type: 'prospect' })),
             ...customers.map(c => ({ ...c, type: 'customer' }))
