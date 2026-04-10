@@ -248,7 +248,7 @@ Object.assign(window.app, (() => {
         const content = `
             <div class="event-attendees">
                 <div style="margin-bottom: 16px;">
-                    <button class="btn primary" onclick="app.registerAttendee(${eventId}, prompt('Enter Prospect ID (e.g. 3) to test register:'), 'prospect')"><i class="fas fa-user-plus"></i> Add Attendee</button>
+                    <button class="btn primary" onclick="app.openAddAttendeeModal(${eventId})"><i class="fas fa-user-plus"></i> Add Attendee</button>
                     <button class="btn secondary" onclick="app.processEventScoring(${eventId})"><i class="fas fa-magic"></i> Auto Score</button>
                 </div>
                 <div class="event-tabs" style="margin-bottom: 16px; border-bottom: 2px solid var(--gray-200);">
@@ -325,9 +325,9 @@ Object.assign(window.app, (() => {
                     <td>RM ${e.ticket_price || 0}</td>
                     <td>+${e.base_score || 0}</td>
                     <td>
-                        <button class="btn-icon" onclick="app.openCreateEventModal(${e.id})"><i class="fas fa-edit"></i></button>
+                        <button class="btn-icon" onclick="app.openEditEventModal(${e.id})"><i class="fas fa-edit"></i></button>
                         <button class="btn-icon" onclick="app.deleteEvent(${e.id})"><i class="fas fa-trash"></i></button>
-                        <button class="btn secondary btn-sm" onclick="app.openEventAttendeesModal(${e.id})">View</button>
+                        <button class="btn secondary btn-sm" onclick="app.openEventAttendeesModal(${e.id})">View Attendees</button>
                     </td>
                 </tr>
             `;
@@ -817,6 +817,180 @@ Object.assign(window.app, (() => {
         UI.showModal('Event Report', content, [{ label: 'Close', type: 'secondary', action: 'UI.hideModal()' }]);
     };
 
+    const openAddAttendeeModal = async (eventId) => {
+        const event = await AppDataStore.getById('events', eventId);
+        if (!event) return;
+
+        const existing = (await AppDataStore.getAll('event_registrations')).filter(r => r.event_id === eventId);
+        window._eventAttendeeExcludedProspects = new Set(existing.filter(r => r.prospect_id).map(r => r.prospect_id));
+        window._eventAttendeeExcludedCustomers = new Set(existing.filter(r => r.customer_id).map(r => r.customer_id));
+
+        const content = `
+            <div>
+                <p style="font-size:13px; color:var(--gray-500); margin-bottom:12px;">Search by name or phone number.</p>
+                <div style="position:relative;">
+                    <input type="text" id="event-attendee-search" class="form-control"
+                        placeholder="Type name or phone..."
+                        oninput="app.searchEventAttendees(${eventId})"
+                        autocomplete="off">
+                    <div id="event-attendee-results" style="display:none; position:absolute; top:100%; left:0; right:0; background:#fff; border:1px solid var(--gray-200); border-radius:6px; box-shadow:0 4px 12px rgba(0,0,0,0.1); z-index:1000; max-height:240px; overflow-y:auto;"></div>
+                </div>
+                <div id="event-attendee-selected" style="margin-top:16px; min-height:48px; color:var(--gray-400); font-size:13px; text-align:center; padding:12px;">
+                    No attendee selected yet.
+                </div>
+            </div>`;
+
+        UI.showModal(`Add Attendee — ${event.event_title}`, content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }
+        ]);
+
+        setTimeout(() => document.getElementById('event-attendee-search')?.focus(), 100);
+    };
+
+    const searchEventAttendees = async (eventId) => {
+        const input = document.getElementById('event-attendee-search');
+        const results = document.getElementById('event-attendee-results');
+        if (!input || !results) return;
+
+        const query = input.value.trim().toLowerCase();
+        if (query.length < 2) { results.style.display = 'none'; return; }
+
+        const prospects = await AppDataStore.getAll('prospects');
+        const customers = await AppDataStore.getAll('customers');
+        const excludeP = window._eventAttendeeExcludedProspects || new Set();
+        const excludeC = window._eventAttendeeExcludedCustomers || new Set();
+
+        const matchP = prospects
+            .filter(p => !excludeP.has(p.id) &&
+                ((p.full_name && p.full_name.toLowerCase().includes(query)) || (p.phone && p.phone.includes(query))))
+            .slice(0, 6)
+            .map(p => ({ ...p, type: 'prospect' }));
+
+        const matchC = customers
+            .filter(c => !excludeC.has(c.id) &&
+                ((c.full_name && c.full_name.toLowerCase().includes(query)) || (c.phone && c.phone.includes(query))))
+            .slice(0, 4)
+            .map(c => ({ ...c, type: 'customer' }));
+
+        const all = [...matchP, ...matchC];
+        if (all.length === 0) {
+            results.innerHTML = '<div style="padding:10px 14px; color:var(--gray-400); font-size:13px;">No matches found.</div>';
+        } else {
+            results.innerHTML = all.map(m => `
+                <div onclick="app.selectEventAttendee(${eventId}, ${m.id}, '${m.type}', '${(m.full_name || '').replace(/'/g, "\\'")}')"
+                    style="padding:10px 14px; cursor:pointer; border-bottom:1px solid var(--gray-100); display:flex; justify-content:space-between; align-items:center;"
+                    onmouseover="this.style.background='var(--gray-50)'" onmouseout="this.style.background=''">
+                    <div>
+                        <div style="font-weight:500; font-size:13px;">${m.full_name || ''}</div>
+                        <div style="font-size:11px; color:var(--gray-400);">${m.phone || ''}</div>
+                    </div>
+                    <span style="font-size:11px; background:${m.type === 'prospect' ? '#eff6ff' : '#f0fdf4'}; color:${m.type === 'prospect' ? '#2563eb' : '#16a34a'}; padding:2px 8px; border-radius:12px;">${m.type}</span>
+                </div>
+            `).join('');
+        }
+        results.style.display = 'block';
+    };
+
+    const selectEventAttendee = (eventId, entityId, type, name) => {
+        const results = document.getElementById('event-attendee-results');
+        const selected = document.getElementById('event-attendee-selected');
+        const input = document.getElementById('event-attendee-search');
+        if (results) results.style.display = 'none';
+        if (input) input.value = name;
+        if (selected) {
+            selected.innerHTML = `
+                <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; background:var(--gray-50); border-radius:8px; border:1px solid var(--gray-200);">
+                    <div>
+                        <div style="font-weight:600; font-size:14px;">${name}</div>
+                        <div style="font-size:12px; color:var(--gray-400); text-transform:capitalize;">${type}</div>
+                    </div>
+                    <button class="btn primary btn-sm" onclick="app.registerAttendee(${eventId}, ${entityId}, '${type}')">
+                        <i class="fas fa-plus"></i> Register
+                    </button>
+                </div>`;
+        }
+    };
+
+    const openEditEventModal = async (eventId) => {
+        const e = await AppDataStore.getById('events', eventId);
+        if (!e) return;
+
+        const categories = await AppDataStore.getAll('event_categories');
+        const catOptions = categories.map(c =>
+            `<option value="${c.id}" ${e.event_category_id == c.id ? 'selected' : ''}>${c.category_name}</option>`
+        ).join('');
+
+        const content = `
+            <form id="edit-event-form" onsubmit="event.preventDefault(); app.saveEditEvent(${eventId});">
+                <div class="form-section">
+                    <h4>Event Details</h4>
+                    <div class="form-row">
+                        <div class="form-group half"><label>Title *</label><input type="text" id="edit-event-title" class="form-control" value="${(e.event_title || '').replace(/"/g, '&quot;')}" required></div>
+                        <div class="form-group half"><label>Category</label><select id="edit-event-category" class="form-control">${catOptions}</select></div>
+                    </div>
+                    <div class="form-group"><label>Description</label><textarea id="edit-event-description" class="form-control">${e.description || ''}</textarea></div>
+                    <div class="form-row">
+                        <div class="form-group half"><label>Date *</label><input type="date" id="edit-event-date" class="form-control" value="${e.event_date || ''}" required></div>
+                        <div class="form-group half"><label>Location</label><input type="text" id="edit-event-location" class="form-control" value="${(e.location || '').replace(/"/g, '&quot;')}"></div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group half"><label>Capacity</label><input type="number" id="edit-event-capacity" class="form-control" value="${e.capacity || 0}"></div>
+                        <div class="form-group half"><label>Ticket Price (RM)</label><input type="number" id="edit-ticket-price" class="form-control" value="${e.ticket_price || 0}"></div>
+                    </div>
+                </div>
+                <div class="form-section scoring-section">
+                    <h4>Scoring Config</h4>
+                    <div class="scoring-row" style="display:flex;gap:12px;">
+                        <div class="form-group half"><label>Base Points</label><input type="number" id="edit-base-score" class="form-control" value="${e.base_score || 10}"></div>
+                        <div class="form-group half"><label>Score Multiplier</label><input type="number" id="edit-score-multiplier" class="form-control" value="${e.score_multiplier || 1.0}" step="0.1"></div>
+                    </div>
+                    <label class="bonus-checkbox"><input type="checkbox" id="edit-friend-bonus" ${e.enable_friend_bonus !== false ? 'checked' : ''}> Bringing a friend (+10 per friend, max 3)</label>
+                    <label class="bonus-checkbox"><input type="checkbox" id="edit-question-bonus" ${e.enable_question_bonus !== false ? 'checked' : ''}> Asking questions (+5 per question, max 3)</label>
+                    <label class="bonus-checkbox"><input type="checkbox" id="edit-stay-bonus" ${e.enable_stay_bonus !== false ? 'checked' : ''}> Staying till end (+5)</label>
+                    <label class="bonus-checkbox"><input type="checkbox" id="edit-purchase-bonus" ${e.enable_purchase_bonus !== false ? 'checked' : ''}> Making purchase (+15 + 10 per RM100)</label>
+                </div>
+                <div class="form-section">
+                    <h4>Status</h4>
+                    <select id="edit-event-status" class="form-control">
+                        <option value="upcoming" ${e.status === 'upcoming' ? 'selected' : ''}>Upcoming</option>
+                        <option value="completed" ${e.status === 'completed' ? 'selected' : ''}>Completed</option>
+                        <option value="cancelled" ${e.status === 'cancelled' ? 'selected' : ''}>Cancelled</option>
+                    </select>
+                </div>
+            </form>`;
+
+        UI.showModal('Edit Event', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save Changes', type: 'primary', action: 'document.getElementById("edit-event-form").dispatchEvent(new Event("submit"))' }
+        ]);
+    };
+
+    const saveEditEvent = async (eventId) => {
+        const title = document.getElementById('edit-event-title')?.value?.trim();
+        if (!title) { UI.toast.error('Event title is required.'); return; }
+
+        await AppDataStore.update('events', eventId, {
+            event_title: title,
+            event_category_id: parseInt(document.getElementById('edit-event-category').value) || 1,
+            description: document.getElementById('edit-event-description').value,
+            event_date: document.getElementById('edit-event-date').value,
+            location: document.getElementById('edit-event-location').value,
+            capacity: parseInt(document.getElementById('edit-event-capacity').value) || 0,
+            ticket_price: parseFloat(document.getElementById('edit-ticket-price').value) || 0,
+            base_score: parseInt(document.getElementById('edit-base-score').value) || 10,
+            score_multiplier: parseFloat(document.getElementById('edit-score-multiplier').value) || 1.0,
+            enable_friend_bonus: document.getElementById('edit-friend-bonus').checked,
+            enable_question_bonus: document.getElementById('edit-question-bonus').checked,
+            enable_stay_bonus: document.getElementById('edit-stay-bonus').checked,
+            enable_purchase_bonus: document.getElementById('edit-purchase-bonus').checked,
+            status: document.getElementById('edit-event-status').value
+        });
+
+        UI.toast.success('Event updated.');
+        UI.hideModal();
+        if (app.renderUpcomingEvents) await app.renderUpcomingEvents();
+    };
+
     const openEventReports = async () => {
         const events = await AppDataStore.getAll('events');
         const registrations = await AppDataStore.getAll('event_registrations');
@@ -856,9 +1030,14 @@ Object.assign(window.app, (() => {
         saveEvent,
         calculateEventScore,
         openEventAttendeesModal,
+        openAddAttendeeModal,
+        searchEventAttendees,
+        selectEventAttendee,
         registerAttendee,
         checkInAttendee,
         executeCheckIn,
+        openEditEventModal,
+        saveEditEvent,
         openEventReports,
         deleteEvent,
         deleteTemplate,

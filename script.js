@@ -3560,7 +3560,13 @@ In a production system, this would show the actual file contents.
                 }
 
                 this.lastSyncTime = new Date().toISOString();
-                localStorage.setItem('last_google_sync', this.lastSyncTime);
+                // Persist last sync time to Supabase via integration_connections.last_sync_at
+                try {
+                    const _syncConn = await getGoogleConnection();
+                    if (_syncConn) {
+                        AppDataStore.update('integration_connections', _syncConn.id, { last_sync_at: this.lastSyncTime }).catch(() => {});
+                    }
+                } catch (_) {}
 
                 if (created || updated || deleted) {
                     // Only show toast if something actually synced to avoid spam
@@ -3582,7 +3588,7 @@ In a production system, this would show the actual file contents.
                 const googleEvents = await this.googleCalendar.listEvents(timeMin, timeMax);
                 if (!googleEvents.length) { this.syncInProgress = false; return; }
 
-                const syncLog = this.getSyncLog();
+                const syncLog = await this.getSyncLog();
                 let imported = 0;
                 for (const gEvent of googleEvents) {
                     // Skip events that originated from CRM
@@ -3594,7 +3600,7 @@ In a production system, this would show the actual file contents.
                     const startTime = gEvent.start?.dateTime?.split('T')[1]?.substring(0, 5) || '09:00';
                     const endTime = gEvent.end?.dateTime?.split('T')[1]?.substring(0, 5) || '10:00';
 
-                    await AppDataStore.create('activities', {
+                    const activity = await AppDataStore.create('activities', {
                         activity_title: gEvent.summary || 'Google Calendar Event',
                         activity_type: 'Call',
                         activity_date: startDate,
@@ -3608,10 +3614,10 @@ In a production system, this would show the actual file contents.
                         created_at: new Date().toISOString()
                     });
 
-                    syncLog.push({ google_event_id: gEvent.id, last_synced_at: new Date().toISOString() });
+                    // Record import in sync_history (was localStorage-only before)
+                    await this.addSyncRecord(activity?.id, gEvent.id, 'google_to_crm');
                     imported++;
                 }
-                localStorage.setItem('google_sync_log', JSON.stringify(syncLog));
                 if (imported > 0) UI.toast.success(`Imported ${imported} events from Google Calendar`);
             } catch (error) {
                 console.error('Import error:', error);
@@ -3627,69 +3633,47 @@ In a production system, this would show the actual file contents.
             return activityUpdated > syncUpdated;
         }
 
-        getSyncLog() {
-            const log = localStorage.getItem('google_sync_log');
-            return log ? JSON.parse(log) : [];
+        async getSyncLog() {
+            try {
+                const records = await AppDataStore.getAll('sync_history');
+                return (records || []).map(r => ({
+                    activity_id: r.activity_id,
+                    google_event_id: r.google_event_id,
+                    last_synced_at: r.synced_at || r.last_synced_at
+                }));
+            } catch (_) { return []; }
         }
 
-        async addSyncRecord(activityId, googleEventId) {
-            const log = this.getSyncLog();
-            log.push({
-                activity_id: activityId,
-                google_event_id: googleEventId,
-                last_synced_at: new Date().toISOString()
-            });
-            localStorage.setItem('google_sync_log', JSON.stringify(log));
-
-            // Also add to sync_history table
-            const connection = await getGoogleConnection();
-            if (connection && _currentUser) {
-                await AppDataStore.create('sync_history', {
-                    integration_id: connection.integration_id,
-                    user_id: _currentUser.id,
-                    activity_id: activityId,
-                    google_event_id: googleEventId,
-                    direction: 'crm_to_google',
-                    status: 'success',
-                    error_message: '',
-                    synced_at: new Date().toISOString()
-                });
-            }
+        async addSyncRecord(activityId, googleEventId, direction = 'crm_to_google') {
+            try {
+                const connection = await getGoogleConnection();
+                if (connection && _currentUser) {
+                    await AppDataStore.create('sync_history', {
+                        integration_id: connection.integration_id,
+                        user_id: _currentUser.id,
+                        activity_id: activityId,
+                        google_event_id: googleEventId,
+                        direction,
+                        status: 'success',
+                        error_message: '',
+                        synced_at: new Date().toISOString()
+                    });
+                }
+            } catch (_) {}
         }
 
         async updateSyncRecord(activityId, googleEventId) {
-            const log = this.getSyncLog();
-            const record = log.find(r => r.activity_id === activityId);
-            if (record) {
-                record.last_synced_at = new Date().toISOString();
-            } else {
-                log.push({
-                    activity_id: activityId,
-                    google_event_id: googleEventId,
-                    last_synced_at: new Date().toISOString()
-                });
-            }
-            localStorage.setItem('google_sync_log', JSON.stringify(log));
-
-            const connection = await getGoogleConnection();
-            if (connection && _currentUser) {
-                await AppDataStore.create('sync_history', {
-                    integration_id: connection.integration_id,
-                    user_id: _currentUser.id,
-                    activity_id: activityId,
-                    google_event_id: googleEventId,
-                    direction: 'crm_to_google',
-                    status: 'success',
-                    error_message: '',
-                    synced_at: new Date().toISOString()
-                });
-            }
+            // sync_history rows are append-only; the latest row wins for the same activity_id.
+            await this.addSyncRecord(activityId, googleEventId, 'crm_to_google');
         }
 
-        removeSyncRecord(activityId) {
-            const log = this.getSyncLog();
-            const filtered = log.filter(r => r.activity_id !== activityId);
-            localStorage.setItem('google_sync_log', JSON.stringify(filtered));
+        async removeSyncRecord(activityId) {
+            try {
+                const records = await AppDataStore.query('sync_history', { activity_id: activityId });
+                for (const r of records || []) {
+                    await AppDataStore.delete('sync_history', r.id);
+                }
+            } catch (_) {}
         }
 
         resolveConflict(choice, activityId, eventId) {
@@ -4380,11 +4364,35 @@ In a production system, this would show the actual file contents.
         await showWhatsAppIntegration();
     };
 
+    // Centralised WhatsApp Cloud API caller — handles auth, URL, parsing, error surfacing
+    const _callWhatsAppAPI = async (method, path, body = null) => {
+        const conn = await getWhatsAppConnection();
+        if (!conn?.access_token) throw new Error('WhatsApp not connected. Please configure credentials in Integrations.');
+        const url = `https://graph.facebook.com/v18.0/${path}`;
+        const opts = {
+            method,
+            headers: {
+                'Authorization': `Bearer ${conn.access_token}`,
+                'Content-Type': 'application/json'
+            }
+        };
+        if (body) opts.body = JSON.stringify(body);
+        const res = await fetch(url, opts);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error?.message || `WhatsApp API error ${res.status}`);
+        return { data, conn };
+    };
+
     const testWhatsAppConnection = async () => {
         UI.toast.info('Testing connection...');
-        (() => {
-            UI.toast.success('Connection successful!');
-        }, 1500);
+        try {
+            const conn = await getWhatsAppConnection();
+            if (!conn?.phone_number_id) { UI.toast.error('No connection configured'); return; }
+            const { data } = await _callWhatsAppAPI('GET', conn.phone_number_id);
+            UI.toast.success(`Connected: ${data.display_phone_number || data.verified_name || 'OK'}`);
+        } catch (e) {
+            UI.toast.error(`Connection failed: ${e.message}`);
+        }
     };
 
     const verifyWebhook = async () => {
@@ -4493,49 +4501,25 @@ In a production system, this would show the actual file contents.
 
     const sendWhatsApp = async (entityType, entityId) => {
         const isTemplate = document.querySelector('input[name="msg-type"]:checked')?.value === 'template';
-        const isNow = document.querySelector('input[name="schedule"]:checked')?.value === 'now';
+        const entity = window._currentWhatsAppEntity;
+        if (!entity?.phone) { UI.toast.error('No recipient phone'); return; }
 
         if (isTemplate) {
             const templateId = document.getElementById('template-select')?.value;
             if (!templateId) { UI.toast.error('Please select a template'); return; }
             const template = await AppDataStore.getById('whatsapp_templates', parseInt(templateId));
-            setTimeout(async () => {
-                await AppDataStore.create('whatsapp_messages', {
-                    id: 'wamid_' + Date.now(),
-                    entity_type: entityType,
-                    entity_id: entityId,
-                    direction: 'outgoing',
-                    to: window._currentWhatsAppEntity.phone,
-                    template_name: template.template_name,
-                    content: template.content,
-                    status: 'delivered',
-                    sent_at: new Date().toISOString()
-                });
-                UI.hideModal();
-                UI.toast.success('Message sent successfully');
-                if (entityType === 'prospect') await app.showProspectDetail(entityId);
-                else await app.showCustomerDetail(entityId);
-            }, 800);
+            UI.hideModal();
+            UI.toast.info('Sending...');
+            await sendWhatsAppMessage(entity.phone, template.template_name, {});
         } else {
             const message = document.getElementById('free-message')?.value;
             if (!message) { UI.toast.error('Please enter a message'); return; }
-            setTimeout(async () => {
-                await AppDataStore.create('whatsapp_messages', {
-                    id: 'wamid_' + Date.now(),
-                    entity_type: entityType,
-                    entity_id: entityId,
-                    direction: 'outgoing',
-                    to: window._currentWhatsAppEntity.phone,
-                    content: message,
-                    status: 'delivered',
-                    sent_at: new Date().toISOString()
-                });
-                UI.hideModal();
-                UI.toast.success('Message sent successfully');
-                if (entityType === 'prospect') await app.showProspectDetail(entityId);
-                else await app.showCustomerDetail(entityId);
-            }, 800);
+            UI.hideModal();
+            UI.toast.info('Sending...');
+            await sendFreeTextWhatsApp(entity.phone, message);
         }
+        if (entityType === 'prospect') await app.showProspectDetail(entityId);
+        else await app.showCustomerDetail(entityId);
     };
 
     const renderWhatsAppHistoryTab = async (entityType, entityId) => {
@@ -4749,40 +4733,97 @@ In a production system, this would show the actual file contents.
     };
 
     const sendWhatsAppMessage = async (to, templateName, variables = {}) => {
-        const connection = (await AppDataStore.query('integration_connections', { provider: 'whatsapp' }))[0];
-        if (!connection?.phone_number_id || !connection?.access_token) {
-            UI.toast.error('WhatsApp not connected');
-            return;
-        }
-        const body = {
-            messaging_product: 'whatsapp',
-            to,
-            type: 'template',
-            template: { name: templateName, language: { code: 'en' }, components: [] }
-        };
-        const res = await fetch(`https://graph.facebook.com/v17.0/${connection.phone_number_id}/messages`, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${connection.access_token}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify(body)
+        const phone = (to || '').replace(/^\+/, '').replace(/\s/g, '');
+        const conn = await getWhatsAppConnection();
+        if (!conn?.phone_number_id) { UI.toast.error('WhatsApp not connected'); return; }
+
+        // Resolve local template for content preview
+        const localTemplate = (await AppDataStore.getAll('whatsapp_templates'))
+            .find(t => t.template_name === templateName);
+        let content = localTemplate?.content || templateName;
+        Object.entries(variables).forEach(([k, v]) => {
+            content = content.replace(new RegExp(`{{${k}}}`, 'g'), v);
         });
-        if (!res.ok) throw new Error(`WhatsApp API error ${res.status}`);
-        return res.json();
+
+        // Build Meta API body
+        const params = Object.values(variables).map(v => ({ type: 'text', text: String(v) }));
+        const components = params.length ? [{ type: 'body', parameters: params }] : [];
+        const langCode = phone.startsWith('60') ? 'ms' : 'en_US';
+        const metaTemplateName = templateName.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+
+        let wamid = 'wamid_' + Date.now();
+        let status = 'failed';
+        try {
+            const { data } = await _callWhatsAppAPI('POST', `${conn.phone_number_id}/messages`, {
+                messaging_product: 'whatsapp',
+                recipient_type: 'individual',
+                to: phone,
+                type: 'template',
+                template: { name: metaTemplateName, language: { code: langCode }, components }
+            });
+            wamid = data.messages?.[0]?.id || wamid;
+            status = 'sent';
+            UI.toast.success('WhatsApp message sent');
+        } catch (e) {
+            UI.toast.error(`Send failed: ${e.message}`);
+        }
+
+        // Persist message record + resolve entity for UI history
+        const allEntities = [
+            ...(await AppDataStore.getAll('prospects')).map(e => ({ ...e, _type: 'prospect' })),
+            ...(await AppDataStore.getAll('customers')).map(e => ({ ...e, _type: 'customer' }))
+        ];
+        const entity = allEntities.find(e => (e.phone || '').replace(/^\+/, '').replace(/\s/g, '') === phone);
+        await AppDataStore.create('whatsapp_messages', {
+            id: wamid,
+            entity_type: entity?._type || 'prospect',
+            entity_id: entity?.id || null,
+            direction: 'outgoing',
+            to,
+            template_name: templateName,
+            content,
+            status,
+            sent_at: new Date().toISOString()
+        });
     };
 
     const sendFreeTextWhatsApp = async (to, text) => {
-        const connection = (await AppDataStore.query('integration_connections', { provider: 'whatsapp' }))[0];
-        if (!connection?.phone_number_id || !connection?.access_token) {
-            UI.toast.error('WhatsApp not connected');
-            return;
+        if (!text) return;
+        const phone = (to || '').replace(/^\+/, '').replace(/\s/g, '');
+        const conn = await getWhatsAppConnection();
+        if (!conn?.phone_number_id) { UI.toast.error('WhatsApp not connected'); return; }
+
+        let wamid = 'wamid_' + Date.now();
+        let status = 'failed';
+        try {
+            const { data } = await _callWhatsAppAPI('POST', `${conn.phone_number_id}/messages`, {
+                messaging_product: 'whatsapp',
+                recipient_type: 'individual',
+                to: phone,
+                type: 'text',
+                text: { preview_url: false, body: text }
+            });
+            wamid = data.messages?.[0]?.id || wamid;
+            status = 'sent';
+            UI.toast.success('WhatsApp message sent');
+        } catch (e) {
+            UI.toast.error(`Send failed: ${e.message}`);
         }
-        const body = { messaging_product: 'whatsapp', to, type: 'text', text: { body: text } };
-        const res = await fetch(`https://graph.facebook.com/v17.0/${connection.phone_number_id}/messages`, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${connection.access_token}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify(body)
+        const allEntities = [
+            ...(await AppDataStore.getAll('prospects')).map(e => ({ ...e, _type: 'prospect' })),
+            ...(await AppDataStore.getAll('customers')).map(e => ({ ...e, _type: 'customer' }))
+        ];
+        const entity = allEntities.find(e => (e.phone || '').replace(/^\+/, '').replace(/\s/g, '') === phone);
+        await AppDataStore.create('whatsapp_messages', {
+            id: wamid,
+            entity_type: entity?._type || 'prospect',
+            entity_id: entity?.id || null,
+            direction: 'outgoing',
+            to,
+            content: text,
+            status,
+            sent_at: new Date().toISOString()
         });
-        if (!res.ok) throw new Error(`WhatsApp API error ${res.status}`);
-        return res.json();
     };
 
     // ========== PHASE 17: AI ANALYTICS FUNCTIONS ==========
@@ -6268,8 +6309,38 @@ function _wireLoginBtn() {
             }
             let profileError = profile ? null : { code: 'PGRST116' };
 
-            // If profile not found, create one automatically
-            if (profileError && profileError.code === 'PGRST116') {
+            // If not found by email, try case-insensitive email match then name-based fallback
+            // (handles cases where admin created the agent record without email or with different case)
+            if (!profile) {
+                const allUsers = await AppDataStore.getAll('users');
+                // 1. Case-insensitive email match
+                const lowerEmail = user.email.toLowerCase();
+                const caseMatch = allUsers.find(u => u.email && u.email.toLowerCase() === lowerEmail);
+                if (caseMatch) {
+                    // Normalise email casing in the record
+                    await AppDataStore.update('users', caseMatch.id, { email: user.email });
+                    profile = { ...caseMatch, email: user.email };
+                    profileError = null;
+                } else {
+                    // 2. Name-based fallback: match by full_name where email is empty/null
+                    const authName = (user.user_metadata?.full_name || '').trim();
+                    if (authName) {
+                        const nameMatch = allUsers.find(u =>
+                            u.full_name && u.full_name.trim().toLowerCase() === authName.toLowerCase() && !u.email
+                        );
+                        if (nameMatch) {
+                            // Link this existing admin-created record to the login email
+                            await AppDataStore.update('users', nameMatch.id, { email: user.email });
+                            profile = { ...nameMatch, email: user.email };
+                            profileError = null;
+                            console.log(`Linked existing agent record "${nameMatch.full_name}" (id ${nameMatch.id}) to email ${user.email}`);
+                        }
+                    }
+                }
+            }
+
+            // If profile still not found, create one automatically
+            if (!profile && profileError && profileError.code === 'PGRST116') {
                 console.log('Profile not found, creating one...');
                 const newProfile = {
                     id: Date.now(),
@@ -6282,7 +6353,7 @@ function _wireLoginBtn() {
                 };
                 // Use AppDataStore.create() so the service-role client is used (bypasses RLS)
                 profile = await AppDataStore.create('users', newProfile);
-            } else if (profileError) {
+            } else if (!profile && profileError) {
                 throw profileError;
             }
             
@@ -6334,7 +6405,10 @@ function _wireLoginBtn() {
 
     // ==================== INIT ====================
 
+    let _initStarted = false;
     const init = async () => {
+    if (_initStarted) return; // prevent double-init (synchronous guard)
+    _initStarted = true;
     await AppDataStore.init();
     console.log('App initializing...');
 
@@ -18658,10 +18732,12 @@ const renderCurrentAssignments = async (agentId) => {
                 <p style="margin-bottom:12px;">Reset credentials for <strong>${escapeHtml(agent.full_name)}</strong> (${escapeHtml(agent.email || 'no email')})</p>
                 <div style="margin-bottom:16px;">
                     <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
-                        <input type="radio" name="pwd-reset-type" value="email" ${agent.email ? 'checked' : 'disabled'}> Send password reset email to agent
+                        <input type="radio" name="pwd-reset-type" value="email" ${agent.email ? 'checked' : 'disabled'}
+                            onchange="document.getElementById('manual-reset-section').style.display='none'"> Send password reset email to agent
                     </label>
                     <label style="display:flex;align-items:center;gap:8px;">
-                        <input type="radio" name="pwd-reset-type" value="manual" ${!agent.email ? 'checked' : ''}> Set temporary password manually
+                        <input type="radio" name="pwd-reset-type" value="manual" ${!agent.email ? 'checked' : ''}
+                            onchange="document.getElementById('manual-reset-section').style.display=''"> Set temporary password manually
                     </label>
                 </div>
                 <div id="manual-reset-section" style="${!agent.email ? '' : 'display:none;'}">
@@ -18672,12 +18748,7 @@ const renderCurrentAssignments = async (agentId) => {
                     </div>
                     <small style="color:var(--gray-500); margin-top:4px; display:block;">Agent must change password on next login.</small>
                 </div>
-            </div>
-            <script>
-                document.querySelectorAll('[name=pwd-reset-type]').forEach(r => r.addEventListener('change', e => {
-                    document.getElementById('manual-reset-section').style.display = e.target.value === 'manual' ? '' : 'none';
-                }));
-            <\/script>`;
+            </div>`;
         UI.showModal('Reset Agent Password', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
             { label: 'Reset Password', type: 'primary', action: `(async () => { await app.executePasswordReset('${agentId}'); })()` }
@@ -20358,6 +20429,7 @@ container.innerHTML = `
 
     let _currentTimeFilter = 'monthly';
     let _currentRoleFilter = 'All';
+    let _currentAgentFilter = 'all';
     let _visibleUserIds = 'all';
     const toLocalDateStr = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
     let _customDateFrom = toLocalDateStr(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
@@ -20366,6 +20438,12 @@ container.innerHTML = `
 
     const showKPIDashboard = async (container) => {
         _selectedEntity = null; // Clear selection
+        // Agents list for the agent filter dropdown (admins/team leaders see this)
+        const _kpiAgents = (await AppDataStore.getAll('users')).filter(u =>
+            isAgent(u) || u.role === 'team_leader' || (u.role || '').includes('Level 7')
+        );
+        const _kpiAgentOptions = `<option value="all">All Agents</option>` +
+            _kpiAgents.map(a => `<option value="${a.id}" ${String(_currentAgentFilter) === String(a.id) ? 'selected' : ''}>${escapeHtml(a.full_name || '')}</option>`).join('');
         container.innerHTML = `
             <div class="kpi-dashboard">
                 <div class="dashboard-header">
@@ -20405,6 +20483,11 @@ container.innerHTML = `
                         <select id="kpi-role-filter" class="form-control" onchange="app.setRoleFilter(this.value)" style="width: 200px;">
                             <option value="All">All Roles</option>
                             ${USER_ROLES.map(r => `<option value="${r}" ${_currentRoleFilter === r ? 'selected' : ''}>${r}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="role-filter-group" style="margin-left: 12px;">
+                        <select id="kpi-agent-filter" class="form-control" onchange="app.setAgentFilter(this.value)" style="width: 200px;">
+                            ${_kpiAgentOptions}
                         </select>
                     </div>
                     <div class="date-range-picker" style="margin-left: auto;">
@@ -20473,6 +20556,11 @@ container.innerHTML = `
         await refreshKPIDashboard();
     };
 
+    const setAgentFilter = async (agentId) => {
+        _currentAgentFilter = agentId || 'all';
+        await refreshKPIDashboard();
+    };
+
     const setCustomDateRange = async (from, to) => {
         _customDateFrom = from;
         _customDateTo = to;
@@ -20482,6 +20570,16 @@ container.innerHTML = `
 
     const refreshKPIDashboard = async () => {
         _visibleUserIds = await getVisibleUserIds(_currentUser);
+        // Narrow visibility to a single agent if the agent filter is active
+        if (_currentAgentFilter && _currentAgentFilter !== 'all') {
+            const agentId = parseInt(_currentAgentFilter);
+            if (Array.isArray(_visibleUserIds)) {
+                _visibleUserIds = _visibleUserIds.filter(id => String(id) === String(agentId));
+                if (_visibleUserIds.length === 0) _visibleUserIds = [agentId];
+            } else if (_visibleUserIds === 'all') {
+                _visibleUserIds = [agentId];
+            }
+        }
         const ranges = getDateRanges(_currentTimeFilter, _customDateFrom, _customDateTo);
         // Sync date inputs to reflect the computed range (fixes timezone display)
         const fromEl = document.getElementById('kpi-date-from');
@@ -22494,6 +22592,9 @@ const exportKPIReport = async (format) => {
                     <button class="marketing-tab ${_currentMarketingTab === 'products' ? 'active' : ''}" onclick="app.switchMarketingTab('products')">
                         <i class="fas fa-box"></i> Products & Services
                     </button>
+                    <button class="marketing-tab ${_currentMarketingTab === 'promotions' ? 'active' : ''}" onclick="app.switchMarketingTab('promotions')">
+                        <i class="fas fa-calendar-alt"></i> Monthly Promotions
+                    </button>
                     ` : ''}
                 </div>
                 
@@ -22517,7 +22618,8 @@ const exportKPIReport = async (format) => {
             if (t.textContent.includes(tab === 'templates' ? 'Message Templates' :
                 tab === 'campaigns' ? 'Active Campaigns' :
                     tab === 'products' ? 'Products & Services' :
-                        tab === 'packages' ? 'Promotion Packages' : 'Campaign Analytics')) {
+                        tab === 'packages' ? 'Promotion Packages' :
+                            tab === 'promotions' ? 'Monthly Promotions' : 'Campaign Analytics')) {
                 t.classList.add('active');
             }
         });
@@ -22536,6 +22638,8 @@ const exportKPIReport = async (format) => {
             return await renderAnalyticsTab();
         } else if (_currentMarketingTab === 'products') {
             return await renderProductsTab();
+        } else if (_currentMarketingTab === 'promotions') {
+            return await renderMonthlyPromotionsTab();
         }
     };
 
@@ -22823,6 +22927,533 @@ const exportKPIReport = async (format) => {
                 : activeRows + divider + expiredRows;
         }
     };
+
+    // ========== MONTHLY PROMOTIONS TAB ==========
+
+    const renderMonthlyPromotionsTab = async () => {
+        let promotions = [];
+        try { promotions = await AppDataStore.getAll('monthly_promotions'); } catch(e) { promotions = []; }
+        promotions.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+        const canManage = isMarketingManager(_currentUser) || isSystemAdmin(_currentUser);
+
+        return `
+            <div style="padding: 24px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <div>
+                        <h3>Monthly Promotions</h3>
+                        <p class="text-muted">Full history of all monthly promotions — sorted newest first, never deleted</p>
+                    </div>
+                    <div style="display: flex; gap: 10px;">
+                        <button class="btn secondary" onclick="app.exportMonthlyPromotions()">
+                            <i class="fas fa-download"></i> Export CSV
+                        </button>
+                        ${canManage ? `<button class="btn primary" onclick="app.openMonthlyPromotionModal()">
+                            <i class="fas fa-plus"></i> New Promotion
+                        </button>` : ''}
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 15px; margin-bottom: 20px;">
+                    <div style="position: relative; flex: 1;">
+                        <i class="fas fa-search" style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--gray-400);"></i>
+                        <input type="text" id="promo-search" class="form-control" placeholder="Search by promotion name or package..." style="padding-left: 35px;" onkeyup="app.filterMonthlyPromotions()">
+                    </div>
+                    <select id="promo-status-filter" class="form-control" style="width: 170px;" onchange="app.filterMonthlyPromotions()">
+                        <option value="all">All Status</option>
+                        <option value="Draft">Draft</option>
+                        <option value="Active">Active</option>
+                        <option value="Ended">Ended</option>
+                        <option value="Archived">Archived</option>
+                    </select>
+                </div>
+
+                <div style="overflow-x: auto;">
+                    <table class="data-table" style="width: 100%; border-collapse: collapse; min-width: 900px;">
+                        <thead>
+                            <tr style="background: var(--gray-100); text-align: left;">
+                                <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Promotion Name</th>
+                                <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Month/Year</th>
+                                <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Time Frame</th>
+                                <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Special Package</th>
+                                <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Payment Mode</th>
+                                <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Target Customer</th>
+                                <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Entitlement Req.</th>
+                                <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Status</th>
+                                <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="monthly-promotions-tbody">
+                            ${promotions.map(p => renderMonthlyPromotionRow(p)).join('')}
+                            ${promotions.length === 0 ? '<tr><td colspan="9" style="padding: 40px; text-align: center; color: var(--gray-500);">No monthly promotions yet. Click "+ New Promotion" to create the first one.</td></tr>' : ''}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    };
+
+    const renderMonthlyPromotionRow = (p) => {
+        const monthYear = p.month_year
+            ? new Date(p.month_year + 'T00:00:00').toLocaleDateString('en-MY', { month: 'short', year: 'numeric' })
+            : '—';
+
+        let timeFrame = '—';
+        if (p.start_date && p.end_date) {
+            const sd = new Date(p.start_date + 'T00:00:00');
+            const ed = new Date(p.end_date + 'T00:00:00');
+            const days = Math.round((ed - sd) / 86400000) + 1;
+            const fmt = (d) => d.toLocaleDateString('en-MY', { day: '2-digit', month: 'short', year: 'numeric' });
+            timeFrame = `${fmt(sd)} – ${fmt(ed)} (${days}d)`;
+        }
+
+        let paymentBadges = '';
+        try {
+            const modes = JSON.parse(p.payment_modes || '[]');
+            paymentBadges = modes.map(m => `<span class="badge badge-gray" style="font-size:10px; margin:1px;">${m}</span>`).join('');
+        } catch(e) { paymentBadges = p.payment_modes || '—'; }
+
+        const statusClass = `status-${(p.status || 'draft').toLowerCase()}`;
+
+        const pkg = p.special_package ? (p.special_package.length > 25 ? p.special_package.slice(0, 23) + '…' : p.special_package) : '—';
+        const target = p.target_customer ? (p.target_customer.length > 20 ? p.target_customer.slice(0, 18) + '…' : p.target_customer) : '—';
+        const entitle = p.entitlement_requirement ? (p.entitlement_requirement.length > 22 ? p.entitlement_requirement.slice(0, 20) + '…' : p.entitlement_requirement) : '—';
+
+        const isArchived = p.status === 'Archived';
+
+        return `
+            <tr style="cursor: pointer;" onclick="app.viewMonthlyPromotionDetails(${p.id})">
+                <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">
+                    <strong>${p.name}</strong>
+                </td>
+                <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">${monthYear}</td>
+                <td style="padding: 12px; border-bottom: 1px solid var(--gray-200); font-size: 12px; color: var(--gray-600);">${timeFrame}</td>
+                <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);" title="${p.special_package || ''}">${pkg}</td>
+                <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">
+                    <div style="display: flex; flex-wrap: wrap; gap: 2px;">${paymentBadges || '—'}</div>
+                </td>
+                <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);" title="${p.target_customer || ''}">${target}</td>
+                <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);" title="${p.entitlement_requirement || ''}">${entitle}</td>
+                <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">
+                    <span class="status-badge ${statusClass}">${p.status || 'Draft'}</span>
+                </td>
+                <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">
+                    <div class="table-actions" onclick="event.stopPropagation()">
+                        <button class="btn-icon" onclick="app.viewMonthlyPromotionDetails(${p.id})" title="View Details"><i class="fas fa-eye"></i></button>
+                        ${!isArchived ? `<button class="btn-icon" onclick="app.openMonthlyPromotionModal(${p.id})" title="Edit"><i class="fas fa-edit"></i></button>` : ''}
+                        <button class="btn-icon" onclick="app.duplicateMonthlyPromotion(${p.id})" title="Duplicate"><i class="fas fa-copy"></i></button>
+                        ${!isArchived ? `<button class="btn-icon" onclick="app.archiveMonthlyPromotion(${p.id})" title="Archive"><i class="fas fa-archive"></i></button>` : ''}
+                        <button class="btn-icon text-danger" onclick="app.deleteMonthlyPromotion(${p.id})" title="Delete"><i class="fas fa-trash"></i></button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    };
+
+    const filterMonthlyPromotions = async () => {
+        const search = (document.getElementById('promo-search')?.value || '').toLowerCase();
+        const status = document.getElementById('promo-status-filter')?.value || 'all';
+
+        let promotions = [];
+        try { promotions = await AppDataStore.getAll('monthly_promotions'); } catch(e) { promotions = []; }
+        promotions.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+        const filtered = promotions.filter(p => {
+            const matchesSearch = (p.name || '').toLowerCase().includes(search) ||
+                (p.special_package || '').toLowerCase().includes(search);
+            const matchesStatus = status === 'all' || p.status === status;
+            return matchesSearch && matchesStatus;
+        });
+
+        const tbody = document.getElementById('monthly-promotions-tbody');
+        if (tbody) {
+            tbody.innerHTML = filtered.map(p => renderMonthlyPromotionRow(p)).join('') +
+                (filtered.length === 0 ? '<tr><td colspan="9" style="padding: 40px; text-align: center; color: var(--gray-500);">No matching promotions found.</td></tr>' : '');
+        }
+    };
+
+    const viewMonthlyPromotionDetails = async (id) => {
+        const p = await AppDataStore.getById('monthly_promotions', id);
+        if (!p) return;
+
+        const monthYear = p.month_year
+            ? new Date(p.month_year + 'T00:00:00').toLocaleDateString('en-MY', { month: 'long', year: 'numeric' })
+            : '—';
+
+        let timeFrame = '—';
+        if (p.start_date && p.end_date) {
+            const fmt = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-MY', { day: '2-digit', month: 'short', year: 'numeric' });
+            timeFrame = `${fmt(p.start_date)} – ${fmt(p.end_date)}`;
+        }
+
+        let productList = '<p style="color: var(--gray-500); font-style: italic;">No product details added.</p>';
+        try {
+            const products = JSON.parse(p.package_product_details || '[]');
+            if (products.length > 0) {
+                productList = `<ul style="margin: 0; padding-left: 20px;">
+                    ${products.map(prod => `<li style="margin-bottom: 4px;"><strong>${prod.product}</strong>${prod.detail ? ` — ${prod.detail}` : ''}</li>`).join('')}
+                </ul>`;
+            }
+        } catch(e) {
+            if (p.package_product_details) productList = `<p>${p.package_product_details}</p>`;
+        }
+
+        let paymentBadges = '—';
+        try {
+            const modes = JSON.parse(p.payment_modes || '[]');
+            if (modes.length > 0) {
+                paymentBadges = `<div style="display:flex; flex-wrap:wrap; gap:5px;">${modes.map(m => `<span class="badge badge-gray">${m}</span>`).join('')}</div>`;
+            }
+        } catch(e) { paymentBadges = p.payment_modes || '—'; }
+
+        const statusClass = `status-${(p.status || 'draft').toLowerCase()}`;
+        const isArchived = p.status === 'Archived';
+
+        const content = `
+            <div style="max-width: 600px;">
+                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px;">
+                    <span class="status-badge ${statusClass}" style="font-size: 13px; padding: 5px 12px;">${p.status || 'Draft'}</span>
+                    <span style="color: var(--gray-500);">${monthYear}</span>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+                    <div>
+                        <label style="font-size: 11px; font-weight: 600; color: var(--gray-500); text-transform: uppercase;">Time Frame</label>
+                        <p style="margin: 4px 0;"><i class="fas fa-calendar-alt" style="color: var(--primary); margin-right: 6px;"></i>${timeFrame}</p>
+                    </div>
+                    <div>
+                        <label style="font-size: 11px; font-weight: 600; color: var(--gray-500); text-transform: uppercase;">Special Package</label>
+                        <p style="margin: 4px 0;"><i class="fas fa-gift" style="color: var(--primary); margin-right: 6px;"></i>${p.special_package || '—'}</p>
+                    </div>
+                </div>
+                <div style="margin-bottom: 16px;">
+                    <label style="font-size: 11px; font-weight: 600; color: var(--gray-500); text-transform: uppercase; display: block; margin-bottom: 8px;">Package Product Details</label>
+                    <div style="background: var(--gray-50); border: 1px solid var(--gray-200); border-radius: 6px; padding: 12px;">
+                        ${productList}
+                    </div>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+                    <div>
+                        <label style="font-size: 11px; font-weight: 600; color: var(--gray-500); text-transform: uppercase; display: block; margin-bottom: 6px;">Payment Mode</label>
+                        ${paymentBadges}
+                    </div>
+                    <div>
+                        <label style="font-size: 11px; font-weight: 600; color: var(--gray-500); text-transform: uppercase;">Target Customer</label>
+                        <p style="margin: 4px 0;"><i class="fas fa-bullseye" style="color: var(--primary); margin-right: 6px;"></i>${p.target_customer || '—'}</p>
+                    </div>
+                </div>
+                <div style="margin-bottom: 16px;">
+                    <label style="font-size: 11px; font-weight: 600; color: var(--gray-500); text-transform: uppercase;">Entitlement Requirement</label>
+                    <p style="margin: 4px 0;"><i class="fas fa-check-circle" style="color: var(--primary); margin-right: 6px;"></i>${p.entitlement_requirement || '—'}</p>
+                </div>
+                ${p.promotion_script ? `
+                <div style="margin-bottom: 16px;">
+                    <label style="font-size: 11px; font-weight: 600; color: var(--gray-500); text-transform: uppercase; display: block; margin-bottom: 8px;">Promotion Script (WhatsApp)</label>
+                    <div style="background: #e9fbe9; border: 1px solid #c3e6cb; border-radius: 12px 12px 12px 2px; padding: 14px 16px; font-size: 14px; line-height: 1.6; white-space: pre-wrap; max-height: 200px; overflow-y: auto;">
+                        ${p.promotion_script.replace(/</g, '&lt;').replace(/>/g, '&gt;')}
+                    </div>
+                </div>` : ''}
+                <div style="font-size: 11px; color: var(--gray-400); margin-top: 16px;">
+                    Created: ${p.created_at ? new Date(p.created_at).toLocaleDateString('en-MY', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
+                    ${p.updated_at && p.updated_at !== p.created_at ? ` · Updated: ${new Date(p.updated_at).toLocaleDateString('en-MY', { day: '2-digit', month: 'short', year: 'numeric' })}` : ''}
+                </div>
+            </div>
+        `;
+
+        const buttons = [
+            { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Duplicate', type: 'secondary', action: `(async () => { await app.duplicateMonthlyPromotion(${id}); })()` },
+        ];
+        if (!isArchived) {
+            buttons.push({ label: 'Archive', type: 'secondary', action: `(async () => { await app.archiveMonthlyPromotion(${id}); })()` });
+            buttons.push({ label: 'Edit', type: 'primary', action: `UI.hideModal(); app.openMonthlyPromotionModal(${id})` });
+        }
+
+        UI.showModal(`${p.name}`, content, buttons);
+    };
+
+    const openMonthlyPromotionModal = async (id = null) => {
+        const isEdit = !!id;
+        const p = isEdit ? await AppDataStore.getById('monthly_promotions', id) : {
+            name: '', month_year: null, start_date: '', end_date: '',
+            special_package: '', package_product_details: '[]',
+            payment_modes: '[]', entitlement_requirement: '',
+            target_customer: '', promotion_script: '', status: 'Draft'
+        };
+
+        const now = new Date();
+        const currentMonth = p.month_year ? parseInt(p.month_year.split('-')[1]) : now.getMonth() + 1;
+        const currentYear = p.month_year ? parseInt(p.month_year.split('-')[0]) : now.getFullYear();
+
+        const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+        const yearRange = Array.from({ length: 6 }, (_, i) => now.getFullYear() - 1 + i);
+
+        const paymentOptions = ['Credit Card', 'FPX', 'QR Pay', 'Installment', 'GrabPay', 'Cash'];
+        let selectedPayments = [];
+        try { selectedPayments = JSON.parse(p.payment_modes || '[]'); } catch(e) {}
+
+        const placeholders = ['{{name}}', '{{zodiac}}', '{{mg}}', '{{expiry}}', '{{date}}', '{{agent}}'];
+
+        const content = `
+            <div class="form-group">
+                <label>Promotion Name <span class="required">*</span></label>
+                <input type="text" id="promo-name" class="form-control" value="${(p.name || '').replace(/"/g, '&quot;')}" placeholder="e.g. CNY Prosperity Pack">
+            </div>
+            <div class="form-row">
+                <div class="form-group half">
+                    <label>Month <span class="required">*</span></label>
+                    <select id="promo-month" class="form-control">
+                        ${months.map((m, i) => `<option value="${i + 1}" ${currentMonth === i + 1 ? 'selected' : ''}>${m}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="form-group half">
+                    <label>Year <span class="required">*</span></label>
+                    <select id="promo-year" class="form-control">
+                        ${yearRange.map(y => `<option value="${y}" ${currentYear === y ? 'selected' : ''}>${y}</option>`).join('')}
+                    </select>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group half">
+                    <label>Start Date</label>
+                    <input type="date" id="promo-start" class="form-control" value="${p.start_date || ''}">
+                </div>
+                <div class="form-group half">
+                    <label>End Date</label>
+                    <input type="date" id="promo-end" class="form-control" value="${p.end_date || ''}">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Special Package Name</label>
+                <input type="text" id="promo-package" class="form-control" value="${(p.special_package || '').replace(/"/g, '&quot;')}" placeholder="e.g. Ultimate Prosperity Bundle">
+            </div>
+            <div class="form-group">
+                <label>Package Product Details</label>
+                <div id="promo-products-container" style="margin-bottom: 8px;"></div>
+                <button type="button" class="btn secondary" style="font-size: 12px; padding: 5px 12px;" onclick="app.addPromoProductRow()">
+                    <i class="fas fa-plus"></i> Add Product Item
+                </button>
+            </div>
+            <div class="form-group">
+                <label>Payment Mode</label>
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; border: 1px solid var(--gray-300); border-radius: 4px; padding: 10px;">
+                    ${paymentOptions.map(opt => `
+                        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px;">
+                            <input type="checkbox" name="promo-payment" value="${opt}" ${selectedPayments.includes(opt) ? 'checked' : ''}> ${opt}
+                        </label>
+                    `).join('')}
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Target Customer</label>
+                <input type="text" id="promo-target" class="form-control" value="${(p.target_customer || '').replace(/"/g, '&quot;')}" placeholder="e.g. All customers, New sign-ups, Zodiac=Horse">
+            </div>
+            <div class="form-group">
+                <label>Entitlement Requirement</label>
+                <input type="text" id="promo-entitlement" class="form-control" value="${(p.entitlement_requirement || '').replace(/"/g, '&quot;')}" placeholder="e.g. Min spend RM150, First 50 customers">
+            </div>
+            <div class="form-group">
+                <label>Promotion Script (WhatsApp)</label>
+                <div style="margin-bottom: 8px;">
+                    <small style="color: var(--gray-500);">Insert placeholder:</small>
+                    <div style="display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px;">
+                        ${placeholders.map(ph => `<span onclick="app.insertPromoVariable('${ph}')" style="cursor:pointer; background: var(--primary-light, #e0e7ff); color: var(--primary); padding: 2px 8px; border-radius: 12px; font-size: 12px; font-family: monospace;">${ph}</span>`).join('')}
+                    </div>
+                </div>
+                <textarea id="promo-script" class="form-control" rows="5" placeholder="Hi {{name}}, enjoy our exclusive promotion this month...">${(p.promotion_script || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>
+            </div>
+            <div class="form-group">
+                <label>Status</label>
+                <select id="promo-status" class="form-control">
+                    <option value="Draft" ${(p.status || 'Draft') === 'Draft' ? 'selected' : ''}>Draft</option>
+                    <option value="Active" ${p.status === 'Active' ? 'selected' : ''}>Active</option>
+                    <option value="Ended" ${p.status === 'Ended' ? 'selected' : ''}>Ended</option>
+                    <option value="Archived" ${p.status === 'Archived' ? 'selected' : ''}>Archived</option>
+                </select>
+            </div>
+        `;
+
+        UI.showModal(isEdit ? 'Edit Monthly Promotion' : 'New Monthly Promotion', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: isEdit ? 'Save Changes' : 'Create Promotion', type: 'primary', action: `(async () => { await app.saveMonthlyPromotion(${id || 'null'}); })()` }
+        ]);
+
+        // Pre-populate product rows for edit mode
+        if (isEdit) {
+            setTimeout(() => {
+                let existingProducts = [];
+                try { existingProducts = JSON.parse(p.package_product_details || '[]'); } catch(e) {}
+                existingProducts.forEach(r => app.addPromoProductRow(r.product || '', r.detail || ''));
+            }, 0);
+        }
+    };
+
+    const addPromoProductRow = (product = '', detail = '') => {
+        const container = document.getElementById('promo-products-container');
+        if (!container) return;
+        const div = document.createElement('div');
+        div.className = 'promo-product-row';
+        div.style.cssText = 'display: flex; gap: 8px; margin-bottom: 8px; align-items: center;';
+        div.innerHTML = `
+            <input type="text" class="form-control promo-product-name" placeholder="Product name" value="${product.replace(/"/g, '&quot;')}" style="flex: 1;">
+            <input type="text" class="form-control promo-product-detail" placeholder="Detail (e.g. 1 free, 20% off, RM88)" value="${detail.replace(/"/g, '&quot;')}" style="flex: 1;">
+            <button type="button" class="btn-icon text-danger" onclick="this.parentElement.remove()" title="Remove"><i class="fas fa-times"></i></button>
+        `;
+        container.appendChild(div);
+    };
+
+    const insertPromoVariable = (variable) => {
+        const ta = document.getElementById('promo-script');
+        if (!ta) return;
+        const start = ta.selectionStart;
+        const end = ta.selectionEnd;
+        ta.value = ta.value.slice(0, start) + variable + ta.value.slice(end);
+        ta.selectionStart = ta.selectionEnd = start + variable.length;
+        ta.focus();
+    };
+
+    const saveMonthlyPromotion = async (id) => {
+        const name = (document.getElementById('promo-name')?.value || '').trim();
+        const month = document.getElementById('promo-month')?.value;
+        const year = document.getElementById('promo-year')?.value;
+
+        if (!name) { UI.toast.error('Promotion Name is required'); return; }
+        if (!month || !year) { UI.toast.error('Month and Year are required'); return; }
+
+        const month_year = `${year}-${String(month).padStart(2, '0')}-01`;
+        const start_date = document.getElementById('promo-start')?.value || null;
+        const end_date = document.getElementById('promo-end')?.value || null;
+        const special_package = (document.getElementById('promo-package')?.value || '').trim();
+        const target_customer = (document.getElementById('promo-target')?.value || '').trim();
+        const entitlement_requirement = (document.getElementById('promo-entitlement')?.value || '').trim();
+        const promotion_script = (document.getElementById('promo-script')?.value || '').trim();
+        const status = document.getElementById('promo-status')?.value || 'Draft';
+
+        const productRows = Array.from(document.querySelectorAll('.promo-product-row')).map(row => ({
+            product: row.querySelector('.promo-product-name')?.value.trim() || '',
+            detail: row.querySelector('.promo-product-detail')?.value.trim() || ''
+        })).filter(r => r.product);
+        const package_product_details = JSON.stringify(productRows);
+
+        const checkedPayments = Array.from(document.querySelectorAll('input[name="promo-payment"]:checked')).map(el => el.value);
+        const payment_modes = JSON.stringify(checkedPayments);
+
+        const data = {
+            name, month_year, start_date, end_date,
+            special_package, package_product_details,
+            payment_modes, entitlement_requirement,
+            target_customer, promotion_script, status,
+            updated_at: new Date().toISOString()
+        };
+
+        try {
+            if (id) {
+                await AppDataStore.update('monthly_promotions', id, data);
+                UI.toast.success('Promotion updated successfully');
+            } else {
+                data.created_by = _currentUser ? _currentUser.id : null;
+                data.created_at = new Date().toISOString();
+                await AppDataStore.create('monthly_promotions', data);
+                UI.toast.success('Promotion created successfully');
+            }
+            UI.hideModal();
+            if (_currentMarketingTab === 'promotions') await app.switchMarketingTab('promotions');
+        } catch(e) {
+            UI.toast.error('Failed to save promotion. Please try again.');
+        }
+    };
+
+    const archiveMonthlyPromotion = async (id) => {
+        try {
+            await AppDataStore.update('monthly_promotions', id, {
+                status: 'Archived',
+                updated_at: new Date().toISOString()
+            });
+            UI.toast.success('Promotion archived');
+            UI.hideModal();
+            if (_currentMarketingTab === 'promotions') await app.switchMarketingTab('promotions');
+        } catch(e) {
+            UI.toast.error('Failed to archive promotion');
+        }
+    };
+
+    const duplicateMonthlyPromotion = async (id) => {
+        try {
+            const original = await AppDataStore.getById('monthly_promotions', id);
+            if (!original) return;
+            const { id: _ignored, ...rest } = original;
+            const copy = {
+                ...rest,
+                name: 'Copy of ' + original.name,
+                status: 'Draft',
+                created_by: _currentUser ? _currentUser.id : null,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+            };
+            await AppDataStore.create('monthly_promotions', copy);
+            UI.toast.success('Promotion duplicated as Draft');
+            UI.hideModal();
+            if (_currentMarketingTab === 'promotions') await app.switchMarketingTab('promotions');
+        } catch(e) {
+            UI.toast.error('Failed to duplicate promotion');
+        }
+    };
+
+    const deleteMonthlyPromotion = async (id) => {
+        if (!confirm('Delete this promotion permanently? This cannot be undone.')) return;
+        try {
+            await AppDataStore.delete('monthly_promotions', id);
+            UI.toast.success('Promotion deleted');
+            if (_currentMarketingTab === 'promotions') await app.switchMarketingTab('promotions');
+        } catch(e) {
+            UI.toast.error('Failed to delete promotion');
+        }
+    };
+
+    const exportMonthlyPromotions = async () => {
+        const search = (document.getElementById('promo-search')?.value || '').toLowerCase();
+        const status = document.getElementById('promo-status-filter')?.value || 'all';
+
+        let promotions = [];
+        try { promotions = await AppDataStore.getAll('monthly_promotions'); } catch(e) {}
+        promotions.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+        const filtered = promotions.filter(p => {
+            const matchesSearch = (p.name || '').toLowerCase().includes(search) ||
+                (p.special_package || '').toLowerCase().includes(search);
+            const matchesStatus = status === 'all' || p.status === status;
+            return matchesSearch && matchesStatus;
+        });
+
+        const esc = (v) => `"${String(v || '').replace(/"/g, '""')}"`;
+        const header = ['Name','Month/Year','Start Date','End Date','Special Package','Payment Modes','Target Customer','Entitlement Requirement','Status','Created At'];
+        const rows = filtered.map(p => {
+            const monthYear = p.month_year
+                ? new Date(p.month_year + 'T00:00:00').toLocaleDateString('en-MY', { month: 'short', year: 'numeric' })
+                : '';
+            let paymentStr = '';
+            try { paymentStr = JSON.parse(p.payment_modes || '[]').join(' | '); } catch(e) { paymentStr = p.payment_modes || ''; }
+            return [
+                esc(p.name), esc(monthYear), esc(p.start_date), esc(p.end_date),
+                esc(p.special_package), esc(paymentStr), esc(p.target_customer),
+                esc(p.entitlement_requirement), esc(p.status),
+                esc(p.created_at ? new Date(p.created_at).toLocaleDateString('en-MY') : '')
+            ].join(',');
+        });
+
+        const csv = '\uFEFF' + [header.map(esc).join(','), ...rows].join('\r\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Monthly_Promotions_${new Date().toLocaleDateString('en-MY').replace(/\//g, '-')}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+        UI.toast.success(`Exported ${filtered.length} promotion${filtered.length !== 1 ? 's' : ''}`);
+    };
+
+    // ========== END MONTHLY PROMOTIONS TAB ==========
 
     const openCreatePackageModal = async (id = null) => {
         const isEdit = !!id;
@@ -28305,6 +28936,7 @@ const initImportDemoData = async () => {
         // Phase 16 WhatsApp Integration Functions
         showWhatsAppIntegration,
         saveWhatsAppConnection,
+        _callWhatsAppAPI,
         testWhatsAppConnection,
         verifyWebhook,
         copyWebhookUrl,
@@ -28716,6 +29348,20 @@ const initImportDemoData = async () => {
         viewPackageCustomers,
         filterPackages,
 
+        // Monthly Promotions ledger
+        renderMonthlyPromotionsTab,
+        renderMonthlyPromotionRow,
+        filterMonthlyPromotions,
+        viewMonthlyPromotionDetails,
+        openMonthlyPromotionModal,
+        addPromoProductRow,
+        insertPromoVariable,
+        saveMonthlyPromotion,
+        archiveMonthlyPromotion,
+        duplicateMonthlyPromotion,
+        deleteMonthlyPromotion,
+        exportMonthlyPromotions,
+
         // Phase 13: Import & Reassignment
         showImportDashboard,
         openImportWizard,
@@ -29092,6 +29738,7 @@ const initImportDemoData = async () => {
         populateLoginDropdown,
         updateNavVisibility,
         setRoleFilter,
+        setAgentFilter,
         setTimeFilter,
         setCustomDateRange,
         refreshKPIDashboard,
@@ -29176,7 +29823,9 @@ const monitorLoginAttempts = async () => {
             await AppDataStore.create('login_attempts', { attempts_data: failedAttempts, updated_at: new Date().toISOString() });
         }
     } catch (_) {}
-    localStorage.setItem('login_attempts', JSON.stringify(failedAttempts));
+    // No localStorage fallback — failed login attempts must be server-authoritative to
+    // prevent client-side bypass by clearing storage. Previously written to localStorage
+    // which allowed attackers to reset the lockout counter at will.
 };
 
 const checkForSecurityIncidents = async () => {
@@ -29230,7 +29879,6 @@ const scheduleRetentionJobs = async () => {
             const retentionConfig = (configs || []).find(c => c.config_key === 'last_retention_run');
             if (retentionConfig) lastRun = retentionConfig.config_value;
         } catch (_) {}
-        if (!lastRun) lastRun = localStorage.getItem('last_retention_run');
         if (!lastRun || Date.now() - parseInt(lastRun) > 24 * 60 * 60 * 1000) {
             RetentionPolicy.applyRetention();
             const now = Date.now().toString();
@@ -29243,7 +29891,8 @@ const scheduleRetentionJobs = async () => {
                     await AppDataStore.create('system_config', { config_key: 'last_retention_run', config_value: now, updated_at: new Date().toISOString() });
                 }
             } catch (_) {}
-            localStorage.setItem('last_retention_run', now);
+            // No localStorage fallback — retention run timestamp must be shared across
+            // all admin devices so the job doesn't run multiple times per day.
         }
     };
     await runRetention();
