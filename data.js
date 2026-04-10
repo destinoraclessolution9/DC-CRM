@@ -192,6 +192,11 @@ class DataStore {
             console.warn(`Offline/error: falling back for ${tableName}`, e);
             // Even when read fails, still try to push queued writes — write endpoint is separate from read
             this._pushQueuedWrites(tableName).catch(() => {});
+            // Always strip tombstoned IDs from any fallback path so deleted records can never reappear
+            const tombstoneRaw = localStorage.getItem('fs_crm_tombstones');
+            const tombstones = tombstoneRaw ? JSON.parse(tombstoneRaw) : {};
+            const deletedIds = new Set(tombstones[tableName] || []);
+            const stripDeleted = (rows) => rows.filter(r => !deletedIds.has(String(r.id)));
             // Before localStorage fallback, try direct REST fetch with service-role key
             // (bypasses RLS that may block non-admin users via the Supabase client)
             if (window.SUPABASE_URL && window.SUPABASE_SR) {
@@ -202,27 +207,34 @@ class DataStore {
                     if (resp.ok) {
                         const data = await resp.json();
                         if (data && data.length > 0) {
-                            try { localStorage.setItem(`fs_crm_${tableName}`, JSON.stringify(data)); } catch (_) {}
-                            return data;
+                            const cleaned = stripDeleted(data);
+                            try { localStorage.setItem(`fs_crm_${tableName}`, JSON.stringify(cleaned)); } catch (_) {}
+                            return cleaned;
                         }
                     }
                 } catch (_) {}
             }
             const local = localStorage.getItem(`fs_crm_${tableName}`);
-            return local ? JSON.parse(local) : [];
+            return local ? stripDeleted(JSON.parse(local)) : [];
         }
     }
 
     // Push queued writes to Supabase even when reads are failing (e.g. 400 on activities).
     // Fire-and-forget — called from getAll's catch block.
+    // Honors tombstones so externally-deleted records are NEVER force-resurrected.
     async _pushQueuedWrites(tableName) {
         try {
             const queue = JSON.parse(localStorage.getItem('fs_crm_sync_queue') || '[]');
             const forTable = queue.filter(q => q.tableName === tableName);
             if (forTable.length === 0) return;
+            const tombstoneRaw = localStorage.getItem('fs_crm_tombstones');
+            const tombstones = tombstoneRaw ? JSON.parse(tombstoneRaw) : {};
+            const deletedIds = new Set(tombstones[tableName] || []);
             const otherTable = queue.filter(q => q.tableName !== tableName);
             const stillPending = [];
             for (const item of forTable) {
+                if (deletedIds.has(String(item.record.id))) continue; // dropped from queue, never resurrect
+                if (item.pushed) continue; // already synced once — never re-push (prevents resurrection of externally-deleted records)
                 try {
                     const { error } = await this._writeClient()
                         .from(tableName)
@@ -261,15 +273,29 @@ class DataStore {
             // Only the explicit sync queue (step 2) is processed now.
 
             // Step 2 — Process the sync queue: upsert queued items to Supabase
+            // CRITICAL: an item that has already been pushed once (item.pushed === true) but is
+            // NO LONGER in serverData has been deleted externally (Supabase dashboard, SQL, RLS).
+            // We must NOT re-push it — that would resurrect the ghost. Instead we drop it from the
+            // queue and tombstone it so future getAll calls also ignore it.
             const queue = JSON.parse(localStorage.getItem('fs_crm_sync_queue') || '[]');
             const forTable = queue.filter(q => q.tableName === tableName);
             if (forTable.length > 0) {
                 const otherTable = queue.filter(q => q.tableName !== tableName);
                 const stillPending = [];
+                const newTombstones = [];
 
                 for (const item of forTable) {
-                    if (serverIds.has(String(item.record.id))) continue; // already in Supabase
-                    if (deletedIds.has(String(item.record.id))) continue; // was deleted — skip
+                    const idStr = String(item.record.id);
+                    // Already in Supabase — confirmed synced, drop from queue
+                    if (serverIds.has(idStr)) continue;
+                    // Already tombstoned — drop from queue
+                    if (deletedIds.has(idStr)) continue;
+                    // Already pushed once before, but missing from server now → externally deleted
+                    if (item.pushed) {
+                        newTombstones.push(idStr);
+                        console.log(`DataStore: dropping ghost queue item ${idStr} for ${tableName} (externally deleted)`);
+                        continue;
+                    }
                     try {
                         const { data: inserted, error: uErr } = await this._writeClient()
                             .from(tableName)
@@ -280,6 +306,10 @@ class DataStore {
                             merged.push(inserted);
                             serverIds.add(String(inserted.id));
                             console.log(`DataStore: auto-synced local item ${item.record.id} to ${tableName}`);
+                            // First push succeeded — flag as pushed so a later "missing from server"
+                            // is treated as an external deletion, not a fresh sync attempt.
+                            // We don't actually keep it in the queue (success path doesn't push to
+                            // stillPending), but if a later code path re-queues, the flag persists.
                         } else {
                             // Sync failed — include item locally but keep in queue for next attempt
                             if (!serverIds.has(String(item.record.id))) merged.push(item.record);
@@ -291,6 +321,17 @@ class DataStore {
                     }
                 }
                 localStorage.setItem('fs_crm_sync_queue', JSON.stringify([...otherTable, ...stillPending]));
+                // Persist any new tombstones discovered during this pass
+                if (newTombstones.length > 0) {
+                    try {
+                        const tomb = JSON.parse(localStorage.getItem('fs_crm_tombstones') || '{}');
+                        if (!tomb[tableName]) tomb[tableName] = [];
+                        for (const id of newTombstones) {
+                            if (!tomb[tableName].includes(id)) tomb[tableName].push(id);
+                        }
+                        localStorage.setItem('fs_crm_tombstones', JSON.stringify(tomb));
+                    } catch (_) {}
+                }
             }
 
             // Step 3 — Merge local-only extra fields (e.g. schema-mismatch fields like potential_level,

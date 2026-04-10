@@ -129,10 +129,32 @@ const appLogic = (() => {
     let _filters = { agent: 'all', type: 'all', from: '', to: '' };
 
     // ========== ROLE HELPERS ==========
-    const isSystemAdmin = (user) => user?.role === 'super_admin' || user?.role === 'admin' || user?.role?.includes('Level 1');
-    const isMarketingManager = (user) => user?.role === 'marketing_manager' || user?.role?.includes('Level 2');
-    const isAgent = (user) => user?.role === 'consultant' || user?.role === 'agent' || user?.role?.includes('Level');
-    const isManagement = (user) => isSystemAdmin(user) || isMarketingManager(user) || user?.role?.includes('Level 3');
+    // Extract numeric level from a role string. "Level 10 Agent" -> 10, "Level 1 Super Admin" -> 1.
+    // Falls back to legacy named roles. Returns 99 (lowest) when nothing matches.
+    // CRITICAL: must use word boundary regex — `'Level 10 Agent'.includes('Level 1')` is TRUE,
+    // which used to silently grant Level 10/11/12/13/14 users full Super Admin visibility.
+    const _getUserLevel = (user) => {
+        if (!user?.role) return 99;
+        const m = String(user.role).match(/Level\s+(\d+)\b/i);
+        if (m) return parseInt(m[1], 10);
+        const r = String(user.role).toLowerCase();
+        if (r === 'super_admin' || r === 'admin') return 1;
+        if (r === 'marketing_manager') return 2;
+        if (r === 'manager') return 4;
+        if (r === 'team_leader') return 5;
+        if (r === 'consultant') return 7;
+        if (r === 'agent') return 10;
+        if (r === 'customer') return 13;
+        if (r === 'referrer') return 14;
+        return 99;
+    };
+    const isSystemAdmin = (user) => _getUserLevel(user) === 1;
+    const isMarketingManager = (user) => _getUserLevel(user) === 2;
+    const isAgent = (user) => {
+        const lvl = _getUserLevel(user);
+        return lvl >= 3 && lvl <= 12;
+    };
+    const isManagement = (user) => _getUserLevel(user) <= 3;
 
     // Phase 10: Search Panel State
     let _searchPanelVisible = false;
@@ -245,14 +267,17 @@ const appLogic = (() => {
         if (!user) return false;
         const visibleIds = await getVisibleUserIds(user);
         if (visibleIds === 'all') return true;
-        return visibleIds.includes(customer.responsible_agent_id);
+        return visibleIds.includes(customer.responsible_agent_id) || visibleIds.includes(customer.agent_id);
     };
 
     const getVisibleCustomers = async () => {
-        if (_currentUser && (isSystemAdmin(_currentUser) || isMarketingManager(_currentUser) || _currentUser.role === 'admin')) {
-            return await AppDataStore.getAll('customers');
-        }
-        return (await AppDataStore.getAll('customers')).filter(c => c.agent_id === _currentUser?.id);
+        const all = await AppDataStore.getAll('customers');
+        const user = _currentUser;
+        if (!user) return [];
+        const visibleIds = await getVisibleUserIds(user);
+        if (visibleIds === 'all') return all;
+        // Customers may store the owning agent on either responsible_agent_id (new) or agent_id (legacy)
+        return all.filter(c => visibleIds.includes(c.responsible_agent_id) || visibleIds.includes(c.agent_id));
     };
 
     // Role-based referral visibility:
