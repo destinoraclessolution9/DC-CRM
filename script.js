@@ -4977,15 +4977,24 @@ In a production system, this would show the actual file contents.
         // Combine lead scores and churn risks for display
         const predictions = [];
 
+        // Pre-load all data in parallel
+        const [allLeadScores, allChurnRisks, allProspectsAI, allCustomersAI] = await Promise.all([
+            AppDataStore.getAll('lead_scores'),
+            AppDataStore.getAll('churn_risk'),
+            AppDataStore.getAll('prospects'),
+            AppDataStore.getAll('customers'),
+        ]);
+        const prospectMapAI = new Map((allProspectsAI || []).map(p => [String(p.id), p]));
+        const customerMapAI = new Map((allCustomersAI || []).map(c => [String(c.id), c]));
+
         // Add top lead scores
-        const allLeadScores = await AppDataStore.getAll('lead_scores');
         const leadScores = (allLeadScores || [])
             .filter(l => l.prospect_id)
             .sort((a, b) => b.overall_score - a.overall_score)
             .slice(0, 3);
 
         for (const score of leadScores) {
-            const prospect = await AppDataStore.getById('prospects', score.prospect_id);
+            const prospect = prospectMapAI.get(String(score.prospect_id));
             if (prospect) {
                 predictions.push({
                     name: prospect.full_name,
@@ -4999,13 +5008,12 @@ In a production system, this would show the actual file contents.
         }
 
         // Add top churn risks
-        const allChurnRisks = await AppDataStore.getAll('churn_risk');
         const churnRisks = (allChurnRisks || [])
             .sort((a, b) => b.risk_score - a.risk_score)
             .slice(0, 2);
 
         for (const risk of churnRisks) {
-            const customer = await AppDataStore.getById('customers', risk.customer_id);
+            const customer = customerMapAI.get(String(risk.customer_id));
             if (customer) {
                 predictions.push({
                     name: customer.full_name,
@@ -5045,16 +5053,20 @@ In a production system, this would show the actual file contents.
         const allModels = await AppDataStore.getAll('ai_models');
         const model = (allModels || []).find(m => m.model_name === 'lead_scoring' && m.is_active);
 
-        // Get recent lead scores
-        const allLeadScores = await AppDataStore.getAll('lead_scores');
-        const leadScores = (allLeadScores || [])
+        // Get recent lead scores — pre-load prospects in parallel
+        const [allLeadScoresLS, allProspectsLS] = await Promise.all([
+            AppDataStore.getAll('lead_scores'),
+            AppDataStore.getAll('prospects'),
+        ]);
+        const prospectMapLS = new Map((allProspectsLS || []).map(p => [String(p.id), p]));
+        const leadScores = (allLeadScoresLS || [])
             .filter(l => l.prospect_id)
             .sort((a, b) => new Date(b.score_date) - new Date(a.score_date))
             .slice(0, 10);
 
         let scoresHTML = '';
         for (const score of leadScores) {
-            const prospect = await AppDataStore.getById('prospects', score.prospect_id);
+            const prospect = prospectMapLS.get(String(score.prospect_id));
             if (!prospect) continue;
 
             const trendIcon = score.trend === 'up' ? '⬆️' : score.trend === 'down' ? '⬇️' : '➡️';
@@ -5540,10 +5552,13 @@ In a production system, this would show the actual file contents.
         const lowRisk = churnRisks.filter(c => c.risk_level === 'low').length;
         const total = churnRisks.length || 1; // avoid div by 0
 
+        const allCustomersCRA = await AppDataStore.getAll('customers');
+        const customerMapCRA = new Map((allCustomersCRA || []).map(c => [String(c.id), c]));
+
         let risksHTML = '';
         const topRisks = churnRisks.slice(0, 5);
         for (const risk of topRisks) {
-            const customer = await AppDataStore.getById('customers', risk.customer_id);
+            const customer = customerMapCRA.get(String(risk.customer_id));
             if (!customer) continue;
 
             const riskClass = risk.risk_level === 'high' ? 'high' : risk.risk_level === 'medium' ? 'medium' : 'low';
@@ -9943,8 +9958,14 @@ function _wireLoginBtn() {
         html += '</div>';
         html += '<div class="week-body">';
 
-        // Get all activities
-        const activities = await AppDataStore.getAll('activities');
+        // Pre-load all lookup data in parallel
+        const [activities, allProspectsWV, allCustomersWV] = await Promise.all([
+            AppDataStore.getAll('activities'),
+            AppDataStore.getAll('prospects'),
+            AppDataStore.getAll('customers'),
+        ]);
+        const prospectMapWV = new Map((allProspectsWV || []).map(p => [String(p.id), p]));
+        const customerMapWV = new Map((allCustomersWV || []).map(c => [String(c.id), c]));
 
         // Time async slots (8 AM to 8 PM)
         for (let hour = 8; hour <= 20; hour++) {
@@ -9965,8 +9986,8 @@ function _wireLoginBtn() {
 
                 html += '<div class="week-hour-cell">';
                 for (const a of dayActivities) {
-                    const prospect = a.prospect_id ? await AppDataStore.getById('prospects', a.prospect_id) : null;
-                    const customer = a.customer_id ? await AppDataStore.getById('customers', a.customer_id) : null;
+                    const prospect = a.prospect_id ? prospectMapWV.get(String(a.prospect_id)) : null;
+                    const customer = a.customer_id ? customerMapWV.get(String(a.customer_id)) : null;
                     const name = prospect?.full_name || customer?.full_name || 'Activity';
 
                     html += `
@@ -9987,7 +10008,16 @@ function _wireLoginBtn() {
     const renderDayView = async () => {
         const grid = document.getElementById('calendar-grid');
         const todayStr = _currentDate.toISOString().split('T')[0];
-        const dayActivities = (await AppDataStore.getAll('activities')).filter(a => a.activity_date === todayStr);
+        const [allActivitiesDV, allProspectsDV, allCustomersDV, allUsersDV] = await Promise.all([
+            AppDataStore.getAll('activities'),
+            AppDataStore.getAll('prospects'),
+            AppDataStore.getAll('customers'),
+            AppDataStore.getAll('users'),
+        ]);
+        const dayActivities = (allActivitiesDV || []).filter(a => a.activity_date === todayStr);
+        const prospectMapDV = new Map((allProspectsDV || []).map(p => [String(p.id), p]));
+        const customerMapDV = new Map((allCustomersDV || []).map(c => [String(c.id), c]));
+        const userMapDV = new Map((allUsersDV || []).map(u => [String(u.id), u]));
 
         // Calculate summary stats
         const totalMeetings = dayActivities.filter(a => a.activity_type === 'FTF').length;
@@ -10001,7 +10031,7 @@ function _wireLoginBtn() {
                         <i class="fas fa-plus"></i> Add Activity
                     </button>
                 </div>
-                
+
                 <div class="day-summary">
                     <div class="summary-card">
                         <div class="summary-label">Total Activities</div>
@@ -10016,7 +10046,7 @@ function _wireLoginBtn() {
                         <div class="summary-value">${totalCalls}</div>
                     </div>
                 </div>
-                
+
                 <div class="timeline">
         `;
 
@@ -10032,10 +10062,10 @@ function _wireLoginBtn() {
             `;
 
             for (const a of hourActivities) {
-                const prospect = a.prospect_id ? await AppDataStore.getById('prospects', a.prospect_id) : null;
-                const customer = a.customer_id ? await AppDataStore.getById('customers', a.customer_id) : null;
+                const prospect = a.prospect_id ? prospectMapDV.get(String(a.prospect_id)) : null;
+                const customer = a.customer_id ? customerMapDV.get(String(a.customer_id)) : null;
                 const name = prospect?.full_name || customer?.full_name || '';
-                const agent = await AppDataStore.getById('users', a.lead_agent_id);
+                const agent = userMapDV.get(String(a.lead_agent_id));
 
                 html += `
                     <div class="timeline-activity ${a.activity_type.toLowerCase()}" onclick="app.viewActivityDetails(${a.id})">
@@ -10056,16 +10086,21 @@ function _wireLoginBtn() {
     const generateDayHours = async () => {
         let hoursHtml = '';
         const todayStr = _currentDate.toISOString().split('T')[0];
-        const dayActs = (await AppDataStore.getAll('activities')).filter(a => a.activity_date === todayStr);
+        const [allActsGDH, allProspectsGDH] = await Promise.all([
+            AppDataStore.getAll('activities'),
+            AppDataStore.getAll('prospects'),
+        ]);
+        const dayActs = (allActsGDH || []).filter(a => a.activity_date === todayStr);
+        const prospectMapGDH = new Map((allProspectsGDH || []).map(p => [String(p.id), p]));
 
         for (let i = 8; i <= 20; i++) {
             const hourStr = `${i.toString().padStart(2, '0')}:00`;
             const actsAtHour = dayActs.filter(a => a.start_time.startsWith(i.toString().padStart(2, '0')));
 
-            const hourContent = await Promise.all(actsAtHour.map(async a => {
+            const hourContent = actsAtHour.map(a => {
                 let prospectInfo = '';
                 if (a.prospect_id) {
-                    const p = await AppDataStore.getById('prospects', a.prospect_id);
+                    const p = prospectMapGDH.get(String(a.prospect_id));
                     if (p) prospectInfo = `(${p.full_name})`;
                 }
                 return `
@@ -10073,7 +10108,7 @@ function _wireLoginBtn() {
                         <strong>${a.activity_type}</strong>: ${a.activity_title} ${prospectInfo}
                     </div>
                 `;
-            }));
+            });
 
             hoursHtml += `
                 <div class="day-view-hour">
@@ -17741,13 +17776,16 @@ const html = `
 
 
 const renderCurrentAssignments = async (agentId) => {
-    const assignments = await AppDataStore.query('assignments', { agent_id: agentId });
+    const [assignments, allProspectsCA] = await Promise.all([
+        AppDataStore.query('assignments', { agent_id: agentId }),
+        AppDataStore.getAll('prospects'),
+    ]);
     if (assignments.length === 0) return '<p>No active assignments.</p>';
+    const prospectMapCA = new Map((allProspectsCA || []).map(p => [String(p.id), p]));
 
-    // Use for...of to avoid complex Promise.all, or use Promise.all with async map
     let itemsHtml = '';
     for (const a of assignments) {
-        const p = await AppDataStore.getById('prospects', a.prospect_id);
+        const p = prospectMapCA.get(String(a.prospect_id));
         itemsHtml += `
             <div class="assignment-item" onclick="app.showProspectDetail(${a.prospect_id})">
                 <div>

@@ -51,6 +51,16 @@ class DataStore {
         this.initialized = false;
         this._events = {};
         this._srClient = null; // Service-role client (bypasses RLS for writes)
+
+        // ── In-memory cache ──────────────────────────────────────────────
+        // Keyed by tableName → { data: [], ts: Date.now() }
+        // TTL: 30 s for mutable tables, 120 s for near-static ones.
+        this._cache = new Map();
+        this._cacheTTL = 30_000; // ms
+        this._staticTables = new Set([
+            'users', 'roles', 'teams', 'event_categories', 'event_templates',
+            'products', 'appointment_locations', 'venues', 'ai_models',
+        ]);
     }
 
     on(event, callback) {
@@ -160,7 +170,34 @@ class DataStore {
         } catch (_) {}
     }
 
+    // ── Cache helpers ────────────────────────────────────────────────────
+    _cacheGet(tableName) {
+        const entry = this._cache.get(tableName);
+        if (!entry) return null;
+        const ttl = this._staticTables.has(tableName) ? 120_000 : this._cacheTTL;
+        if (Date.now() - entry.ts > ttl) { this._cache.delete(tableName); return null; }
+        return entry.data;
+    }
+
+    _cacheSet(tableName, data) {
+        this._cache.set(tableName, { data, ts: Date.now() });
+    }
+
+    // Invalidate cache for a table (and any table that depends on it)
+    invalidateCache(tableName) {
+        this._cache.delete(tableName);
+    }
+
+    // Force-expire everything (e.g. after bulk import)
+    clearCache() {
+        this._cache.clear();
+    }
+
     async getAll(tableName) {
+        // Return cached data if still fresh — avoids redundant Supabase round trips
+        const cached = this._cacheGet(tableName);
+        if (cached) return cached;
+
         try {
             const { data, error } = await this._readClient().from(tableName).select('*');
             if (error) throw error;
@@ -185,10 +222,12 @@ class DataStore {
                         return local ? { ...local, ...r } : r;
                     });
                     localStorage.setItem(`fs_crm_${tableName}`, JSON.stringify(merged));
+                    this._cacheSet(tableName, merged);
                     return merged;
                 }
             } catch (_) {}
             try { localStorage.setItem(`fs_crm_${tableName}`, JSON.stringify(result)); } catch (_) {}
+            this._cacheSet(tableName, result);
             return result;
         } catch (e) {
             console.warn(`Offline/error: falling back for ${tableName}`, e);
@@ -363,6 +402,14 @@ class DataStore {
 
     async get(tableName, id) {
         if (id == null || id === 'null' || id === 'undefined') return null;
+
+        // If the whole table is already cached, do a synchronous in-memory lookup
+        // instead of a network round trip.
+        const cachedTable = this._cacheGet(tableName);
+        if (cachedTable) {
+            return cachedTable.find(r => String(r.id) === String(id)) || null;
+        }
+
         try {
             const { data, error } = await this._readClient()
                 .from(tableName)
@@ -453,6 +500,7 @@ class DataStore {
                     all.push({ ...insertData, ...dataToInsert, ...data });
                     localStorage.setItem(key, JSON.stringify(all));
                 } catch (_) {}
+                this.invalidateCache(tableName);
                 this.emit('dataChanged', { action: 'add', table: tableName, record: data });
                 return data;
             } catch (e) {
@@ -490,6 +538,7 @@ class DataStore {
             syncQueue.push({ tableName, record: dataToInsert, timestamp: Date.now() });
             localStorage.setItem('fs_crm_sync_queue', JSON.stringify(syncQueue));
         } catch (_) {}
+        this.invalidateCache(tableName);
         this.emit('dataChanged', { action: 'add', table: tableName, record: dataToInsert });
         return dataToInsert;
     }
@@ -512,6 +561,7 @@ class DataStore {
                     const full = { ...data, ...updates };
                     if (idx >= 0) { all[idx] = full; localStorage.setItem(key, JSON.stringify(all)); }
                 } catch (_) {}
+                this.invalidateCache(tableName);
                 this.emit('dataChanged', { action: 'update', table: tableName, record: data });
                 return data;
             } catch (e) {
@@ -547,6 +597,7 @@ class DataStore {
             localStorage.setItem('fs_crm_sync_queue', JSON.stringify(syncQueue));
         } catch (_) {}
         const record = { id, ...updates };
+        this.invalidateCache(tableName);
         this.emit('dataChanged', { action: 'update', table: tableName, record });
         return record;
     }
@@ -582,6 +633,7 @@ class DataStore {
             localStorage.setItem('fs_crm_tombstones', JSON.stringify(tombstones));
         } catch (_) {}
 
+        this.invalidateCache(tableName);
         this.emit('dataChanged', { action: 'delete', table: tableName, id });
     }
 
