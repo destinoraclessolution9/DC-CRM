@@ -3560,7 +3560,13 @@ In a production system, this would show the actual file contents.
                 }
 
                 this.lastSyncTime = new Date().toISOString();
-                localStorage.setItem('last_google_sync', this.lastSyncTime);
+                // Persist last sync time to Supabase via integration_connections.last_sync_at
+                try {
+                    const _syncConn = await getGoogleConnection();
+                    if (_syncConn) {
+                        AppDataStore.update('integration_connections', _syncConn.id, { last_sync_at: this.lastSyncTime }).catch(() => {});
+                    }
+                } catch (_) {}
 
                 if (created || updated || deleted) {
                     // Only show toast if something actually synced to avoid spam
@@ -3582,7 +3588,7 @@ In a production system, this would show the actual file contents.
                 const googleEvents = await this.googleCalendar.listEvents(timeMin, timeMax);
                 if (!googleEvents.length) { this.syncInProgress = false; return; }
 
-                const syncLog = this.getSyncLog();
+                const syncLog = await this.getSyncLog();
                 let imported = 0;
                 for (const gEvent of googleEvents) {
                     // Skip events that originated from CRM
@@ -3594,7 +3600,7 @@ In a production system, this would show the actual file contents.
                     const startTime = gEvent.start?.dateTime?.split('T')[1]?.substring(0, 5) || '09:00';
                     const endTime = gEvent.end?.dateTime?.split('T')[1]?.substring(0, 5) || '10:00';
 
-                    await AppDataStore.create('activities', {
+                    const activity = await AppDataStore.create('activities', {
                         activity_title: gEvent.summary || 'Google Calendar Event',
                         activity_type: 'Call',
                         activity_date: startDate,
@@ -3608,10 +3614,10 @@ In a production system, this would show the actual file contents.
                         created_at: new Date().toISOString()
                     });
 
-                    syncLog.push({ google_event_id: gEvent.id, last_synced_at: new Date().toISOString() });
+                    // Record import in sync_history (was localStorage-only before)
+                    await this.addSyncRecord(activity?.id, gEvent.id, 'google_to_crm');
                     imported++;
                 }
-                localStorage.setItem('google_sync_log', JSON.stringify(syncLog));
                 if (imported > 0) UI.toast.success(`Imported ${imported} events from Google Calendar`);
             } catch (error) {
                 console.error('Import error:', error);
@@ -3627,69 +3633,47 @@ In a production system, this would show the actual file contents.
             return activityUpdated > syncUpdated;
         }
 
-        getSyncLog() {
-            const log = localStorage.getItem('google_sync_log');
-            return log ? JSON.parse(log) : [];
+        async getSyncLog() {
+            try {
+                const records = await AppDataStore.getAll('sync_history');
+                return (records || []).map(r => ({
+                    activity_id: r.activity_id,
+                    google_event_id: r.google_event_id,
+                    last_synced_at: r.synced_at || r.last_synced_at
+                }));
+            } catch (_) { return []; }
         }
 
-        async addSyncRecord(activityId, googleEventId) {
-            const log = this.getSyncLog();
-            log.push({
-                activity_id: activityId,
-                google_event_id: googleEventId,
-                last_synced_at: new Date().toISOString()
-            });
-            localStorage.setItem('google_sync_log', JSON.stringify(log));
-
-            // Also add to sync_history table
-            const connection = await getGoogleConnection();
-            if (connection && _currentUser) {
-                await AppDataStore.create('sync_history', {
-                    integration_id: connection.integration_id,
-                    user_id: _currentUser.id,
-                    activity_id: activityId,
-                    google_event_id: googleEventId,
-                    direction: 'crm_to_google',
-                    status: 'success',
-                    error_message: '',
-                    synced_at: new Date().toISOString()
-                });
-            }
+        async addSyncRecord(activityId, googleEventId, direction = 'crm_to_google') {
+            try {
+                const connection = await getGoogleConnection();
+                if (connection && _currentUser) {
+                    await AppDataStore.create('sync_history', {
+                        integration_id: connection.integration_id,
+                        user_id: _currentUser.id,
+                        activity_id: activityId,
+                        google_event_id: googleEventId,
+                        direction,
+                        status: 'success',
+                        error_message: '',
+                        synced_at: new Date().toISOString()
+                    });
+                }
+            } catch (_) {}
         }
 
         async updateSyncRecord(activityId, googleEventId) {
-            const log = this.getSyncLog();
-            const record = log.find(r => r.activity_id === activityId);
-            if (record) {
-                record.last_synced_at = new Date().toISOString();
-            } else {
-                log.push({
-                    activity_id: activityId,
-                    google_event_id: googleEventId,
-                    last_synced_at: new Date().toISOString()
-                });
-            }
-            localStorage.setItem('google_sync_log', JSON.stringify(log));
-
-            const connection = await getGoogleConnection();
-            if (connection && _currentUser) {
-                await AppDataStore.create('sync_history', {
-                    integration_id: connection.integration_id,
-                    user_id: _currentUser.id,
-                    activity_id: activityId,
-                    google_event_id: googleEventId,
-                    direction: 'crm_to_google',
-                    status: 'success',
-                    error_message: '',
-                    synced_at: new Date().toISOString()
-                });
-            }
+            // sync_history rows are append-only; the latest row wins for the same activity_id.
+            await this.addSyncRecord(activityId, googleEventId, 'crm_to_google');
         }
 
-        removeSyncRecord(activityId) {
-            const log = this.getSyncLog();
-            const filtered = log.filter(r => r.activity_id !== activityId);
-            localStorage.setItem('google_sync_log', JSON.stringify(filtered));
+        async removeSyncRecord(activityId) {
+            try {
+                const records = await AppDataStore.query('sync_history', { activity_id: activityId });
+                for (const r of records || []) {
+                    await AppDataStore.delete('sync_history', r.id);
+                }
+            } catch (_) {}
         }
 
         resolveConflict(choice, activityId, eventId) {
@@ -29795,7 +29779,9 @@ const monitorLoginAttempts = async () => {
             await AppDataStore.create('login_attempts', { attempts_data: failedAttempts, updated_at: new Date().toISOString() });
         }
     } catch (_) {}
-    localStorage.setItem('login_attempts', JSON.stringify(failedAttempts));
+    // No localStorage fallback — failed login attempts must be server-authoritative to
+    // prevent client-side bypass by clearing storage. Previously written to localStorage
+    // which allowed attackers to reset the lockout counter at will.
 };
 
 const checkForSecurityIncidents = async () => {
@@ -29849,7 +29835,6 @@ const scheduleRetentionJobs = async () => {
             const retentionConfig = (configs || []).find(c => c.config_key === 'last_retention_run');
             if (retentionConfig) lastRun = retentionConfig.config_value;
         } catch (_) {}
-        if (!lastRun) lastRun = localStorage.getItem('last_retention_run');
         if (!lastRun || Date.now() - parseInt(lastRun) > 24 * 60 * 60 * 1000) {
             RetentionPolicy.applyRetention();
             const now = Date.now().toString();
@@ -29862,7 +29847,8 @@ const scheduleRetentionJobs = async () => {
                     await AppDataStore.create('system_config', { config_key: 'last_retention_run', config_value: now, updated_at: new Date().toISOString() });
                 }
             } catch (_) {}
-            localStorage.setItem('last_retention_run', now);
+            // No localStorage fallback — retention run timestamp must be shared across
+            // all admin devices so the job doesn't run multiple times per day.
         }
     };
     await runRetention();
