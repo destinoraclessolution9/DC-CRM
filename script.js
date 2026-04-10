@@ -22957,7 +22957,7 @@ const exportKPIReport = async (format) => {
                 <div style="display: flex; gap: 15px; margin-bottom: 20px;">
                     <div style="position: relative; flex: 1;">
                         <i class="fas fa-search" style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--gray-400);"></i>
-                        <input type="text" id="promo-search" class="form-control" placeholder="Search by promotion name or package..." style="padding-left: 35px;" onkeyup="app.filterMonthlyPromotions()">
+                        <input type="text" id="promo-search" class="form-control" placeholder="Search by promotion name or package..." style="padding-left: 35px;" oninput="app.debounceCall('promo-search', app.filterMonthlyPromotions, 220)">
                     </div>
                     <select id="promo-status-filter" class="form-control" style="width: 170px;" onchange="app.filterMonthlyPromotions()">
                         <option value="all">All Status</option>
