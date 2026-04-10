@@ -10041,9 +10041,23 @@ function _wireLoginBtn() {
 
         let attendeeHtml = '';
         if (activity.activity_type === 'EVENT' && activity.event_id) {
-            const attendees = (await AppDataStore.getAll('event_attendees')).filter(a =>
+            // Attendees are shared across ALL activity rows that point to the same event on
+            // the same date. Each agent who joins an event creates their own activity row, but
+            // they should all see the same registered attendees. We scope by event_date so a
+            // recurring event still keeps each session's attendees separate.
+            const allActivities = await AppDataStore.getAll('activities');
+            const sameSessionActivityIds = new Set(
+                allActivities
+                    .filter(a => String(a.event_id) === String(activity.event_id)
+                        && a.activity_date === activity.activity_date)
+                    .map(a => String(a.id))
+            );
+            sameSessionActivityIds.add(String(activity.id));
+
+            const allAttendees = await AppDataStore.getAll('event_attendees');
+            const attendees = allAttendees.filter(a =>
                 String(a.event_id) === String(activity.event_id) &&
-                String(a.activity_id) === String(activity.id)
+                (!a.activity_id || sameSessionActivityIds.has(String(a.activity_id)))
             );
             if (attendees.length > 0) {
                 const prospects = await AppDataStore.getAll('prospects');
@@ -11940,6 +11954,9 @@ function _wireLoginBtn() {
             await AppDataStore.create('event_attendees', {
                 event_id: eventId,
                 activity_id: activityId,
+                // attendee_id is the canonical Supabase column — must be set so the record
+                // remains linked to the prospect when other columns get stripped on insert.
+                attendee_id: prospect.id,
                 entity_id: prospect.id,
                 entity_name: prospect.full_name || '',
                 attendee_type: 'prospect',
@@ -11965,6 +11982,10 @@ function _wireLoginBtn() {
         await AppDataStore.create('event_attendees', {
             event_id: eventId,
             activity_id: activityId,
+            // attendee_id is the actual Supabase schema column — entity_id gets stripped
+            // by data.js because it doesn't exist in the table, which is why prior writes
+            // persisted with no link to the prospect.
+            attendee_id: s.id,
             entity_id: s.id,
             entity_name: s.name || s.full_name || '',
             attendee_type: s.type,
