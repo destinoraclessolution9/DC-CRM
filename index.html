@@ -9,6 +9,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="icon" href="favicon.ico" type="image/x-icon">
     <link rel="stylesheet" href="styles-fixed.css">
+    <link rel="stylesheet" href="styles-mobile.css">
     <!-- Comment out manifest to avoid CORS error when running locally -->
     <!-- <link rel="manifest" href="manifest.json"> -->
 </head>
@@ -28,6 +29,28 @@
             <p class="login-hint">Enter your email and password to continue</p>
         </div>
     </div>
+    <!-- Mobile Side Drawer -->
+    <div class="mobile-drawer-overlay" id="mobile-drawer-overlay" onclick="app.closeMobileDrawer()"></div>
+    <nav class="mobile-drawer" id="mobile-drawer">
+        <div class="mobile-drawer-header">
+            <i class="fas fa-dharmachakra"></i>
+            <span>FENG SHUI CRM</span>
+        </div>
+        <div class="mobile-drawer-body" id="mobile-drawer-body">
+            <!-- Populated by app.renderMobileDrawer() -->
+        </div>
+        <div class="mobile-drawer-footer" id="mobile-drawer-footer">
+            <img id="drawer-user-avatar" src="https://ui-avatars.com/api/?name=Guest&background=8B0000&color=fff" alt="Avatar">
+            <div class="mobile-drawer-footer-info">
+                <div class="mobile-drawer-footer-name" id="drawer-user-name">Guest</div>
+                <div class="mobile-drawer-footer-role" id="drawer-user-role">—</div>
+            </div>
+            <button class="mobile-drawer-logout" onclick="app.logout()" title="Logout">
+                <i class="fas fa-sign-out-alt"></i>
+            </button>
+        </div>
+    </nav>
+
     <div class="app-shell" id="app-shell" style="display: none;">
         <!-- Top Navigation -->
         <nav class="top-bar">

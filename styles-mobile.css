@@ -1,0 +1,956 @@
+/* ============================================================
+   FENG SHUI CRM — Mobile / Phone Layout  (styles-mobile.css)
+   Auto-activates at ≤ 768px viewport width.
+   Load AFTER styles-fixed.css so these rules override.
+   ============================================================ */
+
+/* ──────────────────────────────────────────────────────────
+   1. TOP BAR
+────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+    .top-bar {
+        height: 56px;
+        padding: 0 12px;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 200;
+    }
+
+    .brand-name { display: none !important; }
+
+    .brand i { font-size: 20px; }
+
+    /* Hamburger visible */
+    .hamburger-menu {
+        display: flex !important;
+        align-items: center;
+        justify-content: center;
+        width: 40px;
+        height: 40px;
+        margin-left: auto;
+        order: 3;
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 20px;
+        color: var(--gray-800);
+        border-radius: 8px;
+    }
+
+    .hamburger-menu:hover { background: var(--gray-100); }
+
+    /* Inline nav-links hidden — replaced by drawer */
+    .nav-links {
+        display: none !important;
+    }
+
+    /* Compact right bar */
+    .bar-right { gap: 12px; }
+    .bar-right .notif-bell { display: none; }
+
+    /* Fix top-bar dropdown menu positioning */
+    .dropdown-menu {
+        position: fixed !important;
+        top: 56px !important;
+        left: 0 !important;
+        right: 0 !important;
+        border-radius: 0 0 12px 12px !important;
+        width: 100% !important;
+        min-width: unset !important;
+    }
+}
+
+/* ──────────────────────────────────────────────────────────
+   2. SIDE DRAWER (hamburger → slide-in panel)
+────────────────────────────────────────────────────────── */
+.mobile-drawer-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    z-index: 300;
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+}
+
+.mobile-drawer-overlay.open { display: block; }
+
+.mobile-drawer {
+    position: fixed;
+    top: 0;
+    left: -100%;
+    width: min(80vw, 320px);
+    height: 100dvh;
+    background: var(--white);
+    z-index: 301;
+    display: flex;
+    flex-direction: column;
+    transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.15);
+    overflow: hidden;
+}
+
+.mobile-drawer.open { left: 0; }
+
+.mobile-drawer-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 18px 16px 14px;
+    background: var(--primary);
+    color: white;
+    flex-shrink: 0;
+}
+
+.mobile-drawer-header i { font-size: 22px; }
+
+.mobile-drawer-header span {
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+}
+
+.mobile-drawer-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 0 24px;
+    -webkit-overflow-scrolling: touch;
+}
+
+.mobile-drawer-section-title {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--gray-500);
+    padding: 14px 18px 6px;
+    margin: 0;
+}
+
+.mobile-drawer-item {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 11px 18px;
+    color: var(--gray-800);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    border: none;
+    background: none;
+    width: 100%;
+    text-align: left;
+}
+
+.mobile-drawer-item:hover,
+.mobile-drawer-item.active {
+    background: var(--gray-50);
+    color: var(--primary);
+}
+
+.mobile-drawer-item i {
+    width: 20px;
+    text-align: center;
+    font-size: 15px;
+    color: var(--primary);
+    flex-shrink: 0;
+}
+
+.mobile-drawer-item.active i { color: var(--primary); }
+
+.mobile-drawer-divider {
+    height: 1px;
+    background: var(--gray-200);
+    margin: 6px 16px;
+}
+
+.mobile-drawer-footer {
+    flex-shrink: 0;
+    border-top: 1px solid var(--gray-200);
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: var(--gray-50);
+}
+
+.mobile-drawer-footer img {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 2px solid var(--primary);
+}
+
+.mobile-drawer-footer-info {
+    flex: 1;
+}
+
+.mobile-drawer-footer-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--gray-800);
+}
+
+.mobile-drawer-footer-role {
+    font-size: 11px;
+    color: var(--gray-500);
+}
+
+.mobile-drawer-logout {
+    background: none;
+    border: none;
+    color: var(--error);
+    font-size: 18px;
+    cursor: pointer;
+    padding: 6px;
+    border-radius: 6px;
+}
+
+.mobile-drawer-logout:hover { background: #fee2e2; }
+
+/* ──────────────────────────────────────────────────────────
+   3. LAYOUT SHELL
+────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+    /* Push content below fixed top bar */
+    .app-shell { padding-top: 56px; }
+
+    .main-layout {
+        flex-direction: column;
+        height: auto;
+        min-height: calc(100dvh - 56px);
+        margin-left: 0 !important;
+    }
+
+    /* Hide desktop sidebar */
+    .sidebar { display: none !important; }
+
+    /* Content area — leave space for bottom nav */
+    .content-viewport {
+        padding: 12px 10px !important;
+        padding-bottom: 84px !important;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        height: auto !important;
+        min-height: calc(100dvh - 56px - 80px);
+    }
+}
+
+/* ──────────────────────────────────────────────────────────
+   4. BOTTOM NAVIGATION (fixed 4-tab bar)
+────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+    .mobile-bottom-nav {
+        display: flex !important;
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        background: var(--white);
+        border-top: 1px solid var(--gray-200);
+        padding: 6px 4px;
+        padding-bottom: calc(6px + env(safe-area-inset-bottom));
+        z-index: 200;
+        box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.06);
+        justify-content: space-around;
+        align-items: center;
+    }
+
+    .mobile-nav-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 2px;
+        font-size: 10px;
+        font-weight: 500;
+        color: var(--gray-500);
+        cursor: pointer;
+        padding: 5px 12px;
+        border-radius: 10px;
+        transition: color 0.2s, background 0.2s;
+        flex: 1;
+        min-height: 44px;
+        justify-content: center;
+        border: none;
+        background: none;
+    }
+
+    .mobile-nav-item.active,
+    .mobile-nav-item:hover { color: var(--primary); }
+
+    .mobile-nav-item.active { background: rgba(139, 0, 0, 0.06); }
+
+    .mobile-nav-item i { font-size: 20px; }
+}
+
+/* ──────────────────────────────────────────────────────────
+   5. TABLES → CARD LAYOUT
+────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+
+    /* Generic table → card transform */
+    .prospects-table-container,
+    .customers-table-container,
+    .agents-table-container,
+    .imports-table-container,
+    .events-table-container,
+    .history-table-container {
+        overflow-x: unset !important;
+        overflow: visible;
+        box-shadow: none;
+        background: transparent;
+    }
+
+    /* Classes used by ALL mobile-converted tables */
+    .mobile-card-table { display: block !important; }
+
+    .mobile-card-table thead { display: none !important; }
+
+    .mobile-card-table tbody { display: block !important; }
+
+    .mobile-card-table tbody tr {
+        display: block !important;
+        background: var(--white);
+        border-radius: 12px;
+        padding: 14px 14px 10px;
+        margin-bottom: 10px;
+        box-shadow: var(--shadow-md);
+        border: 1px solid var(--gray-200);
+        cursor: pointer;
+        transition: transform 0.15s, box-shadow 0.15s;
+    }
+
+    .mobile-card-table tbody tr:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.1);
+    }
+
+    .mobile-card-table tbody td {
+        display: flex !important;
+        justify-content: space-between;
+        align-items: center;
+        padding: 6px 0 !important;
+        border: none !important;
+        font-size: 13px;
+        border-bottom: 1px solid var(--gray-100) !important;
+        min-height: 32px;
+    }
+
+    .mobile-card-table tbody td:last-child {
+        border-bottom: none !important;
+        padding-top: 10px !important;
+        justify-content: flex-end;
+        gap: 6px;
+    }
+
+    .mobile-card-table tbody td::before {
+        content: attr(data-label);
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--gray-500);
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        flex-shrink: 0;
+        margin-right: 8px;
+    }
+
+    /* Hide label on action column */
+    .mobile-card-table tbody td:last-child::before { display: none; }
+
+    /* Apply to all known tables */
+    .prospects-table,
+    .customers-table,
+    .agents-table,
+    .imports-table,
+    .events-table,
+    .leaderboard-table-v2,
+    .history-table,
+    .risk-table,
+    .performance-table,
+    .predictions-table,
+    .leads-table,
+    .factors-table,
+    .breakdown-table,
+    .crm-table,
+    .version-table,
+    .file-table {
+        display: block !important;
+    }
+
+    .prospects-table thead,
+    .customers-table thead,
+    .agents-table thead,
+    .imports-table thead,
+    .events-table thead,
+    .leaderboard-table-v2 thead,
+    .history-table thead,
+    .risk-table thead,
+    .performance-table thead,
+    .predictions-table thead,
+    .leads-table thead,
+    .factors-table thead,
+    .breakdown-table thead,
+    .crm-table thead,
+    .version-table thead,
+    .file-table thead {
+        display: none !important;
+    }
+
+    .prospects-table tbody,
+    .customers-table tbody,
+    .agents-table tbody,
+    .imports-table tbody,
+    .events-table tbody,
+    .leaderboard-table-v2 tbody,
+    .history-table tbody,
+    .risk-table tbody,
+    .performance-table tbody,
+    .predictions-table tbody,
+    .leads-table tbody,
+    .factors-table tbody,
+    .breakdown-table tbody,
+    .crm-table tbody,
+    .version-table tbody,
+    .file-table tbody {
+        display: block !important;
+    }
+
+    .prospects-table tr,
+    .customers-table tr,
+    .agents-table tr,
+    .imports-table tr,
+    .events-table tr,
+    .leaderboard-table-v2 tr,
+    .history-table tr,
+    .risk-table tr,
+    .performance-table tr,
+    .predictions-table tr,
+    .leads-table tr,
+    .factors-table tr,
+    .breakdown-table tr,
+    .crm-table tr,
+    .version-table tr,
+    .file-table tr {
+        display: block !important;
+        background: var(--white);
+        border-radius: 12px;
+        padding: 12px;
+        margin-bottom: 10px;
+        box-shadow: var(--shadow-md);
+        border: 1px solid var(--gray-200);
+    }
+
+    .prospects-table td,
+    .customers-table td,
+    .agents-table td,
+    .imports-table td,
+    .events-table td,
+    .leaderboard-table-v2 td,
+    .history-table td,
+    .risk-table td,
+    .performance-table td,
+    .predictions-table td,
+    .leads-table td,
+    .factors-table td,
+    .breakdown-table td,
+    .crm-table td,
+    .version-table td,
+    .file-table td {
+        display: flex !important;
+        justify-content: space-between;
+        align-items: center;
+        padding: 6px 2px !important;
+        border: none !important;
+        font-size: 13px;
+        border-bottom: 1px solid var(--gray-100) !important;
+        min-height: 32px;
+        gap: 8px;
+    }
+
+    .prospects-table td:last-child,
+    .customers-table td:last-child,
+    .agents-table td:last-child,
+    .imports-table td:last-child,
+    .events-table td:last-child,
+    .leaderboard-table-v2 td:last-child,
+    .history-table td:last-child,
+    .risk-table td:last-child,
+    .performance-table td:last-child,
+    .predictions-table td:last-child,
+    .leads-table td:last-child,
+    .factors-table td:last-child,
+    .breakdown-table td:last-child,
+    .crm-table td:last-child,
+    .version-table td:last-child,
+    .file-table td:last-child {
+        border-bottom: none !important;
+        justify-content: flex-end;
+        gap: 4px;
+        padding-top: 10px !important;
+    }
+
+    /* data-label from JS injection */
+    .prospects-table td::before,
+    .customers-table td::before,
+    .agents-table td::before,
+    .imports-table td::before,
+    .events-table td::before,
+    .leaderboard-table-v2 td::before,
+    .history-table td::before,
+    .risk-table td::before,
+    .performance-table td::before,
+    .predictions-table td::before,
+    .leads-table td::before,
+    .factors-table td::before,
+    .breakdown-table td::before,
+    .crm-table td::before,
+    .version-table td::before,
+    .file-table td::before {
+        content: attr(data-label);
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--gray-500);
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        flex-shrink: 0;
+        white-space: nowrap;
+    }
+
+    .prospects-table td:last-child::before,
+    .customers-table td:last-child::before,
+    .agents-table td:last-child::before,
+    .imports-table td:last-child::before,
+    .events-table td:last-child::before,
+    .leaderboard-table-v2 td:last-child::before,
+    .history-table td:last-child::before,
+    .risk-table td:last-child::before,
+    .performance-table td:last-child::before,
+    .predictions-table td:last-child::before,
+    .leads-table td:last-child::before,
+    .factors-table td:last-child::before,
+    .breakdown-table td:last-child::before,
+    .crm-table td:last-child::before,
+    .version-table td:last-child::before,
+    .file-table td:last-child::before {
+        display: none !important;
+    }
+
+    /* inline style tables (no class) */
+    table[style] {
+        display: block !important;
+        width: 100% !important;
+        overflow-x: auto;
+    }
+}
+
+/* ──────────────────────────────────────────────────────────
+   6. MODALS — full screen on mobile
+────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+    .modal-overlay {
+        align-items: flex-end !important;
+        padding: 0 !important;
+    }
+
+    .modal-content {
+        width: 100% !important;
+        max-width: 100% !important;
+        max-height: 92dvh !important;
+        border-radius: 20px 20px 0 0 !important;
+        margin: 0 !important;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .modal-header {
+        flex-shrink: 0;
+        border-radius: 20px 20px 0 0;
+        padding: 18px 16px 14px !important;
+    }
+
+    .modal-body {
+        flex: 1;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        padding: 16px !important;
+    }
+
+    .modal-footer {
+        flex-shrink: 0;
+        padding: 12px 16px !important;
+        padding-bottom: calc(12px + env(safe-area-inset-bottom)) !important;
+        border-top: 1px solid var(--gray-200);
+        gap: 10px !important;
+        display: flex !important;
+        flex-direction: column-reverse;
+    }
+
+    .modal-footer .btn,
+    .modal-footer button {
+        width: 100% !important;
+        min-height: 48px !important;
+        font-size: 16px !important;
+    }
+
+    /* Single-column forms in modals */
+    .modal-body .form-grid,
+    .modal-body [class*="grid-"] {
+        grid-template-columns: 1fr !important;
+    }
+
+    /* Wider form inputs */
+    .modal-body .form-control,
+    .modal-body input,
+    .modal-body select,
+    .modal-body textarea {
+        font-size: 16px !important;
+    }
+}
+
+/* ──────────────────────────────────────────────────────────
+   7. CALENDAR
+────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+    .calendar-view-container { padding: 0 !important; }
+
+    .calendar-header-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+        padding: 10px !important;
+    }
+
+    .calendar-title-nav {
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    .calendar-controls {
+        width: 100%;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+
+    .calendar-controls select,
+    .calendar-controls button {
+        flex: 1;
+        min-width: 0;
+        font-size: 12px;
+    }
+
+    /* Day headers short form handled by JS */
+    .calendar-days-header .day-header { font-size: 10px; }
+
+    .calendar-grid-main {
+        grid-auto-rows: minmax(52px, auto) !important;
+    }
+
+    .calendar-cell {
+        padding: 3px !important;
+    }
+
+    .date-num { font-size: 11px !important; }
+
+    .grid-act-item {
+        font-size: 7px !important;
+        padding: 1px 2px !important;
+        border-radius: 3px;
+    }
+
+    /* Today activities section */
+    .activity-cards-grid {
+        grid-template-columns: 1fr !important;
+    }
+
+    /* Birthday section */
+    .birthday-columns {
+        grid-template-columns: 1fr !important;
+        gap: 12px;
+    }
+}
+
+/* ──────────────────────────────────────────────────────────
+   8. GRIDS → SINGLE COLUMN
+────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+    /* Generic multi-col to single */
+    .profile-grid,
+    .profile-content-grid,
+    .templates-layout,
+    .analytics-stats-grid,
+    .reports-grid,
+    .pipeline-layout,
+    .performance-grid,
+    .team-summary-cards,
+    .agents-grid,
+    .integration-grid,
+    .kpi-charts-row,
+    .chart-row,
+    .protection-stats,
+    .license-stats,
+    .filter-bar,
+    .agent-filters {
+        grid-template-columns: 1fr !important;
+        flex-direction: column !important;
+        gap: 10px !important;
+    }
+
+    /* KPI stats: 2 per row on mobile */
+    .kpi-stats-grid,
+    .stats-grid,
+    .summary-cards,
+    .stat-cards {
+        grid-template-columns: repeat(2, 1fr) !important;
+        gap: 8px !important;
+    }
+
+    /* Pipeline columns stacked */
+    .pipeline-container {
+        grid-template-columns: 1fr !important;
+    }
+
+    /* Referrals */
+    .referrals-grid {
+        grid-template-columns: 1fr !important;
+        height: auto !important;
+        gap: 12px;
+    }
+
+    .leaderboard-card,
+    .tree-card {
+        min-height: 300px;
+        height: auto;
+    }
+
+    /* DMS */
+    .dms-layout {
+        grid-template-columns: 1fr !important;
+    }
+
+    .folder-sidebar { display: none !important; }
+    .mobile-folder-toggle { display: block; }
+
+    /* Profile sidebar */
+    .profile-sidebar { display: none !important; }
+
+    /* Profile header */
+    .profile-header {
+        flex-direction: column !important;
+        gap: 12px;
+        align-items: stretch !important;
+    }
+
+    .profile-actions {
+        width: 100%;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    .profile-actions .btn {
+        flex: 1;
+        min-width: 0;
+    }
+
+    /* Headers with actions */
+    .agents-header,
+    .integration-header,
+    .history-header,
+    .import-header {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+    }
+
+    .agents-header button,
+    .history-header button {
+        width: 100%;
+    }
+}
+
+/* ──────────────────────────────────────────────────────────
+   9. FILTER BARS — collapsible on mobile
+────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+    .filter-group { min-width: 0 !important; width: 100%; }
+    .filter-group select,
+    .filter-group input { width: 100%; }
+
+    /* Prospect / Customer filter bar — stack vertically */
+    .prospect-filters,
+    .customer-filters {
+        flex-direction: column !important;
+        gap: 8px;
+    }
+
+    /* Search inputs full width */
+    #prospect-search,
+    #customer-search,
+    #agent-search {
+        width: 100% !important;
+    }
+}
+
+/* ──────────────────────────────────────────────────────────
+   10. TOUCH TARGETS & INPUTS
+────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+    .btn { min-height: 44px !important; font-size: 14px !important; }
+    .btn-sm { min-height: 36px !important; }
+    .btn-icon { min-height: 40px; min-width: 40px; }
+
+    /* Prevent iOS input auto-zoom (must be ≥ 16px) */
+    input[type="text"],
+    input[type="email"],
+    input[type="number"],
+    input[type="date"],
+    input[type="time"],
+    input[type="password"],
+    input[type="search"],
+    input[type="tel"],
+    select,
+    textarea {
+        font-size: 16px !important;
+        min-height: 44px;
+    }
+
+    textarea { min-height: 80px !important; }
+
+    /* Tab strips — horizontal scroll */
+    .tab-bar,
+    .nav-tabs,
+    .scroll-tabs {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        flex-wrap: nowrap !important;
+        white-space: nowrap;
+        gap: 4px;
+        padding-bottom: 4px;
+    }
+
+    .tab-btn, .nav-tab {
+        flex-shrink: 0;
+        white-space: nowrap;
+    }
+}
+
+/* ──────────────────────────────────────────────────────────
+   11. SPECIFIC VIEWS
+────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+
+    /* Import wizard */
+    .import-wizard { min-width: auto !important; }
+    .wizard-steps { flex-wrap: wrap; gap: 4px; }
+    .wizard-step { flex: auto; min-width: 60px; margin-bottom: 4px; font-size: 11px; }
+
+    /* Risk analysis */
+    .risk-controls {
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    /* Performance page */
+    .performance-header { flex-direction: column; gap: 10px; }
+
+    /* Reports */
+    .report-header { flex-direction: column; gap: 8px; }
+
+    /* Milestones / 增运九法 scroll tabs */
+    .milestone-tabs,
+    .zengyan-tabs {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        flex-wrap: nowrap !important;
+        white-space: nowrap;
+        gap: 4px;
+    }
+
+    .milestone-tab-item,
+    .zengyan-tab-item {
+        flex-shrink: 0;
+        font-size: 11px;
+    }
+
+    /* Card sections generic */
+    .card-section {
+        padding: 14px !important;
+    }
+
+    /* Stat number */
+    .stat-value,
+    .stat-number { font-size: 22px !important; }
+
+    /* Meet-up / event photo grid */
+    .photo-grid {
+        grid-template-columns: repeat(2, 1fr) !important;
+        gap: 6px;
+    }
+
+    /* Voice recorder */
+    .recorder-controls { flex-direction: column; align-items: center; gap: 8px; }
+    .recorder-actions { flex-direction: column; align-items: stretch; }
+
+    /* View container headings */
+    .view-header h1,
+    .agents-header h1,
+    .section-title { font-size: 20px !important; }
+
+    /* Action Plan card */
+    .action-plan-card { padding: 12px !important; }
+
+    /* CPS form */
+    .cps-form-grid { grid-template-columns: 1fr !important; }
+}
+
+/* ──────────────────────────────────────────────────────────
+   12. PULL-TO-REFRESH INDICATOR
+────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+    .pull-to-refresh {
+        height: 0;
+        overflow: hidden;
+        text-align: center;
+        color: var(--gray-500);
+        font-size: 13px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        transition: height 0.3s;
+        margin-bottom: 0;
+    }
+
+    .pull-to-refresh.show { height: 44px; }
+}
+
+/* ──────────────────────────────────────────────────────────
+   13. TABLET (769px – 1024px)
+────────────────────────────────────────────────────────── */
+@media (min-width: 769px) and (max-width: 1024px) {
+    .profile-content-grid { grid-template-columns: 1fr 240px !important; }
+    .analytics-stats-grid { grid-template-columns: repeat(2, 1fr) !important; }
+    .team-summary-cards { grid-template-columns: repeat(2, 1fr) !important; }
+    .kpi-stats-grid { grid-template-columns: repeat(3, 1fr) !important; }
+    .integration-grid { grid-template-columns: repeat(2, 1fr) !important; }
+}
+
+/* ──────────────────────────────────────────────────────────
+   14. PRINT — keep unchanged
+────────────────────────────────────────────────────────── */
+@media print {
+    .mobile-bottom-nav,
+    .mobile-drawer,
+    .mobile-drawer-overlay,
+    .hamburger-menu,
+    .top-bar { display: none !important; }
+
+    .content-viewport {
+        padding: 0 !important;
+        padding-bottom: 0 !important;
+    }
+}
