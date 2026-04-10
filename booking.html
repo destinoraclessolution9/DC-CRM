@@ -207,7 +207,10 @@ function show(id) {
 
 function loadSlots(dateStr) {
     if (!dateStr) return;
-    const dow = new Date(dateStr + 'T12:00:00').getDay();
+    // Parse "YYYY-MM-DD" into local-calendar parts directly.
+    // Using `new Date(dateStr + 'T12:00:00')` shifted the day across some timezones.
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const dow = new Date(y, (m || 1) - 1, d || 1).getDay();
     const daySlots = agentSlots.filter(s => s.day_of_week == dow);
     const grid = document.getElementById('slot-grid');
     const section = document.getElementById('slots-section');
@@ -271,10 +274,39 @@ async function submitBooking() {
 
     if (!name || !phone) { errEl.textContent = 'Please enter your name and phone number.'; errEl.style.display = 'block'; return; }
     if (!selectedSlot) { errEl.textContent = 'Please select a time slot.'; errEl.style.display = 'block'; return; }
+    // Light-touch format checks — stop obviously bad input before it hits the DB.
+    const phoneDigits = phone.replace(/\D/g, '');
+    if (phoneDigits.length < 7) { errEl.textContent = 'Please enter a valid phone number.'; errEl.style.display = 'block'; return; }
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { errEl.textContent = 'Please enter a valid email address.'; errEl.style.display = 'block'; return; }
+    if (postal && !/^\d{4,6}$/.test(postal)) { errEl.textContent = 'Please enter a valid postal code.'; errEl.style.display = 'block'; return; }
     errEl.style.display = 'none';
 
     document.getElementById('submit-btn').disabled = true;
     document.getElementById('submit-btn').textContent = 'Booking...';
+
+    // Prevent double-booking: check if the same slot on the same date already has a non-cancelled appointment.
+    const { data: existing, error: existErr } = await supabase
+        .from('booking_appointments')
+        .select('id,status')
+        .eq('slot_id', selectedSlot.slotId)
+        .eq('booking_date', date)
+        .eq('start_time', selectedSlot.start)
+        .neq('status', 'cancelled');
+    if (existErr) {
+        errEl.textContent = 'Could not verify slot availability. Please try again.';
+        errEl.style.display = 'block';
+        document.getElementById('submit-btn').disabled = false;
+        document.getElementById('submit-btn').textContent = 'Confirm Booking';
+        return;
+    }
+    if (existing && existing.length > 0) {
+        errEl.textContent = 'Sorry, this time slot was just taken. Please choose another time.';
+        errEl.style.display = 'block';
+        document.getElementById('submit-btn').disabled = false;
+        document.getElementById('submit-btn').textContent = 'Confirm Booking';
+        loadSlots(date); // refresh slot grid so user can pick another
+        return;
+    }
 
     const { error: apptErr } = await supabase.from('booking_appointments').insert({
         slot_id: selectedSlot.slotId,
