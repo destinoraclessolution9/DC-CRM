@@ -8472,40 +8472,8 @@ function _wireLoginBtn() {
         const agents = allUsers.filter(u => u.status !== 'inactive');
         const allTags = (await AppDataStore.getAll('tags')) || [];
 
-        const isCps = _caseActiveTab === 'cps';
-
-        const cpsFilterBar = `
-            <div class="filter-bar">
-                <div class="filter-group">
-                    <i class="fas fa-search"></i>
-                    <input type="text" id="case-search" placeholder="Search title or prospect/customer..." value="${_caseFilters.search}" onkeyup="app.handleCaseSearch(event)">
-                </div>
-                <div class="filter-group">
-                    <label>Product</label>
-                    <select id="case-product-filter" onchange="app.handleCaseFilterChange()">
-                        <option value="all">All Products</option>
-                        ${products.map(p => `<option value="${p.name}" ${_caseFilters.product === p.name ? 'selected' : ''}>${p.name}</option>`).join('')}
-                    </select>
-                </div>
-                <div class="filter-group">
-                    <label>From</label>
-                    <input type="date" id="case-date-from" value="${_caseFilters.from}" onchange="app.handleCaseFilterChange()">
-                </div>
-                <div class="filter-group">
-                    <label>To</label>
-                    <input type="date" id="case-date-to" value="${_caseFilters.to}" onchange="app.handleCaseFilterChange()">
-                </div>
-                <div class="filter-group">
-                    <label>Visibility</label>
-                    <select id="case-visibility-filter" onchange="app.handleCaseFilterChange()">
-                        <option value="all" ${_caseFilters.visibility === 'all' ? 'selected' : ''}>All</option>
-                        <option value="public" ${_caseFilters.visibility === 'public' ? 'selected' : ''}>Public Only</option>
-                        <option value="mine" ${_caseFilters.visibility === 'mine' ? 'selected' : ''}>My Cases</option>
-                    </select>
-                </div>
-            </div>`;
-
-        const closedFilterBar = `
+        // Shared filter bar — one set of filters that applies to both tables
+        const filterBar = `
             <div class="filter-bar">
                 <div class="filter-group">
                     <i class="fas fa-search"></i>
@@ -8562,45 +8530,59 @@ function _wireLoginBtn() {
                     </button>
                 </div>
 
-                <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:12px;">
-                    <button class="btn ${isCps ? 'primary' : 'secondary'}" onclick="app.switchCaseTab('cps')" style="width:100%;">
-                        <i class="fas fa-handshake"></i> CPS Invitation Cases
-                    </button>
-                    <button class="btn ${!isCps ? 'primary' : 'secondary'}" onclick="app.switchCaseTab('closed')" style="width:100%;">
-                        <i class="fas fa-check-circle"></i> Closed Cases
-                    </button>
+                ${filterBar}
+
+                <!-- CPS Invitation Cases Section -->
+                <div style="margin-top:20px; margin-bottom:10px; display:flex; align-items:center; gap:8px;">
+                    <i class="fas fa-handshake" style="color:var(--primary-600);"></i>
+                    <h2 style="margin:0; font-size:18px;">CPS Invitation Cases</h2>
                 </div>
-
-                ${isCps ? cpsFilterBar : closedFilterBar}
-
                 <div class="table-container">
                     <table class="crm-table">
                         <thead>
                             <tr>
-                                ${isCps ? `
                                 <th>Relation</th>
                                 <th>Occupation</th>
                                 <th>Age</th>
                                 <th>Gender</th>
                                 <th>Inv. Method</th>
                                 <th>Details</th>
-                                ` : `
+                                <th class="text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="cases-list-body-cps">
+                        </tbody>
+                    </table>
+                    <div id="cases-empty-state-cps" style="display: none; padding: 24px; text-align: center; color: var(--gray-400);">
+                        <i class="fas fa-folder-open" style="font-size: 36px; margin-bottom: 12px;"></i>
+                        <p>No CPS invitation cases found.</p>
+                    </div>
+                </div>
+
+                <!-- Closed Cases Section -->
+                <div style="margin-top:30px; margin-bottom:10px; display:flex; align-items:center; gap:8px;">
+                    <i class="fas fa-check-circle" style="color:var(--primary-600);"></i>
+                    <h2 style="margin:0; font-size:18px;">Closed Cases</h2>
+                </div>
+                <div class="table-container">
+                    <table class="crm-table">
+                        <thead>
+                            <tr>
                                 <th>Title</th>
                                 <th>Prospect / Customer</th>
                                 <th>Product</th>
                                 <th>Amount (RM)</th>
                                 <th>Closing Date</th>
                                 <th>Tags</th>
-                                `}
                                 <th class="text-right">Actions</th>
                             </tr>
                         </thead>
-                        <tbody id="cases-list-body">
+                        <tbody id="cases-list-body-closed">
                         </tbody>
                     </table>
-                    <div id="cases-empty-state" style="display: none; padding: 40px; text-align: center; color: var(--gray-400);">
-                        <i class="fas fa-folder-open" style="font-size: 48px; margin-bottom: 16px;"></i>
-                        <p>No cases found matching your criteria.</p>
+                    <div id="cases-empty-state-closed" style="display: none; padding: 24px; text-align: center; color: var(--gray-400);">
+                        <i class="fas fa-folder-open" style="font-size: 36px; margin-bottom: 12px;"></i>
+                        <p>No closed cases found.</p>
                     </div>
                 </div>
             </div>
@@ -8633,86 +8615,62 @@ function _wireLoginBtn() {
     };
 
     const renderCasesList = async () => {
-        const tbody = document.getElementById('cases-list-body');
-        const emptyState = document.getElementById('cases-empty-state');
-        if (!tbody) return;
+        const tbodyCps = document.getElementById('cases-list-body-cps');
+        const tbodyClosed = document.getElementById('cases-list-body-closed');
+        const emptyCps = document.getElementById('cases-empty-state-cps');
+        const emptyClosed = document.getElementById('cases-empty-state-closed');
+        if (!tbodyCps || !tbodyClosed) return;
 
-        let cases = await AppDataStore.getAll('case_studies');
+        const allCases = await AppDataStore.getAll('case_studies');
         const currentUser = _currentUser;
-
-        // Filter by active tab (case_type)
-        cases = cases.filter(c => (c.case_type || 'cps') === _caseActiveTab);
-
-        // Apply Permission/Visibility Filters
-        cases = cases.filter(c => {
-            const isOwner = c.created_by === currentUser?.id;
-            const isAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || currentUser?.role?.includes('Level 3') || currentUser?.role?.includes('Level 7') || currentUser?.role === 'team_leader' || currentUser?.role === 'admin';
-
-            if (_caseFilters.visibility === 'public') return c.is_public;
-            if (_caseFilters.visibility === 'mine') return isOwner;
-
-            return c.is_public || isOwner || isAdmin;
-        });
-
-        // Agent filter (Closed tab only)
-        if (_caseActiveTab === 'closed' && _caseFilters.agent !== 'all') {
-            cases = cases.filter(c => String(c.created_by) === String(_caseFilters.agent));
-        }
-
-        // Tag filter
-        if (_caseFilters.tag !== 'all') {
-            const tagMappings = (await AppDataStore.getAll('entity_tags')) || [];
-            const caseIdsWithTag = tagMappings
-                .filter(et => et.entity_type === 'case_study' && String(et.tag_id) === String(_caseFilters.tag))
-                .map(et => et.entity_id);
-            cases = cases.filter(c => caseIdsWithTag.includes(c.id));
-        }
-
-        // Search filter
-        if (_caseFilters.search) {
-            const q = _caseFilters.search.toLowerCase();
-            const filteredCases = [];
-            for (const c of cases) {
-                let nameMatch = false;
-                if (c.prospect_id) {
-                    const p = await AppDataStore.getById('prospects', c.prospect_id);
-                    if (p?.full_name?.toLowerCase().includes(q)) nameMatch = true;
-                }
-                if (c.customer_id) {
-                    const cust = await AppDataStore.getById('customers', c.customer_id);
-                    if (cust?.full_name?.toLowerCase().includes(q)) nameMatch = true;
-                }
-                if (c.title.toLowerCase().includes(q) || nameMatch) {
-                    filteredCases.push(c);
-                }
-            }
-            cases = filteredCases;
-        }
-
-        if (_caseFilters.product !== 'all') {
-            cases = cases.filter(c => c.product === _caseFilters.product);
-        }
-
-        if (_caseFilters.from) {
-            cases = cases.filter(c => c.closing_date >= _caseFilters.from);
-        }
-
-        if (_caseFilters.to) {
-            cases = cases.filter(c => c.closing_date <= _caseFilters.to);
-        }
-
-        if (cases.length === 0) {
-            tbody.innerHTML = '';
-            emptyState.style.display = 'block';
-            return;
-        }
-
-        // Pre-fetch all tags & mappings for batch display
         const allTags = (await AppDataStore.getAll('tags')) || [];
         const allTagMappings = (await AppDataStore.getAll('entity_tags')) || [];
 
-        emptyState.style.display = 'none';
-        const caseRows = await Promise.all(cases.map(async c => {
+        const applySharedFilters = async (cases) => {
+            // Visibility / permission
+            cases = cases.filter(c => {
+                const isOwner = c.created_by === currentUser?.id;
+                const isAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || currentUser?.role?.includes('Level 3') || currentUser?.role?.includes('Level 7') || currentUser?.role === 'team_leader' || currentUser?.role === 'admin';
+                if (_caseFilters.visibility === 'public') return c.is_public;
+                if (_caseFilters.visibility === 'mine') return isOwner;
+                return c.is_public || isOwner || isAdmin;
+            });
+            // Agent
+            if (_caseFilters.agent !== 'all') {
+                cases = cases.filter(c => String(c.created_by) === String(_caseFilters.agent));
+            }
+            // Tag
+            if (_caseFilters.tag !== 'all') {
+                const caseIdsWithTag = allTagMappings
+                    .filter(et => et.entity_type === 'case_study' && String(et.tag_id) === String(_caseFilters.tag))
+                    .map(et => et.entity_id);
+                cases = cases.filter(c => caseIdsWithTag.includes(c.id));
+            }
+            // Search
+            if (_caseFilters.search) {
+                const q = _caseFilters.search.toLowerCase();
+                const filtered = [];
+                for (const c of cases) {
+                    let nameMatch = false;
+                    if (c.prospect_id) {
+                        const p = await AppDataStore.getById('prospects', c.prospect_id);
+                        if (p?.full_name?.toLowerCase().includes(q)) nameMatch = true;
+                    }
+                    if (c.customer_id) {
+                        const cust = await AppDataStore.getById('customers', c.customer_id);
+                        if (cust?.full_name?.toLowerCase().includes(q)) nameMatch = true;
+                    }
+                    if ((c.title || '').toLowerCase().includes(q) || nameMatch) filtered.push(c);
+                }
+                cases = filtered;
+            }
+            if (_caseFilters.product !== 'all') cases = cases.filter(c => c.product === _caseFilters.product);
+            if (_caseFilters.from) cases = cases.filter(c => c.closing_date >= _caseFilters.from);
+            if (_caseFilters.to) cases = cases.filter(c => c.closing_date <= _caseFilters.to);
+            return cases;
+        };
+
+        const buildRow = async (c, type) => {
             let entityName = '-';
             let entityLink = 'return false';
             let prospectData = null;
@@ -8726,22 +8684,17 @@ function _wireLoginBtn() {
                 entityName = pros ? `<i class="fas fa-user" title="Prospect"></i> ${pros.full_name}` : 'Unknown Prospect';
                 entityLink = `app.showProspectDetail(${c.prospect_id})`;
             }
-
             const isOwner = c.created_by === currentUser?.id;
             const isAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || currentUser?.role?.includes('Level 3') || currentUser?.role?.includes('Level 7') || currentUser?.role === 'team_leader' || currentUser?.role === 'admin';
-
-            // Build tag badges for this case
             const caseMappings = allTagMappings.filter(et => et.entity_type === 'case_study' && et.entity_id === c.id);
             const caseTags = caseMappings.map(m => allTags.find(t => t.id === m.tag_id)).filter(Boolean);
             const tagBadges = caseTags.map(t => `<span class="badge" style="background:${t.color || '#e5e7eb'};color:#1f2937;margin-right:4px;font-size:11px;">${t.name}</span>`).join('');
-
             const ageText = prospectData?.date_of_birth
                 ? Math.floor((Date.now() - new Date(prospectData.date_of_birth)) / (365.25 * 24 * 60 * 60 * 1000)) + 'y'
                 : '-';
             const detailsPreview = c.cps_invitation_details
                 ? (c.cps_invitation_details.length > 80 ? c.cps_invitation_details.substring(0, 80) + '…' : c.cps_invitation_details)
                 : '-';
-
             const actionButtons = `
                 <td class="text-right">
                     <div class="actions">
@@ -8752,8 +8705,7 @@ function _wireLoginBtn() {
                         ` : ''}
                     </div>
                 </td>`;
-
-            if (_caseActiveTab === 'cps') {
+            if (type === 'cps') {
                 return `
                 <tr class="clickable" onclick="app.showCaseStudyDetail(${c.id})">
                     <td>${prospectData?.referral_relationship || '-'}</td>
@@ -8765,7 +8717,6 @@ function _wireLoginBtn() {
                     ${actionButtons}
                 </tr>`;
             }
-
             return `
                 <tr class="clickable" onclick="app.showCaseStudyDetail(${c.id})">
                     <td>
@@ -8785,8 +8736,31 @@ function _wireLoginBtn() {
                     ${actionButtons}
                 </tr>
             `;
-        }));
-        tbody.innerHTML = caseRows.join('');
+        };
+
+        // CPS cases
+        let cpsCases = allCases.filter(c => (c.case_type || 'cps') === 'cps');
+        cpsCases = await applySharedFilters(cpsCases);
+        if (cpsCases.length === 0) {
+            tbodyCps.innerHTML = '';
+            emptyCps.style.display = 'block';
+        } else {
+            emptyCps.style.display = 'none';
+            const rows = await Promise.all(cpsCases.map(c => buildRow(c, 'cps')));
+            tbodyCps.innerHTML = rows.join('');
+        }
+
+        // Closed cases
+        let closedCases = allCases.filter(c => (c.case_type || 'cps') === 'closed');
+        closedCases = await applySharedFilters(closedCases);
+        if (closedCases.length === 0) {
+            tbodyClosed.innerHTML = '';
+            emptyClosed.style.display = 'block';
+        } else {
+            emptyClosed.style.display = 'none';
+            const rows = await Promise.all(closedCases.map(c => buildRow(c, 'closed')));
+            tbodyClosed.innerHTML = rows.join('');
+        }
     };
 
     const showCaseStudyDetail = async (id) => {
