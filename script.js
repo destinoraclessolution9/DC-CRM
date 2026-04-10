@@ -10060,41 +10060,41 @@ function _wireLoginBtn() {
             sameSessionActivityIds.add(String(activity.id));
 
             const allAttendees = await AppDataStore.getAll('event_attendees');
-            const attendees = allAttendees.filter(a =>
-                String(a.event_id) === String(activity.event_id) &&
-                (!a.activity_id || sameSessionActivityIds.has(String(a.activity_id)))
-            );
-            if (attendees.length > 0) {
-                const prospects = await AppDataStore.getAll('prospects');
-                const customers = await AppDataStore.getAll('customers');
-                const all = [...prospects, ...customers];
+            const prospects = await AppDataStore.getAll('prospects');
+            const customers = await AppDataStore.getAll('customers');
+            const all = [...prospects, ...customers];
 
+            // Hide ghost records that have no attendee_id, no entity_id, and no entity_name —
+            // these are leftovers from the pre-fix bug where the schema-mismatch stripper
+            // dropped the prospect link before insert. They cannot be resolved to a person on
+            // any user's machine and would otherwise show up as "Unresolved prospect" rows.
+            const attendees = allAttendees.filter(a => {
+                if (String(a.event_id) !== String(activity.event_id)) return false;
+                if (a.activity_id && !sameSessionActivityIds.has(String(a.activity_id))) return false;
+                const entityId = a.entity_id || a.attendee_id;
+                const person = entityId ? all.find(p => String(p.id) === String(entityId)) : null;
+                const hasName = !!(person?.full_name || a.entity_name);
+                return hasName;
+            });
+            if (attendees.length > 0) {
                 const renderedRows = await Promise.all(attendees.map(async att => {
                     const entityId = att.entity_id || att.attendee_id;
                     const person = all.find(p => String(p.id) === String(entityId));
                     const name = person?.full_name || att.entity_name || '';
-                    const isUnresolved = !name;
                     const agent = await AppDataStore.getById('users', att.added_by_agent_id);
                     const agentName = agent?.full_name || att.added_by_name || 'Unknown';
                     const paidChecked = att.paid ? 'checked' : '';
                     const ticketChecked = att.ticket_created ? 'checked' : '';
                     const attendedChecked = (att.attended || att.attendance_status === 'Attended') ? 'checked' : '';
+                    const unattendedChecked = att.attendance_status === 'No Show' ? 'checked' : '';
                     return `
                         <div class="info-row" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #eee; padding-bottom:8px; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
                             <div>
-                                ${isUnresolved
-                                    ? `<span style="color:var(--gray-400);font-style:italic;">⚠️ Unresolved prospect</span>`
-                                    : `<strong style="cursor:pointer;color:var(--primary);text-decoration:underline;" onclick="event.stopPropagation();app.showAttendeeDetails(${entityId},'${att.attendee_type||'prospect'}')">${name}</strong>`
-                                }
+                                <strong style="cursor:pointer;color:var(--primary);text-decoration:underline;" onclick="event.stopPropagation();app.showAttendeeDetails(${entityId},'${att.attendee_type||'prospect'}')">${name}</strong>
                                 <span style="font-size:10px; margin-left:5px; background:var(--gray-100); padding:1px 6px; border-radius:10px;">${att.attendee_type || 'prospect'}</span>
                                 <div style="font-size:11px; color:gray;">Added by: ${agentName}</div>
                             </div>
                             <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
-                                ${isUnresolved ? `
-                                <button class="btn btn-sm" style="background:#fee2e2;color:#991b1b;border:none;padding:3px 10px;border-radius:4px;cursor:pointer;"
-                                    onclick="event.stopPropagation();(async()=>{ if(confirm('Remove this unresolved attendee?')){ await AppDataStore.delete('event_attendees','${att.id}'); await app.viewActivityDetails(${activityId}); } })()">
-                                    🗑 Remove
-                                </button>` : `
                                 <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
                                     <input type="checkbox" ${paidChecked} onchange="app.toggleAttendeePaid(${att.id}, this.checked)"> Paid
                                 </label>
@@ -10104,7 +10104,10 @@ function _wireLoginBtn() {
                                 <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
                                     <input type="checkbox" ${attendedChecked} onchange="app.toggleAttendeeAttended(${att.id}, this.checked, ${entityId}, '${att.attendee_type}', ${activity.event_id}, '${activity.activity_date}')"> Attended
                                 </label>
-                                ${entityId ? `<button class="btn btn-sm secondary" onclick="(async()=>{ await app.openPostMeetupNotesModal(${activityId}, ${entityId}); })()">Post Event</button>` : ''}`}
+                                <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
+                                    <input type="checkbox" ${unattendedChecked} onchange="app.toggleAttendeeUnattended(${att.id}, this.checked, ${entityId}, '${att.attendee_type}', ${activity.event_id}, '${activity.activity_date}')"> Unattended
+                                </label>
+                                ${entityId ? `<button class="btn btn-sm secondary" onclick="(async()=>{ await app.openPostMeetupNotesModal(${activityId}, ${entityId}); })()">Post Event</button>` : ''}
                             </div>
                         </div>
                     `;
@@ -11827,6 +11830,41 @@ function _wireLoginBtn() {
                 console.error('toggleAttendeeAttended write-back error:', err);
             }
         }
+    };
+
+    const toggleAttendeeUnattended = async (attendeeId, checked, entityId, entityType, eventId, activityDate) => {
+        // Mutually exclusive with Attended — checking Unattended marks as No Show, unchecking
+        // returns to plain Registered.
+        const status = checked ? 'No Show' : 'Registered';
+        await AppDataStore.update('event_attendees', attendeeId, { attended: false, attendance_status: status });
+
+        if (entityId && eventId) {
+            try {
+                const existing = (await AppDataStore.getAll('event_registrations')).find(
+                    r => r.event_id == eventId && r.attendee_id == entityId
+                );
+                if (existing) {
+                    await AppDataStore.update('event_registrations', existing.id, { attendance_status: status });
+                } else {
+                    await AppDataStore.create('event_registrations', {
+                        event_id: eventId,
+                        attendee_id: entityId,
+                        attendee_type: entityType || 'prospect',
+                        attendance_status: status,
+                        event_date: activityDate || new Date().toISOString().split('T')[0],
+                        points_awarded: 0,
+                        created_at: new Date().toISOString()
+                    });
+                }
+                UI.toast.success(checked ? 'Marked as Unattended (No Show)' : 'Unattended cleared');
+            } catch (err) {
+                console.error('toggleAttendeeUnattended write-back error:', err);
+            }
+        }
+        // Refresh the modal so the Attended checkbox unticks if it was on
+        const allActivities = await AppDataStore.getAll('activities');
+        const acts = allActivities.filter(a => a.event_id == eventId && a.activity_date == activityDate);
+        if (acts.length > 0) await app.viewActivityDetails(acts[0].id);
     };
 
     const toggleLifeChartType = async (prospectId, dateType, checked) => {
@@ -27107,6 +27145,7 @@ const initImportDemoData = async () => {
         toggleAttendeePaid,
         toggleAttendeeTicket,
         toggleAttendeeAttended,
+        toggleAttendeeUnattended,
         goToProspectEventNotes,
         toggleLifeChartType,
         showAttendeeDetails,
