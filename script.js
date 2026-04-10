@@ -2997,80 +2997,191 @@ In a production system, this would show the actual file contents.
 
     // ==================== PHASE 14: MOBILE FUNCTIONS ====================
 
-    const toggleMobileNav = () => {
-        const navLinks = document.getElementById('nav-links');
-        if (navLinks) {
-            navLinks.classList.toggle('show');
+    const isMobile = () => window.innerWidth <= 768;
+
+    // Apply/remove body.is-mobile class and drive layout changes
+    const applyMobileClass = () => {
+        if (isMobile()) {
+            document.body.classList.add('is-mobile');
+        } else {
+            document.body.classList.remove('is-mobile');
+            closeMobileDrawer();
         }
     };
 
-    const isMobile = () => window.innerWidth <= 768;
+    // ── Side Drawer ──────────────────────────────────────────
+    const DRAWER_SECTIONS = [
+        {
+            title: 'Core CRM',
+            items: [
+                { view: 'calendar',             label: 'Calendar',                    icon: 'fas fa-calendar-alt' },
+                { view: 'prospects',            label: 'Prospect / Customer',          icon: 'fas fa-users' },
+                { view: 'referrals',            label: 'Referral Management',          icon: 'fas fa-project-diagram' },
+                { view: 'pipeline',             label: 'Pipeline Management',          icon: 'fas fa-filter' },
+                { view: 'promotions',           label: 'Monthly Promotion',            icon: 'fas fa-bullhorn' },
+                { view: 'marketing_automation', label: 'Marketing Automation',         icon: 'fas fa-robot' },
+                { view: 'milestones',           label: '增运九法',                     icon: 'fas fa-star' },
+                { view: 'fude',                 label: '福运相随',                     icon: 'fas fa-yin-yang' },
+                { view: 'cases',                label: 'Success Case Library',         icon: 'fas fa-book-open' },
+            ]
+        },
+        {
+            title: 'Consultant & Analytics',
+            items: [
+                { view: 'agents',      label: 'Consultant',              icon: 'fas fa-user-tie' },
+                { view: 'performance', label: 'Ranking Performance',     icon: 'fas fa-trophy' },
+                { view: 'reports',     label: 'Reporting KPI',           icon: 'fas fa-chart-bar' },
+                { view: 'risk',        label: 'Attrition Risk Analysis', icon: 'fas fa-exclamation-triangle' },
+            ]
+        },
+        {
+            title: 'Documents & Admin',
+            items: [
+                { view: 'documents', label: 'Document Management', icon: 'fas fa-folder-open' },
+                { view: 'import',    label: 'Import / Export',     icon: 'fas fa-file-import' },
+                { view: 'settings',  label: 'Settings',            icon: 'fas fa-cog' },
+            ]
+        },
+        {
+            title: 'Tools',
+            items: [
+                { view: 'workflows',       label: 'Workflow Automation', icon: 'fas fa-sitemap' },
+                { view: 'protection',      label: 'Protection Monitor',  icon: 'fas fa-shield-alt' },
+                { view: 'lead_forms',      label: 'Lead Capture Forms',  icon: 'fas fa-wpforms' },
+                { view: 'surveys',         label: 'NPS Surveys',         icon: 'fas fa-poll' },
+                { view: 'contracts',       label: 'Contracts',           icon: 'fas fa-file-signature' },
+                { view: 'integrations',    label: 'Integrations',        icon: 'fas fa-plug' },
+                { view: 'booking_settings',label: 'Booking Scheduler',   icon: 'fas fa-calendar-check' },
+            ]
+        },
+    ];
 
+    const renderMobileDrawer = () => {
+        const body = document.getElementById('mobile-drawer-body');
+        if (!body) return;
+
+        let html = '';
+        DRAWER_SECTIONS.forEach(section => {
+            html += `<div class="mobile-drawer-section-title">${section.title}</div>`;
+            section.items.forEach(item => {
+                const isActive = _currentView === item.view ? ' active' : '';
+                html += `
+                    <button class="mobile-drawer-item${isActive}" onclick="app.navigateTo('${item.view}'); app.closeMobileDrawer()">
+                        <i class="${item.icon}"></i>
+                        <span>${item.label}</span>
+                    </button>
+                `;
+            });
+            html += `<div class="mobile-drawer-divider"></div>`;
+        });
+
+        body.innerHTML = html;
+
+        // Sync footer user info
+        const avatar = document.getElementById('drawer-user-avatar');
+        const nameEl = document.getElementById('drawer-user-name');
+        const roleEl = document.getElementById('drawer-user-role');
+        if (_currentUser) {
+            if (avatar) avatar.src = _currentUser.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(_currentUser.full_name || 'U')}&background=8B0000&color=fff`;
+            if (nameEl) nameEl.textContent = _currentUser.full_name || 'User';
+            if (roleEl) roleEl.textContent = _currentUser.role || '—';
+        }
+    };
+
+    const openMobileDrawer = () => {
+        renderMobileDrawer();
+        document.getElementById('mobile-drawer')?.classList.add('open');
+        document.getElementById('mobile-drawer-overlay')?.classList.add('open');
+        document.body.style.overflow = 'hidden';
+    };
+
+    const closeMobileDrawer = () => {
+        document.getElementById('mobile-drawer')?.classList.remove('open');
+        document.getElementById('mobile-drawer-overlay')?.classList.remove('open');
+        document.body.style.overflow = '';
+    };
+
+    const toggleMobileNav = () => {
+        const drawer = document.getElementById('mobile-drawer');
+        if (drawer?.classList.contains('open')) {
+            closeMobileDrawer();
+        } else {
+            openMobileDrawer();
+        }
+    };
+
+    // ── Bottom Nav ───────────────────────────────────────────
     const renderMobileBottomNav = async () => {
-        if (document.querySelector('.mobile-bottom-nav')) return; // Already added
+        if (document.querySelector('.mobile-bottom-nav')) return;
         const bottomNav = document.createElement('div');
         bottomNav.className = 'mobile-bottom-nav';
         bottomNav.id = 'mobile-bottom-nav';
         bottomNav.innerHTML = `
-            <div class="mobile-nav-item" onclick="app.navigateTo('calendar')">
+            <button class="mobile-nav-item" id="bnav-calendar" onclick="app.navigateTo('calendar')">
                 <i class="fas fa-calendar-alt"></i>
                 <span>Calendar</span>
-            </div>
-            <div class="mobile-nav-item" onclick="app.navigateTo('prospects')">
+            </button>
+            <button class="mobile-nav-item" id="bnav-prospects" onclick="app.navigateTo('prospects')">
                 <i class="fas fa-users"></i>
                 <span>Prospects</span>
-            </div>
-            <div class="mobile-nav-item" onclick="app.navigateTo('pipeline')">
-                <i class="fas fa-chart-line"></i>
+            </button>
+            <button class="mobile-nav-item" id="bnav-pipeline" onclick="app.navigateTo('pipeline')">
+                <i class="fas fa-filter"></i>
                 <span>Pipeline</span>
-            </div>
-            <div class="mobile-nav-item" onclick="app.showMobileMenu()">
-                <i class="fas fa-ellipsis-h"></i>
-                <span>More</span>
-            </div>
+            </button>
+            <button class="mobile-nav-item" id="bnav-menu" onclick="app.openMobileDrawer()">
+                <i class="fas fa-th-large"></i>
+                <span>Menu</span>
+            </button>
         `;
         document.body.appendChild(bottomNav);
     };
 
-    const showMobileMenu = async () => {
-        const menuItems = [
-            { view: 'agents', label: 'Consultant', icon: 'fas fa-user-tie' },
-            { view: 'promotions', label: 'Promotions', icon: 'fas fa-bullhorn' },
-            { view: 'reports', label: 'Reports', icon: 'fas fa-chart-bar' },
-            { view: 'documents', label: 'Documents', icon: 'fas fa-folder' },
-            { view: 'protection', label: 'Protection', icon: 'fas fa-shield-alt' },
-            { view: 'settings', label: 'Settings', icon: 'fas fa-cog' }
-        ];
-
-        const content = `
-            <div class="mobile-menu">
-                ${menuItems.map(item => `
-                    <div class="mobile-menu-item" onclick="app.navigateTo('${item.view}'); UI.hideModal()">
-                        <i class="${item.icon}"></i>
-                        <span>${item.label}</span>
-                    </div>
-                `).join('')}
-            </div>
-        `;
-        UI.showModal('Menu', content, [{ label: 'Close', type: 'secondary', action: 'UI.hideModal()' }]);
+    const updateBottomNavActive = (viewId) => {
+        const map = { calendar: 'bnav-calendar', prospects: 'bnav-prospects', pipeline: 'bnav-pipeline' };
+        document.querySelectorAll('.mobile-nav-item').forEach(el => el.classList.remove('active'));
+        const activeId = map[viewId];
+        if (activeId) document.getElementById(activeId)?.classList.add('active');
     };
 
+    // Legacy — kept for any callers
+    const showMobileMenu = () => openMobileDrawer();
+
+    // ── Table data-label injection ───────────────────────────
+    // Run after every table render so mobile cards show column labels
+    const applyMobileTableLabels = () => {
+        if (!isMobile()) return;
+        document.querySelectorAll('table').forEach(table => {
+            const headers = [...table.querySelectorAll('thead th')].map(th => th.textContent.trim());
+            if (!headers.length) return;
+            table.querySelectorAll('tbody tr').forEach(tr => {
+                [...tr.querySelectorAll('td')].forEach((td, i) => {
+                    if (headers[i] && !td.hasAttribute('data-label')) {
+                        td.setAttribute('data-label', headers[i]);
+                    }
+                });
+            });
+        });
+    };
+
+    // ── Swipe gestures ───────────────────────────────────────
     const initSwipeActions = () => {
         let startX = 0;
-        const threshold = 50;
-
         document.addEventListener('touchstart', (e) => { startX = e.touches[0].clientX; }, { passive: true });
         document.addEventListener('touchend', (e) => {
             const diff = e.changedTouches[0].clientX - startX;
-            if (Math.abs(diff) > threshold) {
-                // Swipe right to go back (if on detail view)
-                if (diff > 0 && _currentView && document.querySelector('.profile-header')) {
-                    // Optional: navigate back
-                }
+            // Swipe right from left edge → open drawer
+            if (diff > 60 && startX < 30 && isMobile()) {
+                openMobileDrawer();
+            }
+            // Swipe left → close drawer if open
+            if (diff < -60 && isMobile()) {
+                closeMobileDrawer();
             }
         }, { passive: true });
     };
 
+    // ── Pull-to-refresh (fixed) ──────────────────────────────
     const initPullToRefresh = async () => {
         const content = document.querySelector('.content-viewport');
         if (!content) return;
@@ -3094,16 +3205,15 @@ In a production system, this would show the actual file contents.
             }
         }, { passive: true });
 
-	content.addEventListener('touchend', async (e) => {
+        content.addEventListener('touchend', async (e) => {
             if (!startY) return;
             const diff = e.changedTouches[0].clientY - startY;
             if (diff > 80) {
                 refreshEl.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i> Refreshing...';
-                await setTimeout(async () => {
-                    await navigateTo(_currentView || 'calendar');
-                    refreshEl.classList.remove('show');
-                    refreshEl.innerHTML = '<i class="fas fa-arrow-down"></i> Pull to refresh';
-                }, 800);
+                await new Promise(resolve => setTimeout(resolve, 800));
+                await navigateTo(_currentView || 'calendar');
+                refreshEl.classList.remove('show');
+                refreshEl.innerHTML = '<i class="fas fa-arrow-down"></i> Pull to refresh';
             } else {
                 refreshEl.classList.remove('show');
                 refreshEl.innerHTML = '<i class="fas fa-arrow-down"></i> Pull to refresh';
@@ -6198,6 +6308,25 @@ function _wireLoginBtn() {
 
         // Phase 14: Offline & mobile features
         initOfflineSupport();
+        applyMobileClass();
+
+        // Resize + orientation listeners
+        let _resizeTimer;
+        window.addEventListener('resize', () => {
+            clearTimeout(_resizeTimer);
+            _resizeTimer = setTimeout(() => {
+                applyMobileClass();
+                updateBottomNavActive(_currentView);
+                applyMobileTableLabels();
+            }, 150);
+        });
+        window.addEventListener('orientationchange', () => {
+            setTimeout(() => {
+                applyMobileTableLabels();
+                if (isMobile()) updateBottomNavActive(_currentView);
+            }, 300);
+        });
+
         if (isMobile()) {
             await renderMobileBottomNav();
             initSwipeActions();
@@ -7457,6 +7586,13 @@ function _wireLoginBtn() {
         }
 
         UI.toast.info(`Switched to ${viewId} view.`);
+
+        // Mobile: update bottom nav active state + apply table card labels
+        if (isMobile()) {
+            updateBottomNavActive(viewId);
+            // Small delay so DOM is painted before we label tds
+            setTimeout(applyMobileTableLabels, 200);
+        }
     };
 
     // ========== PHASE 7: REFERRALS MODULE IMPLEMENTATION (VERTICAL LAYOUT) ==========
@@ -7731,15 +7867,15 @@ function _wireLoginBtn() {
             if (!person) return '';
             return `
                 <tr class="rank-${idx + 1}">
-                    <td class="rank-cell">${idx + 1}</td>
-                    <td class="name-cell" onclick="app.showReferralTree(${item.id}, '${item.type || 'prospect'}')">
+                    <td data-label="Rank" class="rank-cell">${idx + 1}</td>
+                    <td data-label="Referrer" class="name-cell" onclick="app.showReferralTree(${item.id}, '${item.type || 'prospect'}')">
                         ${person.full_name}
                         ${item.type === 'customer' ? '<span class="badge" style="background:#dcfce7; color:#166534">C</span>' : ''}
                         ${item.type === 'user' ? '<span class="badge" style="background:#dbeafe; color:#1e40af">Agent</span>' : ''}
                     </td>
-                    <td>${item.count}</td>
-                    <td><span style="color:#10b981; font-weight:600">${item.converted}</span></td>
-                    <td>${UI.formatDate(item.latest)}</td>
+                    <td data-label="Referrals">${item.count}</td>
+                    <td data-label="Converted"><span style="color:#10b981; font-weight:600">${item.converted}</span></td>
+                    <td data-label="Latest">${UI.formatDate(item.latest)}</td>
                     <td class="text-right">
                         <button class="btn-icon" onclick="app.toggleHideReferrer('${item.id}')" title="Hide from leaderboard">
                             <i class="far fa-eye-slash"></i>
@@ -13403,13 +13539,13 @@ function _wireLoginBtn() {
 
             html += `
                 <tr onclick="app.showCustomerDetail(${c.id})">
-                    <td><strong>${c.full_name}</strong></td>
-                    <td>RM ${(c.lifetime_value || 0).toLocaleString()} <span style="color:var(--success); font-size:12px;"><i class="fas fa-caret-up"></i></span></td>
-                    <td>${c.customer_since}</td>
-                    <td>${c.ming_gua}</td>
-                    <td>Michelle Tan</td>
-                    <td>${renderQuickHealthBadge(c)}</td>
-                    <td><span class="score-badge score-A+">${c.status.toUpperCase()}</span></td>
+                    <td data-label="Name"><strong>${c.full_name}</strong></td>
+                    <td data-label="Lifetime Value">RM ${(c.lifetime_value || 0).toLocaleString()} <span style="color:var(--success); font-size:12px;"><i class="fas fa-caret-up"></i></span></td>
+                    <td data-label="Customer Since">${c.customer_since}</td>
+                    <td data-label="Ming Gua">${c.ming_gua}</td>
+                    <td data-label="Agent">Michelle Tan</td>
+                    <td data-label="Health">${renderQuickHealthBadge(c)}</td>
+                    <td data-label="Status"><span class="score-badge score-A+">${c.status.toUpperCase()}</span></td>
                     <td onclick="event.stopPropagation()">
                         <button class="btn-icon" title="Edit"><i class="fas fa-edit"></i></button>
                         <button class="btn-icon" title="Add Purchase" onclick="app.openAddPurchaseModal(${c.id})"><i class="fas fa-shopping-cart"></i></button>
@@ -13894,15 +14030,15 @@ function _wireLoginBtn() {
 
             html += `
                 <tr onclick="app.showProspectDetail(${p.id})">
-                    <td><strong>${p.full_name || '(No Name)'}</strong></td>
-                    <td>${agentName}</td>
-                    <td>
+                    <td data-label="Name"><strong>${p.full_name || '(No Name)'}</strong></td>
+                    <td data-label="Agent">${agentName}</td>
+                    <td data-label="Score">
                         <span class="score-badge score-${grade.replace('+', '-plus')}">${p.score || 0} (${grade})</span>
                     </td>
-                    <td>${p.ming_gua || 'MG4'}</td>
-                    <td>${p.occupation || ''}${p.company_name ? ' · ' + p.company_name : ''}</td>
-                    <td>${lastActivityText}</td>
-                    <td>
+                    <td data-label="Ming Gua">${p.ming_gua || 'MG4'}</td>
+                    <td data-label="Occupation">${p.occupation || ''}${p.company_name ? ' · ' + p.company_name : ''}</td>
+                    <td data-label="Last Activity">${lastActivityText}</td>
+                    <td data-label="Protection">
                         <div>${daysLeft} days left</div>
                         <div class="protection-bar">
                             <div class="protection-fill ${protectionStatus}" style="width: ${Math.min(100, (daysLeft / 30) * 100)}%"></div>
@@ -17086,15 +17222,15 @@ const openAddSolutionModal = async (prospectId) => {
 
             html += `
                 <tr data-agent-id="${agent.id}" class="agent-row">
-                    <td>
+                    <td data-label="Name">
                         <div style="font-weight:600;">${await escapeHtml(agent.full_name)}</div>
                         <div style="font-size:12px; color:var(--gray-500);">${await escapeHtml(agent.agent_code) || 'N/A'}</div>
                     </td>
-                    <td>${await escapeHtml(agent.team) || 'Unassigned'}</td>
-                    <td><span class="status-badge status-${status}">${status.toUpperCase()}</span></td>
-                    <td>${await escapeHtml(agent.license_expiry) || 'N/A'}</td>
-                    <td>${stats.total_assigned} prospects</td>
-                    <td>
+                    <td data-label="Team">${await escapeHtml(agent.team) || 'Unassigned'}</td>
+                    <td data-label="Status"><span class="status-badge status-${status}">${status.toUpperCase()}</span></td>
+                    <td data-label="License Expiry">${await escapeHtml(agent.license_expiry) || 'N/A'}</td>
+                    <td data-label="Prospects">${stats.total_assigned} prospects</td>
+                    <td data-label="Follow-up">
                         <div class="followup-rate">
                             <span class="rate-indicator ${rateClass}"></span>
                             <span>${stats.followup_rate}%</span>
@@ -28209,6 +28345,11 @@ const initImportDemoData = async () => {
         toggleMobileNav,
         isMobile,
         renderMobileBottomNav,
+        openMobileDrawer,
+        closeMobileDrawer,
+        renderMobileDrawer,
+        updateBottomNavActive,
+        applyMobileTableLabels,
         showMobileMenu,
         initSwipeActions,
         initPullToRefresh,
