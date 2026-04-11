@@ -6724,8 +6724,9 @@ function _wireLoginBtn() {
         const userDisplay = document.getElementById('user-name-label');
         const userAvatar = document.getElementById('user-avatar');
         if (_currentUser) {
-            if (userDisplay) userDisplay.textContent = _currentUser.full_name || _currentUser.username;
-            if (userAvatar) userAvatar.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(_currentUser.full_name || _currentUser.username)}&background=0D9488&color=fff`;
+            const displayName = _currentUser.preferred_name || _currentUser.full_name || _currentUser.username;
+            if (userDisplay) userDisplay.textContent = displayName;
+            if (userAvatar) userAvatar.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=0D9488&color=fff`;
         } else {
             if (userDisplay) userDisplay.textContent = 'Guest';
             if (userAvatar) userAvatar.src = 'https://ui-avatars.com/api/?name=Guest&background=0D9488&color=fff';
@@ -18978,6 +18979,22 @@ const renderCurrentAssignments = async (agentId) => {
         UI.toast.success('Password changed successfully');
     };
 
+    const saveSelfPreferredName = async () => {
+        if (!_currentUser) return UI.toast.error('Not logged in');
+        const input = document.getElementById('settings-preferred-name');
+        const newName = (input?.value || '').trim();
+        if (newName.length > 60) return UI.toast.error('Preferred name must be 60 characters or less');
+        try {
+            await AppDataStore.update('users', _currentUser.id, { preferred_name: newName || null });
+            _currentUser.preferred_name = newName || null;
+            updateUserDisplay();
+            UI.toast.success(newName ? 'Display name updated' : 'Display name cleared');
+        } catch (e) {
+            console.error('saveSelfPreferredName failed', e);
+            UI.toast.error('Failed to save display name');
+        }
+    };
+
     const showSettingsView = (container) => {
         const viewport = container || document.getElementById('content-viewport');
         viewport.innerHTML = `
@@ -18992,6 +19009,18 @@ const renderCurrentAssignments = async (agentId) => {
                     <div class="stat-row"><span class="stat-label">Role:</span><span class="stat-value">${escapeHtml(_currentUser?.role || '')}</span></div>
                     <div class="stat-row"><span class="stat-label">Agent Code:</span><span class="stat-value">${escapeHtml(_currentUser?.agent_code || '—')}</span></div>
                 </div>
+            </div>
+
+            <div class="performance-card" style="margin-bottom:24px;">
+                <h4><i class="fas fa-id-badge"></i> Display Name</h4>
+                <p style="color:var(--gray-500); font-size:13px; margin:8px 0 12px;">This is the name shown in the top-right header. Leave blank to use your full name.</p>
+                <div class="form-group" style="margin-bottom:12px;">
+                    <label>Preferred Name</label>
+                    <input type="text" id="settings-preferred-name" class="form-control" placeholder="e.g. Mian" value="${escapeHtml(_currentUser?.preferred_name || '')}" maxlength="60">
+                </div>
+                <button class="btn primary" onclick="(async()=>{ await app.saveSelfPreferredName(); })()">
+                    <i class="fas fa-save"></i> Save Display Name
+                </button>
             </div>
 
             <div class="performance-card">
@@ -30524,6 +30553,7 @@ const initImportDemoData = async () => {
         showForcePasswordChangeModal,
         submitForcePasswordChange,
         selfChangePassword,
+        saveSelfPreferredName,
         showSettingsView,
         openResetPasswordModal,
         executePasswordReset,
