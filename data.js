@@ -46,7 +46,9 @@ class DataStore {
             // User preferences (migrated from localStorage)
             'user_preferences',
             // Special Program Fighting (incentive programs for selected agents)
-            'special_programs', 'special_program_participants'
+            'special_programs', 'special_program_participants',
+            // v6 Pipeline Scoring Rules (editable config + history)
+            'pipeline_config', 'pipeline_config_history'
         ];
         this.initialized = false;
         this._events = {};

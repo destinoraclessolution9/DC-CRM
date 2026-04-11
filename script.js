@@ -19015,83 +19015,304 @@ const deactivateAgent = async (agentId) => {
 
     // ========== PHASE 6: PIPELINE & SALES FORCE MODULE ==========
 
-    // ===== PIPELINE MANAGEMENT — 6-Category Prerequisite Model =====
+    // ===== PIPELINE MANAGEMENT — v6 Activity-Scored Model with Editable Config =====
+    //
+    // Philosophy: CPS is a hard gate. After CPS, every activity adds a decay-weighted
+    // contribution to each product category via a multiplier matrix. The best-scoring
+    // category becomes the "Target to Sign". Referral from a recent-purchase customer
+    // adds a flat +20% bonus. All weights are editable by Super Admin at runtime and
+    // persisted in the pipeline_config Supabase table.
 
-    // 6 Product Categories with prerequisite definitions mapped to activity types
-    const PIPELINE_CATEGORIES = [
-        {
-            id: 'lifechart',
-            name: 'Personal Lifechart Solution',
-            products: 'Lifechart reading, 9-stars analysis, personalised chart report',
-            defaultAmount: 3000,
-            prerequisites: [
-                { key: 'CPS', label: 'CPS', check: (acts) => acts.some(a => a.activity_type === 'CPS') },
-                { key: '9Stars', label: '9 Stars Session', check: (acts) => acts.some(a => a.activity_type === 'EVENT' && /(9[\s-]?stars?|9星|nine[\s-]?stars?)/i.test((a.event_title || '') + ' ' + (a.notes || ''))) },
-                { key: 'PersonalSharing', label: 'Personal Sharing Class', check: (acts) => acts.some(a => a.activity_type === 'EVENT' && /(personal.?sharing|sharing.?class)/i.test((a.event_title || '') + ' ' + (a.notes || ''))) },
-                { key: 'Museum', label: 'Museum Visit', check: (acts) => acts.some(a => a.activity_type === 'MUSEUM') },
-            ]
+    const DEFAULT_PIPELINE_CONFIG = {
+        version: 1,
+        updated_at: null,
+        updated_by: null,
+        categories: [
+            { id: 'powerring',     name: 'Power Ring (九星助命)',      products: 'PR4 Power Ring — premium feng shui ring',       default_amount: 2500 },
+            { id: 'fengshui',      name: '风水方案 (Fengshui Solution)', products: 'Residential audit, office audit, landform',   default_amount: 5000 },
+            { id: 'calligraphy',   name: '画作 (Calligraphy)',           products: 'Wealth / health / blessing calligraphy pieces', default_amount: 2800 },
+            { id: 'agent_package', name: '代理配套 (Agent Package)',    products: 'DC agent recruitment package',                  default_amount: null },
+            { id: 'bujishu',       name: 'Bujishu (满堂系列)',           products: 'Bed set, curtains, sofa, furniture package',    default_amount: 8500 },
+            { id: 'formula',       name: 'Formula Healthcare',            products: 'Formula supplements, health plan, wellness',    default_amount: 1200 },
+        ],
+        activity_weights: {
+            CPS:      15,
+            MUSEUM:    6,
+            FSA:       8,
+            FTF:       8,
+            EVENT:     6,
+            CALL:      3,
+            WHATSAPP:  2,
+            EMAIL:     2,
         },
-        {
-            id: 'fengshui',
-            name: 'Fengshui Audit Solution',
-            products: 'Residential audit, office audit, landform analysis',
-            defaultAmount: 5000,
-            prerequisites: [
-                { key: 'CPS', label: 'CPS', check: (acts) => acts.some(a => a.activity_type === 'CPS') },
-                { key: 'FengshuiDIY', label: 'Fengshui DIY', check: (acts) => acts.some(a => (a.activity_type === 'EVENT' || a.activity_type === 'FSA') && /(fengshui.?diy|feng.?shui.?diy)/i.test((a.event_title || '') + ' ' + (a.notes || ''))) },
-                { key: 'HuiJi', label: 'Hui Ji', check: (acts) => acts.some(a => a.activity_type === 'EVENT' && /(hui.?ji|汇聚)/i.test((a.event_title || '') + ' ' + (a.notes || ''))) },
-                { key: 'Museum', label: 'Museum Visit', check: (acts) => acts.some(a => a.activity_type === 'MUSEUM') },
-            ]
+        decay_tiers: [
+            { max_days:  30, factor: 1.00, label: 'Hot — full signal' },
+            { max_days:  60, factor: 0.50, label: 'Grey zone begins — cooling' },
+            { max_days: 120, factor: 0.25, label: 'Deep grey — needs reactivation' },
+            { max_days: null, factor: 0.00, label: 'Expired' },
+        ],
+        event_boosters: [
+            { name: '个人风水基础课',     pattern: '个人风水基础课|personal.?fengshui.?basic',                  multipliers: { powerring: 2.0 } },
+            { name: '个人改命分享会',     pattern: '个人改命分享会|personal.?destiny.?change',                   multipliers: { powerring: 2.0 } },
+            { name: '环境风水基础课',     pattern: '环境风水基础课|environment.?fengshui.?basic',                multipliers: { fengshui: 2.0 } },
+            { name: '老板每月主题课',     pattern: '老板每月主题课|boss.?monthly.?theme',                         multipliers: { fengshui: 1.8 } },
+            { name: '运程讲座',           pattern: '运程讲座|fortune.?lecture',                                   multipliers: { fengshui: 1.5 } },
+            { name: '汇集',               pattern: '汇集|hui.?ji',                                                 multipliers: { fengshui: 2.5, calligraphy: 2.5 } },
+            { name: '风水改命分享会',     pattern: '风水改命分享会|fengshui.?destiny.?change',                   multipliers: { fengshui: 2.0 } },
+            { name: '画作分享会',         pattern: '画作分享会|画作分|calligraphy.?sharing|painting.?sharing',    multipliers: { calligraphy: 2.0 } },
+            { name: '艺品分享会',         pattern: '艺品分享会|art.?piece.?sharing',                             multipliers: { calligraphy: 2.0 } },
+            { name: 'DC 招商会',          pattern: 'DC.?招商会|招商会|agent.?recruitment',                        multipliers: { agent_package: 2.5 } },
+            { name: 'Bujishu 分享会',     pattern: 'bujishu.?分享会|bujishu.?sharing',                           multipliers: { bujishu: 2.0 } },
+            { name: 'Bujishu 新品发布会', pattern: 'bujishu.?新品发布会|bujishu.?product.?launch',               multipliers: { bujishu: 2.5 } },
+            { name: 'Formula 展览',       pattern: 'formula.?展览|formula.?exhibition',                          multipliers: { formula: 2.0 } },
+            { name: 'Formula 新品发布会', pattern: 'formula.?新品发布会|formula.?product.?launch',               multipliers: { formula: 2.5 } },
+            { name: 'Formula Member Day', pattern: 'formula.?member.?day',                                        multipliers: { formula: 2.0 } },
+            { name: 'Formula 分享会',     pattern: 'formula.?分享会|formula.?sharing',                           multipliers: { formula: 2.0 } },
+        ],
+        activity_multipliers: {
+            MUSEUM:        { powerring: 1.5, fengshui: 1.2, calligraphy: 1.2 },
+            FSA:           { fengshui: 1.5, calligraphy: 2.0 },
+            FTF:           { agent_package: 1.2, bujishu: 1.2 },
+            FTF_HANDS_ON:  { bujishu: 2.5, _pattern: 'wang.?house|mattress|bed.?set|curtain|sofa' },
         },
-        {
-            id: 'calligraphy',
-            name: 'Calligraphy Solution',
-            products: 'Custom calligraphy for wealth/health, blessing pieces',
-            defaultAmount: 2800,
-            prerequisites: [
-                { key: 'CPS', label: 'CPS', check: (acts) => acts.some(a => a.activity_type === 'CPS') },
-                { key: 'CalligraphySharing', label: '画作分享会', check: (acts) => acts.some(a => a.activity_type === 'EVENT' && /(画作|calligraphy.?sharing|painting.?sharing)/i.test((a.event_title || '') + ' ' + (a.notes || ''))) },
-                { key: 'HuiJi', label: 'Hui Ji', check: (acts) => acts.some(a => a.activity_type === 'EVENT' && /(hui.?ji|汇聚)/i.test((a.event_title || '') + ' ' + (a.notes || ''))) },
-                { key: 'Museum', label: 'Museum Visit', check: (acts) => acts.some(a => a.activity_type === 'MUSEUM') },
-            ]
+        constants: {
+            score_to_prob_k: 2.5,
+            referral_customer_bonus_pct: 20,
+            referral_customer_purchase_window_days: 180,
+            cps_required: true,
+            history_retention: 25,
         },
-        {
-            id: 'bujishu',
-            name: 'Bujishu',
-            products: 'Bujishu bed set, energy curtains, Bujishu furniture package',
-            defaultAmount: 8500,
-            prerequisites: [
-                { key: 'CPS', label: 'CPS', check: (acts) => acts.some(a => a.activity_type === 'CPS') },
-                { key: 'BujishuClass', label: 'Bujishu Sharing Class', check: (acts) => acts.some(a => a.activity_type === 'EVENT' && /(bujishu|bu.?ji.?shu)/i.test((a.event_title || '') + ' ' + (a.notes || ''))) },
-                { key: 'HuiJi', label: 'Hui Ji', check: (acts) => acts.some(a => a.activity_type === 'EVENT' && /(hui.?ji|汇聚)/i.test((a.event_title || '') + ' ' + (a.notes || ''))) },
-                { key: 'WangHouse', label: 'Visited Wang House', check: (acts) => acts.some(a => a.activity_type === 'FTF' && /wang.?house/i.test((a.event_title || '') + ' ' + (a.notes || ''))) },
-                { key: 'Mattress', label: 'Tried Mattress', check: (acts) => acts.some(a => a.activity_type === 'FTF' && /(mattress|bed.?set)/i.test((a.event_title || '') + ' ' + (a.notes || ''))) },
-                { key: 'Curtain', label: 'Touched Curtain', check: (acts) => acts.some(a => a.activity_type === 'FTF' && /curtain/i.test((a.event_title || '') + ' ' + (a.notes || ''))) },
-                { key: 'Sofa', label: 'Tried Sofa', check: (acts) => acts.some(a => a.activity_type === 'FTF' && /sofa/i.test((a.event_title || '') + ' ' + (a.notes || ''))) },
-            ]
-        },
-        {
-            id: 'healthcare',
-            name: 'Formula Healthcare Solution',
-            products: 'Formula supplements, health plan, wellness consultation',
-            defaultAmount: 1200,
-            prerequisites: [
-                { key: 'HealthClass', label: 'Health Class', check: (acts) => acts.some(a => a.activity_type === 'EVENT' && /(health.?class|formula.?health|wellness.?class|kesihatan)/i.test((a.event_title || '') + ' ' + (a.notes || ''))) },
-            ]
-        },
-        {
-            id: 'other',
-            name: 'Other / Cross-Category',
-            products: 'Bundles, POP RM499/month, 21-step packages',
-            defaultAmount: 499,
-            prerequisites: []
+    };
+
+    // Module-level cache — populated on first load, invalidated on save
+    let _pipelineConfig = null;
+    let _pipelineConfigLoading = null;
+
+    const loadPipelineConfig = async () => {
+        if (_pipelineConfig) return _pipelineConfig;
+        if (_pipelineConfigLoading) return _pipelineConfigLoading;
+        _pipelineConfigLoading = (async () => {
+            try {
+                const rows = await AppDataStore.query('pipeline_config', { id: 1 });
+                if (rows.length && rows[0].config_json) {
+                    const raw = rows[0].config_json;
+                    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+                    // Shallow-merge with defaults so missing keys don't crash the engine
+                    _pipelineConfig = {
+                        ...DEFAULT_PIPELINE_CONFIG,
+                        ...parsed,
+                        constants: { ...DEFAULT_PIPELINE_CONFIG.constants, ...(parsed.constants || {}) },
+                        activity_weights: { ...DEFAULT_PIPELINE_CONFIG.activity_weights, ...(parsed.activity_weights || {}) },
+                    };
+                    return _pipelineConfig;
+                }
+            } catch (e) { /* fallthrough to defaults */ }
+            _pipelineConfig = JSON.parse(JSON.stringify(DEFAULT_PIPELINE_CONFIG));
+            return _pipelineConfig;
+        })();
+        try {
+            return await _pipelineConfigLoading;
+        } finally {
+            _pipelineConfigLoading = null;
         }
-    ];
+    };
 
-    // Calculate which pipeline category a prospect qualifies for and their signing probability
-    const calcPipelineEntry = (prospect, prospectActivities) => {
+    const savePipelineConfigJson = async (newConfig, note = '') => {
+        newConfig = {
+            ...newConfig,
+            version: (newConfig.version || 0) + 1,
+            updated_at: new Date().toISOString(),
+            updated_by: _currentUser?.id || null,
+        };
+        // 1. Write current config
+        try {
+            const existing = await AppDataStore.query('pipeline_config', { id: 1 });
+            const payload = { id: 1, config_json: newConfig, updated_by: newConfig.updated_by, updated_at: newConfig.updated_at };
+            if (existing.length) {
+                await AppDataStore.update('pipeline_config', 1, payload);
+            } else {
+                await AppDataStore.create('pipeline_config', payload);
+            }
+        } catch (e) {
+            console.warn('savePipelineConfigJson: primary write failed', e);
+        }
+        // 2. Append to history
+        try {
+            await AppDataStore.create('pipeline_config_history', {
+                config_json: newConfig,
+                updated_by: newConfig.updated_by,
+                updated_at: newConfig.updated_at,
+                note: note || `v${newConfig.version}`,
+            });
+            // Trim to retention limit (default 25)
+            const retention = newConfig.constants?.history_retention || 25;
+            const history = await AppDataStore.query('pipeline_config_history', {});
+            if (history.length > retention) {
+                const sorted = [...history].sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+                const toDelete = sorted.slice(retention);
+                for (const h of toDelete) {
+                    try { await AppDataStore.delete('pipeline_config_history', h.id); } catch (_) {}
+                }
+            }
+        } catch (e) { /* offline fallback */ }
+        _pipelineConfig = newConfig;
+        return newConfig;
+    };
+
+    // ---- Scoring helper: decay factor for a given activity age in days ----
+    const _pipelineDecayFactor = (days, config) => {
+        for (const tier of config.decay_tiers) {
+            if (tier.max_days === null || tier.max_days === undefined) return tier.factor;
+            if (days <= tier.max_days) return tier.factor;
+        }
+        return 0;
+    };
+
+    // ---- Activity text resolver: concatenate all searchable fields for an activity,
+    // including the linked event title via event_id lookup.
+    // The activities table uses columns like activity_title, summary, discussion_summary,
+    // note_key_points, note_outcome, note_next_steps, note_needs, note_pain_points —
+    // NOT event_title / notes. The canonical event name lives in events.title.
+    const _pipelineActivityText = (activity, eventsMap) => {
+        const parts = [
+            activity.activity_title || '',
+            activity.summary || '',
+            activity.discussion_summary || '',
+            activity.note_key_points || '',
+            activity.note_outcome || '',
+            activity.note_next_steps || '',
+            activity.note_needs || '',
+            activity.note_pain_points || '',
+            activity.venue || '',
+            activity.solution_sold || '',
+        ];
+        if (activity.event_id && eventsMap) {
+            const ev = eventsMap.get(activity.event_id) || eventsMap.get(String(activity.event_id));
+            if (ev) parts.push(ev.title || ev.name || '');
+        }
+        return parts.filter(Boolean).join(' ');
+    };
+
+    // Module-level cache for events table (TTL 60s) — avoids re-fetching on every score
+    let _pipelineEventsCache = null;
+    let _pipelineEventsCacheTs = 0;
+    const _getPipelineEventsMap = async () => {
+        if (_pipelineEventsCache && Date.now() - _pipelineEventsCacheTs < 60000) {
+            return _pipelineEventsCache;
+        }
+        const map = new Map();
+        try {
+            const events = await AppDataStore.getAll('events');
+            for (const e of (events || [])) {
+                map.set(e.id, e);
+                map.set(String(e.id), e);
+            }
+        } catch (_) {}
+        _pipelineEventsCache = map;
+        _pipelineEventsCacheTs = Date.now();
+        return map;
+    };
+    const _invalidatePipelineEventsCache = () => { _pipelineEventsCache = null; };
+
+    // ---- Scoring helper: how much does this activity multiply category X? ----
+    const _pipelineActivityMultiplier = (activity, categoryId, config, text) => {
+        const type = activity.activity_type;
+        const title = text || _pipelineActivityText(activity, null);
+        if (type === 'EVENT') {
+            // Match event boosters by regex in priority order
+            for (const booster of (config.event_boosters || [])) {
+                try {
+                    if (new RegExp(booster.pattern, 'i').test(title)) {
+                        return booster.multipliers[categoryId] || 1.0;
+                    }
+                } catch (_) { /* bad regex — skip */ }
+            }
+            return 1.0;
+        }
+        if (type === 'FTF') {
+            const handsOn = config.activity_multipliers?.FTF_HANDS_ON;
+            if (handsOn && handsOn._pattern) {
+                try {
+                    if (new RegExp(handsOn._pattern, 'i').test(title)) {
+                        return handsOn[categoryId] || 1.0;
+                    }
+                } catch (_) {}
+            }
+        }
+        const row = config.activity_multipliers?.[type];
+        if (row && row[categoryId] != null) return row[categoryId];
+        return 1.0;
+    };
+
+    // ---- Referral bonus: +20% if prospect was referred by a customer with a purchase
+    // in the last N days (default 180) ----
+    const checkReferralBonus = async (prospect, config) => {
+        const windowDays = config.constants?.referral_customer_purchase_window_days || 180;
+        const bonusPct = config.constants?.referral_customer_bonus_pct || 20;
+        const result = { applied: false, bonusPct, reason: '' };
+
+        // Path A: structured referrals table
+        let referrerCustomerId = null;
+        try {
+            const referrals = await AppDataStore.query('referrals', { referred_prospect_id: prospect.id });
+            const customerRef = (referrals || []).find(r => r.referrer_type === 'customer');
+            if (customerRef) referrerCustomerId = customerRef.referrer_id;
+        } catch (_) {}
+
+        // Path B: fallback to prospect.referrer_name → lookup in customers table
+        if (!referrerCustomerId && prospect.referrer_name) {
+            try {
+                const customers = await AppDataStore.getAll('customers');
+                const needle = String(prospect.referrer_name).trim().toLowerCase();
+                if (needle) {
+                    const match = customers.find(c => {
+                        const n1 = String(c.full_name || '').trim().toLowerCase();
+                        const n2 = String(c.name || '').trim().toLowerCase();
+                        return n1 === needle || n2 === needle;
+                    });
+                    if (match) referrerCustomerId = match.id;
+                }
+            } catch (_) {}
+        }
+
+        if (!referrerCustomerId) {
+            result.reason = 'No customer referrer';
+            return result;
+        }
+        result.referrerCustomerId = referrerCustomerId;
+
+        // Verify at least one purchase within the purchase window
+        let purchases = [];
+        try {
+            purchases = await AppDataStore.query('purchases', { customer_id: referrerCustomerId });
+        } catch (_) {}
+        if (!purchases.length) {
+            result.reason = 'Referrer has no purchases';
+            return result;
+        }
+        const cutoffMs = Date.now() - windowDays * 24 * 60 * 60 * 1000;
+        const recent = purchases.find(p => {
+            const dateStr = p.purchase_date || p.created_at || p.date || null;
+            if (!dateStr) return false;
+            return new Date(dateStr).getTime() >= cutoffMs;
+        });
+        if (!recent) {
+            result.reason = `Last customer purchase older than ${windowDays} days`;
+            return result;
+        }
+        result.applied = true;
+        result.lastPurchaseDate = recent.purchase_date || recent.created_at || recent.date;
+        return result;
+    };
+
+    // ---- MAIN: calculate pipeline entry for one prospect ----
+    // Returns an object with qualified flag, probability, category, breakdown, referral info
+    const calcPipelineEntry = async (prospect, prospectActivities) => {
+        const config = await loadPipelineConfig();
+        const eventsMap = await _getPipelineEventsMap();
         const now = new Date();
 
+        // Latest activity metadata (for UI: "last activity" label + legacy fields)
         let lastActivityDate = null;
         let latestOppPotential = '';
         let latestNextAction = '';
@@ -19101,61 +19322,195 @@ const deactivateAgent = async (agentId) => {
             latestOppPotential = sorted.find(a => a.opportunity_potential?.trim())?.opportunity_potential || '';
             latestNextAction = sorted.find(a => a.next_action?.trim())?.next_action || '';
         }
-
         const daysSinceLast = lastActivityDate
             ? Math.floor((now - lastActivityDate) / (1000 * 60 * 60 * 24))
             : 999;
 
-        const getMultiplier = (days) => {
-            if (days <= 30) return 1.0;
-            if (days <= 90) return 0.7;
-            return 0.5;
-        };
+        // CPS HARD GATE — no CPS anywhere in history means prospect is not scored
+        const hasCPS = prospectActivities.some(a => a.activity_type === 'CPS');
+        if (config.constants?.cps_required && !hasCPS) {
+            return {
+                qualified: false,
+                probability: 0,
+                category: null,
+                categoryScores: {},
+                breakdown: [],
+                referralInfo: { applied: false, reason: 'CPS gate: no CPS on file' },
+                daysSinceLast,
+                lastActivityDate,
+                latestOppPotential,
+                latestNextAction,
+                action: 'Book CPS discovery session — required to enter pipeline',
+                reason: 'No CPS on file',
+            };
+        }
 
-        let qualifiedCategory = null;
-        let partialCategory = null;
-        let partialCompleted = [];
-        let partialMissing = [];
+        // Pre-resolve activity text so we don't rebuild it per-category
+        const activityTexts = new Map();
+        for (const act of prospectActivities) {
+            activityTexts.set(act, _pipelineActivityText(act, eventsMap));
+        }
 
-        for (const cat of PIPELINE_CATEGORIES) {
-            if (cat.id === 'other' || cat.prerequisites.length === 0) continue;
-            const completed = cat.prerequisites.filter(p => p.check(prospectActivities));
-            const missing = cat.prerequisites.filter(p => !p.check(prospectActivities));
-            if (missing.length === 0) {
-                qualifiedCategory = cat;
-                break;
-            } else if (!partialCategory || completed.length > partialCompleted.length) {
-                partialCategory = cat;
-                partialCompleted = completed;
-                partialMissing = missing;
+        // Score every category using weights × decay × multiplier
+        const categoryScores = {};
+        const breakdownByCat = {};
+        const categories = config.categories || [];
+        for (const cat of categories) {
+            let score = 0;
+            const contribs = [];
+            for (const act of prospectActivities) {
+                const base = config.activity_weights?.[act.activity_type] || 0;
+                if (base === 0) continue;
+                const age = Math.floor((now - new Date(act.activity_date)) / (1000 * 60 * 60 * 24));
+                const decay = _pipelineDecayFactor(age, config);
+                if (decay === 0) continue;
+                const text = activityTexts.get(act) || '';
+                const mult = _pipelineActivityMultiplier(act, cat.id, config, text);
+                const contribution = base * decay * mult;
+                if (contribution > 0) {
+                    score += contribution;
+                    contribs.push({
+                        activity_type: act.activity_type,
+                        event_title: text.slice(0, 40),
+                        age_days: age,
+                        base,
+                        decay,
+                        multiplier: mult,
+                        contribution: Math.round(contribution * 100) / 100,
+                    });
+                }
+            }
+            categoryScores[cat.id] = Math.round(score * 100) / 100;
+            breakdownByCat[cat.id] = contribs;
+        }
+
+        // Pick best category
+        let bestCatId = null;
+        let bestScore = 0;
+        for (const [id, s] of Object.entries(categoryScores)) {
+            if (s > bestScore) {
+                bestScore = s;
+                bestCatId = id;
             }
         }
 
-        const category = qualifiedCategory || partialCategory || PIPELINE_CATEGORIES.find(c => c.id === 'other');
-        const isQualified = !!qualifiedCategory;
-        const missingPrereqs = isQualified ? [] : partialMissing;
-        const completedPrereqs = isQualified ? (qualifiedCategory?.prerequisites || []) : partialCompleted;
-        const probability = isQualified ? Math.round(100 * getMultiplier(daysSinceLast)) : 0;
-        const action = generatePipelineAction(category, missingPrereqs, daysSinceLast, isQualified);
+        if (bestScore === 0) {
+            return {
+                qualified: false,
+                probability: 0,
+                category: null,
+                categoryScores,
+                breakdown: [],
+                referralInfo: { applied: false, reason: 'CPS present but no scoring activity within decay window' },
+                daysSinceLast,
+                lastActivityDate,
+                latestOppPotential,
+                latestNextAction,
+                action: 'Reactivate with an event invitation or follow-up call',
+                reason: 'No scoring activity',
+            };
+        }
 
-        return { category, probability, missingPrereqs, completedPrereqs, daysSinceLast, lastActivityDate, action, qualified: isQualified, latestOppPotential, latestNextAction };
+        const bestCategory = categories.find(c => c.id === bestCatId) || null;
+        const K = config.constants?.score_to_prob_k || 2.5;
+        let probability = Math.min(100, Math.round(bestScore * K));
+
+        // Apply customer referral bonus
+        const referralInfo = await checkReferralBonus(prospect, config);
+        if (referralInfo.applied) {
+            probability = Math.min(100, probability + referralInfo.bonusPct);
+        }
+
+        const action = generatePipelineAction(bestCategory, daysSinceLast, true, referralInfo, breakdownByCat[bestCatId]);
+
+        return {
+            qualified: true,
+            probability,
+            category: bestCategory,
+            categoryScores,
+            breakdown: breakdownByCat[bestCatId] || [],
+            referralInfo,
+            rawScore: bestScore,
+            daysSinceLast,
+            lastActivityDate,
+            latestOppPotential,
+            latestNextAction,
+            action,
+            // Legacy fields (some UI code reads these)
+            missingPrereqs: [],
+            completedPrereqs: [],
+        };
     };
 
-    const generatePipelineAction = (category, missingPrereqs, daysSinceLast, isQualified) => {
-        if (!isQualified && missingPrereqs.length > 0) {
-            return `Complete prerequisite: <strong>${escapeHtml(missingPrereqs[0].label)}</strong> – schedule next session`;
+    const generatePipelineAction = (category, daysSinceLast, isQualified, referralInfo, breakdown) => {
+        if (!category) return 'Reactivate with a call or event invite';
+        if (!isQualified) return 'Book next CPS / activity to enter pipeline';
+        const catId = category.id;
+        const name = escapeHtml(category.name || '');
+        // Hands-on close for bujishu
+        if (catId === 'bujishu') {
+            const hasWangHouse = (breakdown || []).some(b => /wang.?house|mattress|bed.?set|curtain|sofa/i.test(b.event_title || ''));
+            if (hasWangHouse) return `Close ${name} — prospect has touched product, follow up within 7 days`;
+            return `Schedule Wang House / mattress / curtain / sofa trial — unlocks Bujishu close`;
         }
-        if (category?.id === 'bujishu') {
-            return 'Schedule in-home trial for mattress / curtain / sofa – then close';
+        if (catId === 'powerring') {
+            if (daysSinceLast <= 30) return `Send Power Ring quotation + 九星 reading summary — follow up within 7 days`;
+            if (daysSinceLast <= 60) return `Re-engagement: invite to next 个人改命分享会`;
+            return `Win-back: reactivate via personal 9-stars session`;
         }
-        if (category?.id === 'healthcare') {
-            if (daysSinceLast <= 30) return 'Send starter pack offer – Health Class completed ✓';
-            if (daysSinceLast <= 90) return 'Re-engagement: book health class follow-up session';
-            return 'Win-back campaign – special health package to reactivate';
+        if (catId === 'fengshui') {
+            if (daysSinceLast <= 30) return `Send Fengshui audit proposal — follow up within 7 days`;
+            if (daysSinceLast <= 60) return `Re-engagement: invite to next 汇集 or 环境风水基础课`;
+            return `Win-back call: offer free Fengshui assessment`;
         }
-        if (daysSinceLast <= 30) return `Send proposal for <strong>${escapeHtml(category?.name || '')}</strong> – follow up within 7 days`;
-        if (daysSinceLast <= 90) return 'Re-engagement call – offer free museum revisit or sharing class';
-        return 'Win-back campaign – special discount or Burger Program to reactivate';
+        if (catId === 'calligraphy') {
+            if (daysSinceLast <= 30) return `Send 画作 sample photos + price list — follow up within 7 days`;
+            if (daysSinceLast <= 60) return `Re-engagement: invite to next 画作分享会`;
+            return `Win-back: share latest 艺品 launch photos`;
+        }
+        if (catId === 'formula') {
+            if (daysSinceLast <= 30) return `Send Formula starter pack offer — follow up within 7 days`;
+            if (daysSinceLast <= 60) return `Re-engagement: invite to next Formula Member Day`;
+            return `Win-back: special health package`;
+        }
+        if (catId === 'agent_package') {
+            if (daysSinceLast <= 30) return `Send 代理配套 current-month pricing + DC onboarding plan`;
+            if (daysSinceLast <= 60) return `Re-engagement: invite to next DC 招商会`;
+            return `Win-back: 1-on-1 agent package discussion`;
+        }
+        if (daysSinceLast <= 30) return `Send proposal for <strong>${name}</strong> – follow up within 7 days`;
+        if (daysSinceLast <= 60) return 'Re-engagement call – offer free sharing class';
+        return 'Win-back campaign – special discount to reactivate';
+    };
+
+    // One-time cleanup: rename legacy 汇聚 → 汇集 across activities AND events.
+    // Scans activity_title, summary, discussion_summary, note_key_points, events.title etc.
+    const _huijiMigrationRan = { flag: false };
+    const runHuiJiMigration = async () => {
+        if (_huijiMigrationRan.flag) return;
+        _huijiMigrationRan.flag = true;
+        const textFields = ['activity_title', 'summary', 'discussion_summary', 'note_key_points', 'note_outcome', 'note_next_steps'];
+        try {
+            const acts = await AppDataStore.getAll('activities');
+            for (const a of acts || []) {
+                const updates = {};
+                for (const f of textFields) {
+                    if (a[f] && /汇聚/.test(a[f])) updates[f] = a[f].replace(/汇聚/g, '汇集');
+                }
+                if (Object.keys(updates).length) {
+                    try { await AppDataStore.update('activities', a.id, updates); } catch (_) {}
+                }
+            }
+            const events = await AppDataStore.getAll('events');
+            for (const e of events || []) {
+                const updates = {};
+                if (e.title && /汇聚/.test(e.title)) updates.title = e.title.replace(/汇聚/g, '汇集');
+                if (e.description && /汇聚/.test(e.description)) updates.description = e.description.replace(/汇聚/g, '汇集');
+                if (Object.keys(updates).length) {
+                    try { await AppDataStore.update('events', e.id, updates); } catch (_) {}
+                }
+            }
+        } catch (_) { /* offline fallback */ }
     };
 
     const getNoteCount = async (prospectId) => {
@@ -19177,7 +19532,10 @@ const deactivateAgent = async (agentId) => {
         if (solutions.length > 0 && solutions[0].amount) return solutions[0].amount;
         if (prospect.estimated_value_max) return prospect.estimated_value_max;
         if (prospect.estimated_value_min) return prospect.estimated_value_min;
-        return category?.defaultAmount || 0;
+        // v6: default_amount may be null (e.g. agent_package) → caller decides how to render
+        if (category?.default_amount != null) return category.default_amount;
+        if (category?.defaultAmount != null) return category.defaultAmount; // legacy fallback
+        return null;
     };
 
     let _pipelineAgentFilter = 'all';
@@ -19185,6 +19543,11 @@ const deactivateAgent = async (agentId) => {
 
     const showPipelineView = async (container) => {
         const userId = _currentUser?.id || 5;
+        // Warm the config cache once per view render
+        await loadPipelineConfig();
+        // Background: one-time migration of legacy 汇聚 → 汇集 (fire-and-forget)
+        runHuiJiMigration();
+
         const allActivities = await getVisibleActivities();
         let prospects = await getVisibleProspects();
         const agents = (await AppDataStore.getAll('users')).filter(u => isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'));
@@ -19198,11 +19561,11 @@ const deactivateAgent = async (agentId) => {
             .filter(rec => activeProspects.some(p => p.id == rec.prospect_id))
             .sort((a, b) => a.priority_order - b.priority_order);
 
-        // Enrich and qualify prospects for Table 2
-        const enriched = activeProspects.map(p => {
+        // Enrich and qualify prospects for Table 2 — v6: async calcPipelineEntry
+        const enrichedRaw = await Promise.all(activeProspects.map(async (p) => {
             const acts = allActivities.filter(a => a.prospect_id === p.id);
-            const pipeline = calcPipelineEntry(p, acts);
-            // Also qualify prospects with explicit potential data set
+            const pipeline = await calcPipelineEntry(p, acts);
+            // Also qualify prospects with explicit potential data set (manual override)
             if (!pipeline.qualified && (p.close_probability > 0 || p.potential_level)) {
                 const potentialProb = p.close_probability > 0
                     ? p.close_probability
@@ -19211,24 +19574,28 @@ const deactivateAgent = async (agentId) => {
                 pipeline.probability = potentialProb;
                 pipeline.fromPotential = true;
                 pipeline.potentialLevel = p.potential_level;
-                if (!pipeline.action || pipeline.action.startsWith('Complete prerequisite')) {
+                if (!pipeline.action || pipeline.action.startsWith('Complete prerequisite') || pipeline.action.startsWith('Book CPS')) {
                     pipeline.action = `Potential: <strong>${p.potential_level || 'Set'}</strong> – follow up to advance to close`;
                 }
             }
             return { ...p, _pipeline: pipeline };
-        }).filter(p => p._pipeline.qualified)
-          .sort((a, b) => {
-              if (b._pipeline.probability !== a._pipeline.probability) return b._pipeline.probability - a._pipeline.probability;
-              const da = a._pipeline.lastActivityDate ? a._pipeline.lastActivityDate.getTime() : 0;
-              const db = b._pipeline.lastActivityDate ? b._pipeline.lastActivityDate.getTime() : 0;
-              if (db !== da) return db - da;
-              return (a.name || a.full_name || '').localeCompare(b.name || b.full_name || '');
-          });
+        }));
 
-        const probBadge = (prob) => {
+        const enriched = enrichedRaw
+            .filter(p => p._pipeline.qualified)
+            .sort((a, b) => {
+                if (b._pipeline.probability !== a._pipeline.probability) return b._pipeline.probability - a._pipeline.probability;
+                const da = a._pipeline.lastActivityDate ? a._pipeline.lastActivityDate.getTime() : 0;
+                const db = b._pipeline.lastActivityDate ? b._pipeline.lastActivityDate.getTime() : 0;
+                if (db !== da) return db - da;
+                return (a.name || a.full_name || '').localeCompare(b.name || b.full_name || '');
+            });
+
+        const probBadge = (prob, prospectId) => {
             const color = prob >= 80 ? '#DC2626' : prob >= 60 ? '#F59E0B' : '#6B7280';
             const label = prob >= 80 ? '🔥 HOT' : prob >= 50 ? '⚡ WARM' : '❄️ COLD';
-            return `<span style="background:${color};color:white;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;">${label}</span><strong style="margin-left:6px;">${prob}%</strong>`;
+            const clickable = prospectId != null ? `onclick="event.stopPropagation();app.showPipelineExplain(${prospectId})" style="cursor:pointer;" title="Click to see score breakdown"` : '';
+            return `<span ${clickable}><span style="background:${color};color:white;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;">${label}</span><strong style="margin-left:6px;">${prob}%</strong></span>`;
         };
 
         const focusRows = (await Promise.all(focusList.map((rec, idx) => renderFocusRow(rec, idx, allActivities, probBadge)))).join('');
@@ -19411,9 +19778,12 @@ const deactivateAgent = async (agentId) => {
         if (!prospect) return '';
 
         const acts = allActivities.filter(a => a.prospect_id === prospect.id);
-        const entry = calcPipelineEntry(prospect, acts);
+        const entry = await calcPipelineEntry(prospect, acts);
         const amount = await getPipelineAmount(prospect, entry.category);
         const noteCount = await getNoteCount(prospect.id);
+        const amountHtml = amount == null
+            ? `<span style="color:#92400E;font-weight:600;">Varies</span> <span style="font-size:10px;color:#9CA3AF;">check monthly</span>`
+            : `RM ${Number(amount).toLocaleString()}`;
 
         return `
             <tr data-list-id="${rec.id}" draggable="true"
@@ -19436,8 +19806,8 @@ const deactivateAgent = async (agentId) => {
                     <div style="font-weight:500;color:#1E40AF;">${escapeHtml(entry.category?.name || 'Unknown')}</div>
                     <div style="font-size:11px;color:#9CA3AF;">${escapeHtml(entry.latestOppPotential || entry.category?.products || '')}</div>
                 </td>
-                <td style="padding:14px 12px;font-weight:600;color:#059669;">RM ${(amount || 0).toLocaleString()}</td>
-                <td style="padding:14px 12px;">${probBadge(entry.probability)}</td>
+                <td style="padding:14px 12px;font-weight:600;color:#059669;">${amountHtml}</td>
+                <td style="padding:14px 12px;">${probBadge(entry.probability, prospect.id)}</td>
                 <td style="padding:14px 12px;font-size:13px;line-height:1.5;max-width:260px;">${entry.latestNextAction ? escapeHtml(entry.latestNextAction) : entry.action}</td>
                 <td style="padding:14px 12px;">
                     <div style="display:flex;gap:6px;">
@@ -19457,12 +19827,24 @@ const deactivateAgent = async (agentId) => {
         const amount = await getPipelineAmount(prospect, entry.category);
         const noteCount = await getNoteCount(prospect.id);
 
-        const prereqsHtml = entry.fromPotential
-            ? `<span style="background:#EDE9FE;color:#5B21B6;padding:2px 5px;border-radius:4px;font-size:10px;">⭐ ${escapeHtml(entry.potentialLevel || 'Potential')} Potential</span>`
-            : (entry.category?.prerequisites || []).map(p => {
-                const done = entry.completedPrereqs.some(c => c.key === p.key);
-                return `<span style="background:${done ? '#D1FAE5' : '#FEE2E2'};color:${done ? '#065F46' : '#991B1B'};padding:2px 5px;border-radius:4px;font-size:10px;">${done ? '✓' : '✗'} ${escapeHtml(p.label)}</span>`;
+        // v6: show top-3 contributing activities instead of prereq pills
+        let signalsHtml = '';
+        if (entry.fromPotential) {
+            signalsHtml = `<span style="background:#EDE9FE;color:#5B21B6;padding:2px 5px;border-radius:4px;font-size:10px;">⭐ ${escapeHtml(entry.potentialLevel || 'Potential')} Potential</span>`;
+        } else if (Array.isArray(entry.breakdown) && entry.breakdown.length) {
+            const top = [...entry.breakdown].sort((a, b) => b.contribution - a.contribution).slice(0, 3);
+            signalsHtml = top.map(c => {
+                const label = c.activity_type === 'EVENT' && c.event_title ? c.event_title.slice(0, 18) : c.activity_type;
+                const boost = c.multiplier > 1 ? ` ×${c.multiplier}` : '';
+                return `<span style="background:#D1FAE5;color:#065F46;padding:2px 5px;border-radius:4px;font-size:10px;">✓ ${escapeHtml(label)}${boost}</span>`;
             }).join(' ');
+        }
+        const referralBadge = entry.referralInfo?.applied
+            ? `<span style="background:#FEF3C7;color:#92400E;padding:2px 5px;border-radius:4px;font-size:10px;margin-left:4px;" title="Referred by customer with recent purchase — +${entry.referralInfo.bonusPct}%">⭐ Customer referral +${entry.referralInfo.bonusPct}%</span>`
+            : '';
+        const amountHtml = amount == null
+            ? `<span style="color:#92400E;font-weight:600;">Varies</span><br><button class="btn-icon" onclick="event.stopPropagation();app.setAgentPackageAmount()" style="font-size:10px;color:#2563EB;padding:0;background:none;border:none;cursor:pointer;">[edit]</button>`
+            : `RM ${Number(amount).toLocaleString()}`;
 
         return `
             <tr style="border-bottom:1px solid #F3F4F6;" onmouseover="this.style.background='#F9FAFB'" onmouseout="this.style.background=''">
@@ -19471,12 +19853,12 @@ const deactivateAgent = async (agentId) => {
                     <div style="font-size:11px;color:#9CA3AF;">Last activity: ${entry.lastActivityDate ? entry.lastActivityDate.toLocaleDateString('en-GB') : 'None'}</div>
                 </td>
                 <td style="padding:14px 12px;">
-                    <div style="font-weight:500;color:#1E40AF;">${entry.fromPotential ? 'Prospect Potential' : escapeHtml(entry.category?.name || '')}</div>
-                    <div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:2px;">${prereqsHtml}</div>
+                    <div style="font-weight:500;color:#1E40AF;">${entry.fromPotential ? 'Prospect Potential' : escapeHtml(entry.category?.name || '')}${referralBadge}</div>
+                    <div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:2px;">${signalsHtml}</div>
                     ${entry.latestOppPotential ? `<div style="font-size:11px;color:#9CA3AF;margin-top:4px;">${escapeHtml(entry.latestOppPotential)}</div>` : ''}
                 </td>
-                <td style="padding:14px 12px;font-weight:600;color:#059669;">RM ${(amount || 0).toLocaleString()}</td>
-                <td style="padding:14px 12px;">${probBadge(entry.probability)}</td>
+                <td style="padding:14px 12px;font-weight:600;color:#059669;">${amountHtml}</td>
+                <td style="padding:14px 12px;">${probBadge(entry.probability, prospect.id)}</td>
                 <td style="padding:14px 12px;font-size:13px;line-height:1.5;max-width:260px;">${entry.latestNextAction ? escapeHtml(entry.latestNextAction) : entry.action}</td>
                 <td style="padding:14px 12px;">
                     <div style="display:flex;gap:6px;flex-wrap:wrap;">
@@ -19792,44 +20174,562 @@ const deactivateAgent = async (agentId) => {
         await refreshPipeline();
     };
 
-    const openPipelineConfigModal = () => {
-        const rows = [
-            ['0 – 30 days since last activity', '× 1.0', '100%', '#059669'],
-            ['31 – 90 days since last activity', '× 0.7', '70%', '#D97706'],
-            ['> 90 days since last activity', '× 0.5', '50%', '#DC2626'],
-            ['Prerequisites not completed', '—', '0% (not in Table 2)', '#6B7280'],
-        ];
-        const content = `
-            <div style="padding:4px;">
-                <h3 style="margin-bottom:12px;font-size:15px;font-weight:600;">Time Decay — Signing Probability Rules</h3>
-                <div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:8px;padding:14px;margin-bottom:18px;">
-                    <table style="width:100%;font-size:13px;border-collapse:collapse;">
-                        ${rows.map(([cond, mult, result, color]) => `
-                        <tr style="border-bottom:1px solid #D1FAE5;">
-                            <td style="padding:6px 8px;">${cond}</td>
-                            <td style="padding:6px 8px;font-weight:700;">${mult}</td>
-                            <td style="padding:6px 8px;font-weight:700;color:${color};">${result}</td>
-                        </tr>`).join('')}
+    // ====== PIPELINE RULES EDITOR (Super Admin only) ======
+    // Renders 6 collapsible sections: Categories / Activity Weights / Decay Tiers /
+    // Event Boosters / Activity × Category Matrix / Global Constants.
+    // Non-admins see a read-only view.
+    //
+    // The editor works on a local draft object (_pipelineEditDraft) so changes can be
+    // discarded by closing the modal without saving. "Save All Changes" writes the
+    // draft via savePipelineConfigJson and refreshes the pipeline.
+
+    let _pipelineEditDraft = null;
+
+    const _pipelineDraftClone = (cfg) => JSON.parse(JSON.stringify(cfg));
+
+    const openPipelineConfigModal = async () => {
+        const config = await loadPipelineConfig();
+        const isAdmin = isSystemAdmin(_currentUser);
+        _pipelineEditDraft = _pipelineDraftClone(config);
+        _renderPipelineConfigModal(isAdmin);
+    };
+
+    const _renderPipelineConfigModal = (isAdmin) => {
+        const cfg = _pipelineEditDraft;
+        const cats = cfg.categories || [];
+        const weights = cfg.activity_weights || {};
+        const decay = cfg.decay_tiers || [];
+        const boosters = cfg.event_boosters || [];
+        const actMults = cfg.activity_multipliers || {};
+        const consts = cfg.constants || {};
+        const disabled = isAdmin ? '' : 'disabled';
+        const adminBadge = isAdmin
+            ? `<span style="background:#DCFCE7;color:#166534;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600;">Editing as Super Admin</span>`
+            : `<span style="background:#F3F4F6;color:#6B7280;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600;">Read-only view</span>`;
+
+        // === Section 1: Categories ===
+        const categoriesSection = `
+            <details open style="margin-bottom:14px;">
+                <summary style="cursor:pointer;font-size:14px;font-weight:600;padding:8px 0;">1. Product Categories <span style="color:#9CA3AF;font-weight:400;font-size:11px;">(${cats.length} rows)</span></summary>
+                <div style="overflow-x:auto;">
+                    <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                        <thead><tr style="background:#F9FAFB;border-bottom:2px solid #E5E7EB;">
+                            <th style="padding:6px 8px;text-align:left;">ID</th>
+                            <th style="padding:6px 8px;text-align:left;">Name</th>
+                            <th style="padding:6px 8px;text-align:left;">Products</th>
+                            <th style="padding:6px 8px;text-align:left;width:110px;">Default RM</th>
+                            ${isAdmin ? '<th style="padding:6px 8px;width:40px;"></th>' : ''}
+                        </tr></thead>
+                        <tbody>
+                        ${cats.map((c, i) => `
+                            <tr style="border-bottom:1px solid #F3F4F6;">
+                                <td style="padding:4px 8px;"><input type="text" value="${escapeHtml(c.id || '')}" ${disabled} data-kind="category" data-index="${i}" data-field="id" style="width:100%;border:1px solid #E5E7EB;padding:4px;font-size:12px;"></td>
+                                <td style="padding:4px 8px;"><input type="text" value="${escapeHtml(c.name || '')}" ${disabled} data-kind="category" data-index="${i}" data-field="name" style="width:100%;border:1px solid #E5E7EB;padding:4px;font-size:12px;"></td>
+                                <td style="padding:4px 8px;"><input type="text" value="${escapeHtml(c.products || '')}" ${disabled} data-kind="category" data-index="${i}" data-field="products" style="width:100%;border:1px solid #E5E7EB;padding:4px;font-size:12px;"></td>
+                                <td style="padding:4px 8px;"><input type="text" value="${c.default_amount == null ? 'Varies' : c.default_amount}" ${disabled} data-kind="category" data-index="${i}" data-field="default_amount" style="width:100%;border:1px solid #E5E7EB;padding:4px;font-size:12px;" placeholder="Varies or number"></td>
+                                ${isAdmin ? `<td style="padding:4px 8px;"><button type="button" class="btn-icon" style="color:#DC2626;" onclick="app.deletePipelineCategory(${i})" title="Delete"><i class="fas fa-trash"></i></button></td>` : ''}
+                            </tr>`).join('')}
+                        </tbody>
+                    </table>
+                    ${isAdmin ? `<button type="button" class="btn secondary btn-sm" style="margin-top:8px;" onclick="app.addPipelineCategory()"><i class="fas fa-plus"></i> Add Category</button>` : ''}
+                </div>
+            </details>`;
+
+        // === Section 2: Activity Base Weights ===
+        const weightKeys = Object.keys(weights);
+        const weightsSection = `
+            <details open style="margin-bottom:14px;">
+                <summary style="cursor:pointer;font-size:14px;font-weight:600;padding:8px 0;">2. Activity Base Weights <span style="color:#9CA3AF;font-weight:400;font-size:11px;">(${weightKeys.length} rows)</span></summary>
+                <div style="overflow-x:auto;">
+                    <table style="width:100%;border-collapse:collapse;font-size:12px;max-width:400px;">
+                        <thead><tr style="background:#F9FAFB;border-bottom:2px solid #E5E7EB;">
+                            <th style="padding:6px 8px;text-align:left;">Activity Type</th>
+                            <th style="padding:6px 8px;text-align:left;">Base Weight</th>
+                            ${isAdmin ? '<th style="padding:6px 8px;width:40px;"></th>' : ''}
+                        </tr></thead>
+                        <tbody>
+                        ${weightKeys.map(k => `
+                            <tr style="border-bottom:1px solid #F3F4F6;">
+                                <td style="padding:4px 8px;font-family:monospace;">${escapeHtml(k)}</td>
+                                <td style="padding:4px 8px;"><input type="number" step="0.5" value="${weights[k]}" ${disabled} data-kind="weight" data-key="${escapeHtml(k)}" style="width:90px;border:1px solid #E5E7EB;padding:4px;"></td>
+                                ${isAdmin ? `<td style="padding:4px 8px;"><button type="button" class="btn-icon" style="color:#DC2626;" onclick="app.deletePipelineWeight('${escapeHtml(k)}')" title="Delete"><i class="fas fa-trash"></i></button></td>` : ''}
+                            </tr>`).join('')}
+                        </tbody>
+                    </table>
+                    ${isAdmin ? `<button type="button" class="btn secondary btn-sm" style="margin-top:8px;" onclick="app.addPipelineWeight()"><i class="fas fa-plus"></i> Add Activity Type</button>` : ''}
+                </div>
+            </details>`;
+
+        // === Section 3: Decay Tiers ===
+        const decaySection = `
+            <details open style="margin-bottom:14px;">
+                <summary style="cursor:pointer;font-size:14px;font-weight:600;padding:8px 0;">3. Time Decay Tiers <span style="color:#9CA3AF;font-weight:400;font-size:11px;">(activity age → multiplier)</span></summary>
+                <div style="overflow-x:auto;">
+                    <table style="width:100%;border-collapse:collapse;font-size:12px;max-width:600px;">
+                        <thead><tr style="background:#F9FAFB;border-bottom:2px solid #E5E7EB;">
+                            <th style="padding:6px 8px;text-align:left;">Up to N days</th>
+                            <th style="padding:6px 8px;text-align:left;">Factor</th>
+                            <th style="padding:6px 8px;text-align:left;">Label</th>
+                            ${isAdmin ? '<th style="padding:6px 8px;width:40px;"></th>' : ''}
+                        </tr></thead>
+                        <tbody>
+                        ${decay.map((t, i) => `
+                            <tr style="border-bottom:1px solid #F3F4F6;">
+                                <td style="padding:4px 8px;"><input type="text" value="${t.max_days == null ? 'beyond' : t.max_days}" ${disabled} data-kind="decay" data-index="${i}" data-field="max_days" style="width:90px;border:1px solid #E5E7EB;padding:4px;" placeholder="30 or 'beyond'"></td>
+                                <td style="padding:4px 8px;"><input type="number" step="0.05" value="${t.factor}" ${disabled} data-kind="decay" data-index="${i}" data-field="factor" style="width:90px;border:1px solid #E5E7EB;padding:4px;"></td>
+                                <td style="padding:4px 8px;"><input type="text" value="${escapeHtml(t.label || '')}" ${disabled} data-kind="decay" data-index="${i}" data-field="label" style="width:100%;border:1px solid #E5E7EB;padding:4px;"></td>
+                                ${isAdmin ? `<td style="padding:4px 8px;"><button type="button" class="btn-icon" style="color:#DC2626;" onclick="app.deletePipelineDecay(${i})" title="Delete"><i class="fas fa-trash"></i></button></td>` : ''}
+                            </tr>`).join('')}
+                        </tbody>
+                    </table>
+                    ${isAdmin ? `<button type="button" class="btn secondary btn-sm" style="margin-top:8px;" onclick="app.addPipelineDecay()"><i class="fas fa-plus"></i> Add Tier</button>` : ''}
+                </div>
+            </details>`;
+
+        // === Section 4: Event Boosters (2D matrix) ===
+        const boosterHeader = cats.map(c => `<th style="padding:6px 6px;font-size:10px;text-align:center;min-width:70px;">${escapeHtml(c.id)}</th>`).join('');
+        const boostersSection = `
+            <details open style="margin-bottom:14px;">
+                <summary style="cursor:pointer;font-size:14px;font-weight:600;padding:8px 0;">4. Event Boosters <span style="color:#9CA3AF;font-weight:400;font-size:11px;">(EVENT title regex → per-category multiplier)</span></summary>
+                <div style="overflow-x:auto;">
+                    <table style="width:100%;border-collapse:collapse;font-size:11px;min-width:900px;">
+                        <thead><tr style="background:#F9FAFB;border-bottom:2px solid #E5E7EB;">
+                            <th style="padding:6px;text-align:left;min-width:140px;">Event Name</th>
+                            <th style="padding:6px;text-align:left;min-width:200px;">Match Pattern (regex)</th>
+                            ${boosterHeader}
+                            ${isAdmin ? '<th style="padding:6px;width:30px;"></th>' : ''}
+                        </tr></thead>
+                        <tbody>
+                        ${boosters.map((b, i) => `
+                            <tr style="border-bottom:1px solid #F3F4F6;">
+                                <td style="padding:2px 4px;"><input type="text" value="${escapeHtml(b.name || '')}" ${disabled} data-kind="booster" data-index="${i}" data-field="name" style="width:100%;border:1px solid #E5E7EB;padding:4px;font-size:11px;"></td>
+                                <td style="padding:2px 4px;"><input type="text" value="${escapeHtml(b.pattern || '')}" ${disabled} data-kind="booster" data-index="${i}" data-field="pattern" style="width:100%;border:1px solid #E5E7EB;padding:4px;font-size:11px;font-family:monospace;"></td>
+                                ${cats.map(c => {
+                                    const v = b.multipliers?.[c.id] ?? '';
+                                    return `<td style="padding:2px 4px;text-align:center;"><input type="number" step="0.1" value="${v}" ${disabled} data-kind="booster-mult" data-index="${i}" data-cat="${escapeHtml(c.id)}" style="width:55px;border:1px solid #E5E7EB;padding:3px;text-align:center;" placeholder="1"></td>`;
+                                }).join('')}
+                                ${isAdmin ? `<td style="padding:2px 4px;"><button type="button" class="btn-icon" style="color:#DC2626;" onclick="app.deletePipelineBooster(${i})" title="Delete"><i class="fas fa-trash"></i></button></td>` : ''}
+                            </tr>`).join('')}
+                        </tbody>
+                    </table>
+                    ${isAdmin ? `<button type="button" class="btn secondary btn-sm" style="margin-top:8px;" onclick="app.addPipelineBooster()"><i class="fas fa-plus"></i> Add Event Booster</button>` : ''}
+                </div>
+            </details>`;
+
+        // === Section 5: Activity × Category Matrix ===
+        const actMultRows = Object.keys(actMults);
+        const matrixSection = `
+            <details style="margin-bottom:14px;">
+                <summary style="cursor:pointer;font-size:14px;font-weight:600;padding:8px 0;">5. Activity × Category Multipliers <span style="color:#9CA3AF;font-weight:400;font-size:11px;">(non-EVENT activity routing)</span></summary>
+                <div style="overflow-x:auto;">
+                    <table style="width:100%;border-collapse:collapse;font-size:11px;">
+                        <thead><tr style="background:#F9FAFB;border-bottom:2px solid #E5E7EB;">
+                            <th style="padding:6px;text-align:left;min-width:120px;">Activity / Key</th>
+                            ${cats.map(c => `<th style="padding:6px;font-size:10px;text-align:center;min-width:70px;">${escapeHtml(c.id)}</th>`).join('')}
+                            <th style="padding:6px;text-align:left;min-width:160px;">Sub-pattern (optional)</th>
+                        </tr></thead>
+                        <tbody>
+                        ${actMultRows.map(key => {
+                            const row = actMults[key] || {};
+                            return `
+                            <tr style="border-bottom:1px solid #F3F4F6;">
+                                <td style="padding:4px 8px;font-family:monospace;">${escapeHtml(key)}</td>
+                                ${cats.map(c => {
+                                    const v = row[c.id] ?? '';
+                                    return `<td style="padding:2px 4px;text-align:center;"><input type="number" step="0.1" value="${v}" ${disabled} data-kind="actmult" data-row="${escapeHtml(key)}" data-cat="${escapeHtml(c.id)}" style="width:55px;border:1px solid #E5E7EB;padding:3px;text-align:center;" placeholder="1"></td>`;
+                                }).join('')}
+                                <td style="padding:2px 4px;"><input type="text" value="${escapeHtml(row._pattern || '')}" ${disabled} data-kind="actmult-pattern" data-row="${escapeHtml(key)}" style="width:100%;border:1px solid #E5E7EB;padding:4px;font-size:10px;font-family:monospace;"></td>
+                            </tr>`;
+                        }).join('')}
+                        </tbody>
                     </table>
                 </div>
-                <h3 style="margin-bottom:12px;font-size:15px;font-weight:600;">6 Product Categories & Prerequisites</h3>
-                ${PIPELINE_CATEGORIES.filter(c => c.id !== 'other').map(cat => `
-                    <div style="border:1px solid #E5E7EB;border-radius:8px;padding:12px;margin-bottom:10px;">
-                        <div style="font-weight:600;color:#1E40AF;margin-bottom:3px;">${escapeHtml(cat.name)} <span style="font-weight:400;color:#6B7280;font-size:12px;">· RM ${cat.defaultAmount.toLocaleString()} est.</span></div>
-                        <div style="font-size:11px;color:#9CA3AF;margin-bottom:6px;">${escapeHtml(cat.products)}</div>
-                        <div style="display:flex;flex-wrap:wrap;gap:4px;">
-                            ${cat.prerequisites.map(p => `<span style="background:#EFF6FF;color:#1E40AF;padding:2px 8px;border-radius:4px;font-size:11px;">${escapeHtml(p.label)}</span>`).join('')}
-                        </div>
-                    </div>`).join('')}
+            </details>`;
+
+        // === Section 6: Global Constants ===
+        const constsSection = `
+            <details open style="margin-bottom:14px;">
+                <summary style="cursor:pointer;font-size:14px;font-weight:600;padding:8px 0;">6. Global Constants</summary>
+                <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;max-width:600px;">
+                    <div>
+                        <label style="font-size:11px;color:#6B7280;display:block;margin-bottom:2px;">K constant (score → probability)</label>
+                        <input type="number" step="0.1" value="${consts.score_to_prob_k || 2.5}" ${disabled} data-kind="const" data-field="score_to_prob_k" style="width:100%;border:1px solid #E5E7EB;padding:6px;">
+                    </div>
+                    <div>
+                        <label style="font-size:11px;color:#6B7280;display:block;margin-bottom:2px;">Customer referral bonus (%)</label>
+                        <input type="number" step="1" value="${consts.referral_customer_bonus_pct || 20}" ${disabled} data-kind="const" data-field="referral_customer_bonus_pct" style="width:100%;border:1px solid #E5E7EB;padding:6px;">
+                    </div>
+                    <div>
+                        <label style="font-size:11px;color:#6B7280;display:block;margin-bottom:2px;">Purchase window (days)</label>
+                        <input type="number" step="1" value="${consts.referral_customer_purchase_window_days || 180}" ${disabled} data-kind="const" data-field="referral_customer_purchase_window_days" style="width:100%;border:1px solid #E5E7EB;padding:6px;">
+                    </div>
+                    <div>
+                        <label style="font-size:11px;color:#6B7280;display:block;margin-bottom:2px;">History retention (versions)</label>
+                        <input type="number" step="1" value="${consts.history_retention || 25}" ${disabled} data-kind="const" data-field="history_retention" style="width:100%;border:1px solid #E5E7EB;padding:6px;">
+                    </div>
+                    <div style="grid-column:1 / -1;">
+                        <label style="display:flex;align-items:center;gap:8px;font-size:12px;">
+                            <input type="checkbox" ${consts.cps_required ? 'checked' : ''} ${disabled} data-kind="const" data-field="cps_required">
+                            CPS required — hard gate (no score without CPS anywhere in history)
+                        </label>
+                    </div>
+                </div>
+            </details>`;
+
+        const historyBtn = isAdmin
+            ? `<button class="btn secondary btn-sm" onclick="app.showPipelineConfigHistory()"><i class="fas fa-history"></i> History</button>`
+            : '';
+
+        const content = `
+            <div style="padding:4px;max-width:100%;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding:10px 12px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;">
+                    <div>
+                        <div style="font-size:13px;font-weight:600;color:#92400E;">Pipeline Scoring Rules v6</div>
+                        <div style="font-size:11px;color:#78350F;">Config version ${cfg.version || 1} · ${adminBadge}</div>
+                    </div>
+                    ${historyBtn}
+                </div>
+                ${categoriesSection}
+                ${weightsSection}
+                ${decaySection}
+                ${boostersSection}
+                ${matrixSection}
+                ${constsSection}
             </div>`;
-        UI.showModal('Pipeline Rules & 6 Categories', content, [
-            { label: 'Close', type: 'secondary', action: 'UI.hideModal()' }
+
+        const saveBtn = isAdmin
+            ? { label: 'Save All Changes', type: 'primary', action: `(async () => { await app.savePipelineRules(); })()` }
+            : null;
+        const buttons = [
+            { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
+            ...(saveBtn ? [saveBtn] : []),
+        ];
+        UI.showModal('Pipeline Scoring Rules', content, buttons);
+    };
+
+    const _readPipelineDraftFromDom = () => {
+        const cfg = _pipelineEditDraft;
+        if (!cfg) return null;
+        // Categories
+        document.querySelectorAll('[data-kind="category"]').forEach(el => {
+            const i = parseInt(el.dataset.index, 10);
+            const field = el.dataset.field;
+            if (!cfg.categories[i]) return;
+            if (field === 'default_amount') {
+                const raw = (el.value || '').trim();
+                if (!raw || /^(varies|null|-)$/i.test(raw)) {
+                    cfg.categories[i].default_amount = null;
+                } else {
+                    const n = parseFloat(raw);
+                    cfg.categories[i].default_amount = isNaN(n) ? null : n;
+                }
+            } else {
+                cfg.categories[i][field] = el.value;
+            }
+        });
+        // Activity weights
+        document.querySelectorAll('[data-kind="weight"]').forEach(el => {
+            const key = el.dataset.key;
+            cfg.activity_weights[key] = parseFloat(el.value) || 0;
+        });
+        // Decay tiers
+        document.querySelectorAll('[data-kind="decay"]').forEach(el => {
+            const i = parseInt(el.dataset.index, 10);
+            const field = el.dataset.field;
+            if (!cfg.decay_tiers[i]) return;
+            if (field === 'max_days') {
+                const raw = (el.value || '').trim();
+                cfg.decay_tiers[i].max_days = /^(beyond|null|-|infinity)$/i.test(raw) ? null : (parseInt(raw, 10) || null);
+            } else if (field === 'factor') {
+                cfg.decay_tiers[i].factor = parseFloat(el.value) || 0;
+            } else {
+                cfg.decay_tiers[i][field] = el.value;
+            }
+        });
+        // Event boosters — name/pattern
+        document.querySelectorAll('[data-kind="booster"]').forEach(el => {
+            const i = parseInt(el.dataset.index, 10);
+            const field = el.dataset.field;
+            if (!cfg.event_boosters[i]) return;
+            cfg.event_boosters[i][field] = el.value;
+        });
+        // Event booster multipliers
+        document.querySelectorAll('[data-kind="booster-mult"]').forEach(el => {
+            const i = parseInt(el.dataset.index, 10);
+            const catId = el.dataset.cat;
+            if (!cfg.event_boosters[i]) return;
+            if (!cfg.event_boosters[i].multipliers) cfg.event_boosters[i].multipliers = {};
+            const v = parseFloat(el.value);
+            if (isNaN(v) || v === 1 || v === 0) {
+                delete cfg.event_boosters[i].multipliers[catId];
+            } else {
+                cfg.event_boosters[i].multipliers[catId] = v;
+            }
+        });
+        // Activity × category matrix
+        document.querySelectorAll('[data-kind="actmult"]').forEach(el => {
+            const row = el.dataset.row;
+            const catId = el.dataset.cat;
+            if (!cfg.activity_multipliers[row]) cfg.activity_multipliers[row] = {};
+            const v = parseFloat(el.value);
+            if (isNaN(v) || v === 1 || v === 0) {
+                delete cfg.activity_multipliers[row][catId];
+            } else {
+                cfg.activity_multipliers[row][catId] = v;
+            }
+        });
+        document.querySelectorAll('[data-kind="actmult-pattern"]').forEach(el => {
+            const row = el.dataset.row;
+            if (!cfg.activity_multipliers[row]) cfg.activity_multipliers[row] = {};
+            if ((el.value || '').trim()) {
+                cfg.activity_multipliers[row]._pattern = el.value;
+            } else {
+                delete cfg.activity_multipliers[row]._pattern;
+            }
+        });
+        // Constants
+        document.querySelectorAll('[data-kind="const"]').forEach(el => {
+            const field = el.dataset.field;
+            if (el.type === 'checkbox') cfg.constants[field] = el.checked;
+            else cfg.constants[field] = parseFloat(el.value) || 0;
+        });
+        return cfg;
+    };
+
+    const savePipelineRules = async () => {
+        if (!isSystemAdmin(_currentUser)) {
+            UI.toast.error('Super Admin only');
+            return;
+        }
+        const draft = _readPipelineDraftFromDom();
+        if (!draft) return;
+        await savePipelineConfigJson(draft, 'Super Admin edit');
+        UI.toast.success('Pipeline rules saved');
+        UI.hideModal();
+        const container = document.getElementById('content-viewport');
+        if (container) await showPipelineView(container);
+    };
+
+    // CRUD actions that mutate the draft and re-render the modal
+    const addPipelineCategory = () => {
+        _readPipelineDraftFromDom();
+        const n = _pipelineEditDraft.categories.length + 1;
+        _pipelineEditDraft.categories.push({ id: `cat_${n}`, name: 'New Category', products: '', default_amount: 0 });
+        _renderPipelineConfigModal(true);
+    };
+    const deletePipelineCategory = (i) => {
+        _readPipelineDraftFromDom();
+        const cat = _pipelineEditDraft.categories[i];
+        if (!cat) return;
+        if (!confirm(`Delete category "${cat.name}"? Any prospects targeting it will auto-reroute to the next-best category.`)) return;
+        _pipelineEditDraft.categories.splice(i, 1);
+        _renderPipelineConfigModal(true);
+    };
+    const addPipelineWeight = () => {
+        _readPipelineDraftFromDom();
+        const key = prompt('New activity type code (e.g. VIDEO_CALL)');
+        if (!key) return;
+        _pipelineEditDraft.activity_weights[key.trim().toUpperCase()] = 3;
+        _renderPipelineConfigModal(true);
+    };
+    const deletePipelineWeight = (key) => {
+        _readPipelineDraftFromDom();
+        delete _pipelineEditDraft.activity_weights[key];
+        _renderPipelineConfigModal(true);
+    };
+    const addPipelineDecay = () => {
+        _readPipelineDraftFromDom();
+        _pipelineEditDraft.decay_tiers.push({ max_days: 30, factor: 0.5, label: 'New tier' });
+        _renderPipelineConfigModal(true);
+    };
+    const deletePipelineDecay = (i) => {
+        _readPipelineDraftFromDom();
+        _pipelineEditDraft.decay_tiers.splice(i, 1);
+        _renderPipelineConfigModal(true);
+    };
+    const addPipelineBooster = () => {
+        _readPipelineDraftFromDom();
+        _pipelineEditDraft.event_boosters.push({ name: 'New Event', pattern: '', multipliers: {} });
+        _renderPipelineConfigModal(true);
+    };
+    const deletePipelineBooster = (i) => {
+        _readPipelineDraftFromDom();
+        _pipelineEditDraft.event_boosters.splice(i, 1);
+        _renderPipelineConfigModal(true);
+    };
+
+    // Quick-edit the 代理配套 monthly amount
+    const setAgentPackageAmount = async () => {
+        const cfg = await loadPipelineConfig();
+        const cat = (cfg.categories || []).find(c => c.id === 'agent_package');
+        if (!cat) {
+            UI.toast.error('代理配套 category not found');
+            return;
+        }
+        const current = cat.default_amount == null ? '' : cat.default_amount;
+        const raw = prompt(`Set this month's 代理配套 amount (RM). Leave blank for "Varies".`, current);
+        if (raw === null) return;
+        const trimmed = raw.trim();
+        if (!trimmed || /^(varies|null|-)$/i.test(trimmed)) {
+            cat.default_amount = null;
+        } else {
+            const n = parseFloat(trimmed);
+            if (isNaN(n)) { UI.toast.error('Invalid number'); return; }
+            cat.default_amount = n;
+        }
+        await savePipelineConfigJson(cfg, `Set agent_package amount to ${cat.default_amount}`);
+        UI.toast.success('Updated');
+        const container = document.getElementById('content-viewport');
+        if (container) await showPipelineView(container);
+    };
+
+    const showPipelineConfigHistory = async () => {
+        try {
+            const history = await AppDataStore.query('pipeline_config_history', {});
+            const sorted = [...history].sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+            const rows = sorted.map(h => `
+                <tr style="border-bottom:1px solid #F3F4F6;">
+                    <td style="padding:6px 8px;font-size:12px;">${new Date(h.updated_at).toLocaleString()}</td>
+                    <td style="padding:6px 8px;font-size:12px;">${escapeHtml(h.note || '')}</td>
+                    <td style="padding:6px 8px;"><button class="btn-icon" onclick="app.rollbackPipelineConfig(${h.id})" title="Rollback"><i class="fas fa-undo"></i></button></td>
+                </tr>`).join('');
+            const content = `
+                <div style="max-height:400px;overflow-y:auto;">
+                    <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                        <thead><tr style="background:#F9FAFB;">
+                            <th style="padding:8px;text-align:left;">Saved At</th>
+                            <th style="padding:8px;text-align:left;">Note</th>
+                            <th style="padding:8px;width:50px;"></th>
+                        </tr></thead>
+                        <tbody>${rows || '<tr><td colspan="3" style="padding:24px;text-align:center;color:#9CA3AF;">No history yet</td></tr>'}</tbody>
+                    </table>
+                </div>`;
+            UI.showModal(`Pipeline Config History (last ${sorted.length})`, content, [
+                { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
+            ]);
+        } catch (e) {
+            UI.toast.error('Could not load history');
+        }
+    };
+
+    const rollbackPipelineConfig = async (historyId) => {
+        if (!isSystemAdmin(_currentUser)) { UI.toast.error('Super Admin only'); return; }
+        if (!confirm('Roll back to this version? The current rules will be replaced.')) return;
+        try {
+            const rec = await AppDataStore.getById('pipeline_config_history', historyId);
+            if (!rec) { UI.toast.error('Version not found'); return; }
+            const parsed = typeof rec.config_json === 'string' ? JSON.parse(rec.config_json) : rec.config_json;
+            await savePipelineConfigJson(parsed, `Rollback to ${new Date(rec.updated_at).toLocaleString()}`);
+            UI.toast.success('Rolled back');
+            UI.hideModal();
+            const container = document.getElementById('content-viewport');
+            if (container) await showPipelineView(container);
+        } catch (e) {
+            UI.toast.error('Rollback failed');
+        }
+    };
+
+    // ====== Explainability modal ======
+    // Shows how the probability for a prospect was computed — score breakdown,
+    // multipliers applied, referral bonus, and the final formula.
+    const showPipelineExplain = async (prospectId) => {
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) { UI.toast.error('Prospect not found'); return; }
+        const allActivities = await AppDataStore.query('activities', { prospect_id: prospectId });
+        const entry = await calcPipelineEntry(prospect, allActivities);
+        const cfg = await loadPipelineConfig();
+        const K = cfg.constants?.score_to_prob_k || 2.5;
+
+        if (!entry.qualified) {
+            const content = `
+                <div style="padding:8px;">
+                    <p style="font-size:13px;color:#6B7280;">This prospect is not in the pipeline.</p>
+                    <div style="background:#FEF3C7;border:1px solid #FDE68A;border-radius:8px;padding:12px;margin-top:8px;">
+                        <strong style="color:#92400E;">Reason:</strong> ${escapeHtml(entry.reason || 'Not qualified')}
+                    </div>
+                    ${entry.action ? `<p style="margin-top:10px;font-size:12px;"><strong>Next step:</strong> ${entry.action}</p>` : ''}
+                </div>`;
+            UI.showModal(`Score Breakdown — ${escapeHtml(prospect.name || prospect.full_name || '')}`, content, [
+                { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
+            ]);
+            return;
+        }
+
+        const breakdownRows = (entry.breakdown || []).sort((a, b) => b.contribution - a.contribution).map(c => `
+            <tr style="border-bottom:1px solid #F3F4F6;">
+                <td style="padding:6px 8px;font-size:11px;">${escapeHtml(c.activity_type)}</td>
+                <td style="padding:6px 8px;font-size:11px;color:#6B7280;">${escapeHtml((c.event_title || '').slice(0, 30))}</td>
+                <td style="padding:6px 8px;font-size:11px;text-align:right;">${c.age_days}d</td>
+                <td style="padding:6px 8px;font-size:11px;text-align:right;">${c.base}</td>
+                <td style="padding:6px 8px;font-size:11px;text-align:right;">×${c.decay}</td>
+                <td style="padding:6px 8px;font-size:11px;text-align:right;">×${c.multiplier}</td>
+                <td style="padding:6px 8px;font-size:11px;text-align:right;font-weight:600;color:#059669;">+${c.contribution}</td>
+            </tr>`).join('');
+
+        const allCatScores = Object.entries(entry.categoryScores || {})
+            .sort((a, b) => b[1] - a[1])
+            .map(([id, s]) => {
+                const cat = cfg.categories.find(c => c.id === id);
+                const isBest = id === entry.category?.id;
+                return `<tr style="${isBest ? 'background:#FEF3C7;font-weight:600;' : ''}">
+                    <td style="padding:6px 8px;font-size:11px;">${escapeHtml(cat?.name || id)}${isBest ? ' ⭐' : ''}</td>
+                    <td style="padding:6px 8px;font-size:11px;text-align:right;">${s}</td>
+                    <td style="padding:6px 8px;font-size:11px;text-align:right;">${Math.min(100, Math.round(s * K))}%</td>
+                </tr>`;
+            }).join('');
+
+        const referralRow = entry.referralInfo?.applied
+            ? `<tr><td colspan="2" style="padding:6px 8px;font-size:12px;color:#92400E;">+ Customer referral bonus <span style="font-size:10px;color:#9CA3AF;">(purchase ${entry.referralInfo.lastPurchaseDate ? new Date(entry.referralInfo.lastPurchaseDate).toLocaleDateString('en-GB') : '—'})</span></td><td style="padding:6px 8px;font-size:12px;text-align:right;font-weight:600;color:#D97706;">+${entry.referralInfo.bonusPct}%</td></tr>`
+            : `<tr><td colspan="3" style="padding:6px 8px;font-size:11px;color:#9CA3AF;">Referral bonus: ${escapeHtml(entry.referralInfo?.reason || 'not applied')}</td></tr>`;
+
+        const content = `
+            <div style="padding:4px;max-height:70vh;overflow-y:auto;">
+                <div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;padding:12px;margin-bottom:14px;">
+                    <div style="font-size:18px;font-weight:700;color:#1E40AF;">${entry.probability}%</div>
+                    <div style="font-size:12px;color:#1E40AF;">Target: <strong>${escapeHtml(entry.category?.name || '')}</strong></div>
+                    <div style="font-size:11px;color:#6B7280;margin-top:2px;">Raw score ${entry.rawScore} × K(${K}) = ${Math.min(100, Math.round(entry.rawScore * K))}% ${entry.referralInfo?.applied ? `+ ${entry.referralInfo.bonusPct}% referral bonus` : ''}</div>
+                </div>
+
+                <h4 style="font-size:13px;margin:12px 0 6px;">Activity contributions (sorted)</h4>
+                <table style="width:100%;border-collapse:collapse;font-size:11px;">
+                    <thead><tr style="background:#F9FAFB;">
+                        <th style="padding:6px 8px;text-align:left;">Type</th>
+                        <th style="padding:6px 8px;text-align:left;">Title</th>
+                        <th style="padding:6px 8px;text-align:right;">Age</th>
+                        <th style="padding:6px 8px;text-align:right;">Base</th>
+                        <th style="padding:6px 8px;text-align:right;">Decay</th>
+                        <th style="padding:6px 8px;text-align:right;">Mult</th>
+                        <th style="padding:6px 8px;text-align:right;">Total</th>
+                    </tr></thead>
+                    <tbody>${breakdownRows || '<tr><td colspan="7" style="padding:12px;text-align:center;color:#9CA3AF;">No contributing activities</td></tr>'}</tbody>
+                </table>
+
+                <h4 style="font-size:13px;margin:14px 0 6px;">All category scores</h4>
+                <table style="width:100%;border-collapse:collapse;font-size:11px;">
+                    <thead><tr style="background:#F9FAFB;">
+                        <th style="padding:6px 8px;text-align:left;">Category</th>
+                        <th style="padding:6px 8px;text-align:right;">Score</th>
+                        <th style="padding:6px 8px;text-align:right;">→ %</th>
+                    </tr></thead>
+                    <tbody>${allCatScores}</tbody>
+                </table>
+
+                <h4 style="font-size:13px;margin:14px 0 6px;">Bonuses / Penalties</h4>
+                <table style="width:100%;border-collapse:collapse;font-size:11px;">
+                    <tbody>${referralRow}</tbody>
+                </table>
+
+                ${entry.action ? `<div style="margin-top:14px;padding:10px;background:#F0FDF4;border-left:3px solid #10B981;font-size:12px;"><strong>Next Best Action:</strong> ${entry.action}</div>` : ''}
+            </div>`;
+
+        UI.showModal(`Score Breakdown — ${escapeHtml(prospect.name || prospect.full_name || '')}`, content, [
+            { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
         ]);
     };
 
     const savePipelineConfig = async () => {
-        UI.toast.info('Pipeline rules are defined by the 6-category model.');
-        UI.hideModal();
+        // Legacy alias — now routes to the v6 draft save
+        await savePipelineRules();
     };
 
     const showProspectMenu = async (prospectId) => {
@@ -29206,6 +30106,20 @@ const initImportDemoData = async () => {
         showComments,
         openPipelineConfigModal,
         savePipelineConfig,
+        // v6 Pipeline Config editor (Super Admin)
+        savePipelineRules,
+        addPipelineCategory,
+        deletePipelineCategory,
+        addPipelineWeight,
+        deletePipelineWeight,
+        addPipelineDecay,
+        deletePipelineDecay,
+        addPipelineBooster,
+        deletePipelineBooster,
+        setAgentPackageAmount,
+        showPipelineConfigHistory,
+        rollbackPipelineConfig,
+        showPipelineExplain,
         addPipelineNote,
         renderManualPriority,
         renderRecentOverrides,
