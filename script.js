@@ -192,6 +192,7 @@ const appLogic = (() => {
     let _currentTreeData = null;
     let _treeNavStack = [];                 // [{id, type}] for back navigation
     let _treeActiveFilter = 'all';          // 'all' | 'new' | 'expected_drop' | 'lost'
+    let _leaderboardPeriod = 'all';         // 'all' | 'year' | 'month' — used by renderLeaderboard filter
 
     // Phase 11: DMS State
     let _currentFolder = null; // Current folder ID
@@ -7761,7 +7762,7 @@ function _wireLoginBtn() {
                 <div class="placeholder-view">
                     <h1>${viewId.toUpperCase()}</h1>
                     <p>Phase ${getViewPhase(viewId)} Implementation: ${viewId} module interface.</p>
-                    <button class="btn primary" onclick="app.todo('Feature development')">View Roadmap</button>
+                    <button class="btn primary" onclick="app.showRoadmap()">View Roadmap</button>
                 </div>
             `;
         }
@@ -7831,7 +7832,7 @@ function _wireLoginBtn() {
                                 <button class="tool-btn" onclick="app.treeZoomOut()" title="Zoom Out"><i class="fas fa-minus"></i></button>
                                 <button class="tool-btn" onclick="app.treeResetZoom()" title="Reset"><i class="fas fa-compress-arrows-alt"></i></button>
                                 <button class="tool-btn" onclick="app.showTreeBookmarks()" title="Bookmarks"><i class="fas fa-heart"></i></button>
-                                <button class="tool-btn" onclick="app.todo('Export Tree')" title="Export"><i class="fas fa-download"></i></button>
+                                <button class="tool-btn" onclick="app.exportRelationshipTree()" title="Export"><i class="fas fa-download"></i></button>
                             </div>
                         </div>
                         <div class="tree-workspace">
@@ -8029,7 +8030,15 @@ function _wireLoginBtn() {
 
         const hiddenIds = UserPreferences.getSync('hidden_referrers', []);
 
-        const referrals = await getVisibleReferrals();
+        const allReferrals = await getVisibleReferrals();
+        // BUG FIX 2026-04-11: filter by period (set via changeLeaderboardPeriod)
+        const now = new Date();
+        let cutoff = null;
+        if (_leaderboardPeriod === 'year') cutoff = new Date(now.getFullYear(), 0, 1);
+        else if (_leaderboardPeriod === 'month') cutoff = new Date(now.getFullYear(), now.getMonth(), 1);
+        const referrals = cutoff
+            ? allReferrals.filter(r => r.created_at && new Date(r.created_at) >= cutoff)
+            : allReferrals;
         const grouped = {};
         referrals.forEach(r => {
             if (!r.referrer_id) return;
@@ -8070,10 +8079,10 @@ function _wireLoginBtn() {
         container.innerHTML = `
             <div class="leaderboard-controls-v2">
                 <div style="display:flex; gap:12px; align-items:center;">
-                    <select class="form-control" style="width:150px" onchange="app.todo('Change period')">
-                        <option>All Time</option>
-                        <option>This Year</option>
-                        <option>This Month</option>
+                    <select class="form-control" style="width:150px" onchange="app.changeLeaderboardPeriod(this.value)">
+                        <option${_leaderboardPeriod === 'all' ? ' selected' : ''}>All Time</option>
+                        <option${_leaderboardPeriod === 'year' ? ' selected' : ''}>This Year</option>
+                        <option${_leaderboardPeriod === 'month' ? ' selected' : ''}>This Month</option>
                     </select>
                     <button class="btn secondary btn-sm" onclick="app.resetHiddenReferrers()">Reset Hidden</button>
                 </div>
@@ -14127,7 +14136,7 @@ function _wireLoginBtn() {
                     <td onclick="event.stopPropagation()">
                         <button class="btn-icon" title="Edit"><i class="fas fa-edit"></i></button>
                         <button class="btn-icon" title="Add Purchase" onclick="app.openAddPurchaseModal(${c.id})"><i class="fas fa-shopping-cart"></i></button>
-                        <button class="btn-icon" title="Referral" onclick="app.todo('Referral workflow')"><i class="fas fa-user-plus"></i></button>
+                        <button class="btn-icon" title="Referral" onclick="event.stopPropagation(); app.openCustomerReferralModal(${c.id})"><i class="fas fa-user-plus"></i></button>
                         <button class="btn-icon" title="Recruit" onclick="app.openRecruitModal(${c.id})"><i class="fas fa-user-tie"></i></button>
                     </td>
                 </tr>
@@ -16236,7 +16245,7 @@ function _wireLoginBtn() {
                 <div style="margin-top:16px;border-top:1px solid var(--gray-200);padding-top:16px;">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
                         <span style="font-weight:600;font-size:14px;"><i class="fas fa-folder"></i> Documents</span>
-                        <button class="btn primary btn-sm" onclick="app.todo('Upload document')"><i class="fas fa-upload"></i> Upload</button>
+                        <button class="btn primary btn-sm" onclick="app.uploadProspectDocument(${prospect.id})"><i class="fas fa-upload"></i> Upload</button>
                     </div>
                     <p style="text-align:center;padding:16px;color:var(--gray-400);">No documents uploaded.</p>
                 </div>
@@ -17402,7 +17411,7 @@ for (const p of allPackages) {
     `;
         UI.showModal('Convert Customer to Agent', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Submit for Approval', type: 'primary', action: `app.todo('Recruitment approval workflow submitted')` }
+            { label: 'Submit for Approval', type: 'primary', action: '(async () => { await app.submitRecruitmentApproval(); })()' }
         ]);
     };
 
@@ -30110,10 +30119,191 @@ const initImportDemoData = async () => {
         }
     };
 
+    // ==========================================================================
+    // STUB IMPLEMENTATIONS (replacing app.todo placeholders) — 2026-04-11
+    // ==========================================================================
+
+    // Stub 1: View Roadmap — was: onclick="app.todo('Feature development')"
+    // Shows a modal listing shipped features vs. the planned backlog so users
+    // on a placeholder view have context on what's coming.
+    const showRoadmap = () => {
+        const content = `
+            <div style="max-height:60vh; overflow-y:auto; padding:4px 2px; font-size:14px;">
+                <div style="background:#fef3c7; border-left:4px solid #f59e0b; padding:12px; border-radius:4px; margin-bottom:16px;">
+                    <strong>📍 DestinOraclesSolution CRM</strong><br>
+                    Core modules are live. This list tracks what's shipped and what's planned.
+                </div>
+                <h3 style="margin-top:12px;">✅ Shipped</h3>
+                <ul style="margin-left:16px;">
+                    <li>Prospects &amp; Customers pipeline</li>
+                    <li>Activity tracking (FSA, CPS, Site Visit, Events, Meetings, Training)</li>
+                    <li>Relationship Tree with fast-rendering synchronous DFS</li>
+                    <li>Referrals leaderboard, period filter, and rewards</li>
+                    <li>Events with check-in &amp; engagement scoring</li>
+                    <li>Document upload per prospect</li>
+                    <li>Recruitment approval workflow</li>
+                    <li>KPI dashboard with agent filter</li>
+                    <li>Marketing Automation (Monthly Promotions, Bujishu, Formula)</li>
+                    <li>Agent reassignment (single &amp; bulk)</li>
+                </ul>
+                <h3 style="margin-top:16px;">🚧 Planned</h3>
+                <ul style="margin-left:16px;">
+                    <li>WhatsApp Business deep integration</li>
+                    <li>Mobile PWA + biometric auth</li>
+                    <li>Advanced analytics dashboards</li>
+                    <li>Multi-tenant support</li>
+                    <li>Automated compliance reports (GDPR / DSAR)</li>
+                    <li>Export Tree to PDF (CSV already ships)</li>
+                </ul>
+            </div>
+        `;
+        UI.showModal('Feature Roadmap', content, [
+            { label: 'Close', type: 'secondary', action: 'UI.hideModal()' }
+        ]);
+    };
+
+    // Stub 2: Export Tree — was: onclick="app.todo('Export Tree')"
+    // Walks the currently-loaded _currentTreeData object (depth-first) and
+    // downloads a CSV with one row per node (parent link + key fields).
+    const exportRelationshipTree = () => {
+        if (!_currentTreeData) {
+            UI.toast.error('No tree loaded — search for a person first.');
+            return;
+        }
+        const rows = [];
+        const walk = (node, parentName = '', depth = 0) => {
+            rows.push({
+                depth,
+                parent: parentName,
+                name: node.name || '',
+                type: node.type || '',
+                role: node.role || '',
+                pipeline: node.pipeline_stage || '',
+                last_activity: node.last_activity_date || '',
+                join_date: node.join_date || ''
+            });
+            (node.children || []).forEach(c => walk(c, node.name, depth + 1));
+        };
+        walk(_currentTreeData);
+        const esc = v => {
+            const s = String(v ?? '');
+            return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+        };
+        const header = 'Depth,Parent,Name,Type,Role,Pipeline Stage,Last Activity,Join Date\n';
+        const body = rows.map(r => [r.depth, r.parent, r.name, r.type, r.role, r.pipeline, r.last_activity, r.join_date].map(esc).join(',')).join('\n');
+        const csv = '\ufeff' + header + body; // BOM so Excel reads UTF-8 (Chinese names) correctly
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const safeName = String(_currentTreeData.name || 'export').replace(/[^\w\u4e00-\u9fff-]+/g, '_');
+        a.download = `relationship-tree-${safeName}-${new Date().toISOString().split('T')[0]}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        UI.toast.success(`Exported ${rows.length} nodes to CSV`);
+    };
+
+    // Stub 3: Change leaderboard period — was: onchange="app.todo('Change period')"
+    // Stores the selected period in a module-level variable that renderLeaderboard
+    // reads to filter referrals by date before grouping.
+    const changeLeaderboardPeriod = async (label) => {
+        const map = { 'All Time': 'all', 'This Year': 'year', 'This Month': 'month' };
+        _leaderboardPeriod = map[label] || 'all';
+        await renderLeaderboard();
+    };
+
+    // Stub 4: Customer-initiated referral workflow — was: onclick="app.todo('Referral workflow')"
+    // The openCustomerReferralModal function already existed at line ~15515;
+    // this stub was purely a wiring fix — the onclick now points at the real function.
+
+    // Stub 5: Upload document on prospect detail — was: onclick="app.todo('Upload document')"
+    // Opens a hidden file input, reads as base64, stores in `documents` table
+    // linked to the prospect via filename prefix.
+    const uploadProspectDocument = async (prospectId) => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*,application/pdf,.doc,.docx,.txt';
+        input.onchange = async (ev) => {
+            const file = ev.target.files && ev.target.files[0];
+            if (!file) return;
+            const MAX_BYTES = 5 * 1024 * 1024; // 5 MB
+            if (file.size > MAX_BYTES) {
+                UI.toast.error('File too large — 5 MB max');
+                return;
+            }
+            try {
+                const dataUrl = await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve(reader.result);
+                    reader.onerror = reject;
+                    reader.readAsDataURL(file);
+                });
+                await AppDataStore.create('documents', {
+                    filename: `prospect_${prospectId}/${file.name}`,
+                    size: file.size,
+                    mime_type: file.type || 'application/octet-stream',
+                    data: String(dataUrl || ''),
+                    current_version: 1,
+                    created_by: _currentUser?.id || null,
+                    description: `Uploaded for prospect #${prospectId}`,
+                    is_starred: false
+                });
+                UI.toast.success('Document uploaded');
+                // Re-render the prospect detail so the new doc shows up
+                if (typeof app.showProspectDetail === 'function') {
+                    await app.showProspectDetail(prospectId);
+                }
+            } catch (err) {
+                UI.toast.error('Upload failed: ' + (err.message || 'Unknown error'));
+            }
+        };
+        input.click();
+    };
+
+    // Stub 6: Submit recruitment approval — was: action="app.todo('Recruitment approval workflow submitted')"
+    // Captures recruitment form data and writes to approval_queue as pending.
+    const submitRecruitmentApproval = async () => {
+        try {
+            const modal = document.getElementById('modal-content') || document;
+            const textareas = modal.querySelectorAll('textarea');
+            const inputs = modal.querySelectorAll('input.form-control, select.form-control');
+            const snapshot = {};
+            inputs.forEach((el, i) => {
+                const label = el.closest('.form-group')?.querySelector('label')?.textContent?.trim() || `field_${i}`;
+                snapshot[label] = el.value;
+            });
+            textareas.forEach((el, i) => {
+                const label = el.closest('.form-group')?.querySelector('label')?.textContent?.trim() || `textarea_${i}`;
+                snapshot[label] = el.value;
+            });
+            await AppDataStore.create('approval_queue', {
+                approval_type: 'recruitment',
+                status: 'pending',
+                submitted_by: _currentUser?.id || null,
+                submitted_at: new Date().toISOString(),
+                description: 'Recruitment: Convert customer to agent',
+                snapshot_after: snapshot,
+                created_at: new Date().toISOString()
+            });
+            UI.hideModal();
+            UI.toast.success('Recruitment submitted for approval');
+        } catch (err) {
+            UI.toast.error('Submit failed: ' + (err.message || 'Unknown error'));
+        }
+    };
+
     return {
         init,
         navigateTo,
         todo,
+        // Stub implementations (2026-04-11) — replace app.todo() placeholders
+        showRoadmap,
+        exportRelationshipTree,
+        changeLeaderboardPeriod,
+        uploadProspectDocument,
+        submitRecruitmentApproval,
         toggleUserMenu,
         loginAs,
         logout,
