@@ -46,7 +46,9 @@ class DataStore {
             // User preferences (migrated from localStorage)
             'user_preferences',
             // Special Program Fighting (incentive programs for selected agents)
-            'special_programs', 'special_program_participants'
+            'special_programs', 'special_program_participants',
+            // v6 Pipeline Scoring Rules (editable config + history)
+            'pipeline_config', 'pipeline_config_history'
         ];
         this.initialized = false;
         this._events = {};
@@ -256,6 +258,20 @@ class DataStore {
             }, 0);
             return result;
         } catch (e) {
+            // Detect "table doesn't exist in schema" — PGRST205 or explicit not-found messages.
+            // These are benign in this codebase (tables provisioned lazily), so don't log noisily,
+            // don't bother retrying via direct REST, and memoize the miss so repeated getAll()
+            // calls on the same cold cache don't all re-hit Supabase with the same 404.
+            const isMissingTable = e?.code === 'PGRST205'
+                || /schema cache|could not find the table|relation ".+" does not exist/i.test(e?.message || '');
+            if (isMissingTable) {
+                this._cacheSet(tableName, []);
+                const local = localStorage.getItem(`fs_crm_${tableName}`);
+                const tombstoneRaw = localStorage.getItem('fs_crm_tombstones');
+                const tombstones = tombstoneRaw ? JSON.parse(tombstoneRaw) : {};
+                const deletedIds = new Set(tombstones[tableName] || []);
+                return local ? JSON.parse(local).filter(r => !deletedIds.has(String(r.id))) : [];
+            }
             console.warn(`Offline/error: falling back for ${tableName}`, e);
             // Even when read fails, still try to push queued writes — write endpoint is separate from read
             this._pushQueuedWrites(tableName).catch(() => {});
@@ -599,6 +615,19 @@ class DataStore {
                         if (v === null || v === undefined || typeof v !== 'object') stripped[k] = v;
                     }
                     if (Object.keys(stripped).length < Object.keys(updateData).length) { updateData = stripped; continue; }
+                }
+                // PGRST116 = zero rows matched .single() — the row no longer exists in Supabase
+                // (stale id from local cache). Purge it so the next getAll() returns clean state,
+                // and let the caller's insert-or-update pattern recover on the next pass.
+                if (e?.code === 'PGRST116') {
+                    try {
+                        const key = `fs_crm_${tableName}`;
+                        const all = JSON.parse(localStorage.getItem(key) || '[]');
+                        const filtered = all.filter(r => String(r.id) !== String(id));
+                        if (filtered.length !== all.length) localStorage.setItem(key, JSON.stringify(filtered));
+                    } catch (_) {}
+                    this.invalidateCache(tableName);
+                    return null;
                 }
                 console.warn(`Error on update to ${tableName}: ${e.message} (code: ${e.code}) — saving locally`);
                 break;
