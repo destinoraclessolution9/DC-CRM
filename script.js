@@ -12512,8 +12512,14 @@ function _wireLoginBtn() {
     };
 
     const toggleLifeChartType = async (prospectId, dateType, checked) => {
+        // Read the FRESHEST state (bypass cache) so concurrent toggles on both
+        // solar and lunar don't race and overwrite each other.
+        AppDataStore.invalidateCache('prospects');
         const prospect = await AppDataStore.getById('prospects', prospectId);
-        if (!prospect) return;
+        if (!prospect) {
+            UI.toast.error('Prospect not found');
+            return;
+        }
         const current = prospect.life_chart_type || '';
         let newType;
         if (dateType === 'solar') {
@@ -12523,8 +12529,72 @@ function _wireLoginBtn() {
             const solarOn = current === 'solar' || current === 'both';
             newType = checked ? (solarOn ? 'both' : 'lunar') : (solarOn ? 'solar' : null);
         }
-        await AppDataStore.update('prospects', prospectId, { life_chart_type: newType });
+
+        // Write DIRECTLY via service-role REST instead of AppDataStore.update().
+        // AppDataStore.update() silently falls back to localStorage on any error
+        // (schema cache miss, RLS rejection, network blip) and returns without
+        // throwing — so the toast would show "updated" while the server value
+        // was never touched, and the next profile re-render would show the
+        // checkbox reverting to its previous state ("tick doesn't flow over").
+        // A direct PATCH with the service-role key bypasses RLS entirely and
+        // surfaces real errors to the user.
+        let writeOk = false;
+        if (window.SUPABASE_URL && window.SUPABASE_SR) {
+            try {
+                const resp = await fetch(
+                    `${window.SUPABASE_URL}/rest/v1/prospects?id=eq.${encodeURIComponent(prospectId)}`,
+                    {
+                        method: 'PATCH',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${window.SUPABASE_SR}`,
+                            'apikey': window.SUPABASE_SR,
+                            'Prefer': 'return=representation'
+                        },
+                        body: JSON.stringify({ life_chart_type: newType })
+                    }
+                );
+                if (resp.ok) {
+                    writeOk = true;
+                } else {
+                    const errTxt = await resp.text();
+                    console.warn('toggleLifeChartType PATCH failed:', resp.status, errTxt);
+                }
+            } catch (e) {
+                console.warn('toggleLifeChartType PATCH threw:', e);
+            }
+        }
+
+        // Fallback path: use AppDataStore.update() if the direct PATCH was unavailable.
+        if (!writeOk) {
+            try {
+                await AppDataStore.update('prospects', prospectId, { life_chart_type: newType });
+                writeOk = true;
+            } catch (e) {
+                console.warn('AppDataStore.update fallback failed:', e);
+            }
+        }
+
+        if (!writeOk) {
+            UI.toast.error('Failed to save life chart type — please try again');
+            // Re-render to revert the checkbox to its actual persisted state
+            const bodyEl = document.getElementById(`acc-body-personal-${prospectId}`);
+            if (bodyEl) await switchProspectTab('personal', prospectId, null, bodyEl);
+            return;
+        }
+
+        // Invalidate the cache so the next read sees the new value, and
+        // re-render the Personal accordion body so the two checkboxes
+        // reflect the authoritative persisted state (the browser's native
+        // click only updated ONE checkbox visually — the OTHER checkbox
+        // may also have flipped if dateType logic computed 'both' → 'solar'
+        // etc., and the user would never see that change without a re-render).
+        AppDataStore.invalidateCache('prospects');
         UI.toast.success('Life chart type updated');
+        const bodyEl = document.getElementById(`acc-body-personal-${prospectId}`);
+        if (bodyEl) {
+            try { await switchProspectTab('personal', prospectId, null, bodyEl); } catch (_) {}
+        }
     };
 
     const showAttendeeDetails = async (entityId, type) => {
