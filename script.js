@@ -12510,7 +12510,19 @@ function _wireLoginBtn() {
 
     const showAddAttendeeSearch = async (eventId, activityId) => {
         const [prospects, customers] = await Promise.all([AppDataStore.getAll('prospects'), AppDataStore.getAll('customers')]);
-        window._addAttAll = [...prospects.map(p => ({...p, _type:'prospect'})), ...customers.map(c => ({...c, _type:'customer'}))];
+        // BUG FIX 2026-04-11: dedupe by normalized phone (fallback: name) within each list
+        // so the same person (accidental duplicate row) doesn't show twice in the picker.
+        const dedupe = (list, type) => {
+            const seen = new Map();
+            for (const p of list) {
+                const key = (p.phone && String(p.phone).replace(/\D+/g,''))
+                    || `name:${String(p.full_name||'').trim().toLowerCase()}`;
+                if (!key || key === 'name:') continue;
+                if (!seen.has(key)) seen.set(key, { ...p, _type: type });
+            }
+            return Array.from(seen.values());
+        };
+        window._addAttAll = [...dedupe(prospects, 'prospect'), ...dedupe(customers, 'customer')];
         window._addAttSelected = null;
         window._addAttEventId = eventId;
         window._addAttActivityId = activityId;
@@ -12538,11 +12550,30 @@ function _wireLoginBtn() {
     const showAddConsultantSearch = async (eventId, activityId) => {
         const users = await AppDataStore.getAll('users');
         // Filter to consultants + agents (Level 3-12). Exclude customers/referrers/inactive.
-        const eligible = users.filter(u => {
+        const filtered = users.filter(u => {
             if (u.status === 'inactive') return false;
             const lvl = _getUserLevel(u);
             return lvl >= 1 && lvl <= 12; // admin → agent; customers (13) and referrers (14) excluded
         });
+        // Dedupe by email (fallback: normalized name) — keep the most senior (lowest level) row,
+        // then the oldest created_at. Defensive net against stray duplicate rows in the users table.
+        const seen = new Map();
+        for (const u of filtered) {
+            const key = (u.email && String(u.email).trim().toLowerCase())
+                || `name:${String(u.full_name || '').trim().toLowerCase()}`;
+            if (!key || key === 'name:') continue;
+            const prev = seen.get(key);
+            if (!prev) { seen.set(key, u); continue; }
+            const prevLvl = _getUserLevel(prev);
+            const curLvl  = _getUserLevel(u);
+            if (curLvl < prevLvl) { seen.set(key, u); continue; }
+            if (curLvl === prevLvl) {
+                const prevTs = Date.parse(prev.created_at || 0) || 0;
+                const curTs  = Date.parse(u.created_at || 0) || 0;
+                if (curTs && prevTs && curTs < prevTs) seen.set(key, u);
+            }
+        }
+        const eligible = Array.from(seen.values());
         window._addConsultAll = eligible.map(u => ({ ...u, _type: 'agent' }));
         window._addConsultSelected = null;
         window._addConsultEventId = eventId;
@@ -17635,8 +17666,9 @@ const openAddSolutionModal = async (prospectId) => {
         await AppDataStore.update('prospects', prospectId, { status: 'converted' });
 
         // Phase X: Create purchase record for conversion amount
+        // BUG FIX 2026-04-11: removed stray double `await`
         if (amount > 0) {
-           await  await AppDataStore.create('purchases', {
+            await AppDataStore.create('purchases', {
                 customer_id: newCustomer.id,
                 date: customer.customer_since,
                 item: 'Conversion Package / First Deal',

@@ -42,8 +42,13 @@ Object.assign(window.app, (() => {
         }
     };
 
-    const calculateEventScore = (registration, event) => {
-        const category = AppDataStore.getById('event_categories', event.event_category_id);
+    // BUG FIX 2026-04-11: was synchronously calling async AppDataStore.getById,
+    // which returned a Promise and made `category?.base_score` always undefined,
+    // silently killing category-based scoring. Now async so callers must await.
+    const calculateEventScore = async (registration, event) => {
+        const category = event.event_category_id
+            ? await AppDataStore.getById('event_categories', event.event_category_id)
+            : null;
         const eventMultiplier = event.score_multiplier || 1.0;
         const baseScore = (category?.base_score || event.base_score || 10) * (category?.score_multiplier || 1.0) * eventMultiplier;
 
@@ -92,7 +97,7 @@ Object.assign(window.app, (() => {
         const event = await AppDataStore.getById('events', eventId);
         if (!event) return;
         for (const reg of regs) {
-            const score = calculateEventScore(reg, event);
+            const score = await calculateEventScore(reg, event);
             reg.points_awarded = score.total;
             reg.points_breakdown = score.breakdown;
             reg.scoring_processed = true;
@@ -165,7 +170,7 @@ Object.assign(window.app, (() => {
         await AppDataStore.update('event_registrations', regId, reg);
 
         const event = await AppDataStore.getById('events', reg.event_id);
-        const score = calculateEventScore(reg, event);
+        const score = await calculateEventScore(reg, event);
         reg.points_awarded = score.total;
         reg.points_breakdown = score.breakdown;
         reg.scoring_processed = true;
@@ -180,38 +185,67 @@ Object.assign(window.app, (() => {
         }
         await applyTagsFromEngagement(reg, score.breakdown);
 
+        // BUG FIX 2026-04-11: was hardcoding lead_agent_id=5 as fallback
+        // (which is an actual real user's ID). Also removed `score_value`
+        // which is not a column on the activities table. Support events with
+        // both old (event_title/event_date) and new (title/date) schema.
         const currentUser = await Auth.getCurrentUser();
-        await AppDataStore.create('activities', {
-            activity_type: 'EVENT',
-            activity_title: `Checked in to: ${event?.event_title || 'Event'}`,
-            activity_date: event?.event_date || new Date().toISOString().split('T')[0],
-            start_time: event?.start_time || '00:00',
-            end_time: event?.end_time || '23:59',
-            venue: event?.location || '',
-            event_id: reg.event_id,
-            prospect_id: reg.attendee_type === 'prospect' ? reg.prospect_id : null,
-            customer_id: reg.attendee_type === 'customer' ? reg.customer_id : null,
-            lead_agent_id: entity ? entity.responsible_agent_id : (currentUser?.id || 5),
-            summary: `Notes: ${document.getElementById('checkin-notes')?.value || 'None'}. Points awarded: ${score.total}`,
-            score_value: score.total
-        });
+        try {
+            await AppDataStore.create('activities', {
+                activity_type: 'EVENT',
+                activity_title: `Checked in to: ${event?.event_title || event?.title || 'Event'}`,
+                activity_date: event?.event_date || event?.date || new Date().toISOString().split('T')[0],
+                start_time: event?.start_time || '00:00',
+                end_time: event?.end_time || '23:59',
+                venue: event?.location || '',
+                event_id: reg.event_id,
+                prospect_id: reg.attendee_type === 'prospect' ? reg.prospect_id : null,
+                customer_id: reg.attendee_type === 'customer' ? reg.customer_id : null,
+                lead_agent_id: entity ? entity.responsible_agent_id : (currentUser?.id || null),
+                summary: `Notes: ${document.getElementById('checkin-notes')?.value || 'None'}. Points awarded: ${score.total}`
+            });
+        } catch (err) {
+            console.warn('Check-in: failed to write activity log', err);
+        }
 
-        UI.toast.success(`Checked in successfully! Awarded ${score.total} points`);
         UI.hideModal();
+        UI.toast.success(`Checked in successfully! Awarded ${score.total} points`);
         await app.openEventAttendeesModal(reg.event_id);
     };
 
     const registerAttendee = async (eventId, entityId, type) => {
         if (!entityId) return;
-        await AppDataStore.create('event_registrations', {
-            event_id: eventId,
-            attendee_type: type,
-            prospect_id: type === 'prospect' ? parseInt(entityId) : null,
-            customer_id: type === 'customer' ? parseInt(entityId) : null,
-            registered_at: new Date().toISOString(),
-            checked_in: false,
-            points_awarded: 0
-        });
+        // BUG FIX 2026-04-11: no duplicate check previously — the same prospect/customer
+        // could be registered to the same event any number of times.
+        try {
+            const existing = await AppDataStore.getAll('event_registrations');
+            const pid = parseInt(entityId);
+            const dup = (existing || []).find(r =>
+                String(r.event_id) === String(eventId)
+                && (
+                    (type === 'prospect' && String(r.prospect_id) === String(pid))
+                    || (type === 'customer' && String(r.customer_id) === String(pid))
+                )
+            );
+            if (dup) {
+                UI.toast.error('This person is already registered to this event');
+                return;
+            }
+        } catch (_) { /* if the check fails, fall through and let the create run */ }
+        try {
+            await AppDataStore.create('event_registrations', {
+                event_id: eventId,
+                attendee_type: type,
+                prospect_id: type === 'prospect' ? parseInt(entityId) : null,
+                customer_id: type === 'customer' ? parseInt(entityId) : null,
+                registered_at: new Date().toISOString(),
+                checked_in: false,
+                points_awarded: 0
+            });
+        } catch (err) {
+            UI.toast.error('Registration failed: ' + (err.message || 'Unknown error'));
+            return;
+        }
         UI.toast.success('Attendee registered!');
         await app.openEventAttendeesModal(eventId);
     };
@@ -234,13 +268,13 @@ Object.assign(window.app, (() => {
             const name = entity ? entity.full_name : 'Unknown User';
             const checkInBtn = r.checked_in
                 ? `<span style="color:var(--success);"><i class="fas fa-check"></i> Checked In</span>`
-                : `<button class="btn primary btn-sm" onclick="app.checkInAttendee(${r.id})">Check In</button>`;
+                : `<button class="btn primary btn-sm" onclick="event.stopPropagation(); app.checkInAttendee(${r.id})">Check In</button>`;
             attendeesHtml += `
                 <tr>
                     <td>${name}</td>
                     <td>${checkInBtn}</td>
                     <td>${r.points_awarded || 0}</td>
-                    <td><button class="btn-icon text-error" onclick="app.deleteAttendee(${r.id}, ${eventId})"><i class="fas fa-times"></i></button></td>
+                    <td><button class="btn-icon text-error" onclick="event.stopPropagation(); app.deleteAttendee(${r.id}, ${eventId})"><i class="fas fa-times"></i></button></td>
                 </tr>
             `;
         }
@@ -265,7 +299,8 @@ Object.assign(window.app, (() => {
                     </table>
                 </div>
             </div>`;
-        UI.showModal(`Attendees - ${event.event_title}`, content, [{ label: 'Done', type: 'secondary', action: 'UI.hideModal()' }]);
+        // BUG FIX 2026-04-11: support both legacy (event_title) and new (title) schema
+        UI.showModal(`Attendees - ${event.event_title || event.title || 'Event'}`, content, [{ label: 'Done', type: 'secondary', action: 'UI.hideModal()' }]);
     };
 
     const deleteAttendee = async (regId, eventId) => {
@@ -306,28 +341,42 @@ Object.assign(window.app, (() => {
         else if (tab === 'templates') app.renderEventTemplates();
     };
 
+    // BUG FIX 2026-04-11: events table has duplicate columns from a schema migration
+    // (event_title/title, event_date/date, event_category_id/category). Old rows only
+    // populate the `event_*` columns; new rows only populate the shorter ones. This
+    // helper returns a row with both variants so any consumer can read either name.
+    const _normalizeEvent = (e) => {
+        if (!e) return e;
+        return {
+            ...e,
+            event_title: e.event_title || e.title || '',
+            event_date: e.event_date || e.date || null,
+            event_category_id: e.event_category_id || null,
+        };
+    };
+
     const renderUpcomingEvents = async () => {
         const container = document.getElementById('event-tab-content');
         if (!container) return;
-        const allEvents = await AppDataStore.getAll('events');
+        const allEvents = (await AppDataStore.getAll('events')).map(_normalizeEvent);
         // Only events that are (a) not completed AND (b) scheduled on/after today.
         // Previously this filter ignored event_date, so stale events stuck here forever.
         const todayStr = new Date().toISOString().split('T')[0];
-        const events = allEvents.filter(e => e.status !== 'completed' && (!e.event_date || e.event_date >= todayStr));
+        const events = allEvents.filter(e => e.status !== 'completed' && (!(e.event_date || e.date || null) || (e.event_date || e.date || null) >= todayStr));
         let html = `<div class="events-table-container"><table class="events-table"><thead><tr><th>Event Title</th><th>Date</th><th>Expected</th><th>Price</th><th>Score</th><th>Actions</th></tr></thead><tbody>`;
         if (events.length === 0) html += `<tr><td colspan="6" style="text-align:center;">No upcoming events.</td></tr>`;
         for (const e of events) {
             html += `
                 <tr>
-                    <td><strong>${e.event_title}</strong></td>
-                    <td>${e.event_date}</td>
+                    <td><strong>${(e.event_title || e.title || '') || '(untitled)'}</strong></td>
+                    <td>${(e.event_date || e.date || null) || '—'}</td>
                     <td>${e.registered_count || 0}</td>
                     <td>RM ${e.ticket_price || 0}</td>
                     <td>+${e.base_score || 0}</td>
                     <td>
-                        <button class="btn-icon" onclick="app.openEditEventModal(${e.id})"><i class="fas fa-edit"></i></button>
-                        <button class="btn-icon" onclick="app.deleteEvent(${e.id})"><i class="fas fa-trash"></i></button>
-                        <button class="btn secondary btn-sm" onclick="app.openEventAttendeesModal(${e.id})">View Attendees</button>
+                        <button class="btn-icon" onclick="event.stopPropagation(); app.openEditEventModal(${e.id})"><i class="fas fa-edit"></i></button>
+                        <button class="btn-icon" onclick="event.stopPropagation(); app.deleteEvent(${e.id})"><i class="fas fa-trash"></i></button>
+                        <button class="btn secondary btn-sm" onclick="event.stopPropagation(); app.openEventAttendeesModal(${e.id})">View Attendees</button>
                     </td>
                 </tr>
             `;
@@ -338,30 +387,31 @@ Object.assign(window.app, (() => {
     const renderPastEvents = async () => {
         const container = document.getElementById('event-tab-content');
         if (!container) return;
-        const allEvents = await AppDataStore.getAll('events');
+        const allEvents = (await AppDataStore.getAll('events')).map(_normalizeEvent);
         // Past = explicitly completed OR event_date has passed.
         // Removed the phantom-event seeding (ids 991/992) that polluted real data.
         const todayStr = new Date().toISOString().split('T')[0];
-        const events = allEvents.filter(e => e.status === 'completed' || (e.event_date && e.event_date < todayStr));
+        const events = allEvents.filter(e => e.status === 'completed' || ((e.event_date || e.date || null) && (e.event_date || e.date || null) < todayStr));
         let html = `
             <div style="margin-bottom: 10px; text-align: right;">
                 <button class="btn secondary" onclick="app.exportEventData('csv')"><i class="fas fa-file-csv"></i> Export All Past Events</button>
             </div>
             <div class="events-table-container"><table class="events-table"><thead><tr><th>Event Title</th><th>Date</th><th>Actual</th><th>Score</th><th>Actions</th></tr></thead><tbody>`;
         if (events.length === 0) html += `<tr><td colspan="5" style="text-align:center;">No past events.</td></tr>`;
+        // BUG FIX 2026-04-11: was fetching event_registrations inside the loop (N+1).
+        const allRegs = events.length > 0 ? await AppDataStore.getAll('event_registrations') : [];
         for (const e of events) {
-            const allRegs = await AppDataStore.getAll('event_registrations');
             const regs = allRegs.filter(r => r.event_id === e.id && r.checked_in);
             const avgScore = regs.length ? (regs.reduce((sum, r) => sum + (r.points_awarded || 0), 0) / regs.length).toFixed(1) : 0;
             html += `
                 <tr>
-                    <td><strong>${e.event_title}</strong></td>
-                    <td>${e.event_date}</td>
+                    <td><strong>${(e.event_title || e.title || '') || '(untitled)'}</strong></td>
+                    <td>${(e.event_date || e.date || null) || '—'}</td>
                     <td>${regs.length}</td>
                     <td>+${avgScore}</td>
                     <td>
-                        <button class="btn secondary btn-sm" onclick="app.openEventReports()">Report</button>
-                        <button class="btn secondary btn-sm" onclick="app.exportEventData('csv')">Export</button>
+                        <button class="btn secondary btn-sm" onclick="event.stopPropagation(); app.openEventReports()">Report</button>
+                        <button class="btn secondary btn-sm" onclick="event.stopPropagation(); app.exportEventData('csv')">Export</button>
                     </td>
                 </tr>
             `;
@@ -460,7 +510,7 @@ Object.assign(window.app, (() => {
     const applyTemplate = async (templateId) => {
         const template = await AppDataStore.getById('event_templates', templateId);
         if (!template) return;
-        document.getElementById('event-title').value = template.template_name || template.event_title || '';
+        document.getElementById('event-title').value = template.template_name || template.event_title || template.title || '';
         document.getElementById('event-category').value = template.event_category_id || 1;
         document.getElementById('event-description').value = template.description || '';
         document.getElementById('event-location').value = template.location || '';
@@ -624,7 +674,7 @@ Object.assign(window.app, (() => {
         new Chart(ctx, {
             type: 'pie',
             data: {
-                labels: events.map(e => e.event_title),
+                labels: events.map(e => (e.event_title || e.title || '')),
                 datasets: [{ data: data, backgroundColor: ['#3b82f6', '#f59e0b', '#10b981', '#8b5cf6', '#ec4899'] }]
             },
             options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' }, title: { display: true, text: 'Attendance by Event' } } }
@@ -657,8 +707,9 @@ Object.assign(window.app, (() => {
         const md = {};
         for (const r of regs) {
             const ev = events.find(e => e.id === r.event_id);
-            if (!ev || !ev.event_date) continue;
-            const m = new Date(ev.event_date).toLocaleString('default', { month: 'short' });
+            const _evDate = ev && (ev.event_date || ev.date);
+            if (!ev || !_evDate) continue;
+            const m = new Date(_evDate).toLocaleString('default', { month: 'short' });
             md[m] = (md[m] || 0) + 1;
         }
         const ctx = document.getElementById('trend-chart')?.getContext('2d');
@@ -680,7 +731,7 @@ Object.assign(window.app, (() => {
                 const evRegs = registrations.filter(r => r.event_id === e.id);
                 const att = evRegs.filter(r => r.checked_in).length;
                 const avg = att > 0 ? evRegs.reduce((sum, r) => sum + (r.points_awarded || 0), 0) / att : 0;
-                csv += `"${e.event_title}",${e.event_date},${evRegs.length},${att},${avg.toFixed(1)}\n`;
+                csv += `"${(e.event_title || e.title || '')}",${(e.event_date || e.date || null)},${evRegs.length},${att},${avg.toFixed(1)}\n`;
             }
             const blob = new Blob([csv], { type: 'text/csv' });
             const url = URL.createObjectURL(blob);
@@ -705,7 +756,7 @@ Object.assign(window.app, (() => {
                 const evRegs = registrations.filter(r => r.event_id === e.id);
                 const att = evRegs.filter(r => r.checked_in).length;
                 const avg = att > 0 ? (evRegs.reduce((sum, r) => sum + (r.points_awarded || 0), 0) / att).toFixed(1) : '0.0';
-                tableData.push([e.event_title, e.event_date, evRegs.length, att, avg]);
+                tableData.push([(e.event_title || e.title || ''), (e.event_date || e.date || null), evRegs.length, att, avg]);
             }
 
             doc.autoTable({
@@ -729,10 +780,12 @@ Object.assign(window.app, (() => {
             const { jsPDF } = window.jspdf;
             const doc = new jsPDF();
 
+            const _title = event.event_title || event.title || 'Event';
+            const _date = event.event_date || event.date || '';
             doc.setFontSize(18);
-            doc.text(`Attendee List: ${event.event_title}`, 14, 22);
+            doc.text(`Attendee List: ${_title}`, 14, 22);
             doc.setFontSize(11);
-            doc.text(`Event Date: ${event.event_date}`, 14, 30);
+            doc.text(`Event Date: ${_date}`, 14, 30);
 
             const tableData = [];
             for (const r of regs) {
@@ -755,7 +808,7 @@ Object.assign(window.app, (() => {
                 theme: 'grid'
             });
 
-            doc.save(`attendees-${event.event_title.replace(/\s+/g, '-').toLowerCase()}.pdf`);
+            doc.save(`attendees-${_title.replace(/\s+/g, '-').toLowerCase()}.pdf`);
             UI.toast.success('Attendee list exported (PDF)');
         }
     };
@@ -772,7 +825,7 @@ Object.assign(window.app, (() => {
         const content = `
             <div class="event-report-detail">
                 <div class="report-header">
-                    <h2>${event.event_title} - Analytics</h2>
+                    <h2>${event.event_title || event.title || 'Event'} - Analytics</h2>
                     <div class="report-actions">
                         <button class="btn primary btn-sm" onclick="app.exportAttendeeList(${eventId}, 'pdf')">
                             <i class="fas fa-file-pdf"></i> Attendee List
@@ -840,7 +893,7 @@ Object.assign(window.app, (() => {
                 </div>
             </div>`;
 
-        UI.showModal(`Add Attendee — ${event.event_title}`, content, [
+        UI.showModal(`Add Attendee — ${event.event_title || event.title || 'Event'}`, content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }
         ]);
 
@@ -925,12 +978,12 @@ Object.assign(window.app, (() => {
                 <div class="form-section">
                     <h4>Event Details</h4>
                     <div class="form-row">
-                        <div class="form-group half"><label>Title *</label><input type="text" id="edit-event-title" class="form-control" value="${(e.event_title || '').replace(/"/g, '&quot;')}" required></div>
+                        <div class="form-group half"><label>Title *</label><input type="text" id="edit-event-title" class="form-control" value="${((e.event_title || e.title || '') || '').replace(/"/g, '&quot;')}" required></div>
                         <div class="form-group half"><label>Category</label><select id="edit-event-category" class="form-control">${catOptions}</select></div>
                     </div>
                     <div class="form-group"><label>Description</label><textarea id="edit-event-description" class="form-control">${e.description || ''}</textarea></div>
                     <div class="form-row">
-                        <div class="form-group half"><label>Date *</label><input type="date" id="edit-event-date" class="form-control" value="${e.event_date || ''}" required></div>
+                        <div class="form-group half"><label>Date *</label><input type="date" id="edit-event-date" class="form-control" value="${(e.event_date || e.date || null) || ''}" required></div>
                         <div class="form-group half"><label>Location</label><input type="text" id="edit-event-location" class="form-control" value="${(e.location || '').replace(/"/g, '&quot;')}"></div>
                     </div>
                     <div class="form-row">
