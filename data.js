@@ -63,6 +63,41 @@ class DataStore {
             'users', 'roles', 'teams', 'event_categories', 'event_templates',
             'products', 'appointment_locations', 'venues', 'ai_models',
         ]);
+
+        // ── Heavy-column exclusions for getAll() ─────────────────────────
+        // Some columns carry large base64 BLOBs (CPS form PDFs stored as text)
+        // that bloat every getAll('prospects') call into a ~10 MB download,
+        // turning the Prospects page load into a 10-second stall for ALL users.
+        //
+        // The approach: keep a per-table explicit column list that OMITS the
+        // heavy columns. getAll() uses this list in its PostgREST `select`
+        // parameter so the bytes never leave the server. getById() still uses
+        // `select=*` to fetch the full row (including the heavy column) when
+        // the user actually needs it (e.g. when opening a prospect's profile
+        // to view the CPS form).
+        //
+        // If a new column is added to the table that isn't in this list, it
+        // simply won't appear in list-view results until it's added here —
+        // write operations (insert/update) are unaffected, and getById returns
+        // every column so the detail view still sees it. That's an acceptable
+        // tradeoff for avoiding a 9.7 MB download on every list fetch.
+        // IMPORTANT: this column list must match the actual prospects schema
+        // (minus cps_form_data). If a new column is added to Supabase, add it
+        // here so it flows into list views. Unknown columns here cause PostgREST
+        // 400, which the fallback retry-with-'*' handles gracefully — but that
+        // also re-downloads the 9.7 MB blob, defeating the point. So keep this
+        // list authoritative.
+        this._lightSelects = {
+            prospects: 'id,full_name,nickname,title,gender,nationality,phone,email,ic_number,date_of_birth,lunar_birth,ming_gua,element,occupation,company_name,income_range,address,city,state,postal_code,responsible_agent_id,cps_agent_id,cps_assignment_date,protection_deadline,pipeline_stage,deal_value,expected_close_date,status,referred_by,referred_by_id,referred_by_type,referral_relationship,cps_invitation_method,cps_invitation_details,cps_attachment,score,tags,notes,created_at,updated_at,cps_form_date,cps_form_name,closing_record,conversion_status,conversion_requested_by,conversion_rejected_by,conversion_rejected_at,closed_at,closed_date,closing_date,potential_level,close_probability,is_own_business,business_name,business_industry,business_area,business_title_role,business_started,company_size,pre2025_purchases,original_source,source_id,source,lead_agent_id'
+        };
+    }
+
+    // PostgREST `select` clause to use for a given table. Lets us omit heavy
+    // BLOB columns from list fetches. Unknown columns in the list are ignored
+    // by PostgREST with a 400 error, so we wrap the fetch in a try that falls
+    // back to '*' if the column list becomes stale.
+    _selectClauseForGetAll(tableName) {
+        return this._lightSelects[tableName] || '*';
     }
 
     on(event, callback) {
@@ -219,8 +254,17 @@ class DataStore {
     }
 
     async _getAllImpl(tableName) {
+        const selectClause = this._selectClauseForGetAll(tableName);
         try {
-            const { data, error } = await this._readClient().from(tableName).select('*');
+            let data, error;
+            ({ data, error } = await this._readClient().from(tableName).select(selectClause));
+            // If the light-select column list is stale (e.g. a column was renamed
+            // or dropped), PostgREST returns a 400. Fall back to '*' once so the
+            // page still loads with the full row (including the heavy column).
+            if (error && selectClause !== '*') {
+                console.warn(`Light select failed for ${tableName}, retrying with *:`, error.message);
+                ({ data, error } = await this._readClient().from(tableName).select('*'));
+            }
             if (error) throw error;
             // Filter out tombstoned records before caching — prevents deleted items reappearing
             const tombstoneRaw = localStorage.getItem('fs_crm_tombstones');
@@ -281,10 +325,13 @@ class DataStore {
             const deletedIds = new Set(tombstones[tableName] || []);
             const stripDeleted = (rows) => rows.filter(r => !deletedIds.has(String(r.id)));
             // Before localStorage fallback, try direct REST fetch with service-role key
-            // (bypasses RLS that may block non-admin users via the Supabase client)
+            // (bypasses RLS that may block non-admin users via the Supabase client).
+            // Use the light-select clause here too so we don't re-download 10 MB
+            // of cps_form_data via the fallback path.
             if (window.SUPABASE_URL && window.SUPABASE_SR) {
                 try {
-                    const resp = await fetch(`${window.SUPABASE_URL}/rest/v1/${encodeURIComponent(tableName)}?select=*`, {
+                    const selectParam = encodeURIComponent(this._selectClauseForGetAll(tableName));
+                    const resp = await fetch(`${window.SUPABASE_URL}/rest/v1/${encodeURIComponent(tableName)}?select=${selectParam}`, {
                         headers: { 'Authorization': `Bearer ${window.SUPABASE_SR}`, 'apikey': window.SUPABASE_SR }
                     });
                     if (resp.ok) {
@@ -446,7 +493,12 @@ class DataStore {
         if (id == null || id === 'null' || id === 'undefined') return null;
 
         // If the whole table is already cached, do a synchronous in-memory lookup
-        // instead of a network round trip.
+        // instead of a network round trip. For tables with heavy columns excluded
+        // from getAll (e.g. prospects.cps_form_data), the cached row will be
+        // "light" — missing the blob. That's fine for most call sites (table
+        // rendering, agent lookups, etc.). Callers that specifically need the
+        // heavy column (e.g. rendering the CPS form image in the profile) should
+        // use getByIdFull() which always does a network fetch with select=*.
         const cachedTable = this._cacheGet(tableName);
         if (cachedTable) {
             return cachedTable.find(r => String(r.id) === String(id)) || null;
@@ -497,6 +549,35 @@ class DataStore {
             if (local) {
                 const records = JSON.parse(local);
                 return records.find(r => String(r.id) === String(id)) || null;
+            }
+            return null;
+        }
+    }
+
+    // Always fetch the full row from Supabase with select=*, bypassing the
+    // in-memory cache. Use this when you specifically need columns that were
+    // excluded from the getAll light-select (e.g. prospects.cps_form_data).
+    async getByIdFull(tableName, id) {
+        if (id == null || id === 'null' || id === 'undefined') return null;
+        try {
+            const { data, error } = await this._readClient()
+                .from(tableName)
+                .select('*')
+                .eq('id', id)
+                .maybeSingle();
+            if (error) throw error;
+            return data || null;
+        } catch (e) {
+            if (window.SUPABASE_URL && window.SUPABASE_SR) {
+                try {
+                    const resp = await fetch(`${window.SUPABASE_URL}/rest/v1/${encodeURIComponent(tableName)}?select=*&id=eq.${encodeURIComponent(id)}`, {
+                        headers: { 'Authorization': `Bearer ${window.SUPABASE_SR}`, 'apikey': window.SUPABASE_SR, 'Accept': 'application/vnd.pgrst.object+json' }
+                    });
+                    if (resp.ok) {
+                        const data = await resp.json();
+                        if (data && data.id) return data;
+                    }
+                } catch (_) {}
             }
             return null;
         }

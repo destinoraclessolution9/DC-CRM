@@ -16246,7 +16246,13 @@ function _wireLoginBtn() {
             btn.style.fontWeight = '600';
         }
 
-        const prospect = await AppDataStore.getById('prospects', prospectId);
+        // For the Info tab we need the FULL prospect row (including the heavy
+        // cps_form_data blob, which is excluded from the default getAll light
+        // select). All other tabs only need the light columns, so they use the
+        // cheaper cached getById path.
+        const prospect = (tab === 'info')
+            ? await AppDataStore.getByIdFull('prospects', prospectId)
+            : await AppDataStore.getById('prospects', prospectId);
         const container = containerOverride || document.getElementById('prospect-tab-content');
         if (!container || !prospect) return;
 
