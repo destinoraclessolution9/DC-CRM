@@ -11266,7 +11266,55 @@ function _wireLoginBtn() {
             opportunity_potential: serializeMultiSelectToText('pmn-opp-items', 'pmn-opportunity-remarks'),
             next_action: serializeEventSelectToText('pmn-na-items', 'pmn-next-action-remarks'),
         };
-        await AppDataStore.update('activities', activityId, updates);
+
+        // Write DIRECTLY via service-role REST so we can catch real errors.
+        // AppDataStore.update() silently falls back to localStorage on schema
+        // cache misses / RLS rejections and the user would see a success toast
+        // while Potential & Opportunities / Next Actions accordions stayed empty.
+        let writeOk = false;
+        if (window.SUPABASE_URL && window.SUPABASE_SR) {
+            try {
+                const resp = await fetch(
+                    `${window.SUPABASE_URL}/rest/v1/activities?id=eq.${encodeURIComponent(activityId)}`,
+                    {
+                        method: 'PATCH',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${window.SUPABASE_SR}`,
+                            'apikey': window.SUPABASE_SR,
+                            'Prefer': 'return=representation'
+                        },
+                        body: JSON.stringify(updates)
+                    }
+                );
+                if (resp.ok) {
+                    writeOk = true;
+                } else {
+                    const errTxt = await resp.text();
+                    console.warn('savePostMeetupNotes PATCH failed:', resp.status, errTxt);
+                }
+            } catch (e) {
+                console.warn('savePostMeetupNotes PATCH threw:', e);
+            }
+        }
+        // Fallback to AppDataStore.update() if the direct REST path is unavailable
+        if (!writeOk) {
+            try {
+                await AppDataStore.update('activities', activityId, updates);
+                writeOk = true;
+            } catch (e) {
+                console.warn('AppDataStore.update fallback failed:', e);
+            }
+        }
+
+        if (!writeOk) {
+            UI.toast.error('Failed to save notes — please try again');
+            return;
+        }
+
+        // Invalidate the activities cache so the accordion re-reads fresh data
+        AppDataStore.invalidateCache('activities');
+
         UI.hideModal();
         UI.toast.success('Post-meetup notes saved');
         if (prospectId) {

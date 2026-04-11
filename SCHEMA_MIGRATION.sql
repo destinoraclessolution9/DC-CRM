@@ -37,7 +37,18 @@ alter table activities
     add column if not exists status text,
     add column if not exists discussion_summary text,
     add column if not exists source text,
-    add column if not exists completed_at timestamptz;
+    add column if not exists completed_at timestamptz,
+    -- Post-Meetup Notes & aggregate fields read by the Potential & Opportunities
+    -- / Next Actions accordions on the prospect profile. Were silently stripped
+    -- by data.js before, so saving Post-Meetup Notes appeared to succeed but
+    -- nothing flowed through to the accordions.
+    add column if not exists opportunity_potential text,
+    add column if not exists next_action text,
+    add column if not exists core_problem text,
+    add column if not exists next_action_done boolean default false,
+    add column if not exists note_next_steps_done boolean default false,
+    add column if not exists score_value integer,
+    add column if not exists is_closed boolean default false;
 
 -- Back-fill: the existing `amount_closed` column is where closed-case data
 -- already sits. Copy it to the new `closing_amount` column that the code reads.
