@@ -10428,7 +10428,8 @@ function _wireLoginBtn() {
             : null;
 
         let attendeeHtml = '';
-        if (activity.activity_type === 'EVENT' && activity.event_id) {
+        const isAttendeeType = ['EVENT', 'AGENT_MEETING', 'AGENT_TRAINING'].includes(activity.activity_type);
+        if (isAttendeeType && activity.event_id) {
             // Attendees are shared across ALL activity rows that point to the same event on
             // the same date. Each agent who joins an event creates their own activity row, but
             // they should all see the same registered attendees. We scope by event_date so a
@@ -10445,7 +10446,9 @@ function _wireLoginBtn() {
             const allAttendees = await AppDataStore.getAll('event_attendees');
             const prospects = await AppDataStore.getAll('prospects');
             const customers = await AppDataStore.getAll('customers');
-            const all = [...prospects, ...customers];
+            const users = await AppDataStore.getAll('users');
+            // Include users so agent attendees (AGENT_MEETING / AGENT_TRAINING) resolve their names
+            const all = [...prospects, ...customers, ...users];
 
             // Hide ghost records that have no attendee_id, no entity_id, and no entity_name —
             // these are leftovers from the pre-fix bug where the schema-mismatch stripper
@@ -10460,16 +10463,44 @@ function _wireLoginBtn() {
                 return hasName;
             });
             if (attendees.length > 0) {
-                const renderedRows = await Promise.all(attendees.map(async att => {
+                // Sort: prospects/customers first, agents (consultants) last
+                const typeOrder = (t) => (t === 'agent' ? 1 : 0);
+                const sortedAttendees = [...attendees].sort((a, b) => typeOrder(a.attendee_type) - typeOrder(b.attendee_type));
+                const renderedRows = await Promise.all(sortedAttendees.map(async att => {
                     const entityId = att.entity_id || att.attendee_id;
                     const person = all.find(p => String(p.id) === String(entityId));
                     const name = person?.full_name || att.entity_name || '';
                     const agent = await AppDataStore.getById('users', att.added_by_agent_id);
                     const agentName = agent?.full_name || att.added_by_name || 'Unknown';
-                    const paidChecked = att.paid ? 'checked' : '';
-                    const ticketChecked = att.ticket_created ? 'checked' : '';
+                    const isAgentAttendee = att.attendee_type === 'agent';
                     const attendedChecked = (att.attended || att.attendance_status === 'Attended') ? 'checked' : '';
                     const unattendedChecked = att.attendance_status === 'No Show' ? 'checked' : '';
+                    // Agents (consultants) get a simpler control set: Attended / Unattended only.
+                    // Paid/Ticket/Post Event only apply to prospect/customer attendees.
+                    if (isAgentAttendee) {
+                        const nameDisplay = entityId
+                            ? `<strong style="cursor:pointer;color:var(--primary);text-decoration:underline;" onclick="event.stopPropagation();app.showAgentProfile('${entityId}')">${name}</strong>`
+                            : `<strong>${name}</strong>`;
+                        return `
+                            <div class="info-row" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #eee; padding-bottom:8px; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
+                                <div>
+                                    ${nameDisplay}
+                                    <span style="font-size:10px; margin-left:5px; background:var(--gray-100); padding:1px 6px; border-radius:10px;">consultant</span>
+                                    <div style="font-size:11px; color:gray;">Added by: ${agentName}</div>
+                                </div>
+                                <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+                                    <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
+                                        <input type="checkbox" ${attendedChecked} onchange="app.toggleAttendeeAttended(${att.id}, this.checked, ${entityId}, '${att.attendee_type}', ${activity.event_id}, '${activity.activity_date}')"> Attended
+                                    </label>
+                                    <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
+                                        <input type="checkbox" ${unattendedChecked} onchange="app.toggleAttendeeUnattended(${att.id}, this.checked, ${entityId}, '${att.attendee_type}', ${activity.event_id}, '${activity.activity_date}')"> Unattended
+                                    </label>
+                                </div>
+                            </div>
+                        `;
+                    }
+                    const paidChecked = att.paid ? 'checked' : '';
+                    const ticketChecked = att.ticket_created ? 'checked' : '';
                     return `
                         <div class="info-row" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #eee; padding-bottom:8px; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
                             <div>
@@ -10533,6 +10564,7 @@ function _wireLoginBtn() {
                     ${activity.summary ? `<div class="info-row"><span class="info-label">Summary:</span> <span>${activity.summary}</span></div>` : ''}
                 </div>
                 
+                ${isAttendeeType ? '' : `
                 <div class="detail-section">
                     <h4>Consultant</h4>
                     ${await (async () => {
@@ -10544,6 +10576,7 @@ function _wireLoginBtn() {
                         return `<div class="info-row"><span class="info-label">Consultant Name:</span> <span>❌ Not Assigned</span></div>`;
                     })()}
                 </div>
+                `}
 
                 <div class="detail-section">
                     <h4>Agents</h4>
