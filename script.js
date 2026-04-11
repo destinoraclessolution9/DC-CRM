@@ -12057,6 +12057,7 @@ function _wireLoginBtn() {
                             <label>Invitation Method</label>
                             <select id="cps-invitation-method" class="form-control" onchange="document.getElementById('cps-invitation-other-div').style.display = this.value === 'Other' ? 'block' : 'none'">
                                 <option value="">-- Select Method --</option>
+                                <option value="Face to Face in Person">Face to Face in Person</option>
                                 <option value="Call">Call</option>
                                 <option value="WhatsApp">WhatsApp</option>
                                 <option value="Event">Event</option>
