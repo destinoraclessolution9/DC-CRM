@@ -16001,19 +16001,13 @@ function _wireLoginBtn() {
 
     const showProspectDetail = async (prospectId) => {
         const prospect = await AppDataStore.getById('prospects', prospectId);
-        if (!prospect || !await canViewProspect(prospect)) {
-            UI.toast.error('You do not have permission to view this prospect.');
-            await navigateTo('prospects');
-            return;
-        }
-
         if (!prospect) return;
-
-        // RBAC check
-        const currentUser = _currentUser || await Auth.getCurrentUser();
-        const isAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || currentUser?.role?.includes('Level 3') || currentUser?.role?.includes('Level 7') || currentUser?.role === 'team_leader';
-        const isOwner = prospect.responsible_agent_id == currentUser?.id;
-        if (!isAdmin && !isOwner) {
+        // Single source of truth for prospect visibility: canViewProspect walks
+        // the reporting tree, so team leaders / uplines (Level 3–11) can open any
+        // prospect owned by someone in their subordinate chain. The previous
+        // duplicate "isAdmin || isOwner" check here blocked mid-level leads like
+        // Level 4/5/6/8 from viewing their own team's prospects.
+        if (!await canViewProspect(prospect)) {
             UI.toast.error('You do not have permission to view this prospect.');
             await navigateTo('prospects');
             return;
