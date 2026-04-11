@@ -376,10 +376,66 @@ const appLogic = (() => {
         return visibleIds.some(id => String(id) === String(activity.lead_agent_id));
     };
 
+    // Returns a synchronous (activity) => boolean predicate that's equivalent to
+    // canViewActivity for the current user, after a single upfront resolution of
+    // the user's visible-user-ids set and team membership. Calling canViewActivity
+    // per-row in a tight loop forced every activity through an async function —
+    // with hundreds of activities, that was hundreds of serialized microtask
+    // yields (the main cause of non-admin users seeing a 10 s stall on the
+    // Calendar page).
+    const buildActivityVisibilityChecker = async (usersList) => {
+        const user = _currentUser;
+        if (!user) return () => false;
+        if (isSystemAdmin(user)) return () => true;
+
+        const visibleIds = await getVisibleUserIds(user);
+        const isAll = visibleIds === 'all';
+        const visibleSet = isAll ? null : new Set((visibleIds || []).map(String));
+
+        // Team membership lookup: used for public/open activities where the
+        // lead agent's team must match the viewer's. Build once, not per row.
+        const userTeamId = user.team_id ? String(user.team_id) : null;
+        const teamById = new Map();
+        for (const u of usersList || []) {
+            teamById.set(String(u.id), u.team_id ? String(u.team_id) : null);
+        }
+
+        const viewerId = String(user.id);
+
+        return (activity) => {
+            if (!activity) return false;
+
+            // Public / open activities
+            if (activity.is_public || activity.visibility === 'public' || activity.visibility === 'open') {
+                if (!userTeamId) return true;
+                const leadTeam = teamById.get(String(activity.lead_agent_id));
+                if (leadTeam == null) return true; // lead not found or has no team
+                return leadTeam === userTeamId;
+            }
+
+            // Private activities — only owner / co-agent / admin
+            if (activity.visibility === 'private') {
+                return String(activity.lead_agent_id) === viewerId ||
+                    (Array.isArray(activity.co_agents) && activity.co_agents.some(ca => String(ca.id) === viewerId));
+            }
+
+            // Default: lead / co-agent / subordinate within visible tree
+            if (String(activity.lead_agent_id) === viewerId) return true;
+            if (Array.isArray(activity.co_agents) && activity.co_agents.some(ca => String(ca.id) === viewerId)) return true;
+
+            if (isAll) return true;
+            return visibleSet.has(String(activity.lead_agent_id));
+        };
+    };
+
     const getVisibleActivities = async () => {
-        const all = await AppDataStore.getAll('activities');
-        const visibility = await Promise.all(all.map(a => canViewActivity(a)));
-        return all.filter((_, i) => visibility[i]);
+        const [all, allUsersForVis] = await Promise.all([
+            AppDataStore.getAll('activities'),
+            AppDataStore.getAll('users'),
+        ]);
+        if (isSystemAdmin(_currentUser)) return all;
+        const canView = await buildActivityVisibilityChecker(allUsersForVis);
+        return all.filter(canView);
     };
 
     // Check edit permission: Level 1-2 can edit anything;
@@ -9784,9 +9840,13 @@ function _wireLoginBtn() {
 
         // Super admins see all activities — skip visibility filter and ignore agent filter
         if (!isSystemAdmin(_currentUser)) {
-            // Resolve permission once, in parallel, reusing the cached visibleUserIds.
-            const calVisibility = await Promise.all(activities.map(a => canViewActivity(a)));
-            activities = activities.filter((_, i) => calVisibility[i]);
+            // Build one synchronous visibility predicate for this user and apply it
+            // in a single .filter pass. Previously every activity went through an
+            // async canViewActivity call (even with memoized visibleUserIds, each
+            // call still produced a microtask yield), so hundreds of activities
+            // meant hundreds of serialized yields on the calendar's critical path.
+            const canView = await buildActivityVisibilityChecker(allUsers);
+            activities = activities.filter(canView);
 
             if (_filters.agent && _filters.agent !== 'all') {
                 activities = activities.filter(a => a.lead_agent_id == _filters.agent);
