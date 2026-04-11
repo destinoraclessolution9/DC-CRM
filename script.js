@@ -25252,6 +25252,11 @@ const simulateCampaignSending = async (campaignId) => {
         if (user) {
             // Auth.setUser removed – Supabase manages session; _currentUser set directly below
             _currentUser = user;
+            // Swap login overlay for the authenticated app shell (parity with app.init())
+            const loginEl = document.getElementById('login-container');
+            const shellEl = document.getElementById('app-shell');
+            if (loginEl) loginEl.style.display = 'none';
+            if (shellEl) shellEl.style.display = 'block';
             updateUserDisplay();
             updateNavVisibility();
             // L13 (Customer) / L14 (Referrer) land on 福德; everyone else on calendar
@@ -29810,9 +29815,12 @@ const monitorLoginAttempts = async () => {
     });
     try {
         const rows = await AppDataStore.getAll('login_attempts');
+        let updated = null;
         if (rows && rows.length > 0) {
-            await AppDataStore.update('login_attempts', rows[0].id, { attempts_data: failedAttempts, updated_at: new Date().toISOString() });
-        } else {
+            updated = await AppDataStore.update('login_attempts', rows[0].id, { attempts_data: failedAttempts, updated_at: new Date().toISOString() });
+        }
+        // No existing row (or the cached one was stale and update() purged it) — insert fresh
+        if (!rows || rows.length === 0 || updated === null) {
             await AppDataStore.create('login_attempts', { attempts_data: failedAttempts, updated_at: new Date().toISOString() });
         }
     } catch (_) {}
