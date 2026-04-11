@@ -10462,92 +10462,104 @@ function _wireLoginBtn() {
                 const hasName = !!(person?.full_name || a.entity_name);
                 return hasName;
             });
-            if (attendees.length > 0) {
-                // Sort: prospects/customers first, agents (consultants) last
-                const typeOrder = (t) => (t === 'agent' ? 1 : 0);
-                const sortedAttendees = [...attendees].sort((a, b) => typeOrder(a.attendee_type) - typeOrder(b.attendee_type));
-                const renderedRows = await Promise.all(sortedAttendees.map(async att => {
-                    const entityId = att.entity_id || att.attendee_id;
-                    const person = all.find(p => String(p.id) === String(entityId));
-                    const name = person?.full_name || att.entity_name || '';
-                    const agent = await AppDataStore.getById('users', att.added_by_agent_id);
-                    const agentName = agent?.full_name || att.added_by_name || 'Unknown';
-                    const isAgentAttendee = att.attendee_type === 'agent';
-                    const attendedChecked = (att.attended || att.attendance_status === 'Attended') ? 'checked' : '';
-                    const unattendedChecked = att.attendance_status === 'No Show' ? 'checked' : '';
-                    // Agents (consultants) get a simpler control set: Attended / Unattended only.
-                    // Paid/Ticket/Post Event only apply to prospect/customer attendees.
-                    if (isAgentAttendee) {
-                        const nameDisplay = entityId
-                            ? `<strong style="cursor:pointer;color:var(--primary);text-decoration:underline;" onclick="event.stopPropagation();app.showAgentProfile('${entityId}')">${name}</strong>`
-                            : `<strong>${name}</strong>`;
-                        return `
-                            <div class="info-row" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #eee; padding-bottom:8px; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
-                                <div>
-                                    ${nameDisplay}
-                                    <span style="font-size:10px; margin-left:5px; background:var(--gray-100); padding:1px 6px; border-radius:10px;">consultant</span>
-                                    <div style="font-size:11px; color:gray;">Added by: ${agentName}</div>
-                                </div>
-                                <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
-                                    <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
-                                        <input type="checkbox" ${attendedChecked} onchange="app.toggleAttendeeAttended(${att.id}, this.checked, ${entityId}, '${att.attendee_type}', ${activity.event_id}, '${activity.activity_date}')"> Attended
-                                    </label>
-                                    <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
-                                        <input type="checkbox" ${unattendedChecked} onchange="app.toggleAttendeeUnattended(${att.id}, this.checked, ${entityId}, '${att.attendee_type}', ${activity.event_id}, '${activity.activity_date}')"> Unattended
-                                    </label>
-                                </div>
-                            </div>
-                        `;
-                    }
-                    const paidChecked = att.paid ? 'checked' : '';
-                    const ticketChecked = att.ticket_created ? 'checked' : '';
-                    return `
-                        <div class="info-row" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #eee; padding-bottom:8px; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
-                            <div>
-                                <strong style="cursor:pointer;color:var(--primary);text-decoration:underline;" onclick="event.stopPropagation();app.showAttendeeDetails(${entityId},'${att.attendee_type||'prospect'}')">${name}</strong>
-                                <span style="font-size:10px; margin-left:5px; background:var(--gray-100); padding:1px 6px; border-radius:10px;">${att.attendee_type || 'prospect'}</span>
-                                <div style="font-size:11px; color:gray;">Added by: ${agentName}</div>
-                            </div>
-                            <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
-                                <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
-                                    <input type="checkbox" ${paidChecked} onchange="app.toggleAttendeePaid(${att.id}, this.checked)"> Paid
-                                </label>
-                                <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
-                                    <input type="checkbox" ${ticketChecked} onchange="app.toggleAttendeeTicket(${att.id}, this.checked)"> Ticket Created
-                                </label>
-                                <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
-                                    <input type="checkbox" ${attendedChecked} onchange="app.toggleAttendeeAttended(${att.id}, this.checked, ${entityId}, '${att.attendee_type}', ${activity.event_id}, '${activity.activity_date}')"> Attended
-                                </label>
-                                <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
-                                    <input type="checkbox" ${unattendedChecked} onchange="app.toggleAttendeeUnattended(${att.id}, this.checked, ${entityId}, '${att.attendee_type}', ${activity.event_id}, '${activity.activity_date}')"> Unattended
-                                </label>
-                                ${entityId ? `<button class="btn btn-sm secondary" onclick="(async()=>{ await app.openPostMeetupNotesModal(${activityId}, ${entityId}); })()">Post Event</button>` : ''}
-                            </div>
-                        </div>
-                    `;
-                }));
-                const rows = renderedRows.join('');
+            // v6: split attendees into prospect-type and agent-type for separate rendering
+            const prospectAttendees = attendees.filter(a => a.attendee_type !== 'agent');
+            const agentAttendees = attendees.filter(a => a.attendee_type === 'agent');
 
-                attendeeHtml = `
-                    <div class="detail-section">
-                        <h4>Attendees</h4>
-                        ${rows}
-                        <div style="margin-top:10px; text-align:right;">
-                            <button class="btn primary btn-sm" onclick="app.showAddAttendeeSearch(${activity.event_id}, ${activityId})">+ Add Attendee</button>
+            const renderProspectRow = async (att) => {
+                const entityId = att.entity_id || att.attendee_id;
+                const person = all.find(p => String(p.id) === String(entityId));
+                const name = person?.full_name || att.entity_name || '';
+                const agent = await AppDataStore.getById('users', att.added_by_agent_id);
+                const agentName = agent?.full_name || att.added_by_name || 'Unknown';
+                const attendedChecked = (att.attended || att.attendance_status === 'Attended') ? 'checked' : '';
+                const unattendedChecked = att.attendance_status === 'No Show' ? 'checked' : '';
+                const paidChecked = att.paid ? 'checked' : '';
+                const ticketChecked = att.ticket_created ? 'checked' : '';
+                return `
+                    <div class="info-row" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #eee; padding-bottom:8px; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
+                        <div>
+                            <strong style="cursor:pointer;color:var(--primary);text-decoration:underline;" onclick="event.stopPropagation();app.showAttendeeDetails(${entityId},'${att.attendee_type||'prospect'}')">${name}</strong>
+                            <span style="font-size:10px; margin-left:5px; background:var(--gray-100); padding:1px 6px; border-radius:10px;">${att.attendee_type || 'prospect'}</span>
+                            <div style="font-size:11px; color:gray;">Added by: ${agentName}</div>
+                        </div>
+                        <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+                            <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
+                                <input type="checkbox" ${paidChecked} onchange="app.toggleAttendeePaid(${att.id}, this.checked)"> Paid
+                            </label>
+                            <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
+                                <input type="checkbox" ${ticketChecked} onchange="app.toggleAttendeeTicket(${att.id}, this.checked)"> Ticket Created
+                            </label>
+                            <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
+                                <input type="checkbox" ${attendedChecked} onchange="app.toggleAttendeeAttended(${att.id}, this.checked, ${entityId}, '${att.attendee_type}', ${activity.event_id}, '${activity.activity_date}')"> Attended
+                            </label>
+                            <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
+                                <input type="checkbox" ${unattendedChecked} onchange="app.toggleAttendeeUnattended(${att.id}, this.checked, ${entityId}, '${att.attendee_type}', ${activity.event_id}, '${activity.activity_date}')"> Unattended
+                            </label>
+                            ${entityId ? `<button class="btn btn-sm secondary" onclick="(async()=>{ await app.openPostMeetupNotesModal(${activityId}, ${entityId}); })()">Post Event</button>` : ''}
                         </div>
                     </div>
                 `;
-            } else {
-                attendeeHtml = `
-                    <div class="detail-section">
-                        <h4>Attendees</h4>
-                        <div class="info-row">No attendees registered.</div>
-                        <div style="margin-top:10px; text-align:right;">
-                            <button class="btn primary btn-sm" onclick="app.showAddAttendeeSearch(${activity.event_id}, ${activityId})">+ Add Attendee</button>
+            };
+
+            const renderAgentRow = async (att) => {
+                const entityId = att.entity_id || att.attendee_id;
+                const person = all.find(p => String(p.id) === String(entityId));
+                const name = person?.full_name || att.entity_name || '';
+                const addedBy = await AppDataStore.getById('users', att.added_by_agent_id);
+                const addedByName = addedBy?.full_name || att.added_by_name || 'Unknown';
+                const attendedChecked = (att.attended || att.attendance_status === 'Attended') ? 'checked' : '';
+                const unattendedChecked = att.attendance_status === 'No Show' ? 'checked' : '';
+                const nameDisplay = entityId
+                    ? `<strong style="cursor:pointer;color:var(--primary);text-decoration:underline;" onclick="event.stopPropagation();app.showAgentProfile('${entityId}')">${name}</strong>`
+                    : `<strong>${name}</strong>`;
+                const roleLabel = person?.role || 'consultant';
+                return `
+                    <div class="info-row" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #eee; padding-bottom:8px; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
+                        <div>
+                            ${nameDisplay}
+                            <span style="font-size:10px; margin-left:5px; background:#E0F2FE; color:#075985; padding:1px 6px; border-radius:10px;">${escapeHtml(roleLabel)}</span>
+                            <div style="font-size:11px; color:gray;">Added by: ${addedByName}</div>
+                        </div>
+                        <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+                            <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
+                                <input type="checkbox" ${attendedChecked} onchange="app.toggleAttendeeAttended(${att.id}, this.checked, ${entityId}, 'agent', ${activity.event_id}, '${activity.activity_date}')"> Attended
+                            </label>
+                            <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
+                                <input type="checkbox" ${unattendedChecked} onchange="app.toggleAttendeeUnattended(${att.id}, this.checked, ${entityId}, 'agent', ${activity.event_id}, '${activity.activity_date}')"> Unattended
+                            </label>
+                            <button class="btn btn-sm" style="background:#FEE2E2;color:#991B1B;border:none;padding:3px 8px;border-radius:4px;" onclick="event.stopPropagation();app.removeAgentAttendee(${att.id}, ${activityId})" title="Remove"><i class="fas fa-times"></i></button>
                         </div>
                     </div>
                 `;
-            }
+            };
+
+            const prospectRows = (await Promise.all(prospectAttendees.map(renderProspectRow))).join('');
+            const agentRows = (await Promise.all(agentAttendees.map(renderAgentRow))).join('');
+
+            // Section 1: Prospect / Customer Attendees
+            const prospectSection = `
+                <div class="detail-section">
+                    <h4>Attendees <span style="font-size:11px;color:#9CA3AF;font-weight:400;">(${prospectAttendees.length})</span></h4>
+                    ${prospectRows || '<div class="info-row">No prospect/customer attendees.</div>'}
+                    <div style="margin-top:10px; text-align:right;">
+                        <button class="btn primary btn-sm" onclick="app.showAddAttendeeSearch(${activity.event_id}, ${activityId})">+ Add Attendee</button>
+                    </div>
+                </div>
+            `;
+
+            // Section 2: Agent / Consultant Attendees (searches consultant roster)
+            const agentSection = `
+                <div class="detail-section">
+                    <h4>Agent Attendance <span style="font-size:11px;color:#9CA3AF;font-weight:400;">(${agentAttendees.length})</span></h4>
+                    ${agentRows || '<div class="info-row">No agents/consultants added.</div>'}
+                    <div style="margin-top:10px; text-align:right;">
+                        <button class="btn primary btn-sm" onclick="app.showAddConsultantSearch(${activity.event_id}, ${activityId})"><i class="fas fa-user-tie"></i> + Add Agent / Consultant</button>
+                    </div>
+                </div>
+            `;
+
+            attendeeHtml = prospectSection + agentSection;
         }
 
         const content = `
@@ -10578,6 +10590,7 @@ function _wireLoginBtn() {
                 </div>
                 `}
 
+                ${activity.activity_type !== 'EVENT' ? `
                 <div class="detail-section">
                     <h4>Agents</h4>
                     <div class="info-row"><span class="info-label">Lead:</span> <span>${await getAgentName(activity.lead_agent_id)}</span></div>
@@ -10611,6 +10624,7 @@ function _wireLoginBtn() {
                         </div>
                     ` : ''}
                 </div>
+                ` : ''}
                 ${attendeeHtml}
             </div>
         `;
@@ -12409,6 +12423,113 @@ function _wireLoginBtn() {
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
             { label: 'Add', type: 'primary', action: '(async()=>{ await app.confirmAddAttendee(); })()' }
         ]);
+    };
+
+    // v6: Search & add an agent/consultant attendee.
+    // Uses the users table filtered by consultant role (Level 7) or any agent level.
+    // Writes to event_attendees with attendee_type='agent'.
+    const showAddConsultantSearch = async (eventId, activityId) => {
+        const users = await AppDataStore.getAll('users');
+        // Filter to consultants + agents (Level 3-12). Exclude customers/referrers/inactive.
+        const eligible = users.filter(u => {
+            if (u.status === 'inactive') return false;
+            const lvl = _getUserLevel(u);
+            return lvl >= 1 && lvl <= 12; // admin → agent; customers (13) and referrers (14) excluded
+        });
+        window._addConsultAll = eligible.map(u => ({ ...u, _type: 'agent' }));
+        window._addConsultSelected = null;
+        window._addConsultEventId = eventId;
+        window._addConsultActivityId = activityId;
+        const content = `
+            <div class="form-group">
+                <label>Search Agent / Consultant</label>
+                <input type="text" id="add-consult-search" class="form-control" placeholder="Type name, phone, or role..." oninput="app.searchAddConsultant(this.value)">
+                <div id="add-consult-results" style="border:1px solid var(--border,#e5e0d8);border-radius:4px;max-height:220px;overflow-y:auto;display:none;background:#fff;"></div>
+            </div>
+            <div id="add-consult-name" style="margin-top:8px;font-weight:600;color:var(--primary);min-height:20px;"></div>
+            <div style="margin-top:10px;font-size:11px;color:var(--gray-400);">Showing ${eligible.length} active agents/consultants</div>
+        `;
+        UI.showModal('Add Agent / Consultant', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Add', type: 'primary', action: '(async()=>{ await app.confirmAddConsultant(); })()' }
+        ]);
+    };
+
+    const searchAddConsultant = (query) => {
+        const q = (query || '').toLowerCase().trim();
+        const res = document.getElementById('add-consult-results');
+        if (!res) return;
+        if (q.length < 1) { res.style.display = 'none'; res.innerHTML = ''; return; }
+        const matches = (window._addConsultAll || []).filter(u =>
+            (u.full_name || '').toLowerCase().includes(q)
+            || (u.phone || '').includes(q)
+            || (u.role || '').toLowerCase().includes(q)
+            || (u.email || '').toLowerCase().includes(q)
+        ).slice(0, 15);
+        res.innerHTML = matches.map(u =>
+            `<div style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #eee;" onmousedown="app.selectAddConsultant(${u.id},'${(u.full_name||'').replace(/'/g,"\\'")}')">
+                <strong>${escapeHtml(u.full_name || '')}</strong>
+                <small style="color:gray;margin-left:6px;">${escapeHtml(u.role || '')}</small>
+            </div>`
+        ).join('') || '<div style="padding:12px;color:#9CA3AF;font-size:12px;">No matches</div>';
+        res.style.display = 'block';
+    };
+
+    const selectAddConsultant = (id, name) => {
+        window._addConsultSelected = { id, name };
+        const nameEl = document.getElementById('add-consult-name');
+        if (nameEl) nameEl.textContent = '✅ Selected: ' + name;
+        const res = document.getElementById('add-consult-results');
+        if (res) res.style.display = 'none';
+        const input = document.getElementById('add-consult-search');
+        if (input) input.value = name;
+    };
+
+    const confirmAddConsultant = async () => {
+        const eventId = window._addConsultEventId;
+        const activityId = window._addConsultActivityId;
+        const s = window._addConsultSelected;
+        if (!s) { UI.toast.error('Please select an agent first'); return; }
+
+        // Guard against duplicate (same agent already added to this event/date)
+        try {
+            const existing = await AppDataStore.query('event_attendees', { event_id: eventId });
+            const dup = (existing || []).find(a =>
+                a.attendee_type === 'agent'
+                && String(a.entity_id || a.attendee_id) === String(s.id)
+            );
+            if (dup) {
+                UI.toast.error(s.name + ' is already an agent attendee');
+                return;
+            }
+        } catch (_) {}
+
+        await AppDataStore.create('event_attendees', {
+            event_id: eventId,
+            activity_id: activityId,
+            attendee_id: s.id,
+            entity_id: s.id,
+            entity_name: s.name || '',
+            attendee_type: 'agent',
+            attendance_status: 'Registered',
+            added_by_agent_id: _currentUser?.id || null,
+            added_by_name: _currentUser?.full_name || '',
+            created_at: new Date().toISOString()
+        });
+        UI.hideModal();
+        await app.viewActivityDetails(activityId);
+        UI.toast.success(s.name + ' added as agent attendee');
+    };
+
+    const removeAgentAttendee = async (attendeeId, activityId) => {
+        if (!confirm('Remove this agent from the event?')) return;
+        try {
+            await AppDataStore.delete('event_attendees', attendeeId);
+            UI.toast.success('Agent removed');
+            if (activityId) await app.viewActivityDetails(activityId);
+        } catch (e) {
+            UI.toast.error('Could not remove: ' + e.message);
+        }
     };
 
     const searchAddAttendee = (query) => {
@@ -29914,6 +30035,11 @@ const initImportDemoData = async () => {
         toggleLifeChartType,
         showAttendeeDetails,
         showAddAttendeeSearch,
+        showAddConsultantSearch,
+        searchAddConsultant,
+        selectAddConsultant,
+        confirmAddConsultant,
+        removeAgentAttendee,
         searchAddAttendee,
         selectAddAttendee,
         confirmAddAttendee,
