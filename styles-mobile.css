@@ -304,6 +304,19 @@
         background: transparent;
     }
 
+    /* styles-fixed.css applies min-width: 700px to these tables on mobile for
+       the horizontal-scroll fallback, which fights our card layout and forces
+       each card to overflow horizontally (left/right cut-off on ~375px screens).
+       Kill the min-width so cards shrink to viewport width. */
+    .prospects-table,
+    .customers-table,
+    .agents-table,
+    .imports-table,
+    .events-table {
+        min-width: 0 !important;
+        width: 100% !important;
+    }
+
     /* Classes used by ALL mobile-converted tables */
     .mobile-card-table { display: block !important; }
 
