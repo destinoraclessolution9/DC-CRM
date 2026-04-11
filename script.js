@@ -8195,64 +8195,148 @@ function _wireLoginBtn() {
         await renderD3Tree(_currentTreeData);
     };
 
+    // Prefetches every table once, then walks the tree synchronously using Maps.
+    // Previous implementation recursed with per-node awaits — for a super-admin
+    // root node with hundreds of prospects the recursion exploded into thousands
+    // of serialized microtasks and the Relationship Tree page hung for minutes.
+    // Now: one parallel Promise.all for the 4 tables + canViewNode resolution,
+    // then a synchronous DFS. A `visited` set prevents infinite loops if the
+    // data contains cycles.
     const buildTreeData = async (rootId, rootType) => {
-        let person;
-        if (rootType === 'user') {
-            person = await AppDataStore.getById('users', rootId);
-        } else {
-            person = await AppDataStore.getById(rootType === 'customer' ? 'customers' : 'prospects', rootId);
-        }
-        if (!person || !await canViewNode(rootId, rootType)) return null;
+        // 1. Load all tables once, in parallel.
+        const [allUsers, allProspects, allCustomers, allReferrals] = await Promise.all([
+            AppDataStore.getAll('users'),
+            AppDataStore.getAll('prospects'),
+            AppDataStore.getAll('customers'),
+            AppDataStore.getAll('referrals'),
+        ]);
 
-        const node = {
-            id: person.id,
-            name: person.full_name,
-            type: rootType,
-            role: person.role || 'Guest',
-            pipeline_stage: person.pipeline_stage,
-            last_activity_date: person.last_activity_date,
-            join_date: person.join_date || person.created_at,
-            children: []
+        // 2. Resolve permissions once. For level 1-2 we short-circuit to full
+        // access; otherwise we compute the visible user-id set a single time.
+        const lvlMatch = _currentUser?.role?.match(/Level\s+(\d+)/i);
+        const level = lvlMatch ? parseInt(lvlMatch[1]) : 10;
+        const fullAccess = level <= 2;
+        let visibleUserIds = null;
+        if (!fullAccess) {
+            const vIds = await getVisibleUserIds(_currentUser);
+            visibleUserIds = vIds === 'all' ? null : new Set((vIds || []).map(String));
+        }
+        const canViewUser = (uid) => fullAccess || visibleUserIds === null || visibleUserIds.has(String(uid));
+        const canViewProspectSync = (p) =>
+            fullAccess || visibleUserIds === null || visibleUserIds.has(String(p.responsible_agent_id));
+        const canViewCustomerSync = (c) =>
+            fullAccess || visibleUserIds === null ||
+            visibleUserIds.has(String(c.responsible_agent_id)) ||
+            visibleUserIds.has(String(c.agent_id));
+
+        // 3. Build index maps — all O(1) lookups from here on.
+        const usersById = new Map(allUsers.map(u => [String(u.id), u]));
+        const prospectsById = new Map(allProspects.map(p => [String(p.id), p]));
+        const customersById = new Map(allCustomers.map(c => [String(c.id), c]));
+
+        // subAgents by reporter id (for user/agent tree walks)
+        const subAgentsByParent = new Map();
+        for (const u of allUsers) {
+            if (!u || u.status === 'inactive' || !u.reporting_to) continue;
+            const key = String(u.reporting_to);
+            if (!subAgentsByParent.has(key)) subAgentsByParent.set(key, []);
+            subAgentsByParent.get(key).push(u);
+        }
+
+        // Referrals grouped by referrer_id
+        const referralsByReferrer = new Map();
+        for (const r of allReferrals) {
+            if (!r || !r.referrer_id) continue;
+            const key = String(r.referrer_id);
+            if (!referralsByReferrer.has(key)) referralsByReferrer.set(key, []);
+            referralsByReferrer.get(key).push(r);
+        }
+
+        // Prospects grouped by responsible_agent_id
+        const prospectsByAgent = new Map();
+        for (const p of allProspects) {
+            if (!p || !p.responsible_agent_id) continue;
+            const key = String(p.responsible_agent_id);
+            if (!prospectsByAgent.has(key)) prospectsByAgent.set(key, []);
+            prospectsByAgent.get(key).push(p);
+        }
+
+        // 4. Cap the tree to keep render time sane when a super-admin clicks
+        // themselves. The old recursive version had no limit at all.
+        const MAX_NODES = 400;
+        const MAX_DEPTH = 8;
+        let nodeCount = 0;
+        const visited = new Set();
+
+        const walk = (id, type, depth) => {
+            if (depth > MAX_DEPTH) return null;
+            if (nodeCount >= MAX_NODES) return null;
+            const visitKey = `${type}:${id}`;
+            if (visited.has(visitKey)) return null;
+            visited.add(visitKey);
+
+            let person;
+            if (type === 'user') {
+                person = usersById.get(String(id));
+                if (!person || !canViewUser(id)) return null;
+            } else if (type === 'customer') {
+                person = customersById.get(String(id));
+                if (!person || !canViewCustomerSync(person)) return null;
+            } else {
+                person = prospectsById.get(String(id));
+                if (!person || !canViewProspectSync(person)) return null;
+            }
+
+            nodeCount++;
+            const node = {
+                id: person.id,
+                name: person.full_name,
+                type,
+                role: person.role || 'Guest',
+                pipeline_stage: person.pipeline_stage,
+                last_activity_date: person.last_activity_date,
+                join_date: person.join_date || person.created_at,
+                children: []
+            };
+
+            // Sub-agents for user nodes
+            if (type === 'user') {
+                const subs = subAgentsByParent.get(String(id)) || [];
+                for (const agent of subs) {
+                    const childNode = walk(agent.id, 'user', depth + 1);
+                    if (childNode) node.children.push(childNode);
+                }
+            }
+
+            // Referrals where this node is the referrer
+            const refChildIds = new Set();
+            const refs = referralsByReferrer.get(String(id)) || [];
+            for (const r of refs) {
+                if (!r.referred_prospect_id) continue;
+                const childNode = walk(r.referred_prospect_id, 'prospect', depth + 1);
+                if (childNode) {
+                    childNode.referralSource = r.referral_source;
+                    childNode.referralDate = r.created_at;
+                    node.children.push(childNode);
+                    refChildIds.add(String(r.referred_prospect_id));
+                }
+            }
+
+            // For user/agent nodes: also include prospects assigned to them
+            // (responsible_agent_id) that aren't already linked via a referral
+            if (type === 'user') {
+                const agentProspects = prospectsByAgent.get(String(id)) || [];
+                for (const p of agentProspects) {
+                    if (refChildIds.has(String(p.id))) continue;
+                    const childNode = walk(p.id, 'prospect', depth + 1);
+                    if (childNode) node.children.push(childNode);
+                }
+            }
+
+            return node;
         };
 
-        // For user/agent nodes: include direct sub-agents (reporting_to) as children first
-        if (rootType === 'user') {
-            const allUsers = await AppDataStore.getAll('users');
-            const subAgents = allUsers.filter(u => String(u.reporting_to) === String(rootId) && u.status !== 'inactive');
-            for (const agent of subAgents) {
-                const childNode = await buildTreeData(agent.id, 'user');
-                if (childNode) node.children.push(childNode);
-            }
-        }
-
-        // Find prospects directly referred by this person (from referrals table)
-        const referrals = await AppDataStore.getAll('referrals');
-        const refChildren = referrals.filter(r => String(r.referrer_id) === String(rootId));
-        const refChildIds = new Set();
-        for (const r of refChildren) {
-            const childNode = await buildTreeData(r.referred_prospect_id, 'prospect');
-            if (childNode) {
-                childNode.referralSource = r.referral_source;
-                childNode.referralDate = r.created_at;
-                node.children.push(childNode);
-                refChildIds.add(String(r.referred_prospect_id));
-            }
-        }
-
-        // For agent nodes: also include prospects assigned to this agent (responsible_agent_id)
-        // that aren't already in the tree via a referral record
-        if (rootType === 'user') {
-            const allProspects = await AppDataStore.getAll('prospects');
-            const agentProspects = allProspects.filter(p =>
-                String(p.responsible_agent_id) === String(rootId) && !refChildIds.has(String(p.id))
-            );
-            for (const prospect of agentProspects) {
-                const childNode = await buildTreeData(prospect.id, 'prospect');
-                if (childNode) node.children.push(childNode);
-            }
-        }
-
-        return node;
+        return walk(rootId, rootType, 0);
     };
 
     const getProspectColour = async (prospectId) => {
@@ -8316,7 +8400,29 @@ function _wireLoginBtn() {
         const root = d3.hierarchy(rootData);
         tree(root);
 
-        // Pre-compute fill colors for all nodes before rendering
+        // Pre-compute fill colors for all nodes before rendering.
+        // Prospect nodes already carry pipeline_stage + last_activity_date in
+        // their tree data, so we compute the colour synchronously from that
+        // instead of awaiting getProspectColour (which re-fetched the prospect
+        // record per node — O(N) network calls during tree render).
+        const nowTs = Date.now();
+        const prospectColourFromData = (data) => {
+            if (data.last_activity_date) {
+                const daysSinceActivity = (nowTs - new Date(data.last_activity_date).getTime()) / 86400000;
+                if (daysSinceActivity > 180 && data.pipeline_stage?.toLowerCase() !== 'lost') {
+                    return '#d97706'; // Amber — Expected to Drop
+                }
+            }
+            switch ((data.pipeline_stage || '').toLowerCase()) {
+                case 'new': return '#10b981';
+                case 'contacted': return '#3b82f6';
+                case 'meeting': return '#f59e0b';
+                case 'proposal': return '#eab308';
+                case 'negotiation': return '#6366f1';
+                case 'lost': return '#ef4444';
+                default: return '#94a3b8';
+            }
+        };
         const nodesData = root.descendants();
         for (const d of nodesData) {
             if (d.data.type === 'customer') {
@@ -8324,7 +8430,7 @@ function _wireLoginBtn() {
             } else if (d.data.type === 'user') {
                 d.fillColor = '#1e40af'; // Dark blue — agent/consultant root node
             } else {
-                d.fillColor = await getProspectColour(d.data.id);
+                d.fillColor = prospectColourFromData(d.data);
             }
         }
 
