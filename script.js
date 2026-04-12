@@ -8023,7 +8023,7 @@ function _wireLoginBtn() {
 
         const viewport = document.getElementById('content-viewport');
 
-        if (viewId === 'calendar') {
+        if (viewId === 'calendar' || viewId === 'month') {
             _currentView = 'month';
             await showCalendarView(viewport);
         } else if (viewId === 'prospects') {
