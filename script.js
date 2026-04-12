@@ -9215,7 +9215,7 @@ function _wireLoginBtn() {
                 <div class="ref-form-step">
                     <label>1. Who is the Referrer?</label>
                     <div class="search-field">
-                        <input type="text" id="referrer-search" class="form-control" placeholder="Search customer or prospect..." onkeyup="app.searchReferrersForModal(this.value, 'referrer')">
+                        <input type="text" id="referrer-search" class="form-control" placeholder="Search customer or prospect..." onkeyup="app.debounceCall('referrer-search', () => app.searchReferrersForModal(this.value, 'referrer'), 250)">
                         <div id="referrer-search-results" class="search-dropdown"></div>
                     </div>
                     <div id="selected-referrer-info" class="selected-entity-display"></div>
@@ -9225,7 +9225,7 @@ function _wireLoginBtn() {
                     <label>2. Who was Referred?</label>
                     <div class="search-field">
                         <div style="display:flex; gap:8px">
-                            <input type="text" id="referred-search" class="form-control" placeholder="Search existing prospect..." onkeyup="app.searchReferrersForModal(this.value, 'referred')">
+                            <input type="text" id="referred-search" class="form-control" placeholder="Search existing prospect..." onkeyup="app.debounceCall('referred-search', () => app.searchReferrersForModal(this.value, 'referred'), 250)">
                             <button class="btn secondary" onclick="app.openCreateProspectForReferral()"><i class="fas fa-user-plus"></i> New</button>
                         </div>
                         <div id="referred-search-results" class="search-dropdown"></div>
@@ -12934,7 +12934,7 @@ function _wireLoginBtn() {
                             <div class="form-group half">
                                 <label>Referrer <span class="required">*</span></label>
                                 <div class="search-with-results" style="position: relative;">
-                                    <input type="text" id="cps-referrer" class="form-control" placeholder="Search referrer..." onkeyup="app.searchReferrers()">
+                                    <input type="text" id="cps-referrer" class="form-control" placeholder="Search referrer..." onkeyup="app.debounceCall('cps-referrer', () => app.searchReferrers(), 250)">
                                     <div id="referrer-results" class="search-results-dropdown" style="display:none; position:absolute; z-index:1000; background:white; border:1px solid #ddd; width:100%;"></div>
                                 </div>
                                 <div id="selected-referrer-info" class="selected-entity-info" style="margin-top: 8px;"></div>
@@ -12992,7 +12992,7 @@ function _wireLoginBtn() {
                 `;
                 setTimeout(() => {
                     const input = document.getElementById('cps-referrer');
-                    if (input) input.onkeyup = () => app.searchReferrers();
+                    if (input) input.onkeyup = () => app.debounceCall('cps-referrer', () => app.searchReferrers(), 250);
                 }, 100);
                 break;
 
@@ -15896,7 +15896,7 @@ function _wireLoginBtn() {
                         <div class="form-group half">
                             <label>Referred By <span class="required">*</span></label>
                             <div style="position:relative;">
-                                <input type="text" id="prospect-referrer" class="form-control" placeholder="Search prospect or consultant..." onkeyup="app.searchProspectReferrers()">
+                                <input type="text" id="prospect-referrer" class="form-control" placeholder="Search prospect or consultant..." onkeyup="app.debounceCall('prospect-referrer', () => app.searchProspectReferrers(), 250)">
                                 <div id="prospect-referrer-results" style="display:none;position:absolute;z-index:1000;background:white;border:1px solid #ddd;border-radius:4px;width:100%;max-height:180px;overflow-y:auto;box-shadow:0 4px 8px rgba(0,0,0,0.1);"></div>
                             </div>
                             <div id="prospect-referrer-info" style="margin-top:6px;">${prospect?.referred_by ? `<div class="selected-entity-badge"><span><strong>${prospect.referred_by}</strong></span><button class="btn btn-sm secondary" onclick="app.clearProspectReferrer()">Clear</button></div>` : ''}</div>
