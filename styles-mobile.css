@@ -675,20 +675,35 @@
     }
 
     .calendar-appointment {
-        padding: 3px 4px !important;
+        padding: 2px 3px !important;
         font-size: 10px !important;
         margin-bottom: 2px !important;
+        border-left-width: 2px !important;
     }
 
-    .appointment-time,
-    .appointment-agent,
-    .appointment-customer,
-    .appointment-type,
-    .appointment-venue {
-        font-size: 9px !important;
+    /* On mobile: show only time + customer name, hide the rest */
+    .appointment-time {
+        font-size: 8px !important;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+        margin-bottom: 1px !important;
+    }
+
+    .appointment-customer {
+        font-size: 8px !important;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        margin-bottom: 0 !important;
+        margin-left: 0 !important;
+    }
+
+    .appointment-agent,
+    .appointment-type,
+    .appointment-venue,
+    .appointment-closed {
+        display: none !important;
     }
 
     .date-num { font-size: 11px !important; }
