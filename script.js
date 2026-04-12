@@ -8159,9 +8159,9 @@ function _wireLoginBtn() {
                                 <h3><i class="fas fa-network-wired"></i> Relationship Tree</h3>
                                 <div class="tree-filter-chips">
                                     <button class="tree-filter-chip active" data-filter="all" onclick="app.applyTreeFilters('all')">All</button>
-                                    <button class="tree-filter-chip" data-filter="new" onclick="app.applyTreeFilters('new')">New (&lt;30d)</button>
+                                    <button class="tree-filter-chip" data-filter="new" onclick="app.applyTreeFilters('new')">CPS Active</button>
                                     <button class="tree-filter-chip" data-filter="expected_drop" onclick="app.applyTreeFilters('expected_drop')">Expected to Drop</button>
-                                    <button class="tree-filter-chip" data-filter="lost" onclick="app.applyTreeFilters('lost')">Lost</button>
+                                    <button class="tree-filter-chip" data-filter="lost" onclick="app.applyTreeFilters('lost')">Inactive / Unable</button>
                                 </div>
                             </div>
                             <div class="tree-tools">
@@ -8551,12 +8551,39 @@ function _wireLoginBtn() {
     // data contains cycles.
     const buildTreeData = async (rootId, rootType) => {
         // 1. Load all tables once, in parallel.
-        const [allUsers, allProspects, allCustomers, allReferrals] = await Promise.all([
+        const [allUsers, allProspects, allCustomers, allReferrals, allActivities, allEventAttendees] = await Promise.all([
             AppDataStore.getAll('users'),
             AppDataStore.getAll('prospects'),
             AppDataStore.getAll('customers'),
             AppDataStore.getAll('referrals'),
+            AppDataStore.getAll('activities'),
+            AppDataStore.getAll('event_attendees'),
         ]);
+
+        // Build lookup maps for tree colour enrichment
+        // CPS activities by prospect_id
+        const cpsProspectIds = new Set();
+        const unableToServeProspectIds = new Set();
+        for (const a of allActivities) {
+            if (a.activity_type === 'CPS' && a.prospect_id) cpsProspectIds.add(String(a.prospect_id));
+            if (a.unable_to_serve && a.prospect_id) unableToServeProspectIds.add(String(a.prospect_id));
+        }
+        // Event attendance count per prospect (only count "Attended")
+        const eventAttendanceCount = new Map();
+        for (const ea of allEventAttendees) {
+            if ((ea.attended || ea.attendance_status === 'Attended') && ea.attendee_type !== 'agent') {
+                const pid = String(ea.entity_id || ea.attendee_id);
+                eventAttendanceCount.set(pid, (eventAttendanceCount.get(pid) || 0) + 1);
+            }
+        }
+        // Referral count per referrer (how many people they referred)
+        const referralCountByReferrer = new Map();
+        for (const r of allReferrals) {
+            if (r.referrer_id) {
+                const key = String(r.referrer_id);
+                referralCountByReferrer.set(key, (referralCountByReferrer.get(key) || 0) + 1);
+            }
+        }
 
         // 2. Resolve permissions once. For level 1-2 we short-circuit to full
         // access; otherwise we compute the visible user-id set a single time.
@@ -8637,6 +8664,7 @@ function _wireLoginBtn() {
             }
 
             nodeCount++;
+            const pid = String(person.id);
             const node = {
                 id: person.id,
                 name: person.full_name,
@@ -8645,6 +8673,11 @@ function _wireLoginBtn() {
                 pipeline_stage: person.pipeline_stage,
                 last_activity_date: person.last_activity_date,
                 join_date: person.join_date || person.created_at,
+                hasCPS: cpsProspectIds.has(pid),
+                unableToServe: unableToServeProspectIds.has(pid),
+                referralCount: referralCountByReferrer.get(pid) || 0,
+                eventAttendanceCount: eventAttendanceCount.get(pid) || 0,
+                closeProbability: person.close_probability || 0,
                 children: []
             };
 
@@ -8692,24 +8725,32 @@ function _wireLoginBtn() {
         const prospect = await AppDataStore.getById('prospects', prospectId);
         if (!prospect) return "#cbd5e1"; // Gray default
 
-        // Expected to Drop: no activity in 180+ days (shown before stage color)
-        if (prospect.last_activity_date) {
-            const daysSinceActivity = (new Date() - new Date(prospect.last_activity_date)) / (1000 * 60 * 60 * 24);
-            if (daysSinceActivity > 180 && prospect.pipeline_stage?.toLowerCase() !== 'lost') {
-                return "#d97706"; // Amber — Expected to Drop
-            }
-        }
+        const pid = String(prospectId);
+        const allActivities = await AppDataStore.getAll('activities');
+        const hasCPS = allActivities.some(a => a.activity_type === 'CPS' && String(a.prospect_id) === pid);
+        const unableToServe = allActivities.some(a => a.unable_to_serve && String(a.prospect_id) === pid);
 
-        const status = prospect.pipeline_stage?.toLowerCase();
-        switch(status) {
-            case 'new': return "#10b981"; // Emerald Green
-            case 'contacted': return "#3b82f6"; // Blue
-            case 'meeting': return "#f59e0b"; // Oak/Orange
-            case 'proposal': return "#eab308"; // Yellow
-            case 'negotiation': return "#6366f1"; // Indigo
-            case 'lost': return "#ef4444"; // Red
-            default: return "#94a3b8"; // Slate Gray
-        }
+        const daysSinceActivity = prospect.last_activity_date
+            ? (Date.now() - new Date(prospect.last_activity_date).getTime()) / 86400000
+            : 999;
+
+        // CPS + 180 days no activity OR unable to serve → Slate Gray
+        if ((hasCPS && daysSinceActivity > 180) || unableToServe) return '#94a3b8';
+        // CPS + 45 days no activity → Yellow
+        if (hasCPS && daysSinceActivity > 45) return '#eab308';
+        // High chance of closing → Red
+        if ((prospect.close_probability || 0) >= 60) return '#ef4444';
+        // Referred more than 5 people → Orange
+        const allReferrals = await AppDataStore.getAll('referrals');
+        if (allReferrals.filter(r => String(r.referrer_id) === pid).length > 5) return '#f59e0b';
+        // Attended events more than 5 times → Indigo
+        const allAttendees = await AppDataStore.getAll('event_attendees');
+        const attended = allAttendees.filter(ea => (ea.attended || ea.attendance_status === 'Attended') && ea.attendee_type !== 'agent' && String(ea.entity_id || ea.attendee_id) === pid);
+        if (attended.length > 5) return '#6366f1';
+        // Has CPS → Green
+        if (hasCPS) return '#10b981';
+        // Default — no CPS
+        return '#ffffff';
     };
 
     const getCustomerBadge = async (customerId) => {
@@ -8750,37 +8791,41 @@ function _wireLoginBtn() {
         tree(root);
 
         // Pre-compute fill colors for all nodes before rendering.
-        // Prospect nodes already carry pipeline_stage + last_activity_date in
-        // their tree data, so we compute the colour synchronously from that
-        // instead of awaiting getProspectColour (which re-fetched the prospect
-        // record per node — O(N) network calls during tree render).
+        // Color scheme:
+        //   Blue (#3b82f6)     = Agent
+        //   Slate Gray (#94a3b8) = CPS + 180 days no activity, or unable to serve
+        //   Yellow (#eab308)   = CPS + 45 days no activity
+        //   Red (#ef4444)      = High chance of closing (close_probability >= 60%)
+        //   Orange (#f59e0b)   = Referred more than 5 people
+        //   Indigo (#6366f1)   = Attended events more than 5 times
+        //   Green (#10b981)    = Has CPS activity (active)
+        //   White (#ffffff)    = No CPS / default prospect
         const nowTs = Date.now();
-        const prospectColourFromData = (data) => {
-            if (data.last_activity_date) {
-                const daysSinceActivity = (nowTs - new Date(data.last_activity_date).getTime()) / 86400000;
-                if (daysSinceActivity > 180 && data.pipeline_stage?.toLowerCase() !== 'lost') {
-                    return '#d97706'; // Amber — Expected to Drop
-                }
-            }
-            switch ((data.pipeline_stage || '').toLowerCase()) {
-                case 'new': return '#10b981';
-                case 'contacted': return '#3b82f6';
-                case 'meeting': return '#f59e0b';
-                case 'proposal': return '#eab308';
-                case 'negotiation': return '#6366f1';
-                case 'lost': return '#ef4444';
-                default: return '#94a3b8';
-            }
+        const nodeColourFromData = (data) => {
+            if (data.type === 'user') return '#3b82f6'; // Blue — Agent
+
+            const daysSinceActivity = data.last_activity_date
+                ? (nowTs - new Date(data.last_activity_date).getTime()) / 86400000
+                : 999;
+
+            // CPS + 180 days no activity OR unable to serve → Slate Gray
+            if ((data.hasCPS && daysSinceActivity > 180) || data.unableToServe) return '#94a3b8';
+            // CPS + 45 days no activity → Yellow
+            if (data.hasCPS && daysSinceActivity > 45) return '#eab308';
+            // High chance of closing → Red
+            if (data.closeProbability >= 60) return '#ef4444';
+            // Referred more than 5 people → Orange
+            if (data.referralCount > 5) return '#f59e0b';
+            // Attended events more than 5 times → Indigo
+            if (data.eventAttendanceCount > 5) return '#6366f1';
+            // Has CPS → Green
+            if (data.hasCPS) return '#10b981';
+            // Default — no CPS / uncategorised
+            return '#ffffff';
         };
         const nodesData = root.descendants();
         for (const d of nodesData) {
-            if (d.data.type === 'customer') {
-                d.fillColor = '#ffffff';
-            } else if (d.data.type === 'user') {
-                d.fillColor = '#1e40af'; // Dark blue — agent/consultant root node
-            } else {
-                d.fillColor = prospectColourFromData(d.data);
-            }
+            d.fillColor = nodeColourFromData(d.data);
         }
 
         // Links — vertical top-down
@@ -8809,15 +8854,18 @@ function _wireLoginBtn() {
             .attr("y", -22)
             .attr("rx", 6)
             .attr("fill", d => d.fillColor)
-            .attr("stroke", d => d.data.type === 'customer' ? '#0d9488' : d.data.type === 'user' ? '#93c5fd' : 'none')
+            .attr("stroke", d => d.fillColor === '#ffffff' ? '#d1d5db' : 'none')
             .attr("stroke-width", 2)
             .style("filter", "drop-shadow(0 2px 4px rgba(0,0,0,0.05))");
+
+        // Helper: dark text for white/yellow backgrounds, white text for others
+        const isLightBg = (d) => d.fillColor === '#ffffff' || d.fillColor === '#eab308';
 
         // Icon
         nodes.append("text")
             .attr("x", -70)
             .attr("y", 4)
-            .attr("fill", d => d.data.type === 'customer' ? '#0d9488' : '#ffffff')
+            .attr("fill", d => isLightBg(d) ? '#374151' : '#ffffff')
             .style("font-family", '"Font Awesome 5 Free"')
             .style("font-weight", "900")
             .text(d => d.data.type === 'customer' ? "\uf0b1" : d.data.type === 'user' ? "\uf505" : "\uf007"); // Briefcase / user-tie / User
@@ -8826,7 +8874,7 @@ function _wireLoginBtn() {
         nodes.append("text")
             .attr("x", -50)
             .attr("y", 0)
-            .attr("fill", d => d.data.type === 'customer' ? '#1f2937' : '#ffffff')
+            .attr("fill", d => isLightBg(d) ? '#1f2937' : '#ffffff')
             .style("font-weight", "600")
             .style("font-size", "11px")
             .text(d => d.data.name.length > 18 ? d.data.name.substring(0, 15) + '...' : d.data.name);
@@ -8835,7 +8883,7 @@ function _wireLoginBtn() {
         nodes.append("text")
             .attr("x", -50)
             .attr("y", 12)
-            .attr("fill", d => d.data.type === 'customer' ? '#6b7280' : 'rgba(255,255,255,0.8)')
+            .attr("fill", d => isLightBg(d) ? '#6b7280' : 'rgba(255,255,255,0.8)')
             .style("font-size", "9px")
             .text(d => d.data.type === 'user' ? 'AGENT' : d.data.type.toUpperCase());
 
@@ -8844,7 +8892,7 @@ function _wireLoginBtn() {
             .attr("class", "node-memo-btn")
             .attr("x", 65)
             .attr("y", 4)
-            .attr("fill", d => d.data.type === 'customer' ? '#94a3b8' : 'rgba(255,255,255,0.6)')
+            .attr("fill", d => isLightBg(d) ? '#94a3b8' : 'rgba(255,255,255,0.6)')
             .style("font-family", '"Font Awesome 5 Free"')
             .style("font-weight", "900")
             .text("\uf075") // fa-comment
@@ -8865,21 +8913,21 @@ function _wireLoginBtn() {
             await showReferralTree(d.data.id, d.data.type, true);
         });
 
-        // Apply active filter as opacity overlay
-        const now = new Date();
+        // Apply active filter as opacity overlay — matches new colour scheme
         nodes.attr("opacity", d => {
             if (_treeActiveFilter === 'all') return 1;
-            const data = d.data;
+            const color = d.fillColor;
             if (_treeActiveFilter === 'new') {
-                const joinDate = data.join_date ? new Date(data.join_date) : null;
-                return (joinDate && (now - joinDate) / (1000 * 60 * 60 * 24) <= 30) ? 1 : 0.2;
+                // Highlight CPS (green) nodes
+                return color === '#10b981' ? 1 : 0.2;
             }
             if (_treeActiveFilter === 'expected_drop') {
-                const lastActivity = data.last_activity_date ? new Date(data.last_activity_date) : null;
-                return (lastActivity && (now - lastActivity) / (1000 * 60 * 60 * 24) > 180 && data.pipeline_stage?.toLowerCase() !== 'lost') ? 1 : 0.2;
+                // Highlight CPS inactive 45d+ (yellow) and 180d+ (gray)
+                return (color === '#eab308' || color === '#94a3b8') ? 1 : 0.2;
             }
             if (_treeActiveFilter === 'lost') {
-                return data.pipeline_stage?.toLowerCase() === 'lost' ? 1 : 0.2;
+                // Highlight unable to serve / 180d+ inactive (gray)
+                return color === '#94a3b8' ? 1 : 0.2;
             }
             return 1;
         });
@@ -8973,17 +9021,32 @@ function _wireLoginBtn() {
         const made = allReferrals.filter(r => String(r.referrer_id) === String(id));
         const converted = made.filter(r => r.is_converted || r.status === 'Active').length;
 
-        // Stage badge color
-        const stageColors = { new: '#10b981', contacted: '#3b82f6', meeting: '#f59e0b', proposal: '#eab308', negotiation: '#6366f1', lost: '#ef4444' };
-        const stageName = type === 'customer' ? 'Customer' : (person.pipeline_stage || 'Prospect');
-        const stageColor = type === 'customer' ? '#0d9488' : (stageColors[person.pipeline_stage?.toLowerCase()] || '#94a3b8');
+        // Stage badge color — matches tree node colour scheme
+        const pid = String(id);
+        const allActivities = await AppDataStore.getAll('activities');
+        const hasCPS = allActivities.some(a => a.activity_type === 'CPS' && String(a.prospect_id) === pid);
+        const unableToServe = allActivities.some(a => a.unable_to_serve && String(a.prospect_id) === pid);
+        const daysSinceActivity = person.last_activity_date
+            ? (Date.now() - new Date(person.last_activity_date).getTime()) / 86400000 : 999;
+        const allAttendees = await AppDataStore.getAll('event_attendees');
+        const attendedCount = allAttendees.filter(ea => (ea.attended || ea.attendance_status === 'Attended') && ea.attendee_type !== 'agent' && String(ea.entity_id || ea.attendee_id) === pid).length;
+
+        let stageColor, stageName;
+        if (type === 'user') { stageColor = '#3b82f6'; stageName = 'Agent'; }
+        else if ((hasCPS && daysSinceActivity > 180) || unableToServe) { stageColor = '#94a3b8'; stageName = daysSinceActivity > 180 ? 'CPS — Inactive 180d+' : 'Unable to Serve'; }
+        else if (hasCPS && daysSinceActivity > 45) { stageColor = '#eab308'; stageName = 'CPS — Inactive 45d+'; }
+        else if ((person.close_probability || 0) >= 60) { stageColor = '#ef4444'; stageName = 'High Closing Chance'; }
+        else if (made.length > 5) { stageColor = '#f59e0b'; stageName = 'Referrer 5+'; }
+        else if (attendedCount > 5) { stageColor = '#6366f1'; stageName = 'Event Regular'; }
+        else if (hasCPS) { stageColor = '#10b981'; stageName = 'CPS'; }
+        else { stageColor = '#ffffff'; stageName = type === 'customer' ? 'Customer' : 'Prospect'; }
 
         sidebar.style.display = 'flex';
         sidebar.innerHTML = `
             <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px">
                 <div style="flex:1; min-width:0">
                     <div style="font-size:15px; font-weight:700; color:var(--gray-800); white-space:normal; word-break:break-word">${person.full_name}</div>
-                    <span style="background:${stageColor}; color:white; font-size:10px; padding:2px 8px; border-radius:10px; text-transform:uppercase; display:inline-block; margin-top:4px">${stageName}</span>
+                    <span style="background:${stageColor}; color:${stageColor === '#ffffff' || stageColor === '#eab308' ? '#374151' : 'white'}; font-size:10px; padding:2px 8px; border-radius:10px; text-transform:uppercase; display:inline-block; margin-top:4px; ${stageColor === '#ffffff' ? 'border:1px solid #d1d5db;' : ''}">${stageName}</span>
                 </div>
                 <button onclick="app.toggleTreeInterested(${id}, '${type}')" class="interested-heart-btn" id="heart-btn-${id}" title="${isInterested ? 'Remove bookmark' : 'Add bookmark'}">
                     ${isInterested ? '❤️' : '🤍'}
