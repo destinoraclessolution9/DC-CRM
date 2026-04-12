@@ -8730,14 +8730,17 @@ function _wireLoginBtn() {
         const hasCPS = allActivities.some(a => a.activity_type === 'CPS' && String(a.prospect_id) === pid);
         const unableToServe = allActivities.some(a => a.unable_to_serve && String(a.prospect_id) === pid);
 
-        const daysSinceActivity = prospect.last_activity_date
+        const hasActivityDate = !!prospect.last_activity_date;
+        const daysSinceActivity = hasActivityDate
             ? (Date.now() - new Date(prospect.last_activity_date).getTime()) / 86400000
-            : 999;
+            : 0;
 
-        // CPS + 180 days no activity OR unable to serve → Slate Gray
-        if ((hasCPS && daysSinceActivity > 180) || unableToServe) return '#94a3b8';
-        // CPS + 45 days no activity → Yellow
-        if (hasCPS && daysSinceActivity > 45) return '#eab308';
+        // Unable to serve → Slate Gray
+        if (unableToServe) return '#94a3b8';
+        // CPS + 180 days no activity → Slate Gray (only when date is known)
+        if (hasCPS && hasActivityDate && daysSinceActivity > 180) return '#94a3b8';
+        // CPS + 45 days no activity → Yellow (only when date is known)
+        if (hasCPS && hasActivityDate && daysSinceActivity > 45) return '#eab308';
         // High chance of closing → Red
         if ((prospect.close_probability || 0) >= 60) return '#ef4444';
         // Referred more than 5 people → Orange
@@ -8804,14 +8807,17 @@ function _wireLoginBtn() {
         const nodeColourFromData = (data) => {
             if (data.type === 'user') return '#3b82f6'; // Blue — Agent
 
-            const daysSinceActivity = data.last_activity_date
+            const hasActivityDate = !!data.last_activity_date;
+            const daysSinceActivity = hasActivityDate
                 ? (nowTs - new Date(data.last_activity_date).getTime()) / 86400000
-                : 999;
+                : 0; // No date = treat as recent (not inactive)
 
-            // CPS + 180 days no activity OR unable to serve → Slate Gray
-            if ((data.hasCPS && daysSinceActivity > 180) || data.unableToServe) return '#94a3b8';
-            // CPS + 45 days no activity → Yellow
-            if (data.hasCPS && daysSinceActivity > 45) return '#eab308';
+            // Unable to serve → Slate Gray (regardless of CPS)
+            if (data.unableToServe) return '#94a3b8';
+            // CPS + 180 days no activity → Slate Gray (only when date is known)
+            if (data.hasCPS && hasActivityDate && daysSinceActivity > 180) return '#94a3b8';
+            // CPS + 45 days no activity → Yellow (only when date is known)
+            if (data.hasCPS && hasActivityDate && daysSinceActivity > 45) return '#eab308';
             // High chance of closing → Red
             if (data.closeProbability >= 60) return '#ef4444';
             // Referred more than 5 people → Orange
@@ -9026,14 +9032,16 @@ function _wireLoginBtn() {
         const allActivities = await AppDataStore.getAll('activities');
         const hasCPS = allActivities.some(a => a.activity_type === 'CPS' && String(a.prospect_id) === pid);
         const unableToServe = allActivities.some(a => a.unable_to_serve && String(a.prospect_id) === pid);
-        const daysSinceActivity = person.last_activity_date
-            ? (Date.now() - new Date(person.last_activity_date).getTime()) / 86400000 : 999;
+        const hasActivityDate = !!person.last_activity_date;
+        const daysSinceActivity = hasActivityDate
+            ? (Date.now() - new Date(person.last_activity_date).getTime()) / 86400000 : 0;
         const allAttendees = await AppDataStore.getAll('event_attendees');
         const attendedCount = allAttendees.filter(ea => (ea.attended || ea.attendance_status === 'Attended') && ea.attendee_type !== 'agent' && String(ea.entity_id || ea.attendee_id) === pid).length;
 
         let stageColor, stageName;
         if (type === 'user') { stageColor = '#3b82f6'; stageName = 'Agent'; }
-        else if ((hasCPS && daysSinceActivity > 180) || unableToServe) { stageColor = '#94a3b8'; stageName = daysSinceActivity > 180 ? 'CPS — Inactive 180d+' : 'Unable to Serve'; }
+        else if (unableToServe) { stageColor = '#94a3b8'; stageName = 'Unable to Serve'; }
+        else if (hasCPS && hasActivityDate && daysSinceActivity > 180) { stageColor = '#94a3b8'; stageName = 'CPS — Inactive 180d+'; }
         else if (hasCPS && daysSinceActivity > 45) { stageColor = '#eab308'; stageName = 'CPS — Inactive 45d+'; }
         else if ((person.close_probability || 0) >= 60) { stageColor = '#ef4444'; stageName = 'High Closing Chance'; }
         else if (made.length > 5) { stageColor = '#f59e0b'; stageName = 'Referrer 5+'; }
