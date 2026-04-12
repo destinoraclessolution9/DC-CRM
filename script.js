@@ -16956,8 +16956,10 @@ function _wireLoginBtn() {
         }
         else if (tab === 'names') {
             const names = await AppDataStore.query('names', { prospect_id: prospectId });
+            const appraisalCount = Array.isArray(prospect.appraisal_form_urls) ? prospect.appraisal_form_urls.length : 0;
             container.innerHTML = `
-                <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+                <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+                    <button class="btn secondary btn-sm" onclick="app.attachAppraisalForm(${prospect.id})"><i class="fas fa-file-image"></i> Upload Appraisal Form${appraisalCount ? ` (${appraisalCount})` : ''}</button>
                     <button class="btn primary btn-sm" onclick="app.openAddNameModal(${prospect.id})"><i class="fas fa-plus"></i> Add Name</button>
                 </div>
                 ${names.length > 0 ? names.map(n => `
@@ -17805,6 +17807,98 @@ NOTIFY pgrst, 'reload schema';`;
         const bodyEl = document.getElementById(`acc-body-activity-${prospectId}`);
         if (bodyEl) {
             await switchProspectTab('activity', prospectId, null, bodyEl);
+        }
+    };
+
+    // Appraisal Form upload — stores one or more photo URLs on prospects.appraisal_form_urls (jsonb).
+    // Uses the same 'attachments' bucket as meet-up photos; files go under appraisal_forms/ prefix.
+    const attachAppraisalForm = async (prospectId) => {
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) { UI.toast.error('Prospect not found'); return; }
+
+        const existing = Array.isArray(prospect.appraisal_form_urls) ? prospect.appraisal_form_urls : [];
+        const content = `
+            <div class="form-group">
+                <label>Select one or more photos</label>
+                <input type="file" id="appraisal-form-upload" class="form-control" accept="image/*" multiple>
+                <p style="color:var(--gray-500);font-size:12px;margin-top:6px;">JPG/PNG, max 5MB each. You can pick multiple files.</p>
+            </div>
+            ${existing.length > 0 ? `
+            <div class="form-group">
+                <label>Existing Appraisal Forms (${existing.length})</label>
+                <div style="display:flex;flex-wrap:wrap;gap:8px;max-height:180px;overflow:auto;padding:6px;border:1px solid var(--gray-200);border-radius:6px;">
+                    ${existing.map((url, i) => `
+                        <div style="position:relative;">
+                            <img src="${url}" style="height:70px;border-radius:4px;object-fit:cover;cursor:pointer;" onclick="window.open('${url}','_blank')">
+                            <button type="button" class="btn-icon" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:white;border-radius:50%;width:20px;height:20px;font-size:10px;padding:0;" title="Remove" onclick="app.removeAppraisalForm(${prospectId}, ${i})"><i class="fas fa-times"></i></button>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>` : ''}
+        `;
+        UI.showModal('Upload Appraisal Form', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Upload', type: 'primary', action: `(async () => { await app.saveAppraisalForm(${prospectId}); })()` }
+        ]);
+    };
+
+    const saveAppraisalForm = async (prospectId) => {
+        const input = document.getElementById('appraisal-form-upload');
+        const files = input?.files;
+        if (!files || files.length === 0) { UI.toast.error('Please select at least one photo'); return; }
+
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) { UI.toast.error('Prospect not found'); return; }
+        const existing = Array.isArray(prospect.appraisal_form_urls) ? prospect.appraisal_form_urls : [];
+        const newUrls = [];
+
+        const sb = window.supabase || window.supabaseClient;
+        if (!sb || !sb.storage) { UI.toast.error('Supabase not connected — cannot upload photos'); return; }
+
+        try {
+            for (const file of files) {
+                if (file.size > 5 * 1024 * 1024) {
+                    UI.toast.error(`"${file.name}" too large (max 5MB)`);
+                    continue;
+                }
+                const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+                const path = `appraisal_forms/${prospectId}_${Date.now()}_${safeName}`;
+                const { error: upErr } = await sb.storage.from('attachments').upload(path, file, { upsert: false, contentType: file.type });
+                if (upErr) { throw upErr; }
+                const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
+                if (urlData?.publicUrl) newUrls.push(urlData.publicUrl);
+            }
+
+            if (newUrls.length === 0) { UI.toast.error('No photos were uploaded'); return; }
+
+            const updated = [...existing, ...newUrls];
+            await AppDataStore.update('prospects', prospectId, { appraisal_form_urls: updated });
+
+            UI.hideModal();
+            UI.toast.success(`${newUrls.length} appraisal form photo(s) uploaded`);
+
+            const bodyEl = document.getElementById(`acc-body-names-${prospectId}`);
+            if (bodyEl) {
+                await switchProspectTab('names', prospectId, null, bodyEl);
+            }
+        } catch (err) {
+            console.error('Appraisal form upload failed:', err);
+            UI.toast.error('Upload failed: ' + (err.message || 'Unknown error'));
+        }
+    };
+
+    const removeAppraisalForm = async (prospectId, index) => {
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) return;
+        const existing = Array.isArray(prospect.appraisal_form_urls) ? [...prospect.appraisal_form_urls] : [];
+        if (index < 0 || index >= existing.length) return;
+        existing.splice(index, 1);
+        await AppDataStore.update('prospects', prospectId, { appraisal_form_urls: existing });
+        UI.hideModal();
+        UI.toast.success('Appraisal form photo removed');
+        const bodyEl = document.getElementById(`acc-body-names-${prospectId}`);
+        if (bodyEl) {
+            await switchProspectTab('names', prospectId, null, bodyEl);
         }
     };
 
@@ -31669,6 +31763,9 @@ const initImportDemoData = async () => {
         attachActivityPhoto,
         saveActivityPhoto,
         removeActivityPhoto,
+        attachAppraisalForm,
+        saveAppraisalForm,
+        removeAppraisalForm,
         recordSalesClosure,
         toggleNextAction,
         toggleNextActionItem,
