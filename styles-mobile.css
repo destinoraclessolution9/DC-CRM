@@ -659,12 +659,36 @@
     /* Day headers short form handled by JS */
     .calendar-days-header .day-header { font-size: 10px; }
 
+    .calendar-days-header {
+        grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
+    }
+
     .calendar-grid-main {
+        grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
         grid-auto-rows: minmax(52px, auto) !important;
     }
 
     .calendar-cell {
         padding: 3px !important;
+        min-width: 0;
+        overflow: hidden;
+    }
+
+    .calendar-appointment {
+        padding: 3px 4px !important;
+        font-size: 10px !important;
+        margin-bottom: 2px !important;
+    }
+
+    .appointment-time,
+    .appointment-agent,
+    .appointment-customer,
+    .appointment-type,
+    .appointment-venue {
+        font-size: 9px !important;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 
     .date-num { font-size: 11px !important; }
