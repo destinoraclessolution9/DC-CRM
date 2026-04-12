@@ -10099,6 +10099,9 @@ function _wireLoginBtn() {
                 <!-- Pending CPS Intake Approvals (populated by renderPendingCpsIntakes) -->
                 <div id="pending-cps-intakes" style="display:none; margin-top:16px;"></div>
 
+                <!-- Follow-Up Reminders (populated by renderFollowUpReminders) -->
+                <div id="follow-up-reminders" style="display:none;"></div>
+
                 <!-- Section 1.3: Today's Activities -->
                 <div class="today-activities-section">
                     <h3>📅 TODAY'S ACTIVITIES</h3>
@@ -10170,12 +10173,392 @@ function _wireLoginBtn() {
         renderBirthdaySection().catch(e => console.warn('renderBirthdaySection failed:', e));
         renderRefillReminders().catch(e => console.warn('renderRefillReminders failed:', e));
         renderPendingCpsIntakes().catch(e => console.warn('renderPendingCpsIntakes failed:', e));
+        triggerBirthdayFollowUps().then(() => renderFollowUpReminders()).catch(e => console.warn('Follow-up reminders failed:', e));
 
         // Show Special Program progress popup (once per session, for participating agents)
         // Deferred so it doesn't block the calendar paint.
         setTimeout(() => {
             checkSpecialProgramPopup().catch(e => console.warn('Special Program popup failed:', e));
         }, 100);
+    };
+
+    // ========== FOLLOW-UP AUTOMATION ENGINE ==========
+
+    // Cache templates in memory after first load
+    let _followUpTemplatesCache = null;
+
+    const loadFollowUpTemplates = async () => {
+        if (_followUpTemplatesCache) return _followUpTemplatesCache;
+        try {
+            const templates = await AppDataStore.getAll('follow_up_templates');
+            _followUpTemplatesCache = templates || [];
+        } catch (e) {
+            console.warn('Failed to load follow-up templates:', e);
+            _followUpTemplatesCache = [];
+        }
+        return _followUpTemplatesCache;
+    };
+
+    const invalidateFollowUpTemplatesCache = () => { _followUpTemplatesCache = null; };
+
+    const getFollowUpTemplate = async (triggerType) => {
+        const templates = await loadFollowUpTemplates();
+        return templates.find(t => t.trigger_type === triggerType && t.is_active);
+    };
+
+    const interpolateTemplate = (template, vars) => {
+        let msg = template;
+        for (const [key, val] of Object.entries(vars)) {
+            msg = msg.replace(new RegExp(`\\{${key}\\}`, 'g'), val || '');
+        }
+        return msg;
+    };
+
+    const createFollowUpDraft = async (opts) => {
+        const { prospectId, customerId, triggerType, messageText, phone, prospectName, eventId, eventDate, eventName, dueDate } = opts;
+        try {
+            // Avoid duplicate drafts for same prospect + trigger + event
+            const existing = await AppDataStore.getAll('follow_up_drafts');
+            const dup = existing.find(d =>
+                d.prospect_id == prospectId &&
+                d.trigger_type === triggerType &&
+                d.status === 'pending' &&
+                (triggerType === 'birthday' ? d.due_date === dueDate : (d.event_id == eventId || !eventId))
+            );
+            if (dup) return null; // already exists
+
+            return await AppDataStore.create('follow_up_drafts', {
+                prospect_id: prospectId || null,
+                customer_id: customerId || null,
+                agent_id: _currentUser?.id || null,
+                trigger_type: triggerType,
+                message_text: messageText,
+                phone: phone || '',
+                prospect_name: prospectName || '',
+                event_id: eventId || null,
+                event_date: eventDate || null,
+                event_name: eventName || '',
+                due_date: dueDate || new Date().toISOString().split('T')[0],
+                status: 'pending'
+            });
+        } catch (e) {
+            console.warn('createFollowUpDraft failed:', e);
+            return null;
+        }
+    };
+
+    // Trigger 1: CPS done + 个人改命 → invite to next 9 Star Basic Class
+    const triggerCps9StarFollowUp = async (prospectId, prospectName, phone) => {
+        const tpl = await getFollowUpTemplate('cps_9star');
+        if (!tpl) return;
+        // Find next 9 star event
+        const events = await AppDataStore.getAll('events');
+        const today = new Date().toISOString().split('T')[0];
+        const nineStarEvents = events.filter(e => {
+            const title = ((e.event_title || e.title) || '').toLowerCase();
+            const eDate = e.event_date || e.date || '';
+            return (title.includes('9 star') || title.includes('nine star') || title.includes('九星')) && eDate >= today && (e.status || '').toLowerCase() !== 'cancelled';
+        }).sort((a, b) => (a.event_date || a.date || '').localeCompare(b.event_date || b.date || ''));
+
+        const nextEvent = nineStarEvents[0];
+        if (!nextEvent) return; // no upcoming 9 star class
+
+        const msg = interpolateTemplate(tpl.message_template, {
+            name: prospectName,
+            date: nextEvent.event_date || nextEvent.date || '',
+            time: (nextEvent.start_time || nextEvent.time || '').slice(0, 5),
+            venue: nextEvent.location || '',
+            event_name: nextEvent.event_title || nextEvent.title || '9 Star Basic Class'
+        });
+
+        await createFollowUpDraft({
+            prospectId,
+            triggerType: 'cps_9star',
+            messageText: msg,
+            phone,
+            prospectName,
+            eventId: nextEvent.id,
+            eventDate: nextEvent.event_date || nextEvent.date,
+            eventName: nextEvent.event_title || nextEvent.title,
+            dueDate: today
+        });
+    };
+
+    // Trigger 2: CPS done + 风水 → invite to Feng Shui DIY / 汇集 within window days
+    const triggerCpsFengshuiFollowUp = async (prospectId, prospectName, phone) => {
+        const tpl = await getFollowUpTemplate('cps_fengshui');
+        if (!tpl) return;
+        const events = await AppDataStore.getAll('events');
+        const today = new Date();
+        const todayStr = today.toISOString().split('T')[0];
+        const windowEnd = new Date(today);
+        windowEnd.setDate(windowEnd.getDate() + (tpl.event_window_days || 21));
+        const windowEndStr = windowEnd.toISOString().split('T')[0];
+
+        const fsEvents = events.filter(e => {
+            const title = ((e.event_title || e.title) || '').toLowerCase();
+            const eDate = e.event_date || e.date || '';
+            const isFsDiy = title.includes('diy') || title.includes('风水diy');
+            const isHuiji = title.includes('汇集') || title.includes('huiji') || title.includes('hui ji');
+            return (isFsDiy || isHuiji) && eDate >= todayStr && eDate <= windowEndStr && (e.status || '').toLowerCase() !== 'cancelled';
+        }).sort((a, b) => (a.event_date || a.date || '').localeCompare(b.event_date || b.date || ''));
+
+        const nextEvent = fsEvents[0];
+        if (!nextEvent) return; // no upcoming feng shui event within window
+
+        const msg = interpolateTemplate(tpl.message_template, {
+            name: prospectName,
+            date: nextEvent.event_date || nextEvent.date || '',
+            time: (nextEvent.start_time || nextEvent.time || '').slice(0, 5),
+            venue: nextEvent.location || '',
+            event_name: nextEvent.event_title || nextEvent.title || 'Feng Shui DIY'
+        });
+
+        await createFollowUpDraft({
+            prospectId,
+            triggerType: 'cps_fengshui',
+            messageText: msg,
+            phone,
+            prospectName,
+            eventId: nextEvent.id,
+            eventDate: nextEvent.event_date || nextEvent.date,
+            eventName: nextEvent.event_title || nextEvent.title,
+            dueDate: todayStr
+        });
+    };
+
+    // Trigger 3: APU photo attached → appointment reminder
+    const triggerApuFollowUp = async (prospectId) => {
+        const tpl = await getFollowUpTemplate('apu_appointment');
+        if (!tpl) return;
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) return;
+
+        const msg = interpolateTemplate(tpl.message_template, {
+            name: prospect.full_name || '',
+            agent_name: _currentUser?.full_name || ''
+        });
+
+        await createFollowUpDraft({
+            prospectId,
+            triggerType: 'apu_appointment',
+            messageText: msg,
+            phone: prospect.phone || '',
+            prospectName: prospect.full_name || '',
+            dueDate: new Date().toISOString().split('T')[0]
+        });
+    };
+
+    // Trigger 4: Feng Shui DIY attended → 3-day review follow-up
+    const triggerDiyReviewFollowUp = async (entityId, entityType, eventId, activityDate) => {
+        const tpl = await getFollowUpTemplate('diy_review');
+        if (!tpl) return;
+
+        // Check if event is a DIY event
+        const event = await AppDataStore.getById('events', eventId);
+        if (!event) return;
+        const title = ((event.event_title || event.title) || '').toLowerCase();
+        if (!title.includes('diy')) return; // only for DIY events
+
+        const entity = entityType === 'customer'
+            ? await AppDataStore.getById('customers', entityId)
+            : await AppDataStore.getById('prospects', entityId);
+        if (!entity) return;
+
+        const msg = interpolateTemplate(tpl.message_template, {
+            name: entity.full_name || '',
+            event_name: event.event_title || event.title || 'Feng Shui DIY',
+            agent_name: _currentUser?.full_name || ''
+        });
+
+        // Due date = attendance date + delay_days (default 3)
+        const dueDate = new Date(activityDate || Date.now());
+        dueDate.setDate(dueDate.getDate() + (tpl.delay_days || 3));
+
+        await createFollowUpDraft({
+            prospectId: entityType !== 'customer' ? entityId : null,
+            customerId: entityType === 'customer' ? entityId : null,
+            triggerType: 'diy_review',
+            messageText: msg,
+            phone: entity.phone || '',
+            prospectName: entity.full_name || '',
+            eventId,
+            eventDate: activityDate,
+            eventName: event.event_title || event.title,
+            dueDate: dueDate.toISOString().split('T')[0]
+        });
+    };
+
+    // Trigger 5: Birthday greeting — called on calendar load
+    const triggerBirthdayFollowUps = async () => {
+        const tpl = await getFollowUpTemplate('birthday');
+        if (!tpl) return;
+
+        const today = new Date();
+        const todayMD = `${(today.getMonth() + 1).toString().padStart(2, '0')}-${today.getDate().toString().padStart(2, '0')}`;
+        const todayStr = today.toISOString().split('T')[0];
+
+        const [prospects, customers] = await Promise.all([
+            AppDataStore.getAll('prospects'),
+            AppDataStore.getAll('customers')
+        ]);
+
+        const allPeople = [
+            ...prospects.map(p => ({ ...p, _type: 'prospect' })),
+            ...customers.map(c => ({ ...c, _type: 'customer' }))
+        ];
+
+        for (const person of allPeople) {
+            if (!person.date_of_birth) continue;
+            const dob = person.date_of_birth; // YYYY-MM-DD
+            const dobMD = dob.slice(5); // MM-DD
+            if (dobMD !== todayMD) continue;
+
+            // Only create for agent's own prospects/customers
+            if (person.responsible_agent_id && person.responsible_agent_id != _currentUser?.id) continue;
+
+            const msg = interpolateTemplate(tpl.message_template, {
+                name: person.full_name || '',
+                agent_name: _currentUser?.full_name || ''
+            });
+
+            await createFollowUpDraft({
+                prospectId: person._type === 'prospect' ? person.id : null,
+                customerId: person._type === 'customer' ? person.id : null,
+                triggerType: 'birthday',
+                messageText: msg,
+                phone: person.phone || '',
+                prospectName: person.full_name || '',
+                dueDate: todayStr
+            });
+        }
+    };
+
+    // Render follow-up reminders below calendar
+    const renderFollowUpReminders = async () => {
+        const container = document.getElementById('follow-up-reminders');
+        if (!container) return;
+
+        let drafts = [];
+        try {
+            const all = await AppDataStore.getAll('follow_up_drafts');
+            const todayStr = new Date().toISOString().split('T')[0];
+            drafts = (all || []).filter(d =>
+                d.status === 'pending' &&
+                d.due_date <= todayStr &&
+                (!d.agent_id || d.agent_id == _currentUser?.id)
+            ).sort((a, b) => (a.due_date || '').localeCompare(b.due_date || ''));
+        } catch (e) {
+            console.warn('renderFollowUpReminders failed:', e);
+        }
+
+        if (drafts.length === 0) {
+            container.style.display = 'none';
+            return;
+        }
+
+        container.style.display = 'block';
+        const triggerLabels = {
+            cps_9star: '9 Star Class Invite',
+            cps_fengshui: 'Feng Shui DIY / 汇集 Invite',
+            apu_appointment: 'APU Appointment Reminder',
+            diy_review: 'DIY Review Follow-up',
+            birthday: 'Birthday Greeting'
+        };
+        const triggerIcons = {
+            cps_9star: '⭐',
+            cps_fengshui: '🏠',
+            apu_appointment: '📋',
+            diy_review: '🔄',
+            birthday: '🎂'
+        };
+
+        container.innerHTML = `
+            <div style="background:var(--white,#fff); border:1px solid var(--gray-200,#e5e7eb); border-radius:12px; padding:16px; margin-top:16px;">
+                <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px;">
+                    <div style="width:32px;height:32px;border-radius:50%;background:#3b82f6;color:white;display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:14px;">${drafts.length}</div>
+                    <h3 style="margin:0; font-size:16px; color:var(--gray-800,#1f2937);">📩 Follow-Up Reminders</h3>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:10px;">
+                    ${drafts.map(d => {
+                        const phone = (d.phone || '').replace(/\D/g, '');
+                        const waPhone = phone.startsWith('0') ? '60' + phone.slice(1) : phone;
+                        const waUrl = `https://wa.me/${waPhone}?text=${encodeURIComponent(d.message_text || '')}`;
+                        return `
+                        <div id="followup-row-${d.id}" style="display:flex; align-items:flex-start; gap:12px; padding:12px; background:var(--gray-50,#f9fafb); border-radius:8px; border-left:4px solid #3b82f6; transition: opacity 0.4s ease, max-height 0.4s ease;">
+                            <input type="checkbox" id="followup-check-${d.id}" style="margin-top:4px; width:18px; height:18px; cursor:pointer; accent-color:#3b82f6;" onchange="app.markFollowUpSent(${d.id})" title="Mark as sent">
+                            <div style="flex:1; min-width:0;">
+                                <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+                                    <span style="font-size:16px;">${triggerIcons[d.trigger_type] || '📩'}</span>
+                                    <strong style="font-size:13px; color:var(--gray-800,#1f2937);">${d.prospect_name || 'Unknown'}</strong>
+                                    <span style="font-size:11px; background:#dbeafe; color:#1d4ed8; padding:2px 8px; border-radius:10px;">${triggerLabels[d.trigger_type] || d.trigger_type}</span>
+                                    ${d.event_name ? `<span style="font-size:11px; color:var(--gray-500,#6b7280);">${d.event_name}${d.event_date ? ' — ' + d.event_date : ''}</span>` : ''}
+                                </div>
+                                <div style="font-size:12px; color:var(--gray-600,#4b5563); white-space:pre-wrap; max-height:60px; overflow:hidden; text-overflow:ellipsis; line-height:1.4;">${(d.message_text || '').slice(0, 200)}${(d.message_text || '').length > 200 ? '...' : ''}</div>
+                            </div>
+                            <div style="display:flex; gap:6px; flex-shrink:0;">
+                                <button class="btn primary btn-sm" onclick="event.stopPropagation(); window.open('${waUrl}', '_blank');" style="font-size:12px; padding:6px 12px; white-space:nowrap;">
+                                    <i class="fab fa-whatsapp"></i> Send
+                                </button>
+                                <button class="btn secondary btn-sm" onclick="event.stopPropagation(); app.dismissFollowUp(${d.id});" style="font-size:12px; padding:6px 8px;" title="Dismiss">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </div>
+                        </div>`;
+                    }).join('')}
+                </div>
+            </div>
+        `;
+    };
+
+    const markFollowUpSent = async (draftId) => {
+        try {
+            await AppDataStore.update('follow_up_drafts', draftId, { status: 'sent', updated_at: new Date().toISOString() });
+            // Animate row out
+            const row = document.getElementById(`followup-row-${draftId}`);
+            if (row) {
+                row.style.opacity = '0';
+                row.style.maxHeight = '0';
+                row.style.overflow = 'hidden';
+                row.style.padding = '0 12px';
+                row.style.marginBottom = '0';
+                setTimeout(() => {
+                    row.remove();
+                    // If no more rows, hide the section
+                    const container = document.getElementById('follow-up-reminders');
+                    if (container && container.querySelectorAll('[id^="followup-row-"]').length === 0) {
+                        container.style.display = 'none';
+                    }
+                }, 500);
+            }
+            UI.toast.success('Follow-up marked as sent');
+        } catch (e) {
+            console.warn('markFollowUpSent failed:', e);
+            UI.toast.error('Failed to update');
+        }
+    };
+
+    const dismissFollowUp = async (draftId) => {
+        try {
+            await AppDataStore.update('follow_up_drafts', draftId, { status: 'dismissed', updated_at: new Date().toISOString() });
+            const row = document.getElementById(`followup-row-${draftId}`);
+            if (row) {
+                row.style.opacity = '0';
+                row.style.maxHeight = '0';
+                row.style.overflow = 'hidden';
+                row.style.padding = '0 12px';
+                setTimeout(() => {
+                    row.remove();
+                    const container = document.getElementById('follow-up-reminders');
+                    if (container && container.querySelectorAll('[id^="followup-row-"]').length === 0) {
+                        container.style.display = 'none';
+                    }
+                }, 500);
+            }
+            UI.toast.success('Follow-up dismissed');
+        } catch (e) {
+            UI.toast.error('Failed to dismiss');
+        }
     };
 
     const renderCalendar = async () => {
@@ -12694,6 +13077,7 @@ function _wireLoginBtn() {
                         setField('cps-state', prospect.state);
                         setField('cps-zip', prospect.postal_code);
                         setField('cps-summary', activity.summary);
+                        setField('cps-interest', prospect.cps_interest);
                         clearInterval(cpsInterval);
                     } else if (++attempts >= 30) {
                         console.warn('CPS fields did not appear after polling');
@@ -12968,6 +13352,18 @@ function _wireLoginBtn() {
                             <input type="text" id="cps-relation-other" class="form-control" placeholder="Specify relation...">
                         </div>
                         <div class="form-group">
+                            <label>Prospect Interest / 客户兴趣</label>
+                            <select id="cps-interest" class="form-control">
+                                <option value="">-- Select Interest --</option>
+                                <option value="个人改命">个人改命 (Personal Destiny Change)</option>
+                                <option value="风水">风水 (Feng Shui)</option>
+                                <option value="画作">画作 (Calligraphy)</option>
+                                <option value="满堂系列">满堂系列 (Bujishu Home Furnishing)</option>
+                                <option value="Formula">Formula Healthcare</option>
+                                <option value="代理配套">代理配套 (Agent Package)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
                             <label>Attachment (PDF, JPG, PNG up to 5MB)</label>
                             <input type="file" id="cps-attachment" class="form-control" accept=".pdf, .png, .jpg, .jpeg">
                             <small class="help-text" style="color: var(--gray-500); font-size: 11px; margin-top: 4px; display: block;">
@@ -13220,6 +13616,11 @@ function _wireLoginBtn() {
                     });
                 }
                 UI.toast.success(checked ? 'Marked as Attended' : 'Attendance removed');
+
+                // Trigger follow-up: DIY review (3-day delay) when marking attended
+                if (checked && entityId && eventId) {
+                    triggerDiyReviewFollowUp(entityId, entityType || 'prospect', eventId, activityDate).catch(e => console.warn('DIY review follow-up failed:', e));
+                }
             } catch (err) {
                 console.error('toggleAttendeeAttended write-back error:', err);
             }
@@ -14246,6 +14647,7 @@ function _wireLoginBtn() {
                 state: document.getElementById('cps-state')?.value || '',
                 postal_code: document.getElementById('cps-zip')?.value || '',
                 ming_gua: document.getElementById('cps-gua')?.value || '',
+                cps_interest: document.getElementById('cps-interest')?.value || '',
                 score: SCORING_RULES.CREATE_PROSPECT,
                 responsible_agent_id: _currentUser?.id || null,
                 referred_by_id: _selectedReferrer?.id || null,
@@ -14621,7 +15023,23 @@ function _wireLoginBtn() {
             }
         } catch (e) { console.warn('Milestone auto-mark failed:', e); }
 
+        // === Follow-Up Automation: trigger CPS-based follow-ups (non-blocking) ===
+        if (activity.activity_type === 'CPS' && activity.prospect_id) {
+            try {
+                const _fuProspect = await AppDataStore.getById('prospects', activity.prospect_id);
+                if (_fuProspect) {
+                    const interest = (_fuProspect.cps_interest || '').trim();
+                    if (interest === '个人改命') {
+                        triggerCps9StarFollowUp(activity.prospect_id, _fuProspect.full_name, _fuProspect.phone).catch(e => console.warn('CPS 9star follow-up failed:', e));
+                    } else if (interest === '风水') {
+                        triggerCpsFengshuiFollowUp(activity.prospect_id, _fuProspect.full_name, _fuProspect.phone).catch(e => console.warn('CPS fengshui follow-up failed:', e));
+                    }
+                }
+            } catch (e) { console.warn('Follow-up trigger failed:', e); }
+        }
+
         await renderCalendar();
+        await renderFollowUpReminders();
         await renderTodayActivities();
 
         if (!stayOpen) {
@@ -18188,6 +18606,9 @@ NOTIFY pgrst, 'reload schema';`;
 
             UI.hideModal();
             UI.toast.success('APU photo uploaded');
+
+            // Trigger follow-up: APU appointment reminder
+            triggerApuFollowUp(prospectId).catch(e => console.warn('APU follow-up failed:', e));
 
             const bodyEl = document.getElementById(`acc-body-names-${prospectId}`);
             if (bodyEl) {
@@ -25826,6 +26247,9 @@ const exportKPIReport = async (format) => {
                     <button class="marketing-tab ${_currentMarketingTab === 'campaigns' ? 'active' : ''}" onclick="app.switchMarketingTab('campaigns')">
                         <i class="fas fa-bullhorn"></i> Active Campaigns
                     </button>
+                    <button class="marketing-tab ${_currentMarketingTab === 'followup_auto' ? 'active' : ''}" onclick="app.switchMarketingTab('followup_auto')">
+                        <i class="fas fa-paper-plane"></i> Follow-Up Auto
+                    </button>
                     <button class="marketing-tab ${_currentMarketingTab === 'analytics' ? 'active' : ''}" onclick="app.switchMarketingTab('analytics')">
                         <i class="fas fa-chart-line"></i> Campaign Analytics
                     </button>
@@ -25858,6 +26282,7 @@ const exportKPIReport = async (format) => {
             t.classList.remove('active');
             if (t.textContent.includes(tab === 'templates' ? 'Message Templates' :
                 tab === 'campaigns' ? 'Active Campaigns' :
+                    tab === 'followup_auto' ? 'Follow-Up Auto' :
                     tab === 'products' ? 'Products & Services' :
                         tab === 'packages' ? 'Promotion Packages' :
                             tab === 'promotions' ? 'Monthly Promotions' : 'Campaign Analytics')) {
@@ -25875,12 +26300,182 @@ const exportKPIReport = async (format) => {
             return await renderTemplatesTab();
         } else if (_currentMarketingTab === 'campaigns') {
             return await renderCampaignsTab();
+        } else if (_currentMarketingTab === 'followup_auto') {
+            return await renderFollowUpAutoTab();
         } else if (_currentMarketingTab === 'analytics') {
             return await renderAnalyticsTab();
         } else if (_currentMarketingTab === 'products') {
             return await renderProductsTab();
         } else if (_currentMarketingTab === 'promotions') {
             return await renderMonthlyPromotionsTab();
+        }
+    };
+
+    // ========== FOLLOW-UP AUTO TAB ==========
+    const renderFollowUpAutoTab = async () => {
+        const templates = await loadFollowUpTemplates();
+        invalidateFollowUpTemplatesCache(); // force fresh on next load
+
+        const triggerLabels = {
+            cps_9star: '9 Star Class Invite',
+            cps_fengshui: 'Feng Shui DIY / 汇集 Invite',
+            apu_appointment: 'APU Appointment Reminder',
+            diy_review: 'DIY 3-Day Review Follow-up',
+            birthday: 'Birthday Greeting'
+        };
+        const triggerDescriptions = {
+            cps_9star: 'Triggered when CPS is done and prospect interest is 个人改命. Invites to next 9 Star Basic Class.',
+            cps_fengshui: 'Triggered when CPS is done and prospect interest is 风水. Invites to Feng Shui DIY or 汇集 event within the event window.',
+            apu_appointment: 'Triggered when an APU photo is attached. Reminds prospect to make an appointment.',
+            diy_review: 'Triggered when prospect attends Feng Shui DIY. Follows up after delay to review progress.',
+            birthday: 'Triggered daily on calendar load. Sends birthday greeting to prospects/customers.'
+        };
+
+        let html = `
+            <div style="margin-bottom:20px;">
+                <h2 style="margin:0 0 8px;">Follow-Up Automation</h2>
+                <p style="color:var(--gray-500); font-size:14px; margin:0;">Manage automated follow-up message templates. Messages are drafted as reminders on the calendar for agents to send via WhatsApp.</p>
+            </div>
+            <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:12px 16px; margin-bottom:20px; font-size:13px; color:#1e40af;">
+                <strong>Available variables:</strong> <code>{name}</code> <code>{date}</code> <code>{time}</code> <code>{venue}</code> <code>{event_name}</code> <code>{agent_name}</code>
+            </div>
+            <div style="display:flex; flex-direction:column; gap:12px;">
+        `;
+
+        for (const tpl of templates) {
+            html += `
+                <div style="background:var(--white,#fff); border:1px solid var(--gray-200,#e5e7eb); border-radius:10px; padding:16px; position:relative;">
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+                        <div>
+                            <h3 style="margin:0; font-size:15px; color:var(--gray-800);">${triggerLabels[tpl.trigger_type] || tpl.template_name}</h3>
+                            <p style="margin:4px 0 0; font-size:12px; color:var(--gray-500);">${triggerDescriptions[tpl.trigger_type] || ''}</p>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:10px;">
+                            <label style="display:flex; align-items:center; gap:6px; font-size:13px; cursor:pointer;">
+                                <input type="checkbox" ${tpl.is_active ? 'checked' : ''} onchange="app.toggleFollowUpTemplate(${tpl.id}, this.checked)" style="accent-color:#3b82f6;">
+                                ${tpl.is_active ? '<span style="color:#059669; font-weight:600;">Active</span>' : '<span style="color:var(--gray-400);">Inactive</span>'}
+                            </label>
+                            <button class="btn secondary btn-sm" onclick="app.openEditFollowUpTemplateModal(${tpl.id})" style="font-size:12px;">
+                                <i class="fas fa-edit"></i> Edit
+                            </button>
+                        </div>
+                    </div>
+                    <div style="background:var(--gray-50,#f9fafb); border-radius:6px; padding:10px 12px; font-size:13px; color:var(--gray-700); white-space:pre-wrap; max-height:80px; overflow:hidden; line-height:1.5;">${tpl.message_template || ''}</div>
+                    <div style="display:flex; gap:16px; margin-top:10px; font-size:12px; color:var(--gray-500);">
+                        ${tpl.delay_days > 0 ? `<span><i class="fas fa-clock"></i> Delay: ${tpl.delay_days} day${tpl.delay_days > 1 ? 's' : ''}</span>` : ''}
+                        ${tpl.event_window_days > 0 ? `<span><i class="fas fa-calendar-alt"></i> Event window: ${tpl.event_window_days} days</span>` : ''}
+                    </div>
+                </div>
+            `;
+        }
+
+        html += `</div>`;
+
+        // Sent/Dismissed history summary
+        let drafts = [];
+        try {
+            drafts = await AppDataStore.getAll('follow_up_drafts');
+        } catch (e) { /* ignore */ }
+        const sentCount = drafts.filter(d => d.status === 'sent').length;
+        const pendingCount = drafts.filter(d => d.status === 'pending').length;
+        const dismissedCount = drafts.filter(d => d.status === 'dismissed').length;
+
+        html += `
+            <div style="margin-top:24px; background:var(--white,#fff); border:1px solid var(--gray-200); border-radius:10px; padding:16px;">
+                <h3 style="margin:0 0 12px; font-size:15px;">Follow-Up Statistics</h3>
+                <div style="display:flex; gap:24px;">
+                    <div style="text-align:center;">
+                        <div style="font-size:28px; font-weight:700; color:#f59e0b;">${pendingCount}</div>
+                        <div style="font-size:12px; color:var(--gray-500);">Pending</div>
+                    </div>
+                    <div style="text-align:center;">
+                        <div style="font-size:28px; font-weight:700; color:#059669;">${sentCount}</div>
+                        <div style="font-size:12px; color:var(--gray-500);">Sent</div>
+                    </div>
+                    <div style="text-align:center;">
+                        <div style="font-size:28px; font-weight:700; color:var(--gray-400);">${dismissedCount}</div>
+                        <div style="font-size:12px; color:var(--gray-500);">Dismissed</div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        return html;
+    };
+
+    const toggleFollowUpTemplate = async (templateId, isActive) => {
+        try {
+            await AppDataStore.update('follow_up_templates', templateId, { is_active: isActive, updated_at: new Date().toISOString() });
+            invalidateFollowUpTemplatesCache();
+            UI.toast.success(isActive ? 'Template activated' : 'Template deactivated');
+            const container = document.getElementById('marketing-tab-content');
+            if (container) container.innerHTML = await renderFollowUpAutoTab();
+        } catch (e) {
+            UI.toast.error('Failed to update template');
+        }
+    };
+
+    const openEditFollowUpTemplateModal = async (templateId) => {
+        const templates = await loadFollowUpTemplates();
+        const tpl = templates.find(t => t.id === templateId);
+        if (!tpl) { UI.toast.error('Template not found'); return; }
+
+        const content = `
+            <div class="form-group">
+                <label>Template Name</label>
+                <input type="text" id="fu-tpl-name" class="form-control" value="${tpl.template_name || ''}">
+            </div>
+            <div class="form-group">
+                <label>Message Template</label>
+                <textarea id="fu-tpl-message" class="form-control" rows="6" style="white-space:pre-wrap;">${tpl.message_template || ''}</textarea>
+                <small style="color:var(--gray-500); font-size:11px;">Variables: {name}, {date}, {time}, {venue}, {event_name}, {agent_name}</small>
+            </div>
+            <div class="form-row">
+                <div class="form-group half">
+                    <label>Delay Days</label>
+                    <input type="number" id="fu-tpl-delay" class="form-control" value="${tpl.delay_days || 0}" min="0" max="30">
+                    <small style="color:var(--gray-500); font-size:11px;">Days to wait before showing reminder (0 = immediate)</small>
+                </div>
+                <div class="form-group half">
+                    <label>Event Window (days)</label>
+                    <input type="number" id="fu-tpl-window" class="form-control" value="${tpl.event_window_days || 0}" min="0" max="90">
+                    <small style="color:var(--gray-500); font-size:11px;">Look-ahead days to find matching events (0 = N/A)</small>
+                </div>
+            </div>
+        `;
+
+        UI.showModal('Edit Follow-Up Template', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save', type: 'primary', action: `(async () => { await app.saveFollowUpTemplate(${templateId}); })()` }
+        ]);
+    };
+
+    const saveFollowUpTemplate = async (templateId) => {
+        const name = document.getElementById('fu-tpl-name')?.value?.trim();
+        const message = document.getElementById('fu-tpl-message')?.value;
+        const delay = parseInt(document.getElementById('fu-tpl-delay')?.value) || 0;
+        const window_ = parseInt(document.getElementById('fu-tpl-window')?.value) || 0;
+
+        if (!name || !message) {
+            UI.toast.error('Name and message are required');
+            return;
+        }
+
+        try {
+            await AppDataStore.update('follow_up_templates', templateId, {
+                template_name: name,
+                message_template: message,
+                delay_days: delay,
+                event_window_days: window_,
+                updated_at: new Date().toISOString()
+            });
+            invalidateFollowUpTemplatesCache();
+            UI.hideModal();
+            UI.toast.success('Template saved');
+            const container = document.getElementById('marketing-tab-content');
+            if (container) container.innerHTML = await renderFollowUpAutoTab();
+        } catch (e) {
+            UI.toast.error('Failed to save: ' + (e.message || ''));
         }
     };
 
@@ -32766,6 +33361,20 @@ const initImportDemoData = async () => {
         saveFileDescription,
         downloadVersion,
         restoreVersion,
+
+        // Follow-Up Automation
+        renderFollowUpReminders,
+        markFollowUpSent,
+        dismissFollowUp,
+        triggerCps9StarFollowUp,
+        triggerCpsFengshuiFollowUp,
+        triggerApuFollowUp,
+        triggerDiyReviewFollowUp,
+        triggerBirthdayFollowUps,
+        renderFollowUpAutoTab,
+        toggleFollowUpTemplate,
+        openEditFollowUpTemplateModal,
+        saveFollowUpTemplate,
 
         // Phase 12 Marketing Functions
         showMonthlyPromotionView,
