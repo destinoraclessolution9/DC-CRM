@@ -716,25 +716,25 @@ body {
 }
 
 .btn-icon-pill {
-    width: 36px;
-    height: 36px;
+    width: 42px;
+    height: 42px;
     border-radius: 50%;
-    border: 1.5px solid var(--gray-300);
-    background: var(--white);
-    color: var(--gray-600);
+    border: none;
+    background: #25d366;
+    color: #fff;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 14px;
+    font-size: 20px;
     cursor: pointer;
-    transition: border-color 0.15s, color 0.15s, background 0.15s;
+    box-shadow: 0 4px 10px rgba(37,211,102,0.4);
+    transition: transform 0.15s, box-shadow 0.15s;
     flex-shrink: 0;
 }
 
 .btn-icon-pill:hover {
-    border-color: #25d366;
-    color: #25d366;
-    background: var(--gray-50);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(37,211,102,0.5);
 }
 
 /* Phase 3: Prospect Management Styles */
