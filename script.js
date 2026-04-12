@@ -1810,7 +1810,7 @@ const appLogic = (() => {
 
     const exportResults = (format) => {
         if (_currentSearchResults.length === 0) {
-            UI.toast.warning('No results to export');
+            UI.toast.warninging('No results to export');
             return;
         }
 
@@ -3393,7 +3393,7 @@ In a production system, this would show the actual file contents.
 
     const handleOffline = () => {
         _isOnline = false;
-        UI.toast.warning('You are offline – changes will be queued');
+        UI.toast.warninging('You are offline – changes will be queued');
         updateOfflineIndicator();
     };
 
@@ -3450,7 +3450,7 @@ In a production system, this would show the actual file contents.
         updateOfflineIndicator();
 
         if (fail === 0) UI.toast.success(`Synced ${success} offline actions`);
-        else UI.toast.warning(`Synced ${success}, failed ${fail} `);
+        else UI.toast.warninging(`Synced ${success}, failed ${fail} `);
     };
 
     const offlineCreate = async (tableName, data) => {
@@ -13648,7 +13648,7 @@ function _wireLoginBtn() {
             if (lunarDate) {
                 lunarField.value = lunarDate;
             } else {
-                UI.toast.warning("Lunar conversion not available for this date.");
+                UI.toast.warninging("Lunar conversion not available for this date.");
                 lunarField.value = '';
             }
         }
@@ -13969,7 +13969,7 @@ function _wireLoginBtn() {
 
     const addCoAgent = (id, name) => {
         if (_selectedCoAgents.length >= 5) {
-            UI.toast.warning('Max 5 co-agents allowed');
+            UI.toast.warninging('Max 5 co-agents allowed');
             return;
         }
         if (_selectedCoAgents.find(a => a.id === id)) return;
@@ -21169,6 +21169,7 @@ const deactivateAgent = async (agentId) => {
 
     let _pipelineAgentFilter = 'all';
     let _pipelineStatusFilter = 'all';
+    let _focusViewMonth = 'current'; // 'current' or 'YYYY-MM' for viewing archived month
 
     const showPipelineView = async (container) => {
         const userId = _currentUser?.id || 5;
@@ -21178,6 +21179,45 @@ const deactivateAgent = async (agentId) => {
         runHuiJiMigration();
 
         const allActivities = await getVisibleActivities();
+
+        // === MONTH FOCUS: Auto-expiry + archive logic ===
+        const _focusCurrentMonth = new Date().toISOString().slice(0, 7);
+        const _focusMonthLabel = new Date().toLocaleString('default', { month: 'long', year: 'numeric' });
+        const _allMyFocusItems = await AppDataStore.query('my_potential_list', { user_id: userId });
+        // Tag legacy items (no focus_month) with current month — one-time migration
+        for (const item of _allMyFocusItems.filter(i => !i.focus_month)) {
+            await AppDataStore.update('my_potential_list', item.id, { focus_month: _focusCurrentMonth });
+            item.focus_month = _focusCurrentMonth;
+        }
+        // Archive expired items (focus_month < current month)
+        const _expiredFocusItems = _allMyFocusItems.filter(i => i.focus_month && i.focus_month < _focusCurrentMonth);
+        if (_expiredFocusItems.length > 0) {
+            for (const item of _expiredFocusItems) {
+                const ep = await AppDataStore.getById('prospects', item.prospect_id);
+                if (!ep) { await AppDataStore.delete('my_potential_list', item.id); continue; }
+                const eActs = allActivities.filter(a => a.prospect_id === ep.id);
+                const eEntry = await calcPipelineEntry(ep, eActs);
+                const eAmt = await getPipelineAmount(ep, eEntry.category);
+                const existing = await AppDataStore.query('monthly_focus_archive', { user_id: userId, month: item.focus_month, prospect_id: item.prospect_id });
+                if (existing.length === 0) {
+                    await AppDataStore.create('monthly_focus_archive', {
+                        user_id: userId, month: item.focus_month, prospect_id: item.prospect_id,
+                        priority_order: item.priority_order,
+                        target_product: item.target_product || eEntry.latestOppPotential || eEntry.category?.name || '',
+                        amount: eAmt, probability: String(eEntry.probability || 0),
+                        action_needed: eEntry.latestNextAction || ''
+                    });
+                }
+                await AppDataStore.delete('my_potential_list', item.id);
+            }
+            UI.toast.info(`${_expiredFocusItems.length} expired focus item(s) archived from last month.`);
+        }
+        // Fetch archive data for dropdown
+        let _archiveItems = [];
+        try { _archiveItems = await AppDataStore.query('monthly_focus_archive', { user_id: userId }); } catch(e) {}
+        const _archiveMonths = [...new Set(_archiveItems.map(a => a.month))].sort().reverse();
+        const _isArchiveView = _focusViewMonth !== 'current';
+
         let prospects = await getVisibleProspects();
         const agents = (await AppDataStore.getAll('users')).filter(u => isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'));
 
@@ -21186,9 +21226,16 @@ const deactivateAgent = async (agentId) => {
 
         const activeProspects = prospects.filter(p => p.status !== 'converted' && p.status !== 'lost');
 
-        const focusList = (await AppDataStore.query('my_potential_list', { user_id: userId }))
-            .filter(rec => activeProspects.some(p => p.id == rec.prospect_id))
-            .sort((a, b) => a.priority_order - b.priority_order);
+        let focusList;
+        if (_isArchiveView) {
+            focusList = _archiveItems
+                .filter(a => a.month === _focusViewMonth)
+                .sort((a, b) => (a.priority_order || 0) - (b.priority_order || 0));
+        } else {
+            focusList = (await AppDataStore.query('my_potential_list', { user_id: userId }))
+                .filter(rec => activeProspects.some(p => p.id == rec.prospect_id))
+                .sort((a, b) => a.priority_order - b.priority_order);
+        }
 
         // Enrich and qualify prospects for Table 2 — v6: async calcPipelineEntry
         const enrichedRaw = await Promise.all(activeProspects.map(async (p) => {
@@ -21227,7 +21274,9 @@ const deactivateAgent = async (agentId) => {
             return `<span ${clickable}><span style="background:${color};color:white;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;">${label}</span><strong style="margin-left:6px;">${prob}%</strong></span>`;
         };
 
-        const focusRows = (await Promise.all(focusList.map((rec, idx) => renderFocusRow(rec, idx, allActivities, probBadge)))).join('');
+        const focusRows = _isArchiveView
+            ? (await Promise.all(focusList.map((arc, idx) => renderArchiveFocusRow(arc, idx)))).join('')
+            : (await Promise.all(focusList.map((rec, idx) => renderFocusRow(rec, idx, allActivities, probBadge)))).join('');
         const systemRows = (await Promise.all(enriched.map(p => renderSystemRow(p, probBadge)))).join('');
 
         // ---- ACTION PLAN DATA FETCH ----
@@ -21315,6 +21364,55 @@ const deactivateAgent = async (agentId) => {
         `;
         // ---- END ACTION PLAN HTML ----
 
+        // === TEAM LEADER VIEW: Build collapsible agent sections ===
+        let _teamAgentSections = '';
+        if (isTeamLeaderOrAbove(_currentUser) && !_isArchiveView) {
+            const _visIds = await getVisibleUserIds(_currentUser);
+            const _allUsersForTeam = await AppDataStore.getAll('users');
+            let _subUsers;
+            if (_visIds === 'all') {
+                // Super Admin / Marketing Manager — show all agents with focus lists
+                _subUsers = _allUsersForTeam.filter(u => u.id !== userId && (isAgent(u) || isTeamLeaderOrAbove(u)));
+            } else {
+                _subUsers = _allUsersForTeam.filter(u => _visIds.includes(u.id) && u.id !== userId);
+            }
+            // Group by their direct reporting_to (team leader)
+            let agentCount = 0;
+            for (const sub of _subUsers) {
+                if (agentCount >= 30) break; // limit for performance
+                const subFocus = (await AppDataStore.query('my_potential_list', { user_id: sub.id }))
+                    .filter(rec => activeProspects.some(p => p.id == rec.prospect_id))
+                    .sort((a, b) => a.priority_order - b.priority_order);
+                if (subFocus.length === 0) continue;
+                agentCount++;
+                const subRows = (await Promise.all(subFocus.map((rec, idx) => renderFocusRow(rec, idx, allActivities, probBadge, true)))).join('');
+                _teamAgentSections += `
+                    <div style="margin-top:12px;">
+                        <div onclick="app.toggleAgentFocusSection(this)" style="cursor:pointer;display:flex;align-items:center;gap:8px;padding:12px 16px;background:#F0F4FF;border-radius:8px;border:1px solid #DBEAFE;user-select:none;">
+                            <span class="agent-collapse-icon" style="transition:transform 0.2s;font-size:14px;">▸</span>
+                            <strong style="font-size:14px;">${escapeHtml(sub.full_name || sub.username || 'Agent')}</strong>
+                            <span style="background:#E0E7FF;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600;color:#3730A3;">${subFocus.length} prospects</span>
+                        </div>
+                        <div class="agent-focus-body" style="display:none;padding:8px 0;overflow-x:auto;">
+                            <table style="width:100%;border-collapse:collapse;min-width:1080px;">
+                                <thead>
+                                    <tr style="background:#F9FAFB;border-bottom:2px solid #E5E7EB;">
+                                        <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;width:50px;">#</th>
+                                        <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Prospect Name</th>
+                                        <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Target to Sign</th>
+                                        <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Amount (RM)</th>
+                                        <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Probability</th>
+                                        <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Action Needed</th>
+                                        <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>${subRows}</tbody>
+                            </table>
+                        </div>
+                    </div>`;
+            }
+        }
+
         container.innerHTML = `
 <div class="pipeline-dual-view">
     <!--PIPELINE HEADER-->
@@ -21344,14 +21442,26 @@ const deactivateAgent = async (agentId) => {
 
     <!--TABLE 1: MONTH FOCUS - MANUAL PRIORITY LIST-->
     <div style="margin-bottom:32px;background:white;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.1);padding:20px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-            <div style="display:flex;align-items:center;gap:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px;">
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
                 <h2 style="font-size:18px;font-weight:600;margin:0;">🔥 MONTH FOCUS — My Priority List</h2>
                 <span style="background:#F3F4F6;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;">${focusList.length} prospects</span>
+                <select onchange="app.switchFocusMonth(this.value)" style="border:1px solid #D1D5DB;border-radius:6px;padding:4px 10px;font-size:12px;color:#374151;cursor:pointer;">
+                    <option value="current" ${_focusViewMonth === 'current' ? 'selected' : ''}>${_focusMonthLabel} (Current)</option>
+                    ${_archiveMonths.map(m => {
+                        const ml = new Date(m + '-01').toLocaleString('default', { month: 'long', year: 'numeric' });
+                        return '<option value="' + m + '" ' + (_focusViewMonth === m ? 'selected' : '') + '>' + ml + '</option>';
+                    }).join('')}
+                </select>
             </div>
-            <button class="btn-icon" onclick="app.saveManualOrder()" title="Save Order"><i class="fas fa-save"></i></button>
+            <div style="display:flex;gap:8px;align-items:center;">
+                <button class="btn secondary btn-sm" onclick="app.openExpiredSearchModal()" title="Browse expired & available prospects"><i class="fas fa-search"></i> Browse Past</button>
+                ${!_isArchiveView ? '<button class="btn-icon" onclick="app.saveManualOrder()" title="Save Order"><i class="fas fa-save"></i></button>' : ''}
+            </div>
         </div>
-        <p style="font-size:12px;color:#9CA3AF;margin-bottom:16px;"><i class="fas fa-arrows-alt" style="margin-right:4px;"></i> Drag ☰ to reorder priority • Add prospects from Table 2 below</p>
+        ${_isArchiveView
+            ? '<div style="background:#FEF3C7;padding:8px 16px;border-radius:8px;margin-bottom:12px;font-size:12px;color:#92400E;"><i class="fas fa-archive" style="margin-right:4px;"></i> Viewing archived month (read-only). Use "Browse Past" to re-add prospects to current month.</div>'
+            : '<p style="font-size:12px;color:#9CA3AF;margin-bottom:16px;"><i class="fas fa-arrows-alt" style="margin-right:4px;"></i> Drag ☰ to reorder priority • Add prospects from Table 2 below</p>'}
         <div style="overflow-x:auto;">
             <table style="width:100%;border-collapse:collapse;min-width:1080px;">
                 <thead>
@@ -21370,6 +21480,13 @@ const deactivateAgent = async (agentId) => {
                 </tbody>
             </table>
         </div>
+        ${_teamAgentSections ? `
+            <div style="margin-top:16px;border-top:2px solid #E5E7EB;padding-top:16px;">
+                <h3 style="font-size:15px;font-weight:600;color:#374151;margin-bottom:8px;"><i class="fas fa-users" style="margin-right:6px;color:#6366F1;"></i> Team Agents Focus Lists</h3>
+                <p style="font-size:11px;color:#9CA3AF;margin-bottom:8px;">Click agent name to expand/collapse their focus list</p>
+                ${_teamAgentSections}
+            </div>
+        ` : ''}
     </div>
 
     <!--TABLE 2: AUTO-GENERATED PIPELINE (sorted by probability)-->
@@ -21402,7 +21519,7 @@ const deactivateAgent = async (agentId) => {
 </div>`;
     };
 
-    const renderFocusRow = async (rec, idx, allActivities, probBadge) => {
+    const renderFocusRow = async (rec, idx, allActivities, probBadge, readOnly = false) => {
         const prospect = await AppDataStore.getById('prospects', rec.prospect_id);
         if (!prospect) return '';
 
@@ -21414,16 +21531,35 @@ const deactivateAgent = async (agentId) => {
             ? `<span style="color:#92400E;font-weight:600;">Varies</span> <span style="font-size:10px;color:#9CA3AF;">check monthly</span>`
             : `RM ${Number(amount).toLocaleString()}`;
 
+        // Product dropdown: show all pipeline categories + custom opportunity_potentials
+        const _pCfg = await loadPipelineConfig();
+        const _allCats = _pCfg.categories || [];
+        const _oppPotentials = [...new Set(acts.filter(a => a.opportunity_potential?.trim()).map(a => a.opportunity_potential.trim()))];
+        const _currentTarget = rec.target_product || entry.category?.name || '';
+        let productColumnHtml;
+        if (!readOnly && _allCats.length > 1) {
+            let opts = _allCats.map(c => `<option value="${escapeHtml(c.name)}" ${c.name === _currentTarget ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('');
+            const catNames = new Set(_allCats.map(c => c.name));
+            for (const opp of _oppPotentials) {
+                if (!catNames.has(opp)) opts += `<option value="${escapeHtml(opp)}" ${opp === _currentTarget ? 'selected' : ''}>${escapeHtml(opp)}</option>`;
+            }
+            productColumnHtml = `<select onchange="event.stopPropagation();app.changeFocusTargetProduct(${rec.id}, this.value)"
+                style="width:100%;border:1px solid #DBEAFE;border-radius:6px;padding:6px 8px;font-size:12px;color:#1E40AF;font-weight:500;background:white;cursor:pointer;">${opts}</select>
+                <div style="font-size:11px;color:#9CA3AF;margin-top:2px;">${escapeHtml(entry.latestOppPotential || entry.category?.products || '')}</div>`;
+        } else {
+            productColumnHtml = `<div style="font-weight:500;color:#1E40AF;">${escapeHtml(_currentTarget || entry.category?.name || 'Unknown')}</div>
+                <div style="font-size:11px;color:#9CA3AF;">${escapeHtml(entry.latestOppPotential || entry.category?.products || '')}</div>`;
+        }
+
+        const dragAttrs = readOnly ? '' : `draggable="true" ondragstart="app.handleDragStart(event, ${rec.id})" ondragover="app.handleDragOver(event)" ondrop="app.handleDrop(event, ${rec.id})"`;
+
         return `
-            <tr data-list-id="${rec.id}" draggable="true"
-                ondragstart="app.handleDragStart(event, ${rec.id})"
-                ondragover="app.handleDragOver(event)"
-                ondrop="app.handleDrop(event, ${rec.id})"
+            <tr data-list-id="${rec.id}" ${dragAttrs}
                 style="border-bottom:1px solid #F3F4F6;"
                 onmouseover="this.style.background='#F9FAFB'" onmouseout="this.style.background=''">
                 <td style="padding:14px 12px;">
-                    <div style="display:flex;align-items:center;gap:8px;cursor:grab;">
-                        <span style="color:#9CA3AF;">☰</span>
+                    <div style="display:flex;align-items:center;gap:8px;${readOnly ? '' : 'cursor:grab;'}">
+                        ${readOnly ? '' : '<span style="color:#9CA3AF;">☰</span>'}
                         <span style="font-weight:700;color:#6B7280;">${idx + 1}</span>
                     </div>
                 </td>
@@ -21431,10 +21567,7 @@ const deactivateAgent = async (agentId) => {
                     <div style="font-weight:600;color:#111827;">${escapeHtml(prospect.name || prospect.full_name || '')}</div>
                     <div style="font-size:11px;color:#9CA3AF;">Last activity: ${entry.lastActivityDate ? entry.lastActivityDate.toLocaleDateString('en-GB') : 'None'}</div>
                 </td>
-                <td style="padding:14px 12px;">
-                    <div style="font-weight:500;color:#1E40AF;">${escapeHtml(entry.category?.name || 'Unknown')}</div>
-                    <div style="font-size:11px;color:#9CA3AF;">${escapeHtml(entry.latestOppPotential || entry.category?.products || '')}</div>
-                </td>
+                <td style="padding:14px 12px;">${productColumnHtml}</td>
                 <td style="padding:14px 12px;font-weight:600;color:#059669;">${amountHtml}</td>
                 <td style="padding:14px 12px;">${probBadge(entry.probability, prospect.id)}</td>
                 <td style="padding:14px 12px;font-size:13px;line-height:1.5;max-width:260px;">${entry.latestNextAction ? escapeHtml(entry.latestNextAction) : entry.action}</td>
@@ -21445,7 +21578,7 @@ const deactivateAgent = async (agentId) => {
                             <i class="fas fa-comment"></i>
                             ${noteCount > 0 ? `<span style="position:absolute;top:-4px;right:-4px;background:#EF4444;color:white;border-radius:50%;width:14px;height:14px;font-size:9px;display:flex;align-items:center;justify-content:center;">${noteCount}</span>` : ''}
                         </button>
-                        <button class="btn-icon text-danger" onclick="event.stopPropagation();app.removeFromFocusList(${rec.id})" title="Remove from Priority"><i class="fas fa-trash-alt"></i></button>
+                        ${readOnly ? '' : `<button class="btn-icon text-danger" onclick="event.stopPropagation();app.removeFromFocusList(${rec.id})" title="Remove from Priority"><i class="fas fa-trash-alt"></i></button>`}
                     </div>
                 </td>
             </tr>`;
@@ -21697,7 +21830,7 @@ const deactivateAgent = async (agentId) => {
             UI.toast.success('🎉 All items completed this week! Great job!');
         } else {
             const pendingNames = pendingItems.map(i => i.event_name).join(', ');
-            UI.toast.warning(`⚠️ Pending: ${pendingNames}. Please update your progress.`);
+            UI.toast.warninging(`⚠️ Pending: ${pendingNames}. Please update your progress.`);
         }
     };
 
@@ -21769,15 +21902,17 @@ const deactivateAgent = async (agentId) => {
 
     const addToFocusList = async (prospectId) => {
         const userId = _currentUser?.id || 5;
+        const currentMonth = new Date().toISOString().slice(0, 7);
         const currentList = await AppDataStore.query('my_potential_list', { user_id: userId });
         if (currentList.some(item => item.prospect_id == prospectId)) {
-            UI.toast.warn('Prospect is already in your priority list.');
+            UI.toast.warning('Prospect is already in your priority list.');
             return;
         }
         await AppDataStore.create('my_potential_list', {
             user_id: userId,
             prospect_id: prospectId,
-            priority_order: currentList.length + 1
+            priority_order: currentList.length + 1,
+            focus_month: currentMonth
         });
         UI.toast.success('Added to Priority List');
         await refreshPipeline();
@@ -22410,7 +22545,7 @@ const deactivateAgent = async (agentId) => {
     const addPipelineNote = async (prospectId) => {
         const content = document.getElementById('new-note-content')?.value;
         if (!content?.trim()) {
-            UI.toast.warn('Please enter some content for the note.');
+            UI.toast.warning('Please enter some content for the note.');
             return;
         }
         await AppDataStore.create('notes', {
@@ -22691,6 +22826,195 @@ const deactivateAgent = async (agentId) => {
         UI.toast.success('Manual priority order synced.');
         await refreshPipeline();
     };
+
+    // ===== MONTH FOCUS: Archive / History / Search / Team View =====
+
+    const renderArchiveFocusRow = async (arc, idx) => {
+        const prospect = await AppDataStore.getById('prospects', arc.prospect_id);
+        const name = prospect ? escapeHtml(prospect.name || prospect.full_name || '') : 'Unknown';
+        const amountHtml = arc.amount != null ? `RM ${Number(arc.amount).toLocaleString()}` : 'N/A';
+        const prob = parseInt(arc.probability || 0);
+        const color = prob >= 80 ? '#DC2626' : prob >= 60 ? '#F59E0B' : '#6B7280';
+        const label = prob >= 80 ? 'HOT' : prob >= 50 ? 'WARM' : 'COLD';
+        return `<tr style="border-bottom:1px solid #F3F4F6;background:#FAFAFA;">
+            <td style="padding:14px 12px;"><span style="font-weight:700;color:#6B7280;">${idx + 1}</span></td>
+            <td style="padding:14px 12px;"><div style="font-weight:600;color:#111827;">${name}</div></td>
+            <td style="padding:14px 12px;"><div style="font-weight:500;color:#1E40AF;">${escapeHtml(arc.target_product || '')}</div></td>
+            <td style="padding:14px 12px;font-weight:600;color:#059669;">${amountHtml}</td>
+            <td style="padding:14px 12px;"><span style="background:${color};color:white;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;">${label}</span><strong style="margin-left:6px;">${prob}%</strong></td>
+            <td style="padding:14px 12px;font-size:13px;">${escapeHtml(arc.action_needed || '')}</td>
+            <td style="padding:14px 12px;">
+                <div style="display:flex;gap:6px;">
+                    ${prospect ? `<button class="btn-icon" onclick="event.stopPropagation();app.showProspectMenu(${arc.prospect_id})" title="View Profile"><i class="fas fa-eye"></i></button>` : ''}
+                    <button class="btn secondary btn-sm" style="padding:2px 8px;font-size:10px;" onclick="event.stopPropagation();app.reAddFromArchive(${arc.prospect_id})" title="Add back to current focus"><i class="fas fa-redo"></i> Re-Add</button>
+                </div>
+            </td>
+        </tr>`;
+    };
+
+    const switchFocusMonth = async (month) => {
+        _focusViewMonth = month;
+        await refreshPipeline();
+    };
+
+    const openExpiredSearchModal = async () => {
+        const userId = _currentUser?.id || 5;
+        let archiveItems = [];
+        try { archiveItems = await AppDataStore.query('monthly_focus_archive', { user_id: userId }); } catch(e) {}
+
+        const allProspects = await getVisibleProspects();
+        const allActs = await getVisibleActivities();
+        const currentFocus = await AppDataStore.query('my_potential_list', { user_id: userId });
+        const currentFocusIds = new Set(currentFocus.map(f => f.prospect_id));
+
+        // Prospects with activity history not in current focus
+        const availableProspects = allProspects.filter(p => {
+            if (currentFocusIds.has(p.id)) return false;
+            return allActs.some(a => a.prospect_id === p.id);
+        });
+
+        // Build archive rows grouped by month
+        const archiveByMonth = {};
+        for (const arc of archiveItems) {
+            if (!archiveByMonth[arc.month]) archiveByMonth[arc.month] = [];
+            archiveByMonth[arc.month].push(arc);
+        }
+        const archiveMonthKeys = Object.keys(archiveByMonth).sort().reverse();
+
+        let archiveHtml = '';
+        for (const month of archiveMonthKeys) {
+            const items = archiveByMonth[month];
+            const monthLabel = new Date(month + '-01').toLocaleString('default', { month: 'long', year: 'numeric' });
+            let rows = '';
+            for (const arc of items) {
+                const p = await AppDataStore.getById('prospects', arc.prospect_id);
+                const pName = p ? escapeHtml(p.name || p.full_name || '') : 'Unknown';
+                const inCurrent = currentFocusIds.has(arc.prospect_id);
+                rows += `<tr style="border-bottom:1px solid #F3F4F6;">
+                    <td style="padding:8px 10px;">${pName}</td>
+                    <td style="padding:8px 10px;">${escapeHtml(arc.target_product || '')}</td>
+                    <td style="padding:8px 10px;">${arc.amount != null ? 'RM ' + Number(arc.amount).toLocaleString() : '-'}</td>
+                    <td style="padding:8px 10px;">${arc.probability || 0}%</td>
+                    <td style="padding:8px 10px;">${escapeHtml(arc.action_needed || '-')}</td>
+                    <td style="padding:8px 10px;">
+                        ${inCurrent
+                            ? '<span style="color:#059669;font-size:11px;font-weight:600;">Already in list</span>'
+                            : `<button class="btn primary btn-sm" style="padding:2px 10px;font-size:11px;" onclick="event.stopPropagation();app.reAddFromArchive(${arc.prospect_id});"><i class="fas fa-plus"></i> Add Back</button>`}
+                    </td>
+                </tr>`;
+            }
+            archiveHtml += `
+                <div style="margin-bottom:16px;">
+                    <h4 style="font-size:13px;font-weight:600;color:#374151;margin-bottom:8px;display:flex;align-items:center;gap:8px;">
+                        <i class="fas fa-calendar-alt" style="color:#6B7280;"></i> ${monthLabel}
+                        <span style="background:#F3F4F6;padding:2px 8px;border-radius:12px;font-size:11px;color:#6B7280;">${items.length}</span>
+                    </h4>
+                    <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                        <thead><tr style="background:#F9FAFB;border-bottom:1px solid #E5E7EB;">
+                            <th style="padding:8px 10px;text-align:left;">Name</th>
+                            <th style="padding:8px 10px;text-align:left;">Product</th>
+                            <th style="padding:8px 10px;text-align:left;">Amount</th>
+                            <th style="padding:8px 10px;text-align:left;">Prob</th>
+                            <th style="padding:8px 10px;text-align:left;">Action</th>
+                            <th style="padding:8px 10px;text-align:left;"></th>
+                        </tr></thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>`;
+        }
+        if (!archiveHtml) archiveHtml = '<p style="color:#9CA3AF;text-align:center;padding:24px;"><i class="fas fa-archive" style="font-size:24px;display:block;margin-bottom:8px;"></i>No archived focus items yet.</p>';
+
+        // Build available prospects (expired pipeline) rows
+        let availRows = '';
+        for (const p of availableProspects.slice(0, 50)) {
+            const pActs = allActs.filter(a => a.prospect_id === p.id);
+            const pEntry = await calcPipelineEntry(p, pActs);
+            const lastDate = pEntry.lastActivityDate ? pEntry.lastActivityDate.toLocaleDateString('en-GB') : 'None';
+            availRows += `<tr style="border-bottom:1px solid #F3F4F6;">
+                <td style="padding:8px 10px;">${escapeHtml(p.name || p.full_name || '')}</td>
+                <td style="padding:8px 10px;">${escapeHtml(pEntry.category?.name || '-')}</td>
+                <td style="padding:8px 10px;">${pEntry.probability || 0}%</td>
+                <td style="padding:8px 10px;font-size:11px;">${lastDate}</td>
+                <td style="padding:8px 10px;">
+                    <button class="btn primary btn-sm" style="padding:2px 10px;font-size:11px;" onclick="event.stopPropagation();app.reAddFromArchive(${p.id});"><i class="fas fa-plus"></i> Add</button>
+                </td>
+            </tr>`;
+        }
+
+        const modalContent = `
+            <div style="max-height:70vh;overflow-y:auto;">
+                <div style="margin-bottom:16px;">
+                    <input type="text" id="expired-search-input" class="form-control" placeholder="Search by name..."
+                        oninput="app.filterExpiredSearch(this.value)" style="width:100%;">
+                </div>
+                <div style="display:flex;gap:8px;margin-bottom:16px;">
+                    <button class="btn secondary btn-sm expired-search-tab" style="font-weight:600;border-bottom:2px solid #2563EB;" onclick="app.switchExpiredTab('archive', this)"><i class="fas fa-archive"></i> Past Focus Lists</button>
+                    <button class="btn secondary btn-sm expired-search-tab" onclick="app.switchExpiredTab('pipeline', this)"><i class="fas fa-chart-line"></i> Available Prospects (${availableProspects.length})</button>
+                </div>
+                <div id="expired-archive-tab">${archiveHtml}</div>
+                <div id="expired-pipeline-tab" style="display:none;">
+                    ${availRows ? `
+                        <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                            <thead><tr style="background:#F9FAFB;border-bottom:1px solid #E5E7EB;">
+                                <th style="padding:8px 10px;text-align:left;">Name</th>
+                                <th style="padding:8px 10px;text-align:left;">Category</th>
+                                <th style="padding:8px 10px;text-align:left;">Prob</th>
+                                <th style="padding:8px 10px;text-align:left;">Last Activity</th>
+                                <th style="padding:8px 10px;text-align:left;"></th>
+                            </tr></thead>
+                            <tbody id="expired-pipeline-body">${availRows}</tbody>
+                        </table>
+                    ` : '<p style="color:#9CA3AF;text-align:center;padding:24px;">No additional prospects found.</p>'}
+                </div>
+            </div>`;
+
+        UI.showModal('Browse Expired & Available Prospects', modalContent, [
+            { label: 'Close', type: 'secondary', action: 'UI.hideModal()' }
+        ]);
+    };
+
+    const switchExpiredTab = (tab, btn) => {
+        document.getElementById('expired-archive-tab').style.display = tab === 'archive' ? '' : 'none';
+        document.getElementById('expired-pipeline-tab').style.display = tab === 'pipeline' ? '' : 'none';
+        document.querySelectorAll('.expired-search-tab').forEach(b => {
+            b.style.fontWeight = '';
+            b.style.borderBottom = '';
+        });
+        if (btn) { btn.style.fontWeight = '600'; btn.style.borderBottom = '2px solid #2563EB'; }
+    };
+
+    const filterExpiredSearch = (query) => {
+        const q = query.toLowerCase();
+        document.querySelectorAll('#expired-archive-tab tr:not(:first-child), #expired-pipeline-body tr').forEach(row => {
+            if (row.closest('thead')) return;
+            const text = row.textContent.toLowerCase();
+            row.style.display = text.includes(q) ? '' : 'none';
+        });
+    };
+
+    const reAddFromArchive = async (prospectId) => {
+        await addToFocusList(prospectId);
+        UI.hideModal();
+    };
+
+    const changeFocusTargetProduct = async (listItemId, product) => {
+        await AppDataStore.update('my_potential_list', listItemId, { target_product: product });
+        UI.toast.success('Target product updated');
+    };
+
+    const toggleAgentFocusSection = (header) => {
+        const body = header.nextElementSibling;
+        const icon = header.querySelector('.agent-collapse-icon');
+        if (body.style.display === 'none') {
+            body.style.display = '';
+            if (icon) icon.textContent = '▾';
+        } else {
+            body.style.display = 'none';
+            if (icon) icon.textContent = '▸';
+        }
+    };
+
+    // ===== END MONTH FOCUS EXTENSIONS =====
 
     const renderRecentOverrides = async () => {
         const container = document.getElementById('recent-overrides-table');
@@ -32001,6 +32325,14 @@ const initImportDemoData = async () => {
         handleDragOver,
         handleDrop,
         saveManualOrder,
+        // Month Focus extensions
+        switchFocusMonth,
+        openExpiredSearchModal,
+        switchExpiredTab,
+        filterExpiredSearch,
+        reAddFromArchive,
+        changeFocusTargetProduct,
+        toggleAgentFocusSection,
         openBoostModal,
         submitBoost,
         openHistoryModal,
@@ -32628,7 +32960,7 @@ const initSessionTimeout = async () => {
 };
 
 const logoutDueToInactivity = async () => {
-    if (window.UI && window.UI.toast) window.UI.toast.warning('Session expired due to inactivity');
+    if (window.UI && window.UI.toast) window.UI.toast.warninging('Session expired due to inactivity');
     if (typeof AuditLogger !== 'undefined') AuditLogger.warn("AUTH", "LOGOUT", { reason: 'session_timeout' });
     if (typeof window.app.logout === 'function') {
         window.app.logout();
