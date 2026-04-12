@@ -8590,11 +8590,13 @@ function _wireLoginBtn() {
             subAgentsByParent.get(key).push(u);
         }
 
-        // Referrals grouped by referrer_id
+        // Referrals grouped by referrer_type:referrer_id (composite key to avoid
+        // cross-type ID collisions — e.g. user id 5 vs prospect id 5).
         const referralsByReferrer = new Map();
         for (const r of allReferrals) {
             if (!r || !r.referrer_id) continue;
-            const key = String(r.referrer_id);
+            const rType = r.referrer_type || 'prospect';
+            const key = `${rType}:${r.referrer_id}`;
             if (!referralsByReferrer.has(key)) referralsByReferrer.set(key, []);
             referralsByReferrer.get(key).push(r);
         }
@@ -8655,9 +8657,9 @@ function _wireLoginBtn() {
                 }
             }
 
-            // Referrals where this node is the referrer
+            // Referrals where this node is the referrer (composite key matches type)
             const refChildIds = new Set();
-            const refs = referralsByReferrer.get(String(id)) || [];
+            const refs = referralsByReferrer.get(`${type}:${id}`) || [];
             for (const r of refs) {
                 if (!r.referred_prospect_id) continue;
                 const childNode = walk(r.referred_prospect_id, 'prospect', depth + 1);
