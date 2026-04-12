@@ -10008,7 +10008,7 @@ function _wireLoginBtn() {
                             Filter <i class="fas fa-chevron-down" style="font-size: 10px; margin-left: 4px;"></i>
                         </button>
                         <button class="btn-icon-pill" onclick="app.openShareCpsIntakeLinkModal()" title="Share CPS Intake Link">
-                            <i class="fas fa-share-alt"></i>
+                            <i class="fab fa-whatsapp"></i>
                         </button>
                         <button class="btn-quick-add" onclick="app.openActivityModal()">
                             <i class="fas fa-plus"></i> Quick Add Activity
