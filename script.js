@@ -19392,6 +19392,7 @@ const openAddSolutionModal = async (prospectId) => {
                                 <th>Status</th>
                                 <th>License Expiry</th>
                                 <th>Assigned Prospects</th>
+                                <th>Customers</th>
                                 <th>Follow-up Rate</th>
                                 <th>Actions</th>
                             </tr>
@@ -19424,6 +19425,22 @@ const openAddSolutionModal = async (prospectId) => {
         const curLvlMatch = _currentUser?.role?.match(/Level\s+(\d+)/i);
         const canAssignUpline = curLvlMatch ? parseInt(curLvlMatch[1]) <= 4 : false;
 
+        // Pre-fetch prospects & customers once, then count per agent
+        const [allProspects, allCustomers] = await Promise.all([
+            AppDataStore.getAll('prospects'),
+            AppDataStore.getAll('customers')
+        ]);
+        const prospectCountMap = {};
+        const customerCountMap = {};
+        for (const p of allProspects) {
+            const aid = String(p.responsible_agent_id);
+            prospectCountMap[aid] = (prospectCountMap[aid] || 0) + 1;
+        }
+        for (const c of allCustomers) {
+            const aid = String(c.responsible_agent_id || c.agent_id);
+            if (aid) customerCountMap[aid] = (customerCountMap[aid] || 0) + 1;
+        }
+
         let html = '';
         for (const agent of agents) {
             if (searchQuery && !agent.full_name?.toLowerCase().includes(searchQuery) && !agent.agent_code?.toLowerCase().includes(searchQuery) && !agent.phone?.toLowerCase().includes(searchQuery)) continue;
@@ -19431,7 +19448,9 @@ const openAddSolutionModal = async (prospectId) => {
             if (roleFilter && agent.role !== roleFilter) continue;
             if (statusFilter && agent.status !== statusFilter) continue;
 
-            const stats = (await AppDataStore.query('agent_stats', { agent_id: agent.id }))[0] || { total_assigned: 0, followup_rate: 0 };
+            const prospectCount = prospectCountMap[String(agent.id)] || 0;
+            const customerCount = customerCountMap[String(agent.id)] || 0;
+            const stats = (await AppDataStore.query('agent_stats', { agent_id: agent.id }))[0] || { followup_rate: 0 };
             const rateClass = stats.followup_rate >= 90 ? 'rate-good' : (stats.followup_rate >= 70 ? 'rate-warning' : 'rate-critical');
             const status = agent.status || 'active';
 
@@ -19444,7 +19463,8 @@ const openAddSolutionModal = async (prospectId) => {
                     <td data-label="Team">${await escapeHtml(agent.team) || 'Unassigned'}</td>
                     <td data-label="Status"><span class="status-badge status-${status}">${status.toUpperCase()}</span></td>
                     <td data-label="License Expiry">${await escapeHtml(agent.license_expiry) || 'N/A'}</td>
-                    <td data-label="Prospects">${stats.total_assigned} prospects</td>
+                    <td data-label="Prospects">${prospectCount} prospects</td>
+                    <td data-label="Customers">${customerCount} customers</td>
                     <td data-label="Follow-up">
                         <div class="followup-rate">
                             <span class="rate-indicator ${rateClass}"></span>
@@ -19463,7 +19483,7 @@ const openAddSolutionModal = async (prospectId) => {
         }
 
         tbody.innerHTML = '';
-        tbody.insertAdjacentHTML('beforeend', html || '<tr><td colspan="7" style="text-align:center; padding:20px;">No agents found</td></tr>');
+        tbody.insertAdjacentHTML('beforeend', html || '<tr><td colspan="8" style="text-align:center; padding:20px;">No agents found</td></tr>');
     };
 
 const showAgentProfile = async (agentId) => {
