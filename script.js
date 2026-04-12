@@ -11317,7 +11317,7 @@ function _wireLoginBtn() {
                     <h4>Attendees <span style="font-size:11px;color:#9CA3AF;font-weight:400;">(${prospectAttendees.length})</span></h4>
                     ${prospectRows || '<div class="info-row">No prospect/customer attendees.</div>'}
                     <div style="margin-top:10px; text-align:right;">
-                        <button class="btn primary btn-sm" onclick="app.showAddAttendeeSearch(${activity.event_id}, ${activityId})">+ Add Attendee</button>
+                        <button class="btn primary btn-sm" onclick="app.showAddAttendeeSearch('${activity.event_id}', '${activityId}')">+ Add Attendee</button>
                     </div>
                 </div>
             `;
@@ -11328,7 +11328,7 @@ function _wireLoginBtn() {
                     <h4>Agent Attendance <span style="font-size:11px;color:#9CA3AF;font-weight:400;">(${agentAttendees.length})</span></h4>
                     ${agentRows || '<div class="info-row">No agents/consultants added.</div>'}
                     <div style="margin-top:10px; text-align:right;">
-                        <button class="btn primary btn-sm" onclick="app.showAddConsultantSearch(${activity.event_id}, ${activityId})"><i class="fas fa-user-tie"></i> + Add Agent / Consultant</button>
+                        <button class="btn primary btn-sm" onclick="app.showAddConsultantSearch('${activity.event_id}', '${activityId}')"><i class="fas fa-user-tie"></i> + Add Agent / Consultant</button>
                     </div>
                 </div>
             `;
