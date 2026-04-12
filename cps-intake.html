@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CPS Appointment — Feng Shui CRM</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Inter', sans-serif; background: #f9fafb; color: #111827; min-height: 100vh; display: flex; align-items: flex-start; justify-content: center; padding: 24px; }
+        .card { background: white; border-radius: 16px; box-shadow: 0 4px 24px rgba(0,0,0,0.08); max-width: 560px; width: 100%; padding: 36px; margin: auto; }
+        .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 28px; }
+        .brand-icon { width: 48px; height: 48px; background: #7c3aed; border-radius: 12px; display: flex; align-items: center; justify-content: center; color: white; font-size: 22px; }
+        .brand-name { font-size: 18px; font-weight: 700; color: #111827; }
+        h1 { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+        h1 .cn { color: #6b7280; font-weight: 500; font-size: 16px; margin-right: 6px; }
+        .subtitle { color: #6b7280; font-size: 14px; margin-bottom: 24px; }
+        label { display: block; font-weight: 500; font-size: 14px; margin-bottom: 5px; color: #374151; }
+        label .cn { color: #111827; margin-right: 4px; }
+        label .en { color: #6b7280; font-weight: 400; }
+        .field { margin-bottom: 14px; }
+        input[type="text"], input[type="tel"], input[type="email"] {
+            width: 100%; padding: 10px 14px; border: 1px solid #d1d5db; border-radius: 8px;
+            font-size: 14px; font-family: inherit; background: #fff; color: #111827;
+            transition: border-color 0.2s;
+        }
+        input:focus { outline: none; border-color: #7c3aed; box-shadow: 0 0 0 3px rgba(124,58,237,0.1); }
+        .btn { width: 100%; padding: 12px; background: #7c3aed; color: white; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+        .btn:hover { background: #6d28d9; }
+        .btn:disabled { background: #d1d5db; cursor: not-allowed; }
+        .info-block { background: #f5f3ff; border: 1px solid #e9d5ff; border-radius: 10px; padding: 14px 16px; margin-bottom: 18px; }
+        .info-block h3 { font-size: 13px; font-weight: 600; color: #6d28d9; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+        .info-block .value { font-size: 15px; font-weight: 600; color: #111827; }
+        .info-block .sub { font-size: 13px; color: #6b7280; margin-top: 4px; line-height: 1.5; }
+        .info-block a.waze { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; color: #7c3aed; text-decoration: none; font-size: 13px; font-weight: 500; }
+        .info-block a.waze:hover { text-decoration: underline; }
+        .reminder { background: #fef3c7; border: 1px solid #fde68a; border-radius: 10px; padding: 12px 14px; margin-bottom: 18px; display: flex; gap: 10px; align-items: flex-start; }
+        .reminder i { color: #d97706; font-size: 18px; margin-top: 2px; }
+        .reminder .text { font-size: 13px; color: #92400e; line-height: 1.6; }
+        .reminder .text strong { color: #78350f; font-size: 14px; display: block; margin-bottom: 2px; }
+        .section-title { font-size: 15px; font-weight: 600; color: #111827; margin: 20px 0 12px; padding-top: 14px; border-top: 1px solid #f3f4f6; }
+        .section-title:first-child { padding-top: 0; border-top: none; margin-top: 0; }
+        .success-state, .error-state { text-align: center; padding: 30px 0; }
+        .success-state .icon { font-size: 56px; color: #10b981; margin-bottom: 16px; }
+        .error-state .icon { font-size: 56px; color: #ef4444; margin-bottom: 16px; }
+        .error-msg { color: #ef4444; font-size: 13px; margin-bottom: 12px; }
+        .req { color: #ef4444; margin-left: 2px; }
+        @media (max-width: 480px) {
+            body { padding: 12px; }
+            .card { padding: 22px; }
+        }
+    </style>
+</head>
+<body>
+<div class="card">
+    <div class="brand">
+        <div class="brand-icon"><i class="fas fa-dharmachakra"></i></div>
+        <div class="brand-name">Feng Shui CRM</div>
+    </div>
+
+    <div id="loading-state">
+        <p style="color:#6b7280;">Loading...</p>
+    </div>
+
+    <div id="intake-form" style="display:none;">
+        <h1><span class="cn">请填妥基本资料</span><span style="font-weight:500; font-size:16px; color:#6b7280;">Basic Information</span></h1>
+        <p class="subtitle">Please fill in the details below to confirm your appointment.</p>
+
+        <div class="section-title">Your Details</div>
+
+        <div class="field">
+            <label><span class="cn">姓名</span><span class="en">Name</span><span class="req">*</span></label>
+            <input type="text" id="p-name" placeholder="e.g., Tan Ah Kow">
+        </div>
+
+        <div class="field">
+            <label><span class="cn">身分号码</span><span class="en">IC</span><span class="req">*</span></label>
+            <input type="text" id="p-ic" placeholder="e.g., 901212-10-1234">
+        </div>
+
+        <div class="field">
+            <label><span class="cn">职业</span><span class="en">Occupation</span></label>
+            <input type="text" id="p-occupation" placeholder="e.g., Engineer">
+        </div>
+
+        <div class="field">
+            <label><span class="cn">联络号码</span><span class="en">Phone no</span><span class="req">*</span></label>
+            <input type="tel" id="p-phone" placeholder="e.g., 012-3456789">
+        </div>
+
+        <div class="field">
+            <label><span class="cn">邮箱</span><span class="en">Email</span></label>
+            <input type="email" id="p-email" placeholder="email@example.com">
+        </div>
+
+        <div class="reminder">
+            <i class="fas fa-exclamation-circle"></i>
+            <div class="text">
+                <strong>Reminder 提醒</strong>
+                需要穿著端正，長褲包鞋<br>
+                Proper attire required (No slippers &amp; short pants)
+            </div>
+        </div>
+
+        <div class="section-title">Appointment Details</div>
+
+        <div class="info-block">
+            <h3><i class="far fa-calendar"></i> Date &amp; Time</h3>
+            <div class="value" id="info-datetime">—</div>
+        </div>
+
+        <div class="info-block">
+            <h3><i class="fas fa-map-marker-alt"></i> Location</h3>
+            <div class="value" id="info-venue">—</div>
+            <div class="sub" id="info-address"></div>
+            <a id="info-waze" class="waze" href="#" target="_blank" rel="noopener" style="display:none;">
+                <i class="fab fa-waze"></i> Open in Waze
+            </a>
+        </div>
+
+        <p id="error-msg" class="error-msg" style="display:none;"></p>
+        <button class="btn" id="submit-btn" onclick="submitIntake()">Confirm &amp; Submit</button>
+    </div>
+
+    <div id="success-state" style="display:none;">
+        <div class="success-state">
+            <div class="icon"><i class="fas fa-check-circle"></i></div>
+            <h2 style="margin-bottom:8px;">Thank you! 谢谢</h2>
+            <p style="color:#6b7280;">Your details have been received. Your consultant will confirm the appointment shortly.</p>
+        </div>
+    </div>
+
+    <div id="already-submitted-state" style="display:none;">
+        <div class="success-state">
+            <div class="icon" style="color:#f59e0b;"><i class="fas fa-check-circle"></i></div>
+            <h2 style="margin-bottom:8px;">Already Submitted</h2>
+            <p style="color:#6b7280;">We've received your information. Your consultant will contact you shortly to confirm the appointment.</p>
+        </div>
+    </div>
+
+    <div id="error-state" style="display:none;">
+        <div class="error-state">
+            <div class="icon"><i class="fas fa-exclamation-circle"></i></div>
+            <h2 style="margin-bottom:8px;">Invalid or Expired Link</h2>
+            <p style="color:#6b7280;">This appointment link is no longer valid. Please contact your consultant for a new link.</p>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const supabase = window.supabase.createClient(
+    'https://remuwhxvzkzjtgbzqjaa.supabase.co',
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJlbXV3aHh2emt6anRnYnpxamFhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQzNjczMDMsImV4cCI6MjA4OTk0MzMwM30.L8yISXnOd1CxzyAbRyFLQXIYviyBrxQC_J19egNtUbs'
+);
+
+const params = new URLSearchParams(window.location.search);
+const token = params.get('token');
+let intakeRow = null;
+
+function show(id) {
+    ['loading-state','intake-form','success-state','already-submitted-state','error-state'].forEach(s => {
+        const el = document.getElementById(s);
+        if (el) el.style.display = s === id ? 'block' : 'none';
+    });
+}
+
+function formatDate(ymd) {
+    if (!ymd) return '';
+    const [y, m, d] = ymd.split('-').map(Number);
+    const date = new Date(y, (m || 1) - 1, d || 1);
+    const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return `${days[date.getDay()]}, ${d} ${months[date.getMonth()]} ${y}`;
+}
+
+function formatTime(t) {
+    if (!t) return '';
+    return t.slice(0, 5); // HH:MM
+}
+
+async function init() {
+    if (!token) { show('error-state'); return; }
+
+    const { data, error } = await supabase
+        .from('cps_intake_requests')
+        .select('*')
+        .eq('token', token)
+        .maybeSingle();
+
+    if (error || !data) { show('error-state'); return; }
+    intakeRow = data;
+
+    // Expired
+    if (data.expires_at && new Date(data.expires_at) < new Date()) {
+        show('error-state');
+        return;
+    }
+
+    // Already submitted or later lifecycle states
+    if (data.status !== 'awaiting_submission') {
+        if (['submitted', 'approved'].includes(data.status)) {
+            show('already-submitted-state');
+        } else {
+            show('error-state');
+        }
+        return;
+    }
+
+    // Fill appointment details
+    document.getElementById('info-datetime').textContent =
+        `${formatDate(data.activity_date)} · ${formatTime(data.start_time)} – ${formatTime(data.end_time)}`;
+    document.getElementById('info-venue').textContent = data.venue_name || '—';
+    document.getElementById('info-address').textContent = data.venue_address || '';
+    if (data.waze_link) {
+        const wazeEl = document.getElementById('info-waze');
+        wazeEl.href = data.waze_link;
+        wazeEl.style.display = 'inline-flex';
+    }
+
+    show('intake-form');
+}
+
+async function submitIntake() {
+    const name = document.getElementById('p-name').value.trim();
+    const ic = document.getElementById('p-ic').value.trim();
+    const occupation = document.getElementById('p-occupation').value.trim();
+    const phone = document.getElementById('p-phone').value.trim();
+    const email = document.getElementById('p-email').value.trim();
+    const errEl = document.getElementById('error-msg');
+
+    if (!name || !ic || !phone) {
+        errEl.textContent = 'Name, IC and Phone are required.';
+        errEl.style.display = 'block';
+        return;
+    }
+    const phoneDigits = phone.replace(/\D/g, '');
+    if (phoneDigits.length < 7) {
+        errEl.textContent = 'Please enter a valid phone number.';
+        errEl.style.display = 'block';
+        return;
+    }
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        errEl.textContent = 'Please enter a valid email address.';
+        errEl.style.display = 'block';
+        return;
+    }
+    errEl.style.display = 'none';
+
+    const btn = document.getElementById('submit-btn');
+    btn.disabled = true;
+    btn.textContent = 'Submitting...';
+
+    const { error } = await supabase
+        .from('cps_intake_requests')
+        .update({
+            prospect_name: name,
+            prospect_ic: ic,
+            prospect_occupation: occupation || null,
+            prospect_phone: phone,
+            prospect_email: email || null,
+            status: 'submitted',
+            submitted_at: new Date().toISOString()
+        })
+        .eq('token', token)
+        .eq('status', 'awaiting_submission');
+
+    if (error) {
+        errEl.textContent = 'Submission failed. Please try again or contact your consultant.';
+        errEl.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = 'Confirm & Submit';
+        return;
+    }
+
+    show('success-state');
+}
+
+init();
+</script>
+</body>
+</html>

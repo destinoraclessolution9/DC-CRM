@@ -125,6 +125,7 @@ const appLogic = (() => {
     let _selectedConsultants = []; // { id, name, status: 'pending'|'accepted'|'rejected' }
     let _selectedReferrer = null;
     let _selectedProspectReferrer = null;
+    let _pendingIntakeId = null; // Set by openApproveCpsIntakeModal; consumed by saveActivity
     let _currentDate = new Date(); // Dynamic start date
     let _filters = { agent: 'all', type: 'all', from: '', to: '' };
 
@@ -7055,6 +7056,285 @@ function _wireLoginBtn() {
         await showBookingSettingsView(document.getElementById('content-viewport'));
     };
 
+    // ========== CPS INTAKE LINK (shareable one-time form) ==========
+    // Flow: agent picks date/time/venue → system generates token link → agent sends to
+    // prospect → prospect fills basic info on cps-intake.html → agent approves on calendar
+    // which opens Quick Add Activity (CPS) pre-filled; agent adds referrer+relation to confirm.
+
+    const openShareCpsIntakeLinkModal = async () => {
+        // Fetch venues (same pattern as openActivityModal)
+        let venueData = [];
+        if (window.SUPABASE_URL && window.SUPABASE_SR) {
+            try {
+                const resp = await fetch(`${window.SUPABASE_URL}/rest/v1/venues?select=*`, {
+                    headers: { 'Authorization': `Bearer ${window.SUPABASE_SR}`, 'apikey': window.SUPABASE_SR }
+                });
+                if (resp.ok) venueData = await resp.json();
+            } catch (_) {}
+        }
+        if (!venueData || venueData.length === 0) {
+            venueData = await AppDataStore.getAll('venues').catch(() => []);
+        }
+        const venueOptions = (venueData || [])
+            .map(v => `<option value="${v.id}" data-name="${(v.name || '').replace(/"/g, '&quot;')}" data-address="${(v.address || v.location || '').replace(/"/g, '&quot;')}" data-waze="${(v.waze_link || '').replace(/"/g, '&quot;')}">${v.name} | ${v.location || ''}</option>`)
+            .join('');
+
+        const today = new Date().toISOString().split('T')[0];
+
+        UI.showModal('Share CPS Intake Link', `
+            <div style="display:flex; flex-direction:column; gap:14px;">
+                <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; padding:12px; font-size:13px; color:#166534;">
+                    <i class="fas fa-info-circle" style="margin-right:6px;"></i>
+                    Set the appointment date, time and venue. A one-time link will be generated — share it with the prospect so they can fill in their basic info. You'll approve it on your calendar afterwards.
+                </div>
+                <div class="form-row">
+                    <div class="form-group half">
+                        <label>Date <span class="required">*</span></label>
+                        <input type="date" id="intake-date" class="form-control" value="${today}">
+                    </div>
+                    <div class="form-group half">
+                        <label>Venue <span class="required">*</span></label>
+                        <select id="intake-venue" class="form-control">
+                            <option value="">-- Select Venue --</option>
+                            ${venueOptions}
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group half">
+                        <label>Start Time <span class="required">*</span></label>
+                        <input type="time" id="intake-start" class="form-control" value="14:00">
+                    </div>
+                    <div class="form-group half">
+                        <label>End Time <span class="required">*</span></label>
+                        <input type="time" id="intake-end" class="form-control" value="15:30">
+                    </div>
+                </div>
+
+                <div id="intake-generated-link" style="display:none; background:var(--gray-50); border:1px solid var(--gray-200); border-radius:8px; padding:14px;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px; font-size:13px;">Shareable Link</label>
+                    <div style="display:flex; gap:8px; align-items:center;">
+                        <input type="text" id="intake-link-input" class="form-control" readonly style="flex:1; font-size:12px;">
+                        <button class="btn secondary btn-sm" type="button" onclick="app.copyCpsIntakeLink()"><i class="fas fa-copy"></i> Copy</button>
+                        <button class="btn secondary btn-sm" type="button" onclick="app.shareCpsIntakeWhatsApp()"><i class="fab fa-whatsapp"></i> WhatsApp</button>
+                    </div>
+                    <p class="help-text" style="margin-top:8px; font-size:12px; color:var(--gray-500);">The link expires in 7 days or once the prospect submits.</p>
+                </div>
+            </div>
+        `, [
+            { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Generate Link', type: 'primary', action: '(async () => { await app.saveCpsIntakeLink(); })()' }
+        ]);
+    };
+
+    const saveCpsIntakeLink = async () => {
+        const date = document.getElementById('intake-date')?.value;
+        const startTime = document.getElementById('intake-start')?.value;
+        const endTime = document.getElementById('intake-end')?.value;
+        const venueSel = document.getElementById('intake-venue');
+
+        if (!date || !startTime || !endTime) {
+            UI.toast.error('Date, start time and end time are required.');
+            return;
+        }
+        if (startTime >= endTime) {
+            UI.toast.error('End time must be after start time.');
+            return;
+        }
+        if (!venueSel?.value) {
+            UI.toast.error('Please select a venue.');
+            return;
+        }
+
+        const opt = venueSel.options[venueSel.selectedIndex];
+        const venueName = opt.getAttribute('data-name') || '';
+        const venueAddress = opt.getAttribute('data-address') || '';
+        const wazeLink = opt.getAttribute('data-waze') || '';
+
+        try {
+            const row = await AppDataStore.create('cps_intake_requests', {
+                agent_id: _currentUser?.id || null,
+                activity_date: date,
+                start_time: startTime,
+                end_time: endTime,
+                venue_name: venueName,
+                venue_address: venueAddress,
+                waze_link: wazeLink,
+                status: 'awaiting_submission',
+                created_at: new Date().toISOString()
+            });
+
+            if (!row || !row.token) {
+                UI.toast.error('Link created but token missing. Please try again.');
+                return;
+            }
+
+            const url = `${window.location.origin}/cps-intake.html?token=${row.token}`;
+            const linkBlock = document.getElementById('intake-generated-link');
+            const linkInput = document.getElementById('intake-link-input');
+            if (linkBlock && linkInput) {
+                linkInput.value = url;
+                linkBlock.style.display = 'block';
+            }
+            UI.toast.success('Link generated! Share it with the prospect.');
+        } catch (err) {
+            console.error('saveCpsIntakeLink failed:', err);
+            UI.toast.error('Failed to generate link: ' + (err.message || 'Unknown error'));
+        }
+    };
+
+    const copyCpsIntakeLink = () => {
+        const input = document.getElementById('intake-link-input');
+        if (!input || !input.value) return;
+        navigator.clipboard.writeText(input.value)
+            .then(() => UI.toast.success('Link copied!'))
+            .catch(() => {
+                input.select();
+                document.execCommand('copy');
+                UI.toast.success('Link copied!');
+            });
+    };
+
+    const shareCpsIntakeWhatsApp = () => {
+        const input = document.getElementById('intake-link-input');
+        if (!input || !input.value) return;
+        const msg = encodeURIComponent(
+            `您好！请通过以下链接填妥基本资料以确认您的 CPS 约谈：\nHi! Please fill in your basic information to confirm your CPS appointment:\n\n${input.value}`
+        );
+        window.open(`https://wa.me/?text=${msg}`, '_blank');
+    };
+
+    // Render a "Pending CPS Intake Approvals" section at the top of the calendar today-list.
+    // Called from showCalendarView in parallel with the other renderers.
+    const renderPendingCpsIntakes = async () => {
+        const host = document.getElementById('pending-cps-intakes');
+        if (!host) return;
+
+        let intakes = [];
+        try {
+            intakes = await AppDataStore.query('cps_intake_requests', {
+                status: 'submitted',
+                agent_id: _currentUser?.id || null
+            });
+        } catch (_) {
+            try {
+                const all = await AppDataStore.getAll('cps_intake_requests');
+                intakes = (all || []).filter(r => r.status === 'submitted' && r.agent_id === (_currentUser?.id || null));
+            } catch (__) { intakes = []; }
+        }
+
+        if (!intakes || intakes.length === 0) {
+            host.innerHTML = '';
+            host.style.display = 'none';
+            return;
+        }
+
+        host.style.display = 'block';
+        host.innerHTML = `
+            <div style="background:#fffbeb; border:1px solid #fcd34d; border-radius:12px; padding:16px; margin-bottom:16px;">
+                <h3 style="margin:0 0 12px; font-size:15px; color:#92400e; display:flex; align-items:center; gap:8px;">
+                    <i class="fas fa-bell"></i> PENDING CPS INTAKE APPROVALS (${intakes.length})
+                </h3>
+                <div style="display:flex; flex-direction:column; gap:10px;">
+                    ${intakes.map(i => `
+                        <div style="background:white; border:1px solid #fde68a; border-radius:8px; padding:12px;">
+                            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap;">
+                                <div style="flex:1; min-width:200px;">
+                                    <div style="font-weight:600; font-size:14px; margin-bottom:2px;">${i.prospect_name || 'Unknown'}</div>
+                                    <div style="font-size:12px; color:var(--gray-600);">
+                                        <i class="fas fa-phone" style="margin-right:4px;"></i>${i.prospect_phone || '—'}
+                                        ${i.prospect_email ? ` · <i class="fas fa-envelope" style="margin-right:4px;"></i>${i.prospect_email}` : ''}
+                                    </div>
+                                    <div style="font-size:12px; color:var(--gray-500); margin-top:4px;">
+                                        <i class="far fa-calendar" style="margin-right:4px;"></i>${i.activity_date} · ${(i.start_time || '').slice(0,5)}–${(i.end_time || '').slice(0,5)}
+                                        ${i.venue_name ? ` · <i class="fas fa-map-marker-alt" style="margin-right:4px;"></i>${i.venue_name}` : ''}
+                                    </div>
+                                </div>
+                                <div style="display:flex; gap:6px;">
+                                    <button class="btn primary btn-sm" onclick="app.openApproveCpsIntakeModal(${i.id})">
+                                        <i class="fas fa-check"></i> Review & Approve
+                                    </button>
+                                    <button class="btn secondary btn-sm" onclick="app.rejectCpsIntake(${i.id})" title="Reject">
+                                        <i class="fas fa-times"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    };
+
+    const openApproveCpsIntakeModal = async (intakeId) => {
+        const intake = await AppDataStore.getById('cps_intake_requests', intakeId);
+        if (!intake) {
+            UI.toast.error('Intake request not found.');
+            return;
+        }
+        if (intake.status !== 'submitted') {
+            UI.toast.error('This intake is no longer pending.');
+            await renderPendingCpsIntakes();
+            return;
+        }
+
+        // Stash id so saveActivity knows to mark the intake approved on success
+        _pendingIntakeId = intakeId;
+
+        // Open the standard Quick Add Activity modal — it defaults to CPS type
+        await openActivityModal(intake.activity_date);
+
+        // Wait for the CPS dynamic fields to mount, then prefill
+        let attempts = 0;
+        const pollInterval = setInterval(() => {
+            const nameEl = document.getElementById('cps-name');
+            if (nameEl) {
+                const setF = (id, val) => { const el = document.getElementById(id); if (el) el.value = val || ''; };
+                setF('cps-name', intake.prospect_name);
+                setF('cps-ic', intake.prospect_ic);
+                setF('cps-occupation', intake.prospect_occupation);
+                setF('cps-phone', intake.prospect_phone);
+                setF('cps-email', intake.prospect_email);
+                setF('activity-date', intake.activity_date);
+                setF('start-time', (intake.start_time || '').slice(0, 5));
+                setF('end-time', (intake.end_time || '').slice(0, 5));
+
+                // Try to select the venue — match by name against the dropdown options
+                const venueSel = document.getElementById('activity-venue');
+                if (venueSel && intake.venue_name) {
+                    for (const opt of venueSel.options) {
+                        if (opt.value && opt.value.toLowerCase().startsWith(intake.venue_name.toLowerCase())) {
+                            venueSel.value = opt.value;
+                            break;
+                        }
+                    }
+                }
+
+                // Trigger duration recalc
+                if (typeof app !== 'undefined' && app.calculateDuration) app.calculateDuration();
+
+                clearInterval(pollInterval);
+                UI.toast.info('Please add referrer and relation before saving.');
+            } else if (++attempts >= 40) {
+                clearInterval(pollInterval);
+            }
+        }, 100);
+    };
+
+    const rejectCpsIntake = async (intakeId) => {
+        if (!confirm('Reject this CPS intake request? This cannot be undone.')) return;
+        try {
+            await AppDataStore.update('cps_intake_requests', intakeId, {
+                status: 'rejected',
+                approved_at: new Date().toISOString()
+            });
+            UI.toast.success('Intake rejected.');
+            await renderPendingCpsIntakes();
+        } catch (err) {
+            UI.toast.error('Reject failed: ' + (err.message || 'Unknown error'));
+        }
+    };
+
     // ========== LEAD CAPTURE FORMS ==========
 
     const showLeadFormsView = async (container) => {
@@ -9729,6 +10009,9 @@ function _wireLoginBtn() {
                         <button class="btn-quick-add" onclick="app.openActivityModal()" style="margin-left: 10px;">
                             <i class="fas fa-plus"></i> Quick Add Activity
                         </button>
+                        <button class="btn secondary" onclick="app.openShareCpsIntakeLinkModal()" style="margin-left: 8px;" title="Generate a shareable CPS intake link for a prospect">
+                            <i class="fas fa-link"></i> Share CPS Intake Link
+                        </button>
                     </div>
                 </div>
 
@@ -9737,6 +10020,9 @@ function _wireLoginBtn() {
                     <div class="calendar-days-header" id="calendar-days-header"></div>
                     <div class="calendar-grid-main" id="calendar-grid"></div>
                 </div>
+
+                <!-- Pending CPS Intake Approvals (populated by renderPendingCpsIntakes) -->
+                <div id="pending-cps-intakes" style="display:none; margin-top:16px;"></div>
 
                 <!-- Section 1.3: Today's Activities -->
                 <div class="today-activities-section">
@@ -9801,6 +10087,7 @@ function _wireLoginBtn() {
         renderTodayActivities().catch(e => console.warn('renderTodayActivities failed:', e));
         renderBirthdaySection().catch(e => console.warn('renderBirthdaySection failed:', e));
         renderRefillReminders().catch(e => console.warn('renderRefillReminders failed:', e));
+        renderPendingCpsIntakes().catch(e => console.warn('renderPendingCpsIntakes failed:', e));
 
         // Show Special Program progress popup (once per session, for participating agents)
         // Deferred so it doesn't block the calendar paint.
@@ -14081,6 +14368,18 @@ function _wireLoginBtn() {
         }
 
         UI.toast.success('Activity saved!');
+
+        // === If this save was approving a CPS intake request, mark it approved ===
+        if (_pendingIntakeId) {
+            try {
+                await AppDataStore.update('cps_intake_requests', _pendingIntakeId, {
+                    status: 'approved',
+                    approved_at: new Date().toISOString(),
+                    approved_activity_id: savedActivity?.id || null
+                });
+            } catch (e) { console.warn('CPS intake approval mark failed:', e); }
+            _pendingIntakeId = null;
+        }
 
         // === Push notification fan-out (non-blocking, best-effort) ===
         _notifyActivityCreated(savedActivity || activity).catch(() => {});
@@ -32004,6 +32303,13 @@ const initImportDemoData = async () => {
         copySmartBookingLink,
         confirmBookingAppointment,
         cancelBookingAppointment,
+        openShareCpsIntakeLinkModal,
+        saveCpsIntakeLink,
+        copyCpsIntakeLink,
+        shareCpsIntakeWhatsApp,
+        renderPendingCpsIntakes,
+        openApproveCpsIntakeModal,
+        rejectCpsIntake,
 
         // Lead Capture Forms
         showLeadFormsView,
