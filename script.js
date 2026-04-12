@@ -15486,13 +15486,31 @@ function _wireLoginBtn() {
         const tbody = document.getElementById('prospects-table-body');
         if (!tbody) return;
 
-        // Fetch everything we need in parallel — previously these were serialized.
-        const [prospectsRaw, activities, allUsers] = await Promise.all([
-            getVisibleProspects(),
-            getVisibleActivities(),
+        // Fetch all three tables in ONE parallel batch, then apply visibility
+        // once — instead of calling getVisibleProspects() and
+        // getVisibleActivities() which each run their own sequential
+        // getVisibleUserIds → tree-walk chain internally.
+        const [allProspects, allActivities, allUsers] = await Promise.all([
+            AppDataStore.getAll('prospects'),
+            AppDataStore.getAll('activities'),
             AppDataStore.getAll('users'),
         ]);
-        let prospects = prospectsRaw;
+
+        let prospects, activities;
+        if (isSystemAdmin(_currentUser)) {
+            prospects = allProspects;
+            activities = allActivities;
+        } else {
+            const visibleIds = await getVisibleUserIds(_currentUser);
+            if (visibleIds === 'all') {
+                prospects = allProspects;
+                activities = allActivities;
+            } else {
+                prospects = allProspects.filter(p => visibleIds.includes(p.responsible_agent_id));
+                const canView = await buildActivityVisibilityChecker(allUsers);
+                activities = allActivities.filter(canView);
+            }
+        }
 
         // Index activities by prospect_id so both sorting AND the per-row
         // "Last Activity" lookup become O(1) instead of O(N) per row.
