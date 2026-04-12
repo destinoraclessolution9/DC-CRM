@@ -148,12 +148,18 @@
     </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-const supabase = window.supabase.createClient(
-    'https://remuwhxvzkzjtgbzqjaa.supabase.co',
-    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJlbXV3aHh2emt6anRnYnpxamFhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQzNjczMDMsImV4cCI6MjA4OTk0MzMwM30.L8yISXnOd1CxzyAbRyFLQXIYviyBrxQC_J19egNtUbs'
-);
+// Unregister the main app's service worker on this public page so its fetch
+// handler can't interfere with the Supabase requests below.
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.getRegistrations().then(regs => {
+        regs.forEach(r => r.unregister().catch(() => {}));
+    }).catch(() => {});
+}
+</script>
+<script>
+const SUPABASE_URL = 'https://remuwhxvzkzjtgbzqjaa.supabase.co';
+const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJlbXV3aHh2emt6anRnYnpxamFhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQzNjczMDMsImV4cCI6MjA4OTk0MzMwM30.L8yISXnOd1CxzyAbRyFLQXIYviyBrxQC_J19egNtUbs';
 
 const params = new URLSearchParams(window.location.search);
 const token = params.get('token');
@@ -164,6 +170,14 @@ function show(id) {
         const el = document.getElementById(s);
         if (el) el.style.display = s === id ? 'block' : 'none';
     });
+}
+
+function showErrorDetail(msg) {
+    const el = document.getElementById('error-state');
+    if (!el) return;
+    const detail = el.querySelector('p');
+    if (detail) detail.textContent = msg;
+    show('error-state');
 }
 
 function formatDate(ymd) {
@@ -180,46 +194,81 @@ function formatTime(t) {
     return t.slice(0, 5); // HH:MM
 }
 
-async function init() {
-    if (!token) { show('error-state'); return; }
-
-    const { data, error } = await supabase
-        .from('cps_intake_requests')
-        .select('*')
-        .eq('token', token)
-        .maybeSingle();
-
-    if (error || !data) { show('error-state'); return; }
-    intakeRow = data;
-
-    // Expired
-    if (data.expires_at && new Date(data.expires_at) < new Date()) {
-        show('error-state');
-        return;
-    }
-
-    // Already submitted or later lifecycle states
-    if (data.status !== 'awaiting_submission') {
-        if (['submitted', 'approved'].includes(data.status)) {
-            show('already-submitted-state');
-        } else {
-            show('error-state');
+// Fetch the intake row via PostgREST directly — avoids the supabase-js
+// client entirely so we don't depend on the jsdelivr CDN loading, and we
+// get clean fetch error messages if anything goes wrong.
+async function fetchIntake(tok) {
+    const url = `${SUPABASE_URL}/rest/v1/cps_intake_requests?token=eq.${encodeURIComponent(tok)}&select=*`;
+    const resp = await fetch(url, {
+        headers: {
+            'apikey': SUPABASE_ANON,
+            'Authorization': `Bearer ${SUPABASE_ANON}`,
+            'Accept': 'application/json'
         }
-        return;
-    }
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const rows = await resp.json();
+    return Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+}
 
-    // Fill appointment details
-    document.getElementById('info-datetime').textContent =
-        `${formatDate(data.activity_date)} · ${formatTime(data.start_time)} – ${formatTime(data.end_time)}`;
-    document.getElementById('info-venue').textContent = data.venue_name || '—';
-    document.getElementById('info-address').textContent = data.venue_address || '';
-    if (data.waze_link) {
-        const wazeEl = document.getElementById('info-waze');
-        wazeEl.href = data.waze_link;
-        wazeEl.style.display = 'inline-flex';
-    }
+async function updateIntake(tok, payload) {
+    const url = `${SUPABASE_URL}/rest/v1/cps_intake_requests?token=eq.${encodeURIComponent(tok)}&status=eq.awaiting_submission`;
+    const resp = await fetch(url, {
+        method: 'PATCH',
+        headers: {
+            'apikey': SUPABASE_ANON,
+            'Authorization': `Bearer ${SUPABASE_ANON}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=representation'
+        },
+        body: JSON.stringify(payload)
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const rows = await resp.json();
+    return Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+}
 
-    show('intake-form');
+async function init() {
+    try {
+        if (!token) { showErrorDetail('No token provided in the link.'); return; }
+
+        const data = await fetchIntake(token);
+
+        if (!data) { showErrorDetail('This appointment link could not be found. Please contact your consultant.'); return; }
+        intakeRow = data;
+
+        // Expired
+        if (data.expires_at && new Date(data.expires_at) < new Date()) {
+            showErrorDetail('This appointment link has expired. Please contact your consultant for a new link.');
+            return;
+        }
+
+        // Already submitted or later lifecycle states
+        if (data.status !== 'awaiting_submission') {
+            if (['submitted', 'approved'].includes(data.status)) {
+                show('already-submitted-state');
+            } else {
+                showErrorDetail('This appointment link is no longer valid.');
+            }
+            return;
+        }
+
+        // Fill appointment details
+        document.getElementById('info-datetime').textContent =
+            `${formatDate(data.activity_date)} · ${formatTime(data.start_time)} – ${formatTime(data.end_time)}`;
+        document.getElementById('info-venue').textContent = data.venue_name || '—';
+        document.getElementById('info-address').textContent = data.venue_address || '';
+        if (data.waze_link) {
+            const wazeEl = document.getElementById('info-waze');
+            wazeEl.href = data.waze_link;
+            wazeEl.style.display = 'inline-flex';
+        }
+
+        show('intake-form');
+    } catch (err) {
+        console.error('init failed', err);
+        showErrorDetail('Could not load appointment details: ' + (err.message || 'network error') + '. Please try again or contact your consultant.');
+    }
 }
 
 async function submitIntake() {
@@ -252,9 +301,8 @@ async function submitIntake() {
     btn.disabled = true;
     btn.textContent = 'Submitting...';
 
-    const { error } = await supabase
-        .from('cps_intake_requests')
-        .update({
+    try {
+        const result = await updateIntake(token, {
             prospect_name: name,
             prospect_ic: ic,
             prospect_occupation: occupation || null,
@@ -262,22 +310,31 @@ async function submitIntake() {
             prospect_email: email || null,
             status: 'submitted',
             submitted_at: new Date().toISOString()
-        })
-        .eq('token', token)
-        .eq('status', 'awaiting_submission');
+        });
 
-    if (error) {
-        errEl.textContent = 'Submission failed. Please try again or contact your consultant.';
+        if (!result) {
+            errEl.textContent = 'This link may have expired or already been used. Please contact your consultant.';
+            errEl.style.display = 'block';
+            btn.disabled = false;
+            btn.textContent = 'Confirm & Submit';
+            return;
+        }
+
+        show('success-state');
+    } catch (err) {
+        console.error('submit failed', err);
+        errEl.textContent = 'Submission failed: ' + (err.message || 'network error') + '. Please try again.';
         errEl.style.display = 'block';
         btn.disabled = false;
         btn.textContent = 'Confirm & Submit';
-        return;
     }
-
-    show('success-state');
 }
 
-init();
+// Kick off, but swallow any top-level error into a visible message
+init().catch(err => {
+    console.error('Top-level init error:', err);
+    showErrorDetail('Unexpected error: ' + (err.message || String(err)));
+});
 </script>
 </body>
 </html>
