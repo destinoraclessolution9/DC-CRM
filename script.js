@@ -7213,13 +7213,12 @@ function _wireLoginBtn() {
         let intakes = [];
         try {
             intakes = await AppDataStore.query('cps_intake_requests', {
-                status: 'submitted',
-                agent_id: _currentUser?.id || null
+                status: 'submitted'
             });
         } catch (_) {
             try {
                 const all = await AppDataStore.getAll('cps_intake_requests');
-                intakes = (all || []).filter(r => r.status === 'submitted' && r.agent_id === (_currentUser?.id || null));
+                intakes = (all || []).filter(r => r.status === 'submitted');
             } catch (__) { intakes = []; }
         }
 
