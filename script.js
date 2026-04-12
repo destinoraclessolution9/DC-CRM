@@ -9764,6 +9764,27 @@ function _wireLoginBtn() {
                         </div>
                     </div>
                 </div>
+
+                <!-- Section 1.5: Health Product Refills -->
+                <div class="refill-reminders-section" style="margin-top:24px;padding:16px;background:#fff;border-radius:10px;border:1px solid var(--gray-200);">
+                    <h3>💊 HEALTH PRODUCT REFILLS</h3>
+                    <div class="refill-columns" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px;">
+                        <div class="refill-col">
+                            <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+                                <div id="refill-overdue-badge" style="min-width:30px;height:30px;padding:0 10px;border-radius:15px;background:#dc2626;color:white;display:flex;align-items:center;justify-content:center;font-weight:bold;">0</div>
+                                <h4 style="margin:0;">🔴 Overdue</h4>
+                            </div>
+                            <div id="refill-overdue-list"></div>
+                        </div>
+                        <div class="refill-col">
+                            <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+                                <div id="refill-soon-badge" style="min-width:30px;height:30px;padding:0 10px;border-radius:15px;background:#f59e0b;color:white;display:flex;align-items:center;justify-content:center;font-weight:bold;">0</div>
+                                <h4 style="margin:0;">🟡 Due This Week</h4>
+                            </div>
+                            <div id="refill-soon-list"></div>
+                        </div>
+                    </div>
+                </div>
             </div>
         `;
 
@@ -9779,6 +9800,7 @@ function _wireLoginBtn() {
         renderCalendar().catch(e => console.warn('renderCalendar failed:', e));
         renderTodayActivities().catch(e => console.warn('renderTodayActivities failed:', e));
         renderBirthdaySection().catch(e => console.warn('renderBirthdaySection failed:', e));
+        renderRefillReminders().catch(e => console.warn('renderRefillReminders failed:', e));
 
         // Show Special Program progress popup (once per session, for participating agents)
         // Deferred so it doesn't block the calendar paint.
@@ -10242,6 +10264,252 @@ function _wireLoginBtn() {
         todayList.innerHTML = renderBday(todayBdays);
         upcomingList.innerHTML = renderBday(upcomingBdays);
     };
+
+    // ===== HEALTH PRODUCT REFILL REMINDERS =====
+
+    // Probe: does the refill_reminders table exist in Supabase yet?
+    // Returns true if the migration has been run, false otherwise.
+    const checkRefillReminderTable = async () => {
+        try {
+            const sb = window.supabase || window.supabaseClient;
+            if (!sb) return false;
+            const { error } = await sb.from('refill_reminders').select('id').limit(1);
+            if (!error) return true;
+            if (error.message && /relation|does not exist|refill_reminders/i.test(error.message)) return false;
+            return false;
+        } catch (_) { return false; }
+    };
+
+    // Show the one-time migration modal when refill_reminders table is missing.
+    // Modeled on showPhotoUrlsMigrationModal at ~script.js:16940.
+    const showRefillMigrationModal = () => {
+        const migrationPath = 'migrations/add_healthcare_refill_reminders.sql';
+        const instructions = `-- Run this SQL in Supabase SQL Editor to enable Health Product Refill Reminders.
+-- First, enable pg_cron: Supabase Dashboard → Database → Extensions → enable "pg_cron"
+-- Then paste the full contents of ${migrationPath} into the SQL Editor and click Run.`;
+        UI.showModal('⚠️ One-time Setup Required — Health Refill Reminders', `
+            <p style="margin-bottom:12px;">The <strong>Health Product Refill Reminders</strong> feature needs a one-time database migration to be applied.</p>
+            <ol style="font-size:13px;line-height:1.7;margin:0 0 12px 20px;padding:0;">
+                <li>Open your <a href="https://supabase.com/dashboard/project/remuwhxvzkzjtgbzqjaa/database/extensions" target="_blank" style="color:var(--primary);font-weight:600;">Supabase Extensions ↗</a> and enable <code>pg_cron</code>.</li>
+                <li>Open the <a href="https://supabase.com/dashboard/project/remuwhxvzkzjtgbzqjaa/sql/new" target="_blank" style="color:var(--primary);font-weight:600;">SQL Editor ↗</a>.</li>
+                <li>Open the file <code>${migrationPath}</code> from the project folder and paste its contents.</li>
+                <li>Click <strong>Run</strong>.</li>
+                <li>Refresh this page.</li>
+            </ol>
+            <textarea class="form-control" rows="4" style="font-family:monospace;font-size:11px;background:#1e1e1e;color:#d4d4d4;border:none;resize:none;width:100%;">${instructions}</textarea>
+            <p style="margin-top:12px;font-size:12px;color:var(--gray-600);"><i class="fas fa-info-circle"></i> The migration is safe to re-run. Until you apply it, the refill reminder widget stays empty but the rest of the CRM is unaffected.</p>
+        `, [{ label: 'Close', type: 'primary', action: 'UI.hideModal()' }]);
+    };
+
+    // Render the dashboard "Health Product Refills" widget by reading straight
+    // from the refill_reminders table (populated by the pg_cron job + triggered
+    // RPC after purchase save).
+    const renderRefillReminders = async () => {
+        const overdueList = document.getElementById('refill-overdue-list');
+        const soonList = document.getElementById('refill-soon-list');
+        const overdueBadge = document.getElementById('refill-overdue-badge');
+        const soonBadge = document.getElementById('refill-soon-badge');
+        if (!overdueList || !soonList) return;
+
+        // Probe: if migration hasn't run, show a gentle call-to-action
+        const tableOk = await checkRefillReminderTable();
+        if (!tableOk) {
+            const cta = `<div class="text-muted" style="padding:10px;font-size:12px;">
+                <i class="fas fa-database" style="margin-right:4px;"></i>
+                Run the one-time migration (<a href="#" onclick="event.preventDefault();app.showRefillMigrationModal()" style="color:var(--primary);">view instructions</a>) to enable refill reminders.
+            </div>`;
+            overdueList.innerHTML = cta;
+            soonList.innerHTML = '';
+            if (overdueBadge) overdueBadge.textContent = '0';
+            if (soonBadge) soonBadge.textContent = '0';
+            return;
+        }
+
+        // Fetch pending reminders + lookup tables in parallel
+        const [reminders, prospects, customers, allUsers] = await Promise.all([
+            AppDataStore.query('refill_reminders', { status: 'pending' }).catch(() => []),
+            AppDataStore.getAll('prospects'),
+            AppDataStore.getAll('customers'),
+            AppDataStore.getAll('users'),
+        ]);
+
+        const whatsappSent = await AppDataStore.query('refill_reminders', { status: 'whatsapp_sent' }).catch(() => []);
+        const all = [...(reminders || []), ...(whatsappSent || [])];
+
+        const prospectMap = new Map(prospects.map(p => [String(p.id), p]));
+        const customerMap = new Map(customers.map(c => [String(c.id), c]));
+        const userMap = new Map(allUsers.map(u => [String(u.id), u]));
+
+        // RBAC: non-admin agents only see their own customers
+        const isAdminOrLead = _currentUser && (isSystemAdmin(_currentUser) || isMarketingManager(_currentUser) || /manager|team_leader/i.test(_currentUser.role || ''));
+        const visibleReminders = all.filter(r => {
+            const entity = r.prospect_id
+                ? prospectMap.get(String(r.prospect_id))
+                : customerMap.get(String(r.customer_id));
+            if (!entity) return false;
+            if (isAdminOrLead) return true;
+            const agentId = entity.responsible_agent_id || entity.lead_agent_id;
+            return agentId && String(agentId) === String(_currentUser?.id);
+        });
+
+        // Split into overdue vs. due this week
+        const overdue = visibleReminders.filter(r => r.days_until_finish < 0)
+            .sort((a, b) => a.days_until_finish - b.days_until_finish);
+        const soon = visibleReminders.filter(r => r.days_until_finish >= 0 && r.days_until_finish <= 7)
+            .sort((a, b) => a.days_until_finish - b.days_until_finish);
+
+        const renderRow = (r) => {
+            const entity = r.prospect_id
+                ? prospectMap.get(String(r.prospect_id))
+                : customerMap.get(String(r.customer_id));
+            const name = entity?.full_name || 'Unknown contact';
+            const phone = entity?.phone || '';
+            const agent = userMap.get(String(entity?.responsible_agent_id || entity?.lead_agent_id));
+            const daysText = r.days_until_finish < 0
+                ? `<span style="color:#dc2626;font-weight:600;">${Math.abs(r.days_until_finish)}d overdue</span>`
+                : r.days_until_finish === 0
+                    ? `<span style="color:#dc2626;font-weight:600;">Today</span>`
+                    : `<span style="color:#d97706;font-weight:600;">${r.days_until_finish}d left</span>`;
+            const sentBadge = r.status === 'whatsapp_sent'
+                ? `<span style="background:#dcfce7;color:#15803d;padding:2px 6px;border-radius:4px;font-size:10px;margin-left:4px;">✓ SENT</span>`
+                : '';
+            return `
+                <div class="refill-card" style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:8px;padding:10px 12px;margin-bottom:8px;">
+                    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+                        <div style="flex:1;min-width:0;">
+                            <div style="font-weight:600;font-size:13px;">${escapeHtml(name)}${sentBadge}</div>
+                            <div style="font-size:12px;color:var(--gray-600);margin-top:2px;">💊 ${escapeHtml(r.product_name || 'Product')}</div>
+                            <div style="font-size:11px;color:var(--gray-500);margin-top:2px;">Est. finish: ${r.estimated_finish_date} · ${daysText}</div>
+                            <div style="font-size:10px;color:var(--gray-400);margin-top:2px;">Agent: ${agent?.full_name || 'Unassigned'}</div>
+                        </div>
+                    </div>
+                    <div style="display:flex;gap:6px;margin-top:8px;">
+                        <button class="btn btn-sm secondary" style="font-size:11px;flex:1;" onclick="app.sendRefillWhatsApp(${r.id})" ${!phone ? 'disabled title="No phone number"' : ''}><i class="fab fa-whatsapp"></i> WhatsApp</button>
+                        <button class="btn btn-sm secondary" style="font-size:11px;flex:1;" onclick="app.viewRefillProspect(${r.prospect_id || 'null'}, ${r.customer_id || 'null'})"><i class="fas fa-user"></i> View</button>
+                        <button class="btn btn-sm secondary" style="font-size:11px;" onclick="app.dismissRefillReminder(${r.id})" title="Dismiss"><i class="fas fa-check"></i></button>
+                    </div>
+                </div>
+            `;
+        };
+
+        if (overdueBadge) overdueBadge.textContent = overdue.length;
+        if (soonBadge) soonBadge.textContent = soon.length;
+
+        overdueList.innerHTML = overdue.length
+            ? overdue.map(renderRow).join('')
+            : '<div class="text-muted" style="padding:10px;font-size:12px;">No overdue refills.</div>';
+        soonList.innerHTML = soon.length
+            ? soon.map(renderRow).join('')
+            : '<div class="text-muted" style="padding:10px;font-size:12px;">No refills due this week.</div>';
+    };
+
+    // Click "WhatsApp" on a refill card → open wa.me/ with a prefilled template.
+    // Does NOT auto-send; the agent reviews in WhatsApp before tapping send.
+    const sendRefillWhatsApp = async (reminderId) => {
+        const reminder = await AppDataStore.getById('refill_reminders', reminderId);
+        if (!reminder) { UI.toast.error('Reminder not found'); return; }
+
+        const entity = reminder.prospect_id
+            ? await AppDataStore.getById('prospects', reminder.prospect_id)
+            : await AppDataStore.getById('customers', reminder.customer_id);
+        if (!entity) { UI.toast.error('Customer record not found'); return; }
+        if (!entity.phone) { UI.toast.error('No phone number on file'); return; }
+
+        // Seed the template on first use if it doesn't exist yet
+        let template;
+        try {
+            const existing = await AppDataStore.query('whatsapp_templates', { template_name: 'Product Refill Reminder' });
+            template = existing?.[0];
+            if (!template) {
+                await AppDataStore.create('whatsapp_templates', {
+                    template_name: 'Product Refill Reminder',
+                    status: 'APPROVED',
+                    content: "Hi {{name}}, hope you're doing well! Just checking — we noticed your {{product}} will be finishing around {{finish_date}}. Would you like us to prepare your next bottle? 🙏"
+                });
+                template = { content: "Hi {{name}}, hope you're doing well! Just checking — we noticed your {{product}} will be finishing around {{finish_date}}. Would you like us to prepare your next bottle? 🙏" };
+            }
+        } catch (_) {
+            template = { content: "Hi {{name}}, hope you're doing well! Just checking — we noticed your {{product}} will be finishing around {{finish_date}}. Would you like us to prepare your next bottle? 🙏" };
+        }
+
+        const firstName = (entity.full_name || '').split(' ')[0] || entity.full_name || 'there';
+        const body = template.content
+            .replace(/\{\{name\}\}/g, firstName)
+            .replace(/\{\{product\}\}/g, reminder.product_name || 'your healthcare product')
+            .replace(/\{\{finish_date\}\}/g, reminder.estimated_finish_date || 'soon');
+
+        // Normalize phone to international format (strip non-digits, prepend 60 if looks Malaysian)
+        let phone = String(entity.phone).replace(/[^0-9]/g, '');
+        if (phone.startsWith('0')) phone = '60' + phone.slice(1);
+        if (!phone.startsWith('60') && phone.length <= 10) phone = '60' + phone;
+
+        const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(body)}`;
+        window.open(waUrl, '_blank');
+
+        // Mark reminder as whatsapp_sent (stays visible, just with a ✓ badge)
+        try {
+            await AppDataStore.update('refill_reminders', reminderId, { status: 'whatsapp_sent', updated_at: new Date().toISOString() });
+        } catch (_) {}
+        UI.toast.success('WhatsApp opened — review and send');
+        renderRefillReminders().catch(() => {});
+    };
+
+    // Dismiss a refill reminder. Updates BOTH the refill_reminders row AND the
+    // underlying JSON purchase record's reminder_dismissed_at, so the next cron
+    // run won't resurrect it.
+    const dismissRefillReminder = async (reminderId) => {
+        if (!confirm('Dismiss this refill reminder? It will not show again for this purchase.')) return;
+
+        const reminder = await AppDataStore.getById('refill_reminders', reminderId);
+        if (!reminder) { UI.toast.error('Reminder not found'); return; }
+
+        try {
+            // 1. Update refill_reminders row
+            await AppDataStore.update('refill_reminders', reminderId, {
+                status: 'dismissed',
+                updated_at: new Date().toISOString()
+            });
+
+            // 2. Update the underlying purchase record's reminder_dismissed_at
+            const isProspect = !!reminder.prospect_id;
+            const entityTable = isProspect ? 'prospects' : 'customers';
+            const entityId = reminder.prospect_id || reminder.customer_id;
+            const entity = await AppDataStore.getById(entityTable, entityId);
+            if (entity && entity.closing_record) {
+                const cr = { ...entity.closing_record };
+                const records = Array.isArray(cr.formula_healthcare_purchases)
+                    ? [...cr.formula_healthcare_purchases]
+                    : [];
+                if (records[reminder.purchase_index]) {
+                    records[reminder.purchase_index] = {
+                        ...records[reminder.purchase_index],
+                        reminder_dismissed_at: new Date().toISOString()
+                    };
+                    cr.formula_healthcare_purchases = records;
+                    await AppDataStore.update(entityTable, entityId, { closing_record: cr });
+                }
+            }
+
+            UI.toast.success('Reminder dismissed');
+            renderRefillReminders().catch(() => {});
+        } catch (err) {
+            console.warn('dismissRefillReminder failed:', err);
+            UI.toast.error('Failed to dismiss: ' + (err.message || 'unknown error'));
+        }
+    };
+
+    // Navigate to the prospect or customer profile linked to a refill reminder.
+    const viewRefillProspect = async (prospectId, customerId) => {
+        if (prospectId) {
+            await navigateTo('prospects');
+            setTimeout(() => { try { showProspectProfile(prospectId); } catch(_) {} }, 200);
+        } else if (customerId) {
+            await navigateTo('customers');
+            setTimeout(() => { try { showCustomerProfile(customerId); } catch(_) {} }, 200);
+        }
+    };
+
+    // ===== END HEALTH PRODUCT REFILL REMINDERS =====
 
 
     // --- Phase 7 Navigation & Filter Functions ---
@@ -16896,11 +17164,43 @@ function _wireLoginBtn() {
                 const src = prospect.closing_record?.[cfg.key];
                 records = Array.isArray(src) ? src : JSON.parse(src || '[]');
             } catch(_) {}
+
+            // ── Formula Healthcare: include refill reminder columns + product dropdown ──
+            // Reads from the 'formula' Marketing List table (Marketing → Lists → Formula).
+            // Only items with capsules_per_bottle + daily_dosage configured are eligible
+            // for refill reminders.
+            const isFormula = tab === 'formula';
+            let hcProducts = [];
+            if (isFormula) {
+                try {
+                    hcProducts = ((await AppDataStore.getAll('formula')) || [])
+                        .filter(f => f.is_active !== false && f.capsules_per_bottle && f.daily_dosage);
+                } catch(_) { hcProducts = []; }
+            }
+
+            const fmtFinish = (r) => {
+                if (!r.estimated_finish_date) return '-';
+                if (r.reminder_dismissed_at) return `<span style="color:var(--gray-400);text-decoration:line-through;">${r.estimated_finish_date}</span>`;
+                const today = new Date(); today.setHours(0,0,0,0);
+                const finish = new Date(r.estimated_finish_date);
+                const days = Math.round((finish - today) / 86400000);
+                let color = 'var(--gray-600)';
+                let suffix = '';
+                if (days < 0) { color = '#dc2626'; suffix = ` <span style="font-size:10px;">(${Math.abs(days)}d overdue)</span>`; }
+                else if (days <= 7) { color = '#d97706'; suffix = ` <span style="font-size:10px;">(${days}d left)</span>`; }
+                else { suffix = ` <span style="font-size:10px;color:var(--gray-400);">(${days}d left)</span>`; }
+                return `<span style="color:${color};">${r.estimated_finish_date}${suffix}</span>`;
+            };
+
             const rowsHtml = records.length
                 ? records.map((r, i) => `
                     <tr>
-                        <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;">${escapeHtml(r.product || '')}</td>
+                        <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;">
+                            ${escapeHtml(r.product || '')}
+                            ${isFormula && r.quantity ? `<div style="font-size:10px;color:var(--gray-400);">qty ${r.quantity}${r.daily_dosage_override ? ' · '+r.daily_dosage_override+'/day' : ''}</div>` : ''}
+                        </td>
                         <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;color:var(--gray-600);">${escapeHtml(r.purchase_date || '-')}</td>
+                        ${isFormula ? `<td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;font-size:12px;">${fmtFinish(r)}</td>` : ''}
                         <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;text-align:right;">${r.amount ? 'RM ' + parseFloat(r.amount).toLocaleString() : '-'}</td>
                         <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;color:var(--gray-500);">${escapeHtml(r.notes || '-')}</td>
                         <td style="padding:4px 8px;border-bottom:1px solid #f3f4f6;text-align:center;">
@@ -16914,19 +17214,36 @@ function _wireLoginBtn() {
                             <button class="btn-icon" style="color:var(--error);" onclick="event.stopPropagation();app.deleteProductPurchaseRecord(${pid},'${tab}',${i})" title="Remove"><i class="fas fa-times"></i></button>
                         </td>
                     </tr>`).join('')
-                : `<tr><td colspan="6" style="padding:10px;text-align:center;color:var(--gray-400);font-size:12px;font-style:italic;">No purchase records yet</td></tr>`;
+                : `<tr><td colspan="${isFormula ? 7 : 6}" style="padding:10px;text-align:center;color:var(--gray-400);font-size:12px;font-style:italic;">No purchase records yet</td></tr>`;
             const totalAmount = records.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
+
+            // Product input: dropdown for Formula Healthcare (if items configured), text field otherwise
+            const productInputHtml = isFormula && hcProducts.length > 0
+                ? `<select id="${tab}-product-${pid}" class="form-control" style="flex:2;min-width:160px;height:32px;font-size:12px;">
+                        <option value="">-- Select Formula product --</option>
+                        ${hcProducts.map(p => `<option value="${p.id}" data-caps="${p.capsules_per_bottle || ''}" data-dose="${p.daily_dosage || ''}" data-name="${escapeHtml(p.name)}">${escapeHtml(p.name)} (${p.capsules_per_bottle || '?'} caps · ${p.daily_dosage || '?'}/day)</option>`).join('')}
+                    </select>`
+                : `<input id="${tab}-product-${pid}" class="form-control" style="flex:2;min-width:140px;height:32px;font-size:12px;" placeholder="Product name">`;
+
+            const emptyProductsBanner = isFormula && hcProducts.length === 0
+                ? `<div style="padding:8px 10px;background:#fef3c7;border-bottom:1px solid #fde68a;font-size:12px;color:#92400e;">
+                        <i class="fas fa-info-circle"></i> No Formula products configured yet. Go to <strong>Marketing → Lists → Formula</strong> → Add New Formula → fill in <strong>Capsules per bottle</strong> and <strong>Daily dosage</strong> to enable refill reminders.
+                    </div>`
+                : '';
+
             container.innerHTML = `
                 <div style="margin-bottom:12px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
                     <div style="background:${cfg.headerBg};padding:8px 12px;font-weight:600;font-size:13px;border-bottom:1px solid #e5e7eb;color:${cfg.headerColor};display:flex;justify-content:space-between;align-items:center;">
                         <span>${cfg.title}</span>
                         <span style="font-size:12px;">Total: RM ${totalAmount.toLocaleString()}</span>
                     </div>
+                    ${emptyProductsBanner}
                     <div style="overflow-x:auto;">
-                    <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:560px;">
+                    <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:${isFormula ? 680 : 560}px;">
                         <thead><tr style="background:#fafafa;">
                             <th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e5e7eb;font-weight:600;">Product</th>
                             <th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e5e7eb;font-weight:600;">Date</th>
+                            ${isFormula ? `<th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e5e7eb;font-weight:600;">Est. Finish</th>` : ''}
                             <th style="padding:6px 10px;text-align:right;border-bottom:1px solid #e5e7eb;font-weight:600;">Amount</th>
                             <th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e5e7eb;font-weight:600;">Notes</th>
                             <th style="padding:4px;width:36px;border-bottom:1px solid #e5e7eb;text-align:center;font-weight:600;font-size:11px;">File</th>
@@ -16936,9 +17253,11 @@ function _wireLoginBtn() {
                     </table>
                     </div>
                     <div style="padding:8px 10px;border-top:1px solid #e5e7eb;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-                        <input id="${tab}-product-${pid}" class="form-control" style="flex:2;min-width:140px;height:32px;font-size:12px;" placeholder="Product name">
-                        <input id="${tab}-date-${pid}" type="date" class="form-control" style="flex:1;min-width:120px;height:32px;font-size:12px;">
+                        ${productInputHtml}
+                        ${isFormula ? `<input id="${tab}-qty-${pid}" type="number" min="1" step="1" class="form-control" style="width:70px;height:32px;font-size:12px;" placeholder="Qty" value="1">` : ''}
+                        <input id="${tab}-date-${pid}" type="date" class="form-control" style="flex:1;min-width:120px;height:32px;font-size:12px;" value="${new Date().toISOString().slice(0,10)}">
                         <input id="${tab}-amount-${pid}" type="number" step="0.01" class="form-control" style="flex:1;min-width:100px;height:32px;font-size:12px;" placeholder="Amount (RM)">
+                        ${isFormula ? `<input id="${tab}-dosage-${pid}" type="number" step="0.5" class="form-control" style="width:100px;height:32px;font-size:12px;" placeholder="Dosage/day" title="Override default dosage for this customer">` : ''}
                         <input id="${tab}-notes-${pid}" class="form-control" style="flex:2;min-width:140px;height:32px;font-size:12px;" placeholder="Notes (optional)">
                         <label for="${tab}-file-${pid}" title="Attach a file" style="cursor:pointer;height:32px;padding:0 10px;display:flex;align-items:center;border:1px solid #e5e7eb;border-radius:6px;background:#f9fafb;color:var(--gray-500);">
                             <i class="fas fa-paperclip"></i>
@@ -17300,26 +17619,127 @@ NOTIFY pgrst, 'reload schema';`;
         if (bodyEl) await switchProspectTab(type, prospectId, null, bodyEl);
     };
 
+    // Compute the estimated finish date for a Formula Healthcare purchase.
+    // Source-of-truth fields come from the 'formula' Marketing List table:
+    //   - capsules_per_bottle (INTEGER)
+    //   - daily_dosage (NUMERIC, default per product)
+    //   - reminder_buffer_percent (NUMERIC, defaults to 0.10 = 10%)
+    // Returns null if the formula item is missing capsule/dosage config.
+    // Uses integer arithmetic (percentage x100) to avoid IEEE754 rounding
+    // errors — e.g. 90 * 1.1 yields 99.00000000000001 in FP, which would
+    // ceil to 100 instead of 99.
+    const _computeFinishDate = (product, quantity, dosageOverride) => {
+        if (!product || !product.capsules_per_bottle) return null;
+        const dosage = parseFloat(dosageOverride) || parseFloat(product.daily_dosage) || 0;
+        if (dosage <= 0) return null;
+        const bufferRaw = parseFloat(product.reminder_buffer_percent);
+        const bufferPct = Math.round((Number.isFinite(bufferRaw) ? bufferRaw : 0.10) * 100); // e.g. 10 for 10%
+        const totalCapsules = (parseInt(quantity) || 1) * parseInt(product.capsules_per_bottle);
+        // days = ceil(totalCapsules * (100 + bufferPct) / (dosage * 100))
+        const days = Math.ceil((totalCapsules * (100 + bufferPct)) / (dosage * 100));
+        const finish = new Date(Date.now() + days * 86400000);
+        return finish.toISOString().slice(0, 10);
+    };
+
+    // Fire-and-forget: ask Supabase to recompute refill_reminders immediately so
+    // the dashboard widget reflects the new purchase without waiting for cron.
+    const _triggerRefillRpc = async () => {
+        try {
+            const sb = window.supabase || window.supabaseClient;
+            if (sb && sb.rpc) {
+                await sb.rpc('compute_refill_reminders');
+            }
+        } catch (_) { /* silent — widget will still pick up on next cron run */ }
+    };
+
     const addProductPurchaseRow = async (prospectId, type) => {
         const productInput = document.getElementById(`${type}-product-${prospectId}`);
         const dateInput = document.getElementById(`${type}-date-${prospectId}`);
         const amountInput = document.getElementById(`${type}-amount-${prospectId}`);
         const notesInput = document.getElementById(`${type}-notes-${prospectId}`);
         const fileInput = document.getElementById(`${type}-file-${prospectId}`);
-        const product = productInput?.value?.trim();
-        if (!product) { UI.toast.error('Please enter a product name'); return; }
+        const qtyInput = document.getElementById(`${type}-qty-${prospectId}`);
+        const dosageInput = document.getElementById(`${type}-dosage-${prospectId}`);
+
+        // For Formula Healthcare with a dropdown, productInput is a <select> whose
+        // value is the product ID. Extract both the ID (to link the record to the
+        // products table) and the display name (to preserve readability even if the
+        // product is later deleted).
+        const isFormula = type === 'formula';
+        let productId = null;
+        let productName = '';
+        if (isFormula && productInput?.tagName === 'SELECT') {
+            const selOpt = productInput.options[productInput.selectedIndex];
+            if (!productInput.value) { UI.toast.error('Please select a healthcare product'); return; }
+            productId = parseInt(productInput.value) || null;
+            productName = selOpt?.dataset?.name || selOpt?.textContent?.trim() || '';
+        } else {
+            productName = productInput?.value?.trim() || '';
+            if (!productName) { UI.toast.error('Please enter a product name'); return; }
+        }
+
         const purchase_date = dateInput?.value || '';
         const amount = amountInput?.value || '';
         const notes = notesInput?.value?.trim() || '';
         const file = fileInput?.files[0] || null;
+        const quantity = isFormula ? (parseInt(qtyInput?.value) || 1) : null;
+        const dosageOverride = isFormula && dosageInput?.value ? parseFloat(dosageInput.value) : null;
+
+        // Fetch Formula master from the 'formula' Marketing List table for finish-date calc
+        let productRecord = null;
+        if (isFormula && productId) {
+            try { productRecord = await AppDataStore.getById('formula', productId); } catch(_) {}
+        }
+
+        const estimated_finish_date = isFormula
+            ? _computeFinishDate(productRecord, quantity, dosageOverride)
+            : null;
 
         const saveRow = async (attachment_data, attachment_name) => {
             const prospect = await AppDataStore.getById('prospects', prospectId);
             if (!prospect) return;
             const records = _readProductPurchases(prospect, type);
-            records.push({ product, purchase_date, amount, notes, attachment_data: attachment_data || null, attachment_name: attachment_name || null });
+
+            // For Formula Healthcare: when adding a new purchase for the same product,
+            // auto-dismiss any still-active previous records for that product. This matches
+            // the v1 "finish date moves forward each time new stock is added" behavior.
+            if (isFormula && productId) {
+                const now = new Date().toISOString();
+                records.forEach(r => {
+                    if (r.product_id === productId && !r.reminder_dismissed_at && r.estimated_finish_date) {
+                        r.reminder_dismissed_at = now;
+                        r.superseded_by_new_purchase = true;
+                    }
+                });
+            }
+
+            const newRecord = {
+                product: productName,
+                purchase_date,
+                amount,
+                notes,
+                attachment_data: attachment_data || null,
+                attachment_name: attachment_name || null
+            };
+            if (isFormula) {
+                newRecord.product_id = productId;
+                newRecord.quantity = quantity;
+                newRecord.daily_dosage_override = dosageOverride;
+                newRecord.estimated_finish_date = estimated_finish_date;
+                newRecord.reminder_dismissed_at = null;
+            }
+            records.push(newRecord);
             await _writeProductPurchases(prospectId, prospect, type, records);
-            UI.toast.success('Record added');
+
+            // Ask Supabase to recompute refill_reminders right away
+            if (isFormula && estimated_finish_date) {
+                _triggerRefillRpc();
+            }
+
+            const finishMsg = estimated_finish_date
+                ? ` (est. finish: ${estimated_finish_date})`
+                : '';
+            UI.toast.success('Record added' + finishMsg);
             await _refreshProductPurchaseTab(prospectId, type);
         };
 
@@ -23695,6 +24115,7 @@ const exportKPIReport = async (format) => {
                             <th>Category</th>
                             <th>Functions</th>
                             <th>Pills/Bottles</th>
+                            <th>Dosage</th>
                             <th>Price (RM)</th>
                             <th>Lead Time</th>
                             <th>Status</th>
@@ -23702,12 +24123,17 @@ const exportKPIReport = async (format) => {
                         </tr>
                     </thead>
                     <tbody>
-                        ${data.length === 0 ? '<tr><td colspan="8" style="text-align:center; color: var(--gray-400); padding: 32px;">No Formula items added yet.</td></tr>' : data.map(item => `
+                        ${data.length === 0 ? '<tr><td colspan="9" style="text-align:center; color: var(--gray-400); padding: 32px;">No Formula items added yet.</td></tr>' : data.map(item => {
+                            const dosageHtml = (item.capsules_per_bottle && item.daily_dosage)
+                                ? `<span title="Capsules per bottle · daily dosage · reminder lead"><strong>${item.capsules_per_bottle}</strong> caps · <strong>${item.daily_dosage}</strong>/day<br><small class="text-muted">${item.reminder_lead_days ?? 3}d lead · ${((item.reminder_buffer_percent ?? 0.10) * 100).toFixed(0)}% buffer</small></span>`
+                                : '<span class="text-muted" style="font-size:11px;">Not configured</span>';
+                            return `
                             <tr style="${!item.is_active ? 'opacity: 0.6; background: #f9fafb;' : ''}">
                                 <td><strong>${item.name}</strong></td>
                                 <td>${item.category || '-'}</td>
                                 <td>${item.functions || '-'}</td>
                                 <td>${item.pills_bottles || '-'}</td>
+                                <td>${dosageHtml}</td>
                                 <td>${item.price || 0}</td>
                                 <td>${item.delivery_lead_time || '-'}</td>
                                 <td>
@@ -23720,7 +24146,7 @@ const exportKPIReport = async (format) => {
                                     <button class="btn-icon text-danger" onclick="app.deleteMarketingListItem('${item.id}')" title="Delete"><i class="fas fa-trash-alt"></i></button>
                                 </td>
                             </tr>
-                        `).join('')}
+                        `;}).join('')}
                     </tbody>
                 </table>
             `;
@@ -23788,10 +24214,19 @@ const exportKPIReport = async (format) => {
                 <div class="form-group"><label>Name*</label><input type="text" id="mkt-name" class="form-control"></div>
                 <div class="form-group"><label>Category</label><input type="text" id="mkt-category" class="form-control"></div>
                 <div class="form-group"><label>Functions</label><textarea id="mkt-functions" class="form-control" placeholder="Describe functions..."></textarea></div>
-                <div class="form-group"><label>Pills/Bottles</label><input type="text" id="mkt-pills-bottles" class="form-control" placeholder="e.g. 60 pills, 1 bottle"></div>
+                <div class="form-group"><label>Pills/Bottles (description)</label><input type="text" id="mkt-pills-bottles" class="form-control" placeholder="e.g. 60 pills, 1 bottle"></div>
+                <div class="form-row">
+                    <div class="form-group half"><label>Capsules per bottle*</label><input type="number" min="1" step="1" id="mkt-capsules" class="form-control" placeholder="e.g. 60"></div>
+                    <div class="form-group half"><label>Daily dosage (caps/day)*</label><input type="number" min="0.5" step="0.5" id="mkt-dosage" class="form-control" placeholder="e.g. 2"></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group half"><label>Reminder lead time (days)</label><input type="number" min="0" step="1" id="mkt-lead-days" class="form-control" value="3"></div>
+                    <div class="form-group half"><label>Safety buffer (%)</label><input type="number" min="0" step="1" id="mkt-buffer-pct" class="form-control" value="10"></div>
+                </div>
                 <div class="form-group"><label>Price (RM)</label><input type="number" id="mkt-price" class="form-control" value="0"></div>
                 <div class="form-group"><label>Delivery Lead Time</label><input type="text" id="mkt-lead" class="form-control" placeholder="e.g. 3-5 days"></div>
                 <div class="form-group"><label><input type="checkbox" id="mkt-active" checked> Is Active</label></div>
+                <p style="font-size:11px;color:#15803d;margin:8px 0 0;"><i class="fas fa-info-circle"></i> Capsules & dosage power the auto refill reminder on the dashboard. Example: 60 caps ÷ 2/day × 1.10 buffer = 33 day supply. Reminder fires 3 days before finish date.</p>
 `;
         } else {
             content = `
@@ -23873,10 +24308,19 @@ const exportKPIReport = async (format) => {
                 <div class="form-group"><label>Name*</label><input type="text" id="mkt-name" class="form-control" value="${item.name || ''}"></div>
                 <div class="form-group"><label>Category</label><input type="text" id="mkt-category" class="form-control" value="${item.category || ''}"></div>
                 <div class="form-group"><label>Functions</label><textarea id="mkt-functions" class="form-control" placeholder="Describe functions...">${item.functions || ''}</textarea></div>
-                <div class="form-group"><label>Pills/Bottles</label><input type="text" id="mkt-pills-bottles" class="form-control" value="${item.pills_bottles || ''}" placeholder="e.g. 60 pills, 1 bottle"></div>
+                <div class="form-group"><label>Pills/Bottles (description)</label><input type="text" id="mkt-pills-bottles" class="form-control" value="${item.pills_bottles || ''}" placeholder="e.g. 60 pills, 1 bottle"></div>
+                <div class="form-row">
+                    <div class="form-group half"><label>Capsules per bottle*</label><input type="number" min="1" step="1" id="mkt-capsules" class="form-control" value="${item.capsules_per_bottle || ''}" placeholder="e.g. 60"></div>
+                    <div class="form-group half"><label>Daily dosage (caps/day)*</label><input type="number" min="0.5" step="0.5" id="mkt-dosage" class="form-control" value="${item.daily_dosage || ''}" placeholder="e.g. 2"></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group half"><label>Reminder lead time (days)</label><input type="number" min="0" step="1" id="mkt-lead-days" class="form-control" value="${item.reminder_lead_days ?? 3}"></div>
+                    <div class="form-group half"><label>Safety buffer (%)</label><input type="number" min="0" step="1" id="mkt-buffer-pct" class="form-control" value="${((item.reminder_buffer_percent ?? 0.10) * 100).toFixed(0)}"></div>
+                </div>
                 <div class="form-group"><label>Price (RM)</label><input type="number" id="mkt-price" class="form-control" value="${item.price || 0}"></div>
                 <div class="form-group"><label>Delivery Lead Time</label><input type="text" id="mkt-lead" class="form-control" value="${item.delivery_lead_time || ''}"></div>
                 <div class="form-group"><label><input type="checkbox" id="mkt-active" ${item.is_active ? 'checked' : ''}> Is Active</label></div>
+                <p style="font-size:11px;color:#15803d;margin:8px 0 0;"><i class="fas fa-info-circle"></i> Capsules & dosage power the auto refill reminder on the dashboard.</p>
             `;
         } else {
             content = `
@@ -23938,7 +24382,18 @@ const exportKPIReport = async (format) => {
             data.pills_bottles = document.getElementById('mkt-pills-bottles').value;
             data.price = parseFloat(document.getElementById('mkt-price').value) || 0;
             data.delivery_lead_time = document.getElementById('mkt-lead').value;
+            // Healthcare refill reminder fields
+            const capsulesVal = parseInt(document.getElementById('mkt-capsules')?.value);
+            const dosageVal = parseFloat(document.getElementById('mkt-dosage')?.value);
+            const leadDaysVal = parseInt(document.getElementById('mkt-lead-days')?.value);
+            const bufferPctVal = parseFloat(document.getElementById('mkt-buffer-pct')?.value);
+            data.capsules_per_bottle = Number.isFinite(capsulesVal) && capsulesVal > 0 ? capsulesVal : null;
+            data.daily_dosage = Number.isFinite(dosageVal) && dosageVal > 0 ? dosageVal : null;
+            data.reminder_lead_days = Number.isFinite(leadDaysVal) ? leadDaysVal : 3;
+            data.reminder_buffer_percent = Number.isFinite(bufferPctVal) ? (bufferPctVal / 100) : 0.10;
             if (!data.name) return UI.toast.error('Name is required');
+            if (!data.capsules_per_bottle) return UI.toast.error('Capsules per bottle is required (for refill reminders)');
+            if (!data.daily_dosage) return UI.toast.error('Daily dosage is required (for refill reminders)');
         } else if (type === 'events') {
             data.event_title = document.getElementById('mkt-title').value.trim();
             data.ticket_price = parseFloat(document.getElementById('mkt-price').value) || 0;
@@ -24289,6 +24744,7 @@ const exportKPIReport = async (format) => {
                 <label>Category</label>
                 <input type="text" id="prod-category" class="form-control" value="${p.category || ''}" placeholder="e.g. Ring, Service, Consultation">
             </div>
+            <p style="font-size:11px;color:var(--gray-500);margin:8px 0 0;"><i class="fas fa-info-circle"></i> Formula Healthcare products (with refill reminders) are managed in <strong>Marketing → Lists → Formula</strong>, not here.</p>
 `;
         UI.showModal(id ? 'Edit Product' : 'Add Product', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
@@ -31565,6 +32021,14 @@ const initImportDemoData = async () => {
         sendPlanReminder,
         showActionPlanHistory,
         initActionPlanReminder,
+
+        // Formula Healthcare Refill Reminders
+        renderRefillReminders,
+        checkRefillReminderTable,
+        showRefillMigrationModal,
+        sendRefillWhatsApp,
+        dismissRefillReminder,
+        viewRefillProspect,
 
     };
 

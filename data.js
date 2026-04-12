@@ -48,7 +48,11 @@ class DataStore {
             // Special Program Fighting (incentive programs for selected agents)
             'special_programs', 'special_program_participants',
             // v6 Pipeline Scoring Rules (editable config + history)
-            'pipeline_config', 'pipeline_config_history'
+            'pipeline_config', 'pipeline_config_history',
+            // Marketing list sub-catalogs
+            'bujishu', 'formula',
+            // Formula Healthcare refill reminder system
+            'refill_reminders'
         ];
         this.initialized = false;
         this._events = {};
