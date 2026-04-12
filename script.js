@@ -13339,7 +13339,7 @@ function _wireLoginBtn() {
         const filtered = users.filter(u => {
             if (u.status === 'inactive') return false;
             const lvl = _getUserLevel(u);
-            return lvl >= 1 && lvl <= 12; // admin → agent; customers (13) and referrers (14) excluded
+            return lvl >= 3 && lvl <= 12; // agents/consultants only; admins (1-2), customers (13), referrers (14) excluded
         });
         // Dedupe by email (fallback: normalized name) — keep the most senior (lowest level) row,
         // then the oldest created_at. Defensive net against stray duplicate rows in the users table.
@@ -13417,7 +13417,7 @@ function _wireLoginBtn() {
 
         // Guard against duplicate (same agent already added to this event/date)
         try {
-            const existing = await AppDataStore.query('event_attendees', { event_id: eventId });
+            const existing = await AppDataStore.query('event_attendees', { activity_id: activityId });
             const dup = (existing || []).find(a =>
                 a.attendee_type === 'agent'
                 && String(a.entity_id || a.attendee_id) === String(s.id)
