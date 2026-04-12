@@ -21717,9 +21717,12 @@ const deactivateAgent = async (agentId) => {
             for (const opp of _oppPotentials) {
                 if (!catNames.has(opp)) opts += `<option value="${escapeHtml(opp)}" ${opp === _currentTarget ? 'selected' : ''}>${escapeHtml(opp)}</option>`;
             }
+            const _detailVal = rec.target_product_detail ?? entry.latestOppPotential ?? entry.category?.products ?? '';
             productColumnHtml = `<select onchange="event.stopPropagation();app.changeFocusTargetProduct(${rec.id}, this.value)"
                 style="width:100%;border:1px solid #DBEAFE;border-radius:6px;padding:6px 8px;font-size:12px;color:#1E40AF;font-weight:500;background:white;cursor:pointer;">${opts}</select>
-                <div style="font-size:11px;color:#9CA3AF;margin-top:2px;">${escapeHtml(entry.latestOppPotential || entry.category?.products || '')}</div>`;
+                <input type="text" value="${escapeHtml(_detailVal)}" placeholder="Remarks / details..."
+                    onclick="event.stopPropagation()" onblur="app.changeFocusTargetDetail(${rec.id}, this.value)"
+                    style="width:100%;border:1px solid #E5E7EB;border-radius:4px;padding:3px 6px;font-size:11px;color:#6B7280;margin-top:2px;background:#FAFAFA;">`;
         } else {
             productColumnHtml = `<div style="font-weight:500;color:#1E40AF;">${escapeHtml(_currentTarget || entry.category?.name || 'Unknown')}</div>
                 <div style="font-size:11px;color:#9CA3AF;">${escapeHtml(entry.latestOppPotential || entry.category?.products || '')}</div>`;
@@ -23234,6 +23237,10 @@ const deactivateAgent = async (agentId) => {
     const changeFocusTargetProduct = async (listItemId, product) => {
         await AppDataStore.update('my_potential_list', listItemId, { target_product: product });
         UI.toast.success('Target product updated');
+    };
+
+    const changeFocusTargetDetail = async (listItemId, detail) => {
+        await AppDataStore.update('my_potential_list', listItemId, { target_product_detail: detail });
     };
 
     const toggleAgentFocusSection = (header) => {
@@ -32572,6 +32579,7 @@ const initImportDemoData = async () => {
         filterExpiredSearch,
         reAddFromArchive,
         changeFocusTargetProduct,
+        changeFocusTargetDetail,
         toggleAgentFocusSection,
         openBoostModal,
         submitBoost,
