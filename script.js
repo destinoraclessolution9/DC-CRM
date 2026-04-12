@@ -13814,6 +13814,9 @@ function _wireLoginBtn() {
 
         UI.toast.success('Activity saved!');
 
+        // === Push notification fan-out (non-blocking, best-effort) ===
+        _notifyActivityCreated(savedActivity || activity).catch(() => {});
+
         // === Auto Scoring: Award points based on activity type ===
         try {
             await applyActivityScoring(activity);
@@ -13872,6 +13875,61 @@ function _wireLoginBtn() {
     };
 
     const saveAndAddAnother = async () => await saveActivity(true);
+
+    // ========== PUSH NOTIFICATIONS: notify subscribed users when an activity is created ==========
+    // Fire-and-forget: never blocks the save flow, never throws.
+    // Targets = lead_agent + co_agents + admins/team leads, minus the creator themselves.
+    const _notifyActivityCreated = async (savedActivity) => {
+        try {
+            if (!savedActivity || !window.PushNotif) return;
+            const targets = new Set();
+            if (savedActivity.lead_agent_id != null) targets.add(String(savedActivity.lead_agent_id));
+            if (Array.isArray(savedActivity.co_agents)) {
+                savedActivity.co_agents.forEach(id => id != null && targets.add(String(id)));
+            }
+            // Include admins / team leads so management sees new activity across the org.
+            try {
+                const allUsers = await AppDataStore.getAll('users');
+                (allUsers || []).forEach(u => {
+                    const role = (u.role || '').toString().toLowerCase();
+                    const lvlMatch = role.match(/level\s*(\d+)/);
+                    const lvl = lvlMatch ? parseInt(lvlMatch[1]) : 99;
+                    const isLead =
+                        lvl <= 4 ||
+                        role === 'team_leader' ||
+                        role === 'admin' ||
+                        role === 'super_admin' ||
+                        role === 'marketing_manager' ||
+                        role === 'manager';
+                    if (isLead && u.id != null) targets.add(String(u.id));
+                });
+            } catch (e) { /* admin broadcast is best-effort */ }
+
+            // Don't self-notify the creator — they just did it.
+            if (_currentUser && _currentUser.id != null) targets.delete(String(_currentUser.id));
+            if (targets.size === 0) return;
+
+            const whoLabel = _currentUser
+                ? (_currentUser.full_name || _currentUser.name || _currentUser.email || 'Someone')
+                : 'Someone';
+            const typeLabel = savedActivity.activity_type || savedActivity.type || 'Activity';
+            const titleLabel = savedActivity.activity_title || savedActivity.title || savedActivity.subject || '';
+            const dateLabel = savedActivity.activity_date || savedActivity.date || '';
+
+            await window.PushNotif.sendActivityPush(
+                savedActivity,
+                Array.from(targets),
+                {
+                    title: `New ${typeLabel} scheduled`,
+                    body: `${whoLabel}: ${titleLabel}${dateLabel ? ` (${dateLabel})` : ''}`,
+                    url: `./index.html#calendar`,
+                }
+            );
+        } catch (e) {
+            // Never let notification errors affect the activity save flow.
+            console.warn('[PushNotif] notifyActivityCreated failed:', e);
+        }
+    };
 
     // ========== PAST RECORD ENTRY (for old customers with historical meet ups) ==========
     const openPastRecordModal = async (prospectId) => {
@@ -13964,14 +14022,18 @@ function _wireLoginBtn() {
             consultants: []
         };
 
+        let savedPastRecord;
         try {
-            await AppDataStore.create('activities', activity);
+            savedPastRecord = await AppDataStore.create('activities', activity);
         } catch (err) {
             UI.toast.error('Failed to save past record: ' + (err.message || 'Unknown error'));
             return;
         }
 
         UI.toast.success('Past record saved.');
+
+        // === Push notification fan-out (non-blocking, best-effort) ===
+        _notifyActivityCreated(savedPastRecord || activity).catch(() => {});
         UI.hideModal();
 
         const bodyEl = document.getElementById(`acc-body-activity-${prospectId}`);
@@ -19221,7 +19283,125 @@ const renderCurrentAssignments = async (agentId) => {
                     </button>
                 </div>
             </div>
+
+            <!-- ========== Push Notifications ========== -->
+            <div class="performance-card" style="margin-top:24px;">
+                <h4><i class="fas fa-bell"></i> Phone Push Notifications</h4>
+                <p style="color:var(--gray-500); font-size:13px; margin:8px 0 12px;">
+                    Get a notification on your phone whenever a new calendar activity is added.
+                    To receive notifications on iPhone or Android, open this site in your mobile browser,
+                    tap <strong>Share → Add to Home Screen</strong>, then enable notifications below.
+                    <span id="notif-ios-hint" style="display:block; margin-top:4px; color:var(--warning);">
+                        iOS 16.4 or newer is required.
+                    </span>
+                </p>
+                <div id="notif-status-box" style="background:var(--gray-100); border-radius:8px; padding:12px; margin-bottom:12px;">
+                    <div class="stat-row"><span class="stat-label">Browser support:</span><span class="stat-value" id="notif-support">—</span></div>
+                    <div class="stat-row"><span class="stat-label">Permission:</span><span class="stat-value" id="notif-permission">—</span></div>
+                    <div class="stat-row"><span class="stat-label">Subscribed:</span><span class="stat-value" id="notif-subscribed">—</span></div>
+                </div>
+                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                    <button id="notif-enable-btn" class="btn primary" onclick="(async()=>{ await app.enablePushNotifications(); })()">
+                        <i class="fas fa-bell"></i> Enable Notifications
+                    </button>
+                    <button id="notif-disable-btn" class="btn secondary" onclick="(async()=>{ await app.disablePushNotifications(); })()" style="display:none;">
+                        <i class="fas fa-bell-slash"></i> Disable
+                    </button>
+                    <button class="btn secondary" onclick="(async()=>{ await app.sendTestPushNotification(); })()">
+                        <i class="fas fa-paper-plane"></i> Send Test
+                    </button>
+                </div>
+            </div>
         </div>`;
+
+        // Populate status asynchronously
+        setTimeout(() => refreshPushNotificationStatus(), 50);
+    };
+
+    // ========== Push notification settings handlers ==========
+    const refreshPushNotificationStatus = async () => {
+        const supEl  = document.getElementById('notif-support');
+        const permEl = document.getElementById('notif-permission');
+        const subEl  = document.getElementById('notif-subscribed');
+        const enableBtn  = document.getElementById('notif-enable-btn');
+        const disableBtn = document.getElementById('notif-disable-btn');
+        if (!supEl || !permEl || !subEl) return;
+
+        if (!window.PushNotif) {
+            supEl.textContent = 'Not loaded';
+            permEl.textContent = '—';
+            subEl.textContent = '—';
+            return;
+        }
+        try {
+            const s = await window.PushNotif.getStatus();
+            supEl.textContent = s.supported ? 'Yes' : 'No (use a modern browser)';
+            permEl.textContent = s.permission || 'default';
+            subEl.textContent = s.subscribed ? 'Yes' : 'No';
+            if (enableBtn && disableBtn) {
+                enableBtn.style.display = s.subscribed ? 'none' : '';
+                disableBtn.style.display = s.subscribed ? '' : 'none';
+            }
+        } catch (e) {
+            supEl.textContent = 'Error: ' + (e.message || e);
+        }
+    };
+
+    const enablePushNotifications = async () => {
+        if (!window.PushNotif) { UI.toast.error('Push module not loaded'); return; }
+        try {
+            await window.PushNotif.subscribe();
+            UI.toast.success('Notifications enabled on this device');
+            await refreshPushNotificationStatus();
+        } catch (e) {
+            const msg = (e && e.message) || String(e);
+            if (msg === 'permission_denied') {
+                UI.toast.error('Permission denied — enable notifications for this site in your browser settings');
+            } else if (msg === 'push_unsupported') {
+                UI.toast.error('This browser does not support push notifications');
+            } else if (msg === 'no_user') {
+                UI.toast.error('Log in first, then enable notifications');
+            } else {
+                UI.toast.error('Failed to enable: ' + msg);
+            }
+            await refreshPushNotificationStatus();
+        }
+    };
+
+    const disablePushNotifications = async () => {
+        if (!window.PushNotif) return;
+        try {
+            await window.PushNotif.unsubscribe();
+            UI.toast.success('Notifications disabled on this device');
+        } catch (e) {
+            UI.toast.error('Failed to disable: ' + (e.message || e));
+        }
+        await refreshPushNotificationStatus();
+    };
+
+    const sendTestPushNotification = async () => {
+        if (!window.PushNotif) { UI.toast.error('Push module not loaded'); return; }
+        if (!_currentUser?.id) { UI.toast.error('Log in first'); return; }
+        try {
+            const res = await window.PushNotif.sendActivityPush(
+                { id: 'test_' + Date.now(), activity_type: 'Test', activity_title: 'Test notification' },
+                [String(_currentUser.id)],
+                {
+                    title: 'Feng Shui CRM — Test',
+                    body: 'If you can read this on your phone, notifications are working.',
+                    url: './index.html#calendar',
+                }
+            );
+            if (res && res.ok && (res.sent > 0)) {
+                UI.toast.success(`Test sent to ${res.sent} device(s)`);
+            } else if (res && res.reason === 'no_subscriptions') {
+                UI.toast.error('No subscribed device found — enable notifications first');
+            } else {
+                UI.toast.error('Test failed: ' + JSON.stringify(res));
+            }
+        } catch (e) {
+            UI.toast.error('Test failed: ' + (e.message || e));
+        }
     };
 
     // Admin: reset another agent's password
@@ -28278,9 +28458,12 @@ const initImportDemoData = async () => {
             };
             if (entityType === 'prospect') activity.prospect_id = entityId;
             else activity.customer_id = entityId;
-            await AppDataStore.create('activities', activity);
+            const savedBdayActivity = await AppDataStore.create('activities', activity);
             UI.hideModal();
             UI.toast.success(`${actionType === 'call' ? 'Call' : 'Meeting'} scheduled for ${personName} on ${actionDate}`);
+
+            // === Push notification fan-out (non-blocking, best-effort) ===
+            _notifyActivityCreated(savedBdayActivity || activity).catch(() => {});
         } else {
             // Create as a note/task
             await AppDataStore.create('notes', {
@@ -30743,6 +30926,11 @@ const initImportDemoData = async () => {
         selfChangePassword,
         saveSelfPreferredName,
         showSettingsView,
+        // Push notifications
+        refreshPushNotificationStatus,
+        enablePushNotifications,
+        disablePushNotifications,
+        sendTestPushNotification,
         openResetPasswordModal,
         executePasswordReset,
         deleteAgent,

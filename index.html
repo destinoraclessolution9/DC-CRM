@@ -10,8 +10,12 @@
     <link rel="icon" href="favicon.ico" type="image/x-icon">
     <link rel="stylesheet" href="styles-fixed.css">
     <link rel="stylesheet" href="styles-mobile.css">
-    <!-- Comment out manifest to avoid CORS error when running locally -->
-    <!-- <link rel="manifest" href="manifest.json"> -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#2563eb">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="FS CRM">
+    <link rel="apple-touch-icon" href="icons/icon-192x192.png">
 </head>
 
 <body>
@@ -255,7 +259,7 @@
 <!-- Properly commented out scripts -->
     <!-- <script src="offline-storage.js"></script> -->
     <!-- <script src="mobile-components.js"></script> -->
-    <!-- <script src="push-notifications.js"></script> -->
+    <script src="push-notifications.js?v=20260412a"></script>
     <!-- <script src="biometric-auth.js"></script> -->
     <!-- <script src="mobile-settings.js"></script> -->
 
@@ -351,6 +355,25 @@
             if (window.app && window.app.init && !window.app.initialized) {
                 window.app.init();
             }
+        });
+
+        // ========== PWA: Service Worker Registration ==========
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', function () {
+                navigator.serviceWorker.register('service-worker.js')
+                    .then(reg => {
+                        console.log('[PWA] Service worker registered:', reg.scope);
+                        window._swRegistration = reg;
+                    })
+                    .catch(err => console.warn('[PWA] Service worker registration failed:', err));
+            });
+        }
+
+        // ========== PWA: Install prompt (Android / Chrome desktop) ==========
+        window.addEventListener('beforeinstallprompt', function (e) {
+            e.preventDefault();
+            window._installPromptEvent = e;
+            console.log('[PWA] Install prompt available');
         });
     </script>
 </body>

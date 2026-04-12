@@ -1,209 +1,189 @@
 // ========== PUSH NOTIFICATIONS ==========
+// PWA push notifications wired to Supabase Edge Function `send-activity-push`.
+// Exposed on `window.PushNotif` so script.js can call it after creating activities.
 
-// Check if push notifications are supported
-const isPushSupported = () => {
-    return 'Notification' in window && 'serviceWorker' in navigator && 'PushManager' in window;
-};
+(function () {
+    'use strict';
 
-// Request notification permission
-const requestNotificationPermission = async () => {
-    if (!isPushSupported()) {
-        console.log('Push notifications not supported');
-        return false;
-    }
+    // Must match the VAPID public key stored as a Supabase Edge Function secret.
+    const VAPID_PUBLIC_KEY = 'BOJY52iUJoLrpgodSLta-26085boS4RS4V05uHpp4MdODi-JKtPGqZReqA2WYfPbqUMxTKCs9uClUXyxZdgqEzI';
 
-    try {
-        const permission = await Notification.requestPermission();
-        return permission === 'granted';
-    } catch (error) {
-        console.error('Error requesting notification permission:', error);
-        return false;
-    }
-};
+    const isPushSupported = () =>
+        typeof window !== 'undefined' &&
+        'Notification' in window &&
+        'serviceWorker' in navigator &&
+        'PushManager' in window;
 
-// Register for push notifications
-const registerPushNotifications = async () => {
-    if (!isPushSupported()) return null;
-
-    try {
-        const registration = await navigator.serviceWorker.ready;
-
-        // Subscribe to push
-        const subscription = await registration.pushManager.subscribe({
-            userVisibleOnly: true,
-            applicationServerKey: urlBase64ToUint8Array(process.env.VAPID_PUBLIC_KEY)
-        });
-
-        // Send subscription to server
-        await fetch('/api/push/subscribe', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${Auth.getToken()}`
-            },
-            body: JSON.stringify(subscription)
-        });
-
-        console.log('Push notification registered');
-        return subscription;
-    } catch (error) {
-        console.error('Error registering push notifications:', error);
-        return null;
-    }
-};
-
-// Convert VAPID key
-const urlBase64ToUint8Array = (base64String) => {
-    const padding = '='.repeat((4 - base64String.length % 4) % 4);
-    const base64 = (base64String + padding)
-        .replace(/\-/g, '+')
-        .replace(/_/g, '/');
-
-    const rawData = window.atob(base64);
-    const outputArray = new Uint8Array(rawData.length);
-
-    for (let i = 0; i < rawData.length; ++i) {
-        outputArray[i] = rawData.charCodeAt(i);
-    }
-    return outputArray;
-};
-
-// Show local notification
-const showLocalNotification = (title, options = {}) => {
-    if (!isPushSupported() || Notification.permission !== 'granted') {
-        return;
-    }
-
-    const {
-        body = '',
-        icon = '/icons/icon-192x192.png',
-        badge = '/icons/icon-72x72.png',
-        tag = 'default',
-        data = {},
-        actions = []
-    } = options;
-
-    const notification = new Notification(title, {
-        body,
-        icon,
-        badge,
-        tag,
-        data,
-        actions,
-        vibrate: [200, 100, 200],
-        requireInteraction: true
-    });
-
-    notification.onclick = (event) => {
-        event.preventDefault();
-        window.focus();
-
-        if (data.url) {
-            window.location.href = data.url;
-        }
-
-        notification.close();
+    // Convert VAPID key (base64url) to Uint8Array for PushManager.subscribe.
+    const urlBase64ToUint8Array = (base64String) => {
+        const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+        const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+        const rawData = window.atob(base64);
+        const outputArray = new Uint8Array(rawData.length);
+        for (let i = 0; i < rawData.length; i++) outputArray[i] = rawData.charCodeAt(i);
+        return outputArray;
     };
 
-    return notification;
-};
+    // Get the Supabase client that's already created in index.html (service-role for now).
+    const getSupabase = () => (window.supabase && window.supabase.from ? window.supabase : null);
 
-// Notification types
-const NotificationTypes = {
-    APPOINTMENT_REMINDER: 'appointment_reminder',
-    TASK_DUE: 'task_due',
-    NEW_MESSAGE: 'new_message',
-    LEAD_UPDATE: 'lead_update',
-    DEAL_WON: 'deal_won',
-    TARGET_ACHIEVED: 'target_achieved'
-};
+    // Get the current user id (script.js stores it on window._currentUser via its auth flow).
+    const getCurrentUserId = () => {
+        try {
+            if (window._currentUser && window._currentUser.id) return String(window._currentUser.id);
+            if (window.app && window.app._currentUser && window.app._currentUser.id) return String(window.app._currentUser.id);
+        } catch (_) {}
+        return null;
+    };
 
-// Send appointment reminder
-const sendAppointmentReminder = (appointment) => {
-    return showLocalNotification('Upcoming Appointment', {
-        body: `You have an appointment with ${appointment.contact_name} in 15 minutes`,
-        tag: `appointment_${appointment.id}`,
-        data: {
-            type: NotificationTypes.APPOINTMENT_REMINDER,
-            url: `/calendar?event=${appointment.id}`
-        },
-        actions: [
-            { action: 'view', title: 'View Details' },
-            { action: 'dismiss', title: 'Dismiss' }
-        ]
-    });
-};
-
-// Send new message notification
-const sendNewMessageNotification = (message) => {
-    return showLocalNotification('New Message', {
-        body: `${message.sender}: ${message.preview}`,
-        tag: `message_${message.id}`,
-        data: {
-            type: NotificationTypes.NEW_MESSAGE,
-            url: `/messages/${message.id}`
-        },
-        actions: [
-            { action: 'reply', title: 'Reply' },
-            { action: 'mark-read', title: 'Mark Read' }
-        ]
-    });
-};
-
-// Send lead update notification
-const sendLeadUpdateNotification = (lead) => {
-    return showLocalNotification('Lead Score Updated', {
-        body: `${lead.name} score is now ${lead.score} - ready for follow-up`,
-        tag: `lead_${lead.id}`,
-        data: {
-            type: NotificationTypes.LEAD_UPDATE,
-            url: `/prospects/${lead.id}`
-        },
-        actions: [
-            { action: 'view', title: 'View Lead' },
-            { action: 'call', title: 'Call Now' }
-        ]
-    });
-};
-
-// Initialize notifications
-const initNotifications = async () => {
-    if (!isPushSupported()) {
-        console.log('Push notifications not supported');
-        return;
-    }
-
-    // Check existing permission
-    if (Notification.permission === 'granted') {
-        await registerPushNotifications();
-    } else if (Notification.permission !== 'denied') {
-        const granted = await requestNotificationPermission();
-        if (granted) {
-            await registerPushNotifications();
+    const requestPermission = async () => {
+        if (!isPushSupported()) return 'unsupported';
+        try {
+            const permission = await Notification.requestPermission();
+            return permission; // "granted" | "denied" | "default"
+        } catch (e) {
+            console.warn('[Push] permission request failed:', e);
+            return 'denied';
         }
-    }
+    };
 
-    // Listen for notification clicks
-    navigator.serviceWorker.addEventListener('message', (event) => {
-        if (event.data.type === 'NOTIFICATION_CLICK') {
-            handleNotificationClick(event.data.data);
+    // Subscribe this browser/device to push + save the subscription to Supabase.
+    const subscribe = async () => {
+        if (!isPushSupported()) throw new Error('push_unsupported');
+        if (Notification.permission !== 'granted') {
+            const p = await requestPermission();
+            if (p !== 'granted') throw new Error('permission_denied');
         }
-    });
-};
 
-// Handle notification click
-const handleNotificationClick = (data) => {
-    switch (data.type) {
-        case NotificationTypes.APPOINTMENT_REMINDER:
-            navigateTo('calendar', { event: data.eventId });
-            break;
-        case NotificationTypes.NEW_MESSAGE:
-            navigateTo('messages', { id: data.messageId });
-            break;
-        case NotificationTypes.LEAD_UPDATE:
-            navigateTo('prospect', { id: data.leadId });
-            break;
-        default:
-            navigateTo('dashboard');
-    }
-};
+        const reg = window._swRegistration || (await navigator.serviceWorker.ready);
+        if (!reg) throw new Error('no_service_worker');
+
+        let sub = await reg.pushManager.getSubscription();
+        if (!sub) {
+            sub = await reg.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+            });
+        }
+
+        const userId = getCurrentUserId();
+        if (!userId) throw new Error('no_user');
+
+        // Serialize the subscription (endpoint + p256dh + auth).
+        const json = sub.toJSON();
+        const row = {
+            user_id: userId,
+            endpoint: sub.endpoint,
+            p256dh: json.keys && json.keys.p256dh,
+            auth: json.keys && json.keys.auth,
+            user_agent: navigator.userAgent.slice(0, 255),
+            enabled: true,
+            last_seen_at: new Date().toISOString(),
+        };
+
+        const sb = getSupabase();
+        if (!sb) throw new Error('no_supabase');
+
+        // Upsert on endpoint (unique) so re-subscribe updates the user_id / keys.
+        const { error } = await sb
+            .from('push_subscriptions')
+            .upsert(row, { onConflict: 'endpoint' });
+        if (error) throw error;
+
+        try { localStorage.setItem('push_enabled', '1'); } catch (_) {}
+        console.log('[Push] subscribed:', sub.endpoint.slice(0, 60) + '...');
+        return sub;
+    };
+
+    // Unsubscribe: remove from push service and mark row disabled (or delete).
+    const unsubscribe = async () => {
+        if (!isPushSupported()) return;
+        const reg = window._swRegistration || (await navigator.serviceWorker.ready);
+        const sub = reg && (await reg.pushManager.getSubscription());
+        if (sub) {
+            try {
+                const sb = getSupabase();
+                if (sb) {
+                    await sb.from('push_subscriptions').delete().eq('endpoint', sub.endpoint);
+                }
+            } catch (e) { console.warn('[Push] delete row failed:', e); }
+            try { await sub.unsubscribe(); } catch (e) { console.warn('[Push] unsubscribe failed:', e); }
+        }
+        try { localStorage.removeItem('push_enabled'); } catch (_) {}
+    };
+
+    // Call the Edge Function to fan out a notification about an activity.
+    // targetUserIds: array of user IDs who should get the notification (RBAC-aware, computed by caller).
+    const sendActivityPush = async (activity, targetUserIds, opts = {}) => {
+        if (!Array.isArray(targetUserIds) || targetUserIds.length === 0) return { ok: true, sent: 0 };
+        try {
+            const sb = getSupabase();
+            // Use the ANON or service-role JWT that's already embedded in index.html.
+            // In production, should use the user's access token via supabase.auth.getSession()
+            const authKey = (sb && sb.supabaseKey) || window.SUPABASE_SR || '';
+            const res = await fetch(
+                `${window.SUPABASE_URL}/functions/v1/send-activity-push`,
+                {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${authKey}`,
+                    },
+                    body: JSON.stringify({
+                        activity,
+                        targetUserIds,
+                        title: opts.title,
+                        body: opts.body,
+                        url: opts.url,
+                    }),
+                }
+            );
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                console.warn('[Push] send failed:', res.status, data);
+                return { ok: false, error: data };
+            }
+            return data;
+        } catch (e) {
+            console.warn('[Push] send error:', e);
+            return { ok: false, error: String(e && e.message || e) };
+        }
+    };
+
+    // Show a local (foreground) notification without going through the push service.
+    const showLocalNotification = (title, body, data = {}) => {
+        if (!isPushSupported() || Notification.permission !== 'granted') return null;
+        try {
+            return new Notification(title, {
+                body,
+                icon: 'icons/icon-192x192.png',
+                badge: 'icons/icon-72x72.png',
+                data,
+                tag: data.tag || 'crm-local',
+            });
+        } catch (e) { return null; }
+    };
+
+    // Get current subscription status for UI.
+    const getStatus = async () => {
+        if (!isPushSupported()) return { supported: false };
+        const permission = Notification.permission;
+        let subscribed = false;
+        try {
+            const reg = window._swRegistration || (await navigator.serviceWorker.ready);
+            const sub = reg && (await reg.pushManager.getSubscription());
+            subscribed = !!sub;
+        } catch (_) {}
+        return { supported: true, permission, subscribed };
+    };
+
+    window.PushNotif = {
+        isPushSupported,
+        requestPermission,
+        subscribe,
+        unsubscribe,
+        sendActivityPush,
+        showLocalNotification,
+        getStatus,
+    };
+})();

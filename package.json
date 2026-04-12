@@ -8,6 +8,7 @@
     "puppeteer": "^24.40.0"
   },
   "devDependencies": {
-    "@playwright/test": "^1.44.0"
+    "@playwright/test": "^1.44.0",
+    "web-push": "^3.6.7"
   }
 }

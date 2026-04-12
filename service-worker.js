@@ -1,37 +1,26 @@
-// Service Worker for offline caching
-const CACHE_NAME = 'crm-cache-v1';
-const OFFLINE_URL = '/offline.html';
+// Service Worker — offline caching + push notifications
+const CACHE_NAME = 'crm-cache-v2';
 
-// Assets to cache on install
+// Minimal precache. We skip heavy files (script.js is 18k lines) to
+// avoid breaking install if any single asset 404s.
 const PRECACHE_ASSETS = [
-    '/',
-    '/index.html',
-    '/offline.html',
-    '/styles.css',
-    '/script.js',
-    '/data.js',
-    '/auth.js',
-    '/manifest.json',
-    '/icons/icon-72x72.png',
-    '/icons/icon-96x96.png',
-    '/icons/icon-128x128.png',
-    '/icons/icon-144x144.png',
-    '/icons/icon-152x152.png',
-    '/icons/icon-192x192.png',
-    '/icons/icon-384x384.png',
-    '/icons/icon-512x512.png',
-    'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap',
-    'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css'
+    './',
+    './index.html',
+    './manifest.json',
+    './icons/icon-192x192.png',
+    './icons/icon-512x512.png'
 ];
 
-// Install event - cache core assets
+// Install event — cache core assets. Use individual adds so a single
+// missing file does not reject the whole install.
 self.addEventListener('install', event => {
     event.waitUntil(
         caches.open(CACHE_NAME)
-            .then(cache => {
-                console.log('Caching precompiled assets');
-                return cache.addAll(PRECACHE_ASSETS);
-            })
+            .then(cache => Promise.all(
+                PRECACHE_ASSETS.map(url =>
+                    cache.add(url).catch(err => console.warn('[SW] precache skip', url, err))
+                )
+            ))
             .then(() => self.skipWaiting())
     );
 });
@@ -52,141 +41,70 @@ self.addEventListener('activate', event => {
     );
 });
 
-// Fetch event - serve from cache, fallback to network
+// Fetch event — network-first for HTML + API, cache-first for static assets.
 self.addEventListener('fetch', event => {
-    // Skip cross-origin requests
-    if (!event.request.url.startsWith(self.location.origin) &&
-        !event.request.url.includes('fonts.googleapis.com') &&
-        !event.request.url.includes('cdnjs.cloudflare.com')) {
-        return;
-    }
+    const req = event.request;
 
-    // Handle API requests differently
-    if (event.request.url.includes('/api/')) {
-        return handleAPIRequest(event);
-    }
+    // Only handle GET
+    if (req.method !== 'GET') return;
 
-    // For static assets, try cache first, then network
+    // Skip Supabase and other cross-origin API traffic entirely
+    if (!req.url.startsWith(self.location.origin)) return;
+
     event.respondWith(
-        caches.match(event.request)
-            .then(cachedResponse => {
-                if (cachedResponse) {
-                    return cachedResponse;
+        caches.match(req).then(cached => cached || fetch(req).catch(() => cached))
+    );
+});
+
+// ========== PUSH NOTIFICATIONS ==========
+
+// Push event — fired by the push service when a notification is pushed to this device.
+self.addEventListener('push', event => {
+    let payload = {};
+    try {
+        payload = event.data ? event.data.json() : {};
+    } catch (e) {
+        payload = { title: 'Feng Shui CRM', body: event.data ? event.data.text() : '' };
+    }
+
+    const title = payload.title || 'Feng Shui CRM';
+    const options = {
+        body: payload.body || '',
+        icon: payload.icon || 'icons/icon-192x192.png',
+        badge: payload.badge || 'icons/icon-72x72.png',
+        tag: payload.tag || 'crm-activity',
+        data: payload.data || {},
+        vibrate: [200, 100, 200],
+        requireInteraction: false,
+        renotify: true
+    };
+
+    event.waitUntil(self.registration.showNotification(title, options));
+});
+
+// Notification click — focus an existing tab or open a new one and route to the target URL.
+self.addEventListener('notificationclick', event => {
+    event.notification.close();
+    const targetUrl = (event.notification.data && event.notification.data.url) || './index.html';
+
+    event.waitUntil(
+        self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clientList => {
+            for (const client of clientList) {
+                if ('focus' in client) {
+                    client.postMessage({ type: 'NOTIFICATION_CLICK', data: event.notification.data });
+                    return client.focus();
                 }
-
-                return fetch(event.request)
-                    .then(networkResponse => {
-                        // Cache new responses
-                        if (networkResponse && networkResponse.status === 200) {
-                            const responseToCache = networkResponse.clone();
-                            caches.open(CACHE_NAME)
-                                .then(cache => {
-                                    cache.put(event.request, responseToCache);
-                                });
-                        }
-                        return networkResponse;
-                    })
-                    .catch(() => {
-                        // If offline and HTML request, return offline page
-                        if (event.request.headers.get('accept').includes('text/html')) {
-                            return caches.match(OFFLINE_URL);
-                        }
-                    });
-            })
+            }
+            if (self.clients.openWindow) {
+                return self.clients.openWindow(targetUrl);
+            }
+        })
     );
 });
 
-// Handle API requests with offline queue
-const handleAPIRequest = (event) => {
-    event.respondWith(
-        fetch(event.request)
-            .then(response => {
-                return response;
-            })
-            .catch(() => {
-                // Store failed request for later sync
-                return saveRequestForSync(event.request.clone())
-                    .then(() => {
-                        return new Response(
-                            JSON.stringify({
-                                offline: true,
-                                message: 'You are offline. Request queued for sync.'
-                            }),
-                            {
-                                status: 202,
-                                headers: { 'Content-Type': 'application/json' }
-                            }
-                        );
-                    });
-            })
-    );
-};
-
-// Save failed request to IndexedDB for later sync
-const saveRequestForSync = (request) => {
-    return request.clone().text().then(body => {
-        const syncData = {
-            id: 'req_' + Date.now(),
-            url: request.url,
-            method: request.method,
-            headers: Array.from(request.headers.entries()),
-            body: body,
-            timestamp: new Date().toISOString()
-        };
-
-        // Open IndexedDB and store
-        return openSyncDB().then(db => {
-            const tx = db.transaction('sync_queue', 'readwrite');
-            const store = tx.objectStore('sync_queue');
-            return store.add(syncData);
-        });
-    });
-};
-
-// Background sync event
-self.addEventListener('sync', event => {
-    if (event.tag === 'sync-crm-data') {
-        event.waitUntil(syncPendingRequests());
+// Allow page to trigger an immediate activate (used after new SW install)
+self.addEventListener('message', event => {
+    if (event.data && event.data.type === 'SKIP_WAITING') {
+        self.skipWaiting();
     }
 });
-
-// Sync pending requests
-const syncPendingRequests = () => {
-    return openSyncDB().then(db => {
-        const tx = db.transaction('sync_queue', 'readonly');
-        const store = tx.objectStore('sync_queue');
-        return store.getAll().then(pendingRequests => {
-            return Promise.all(pendingRequests.map(requestData => {
-                return fetch(requestData.url, {
-                    method: requestData.method,
-                    headers: new Headers(requestData.headers),
-                    body: requestData.body
-                }).then(response => {
-                    if (response.ok) {
-                        // Remove from queue on success
-                        const deleteTx = db.transaction('sync_queue', 'readwrite');
-                        const deleteStore = deleteTx.objectStore('sync_queue');
-                        return deleteStore.delete(requestData.id);
-                    }
-                });
-            }));
-        });
-    });
-};
-
-// Open IndexedDB for sync queue
-const openSyncDB = () => {
-    return new Promise((resolve, reject) => {
-        const request = indexedDB.open('SyncDB', 1);
-
-        request.onupgradeneeded = (event) => {
-            const db = event.target.result;
-            if (!db.objectStoreNames.contains('sync_queue')) {
-                db.createObjectStore('sync_queue', { keyPath: 'id' });
-            }
-        };
-
-        request.onsuccess = (event) => resolve(event.target.result);
-        request.onerror = (event) => reject(event.target.error);
-    });
-};
