@@ -125,7 +125,8 @@ const appLogic = (() => {
     let _selectedConsultants = []; // { id, name, status: 'pending'|'accepted'|'rejected' }
     let _selectedReferrer = null;
     let _selectedProspectReferrer = null;
-    let _pendingIntakeId = null; // Set by openApproveCpsIntakeModal; consumed by saveActivity
+    let _pendingIntakeId = null;   // Set by openApproveCpsIntakeModal; consumed by saveActivity
+    let _pendingIntakeRow = null;  // Full intake row, used to send WhatsApp confirmation
     let _currentDate = new Date(); // Dynamic start date
     let _filters = { agent: 'all', type: 'all', from: '', to: '' };
 
@@ -7277,8 +7278,9 @@ function _wireLoginBtn() {
             return;
         }
 
-        // Stash id so saveActivity knows to mark the intake approved on success
-        _pendingIntakeId = intakeId;
+        // Stash id + full row so saveActivity can mark approved and send WhatsApp
+        _pendingIntakeId  = intakeId;
+        _pendingIntakeRow = intake;
 
         // Open the standard Quick Add Activity modal — it defaults to CPS type
         await openActivityModal(intake.activity_date);
@@ -14370,6 +14372,7 @@ function _wireLoginBtn() {
 
         // === If this save was approving a CPS intake request, mark it approved ===
         if (_pendingIntakeId) {
+            const intakeRow = _pendingIntakeRow;
             try {
                 await AppDataStore.update('cps_intake_requests', _pendingIntakeId, {
                     status: 'approved',
@@ -14377,7 +14380,50 @@ function _wireLoginBtn() {
                     approved_activity_id: savedActivity?.id || null
                 });
             } catch (e) { console.warn('CPS intake approval mark failed:', e); }
-            _pendingIntakeId = null;
+            _pendingIntakeId  = null;
+            _pendingIntakeRow = null;
+
+            // Prompt agent to send WhatsApp confirmation to prospect
+            if (intakeRow?.prospect_phone) {
+                const phone   = intakeRow.prospect_phone.replace(/\D/g, '');
+                const name    = intakeRow.prospect_name  || 'Pelanggan';
+                const date    = intakeRow.activity_date  || '';
+                const start   = (intakeRow.start_time    || '').slice(0, 5);
+                const end     = (intakeRow.end_time      || '').slice(0, 5);
+                const venue   = intakeRow.venue_name     || '';
+                const address = intakeRow.venue_address  || '';
+                const waze    = intakeRow.waze_link      || '';
+
+                const msg = [
+                    `✅ Temujanji anda telah DISAHKAN! / Your appointment has been CONFIRMED!`,
+                    ``,
+                    `👤 ${name}`,
+                    `📅 Tarikh / Date: ${date}`,
+                    `⏰ Masa / Time: ${start}–${end}`,
+                    venue   ? `📍 Lokasi / Venue: ${venue}` : '',
+                    address ? `🏠 Alamat / Address: ${address}` : '',
+                    waze    ? `🗺️ Waze: ${waze}` : '',
+                    ``,
+                    `Sila pastikan anda hadir tepat pada masanya. Pakai pakaian formal/smart casual.`,
+                    `Please ensure you arrive on time. Dress code: formal/smart casual.`,
+                ].filter(l => l !== undefined && !(l === '' && false)).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+
+                const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
+
+                UI.showModal(
+                    '✅ Appointment Confirmed',
+                    `<div style="text-align:center; padding:8px 0;">
+                        <p style="margin-bottom:12px; font-size:14px; color:#374151;">
+                            Notify <strong>${name}</strong> (${intakeRow.prospect_phone}) via WhatsApp?
+                        </p>
+                        <pre style="background:#f3f4f6; border-radius:8px; padding:12px; font-size:12px; text-align:left; white-space:pre-wrap; max-height:220px; overflow-y:auto;">${msg}</pre>
+                    </div>`,
+                    [
+                        { label: '📲 Send WhatsApp', type: 'primary',   action: `window.open(${JSON.stringify(waUrl)}, '_blank'); UI.hideModal();` },
+                        { label: 'Skip',              type: 'secondary', action: 'UI.hideModal();' }
+                    ]
+                );
+            }
         }
 
         // === Push notification fan-out (non-blocking, best-effort) ===
