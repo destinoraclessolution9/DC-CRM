@@ -14371,6 +14371,7 @@ function _wireLoginBtn() {
         UI.toast.success('Activity saved!');
 
         // === If this save was approving a CPS intake request, mark it approved ===
+        let _cpsIntakeWaCallback = null;
         if (_pendingIntakeId) {
             const intakeRow = _pendingIntakeRow;
             try {
@@ -14383,7 +14384,7 @@ function _wireLoginBtn() {
             _pendingIntakeId  = null;
             _pendingIntakeRow = null;
 
-            // Prompt agent to send WhatsApp confirmation to prospect
+            // Build WhatsApp modal — will be shown AFTER activity modal closes
             if (intakeRow?.prospect_phone) {
                 const phone   = intakeRow.prospect_phone.replace(/\D/g, '');
                 const name    = intakeRow.prospect_name  || 'Pelanggan';
@@ -14410,19 +14411,21 @@ function _wireLoginBtn() {
 
                 const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
 
-                UI.showModal(
-                    '✅ Appointment Confirmed',
-                    `<div style="text-align:center; padding:8px 0;">
-                        <p style="margin-bottom:12px; font-size:14px; color:#374151;">
-                            Notify <strong>${name}</strong> (${intakeRow.prospect_phone}) via WhatsApp?
-                        </p>
-                        <pre style="background:#f3f4f6; border-radius:8px; padding:12px; font-size:12px; text-align:left; white-space:pre-wrap; max-height:220px; overflow-y:auto;">${msg}</pre>
-                    </div>`,
-                    [
-                        { label: '📲 Send WhatsApp', type: 'primary',   action: `window.open(${JSON.stringify(waUrl)}, '_blank'); UI.hideModal();` },
-                        { label: 'Skip',              type: 'secondary', action: 'UI.hideModal();' }
-                    ]
-                );
+                _cpsIntakeWaCallback = () => {
+                    UI.showModal(
+                        '✅ Appointment Confirmed',
+                        `<div style="text-align:center; padding:8px 0;">
+                            <p style="margin-bottom:12px; font-size:14px; color:#374151;">
+                                Notify <strong>${name}</strong> (${intakeRow.prospect_phone}) via WhatsApp?
+                            </p>
+                            <pre style="background:#f3f4f6; border-radius:8px; padding:12px; font-size:12px; text-align:left; white-space:pre-wrap; max-height:220px; overflow-y:auto;">${msg}</pre>
+                        </div>`,
+                        [
+                            { label: '📲 Send WhatsApp', type: 'primary',   action: `window.open(${JSON.stringify(waUrl)}, '_blank'); UI.hideModal();` },
+                            { label: 'Skip',              type: 'secondary', action: 'UI.hideModal();' }
+                        ]
+                    );
+                };
             }
         }
 
@@ -14475,6 +14478,7 @@ function _wireLoginBtn() {
 
         if (!stayOpen) {
             UI.hideModal();
+            if (_cpsIntakeWaCallback) setTimeout(_cpsIntakeWaCallback, 300);
         } else {
             // Reset co-agents and consultants when staying open for another add
             _selectedCoAgents = [];
