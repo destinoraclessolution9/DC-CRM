@@ -7005,8 +7005,14 @@ function _wireLoginBtn() {
                         <option value="">-- Select Relation --</option>
                         <option value="Friend">Friend</option>
                         <option value="Family">Family</option>
+                        <option value="Spouse">Spouse</option>
+                        <option value="Siblings">Siblings</option>
+                        <option value="Cousin">Cousin</option>
                         <option value="Colleague">Colleague</option>
+                        <option value="Ex Colleague">Ex Colleague</option>
+                        <option value="Ex Classmate">Ex Classmate</option>
                         <option value="Business Partner">Business Partner</option>
+                        <option value="Customer">Customer</option>
                         <option value="Other">Other</option>
                     </select>
                 </div>
@@ -12945,8 +12951,14 @@ function _wireLoginBtn() {
                                     <option value="">-- Select Relation --</option>
                                     <option value="Friend">Friend</option>
                                     <option value="Family">Family</option>
+                                    <option value="Spouse">Spouse</option>
+                                    <option value="Siblings">Siblings</option>
+                                    <option value="Cousin">Cousin</option>
                                     <option value="Colleague">Colleague</option>
+                                    <option value="Ex Colleague">Ex Colleague</option>
+                                    <option value="Ex Classmate">Ex Classmate</option>
                                     <option value="Business Partner">Business Partner</option>
+                                    <option value="Customer">Customer</option>
                                     <option value="Other">Other</option>
                                 </select>
                             </div>
