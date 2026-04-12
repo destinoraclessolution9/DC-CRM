@@ -10113,22 +10113,22 @@ function _wireLoginBtn() {
                 </div>
 
                 <!-- Section 1.5: Health Product Refills -->
-                <div class="refill-reminders-section" style="margin-top:24px;padding:16px;background:#fff;border-radius:10px;border:1px solid var(--gray-200);">
+                <div class="birthday-section">
                     <h3>💊 HEALTH PRODUCT REFILLS</h3>
-                    <div class="refill-columns" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px;">
-                        <div class="refill-col">
-                            <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-                                <div id="refill-overdue-badge" style="min-width:30px;height:30px;padding:0 10px;border-radius:15px;background:#dc2626;color:white;display:flex;align-items:center;justify-content:center;font-weight:bold;">0</div>
-                                <h4 style="margin:0;">🔴 Overdue</h4>
+                    <div class="birthday-columns">
+                        <div class="birthday-col">
+                            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 15px;">
+                                <div id="refill-overdue-badge" class="bday-badge" style="width: 30px; height: 30px; border-radius: 50%; background: #dc2626; color: white; display: flex; align-items: center; justify-content: center; font-weight: bold;">0</div>
+                                <h4 style="margin: 0;">Overdue</h4>
                             </div>
-                            <div id="refill-overdue-list"></div>
+                            <div class="bday-list" id="refill-overdue-list"></div>
                         </div>
-                        <div class="refill-col">
-                            <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-                                <div id="refill-soon-badge" style="min-width:30px;height:30px;padding:0 10px;border-radius:15px;background:#f59e0b;color:white;display:flex;align-items:center;justify-content:center;font-weight:bold;">0</div>
-                                <h4 style="margin:0;">🟡 Due This Week</h4>
+                        <div class="birthday-col">
+                            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 15px;">
+                                <div id="refill-soon-badge" class="bday-badge" style="width: 30px; height: 30px; border-radius: 50%; background: #f59e0b; color: white; display: flex; align-items: center; justify-content: center; font-weight: bold;">0</div>
+                                <h4 style="margin: 0;">Due This Week</h4>
                             </div>
-                            <div id="refill-soon-list"></div>
+                            <div class="bday-list" id="refill-soon-list"></div>
                         </div>
                     </div>
                 </div>
