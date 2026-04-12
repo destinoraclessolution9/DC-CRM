@@ -10124,7 +10124,10 @@ function _wireLoginBtn() {
         // Previous month overflow days
         for (let i = startDay - 1; i >= 0; i--) {
             const dateNum = daysInPrevMonth - i;
-            html += `<div class="calendar-cell"><span class="date-num other-month">${dateNum}</span></div>`;
+            const prevMonth = month === 0 ? 11 : month - 1;
+            const prevYear = month === 0 ? year - 1 : year;
+            const prevDateStr = `${prevYear}-${(prevMonth + 1).toString().padStart(2, '0')}-${dateNum.toString().padStart(2, '0')}`;
+            html += `<div class="calendar-cell" onclick="app.openActivityModal('${prevDateStr}')"><span class="date-num other-month">${dateNum}</span></div>`;
         }
 
         // Prefetch every lookup table we'll need during the month render in parallel.
@@ -10213,7 +10216,7 @@ function _wireLoginBtn() {
 
                         activityHtml += `
                             <div class="calendar-appointment ${a.activity_type.toLowerCase()} ${a.closing_amount ? 'closed-case' : ''}"
-                                onclick="app.viewActivityDetails(${a.id})">
+                                onclick="event.stopPropagation(); app.viewActivityDetails(${a.id})">
                                 <div class="appointment-time">${(a.start_time || '00:00').slice(0,5)} - ${(a.end_time || '00:00').slice(0,5)}</div>
                                 ${isEvent
                                     ? `<div class="appointment-customer">📅 ${eventTitle || a.activity_title || 'Event'}</div>`
@@ -10236,7 +10239,7 @@ function _wireLoginBtn() {
             }
 
             html += `
-                <div class="calendar-cell ${isToday ? 'today' : ''}">
+                <div class="calendar-cell ${isToday ? 'today' : ''}" onclick="app.openActivityModal('${dateStr}')">
                     <span class="date-num">${i}</span>
                     <div class="grid-activities">
                         ${activityHtml}
@@ -10249,7 +10252,10 @@ function _wireLoginBtn() {
         const remainingCells = 42 - totalCells; // 6 rows of 7 = 42
 
         for (let i = 1; i <= remainingCells; i++) {
-            html += `<div class="calendar-cell"><span class="date-num other-month">${i}</span></div>`;
+            const nextMonth = month === 11 ? 0 : month + 1;
+            const nextYear = month === 11 ? year + 1 : year;
+            const nextDateStr = `${nextYear}-${(nextMonth + 1).toString().padStart(2, '0')}-${i.toString().padStart(2, '0')}`;
+            html += `<div class="calendar-cell" onclick="app.openActivityModal('${nextDateStr}')"><span class="date-num other-month">${i}</span></div>`;
         }
 
         grid.innerHTML = html;
