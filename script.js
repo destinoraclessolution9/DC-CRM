@@ -10007,14 +10007,12 @@ function _wireLoginBtn() {
                         <button class="btn secondary" onclick="app.openCalendarFilterModal()">
                             Filter <i class="fas fa-chevron-down" style="font-size: 10px; margin-left: 4px;"></i>
                         </button>
-                        <div class="calendar-action-buttons">
-                            <button class="btn-quick-add" onclick="app.openActivityModal()">
-                                <i class="fas fa-plus"></i> Quick Add Activity
-                            </button>
-                            <button class="btn-cps-intake" onclick="app.openShareCpsIntakeLinkModal()" title="Generate a shareable CPS intake link for a prospect">
-                                <i class="fas fa-share-alt"></i> CPS Intake Link
-                            </button>
-                        </div>
+                        <button class="btn-icon-pill" onclick="app.openShareCpsIntakeLinkModal()" title="Share CPS Intake Link">
+                            <i class="fas fa-share-alt"></i>
+                        </button>
+                        <button class="btn-quick-add" onclick="app.openActivityModal()">
+                            <i class="fas fa-plus"></i> Quick Add Activity
+                        </button>
                     </div>
                 </div>
 
