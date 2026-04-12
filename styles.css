@@ -732,8 +732,8 @@ body {
 }
 
 .btn-icon-pill:hover {
-    border-color: var(--primary);
-    color: var(--primary);
+    border-color: #25d366;
+    color: #25d366;
     background: var(--gray-50);
 }
 
