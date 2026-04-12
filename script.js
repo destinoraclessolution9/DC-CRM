@@ -9999,11 +9999,6 @@ function _wireLoginBtn() {
                         <button class="btn secondary btn-sm" onclick="app.goToToday()">Today</button>
                     </div>
                     <div class="calendar-controls">
-                        <div class="view-toggles">
-                            <!-- <button class="btn-toggle" onclick="app.switchView('day')">Day</button> -->
-                            <!-- <button class="btn-toggle" onclick="app.switchView('week')">Week</button> -->
-                            <button class="btn-toggle active" onclick="app.switchView('month')">Month</button>
-                        </div>
                         <button class="btn secondary" onclick="app.openCalendarFilterModal()">
                             Filter <i class="fas fa-chevron-down" style="font-size: 10px; margin-left: 4px;"></i>
                         </button>
