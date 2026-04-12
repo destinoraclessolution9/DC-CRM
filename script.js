@@ -21525,11 +21525,22 @@ const deactivateAgent = async (agentId) => {
 
         const acts = allActivities.filter(a => a.prospect_id === prospect.id);
         const entry = await calcPipelineEntry(prospect, acts);
-        const amount = await getPipelineAmount(prospect, entry.category);
+        const systemAmount = await getPipelineAmount(prospect, entry.category);
         const noteCount = await getNoteCount(prospect.id);
-        const amountHtml = amount == null
+
+        // Use custom override if agent set one, otherwise system value
+        const displayAmount = rec.custom_amount != null ? rec.custom_amount : systemAmount;
+        const isCustomAmount = rec.custom_amount != null;
+        const amountHtml = displayAmount == null
             ? `<span style="color:#92400E;font-weight:600;">Varies</span> <span style="font-size:10px;color:#9CA3AF;">check monthly</span>`
-            : `RM ${Number(amount).toLocaleString()}`;
+            : `RM ${Number(displayAmount).toLocaleString()}`;
+
+        const systemAction = entry.latestNextAction ? escapeHtml(entry.latestNextAction) : entry.action;
+        const displayAction = rec.custom_action != null ? escapeHtml(rec.custom_action) : systemAction;
+        const isCustomAction = rec.custom_action != null;
+
+        const editableStyle = 'cursor:pointer;border-bottom:1px dashed #D1D5DB;';
+        const customBadge = `<span style="font-size:9px;color:#F59E0B;margin-left:4px;" title="Custom override (click to reset)">&#9998;</span>`;
 
         // Product dropdown: show all pipeline categories + custom opportunity_potentials
         const _pCfg = await loadPipelineConfig();
@@ -21568,9 +21579,15 @@ const deactivateAgent = async (agentId) => {
                     <div style="font-size:11px;color:#9CA3AF;">Last activity: ${entry.lastActivityDate ? entry.lastActivityDate.toLocaleDateString('en-GB') : 'None'}</div>
                 </td>
                 <td style="padding:14px 12px;">${productColumnHtml}</td>
-                <td style="padding:14px 12px;font-weight:600;color:#059669;">${amountHtml}</td>
+                <td style="padding:14px 12px;font-weight:600;color:#059669;">
+                    <span id="focus-amt-${rec.id}" onclick="event.stopPropagation();app.editFocusAmount(${rec.id}, ${displayAmount || 0})" style="${editableStyle}" title="Click to edit amount">${amountHtml}</span>
+                    ${isCustomAmount ? `<span onclick="event.stopPropagation();app.resetFocusField(${rec.id},'custom_amount')" style="cursor:pointer;">${customBadge}</span>` : ''}
+                </td>
                 <td style="padding:14px 12px;">${probBadge(entry.probability, prospect.id)}</td>
-                <td style="padding:14px 12px;font-size:13px;line-height:1.5;max-width:260px;">${entry.latestNextAction ? escapeHtml(entry.latestNextAction) : entry.action}</td>
+                <td style="padding:14px 12px;font-size:13px;line-height:1.5;max-width:260px;">
+                    <span id="focus-act-${rec.id}" onclick="event.stopPropagation();app.editFocusAction(${rec.id}, this)" style="${editableStyle}" title="Click to edit action">${displayAction}</span>
+                    ${isCustomAction ? `<span onclick="event.stopPropagation();app.resetFocusField(${rec.id},'custom_action')" style="cursor:pointer;">${customBadge}</span>` : ''}
+                </td>
                 <td style="padding:14px 12px;">
                     <div style="display:flex;gap:6px;">
                         <button class="btn-icon" onclick="event.stopPropagation();app.showProspectMenu(${prospect.id})" title="View Profile"><i class="fas fa-eye"></i></button>
@@ -21899,6 +21916,60 @@ const deactivateAgent = async (agentId) => {
     };
 
     // ===== END ACTION PLAN FUNCTIONS =====
+
+    // ===== FOCUS LIST INLINE EDIT (Amount & Action overrides) =====
+
+    const editFocusAmount = (recId, currentAmount) => {
+        const span = document.getElementById(`focus-amt-${recId}`);
+        if (!span || span.querySelector('input')) return;
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.value = currentAmount || '';
+        input.placeholder = 'Amount (RM)';
+        input.style.cssText = 'width:110px;padding:4px 6px;border:1px solid #10B981;border-radius:4px;font-size:13px;font-weight:600;color:#059669;outline:none;';
+        input.onclick = (e) => e.stopPropagation();
+        const save = async () => {
+            const val = input.value.trim();
+            if (val === '' || isNaN(val)) { await refreshPipeline(); return; }
+            await AppDataStore.update('my_potential_list', recId, { custom_amount: Number(val) });
+            UI.toast.success('Amount updated');
+            await refreshPipeline();
+        };
+        input.onblur = save;
+        input.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); input.blur(); } if (e.key === 'Escape') { refreshPipeline(); } };
+        span.textContent = '';
+        span.appendChild(input);
+        input.focus();
+        input.select();
+    };
+
+    const editFocusAction = (recId, spanEl) => {
+        if (!spanEl || spanEl.querySelector('textarea')) return;
+        const currentText = spanEl.textContent.trim();
+        const textarea = document.createElement('textarea');
+        textarea.value = currentText;
+        textarea.placeholder = 'Action needed to close deal...';
+        textarea.style.cssText = 'width:100%;min-height:50px;padding:4px 6px;border:1px solid #10B981;border-radius:4px;font-size:13px;line-height:1.4;resize:vertical;outline:none;font-family:inherit;';
+        textarea.onclick = (e) => e.stopPropagation();
+        const save = async () => {
+            const val = textarea.value.trim();
+            if (!val) { await refreshPipeline(); return; }
+            await AppDataStore.update('my_potential_list', recId, { custom_action: val });
+            UI.toast.success('Action updated');
+            await refreshPipeline();
+        };
+        textarea.onblur = save;
+        textarea.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); textarea.blur(); } if (e.key === 'Escape') { refreshPipeline(); } };
+        spanEl.textContent = '';
+        spanEl.appendChild(textarea);
+        textarea.focus();
+    };
+
+    const resetFocusField = async (recId, field) => {
+        await AppDataStore.update('my_potential_list', recId, { [field]: null });
+        UI.toast.info('Reset to system default');
+        await refreshPipeline();
+    };
 
     const addToFocusList = async (prospectId) => {
         const userId = _currentUser?.id || 5;
@@ -32300,6 +32371,9 @@ const initImportDemoData = async () => {
         setPipelineFilter,
         addToFocusList,
         removeFromFocusList,
+        editFocusAmount,
+        editFocusAction,
+        resetFocusField,
         showProspectMenu,
         showComments,
         openPipelineConfigModal,
