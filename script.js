@@ -9991,7 +9991,7 @@ function _wireLoginBtn() {
                 <!-- Section 1.1: Header -->
                 <div class="calendar-header-toolbar">
                     <div class="calendar-title-nav">
-                        <h2 id="calendar-month-title">Month Year</h2>
+                        <h2 id="calendar-month-title" onclick="app.openMonthPicker()" style="cursor:pointer;" title="Click to select month">Month Year</h2>
                         <div class="nav-arrows">
                             <button class="btn-nav" onclick="app.goToPrevious()"><i class="fas fa-chevron-left"></i></button>
                             <button class="btn-nav" onclick="app.goToNext()"><i class="fas fa-chevron-right"></i></button>
@@ -10854,6 +10854,47 @@ function _wireLoginBtn() {
             _currentDate.setDate(_currentDate.getDate() + 1);
         }
         if (_currentDate.getFullYear() > 2200) _currentDate.setFullYear(2200);
+        updateMonthHeader(_currentDate);
+        await switchView(_currentView);
+    };
+
+    const openMonthPicker = () => {
+        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+            'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const currentMonth = _currentDate.getMonth();
+        const currentYear = _currentDate.getFullYear();
+
+        // Year range: 5 years before and after current
+        const years = [];
+        for (let y = currentYear - 5; y <= currentYear + 5; y++) years.push(y);
+
+        const content = `
+            <div style="text-align:center;">
+                <div style="margin-bottom:16px;">
+                    <label style="font-weight:600; margin-right:8px;">Year:</label>
+                    <select id="mp-year" style="padding:6px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:14px;">
+                        ${years.map(y => `<option value="${y}" ${y === currentYear ? 'selected' : ''}>${y}</option>`).join('')}
+                    </select>
+                </div>
+                <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:8px;">
+                    ${monthNames.map((m, i) => `
+                        <button class="btn ${i === currentMonth ? 'primary' : 'secondary'} btn-sm"
+                            onclick="app.jumpToMonth(${i}, document.getElementById('mp-year').value); UI.hideModal();"
+                            style="padding:8px 4px; font-size:13px;">
+                            ${m}
+                        </button>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+
+        UI.showModal('Go to Month', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }
+        ]);
+    };
+
+    const jumpToMonth = async (month, year) => {
+        _currentDate = new Date(parseInt(year), month, 1);
         updateMonthHeader(_currentDate);
         await switchView(_currentView);
     };
@@ -32018,6 +32059,8 @@ const initImportDemoData = async () => {
         goToPrevious,
         goToNext,
         goToToday,
+        openMonthPicker,
+        jumpToMonth,
         switchView,
         openCalendarFilterModal,
         applyCalendarFilters,
