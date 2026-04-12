@@ -13305,17 +13305,19 @@ function _wireLoginBtn() {
             return;
         }
 
-        // Invalidate the cache so the next read sees the new value, and
-        // re-render the Personal accordion body so the two checkboxes
-        // reflect the authoritative persisted state (the browser's native
-        // click only updated ONE checkbox visually — the OTHER checkbox
-        // may also have flipped if dateType logic computed 'both' → 'solar'
-        // etc., and the user would never see that change without a re-render).
+        // Update both checkboxes directly in the DOM instead of re-rendering
+        // the whole tab.  A full re-render via switchProspectTab fetches the
+        // prospect again — if the read returns stale/cached data the checkbox
+        // silently reverts to its old state ("tick doesn't stick").
         AppDataStore.invalidateCache('prospects');
         UI.toast.success('Life chart type updated');
         const bodyEl = document.getElementById(`acc-body-personal-${prospectId}`);
         if (bodyEl) {
-            try { await switchProspectTab('personal', prospectId, null, bodyEl); } catch (_) {}
+            bodyEl.querySelectorAll('input[type="checkbox"]').forEach(chk => {
+                const oc = chk.getAttribute('onchange') || '';
+                if (oc.includes("'solar'")) chk.checked = newType === 'solar' || newType === 'both';
+                else if (oc.includes("'lunar'")) chk.checked = newType === 'lunar' || newType === 'both';
+            });
         }
     };
 
