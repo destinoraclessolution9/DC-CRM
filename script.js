@@ -10143,15 +10143,22 @@ function _wireLoginBtn() {
             </div>
         `;
 
-        // Fire all 3 section renders IMMEDIATELY — no more blocking prefetch.
-        // Each section hits its own AppDataStore.getAll calls; the in-flight
-        // deduplication layer in data.js ensures overlapping tables (activities,
-        // prospects, customers, users) are fetched exactly once across all
-        // three concurrent callers. Each section paints as soon as its own
-        // data arrives, so the user sees progressive fill-in instead of a
-        // frozen empty template for the full duration of the slowest request.
-        // We don't await these here — we return immediately so the caller
-        // (navigateTo) can finish, and each render resolves on its own.
+        // Kick off every shared table fetch RIGHT NOW, before the renderers
+        // even start their DOM-element checks. The dedup layer in data.js
+        // ensures each table is fetched exactly once; by warming the cache
+        // here, the renderers' Promise.all calls resolve instantly from
+        // the in-flight (or already-cached) promise instead of each one
+        // independently discovering the table and queuing a new fetch.
+        AppDataStore.getAll('activities');
+        AppDataStore.getAll('events');
+        AppDataStore.getAll('prospects');
+        AppDataStore.getAll('customers');
+        AppDataStore.getAll('users');
+        AppDataStore.getAll('names');
+
+        // Fire all section renders IMMEDIATELY. Each section paints as soon
+        // as its own data arrives, so the user sees progressive fill-in.
+        // We don't await these — the caller (navigateTo) returns immediately.
         renderCalendar().catch(e => console.warn('renderCalendar failed:', e));
         renderTodayActivities().catch(e => console.warn('renderTodayActivities failed:', e));
         renderBirthdaySection().catch(e => console.warn('renderBirthdaySection failed:', e));
@@ -10433,8 +10440,10 @@ function _wireLoginBtn() {
         // Prefetch all lookup tables in parallel so the per-row loop below can
         // resolve agent/prospect/customer names synchronously instead of awaiting
         // AppDataStore.getById() three times per row.
+        // Always use getAll + visibility filter (same as renderCalendar) instead
+        // of getVisibleActivities() which duplicates the fetch + tree walk.
         const [rawActs, allEventsRTA, allProspectsRTA, allCustomersRTA, allUsersRTA] = await Promise.all([
-            isSystemAdmin(_currentUser) ? AppDataStore.getAll('activities') : getVisibleActivities(),
+            AppDataStore.getAll('activities'),
             AppDataStore.getAll('events'),
             AppDataStore.getAll('prospects'),
             AppDataStore.getAll('customers'),
@@ -10445,9 +10454,16 @@ function _wireLoginBtn() {
         const customerMapRTA = new Map(allCustomersRTA.map(c => [String(c.id), c]));
         const userMapRTA = new Map(allUsersRTA.map(u => [String(u.id), u]));
 
-        const allActs = rawActs.filter(a =>
+        let allActs = rawActs.filter(a =>
             a.activity_type !== 'EVENT' || !a.event_id || existingEventIds.has(String(a.event_id))
         );
+
+        // Apply visibility filter for non-admin users (same as renderCalendar)
+        if (!isSystemAdmin(_currentUser)) {
+            const canView = await buildActivityVisibilityChecker(allUsersRTA);
+            allActs = allActs.filter(canView);
+        }
+
         let activities = allActs.filter(a => a.activity_date === dateStr);
 
         // Apply filters (super admin ignores agent filter)
@@ -10673,8 +10689,18 @@ function _wireLoginBtn() {
         const soonBadge = document.getElementById('refill-soon-badge');
         if (!overdueList || !soonList) return;
 
-        // Probe: if migration hasn't run, show a gentle call-to-action
-        const tableOk = await checkRefillReminderTable();
+        // Fire the table probe, both refill queries, AND lookup tables all in
+        // one parallel batch. If the table doesn't exist the data queries
+        // harmlessly return [] via their .catch() handlers.
+        const [tableOk, reminders, whatsappSent, prospects, customers, allUsers] = await Promise.all([
+            checkRefillReminderTable(),
+            AppDataStore.query('refill_reminders', { status: 'pending' }).catch(() => []),
+            AppDataStore.query('refill_reminders', { status: 'whatsapp_sent' }).catch(() => []),
+            AppDataStore.getAll('prospects'),
+            AppDataStore.getAll('customers'),
+            AppDataStore.getAll('users'),
+        ]);
+
         if (!tableOk) {
             const cta = `<div class="text-muted" style="padding:10px;font-size:12px;">
                 <i class="fas fa-database" style="margin-right:4px;"></i>
@@ -10686,16 +10712,6 @@ function _wireLoginBtn() {
             if (soonBadge) soonBadge.textContent = '0';
             return;
         }
-
-        // Fetch pending reminders + lookup tables in parallel
-        const [reminders, prospects, customers, allUsers] = await Promise.all([
-            AppDataStore.query('refill_reminders', { status: 'pending' }).catch(() => []),
-            AppDataStore.getAll('prospects'),
-            AppDataStore.getAll('customers'),
-            AppDataStore.getAll('users'),
-        ]);
-
-        const whatsappSent = await AppDataStore.query('refill_reminders', { status: 'whatsapp_sent' }).catch(() => []);
         const all = [...(reminders || []), ...(whatsappSent || [])];
 
         const prospectMap = new Map(prospects.map(p => [String(p.id), p]));
