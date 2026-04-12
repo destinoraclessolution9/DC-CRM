@@ -16423,7 +16423,7 @@ function _wireLoginBtn() {
                         </div>
                         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:6px 0 8px;">
                             <span style="font-size:22px;font-weight:700;line-height:1.3;flex-shrink:0;">${prospect.full_name}</span>${prospect.nickname ? `<span style="font-size:15px;font-weight:400;color:var(--gray-500);">"${prospect.nickname}"</span>` : ''}
-                            <button title="Edit" onclick="app.editProspect(${prospect.id})" style="width:24px;height:24px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--gray-500);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fas fa-edit"></i></button><button title="Convert to Customer" onclick="app.convertToCustomer(${prospect.id})" style="width:24px;height:24px;border-radius:50%;border:none;background:var(--primary);color:#fff;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'"><i class="fas fa-user-check"></i></button>
+                            <button title="Edit" onclick="app.editProspect(${prospect.id})" style="width:24px;height:24px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--gray-500);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fas fa-edit"></i></button><button title="Convert to Customer" onclick="app.convertToCustomer(${prospect.id})" style="width:24px;height:24px;border-radius:50%;border:none;background:var(--primary);color:#fff;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'"><i class="fas fa-user-check"></i></button><button title="Save to Phone Contacts" onclick="app.downloadProspectVCard(${prospect.id})" style="width:24px;height:24px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--success);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fas fa-address-book"></i></button>
                         </div>
                     </div>
                     ${cpsPhoto ? `<img src="${cpsPhoto.url}" onclick="event.stopPropagation();app.zoomCpsPhoto('${cpsPhoto.url}')" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:2px solid var(--gray-200);cursor:zoom-in;flex-shrink:0;margin-top:4px;" title="CPS Photo — click to enlarge">` : ''}
@@ -17291,6 +17291,73 @@ function _wireLoginBtn() {
     };
 
     const editProspect = async (prospectId) => await openProspectModal(prospectId);
+
+    // Export prospect as a vCard 3.0 (.vcf) so the user can save the contact
+    // straight into their phone address book. iOS Safari and Android Chrome
+    // both open the downloaded file in the native Contacts app.
+    const downloadProspectVCard = async (prospectId) => {
+        const p = await AppDataStore.getById('prospects', prospectId);
+        if (!p) { UI.toast.error('Prospect not found'); return; }
+        if (!p.phone && !p.email) {
+            UI.toast.error('Prospect has no phone or email to save');
+            return;
+        }
+
+        // RFC 2426 escape: backslash, newline, comma, semicolon
+        const esc = (v) => String(v || '')
+            .replace(/\\/g, '\\\\')
+            .replace(/\n/g, '\\n')
+            .replace(/,/g, '\\,')
+            .replace(/;/g, '\\;');
+
+        const fullName = p.full_name || '';
+        const displayName = p.nickname ? `${fullName} (${p.nickname})` : fullName;
+
+        const lines = ['BEGIN:VCARD', 'VERSION:3.0'];
+        lines.push(`FN:${esc(displayName)}`);
+        // Put the whole name in the surname slot — no surname/first-name split
+        lines.push(`N:${esc(fullName)};;;;`);
+        if (p.nickname)  lines.push(`NICKNAME:${esc(p.nickname)}`);
+        if (p.phone)     lines.push(`TEL;TYPE=CELL:${esc(p.phone)}`);
+        if (p.email)     lines.push(`EMAIL;TYPE=INTERNET:${esc(p.email)}`);
+
+        const org = p.is_own_business && p.business_name
+            ? `${p.company_name || ''};${p.business_name}`
+            : (p.company_name || '');
+        if (org.replace(/;/g, '')) lines.push(`ORG:${esc(org)}`);
+
+        const title = p.emp_title_role || p.occupation;
+        if (title) lines.push(`TITLE:${esc(title)}`);
+
+        if (p.address || p.city || p.state || p.postal_code) {
+            lines.push(
+                `ADR;TYPE=HOME:;;${esc(p.address)};${esc(p.city)};${esc(p.state)};${esc(p.postal_code)};${esc(p.nationality)}`
+            );
+        }
+
+        if (p.date_of_birth && /^\d{4}-\d{2}-\d{2}$/.test(p.date_of_birth)) {
+            lines.push(`BDAY:${p.date_of_birth}`);
+        }
+
+        lines.push('NOTE:DC CRM');
+        lines.push('URL:https://destinoraclessolution.com');
+        lines.push(`REV:${new Date().toISOString()}`);
+        lines.push('END:VCARD');
+
+        // RFC 2426 requires CRLF line endings
+        const vcard = lines.join('\r\n');
+        const blob  = new Blob([vcard], { type: 'text/vcard;charset=utf-8' });
+        const url   = URL.createObjectURL(blob);
+        const a     = document.createElement('a');
+        a.href = url;
+        a.download = `${(fullName || 'contact').replace(/[^\w\-]+/g, '_')}.vcf`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+        UI.toast.success('Contact downloaded — tap the file to save to your phone');
+    };
 
     const addNote = async (prospectId) => {
         const text = document.getElementById('new-note-text')?.value?.trim();
@@ -31284,6 +31351,7 @@ const initImportDemoData = async () => {
         openAddProspectModal: openProspectModal,
         openProspectModal,
         editProspect,
+        downloadProspectVCard,
         saveProspect,
         filterProspects,
         exportData,
