@@ -1,5 +1,5 @@
 // Service Worker — offline caching + push notifications
-const CACHE_NAME = 'crm-cache-v2';
+const CACHE_NAME = 'crm-cache-v3';
 
 // Minimal precache. We skip heavy files (script.js is 18k lines) to
 // avoid breaking install if any single asset 404s.
