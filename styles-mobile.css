@@ -568,7 +568,7 @@
         padding: 0 !important;
     }
 
-    .modal-content {
+    .modal-box {
         width: 100% !important;
         max-width: 100% !important;
         max-height: 92dvh !important;
@@ -577,6 +577,7 @@
         overflow: hidden;
         display: flex;
         flex-direction: column;
+        padding: 0 !important;
     }
 
     .modal-header {
@@ -585,11 +586,12 @@
         padding: 18px 16px 14px !important;
     }
 
-    .modal-body {
+    .modal-content {
         flex: 1;
         overflow-y: auto;
         -webkit-overflow-scrolling: touch;
         padding: 16px !important;
+        min-height: 0;
     }
 
     .modal-footer {
@@ -610,16 +612,16 @@
     }
 
     /* Single-column forms in modals */
-    .modal-body .form-grid,
-    .modal-body [class*="grid-"] {
+    .modal-content .form-grid,
+    .modal-content [class*="grid-"] {
         grid-template-columns: 1fr !important;
     }
 
     /* Wider form inputs */
-    .modal-body .form-control,
-    .modal-body input,
-    .modal-body select,
-    .modal-body textarea {
+    .modal-content .form-control,
+    .modal-content input,
+    .modal-content select,
+    .modal-content textarea {
         font-size: 16px !important;
     }
 }
