@@ -9480,7 +9480,7 @@ function _wireLoginBtn() {
             // Visibility / permission
             cases = cases.filter(c => {
                 const isOwner = c.created_by === currentUser?.id;
-                const isAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || currentUser?.role?.includes('Level 3') || currentUser?.role?.includes('Level 7') || currentUser?.role === 'team_leader' || currentUser?.role === 'admin';
+                const isAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || /manager|team_leader/i.test(currentUser?.role || '');
                 if (_caseFilters.visibility === 'public') return c.is_public;
                 if (_caseFilters.visibility === 'mine') return isOwner;
                 return c.is_public || isOwner || isAdmin;
@@ -9535,7 +9535,7 @@ function _wireLoginBtn() {
                 entityLink = `app.showProspectDetail(${c.prospect_id})`;
             }
             const isOwner = c.created_by === currentUser?.id;
-            const isAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || currentUser?.role?.includes('Level 3') || currentUser?.role?.includes('Level 7') || currentUser?.role === 'team_leader' || currentUser?.role === 'admin';
+            const isAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || /manager|team_leader/i.test(currentUser?.role || '');
             const caseMappings = allTagMappings.filter(et => et.entity_type === 'case_study' && et.entity_id === c.id);
             const caseTags = caseMappings.map(m => allTags.find(t => t.id === m.tag_id)).filter(Boolean);
             const tagBadges = caseTags.map(t => `<span class="badge" style="background:${t.color || '#e5e7eb'};color:#1f2937;margin-right:4px;font-size:11px;">${t.name}</span>`).join('');
@@ -9619,7 +9619,7 @@ function _wireLoginBtn() {
 
         const currentUser = _currentUser;
         const isOwner = c.created_by === currentUser?.id;
-        const isAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || currentUser?.role?.includes('Level 3') || currentUser?.role?.includes('Level 7') || currentUser?.role === 'team_leader' || currentUser?.role === 'admin';
+        const isAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || /manager|team_leader/i.test(currentUser?.role || '');
 
         const isCpsCase = (c.case_type || 'cps') === 'cps';
         let entityInfo = '';
