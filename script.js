@@ -14396,17 +14396,17 @@ function _wireLoginBtn() {
                 const waze    = intakeRow.waze_link      || '';
 
                 const msg = [
-                    `✅ Temujanji anda telah DISAHKAN! / Your appointment has been CONFIRMED!`,
+                    `✅ Your appointment has been CONFIRMED! / 您的预约已确认！`,
                     ``,
                     `👤 ${name}`,
-                    `📅 Tarikh / Date: ${date}`,
-                    `⏰ Masa / Time: ${start}–${end}`,
-                    venue   ? `📍 Lokasi / Venue: ${venue}` : '',
-                    address ? `🏠 Alamat / Address: ${address}` : '',
+                    `📅 Date / 日期: ${date}`,
+                    `⏰ Time / 时间: ${start}–${end}`,
+                    venue   ? `📍 Venue / 地点: ${venue}` : '',
+                    address ? `🏠 Address / 地址: ${address}` : '',
                     waze    ? `🗺️ Waze: ${waze}` : '',
                     ``,
-                    `Sila pastikan anda hadir tepat pada masanya. Pakai pakaian formal/smart casual.`,
                     `Please ensure you arrive on time. Dress code: formal/smart casual.`,
+                    `请准时出席。着装要求：正式/整洁休闲。`,
                 ].filter(l => l !== undefined && !(l === '' && false)).join('\n').replace(/\n{3,}/g, '\n\n').trim();
 
                 const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
