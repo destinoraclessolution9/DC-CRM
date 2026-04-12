@@ -23445,14 +23445,18 @@ const exportKPIReport = async (format) => {
                         <tr>
                             <th>Venue Name</th>
                             <th>Location</th>
+                            <th>Address</th>
+                            <th>Waze</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody>
-                        ${data.length === 0 ? '<tr><td colspan="3" style="text-align:center; color: var(--gray-400); padding: 32px;">No venues added yet.</td></tr>' : data.map(item => `
+                        ${data.length === 0 ? '<tr><td colspan="5" style="text-align:center; color: var(--gray-400); padding: 32px;">No venues added yet.</td></tr>' : data.map(item => `
                             <tr>
                                 <td><strong>${item.name}</strong></td>
                                 <td>${item.location || '-'}</td>
+                                <td>${item.address || '-'}</td>
+                                <td>${item.waze_link ? `<a href="${item.waze_link}" target="_blank" rel="noopener" style="color: var(--primary); text-decoration: none;" title="Open in Waze"><i class="fas fa-map-marker-alt"></i> Waze</a>` : '-'}</td>
                                 <td>
                                     <button class="btn-icon" onclick="app.openMarketingListEditModal('${item.id}')" title="Edit"><i class="fas fa-pencil-alt"></i></button>
                                     <button class="btn-icon text-danger" onclick="app.deleteMarketingListItem('${item.id}')" title="Delete"><i class="fas fa-trash-alt"></i></button>
@@ -23580,6 +23584,8 @@ const exportKPIReport = async (format) => {
             content = `
                 <div class="form-group"><label>Venue Name*</label><input type="text" id="mkt-vname" class="form-control" placeholder="e.g. MBB, Bujishu Premier"></div>
                 <div class="form-group"><label>Location*</label><input type="text" id="mkt-vlocation" class="form-control" placeholder="e.g. KL, JB, SG"></div>
+                <div class="form-group"><label>Address</label><input type="text" id="mkt-vaddress" class="form-control" placeholder="e.g. No. 5, Jalan Bukit Jalil, 57000 KL"></div>
+                <div class="form-group"><label>Waze Link</label><input type="url" id="mkt-vwaze" class="form-control" placeholder="https://waze.com/ul/..."></div>
 `;
             UI.showModal('Add New Venue', content, [
                 { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
@@ -23663,6 +23669,8 @@ const exportKPIReport = async (format) => {
             content = `
                 <div class="form-group"><label>Venue Name*</label><input type="text" id="mkt-vname" class="form-control" value="${item.name || ''}"></div>
                 <div class="form-group"><label>Location*</label><input type="text" id="mkt-vlocation" class="form-control" value="${item.location || ''}"></div>
+                <div class="form-group"><label>Address</label><input type="text" id="mkt-vaddress" class="form-control" value="${item.address || ''}" placeholder="e.g. No. 5, Jalan Bukit Jalil, 57000 KL"></div>
+                <div class="form-group"><label>Waze Link</label><input type="url" id="mkt-vwaze" class="form-control" value="${item.waze_link || ''}" placeholder="https://waze.com/ul/..."></div>
             `;
             UI.showModal('Edit Venue', content, [
                 { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
@@ -23804,14 +23812,16 @@ const exportKPIReport = async (format) => {
     const saveVenue = async (id = null) => {
         const name = (document.getElementById('mkt-vname')?.value || '').trim();
         const location = (document.getElementById('mkt-vlocation')?.value || '').trim();
+        const address = (document.getElementById('mkt-vaddress')?.value || '').trim();
+        const waze_link = (document.getElementById('mkt-vwaze')?.value || '').trim();
         if (!name) return UI.toast.error('Venue Name is required');
         if (!location) return UI.toast.error('Location is required');
 
         try {
             if (id) {
-                await AppDataStore.update('venues', id, { name, location, updated_at: new Date().toISOString() });
+                await AppDataStore.update('venues', id, { name, location, address, waze_link, updated_at: new Date().toISOString() });
             } else {
-                await AppDataStore.create('venues', { name, location, created_at: new Date().toISOString() });
+                await AppDataStore.create('venues', { name, location, address, waze_link, created_at: new Date().toISOString() });
             }
         } catch (err) {
             UI.toast.error('Save failed: ' + (err.message || err));
