@@ -11232,19 +11232,8 @@ function _wireLoginBtn() {
         const description = event?.description || activity.summary || '';
         if (!description) { UI.toast.error('No description to send'); return; }
 
-        const prospect = activity.prospect_id ? await AppDataStore.getById('prospects', activity.prospect_id) : null;
-        const customer = activity.customer_id ? await AppDataStore.getById('customers', activity.customer_id) : null;
-        const entity = prospect || customer;
-        const phone = entity?.phone;
-        if (!phone) { UI.toast.error('No phone number on file for this contact'); return; }
-
-        let normalized = String(phone).replace(/[^0-9]/g, '');
-        if (normalized.startsWith('0')) normalized = '60' + normalized.slice(1);
-        if (!normalized.startsWith('60') && normalized.length <= 10) normalized = '60' + normalized;
-
-        const waUrl = `https://wa.me/${normalized}?text=${encodeURIComponent(description)}`;
-        window.open(waUrl, '_blank');
-        UI.toast.success('WhatsApp opened — review and send');
+        const msg = encodeURIComponent(description);
+        window.open(`https://wa.me/?text=${msg}`, '_blank');
     };
 
     // Dismiss a refill reminder. Updates BOTH the refill_reminders row AND the
