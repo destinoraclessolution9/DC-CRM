@@ -20,7 +20,7 @@ if (!window.AppDataStore._patched) {
     window.AppDataStore._patched = true;
 }
 (async function() {
-console.log("!!! ANTIGRAVITY v2 LOADED !!!");
+// ANTIGRAVITY v2 LOADED
 
 // Add initialization flag
 window.app.ready = false;
@@ -507,7 +507,7 @@ const appLogic = (() => {
         if (typeof LunarCalendar === 'undefined' && typeof lunarCalendar === 'undefined' && typeof Lunar === 'undefined') {
             console.error('LunarCalendar library failed to load. Check network tab.');
         } else {
-            console.log('LunarCalendar library loaded successfully.');
+            // LunarCalendar loaded OK
         }
     }, 500);
 
@@ -4889,7 +4889,7 @@ In a production system, this would show the actual file contents.
 
     // Initialize AI Service
     const initAIAnalytics = async () => {
-        console.log('Initializing AI Analytics...');
+        // Initializing AI Analytics
 
         _aiService = {
             predictLeadScore: predictLeadScore,
@@ -4902,11 +4902,8 @@ In a production system, this would show the actual file contents.
         // Check if AI models exist, create default if not
         await ensureAIModelsExist();
 
-        // Run initial predictions
-        setTimeout(async () => {
-            await batchUpdateLeadScores();
-            await batchUpdateChurnRisks();
-        }, 2000);
+        // Lead scores & churn risks are computed on-demand (not on every page load)
+        // Call batchUpdateLeadScores() or batchUpdateChurnRisks() manually when needed
     };
 
     // Ensure AI models exist in AppDataStore
@@ -4976,7 +4973,7 @@ In a production system, this would show the actual file contents.
                 await AppDataStore.create('ai_models', model);
             }
 
-            console.log('Default AI models created');
+            // Default AI models created
         }
     };
 
@@ -5498,7 +5495,6 @@ In a production system, this would show the actual file contents.
             await predictLeadScore(prospect.id);
         }
 
-        console.log(`Updated scores for ${prospects.length} prospects`);
         UI.toast.success(`Updated scores for ${prospects.length} prospects`);
     };
 
@@ -5972,7 +5968,6 @@ In a production system, this would show the actual file contents.
             await calculateChurnRisk(customer.id);
         }
 
-        console.log(`Updated churn risks for ${customers.length} customers`);
         UI.toast.success(`Updated churn risks for ${customers.length} customers`);
     };
 
@@ -6235,7 +6230,7 @@ In a production system, this would show the actual file contents.
 
     function populateLoginDropdown() {
         // No-op: login is now handled by Supabase email/password form
-        console.log('populateLoginDropdown: Supabase auth – dropdown removed');
+        // Supabase auth – login dropdown removed
     }
 
     function updateNavVisibility() {
@@ -6392,7 +6387,7 @@ function _wireLoginBtn() {
                             await AppDataStore.update('users', nameMatch.id, { email: user.email });
                             profile = { ...nameMatch, email: user.email };
                             profileError = null;
-                            console.log(`Linked existing agent record "${nameMatch.full_name}" (id ${nameMatch.id}) to email ${user.email}`);
+                            // Linked existing agent record to login email
                         }
                     }
                 }
@@ -6400,7 +6395,7 @@ function _wireLoginBtn() {
 
             // If profile still not found, create one automatically
             if (!profile && profileError && profileError.code === 'PGRST116') {
-                console.log('Profile not found, creating one...');
+                // Profile not found, creating one
                 const newProfile = {
                     id: Date.now(),
                     email: user.email,
@@ -6472,7 +6467,6 @@ function _wireLoginBtn() {
     if (_initStarted) return; // prevent double-init (synchronous guard)
     _initStarted = true;
     await AppDataStore.init();
-    console.log('App initializing...');
 
     try {
         // Try to get current user – if session missing, just set _currentUser = null
@@ -6508,10 +6502,10 @@ function _wireLoginBtn() {
             } else {
                 _currentUser = null;
             }
-            console.log('User loaded:', _currentUser?.email ?? _currentUser?.username);
+            // User loaded
         } catch (err) {
             if (err.message && err.message.includes('Auth session missing')) {
-                console.log('No active session – showing login screen');
+                // No active session – showing login screen
                 _currentUser = null;
             } else {
                 throw err; // re-throw other errors
@@ -6609,7 +6603,7 @@ function _wireLoginBtn() {
         window.app.ready = true;
         window.app.initialized = true;
         window.dispatchEvent(new Event('appReady'));
-        console.log('App initialized successfully.');
+        // App initialized
     } catch (err) {
         console.error('App init failed:', err);
         // Fallback: show login screen again
@@ -6703,23 +6697,12 @@ function _wireLoginBtn() {
 
 
     const initDemoData = async () => {
-    console.log('Seeding demo data (users → prospects → activities)...');
-
     // Helper to insert a record, ignoring conflicts
     const safeInsert = async (table, data) => {
         try {
             await AppDataStore.create(table, data);
-            console.log(`✅ Inserted into ${table}:`, data.id || data);
             return true;
         } catch (err) {
-            // 23505 = duplicate key, 23503 = foreign key violation (we skip, hoping later records fix it)
-            if (err.code === '23505') {
-                console.log(`⏩ ${table} record already exists (id ${data.id})`);
-            } else if (err.code === '23503') {
-                console.warn(`⚠️ Foreign key error for ${table} id ${data.id}: ${err.details}`);
-            } else {
-                console.error(`❌ Failed to insert into ${table}:`, err.message);
-            }
             return false;
         }
     };
@@ -6794,7 +6777,7 @@ function _wireLoginBtn() {
     ];
     for (const r of demoRewards) { await safeInsert('recommendation_rewards', r); }
 
-    console.log('Demo data seeding completed.');
+    // Demo data seeding completed
 };
 
     const updateUserDisplay = () => {
@@ -13260,11 +13243,10 @@ function _wireLoginBtn() {
             updatedData.customer_id = _selectedEntity.id;
             updatedData.prospect_id = null;
         }
-        console.log('Updating with entity:', _selectedEntity);
+        // Updating with selected entity
     } else {
         updatedData.prospect_id = null;
         updatedData.customer_id = null;
-        console.log('No entity selected – clearing IDs');
     }
 
     await AppDataStore.update('activities', activityId, { ...activity, ...updatedData });
@@ -15309,7 +15291,7 @@ function _wireLoginBtn() {
             setTimeout(async () => {
                 try {
                     await window.PushNotif.subscribe();
-                    console.log('[Push] auto-subscribed (standalone PWA)');
+                    // Push auto-subscribed (standalone PWA)
                 } catch (e) { console.warn('[Push] auto-subscribe skipped:', e.message || e); }
             }, 2000);
         } catch (_) {}
@@ -28125,7 +28107,7 @@ ALTER TABLE public.promotions
         try {
             const client = AppDataStore._srClient || window.supabase;
             const { error } = await client.rpc('sql', { query: migrationSQL });
-            if (!error) { console.log('Promotions table migrated via rpc.'); return true; }
+            if (!error) { return true; }
         } catch (_) {}
 
         // Try via direct fetch with service-role key
@@ -28139,7 +28121,7 @@ ALTER TABLE public.promotions
                 },
                 body: JSON.stringify({ query: migrationSQL })
             });
-            if (resp.ok) { console.log('Promotions table migrated via fetch rpc.'); return true; }
+            if (resp.ok) { return true; }
         } catch (_) {}
 
         // Both failed – show SQL to user
@@ -29705,7 +29687,7 @@ const simulateCampaignSending = async (campaignId) => {
         }
 
         if (expiredCount > 0) {
-            console.log(`${expiredCount} manual overrides have expired.`);
+            // expired overrides cleaned up
         }
     };
 
@@ -31210,7 +31192,7 @@ const initImportDemoData = async () => {
                 }
             }
         } else {
-            console.log('Skipping import_jobs seeding: user 5 does not exist');
+            // Skipping import_jobs seeding: user 5 does not exist
         }
     }
 
@@ -31233,7 +31215,7 @@ const initImportDemoData = async () => {
                 }
             }
         } else {
-            console.log('Skipping reassignment_history seeding: some referenced users missing');
+            // Skipping reassignment_history seeding: referenced users missing
         }
     }
 };
@@ -31243,7 +31225,7 @@ const initImportDemoData = async () => {
         if (!isMobile()) return;
 
         try {
-            console.log('Initializing Phase 18 mobile features...');
+            // Initializing Phase 18 mobile features
 
             // 1. Initialize Offline Storage & Sync
             if (typeof SyncManager !== 'undefined') {
@@ -31261,14 +31243,14 @@ const initImportDemoData = async () => {
             // 3. Register Service Worker
             if ('serviceWorker' in navigator) {
                 navigator.serviceWorker.register('./service-worker.js')
-                    .then(reg => console.log('Service Worker registered', reg))
+                    .then(() => {})
                     .catch(err => console.error('Service Worker sync failed', err));
             }
 
             // 4. Add meta tags for PWA
             addMobileMetaTags();
 
-            console.log('Phase 18 mobile features initialized.');
+            // Phase 18 mobile features initialized
         } catch (error) {
             console.error('Error initializing mobile features:', error);
         }
@@ -31352,7 +31334,7 @@ const initImportDemoData = async () => {
                 created_at: new Date().toISOString()
             });
         } catch (e) { /* score_history table may not exist yet */ }
-        console.log(`Score updated for prospect ${prospectId}: ${oldScore} → ${newScore} (${reason}: ${points > 0 ? '+' : ''}${points})`);
+        // Score updated
     };
 
     const addScoreToCustomer = async (customerId, points, reason) => {
@@ -31441,7 +31423,7 @@ const initImportDemoData = async () => {
             protection_deadline: newDeadline,
             last_contact_date: new Date().toISOString().split('T')[0]
         });
-        console.log(`Protection auto-extended for prospect ${prospectId}: +${days} days (${label})`);
+        // Protection auto-extended
     };
 
     const getExtensionType = (activityType) => {
@@ -32906,7 +32888,7 @@ const initImportDemoData = async () => {
                     .replace(/\{\{days\}\}/g, context.days || '')
                     .replace(/\{\{event_name\}\}/g, context.eventName || '');
 
-                console.log(`Workflow "${wf.workflow_name}" triggered: ${wf.action_type} — ${config}`);
+                // Workflow triggered
 
                 // Update run count
                 await AppDataStore.update('automation_workflows', wf.id, {
@@ -34497,7 +34479,7 @@ const initImportDemoData = async () => {
         createSegmentFromScoredLeads: () => UI.toast.info('Creating segment...'),
         scheduleBulkFollowup: () => UI.toast.info('Scheduling follow-ups...'),
         exportScoringReport: () => UI.toast.info('Generating report...'),
-        changeForecastPeriod: (period) => console.log('Changing period to:', period),
+        changeForecastPeriod: (period) => { /* stub */ },
         viewDealDetails: (type) => UI.toast.info(`Viewing ${type} deals`),
         viewProspectDetails: () => UI.toast.info('Viewing prospects'),
         viewUpsellOpportunities: () => UI.toast.info('Viewing upsell opportunities'),
@@ -34518,7 +34500,7 @@ const initImportDemoData = async () => {
     window._isRefreshing = true;
     try {
         const view = _currentView;
-        console.log(`Auto-refreshing view: ${view}`);
+        // Auto-refreshing current view
         switch (view) {
             case 'month':
                 if (typeof renderCalendar === 'function') await renderCalendar();
@@ -34569,7 +34551,7 @@ const initImportDemoData = async () => {
                 if (typeof showFudeView === 'function') await showFudeView(viewport);
                 break;
             default:
-                console.log(`No specific refresh logic configured for ${view}`);
+                // No specific refresh for this view
         }
     } catch (err) {
         console.error("Error during auto-refresh:", err);
@@ -34599,7 +34581,7 @@ const initImportDemoData = async () => {
                     appLogic.refreshCurrentView();
                 }
             });
-            console.log('Global Data Sync initialized.');
+            // Global Data Sync initialized
         },
 
         scheduleCoachingSessions: () => UI.toast.info('Scheduling coaching sessions...'),
@@ -34786,13 +34768,11 @@ Object.assign(window.app, appLogic);
 
 // ========== SECURITY INITIALIZATION ==========
 const initSecurity = async () => {
-    console.log('Initializing security features...');
     if (typeof window.app.checkForSecurityIncidents !== 'undefined') window.app.checkForSecurityIncidents();
     if (typeof window.app.monitorLoginAttempts !== 'undefined') window.app.monitorLoginAttempts();
     if (typeof window.app.initSessionTimeout !== 'undefined') window.app.initSessionTimeout();
     if (typeof window.app.checkExpiredConsents !== 'undefined') window.app.checkExpiredConsents();
     if (typeof window.app.scheduleRetentionJobs !== 'undefined') window.app.scheduleRetentionJobs();
-    console.log('Security features initialized');
 };
 
 let sessionTimeoutTimer;
@@ -34802,9 +34782,20 @@ const initSessionTimeout = async () => {
         clearTimeout(sessionTimeoutTimer);
         sessionTimeoutTimer = setTimeout(window.app.logoutDueToInactivity, timeoutMinutes * 60 * 1000);
     };
+    // Throttled version for high-frequency events (mousemove, scroll)
+    let _lastReset = 0;
+    const throttledReset = () => {
+        const now = Date.now();
+        if (now - _lastReset < 5000) return; // at most once per 5 seconds
+        _lastReset = now;
+        resetTimeout();
+    };
     // Attach listeners ONCE (outside resetTimeout to prevent accumulation)
-    ['click', 'mousemove', 'keypress', 'scroll', 'touchstart'].forEach(event => {
+    ['click', 'keypress', 'touchstart'].forEach(event => {
         document.addEventListener(event, resetTimeout, { passive: true });
+    });
+    ['mousemove', 'scroll'].forEach(event => {
+        document.addEventListener(event, throttledReset, { passive: true });
     });
     resetTimeout();
 };
@@ -35447,10 +35438,8 @@ Object.assign(window.app, {
 
 // Initialize application when DOM is ready
 document.addEventListener('DOMContentLoaded', async () => {
-    console.log("Script end reached. Scheduling init...");
     setTimeout(async () => {
         if (window.app && window.app.init) {
-            console.log("Triggering window.app.init()");
             await window.app.init();
         }
     }, 100);
