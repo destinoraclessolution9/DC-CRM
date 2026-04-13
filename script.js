@@ -11246,10 +11246,21 @@ function _wireLoginBtn() {
         if (!activity) { UI.toast.error('Activity not found'); return; }
 
         const event = (activity.event_id) ? await AppDataStore.getById('events', activity.event_id) : null;
+        const title = event?.event_title || event?.title || activity.activity_title || '';
+        const date = activity.activity_date || '';
+        const time = (activity.start_time && activity.end_time) ? `${activity.start_time} - ${activity.end_time}` : (activity.start_time || '');
+        const venue = activity.venue || activity.location_address || event?.location || '';
         const description = event?.description || activity.summary || '';
-        if (!description) { UI.toast.error('No description to send'); return; }
+        const ticketPrice = event?.ticket_price ? `RM ${event.ticket_price}` : '';
 
-        const msg = encodeURIComponent(description);
+        let lines = [`✨ *${title || 'You are invited!'}* ✨`, ''];
+        if (date) lines.push(`📅 Date: ${date}`);
+        if (time) lines.push(`🕐 Time: ${time}`);
+        if (venue) lines.push(`📍 Venue: ${venue}`);
+        if (ticketPrice) lines.push(`🎟️ Ticket Price: ${ticketPrice}`);
+        if (description) lines.push('', description);
+
+        const msg = encodeURIComponent(lines.join('\n'));
         window.open(`https://wa.me/?text=${msg}`, '_blank');
     };
 
@@ -11859,7 +11870,19 @@ function _wireLoginBtn() {
                     ${marketingEvent?.description ? `<div class="info-row" style="flex-direction:column; align-items:flex-start; gap:4px;"><div style="display:flex; align-items:center; gap:8px; width:100%;"><span class="info-label">Description:</span><button class="btn btn-sm secondary" style="font-size:11px;padding:2px 8px;" onclick="event.stopPropagation();app.sendDescriptionInvite(${activity.id})"><i class="fab fa-whatsapp" style="margin-right:3px;"></i> Invite</button></div><span style="white-space:pre-wrap; color:var(--gray-700);">${marketingEvent.description}</span></div>` : ''}
                     ${activity.summary ? `<div class="info-row"><span class="info-label">Summary:</span> <span>${activity.summary}</span></div>` : ''}
                 </div>
-                
+
+                ${marketingEvent ? `
+                <div class="detail-section">
+                    <h4>Event Details</h4>
+                    ${marketingEvent.ticket_price ? `<div class="info-row"><span class="info-label">Ticket Price:</span> <span>RM ${marketingEvent.ticket_price}</span></div>` : ''}
+                    ${marketingEvent.early_bird_price ? `<div class="info-row"><span class="info-label">Early Bird Price:</span> <span>RM ${marketingEvent.early_bird_price}</span></div>` : ''}
+                    ${marketingEvent.group_purchase_price ? `<div class="info-row"><span class="info-label">Group Purchase Price:</span> <span>RM ${marketingEvent.group_purchase_price}</span></div>` : ''}
+                    ${marketingEvent.duration ? `<div class="info-row"><span class="info-label">Duration:</span> <span>${marketingEvent.duration}</span></div>` : ''}
+                    ${marketingEvent.target_group ? `<div class="info-row"><span class="info-label">Target Group:</span> <span>${marketingEvent.target_group}</span></div>` : ''}
+                    ${marketingEvent.remarks ? `<div class="info-row"><span class="info-label">Remarks:</span> <span>${marketingEvent.remarks}</span></div>` : ''}
+                </div>
+                ` : ''}
+
                 ${isAttendeeType ? '' : `
                 <div class="detail-section">
                     <h4>Consultant</h4>
@@ -15004,7 +15027,7 @@ function _wireLoginBtn() {
                             <pre style="background:#f3f4f6; border-radius:8px; padding:12px; font-size:12px; text-align:left; white-space:pre-wrap; max-height:220px; overflow-y:auto;">${msg}</pre>
                         </div>`,
                         [
-                            { label: '📲 Send WhatsApp', type: 'primary',   action: `window.open(${JSON.stringify(waUrl)}, '_blank'); UI.hideModal();` },
+                            { label: '📲 Send WhatsApp', type: 'primary',   action: `window.open('${waUrl}', '_blank'); UI.hideModal();` },
                             { label: 'Skip',              type: 'secondary', action: 'UI.hideModal();' }
                         ]
                     );
