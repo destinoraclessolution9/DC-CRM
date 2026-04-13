@@ -10657,6 +10657,7 @@ function _wireLoginBtn() {
             sortDir: 'asc',
             limit: 5000,
             offset: 0,
+            countMode: null, // no pagination needed — skip expensive count
             filters: {},
         };
         // Agent filter
@@ -10702,10 +10703,10 @@ function _wireLoginBtn() {
         const neededCustomerIds = [...new Set(activities.filter(a => a.customer_id).map(a => a.customer_id))];
         const [prospectResult, customerResult] = await Promise.all([
             neededProspectIds.length > 0
-                ? AppDataStore.queryAdvanced('prospects', { scopeField: 'id', scopeValues: neededProspectIds, limit: 5000, select: 'id,full_name' })
+                ? AppDataStore.queryAdvanced('prospects', { scopeField: 'id', scopeValues: neededProspectIds, limit: 5000, select: 'id,full_name', countMode: null })
                 : Promise.resolve({ data: [] }),
             neededCustomerIds.length > 0
-                ? AppDataStore.queryAdvanced('customers', { scopeField: 'id', scopeValues: neededCustomerIds, limit: 5000, select: 'id,full_name' })
+                ? AppDataStore.queryAdvanced('customers', { scopeField: 'id', scopeValues: neededCustomerIds, limit: 5000, select: 'id,full_name', countMode: null })
                 : Promise.resolve({ data: [] }),
         ]);
         const prospectMap = new Map(prospectResult.data.map(p => [String(p.id), p]));
@@ -10906,6 +10907,7 @@ function _wireLoginBtn() {
             sortDir: 'asc',
             limit: 500,
             offset: 0,
+            countMode: null, // no pagination needed
         };
         if (!isSystemAdmin(_currentUser) && _filters && _filters.agent && _filters.agent !== 'all') {
             queryOpts.filters.lead_agent_id = _filters.agent;
@@ -10941,8 +10943,8 @@ function _wireLoginBtn() {
         const neededPIds = [...new Set(activities.filter(a => a.prospect_id).map(a => a.prospect_id))];
         const neededCIds = [...new Set(activities.filter(a => a.customer_id).map(a => a.customer_id))];
         const [pRes, cRes] = await Promise.all([
-            neededPIds.length > 0 ? AppDataStore.queryAdvanced('prospects', { scopeField: 'id', scopeValues: neededPIds, limit: 500, select: 'id,full_name' }) : Promise.resolve({ data: [] }),
-            neededCIds.length > 0 ? AppDataStore.queryAdvanced('customers', { scopeField: 'id', scopeValues: neededCIds, limit: 500, select: 'id,full_name' }) : Promise.resolve({ data: [] }),
+            neededPIds.length > 0 ? AppDataStore.queryAdvanced('prospects', { scopeField: 'id', scopeValues: neededPIds, limit: 500, select: 'id,full_name', countMode: null }) : Promise.resolve({ data: [] }),
+            neededCIds.length > 0 ? AppDataStore.queryAdvanced('customers', { scopeField: 'id', scopeValues: neededCIds, limit: 500, select: 'id,full_name', countMode: null }) : Promise.resolve({ data: [] }),
         ]);
         const prospectMapRTA = new Map(pRes.data.map(p => [String(p.id), p]));
         const customerMapRTA = new Map(cRes.data.map(c => [String(c.id), c]));
@@ -16231,31 +16233,10 @@ function _wireLoginBtn() {
         const allUsers = await AppDataStore.getAll('users');
         const userById = new Map(allUsers.map(u => [String(u.id), u]));
 
-        // ── Fetch latest activity per prospect in this page (scoped, not ALL activities) ──
+        // ── Fetch latest activity per prospect — NON-BLOCKING ──
+        // Render the table immediately, then backfill "Last Activity" column
         const prospectIds = prospects.map(p => p.id);
         let latestActivityByProspect = new Map();
-        if (prospectIds.length > 0) {
-            try {
-                // Fetch activities only for visible prospects — NOT the entire table
-                const { data: pageActivities } = await AppDataStore.queryAdvanced('activities', {
-                    scopeField: 'prospect_id',
-                    scopeValues: prospectIds,
-                    sort: 'activity_date',
-                    sortDir: 'desc',
-                    limit: 5000, // generous limit for activities of this page's prospects
-                    offset: 0,
-                });
-                for (const a of (pageActivities || [])) {
-                    if (a.prospect_id == null) continue;
-                    const key = String(a.prospect_id);
-                    const current = latestActivityByProspect.get(key);
-                    if (!current) { latestActivityByProspect.set(key, a); continue; }
-                    const curKey = (current.activity_date || '') + '|' + (current.id || 0);
-                    const newKey = (a.activity_date || '') + '|' + (a.id || 0);
-                    if (newKey > curKey) latestActivityByProspect.set(key, a);
-                }
-            } catch (_) {}
-        }
 
         // ── Client-side post-filters (for computed fields that can't be pushed to DB) ──
         // Pre-load cross-table data only when those filters are active
@@ -16393,6 +16374,37 @@ function _wireLoginBtn() {
             pgHtml += `<button class="btn secondary btn-sm" ${currentPage >= totalPages ? 'disabled' : ''} onclick="app.prospectPageNav('next')">Next <i class="fas fa-angle-right"></i></button>`;
             pgHtml += `<button class="btn secondary btn-sm" ${currentPage >= totalPages ? 'disabled' : ''} onclick="app.prospectPageNav('last')" title="Last page"><i class="fas fa-angle-double-right"></i></button>`;
             paginationEl.innerHTML = pgHtml;
+        }
+
+        // ── Backfill "Last Activity" column asynchronously (non-blocking) ──
+        if (prospectIds.length > 0) {
+            AppDataStore.queryAdvanced('activities', {
+                scopeField: 'prospect_id',
+                scopeValues: prospectIds,
+                sort: 'activity_date',
+                sortDir: 'desc',
+                limit: 5000,
+                offset: 0,
+                countMode: null, // skip count — we don't need pagination for this sub-query
+            }).then(result => {
+                const actMap = new Map();
+                for (const a of (result.data || [])) {
+                    if (a.prospect_id == null) continue;
+                    const key = String(a.prospect_id);
+                    const current = actMap.get(key);
+                    if (!current) { actMap.set(key, a); continue; }
+                    if ((a.activity_date || '') > (current.activity_date || '')) actMap.set(key, a);
+                }
+                // Update the DOM cells in-place
+                const rows = tbody.querySelectorAll('tr[onclick]');
+                rows.forEach(row => {
+                    const idMatch = row.getAttribute('onclick')?.match(/showProspectDetail\((\d+)\)/);
+                    if (!idMatch) return;
+                    const act = actMap.get(idMatch[1]);
+                    const cell = row.querySelector('td[data-label="Last Activity"]');
+                    if (cell && act) cell.textContent = `${act.activity_date} ${act.activity_type}`;
+                });
+            }).catch(() => {});
         }
     };
 

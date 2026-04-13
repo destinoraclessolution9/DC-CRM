@@ -829,14 +829,22 @@ class DataStore {
     //   select:       'id,full_name,...'                   // custom select (defaults to light-select)
     //   gte:          { activity_date: '2026-04-01' },    // >= filters (date ranges)
     //   lte:          { activity_date: '2026-04-30' },    // <= filters (date ranges)
+    //   countMode:    'exact' | 'planned' | null,         // count strategy (default 'planned')
+    //                 'exact' = full count (slow on large tables)
+    //                 'planned' = PostgreSQL planner estimate (fast)
+    //                 null = skip count entirely (fastest)
     // }
     //
     // Returns { data: [], count: totalMatching, limit, offset }
     async queryAdvanced(tableName, options = {}) {
         const selectClause = options.select || this._selectClauseForGetAll(tableName);
+        // Use 'planned' by default — 'exact' forces a full table scan which
+        // stalls for 10+ seconds on large tables (activities, prospects).
+        const countMode = options.countMode !== undefined ? options.countMode : 'planned';
+        const selectOpts = countMode ? { count: countMode } : {};
         let q = this._readClient()
             .from(tableName)
-            .select(selectClause, { count: 'exact' });
+            .select(selectClause, selectOpts);
 
         // Scoping — restrict to rows the user is allowed to see.
         // Single-field scope: scopeField + scopeValues
