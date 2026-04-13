@@ -15096,6 +15096,18 @@ function _wireLoginBtn() {
                 const address = intakeRow.venue_address  || '';
                 const waze    = intakeRow.waze_link      || '';
 
+                const mbbHqNote = (venue || '').toLowerCase().includes('mbb hq') ? [
+                    ``,
+                    `___________________________________________`,
+                    `给予第一次来DC-KL总部的朋友`,
+                    `欢迎您`,
+                    ``,
+                    `1. 驾车的朋友，可以Park 在B1-basement parking。`,
+                    `2. 搭monorail 的朋友，请下Bukit Nanas station。走向Menara Bangkok Bank 方向`,
+                    `3. 到了时，请打电话给我。因为需要亲自来接您才可以上楼。`,
+                    `4. 在等待的时候，请到保安柜台登记。 告知是去 21 楼 DC，需用到IC`,
+                ] : [];
+
                 const msg = [
                     `✅ Your appointment has been CONFIRMED! / 您的预约已确认！`,
                     ``,
@@ -15108,6 +15120,7 @@ function _wireLoginBtn() {
                     ``,
                     `Please ensure you arrive on time. Dress code: formal/smart casual.`,
                     `请准时出席。着装要求：正式/整洁休闲。`,
+                    ...mbbHqNote,
                 ].filter(l => l !== undefined && !(l === '' && false)).join('\n').replace(/\n{3,}/g, '\n\n').trim();
 
                 const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
