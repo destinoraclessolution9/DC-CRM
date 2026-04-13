@@ -35394,11 +35394,11 @@ Object.assign(window.app, {
     rollbackDeployment,
     showSystemLogs,
     viewEntityDetail: async (entity, id) => {
-        if (typeof hideSearchPanel !== 'undefined') hideSearchPanel();
+        if (window.app.hideSearchPanel) window.app.hideSearchPanel();
         switch (entity) {
-            case 'prospects': if (typeof showProspectDetail !== 'undefined') await showProspectDetail(id); break;
-            case 'customers': if (typeof showCustomerDetail !== 'undefined') await showCustomerDetail(id); break;
-            case 'agents': if (typeof showAgentDetail !== 'undefined') await showAgentDetail(id); break;
+            case 'prospects': if (window.app.showProspectDetail) await window.app.showProspectDetail(id); break;
+            case 'customers': if (window.app.showCustomerDetail) await window.app.showCustomerDetail(id); break;
+            case 'agents': if (window.app.showAgentDetail) await window.app.showAgentDetail(id); break;
             default: console.warn('Unknown entity type:', entity);
         }
     },
