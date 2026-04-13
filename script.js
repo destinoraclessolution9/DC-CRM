@@ -24666,7 +24666,7 @@ container.innerHTML = `
                     </div>
                 </div>
 
-                <div style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 24px;">
+                <div class="dashboard-bottom-row" style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 24px;">
                     <div class="performance-card card">
                         <div class="card-header">
                             <h3>Current Quarter Performance Breakdown</h3>
