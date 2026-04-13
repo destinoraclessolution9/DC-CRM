@@ -13578,25 +13578,10 @@ function _wireLoginBtn() {
                         </div>
                         
                         <div id="new-event-section" style="display: none;">
-                            <div class="form-group">
-                                <label>Title <span class="required">*</span></label>
-                                <input type="text" id="new-event-title" class="form-control">
-                            </div>
-                            <div class="form-row">
-                                <div class="form-group half">
-                                    <label>Category</label>
-                                    <select id="event-category" class="form-control">
-                                        <option value="Lecture">Lecture</option>
-                                        <option value="Course">Course</option>
-                                        <option value="Meeting">Meeting</option>
-                                        <option value="Training">Training</option>
-                                    </select>
-                                </div>
-                                <div class="form-group half">
-                                    <label>Base Score</label>
-                                    <input type="number" id="event-score" class="form-control" value="10">
-                                </div>
-                            </div>
+                            <button type="button" class="btn btn-primary" onclick="event.stopPropagation(); app.openCpsCreateEventModal();" style="margin-top:4px;">
+                                <i class="fas fa-plus"></i> Create New Event
+                            </button>
+                            <div id="cps-new-event-preview" style="margin-top:8px;"></div>
                         </div>
 
                         <div class="form-group" style="margin-top: 15px;">
@@ -13645,6 +13630,86 @@ function _wireLoginBtn() {
         const next = document.getElementById('new-event-section');
         if (existing) existing.style.display = val === 'existing' ? 'block' : 'none';
         if (next) next.style.display = val === 'new' ? 'block' : 'none';
+    };
+
+    const openCpsCreateEventModal = () => {
+        const content = `
+            ${buildEventCategoriesField([])}
+            <div class="form-group"><label>Title*</label><input type="text" id="mkt-title" class="form-control"></div>
+            <div class="form-group"><label>Ticket Price (RM)</label><input type="number" id="mkt-price" class="form-control" value="0"></div>
+            <div class="form-group"><label>Early Bird Price (RM)</label><input type="text" id="mkt-early-bird-price" class="form-control" placeholder="e.g. 199"></div>
+            <div class="form-group"><label>Group Purchase Price (RM)</label><input type="text" id="mkt-group-price" class="form-control" placeholder="e.g. 299 (min 5 pax)"></div>
+            <div class="form-group"><label>Duration</label><input type="text" id="mkt-duration" class="form-control" placeholder="e.g. 2 hours"></div>
+            <div class="form-group"><label>Target Group</label><input type="text" id="mkt-target" class="form-control"></div>
+            <div class="form-group"><label>Location</label><input type="text" id="mkt-location" class="form-control" placeholder="e.g. KL, Online"></div>
+            <div class="form-group"><label>Speaker</label><input type="text" id="mkt-speaker" class="form-control" placeholder="e.g. Master Tan"></div>
+            <div class="form-group"><label>Description</label><textarea id="mkt-desc" class="form-control"></textarea></div>
+            <div class="form-group"><label>Remarks</label><input type="text" id="mkt-remarks" class="form-control"></div>
+            <div class="form-group"><label><input type="checkbox" id="mkt-active" checked> Is Active</label></div>
+        `;
+        UI.showModal('Add New Event', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save', type: 'primary', action: '(async () => { await app.saveCpsNewEvent(); })()' }
+        ]);
+    };
+
+    const saveCpsNewEvent = async () => {
+        const title = document.getElementById('mkt-title')?.value?.trim();
+        if (!title) return UI.toast.error('Title is required');
+
+        const catCheckboxes = document.querySelectorAll('#mkt-event-categories .mkt-event-category-cb:checked');
+        const selectedCats = Array.from(catCheckboxes).map(cb => cb.value);
+        const othersCb = document.getElementById('mkt-event-cat-others-cb');
+        const othersInput = document.getElementById('mkt-event-cat-others-input');
+        if (othersCb && othersCb.checked && othersInput && othersInput.value.trim()) {
+            othersInput.value.split(',').map(s => s.trim()).filter(Boolean).forEach(c => {
+                if (!selectedCats.includes(c)) selectedCats.push(c);
+            });
+        }
+
+        const data = {
+            event_title: title,
+            ticket_price: parseFloat(document.getElementById('mkt-price')?.value) || 0,
+            early_bird_price: document.getElementById('mkt-early-bird-price')?.value || '',
+            group_purchase_price: document.getElementById('mkt-group-price')?.value || '',
+            duration: document.getElementById('mkt-duration')?.value || '',
+            target_group: document.getElementById('mkt-target')?.value || '',
+            location: document.getElementById('mkt-location')?.value || '',
+            speaker: document.getElementById('mkt-speaker')?.value || '',
+            description: document.getElementById('mkt-desc')?.value || '',
+            remarks: document.getElementById('mkt-remarks')?.value || '',
+            is_active: document.getElementById('mkt-active')?.checked ?? true,
+            status: document.getElementById('mkt-active')?.checked ? 'active' : 'inactive',
+            categories: JSON.stringify(selectedCats),
+            created_by: _currentUser ? _currentUser.id : null,
+            updated_at: new Date().toISOString()
+        };
+
+        try {
+            const newEvent = await AppDataStore.create('events', data);
+            UI.hideModal();
+            UI.toast.success('Event created successfully');
+
+            // Refresh existing events dropdown and auto-select the new event
+            const dropdown = document.getElementById('existing-event');
+            if (dropdown) {
+                const allEvents = await AppDataStore.getAll('events');
+                const activeEvents = allEvents.filter(e => e.is_active !== false && e.status !== 'inactive');
+                dropdown.innerHTML = '<option value="">-- Select --</option>' +
+                    activeEvents.map(e => `<option value="${e.id}" ${e.id === newEvent.id ? 'selected' : ''}>${e.event_title || e.title || 'Untitled Event'}</option>`).join('');
+                showSelectedEventDetails(newEvent.id);
+            }
+
+            // Switch to "Select Existing" with the new event selected
+            const existingRadio = document.querySelector('input[name="event-selection"][value="existing"]');
+            if (existingRadio) {
+                existingRadio.checked = true;
+                toggleEventForm();
+            }
+        } catch (err) {
+            console.error('saveCpsNewEvent error:', err);
+            UI.toast.error('Save failed: ' + (err.message || err));
+        }
     };
 
     const showSelectedEventDetails = async (eventId) => {
@@ -14795,48 +14860,14 @@ function _wireLoginBtn() {
             activity.location_address = address;
             activity.activity_title = type === 'FSA' ? 'Feng Shui Analysis' : 'Site Visit';
         } else if (type === 'EVENT' || type === 'AGENT_MEETING' || type === 'AGENT_TRAINING') {
-            const isNew = document.querySelector('input[name="event-selection"]:checked')?.value === 'new';
             const visibility = document.querySelector('input[name="event-visibility"]:checked')?.value || 'closed';
-            let eventId;
-            if (isNew) {
-                const title = document.getElementById('new-event-title')?.value;
-                if (!title) {
-                    UI.toast.error('Event title is required.');
-                    return;
-                }
-
-                const durationField = document.getElementById('duration');
-                let dur = 60;
-                if (durationField && durationField.value !== 'Invalid') {
-                    dur = parseInt(durationField.value);
-                }
-
-                let category = document.getElementById('event-category')?.value || 'Lecture';
-                if (type === 'AGENT_MEETING') category = 'Meeting';
-                if (type === 'AGENT_TRAINING') category = 'Training';
-
-                const newEvent = await AppDataStore.create('events', {
-                    title: title,
-                    date: date,
-                    time: start,
-                    duration: dur,
-                    category: category,
-                    base_score: document.getElementById('event-score')?.value || 10,
-                    status: 'Upcoming',
-                    visibility: visibility
-                });
-                eventId = newEvent.id;
-                activity.activity_title = title;
-            } else {
-                eventId = document.getElementById('existing-event')?.value;
-                if (!eventId) {
-                    UI.toast.error('Please select an event.');
-                    return;
-                }
-                const ev = await AppDataStore.getById('events', eventId);
-                activity.activity_title = ev ? ev.title : 'Existing Event';
-                // Update visibility on existing event if needed (optional, keeping it simple for now)
+            const eventId = document.getElementById('existing-event')?.value;
+            if (!eventId) {
+                UI.toast.error('Please select an event. Use "Create New" to add one first.');
+                return;
             }
+            const ev = await AppDataStore.getById('events', eventId);
+            activity.activity_title = ev ? (ev.event_title || ev.title) : 'Event';
             activity.event_id = parseInt(eventId);
             activity.visibility = visibility;
 
@@ -33510,6 +33541,8 @@ const initImportDemoData = async () => {
         calculateDuration,
         toggleCoAgentSection,
         toggleEventForm,
+        openCpsCreateEventModal,
+        saveCpsNewEvent,
         showSelectedEventDetails,
         toggleAttendeePaid,
         toggleAttendeeTicket,
