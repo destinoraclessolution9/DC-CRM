@@ -24705,7 +24705,7 @@ const buildNewAgentsDetails = async (from, to) => {
         } else {
             if (!isAgent(u)) continue;
         }
-        const upline = u.upline_id ? (userMap[u.upline_id]?.full_name || '—') : '—';
+        const upline = u.reporting_to ? (userMap[u.reporting_to]?.full_name || '—') : '—';
         rows.push([u.join_date, u.full_name || '—', u.role || '—', upline]);
     }
     return renderDetailTable(['Join Date', 'Name', 'Role', 'Upline'], rows);
