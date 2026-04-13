@@ -827,6 +827,8 @@ class DataStore {
     //   scopeValues:  [id1, id2],                         // allowed values (from getVisibleUserIds)
     //   scopeFields:  [{ field, values }],                // multi-field scoping (OR across fields)
     //   select:       'id,full_name,...'                   // custom select (defaults to light-select)
+    //   gte:          { activity_date: '2026-04-01' },    // >= filters (date ranges)
+    //   lte:          { activity_date: '2026-04-30' },    // <= filters (date ranges)
     // }
     //
     // Returns { data: [], count: totalMatching, limit, offset }
@@ -854,6 +856,18 @@ class DataStore {
             for (const [key, value] of Object.entries(options.filters)) {
                 if (value == null || value === '' || value === 'null' || value === 'undefined') continue;
                 q = q.eq(key, value);
+            }
+        }
+
+        // Range filters (gte / lte) — for date ranges etc.
+        if (options.gte) {
+            for (const [key, value] of Object.entries(options.gte)) {
+                if (value != null) q = q.gte(key, value);
+            }
+        }
+        if (options.lte) {
+            for (const [key, value] of Object.entries(options.lte)) {
+                if (value != null) q = q.lte(key, value);
             }
         }
 
@@ -900,6 +914,16 @@ class DataStore {
                 for (const [k, v] of Object.entries(options.filters)) {
                     if (v == null || v === '') continue;
                     filtered = filtered.filter(r => String(r[k]) === String(v));
+                }
+            }
+            if (options.gte) {
+                for (const [k, v] of Object.entries(options.gte)) {
+                    if (v != null) filtered = filtered.filter(r => r[k] >= v);
+                }
+            }
+            if (options.lte) {
+                for (const [k, v] of Object.entries(options.lte)) {
+                    if (v != null) filtered = filtered.filter(r => r[k] <= v);
                 }
             }
             if (options.search && options.searchFields) {

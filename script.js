@@ -10201,16 +10201,11 @@ function _wireLoginBtn() {
             </div>
         `;
 
-        // Kick off every shared table fetch RIGHT NOW, before the renderers
-        // even start their DOM-element checks. The dedup layer in data.js
-        // ensures each table is fetched exactly once; by warming the cache
-        // here, the renderers' Promise.all calls resolve instantly from
-        // the in-flight (or already-cached) promise instead of each one
-        // independently discovering the table and queuing a new fetch.
-        AppDataStore.getAll('activities');
+        // Warm the cache for small shared lookup tables that multiple renderers
+        // need. Calendar + Today activities now use queryAdvanced() with date
+        // ranges so they no longer fetch ALL activities/prospects/customers.
+        // Only warm events, users, and names (used by birthday section).
         AppDataStore.getAll('events');
-        AppDataStore.getAll('prospects');
-        AppDataStore.getAll('customers');
         AppDataStore.getAll('users');
         AppDataStore.getAll('names');
 
@@ -10643,20 +10638,50 @@ function _wireLoginBtn() {
             html += `<div class="calendar-cell" onclick="app.openActivityModal('${prevDateStr}')"><span class="date-num other-month">${dateNum}</span></div>`;
         }
 
-        // Prefetch every lookup table we'll need during the month render in parallel.
-        // Previously the inner day-loop did 4 sequential `await AppDataStore.getById(...)`
-        // calls per activity, which (even with cache hits) added hundreds of microtask
-        // yields per render and made the calendar feel laggy after navigation clicks.
-        const [rawActivities, allEvents, allProspects, allCustomers, allUsers] = await Promise.all([
-            AppDataStore.getAll('activities'),
+        // ── Fetch ONLY this month's activities from Supabase (not all history) ──
+        // With overflow days from prev/next month included
+        const monthStart = `${year}-${(month + 1).toString().padStart(2, '0')}-01`;
+        const nextMonth = month === 11 ? 0 : month + 1;
+        const nextYear = month === 11 ? year + 1 : year;
+        const monthEnd = `${nextYear}-${(nextMonth + 1).toString().padStart(2, '0')}-01`;
+        // Include a few days before (prev month overflow) and after
+        const prevOverflow = new Date(year, month, 1 - startDay);
+        const rangeStart = `${prevOverflow.getFullYear()}-${(prevOverflow.getMonth() + 1).toString().padStart(2, '0')}-${prevOverflow.getDate().toString().padStart(2, '0')}`;
+
+        // Build scoped query for activities — agents only get their hierarchy's activities
+        const visibleIds = await getVisibleUserIds(_currentUser);
+        const actQueryOpts = {
+            gte: { activity_date: rangeStart },
+            lte: { activity_date: monthEnd },
+            sort: 'activity_date',
+            sortDir: 'asc',
+            limit: 5000,
+            offset: 0,
+            filters: {},
+        };
+        // Agent filter
+        if (!isSystemAdmin(_currentUser) && _filters.agent && _filters.agent !== 'all') {
+            actQueryOpts.filters.lead_agent_id = _filters.agent;
+        }
+        // Type filter
+        if (_filters.type && _filters.type !== 'all') {
+            actQueryOpts.filters.activity_type = _filters.type;
+        }
+        // Scope by user hierarchy for non-admins
+        if (!isSystemAdmin(_currentUser) && visibleIds !== 'all') {
+            actQueryOpts.scopeField = 'lead_agent_id';
+            actQueryOpts.scopeValues = visibleIds;
+        }
+
+        // Fetch month activities + lookup tables in parallel
+        const [actResult, allEvents, allUsers] = await Promise.all([
+            AppDataStore.queryAdvanced('activities', actQueryOpts),
             AppDataStore.getAll('events'),
-            AppDataStore.getAll('prospects'),
-            AppDataStore.getAll('customers'),
             AppDataStore.getAll('users'),
         ]);
+        let rawActivities = actResult.data;
+
         const eventIds = new Set(allEvents.map(e => String(e.id)));
-        const prospectMap = new Map(allProspects.map(p => [String(p.id), p]));
-        const customerMap = new Map(allCustomers.map(c => [String(c.id), c]));
         const userMap = new Map(allUsers.map(u => [String(u.id), u]));
         const eventMap = new Map(allEvents.map(e => [String(e.id), e]));
 
@@ -10664,29 +10689,27 @@ function _wireLoginBtn() {
             a.activity_type !== 'EVENT' || !a.event_id || eventIds.has(String(a.event_id))
         );
 
-        // Super admins see all activities — skip visibility filter and ignore agent filter
-        if (!isSystemAdmin(_currentUser)) {
-            // Build one synchronous visibility predicate for this user and apply it
-            // in a single .filter pass. Previously every activity went through an
-            // async canViewActivity call (even with memoized visibleUserIds, each
-            // call still produced a microtask yield), so hundreds of activities
-            // meant hundreds of serialized yields on the calendar's critical path.
-            const canView = await buildActivityVisibilityChecker(allUsers);
-            activities = activities.filter(canView);
-
-            if (_filters.agent && _filters.agent !== 'all') {
-                activities = activities.filter(a => a.lead_agent_id == _filters.agent);
-            }
-        }
-        if (_filters.type && _filters.type !== 'all') {
-            activities = activities.filter(a => a.activity_type === _filters.type);
-        }
-        // Phase 21: Case Status filter (Closed/Open)
+        // Phase 21: Case Status filter (Closed/Open) — must stay client-side (computed)
         if (_filters.caseStatus === 'closed') {
             activities = activities.filter(a => a.closing_amount && parseFloat(a.closing_amount) > 0);
         } else if (_filters.caseStatus === 'open') {
             activities = activities.filter(a => !a.closing_amount || parseFloat(a.closing_amount) <= 0);
         }
+
+        // Build prospect/customer maps ONLY for IDs referenced in this month's activities
+        // (not all 5000 prospects — just the ~50-200 referenced this month)
+        const neededProspectIds = [...new Set(activities.filter(a => a.prospect_id).map(a => a.prospect_id))];
+        const neededCustomerIds = [...new Set(activities.filter(a => a.customer_id).map(a => a.customer_id))];
+        const [prospectResult, customerResult] = await Promise.all([
+            neededProspectIds.length > 0
+                ? AppDataStore.queryAdvanced('prospects', { scopeField: 'id', scopeValues: neededProspectIds, limit: 5000, select: 'id,full_name' })
+                : Promise.resolve({ data: [] }),
+            neededCustomerIds.length > 0
+                ? AppDataStore.queryAdvanced('customers', { scopeField: 'id', scopeValues: neededCustomerIds, limit: 5000, select: 'id,full_name' })
+                : Promise.resolve({ data: [] }),
+        ]);
+        const prospectMap = new Map(prospectResult.data.map(p => [String(p.id), p]));
+        const customerMap = new Map(customerResult.data.map(c => [String(c.id), c]));
 
         const todayDate = new Date();
         const isCurrentMonth = todayDate.getMonth() === month && todayDate.getFullYear() === year;
@@ -10875,49 +10898,54 @@ function _wireLoginBtn() {
         const today = new Date();
         const dateStr = `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, '0')}-${today.getDate().toString().padStart(2, '0')}`;
 
-        // Prefetch all lookup tables in parallel so the per-row loop below can
-        // resolve agent/prospect/customer names synchronously instead of awaiting
-        // AppDataStore.getById() three times per row.
-        // Always use getAll + visibility filter (same as renderCalendar) instead
-        // of getVisibleActivities() which duplicates the fetch + tree walk.
-        const [rawActs, allEventsRTA, allProspectsRTA, allCustomersRTA, allUsersRTA] = await Promise.all([
-            AppDataStore.getAll('activities'),
+        // ── Fetch ONLY today's activities from Supabase (not all history) ──
+        const visibleIds = await getVisibleUserIds(_currentUser);
+        const queryOpts = {
+            filters: { activity_date: dateStr },
+            sort: 'start_time',
+            sortDir: 'asc',
+            limit: 500,
+            offset: 0,
+        };
+        if (!isSystemAdmin(_currentUser) && _filters && _filters.agent && _filters.agent !== 'all') {
+            queryOpts.filters.lead_agent_id = _filters.agent;
+        }
+        if (_filters && _filters.type && _filters.type !== 'all') {
+            queryOpts.filters.activity_type = _filters.type;
+        }
+        if (!isSystemAdmin(_currentUser) && visibleIds !== 'all') {
+            queryOpts.scopeField = 'lead_agent_id';
+            queryOpts.scopeValues = visibleIds;
+        }
+
+        const [actResult, allEventsRTA, allUsersRTA] = await Promise.all([
+            AppDataStore.queryAdvanced('activities', queryOpts),
             AppDataStore.getAll('events'),
-            AppDataStore.getAll('prospects'),
-            AppDataStore.getAll('customers'),
             AppDataStore.getAll('users'),
         ]);
         const existingEventIds = new Set(allEventsRTA.map(e => String(e.id)));
-        const prospectMapRTA = new Map(allProspectsRTA.map(p => [String(p.id), p]));
-        const customerMapRTA = new Map(allCustomersRTA.map(c => [String(c.id), c]));
         const userMapRTA = new Map(allUsersRTA.map(u => [String(u.id), u]));
 
-        let allActs = rawActs.filter(a =>
+        let activities = actResult.data.filter(a =>
             a.activity_type !== 'EVENT' || !a.event_id || existingEventIds.has(String(a.event_id))
         );
 
-        // Apply visibility filter for non-admin users (same as renderCalendar)
-        if (!isSystemAdmin(_currentUser)) {
-            const canView = await buildActivityVisibilityChecker(allUsersRTA);
-            allActs = allActs.filter(canView);
-        }
-
-        let activities = allActs.filter(a => a.activity_date === dateStr);
-
-        // Apply filters (super admin ignores agent filter)
-        if (!isSystemAdmin(_currentUser) && _filters && _filters.agent && _filters.agent !== 'all') {
-            activities = activities.filter(a => a.lead_agent_id == _filters.agent);
-        }
-        if (_filters && _filters.type && _filters.type !== 'all') {
-            activities = activities.filter(a => a.activity_type === _filters.type);
-        }
+        // Case status filter (computed — must stay client-side)
         if (_filters && _filters.caseStatus === 'closed') {
             activities = activities.filter(a => a.closing_amount && parseFloat(a.closing_amount) > 0);
         } else if (_filters && _filters.caseStatus === 'open') {
             activities = activities.filter(a => !a.closing_amount || parseFloat(a.closing_amount) <= 0);
         }
 
-        activities.sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
+        // Fetch only the prospect/customer names we actually need
+        const neededPIds = [...new Set(activities.filter(a => a.prospect_id).map(a => a.prospect_id))];
+        const neededCIds = [...new Set(activities.filter(a => a.customer_id).map(a => a.customer_id))];
+        const [pRes, cRes] = await Promise.all([
+            neededPIds.length > 0 ? AppDataStore.queryAdvanced('prospects', { scopeField: 'id', scopeValues: neededPIds, limit: 500, select: 'id,full_name' }) : Promise.resolve({ data: [] }),
+            neededCIds.length > 0 ? AppDataStore.queryAdvanced('customers', { scopeField: 'id', scopeValues: neededCIds, limit: 500, select: 'id,full_name' }) : Promise.resolve({ data: [] }),
+        ]);
+        const prospectMapRTA = new Map(pRes.data.map(p => [String(p.id), p]));
+        const customerMapRTA = new Map(cRes.data.map(c => [String(c.id), c]));
 
         if (activities.length === 0) {
             grid.innerHTML = '<div style="padding:20px; text-align:center; color:var(--gray-500);">No activities scheduled for today.</div>';
