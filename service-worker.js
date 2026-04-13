@@ -1,5 +1,5 @@
 // Service Worker — offline caching + push notifications
-const CACHE_NAME = 'crm-cache-v3';
+const CACHE_NAME = 'crm-cache-v4';
 
 // Minimal precache. We skip heavy files (script.js is 18k lines) to
 // avoid breaking install if any single asset 404s.
@@ -51,9 +51,21 @@ self.addEventListener('fetch', event => {
     // Skip Supabase and other cross-origin API traffic entirely
     if (!req.url.startsWith(self.location.origin)) return;
 
-    event.respondWith(
-        caches.match(req).then(cached => cached || fetch(req).catch(() => cached))
-    );
+    // Network-first for HTML & JS (always get latest code); cache-first for static assets
+    const isCodeAsset = req.url.endsWith('.html') || req.url.endsWith('.js') || req.url.endsWith('/');
+    if (isCodeAsset) {
+        event.respondWith(
+            fetch(req).then(resp => {
+                const clone = resp.clone();
+                caches.open(CACHE_NAME).then(c => c.put(req, clone));
+                return resp;
+            }).catch(() => caches.match(req))
+        );
+    } else {
+        event.respondWith(
+            caches.match(req).then(cached => cached || fetch(req).catch(() => cached))
+        );
+    }
 });
 
 // ========== PUSH NOTIFICATIONS ==========
