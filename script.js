@@ -15717,7 +15717,12 @@ function _wireLoginBtn() {
         const tbody = document.getElementById('customers-table-body');
         if (!tbody) return;
 
-        const searchQuery = document.getElementById('customer-search')?.value?.trim() || '';
+        // ── Use getAll() with cache (proven reliable) ──
+        const customers = await getVisibleCustomers();
+        const allUsers = await AppDataStore.getAll('users');
+        const userById = new Map(allUsers.map(u => [String(u.id), u]));
+
+        const searchQuery = document.getElementById('customer-search')?.value?.trim()?.toLowerCase() || '';
         const typeFilter = document.getElementById('filter-customer-type')?.value || '';
         const guaFilter = document.getElementById('filter-customer-gua')?.value || '';
         const purchaseFilter = document.getElementById('filter-purchase-status')?.value || '';
@@ -15725,44 +15730,19 @@ function _wireLoginBtn() {
         const houseAuditFilter = document.getElementById('filter-customer-house-audit')?.value || '';
         const minEventsFilter = parseInt(document.getElementById('filter-customer-min-events')?.value || '0');
 
-        // ── Build scoping from role hierarchy ──
-        const visibleIds = await getVisibleUserIds(_currentUser);
-        const queryOpts = {
-            search: searchQuery || undefined,
-            searchFields: searchQuery ? ['full_name', 'phone', 'email'] : undefined,
-            sort: 'full_name',
-            sortDir: 'asc',
-            limit: _customerPageSize,
-            offset: _customerPage * _customerPageSize,
-            filters: {},
-        };
-        if (guaFilter) queryOpts.filters.ming_gua = guaFilter;
-
-        // Scope by agent visibility — customers may use responsible_agent_id OR agent_id
-        if (visibleIds !== 'all') {
-            queryOpts.scopeFields = [
-                { field: 'responsible_agent_id', values: visibleIds },
-                { field: 'agent_id', values: visibleIds },
-            ];
-        }
-
-        const result = await AppDataStore.queryAdvanced('customers', queryOpts);
-        let customers = result.data;
-        const totalCount = result.count;
-
-        // ── Fetch users for agent name display ──
-        const allUsers = await AppDataStore.getAll('users');
-        const userById = new Map(allUsers.map(u => [String(u.id), u]));
-
         let allEventRegs = [];
         if (minEventsFilter > 0) allEventRegs = await AppDataStore.getAll('event_registrations');
 
-        let html = '';
-        let visibleCount = 0;
+        // ── Apply filters ──
+        let filtered = [];
         for (const c of customers) {
-            // VIP type filter (computed)
+            if (searchQuery && !(
+                (c.full_name || '').toLowerCase().includes(searchQuery) ||
+                (c.phone && c.phone.includes(searchQuery)) ||
+                (c.email && c.email.toLowerCase().includes(searchQuery))
+            )) continue;
+            if (guaFilter && c.ming_gua !== guaFilter) continue;
             if (typeFilter === 'VIP' && (c.lifetime_value || 0) < 5000) continue;
-
             if (deficiencyFilter) {
                 const needs = c.needs ? (Array.isArray(c.needs) ? c.needs : c.needs.split(',').map(t => t.trim())) : [];
                 if (!needs.includes(deficiencyFilter)) continue;
@@ -15775,7 +15755,16 @@ function _wireLoginBtn() {
                 const attendedCount = allEventRegs.filter(r => r.attendee_id === c.id).length;
                 if (attendedCount < minEventsFilter) continue;
             }
+            filtered.push(c);
+        }
 
+        // ── Client-side pagination ──
+        const totalCount = filtered.length;
+        const pageStart = _customerPage * _customerPageSize;
+        const pageCustomers = filtered.slice(pageStart, pageStart + _customerPageSize);
+
+        let html = '';
+        for (const c of pageCustomers) {
             const agent = userById.get(String(c.responsible_agent_id || c.agent_id));
             const agentName = agent ? agent.full_name : '—';
 
@@ -15796,7 +15785,6 @@ function _wireLoginBtn() {
                     </td>
                 </tr>
             `;
-            visibleCount++;
         }
         tbody.innerHTML = html || '<tr><td colspan="8" style="text-align:center; padding:20px;">No customers found</td></tr>';
 
@@ -15813,8 +15801,8 @@ function _wireLoginBtn() {
             paginationEl.innerHTML = `<span style="color:var(--text-secondary);font-size:13px;">${totalCount} customer${totalCount !== 1 ? 's' : ''}</span>`;
         } else {
             const currentPage = _customerPage + 1;
-            const from = _customerPage * _customerPageSize + 1;
-            const to = Math.min(from + _customerPageSize - 1, totalCount);
+            const from = pageStart + 1;
+            const to = Math.min(pageStart + _customerPageSize, totalCount);
             let pgHtml = `<span style="color:var(--text-secondary);font-size:13px;">Showing ${from}–${to} of ${totalCount}</span>`;
             pgHtml += `<button class="btn secondary btn-sm" ${_customerPage === 0 ? 'disabled' : ''} onclick="app.customerPageNav('first')" title="First page"><i class="fas fa-angle-double-left"></i></button>`;
             pgHtml += `<button class="btn secondary btn-sm" ${_customerPage === 0 ? 'disabled' : ''} onclick="app.customerPageNav('prev')"><i class="fas fa-angle-left"></i> Prev</button>`;
@@ -16188,8 +16176,30 @@ function _wireLoginBtn() {
         const tbody = document.getElementById('prospects-table-body');
         if (!tbody) return;
 
+        // ── Use getAll() with cache (5-min TTL, light-select, proven reliable) ──
+        // Then filter + paginate client-side. First load downloads ~100KB (no blobs),
+        // subsequent calls hit cache instantly.
+        const [allProspects, allActivities, allUsers] = await Promise.all([
+            AppDataStore.getAll('prospects'),
+            AppDataStore.getAll('activities'),
+            AppDataStore.getAll('users'),
+        ]);
+
+        // ── Scope by role hierarchy ──
+        let prospects;
+        if (isSystemAdmin(_currentUser)) {
+            prospects = allProspects;
+        } else {
+            const visibleIds = await getVisibleUserIds(_currentUser);
+            if (visibleIds === 'all') {
+                prospects = allProspects;
+            } else {
+                prospects = allProspects.filter(p => visibleIds.includes(p.responsible_agent_id));
+            }
+        }
+
         // ── Read UI filter values ──
-        const searchQuery = document.getElementById('prospect-search')?.value?.trim() || '';
+        const searchQuery = document.getElementById('prospect-search')?.value?.trim()?.toLowerCase() || '';
         const scoreFilter = document.getElementById('filter-score')?.value || '';
         const guaFilter = document.getElementById('filter-gua')?.value || '';
         const statusFilter = document.getElementById('filter-status')?.value || '';
@@ -16198,48 +16208,20 @@ function _wireLoginBtn() {
         const solutionProposedFilter = document.getElementById('filter-solution-proposed')?.value || '';
         const minEventsFilter = parseInt(document.getElementById('filter-min-events')?.value || '0');
 
-        // ── Map sort field to Supabase column ──
-        // 'activity' and 'protection' can't be sorted server-side (computed), fall back to 'score'
-        const sortColMap = { name: 'full_name', score: 'score', activity: 'score', protection: 'score' };
-        const serverSort = sortColMap[_sortField] || 'score';
-
-        // ── Build scoping from role hierarchy ──
-        const visibleIds = await getVisibleUserIds(_currentUser);
-        const queryOpts = {
-            search: searchQuery || undefined,
-            searchFields: searchQuery ? ['full_name', 'phone', 'email'] : undefined,
-            sort: serverSort,
-            sortDir: _sortDirection,
-            limit: _prospectPageSize,
-            offset: _prospectPage * _prospectPageSize,
-            filters: {},
-        };
-
-        // Apply server-side filters where possible
-        if (guaFilter) queryOpts.filters.ming_gua = guaFilter;
-
-        // Scope by agent visibility (the key optimization — agents only download THEIR data)
-        if (visibleIds !== 'all') {
-            queryOpts.scopeField = 'responsible_agent_id';
-            queryOpts.scopeValues = visibleIds;
+        // ── Build activity index (O(1) lookups) ──
+        const latestActivityByProspect = new Map();
+        for (const a of allActivities) {
+            if (a.prospect_id == null) continue;
+            const key = String(a.prospect_id);
+            const current = latestActivityByProspect.get(key);
+            if (!current) { latestActivityByProspect.set(key, a); continue; }
+            const curKey = (current.activity_date || '') + '|' + (current.id || 0);
+            const newKey = (a.activity_date || '') + '|' + (a.id || 0);
+            if (newKey > curKey) latestActivityByProspect.set(key, a);
         }
-
-        // ── Server-side paginated fetch ──
-        const result = await AppDataStore.queryAdvanced('prospects', queryOpts);
-        let prospects = result.data;
-        const totalCount = result.count;
-
-        // ── Fetch users for agent name display (cached, fast) ──
-        const allUsers = await AppDataStore.getAll('users');
         const userById = new Map(allUsers.map(u => [String(u.id), u]));
 
-        // ── Fetch latest activity per prospect — NON-BLOCKING ──
-        // Render the table immediately, then backfill "Last Activity" column
-        const prospectIds = prospects.map(p => p.id);
-        let latestActivityByProspect = new Map();
-
-        // ── Client-side post-filters (for computed fields that can't be pushed to DB) ──
-        // Pre-load cross-table data only when those filters are active
+        // ── Pre-load cross-table data only when those filters are active ──
         let allProposedSolutions = [];
         let allEventRegs = [];
         if (solutionProposedFilter) allProposedSolutions = await AppDataStore.getAll('proposed_solutions');
@@ -16249,47 +16231,51 @@ function _wireLoginBtn() {
         const _userLevel = _userLvlMatch ? parseInt(_userLvlMatch[1]) : 99;
         const canDelete = _userLevel <= 5;
 
-        // Client-side post-sort for computed columns (activity date, protection)
-        if (_sortField === 'activity') {
-            prospects.sort((a, b) => {
+        // ── Apply sorting ──
+        prospects.sort((a, b) => {
+            let valA, valB;
+            if (_sortField === 'name') {
+                valA = a.full_name || ''; valB = b.full_name || '';
+                return _sortDirection === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+            } else if (_sortField === 'score') {
+                valA = a.score || 0; valB = b.score || 0;
+                return _sortDirection === 'asc' ? valA - valB : valB - valA;
+            } else if (_sortField === 'activity') {
                 const lastA = latestActivityByProspect.get(String(a.id));
                 const lastB = latestActivityByProspect.get(String(b.id));
-                const valA = lastA ? lastA.activity_date : '0000-00-00';
-                const valB = lastB ? lastB.activity_date : '0000-00-00';
+                valA = lastA ? lastA.activity_date : '0000-00-00';
+                valB = lastB ? lastB.activity_date : '0000-00-00';
                 return _sortDirection === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
-            });
-        } else if (_sortField === 'protection') {
-            prospects.sort((a, b) => {
-                const valA = calculateDaysLeft(a.protection_deadline);
-                const valB = calculateDaysLeft(b.protection_deadline);
+            } else if (_sortField === 'protection') {
+                valA = calculateDaysLeft(a.protection_deadline);
+                valB = calculateDaysLeft(b.protection_deadline);
                 return _sortDirection === 'asc' ? valA - valB : valB - valA;
-            });
-        }
+            }
+            return 0;
+        });
 
-        let html = '';
-        let visibleCount = 0;
-
+        // ── Apply filters, then paginate ──
+        let filtered = [];
         for (const p of prospects) {
-            // Score filter (computed grade — must stay client-side)
+            if (searchQuery && !(
+                (p.full_name || '').toLowerCase().includes(searchQuery) ||
+                (p.phone && p.phone.includes(searchQuery)) ||
+                (p.email && p.email.toLowerCase().includes(searchQuery)) ||
+                (p.id && p.id.toString().includes(searchQuery))
+            )) continue;
+
             const grade = getScoreGrade(p.score);
             if (scoreFilter && scoreFilter !== grade) continue;
-
-            const lastActivity = latestActivityByProspect.get(String(p.id));
-            const lastActivityText = lastActivity
-                ? `${lastActivity.activity_date} ${lastActivity.activity_type}`
-                : 'No activity';
+            if (guaFilter && p.ming_gua !== guaFilter) continue;
 
             const daysLeft = calculateProtectionDays(p);
             const protectionStatus = getProtectionStatus(daysLeft);
-
-            // Status filter (Active, Attention, Reassignable, Critical)
             if (statusFilter) {
                 if (statusFilter === 'active' && protectionStatus !== 'normal') continue;
                 if (statusFilter === 'attention' && protectionStatus !== 'warning') continue;
                 if (statusFilter === 'reassign' && protectionStatus !== 'normal') continue;
                 if (statusFilter === 'critical' && protectionStatus !== 'critical') continue;
             }
-
             if (deficiencyFilter) {
                 const needs = p.needs ? (Array.isArray(p.needs) ? p.needs : p.needs.split(',').map(t => t.trim())) : [];
                 if (!needs.includes(deficiencyFilter)) continue;
@@ -16300,9 +16286,7 @@ function _wireLoginBtn() {
             }
             if (solutionProposedFilter) {
                 const hasPending = allProposedSolutions.some(s =>
-                    s.prospect_id === p.id &&
-                    s.solution === solutionProposedFilter &&
-                    s.status !== 'Purchased'
+                    s.prospect_id === p.id && s.solution === solutionProposedFilter && s.status !== 'Purchased'
                 );
                 if (!hasPending) continue;
             }
@@ -16310,7 +16294,23 @@ function _wireLoginBtn() {
                 const attendedCount = allEventRegs.filter(r => r.attendee_id === p.id).length;
                 if (attendedCount < minEventsFilter) continue;
             }
+            filtered.push(p);
+        }
 
+        // ── Client-side pagination ──
+        const totalCount = filtered.length;
+        const pageStart = _prospectPage * _prospectPageSize;
+        const pageProspects = filtered.slice(pageStart, pageStart + _prospectPageSize);
+
+        let html = '';
+        for (const p of pageProspects) {
+            const grade = getScoreGrade(p.score);
+            const lastActivity = latestActivityByProspect.get(String(p.id));
+            const lastActivityText = lastActivity
+                ? `${lastActivity.activity_date} ${lastActivity.activity_type}`
+                : 'No activity';
+            const daysLeft = calculateProtectionDays(p);
+            const protectionStatus = getProtectionStatus(daysLeft);
             const agent = userById.get(String(p.responsible_agent_id));
             const agentName = agent ? agent.full_name : '—';
 
@@ -16343,10 +16343,9 @@ function _wireLoginBtn() {
                     </td>
                 </tr>
             `;
-            visibleCount++;
         }
 
-        if (visibleCount === 0) {
+        if (pageProspects.length === 0) {
             html = '<tr><td colspan="8" style="text-align:center; padding:40px;">No prospects found. Click "Add Prospect" to create one.</td></tr>';
         }
 
@@ -16365,8 +16364,8 @@ function _wireLoginBtn() {
             paginationEl.innerHTML = `<span style="color:var(--text-secondary);font-size:13px;">${totalCount} prospect${totalCount !== 1 ? 's' : ''}</span>`;
         } else {
             const currentPage = _prospectPage + 1;
-            const from = _prospectPage * _prospectPageSize + 1;
-            const to = Math.min(from + _prospectPageSize - 1, totalCount);
+            const from = pageStart + 1;
+            const to = Math.min(pageStart + _prospectPageSize, totalCount);
             let pgHtml = `<span style="color:var(--text-secondary);font-size:13px;">Showing ${from}–${to} of ${totalCount}</span>`;
             pgHtml += `<button class="btn secondary btn-sm" ${_prospectPage === 0 ? 'disabled' : ''} onclick="app.prospectPageNav('first')" title="First page"><i class="fas fa-angle-double-left"></i></button>`;
             pgHtml += `<button class="btn secondary btn-sm" ${_prospectPage === 0 ? 'disabled' : ''} onclick="app.prospectPageNav('prev')"><i class="fas fa-angle-left"></i> Prev</button>`;
@@ -16374,37 +16373,6 @@ function _wireLoginBtn() {
             pgHtml += `<button class="btn secondary btn-sm" ${currentPage >= totalPages ? 'disabled' : ''} onclick="app.prospectPageNav('next')">Next <i class="fas fa-angle-right"></i></button>`;
             pgHtml += `<button class="btn secondary btn-sm" ${currentPage >= totalPages ? 'disabled' : ''} onclick="app.prospectPageNav('last')" title="Last page"><i class="fas fa-angle-double-right"></i></button>`;
             paginationEl.innerHTML = pgHtml;
-        }
-
-        // ── Backfill "Last Activity" column asynchronously (non-blocking) ──
-        if (prospectIds.length > 0) {
-            AppDataStore.queryAdvanced('activities', {
-                scopeField: 'prospect_id',
-                scopeValues: prospectIds,
-                sort: 'activity_date',
-                sortDir: 'desc',
-                limit: 5000,
-                offset: 0,
-                countMode: null, // skip count — we don't need pagination for this sub-query
-            }).then(result => {
-                const actMap = new Map();
-                for (const a of (result.data || [])) {
-                    if (a.prospect_id == null) continue;
-                    const key = String(a.prospect_id);
-                    const current = actMap.get(key);
-                    if (!current) { actMap.set(key, a); continue; }
-                    if ((a.activity_date || '') > (current.activity_date || '')) actMap.set(key, a);
-                }
-                // Update the DOM cells in-place
-                const rows = tbody.querySelectorAll('tr[onclick]');
-                rows.forEach(row => {
-                    const idMatch = row.getAttribute('onclick')?.match(/showProspectDetail\((\d+)\)/);
-                    if (!idMatch) return;
-                    const act = actMap.get(idMatch[1]);
-                    const cell = row.querySelector('td[data-label="Last Activity"]');
-                    if (cell && act) cell.textContent = `${act.activity_date} ${act.activity_type}`;
-                });
-            }).catch(() => {});
         }
     };
 
