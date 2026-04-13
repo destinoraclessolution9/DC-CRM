@@ -24040,7 +24040,8 @@ container.innerHTML = `
         eppSales: "Revenue from EPP cases - Sum of EPP transaction amounts",
         newAgents: "Agent recruits - Count of new agents created",
         newCustomers: "Customer conversions - Count of prospects converted to customers",
-        totalMeetings: "Meeting headcount - Sum of attendees across all meetings",
+        totalMeetings: "Agent meetings & training - Events and internal agent meetings only",
+        clientMeetings: "Client meetings - CPS, FTF, and FSA meetings with prospects/customers",
         activityHeadcount: "Event attendance - Sum of attendees by activity title"
     };
 
@@ -24271,7 +24272,7 @@ container.innerHTML = `
         const [
             cpsCount, totalSales, popCaseCount, popSales,
             eppCaseCount, eppSales, newAgents, newCustomers,
-            totalMeetings, activityHeadcount, conversionRate, eppDetails
+            totalMeetings, clientMeetings, activityHeadcount, conversionRate, eppDetails
         ] = await Promise.all([
             getCPSCount(from, to),
             getTotalSales(from, to),
@@ -24282,6 +24283,7 @@ container.innerHTML = `
             getNewAgents(from, to),
             getNewCustomers(from, to),
             getTotalMeetings(from, to),
+            getClientMeetings(from, to),
             getActivityHeadcount(from, to),
             getConversionRate(from, to),
             getEPPDetails(from, to)
@@ -24289,7 +24291,7 @@ container.innerHTML = `
         return {
             cpsCount, totalSales, popCaseCount, popSales,
             eppCaseCount, eppSales, newAgents, newCustomers,
-            totalMeetings, activityHeadcount, conversionRate, eppDetails
+            totalMeetings, clientMeetings, activityHeadcount, conversionRate, eppDetails
         };
     };
 
@@ -24491,6 +24493,9 @@ const getNewCustomers = async (from, to) => {
     return count;
 };
 
+const AGENT_MEETING_TYPES = ['EVENT', 'AGENT_MEETING'];
+const CLIENT_MEETING_TYPES = ['CPS', 'FTF', 'FSA'];
+
 const getTotalMeetings = async (from, to) => {
     const needUsers = _currentRoleFilter !== 'All' || _visibleUserIds !== 'all';
     const [activities, users] = await Promise.all([
@@ -24502,6 +24507,29 @@ const getTotalMeetings = async (from, to) => {
     let count = 0;
     for (const a of activities) {
         if (a.activity_date < from || a.activity_date > to) continue;
+        if (!AGENT_MEETING_TYPES.includes(a.activity_type)) continue;
+        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(a.lead_agent_id)) continue;
+        if (_currentRoleFilter !== 'All') {
+            const agent = userMap[a.lead_agent_id];
+            if (!agent || agent.role !== _currentRoleFilter) continue;
+        }
+        count++;
+    }
+    return count;
+};
+
+const getClientMeetings = async (from, to) => {
+    const needUsers = _currentRoleFilter !== 'All' || _visibleUserIds !== 'all';
+    const [activities, users] = await Promise.all([
+        AppDataStore.getAll('activities'),
+        needUsers ? AppDataStore.getAll('users') : Promise.resolve([])
+    ]);
+    const userMap = {};
+    users.forEach(u => { userMap[u.id] = u; });
+    let count = 0;
+    for (const a of activities) {
+        if (a.activity_date < from || a.activity_date > to) continue;
+        if (!CLIENT_MEETING_TYPES.includes(a.activity_type)) continue;
         if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(a.lead_agent_id)) continue;
         if (_currentRoleFilter !== 'All') {
             const agent = userMap[a.lead_agent_id];
@@ -24729,6 +24757,27 @@ const buildConversionDetails = async (from, to) => {
 };
 
 const buildMeetingsDetails = async (from, to) => {
+    const [activities, users] = await Promise.all([
+        AppDataStore.getAll('activities'),
+        AppDataStore.getAll('users')
+    ]);
+    const userMap = {}; users.forEach(u => { userMap[u.id] = u; });
+    const rows = [];
+    for (const a of activities) {
+        if (a.activity_date < from || a.activity_date > to) continue;
+        if (!AGENT_MEETING_TYPES.includes(a.activity_type)) continue;
+        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(a.lead_agent_id)) continue;
+        if (_currentRoleFilter !== 'All') {
+            const agent = userMap[a.lead_agent_id];
+            if (!agent || agent.role !== _currentRoleFilter) continue;
+        }
+        const agentName = userMap[a.lead_agent_id]?.full_name || '—';
+        rows.push([a.activity_date, a.activity_type || '—', a.activity_title || '—', agentName]);
+    }
+    return renderDetailTable(['Date', 'Type', 'Title', 'Lead Agent'], rows);
+};
+
+const buildClientMeetingsDetails = async (from, to) => {
     const [activities, users, customers, prospects] = await Promise.all([
         AppDataStore.getAll('activities'),
         AppDataStore.getAll('users'),
@@ -24741,6 +24790,7 @@ const buildMeetingsDetails = async (from, to) => {
     const rows = [];
     for (const a of activities) {
         if (a.activity_date < from || a.activity_date > to) continue;
+        if (!CLIENT_MEETING_TYPES.includes(a.activity_type)) continue;
         if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(a.lead_agent_id)) continue;
         if (_currentRoleFilter !== 'All') {
             const agent = userMap[a.lead_agent_id];
@@ -24844,7 +24894,8 @@ const showKPIDetails = async (key) => {
         newAgents: 'New Agents',
         newCustomers: 'New Customers',
         conversionRate: 'Conversion Rate',
-        totalMeetings: 'Total Meetings',
+        totalMeetings: 'Meetings & Training',
+        clientMeetings: 'Client Meetings',
         activityHeadcount: 'Activity Attendance'
     };
     const title = titles[key] || 'Details';
@@ -24871,6 +24922,7 @@ const showKPIDetails = async (key) => {
         else if (key === 'newCustomers')     body = await buildNewCustomersDetails(from, to);
         else if (key === 'conversionRate')   body = await buildConversionDetails(from, to);
         else if (key === 'totalMeetings')    body = await buildMeetingsDetails(from, to);
+        else if (key === 'clientMeetings')   body = await buildClientMeetingsDetails(from, to);
         else if (key === 'activityHeadcount') body = await buildActivityHeadcountDetails(from, to);
         else body = '<p>No details available for this metric.</p>';
     } catch (e) {
@@ -24903,7 +24955,8 @@ const showKPIDetails = async (key) => {
             { label: 'New Agents', value: kpis.newAgents, prev: prevKpis.newAgents, icon: '👤', color: 'blue', key: 'newAgents' },
             { label: 'New Customers', value: kpis.newCustomers, prev: prevKpis.newCustomers, icon: '👥', color: 'green', key: 'newCustomers' },
             { label: 'Conversion Rate', value: `${kpis.conversionRate}% `, prev: prevKpis.conversionRate, icon: '📈', color: 'purple', key: 'conversionRate' },
-            { label: 'Total Meetings', value: kpis.totalMeetings, prev: prevKpis.totalMeetings, icon: '📅', color: 'orange', key: 'totalMeetings' },
+            { label: 'Meetings & Training', value: kpis.totalMeetings, prev: prevKpis.totalMeetings, icon: '📅', color: 'orange', key: 'totalMeetings' },
+            { label: 'Client Meetings', value: kpis.clientMeetings, prev: prevKpis.clientMeetings, icon: '🤝', color: 'blue', key: 'clientMeetings' },
             { label: 'Activity Attendance', value: kpis.activityHeadcount, prev: prevKpis.activityHeadcount, icon: '📊', color: 'purple', key: 'activityHeadcount' }
         ];
 
