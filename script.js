@@ -24483,11 +24483,16 @@ const getNewAgents = async (from, to) => {
 };
 
 const getNewCustomers = async (from, to) => {
-    const customers = await AppDataStore.getAll('customers');
+    const [customers, purchases] = await Promise.all([
+        AppDataStore.getAll('customers'),
+        AppDataStore.getAll('purchases')
+    ]);
     let count = 0;
     for (const c of customers) {
         if (c.customer_since < from || c.customer_since > to) continue;
         if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(c.responsible_agent_id)) continue;
+        const hasPurchaseInRange = purchases.some(p => p.customer_id == c.id && p.purchase_date >= from && p.purchase_date <= to);
+        if (!hasPurchaseInRange) continue;
         count++;
     }
     return count;
@@ -24707,15 +24712,18 @@ const buildNewAgentsDetails = async (from, to) => {
 };
 
 const buildNewCustomersDetails = async (from, to) => {
-    const [customers, users] = await Promise.all([
+    const [customers, users, purchases] = await Promise.all([
         AppDataStore.getAll('customers'),
-        AppDataStore.getAll('users')
+        AppDataStore.getAll('users'),
+        AppDataStore.getAll('purchases')
     ]);
     const userMap = {}; users.forEach(u => { userMap[u.id] = u; });
     const rows = [];
     for (const c of customers) {
         if (c.customer_since < from || c.customer_since > to) continue;
         if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(c.responsible_agent_id)) continue;
+        const hasPurchaseInRange = purchases.some(p => p.customer_id == c.id && p.purchase_date >= from && p.purchase_date <= to);
+        if (!hasPurchaseInRange) continue;
         const agent = c.responsible_agent_id ? (userMap[c.responsible_agent_id]?.full_name || '—') : '—';
         rows.push([c.customer_since, c.full_name || '—', agent, c.source || '—']);
     }
