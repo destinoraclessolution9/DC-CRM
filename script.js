@@ -11246,10 +11246,21 @@ function _wireLoginBtn() {
         if (!activity) { UI.toast.error('Activity not found'); return; }
 
         const event = (activity.event_id) ? await AppDataStore.getById('events', activity.event_id) : null;
+        const title = event?.event_title || event?.title || activity.activity_title || '';
+        const date = activity.activity_date || '';
+        const time = (activity.start_time && activity.end_time) ? `${activity.start_time} - ${activity.end_time}` : (activity.start_time || '');
+        const venue = activity.venue || activity.location_address || event?.location || '';
         const description = event?.description || activity.summary || '';
-        if (!description) { UI.toast.error('No description to send'); return; }
+        const ticketPrice = event?.ticket_price ? `RM ${event.ticket_price}` : '';
 
-        const msg = encodeURIComponent(description);
+        let lines = [`✨ *${title || 'You are invited!'}* ✨`, ''];
+        if (date) lines.push(`📅 Date: ${date}`);
+        if (time) lines.push(`🕐 Time: ${time}`);
+        if (venue) lines.push(`📍 Venue: ${venue}`);
+        if (ticketPrice) lines.push(`🎟️ Ticket Price: ${ticketPrice}`);
+        if (description) lines.push('', description);
+
+        const msg = encodeURIComponent(lines.join('\n'));
         window.open(`https://wa.me/?text=${msg}`, '_blank');
     };
 
