@@ -15724,6 +15724,13 @@ function _wireLoginBtn() {
         const allUsers = await AppDataStore.getAll('users');
         const userById = new Map(allUsers.map(u => [String(u.id), u]));
 
+        const _custUserLevel = _getUserLevel(_currentUser);
+        const canReassignCust = _custUserLevel <= 5;
+        const activeAgentsCust = canReassignCust ? allUsers.filter(u => {
+            const lvl = _getUserLevel(u);
+            return lvl >= 3 && lvl <= 11 && u.status !== 'deleted';
+        }) : [];
+
         const searchQuery = document.getElementById('customer-search')?.value?.trim()?.toLowerCase() || '';
         const typeFilter = document.getElementById('filter-customer-type')?.value || '';
         const guaFilter = document.getElementById('filter-customer-gua')?.value || '';
@@ -15740,6 +15747,7 @@ function _wireLoginBtn() {
         for (const c of customers) {
             if (searchQuery && !(
                 (c.full_name || '').toLowerCase().includes(searchQuery) ||
+                (c.nickname && c.nickname.toLowerCase().includes(searchQuery)) ||
                 (c.phone && c.phone.includes(searchQuery)) ||
                 (c.email && c.email.toLowerCase().includes(searchQuery))
             )) continue;
@@ -15776,7 +15784,9 @@ function _wireLoginBtn() {
                     <td data-label="Lifetime Value">RM ${(c.lifetime_value || 0).toLocaleString()} <span style="color:var(--success); font-size:12px;"><i class="fas fa-caret-up"></i></span></td>
                     <td data-label="Customer Since">${c.customer_since || '—'}</td>
                     <td data-label="Ming Gua">${c.ming_gua || '—'}</td>
-                    <td data-label="Agent">${agentName}</td>
+                    <td data-label="Agent" onclick="event.stopPropagation()">${canReassignCust
+                        ? `<select class="form-control" style="padding:2px 6px;font-size:12px;min-width:120px;border:1px solid var(--border);border-radius:4px;background:var(--surface);cursor:pointer;" onchange="app.quickReassign(${c.id}, this.value)" title="Reassign agent">${activeAgentsCust.map(a => `<option value="${a.id}" ${String(a.id) === String(c.responsible_agent_id || c.agent_id) ? 'selected' : ''}>${a.full_name || 'Agent'}</option>`).join('')}</select>`
+                        : agentName}</td>
                     <td data-label="Health">${renderQuickHealthBadge(c)}</td>
                     <td data-label="Status"><span class="score-badge score-A+">${(c.status || 'active').toUpperCase()}</span></td>
                     <td onclick="event.stopPropagation()">
@@ -16232,6 +16242,11 @@ function _wireLoginBtn() {
         const _userLvlMatch = _currentUser?.role?.match(/Level\s+(\d+)/i);
         const _userLevel = _userLvlMatch ? parseInt(_userLvlMatch[1]) : 99;
         const canDelete = _userLevel <= 5;
+        const canReassign = _userLevel <= 5;
+        const activeAgents = canReassign ? allUsers.filter(u => {
+            const lvl = _getUserLevel(u);
+            return lvl >= 3 && lvl <= 11 && u.status !== 'deleted';
+        }) : [];
 
         // ── Apply sorting ──
         prospects.sort((a, b) => {
@@ -16320,7 +16335,9 @@ function _wireLoginBtn() {
             html += `
                 <tr onclick="app.showProspectDetail(${p.id})">
                     <td data-label="Name"><strong>${p.full_name || '(No Name)'}</strong></td>
-                    <td data-label="Agent">${agentName}</td>
+                    <td data-label="Agent" onclick="event.stopPropagation()">${canReassign
+                        ? `<select class="form-control" style="padding:2px 6px;font-size:12px;min-width:120px;border:1px solid var(--border);border-radius:4px;background:var(--surface);cursor:pointer;" onchange="app.quickReassign(${p.id}, this.value)" title="Reassign agent">${activeAgents.map(a => `<option value="${a.id}" ${String(a.id) === String(p.responsible_agent_id) ? 'selected' : ''}>${a.full_name || 'Agent'}</option>`).join('')}</select>`
+                        : agentName}</td>
                     <td data-label="Score">
                         <span class="score-badge score-${grade.replace('+', '-plus')}">${p.score || 0} (${grade})</span>
                     </td>
@@ -24666,7 +24683,7 @@ container.innerHTML = `
                     </div>
                 </div>
 
-                <div class="dashboard-bottom-row" style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 24px;">
+                <div style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 24px;">
                     <div class="performance-card card">
                         <div class="card-header">
                             <h3>Current Quarter Performance Breakdown</h3>
@@ -30881,6 +30898,32 @@ const simulateCampaignSending = async (campaignId) => {
         }
     };
 
+    const quickReassign = async (prospectId, newAgentId) => {
+        try {
+            newAgentId = parseInt(newAgentId);
+            if (!prospectId || !newAgentId) return;
+            const prospect = await AppDataStore.getById('prospects', prospectId);
+            if (!prospect) { UI.toast.error('Prospect not found'); return; }
+            const fromAgentId = prospect.responsible_agent_id;
+            if (fromAgentId == newAgentId) return;
+            await AppDataStore.update('prospects', prospectId, { responsible_agent_id: newAgentId });
+            await AppDataStore.create('reassignment_history', {
+                prospect_id: prospectId,
+                from_agent_id: fromAgentId,
+                to_agent_id: newAgentId,
+                reassigned_by: _currentUser?.id,
+                reassignment_date: new Date().toISOString(),
+                reassignment_reason: 'manual',
+                reason_notes: 'Quick reassign from table',
+                created_at: new Date().toISOString()
+            });
+            const newAgent = await AppDataStore.getById('users', newAgentId);
+            UI.toast.success(`Reassigned to ${newAgent?.full_name || 'Agent'}`);
+        } catch (err) {
+            UI.toast.error('Reassignment failed: ' + err.message);
+        }
+    };
+
     const bulkReassign = async (agentId) => {
         const agent = await AppDataStore.getById('users', agentId);
         if (!agent) { UI.toast.error('Agent not found'); return; }
@@ -33952,6 +33995,7 @@ const initImportDemoData = async () => {
         extendProtection,
         transferProspect,
         reassignProspect,
+        quickReassign,
         convertToCustomer,
         confirmConvertToCustomer,
         requestProspectConversion,
