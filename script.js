@@ -1419,7 +1419,7 @@ const appLogic = (() => {
         // Basic filters
         if (filters.basic.name) {
             const query = filters.basic.name.toLowerCase();
-            items = items.filter(i => i.full_name && i.full_name.toLowerCase().includes(query));
+            items = items.filter(i => (i.full_name && i.full_name.toLowerCase().includes(query)) || (i.nickname && i.nickname.toLowerCase().includes(query)));
         }
         if (filters.basic.minggua) {
             items = items.filter(i => i.ming_gua === filters.basic.minggua);
@@ -1442,6 +1442,7 @@ const appLogic = (() => {
             const kw = filters.basic.keyword.toLowerCase();
             items = items.filter(i =>
                 (i.full_name && i.full_name.toLowerCase().includes(kw)) ||
+                (i.nickname && i.nickname.toLowerCase().includes(kw)) ||
                 (i.phone && i.phone.toLowerCase().includes(kw)) ||
                 (i.email && i.email.toLowerCase().includes(kw)) ||
                 (i.notes && i.notes.toLowerCase().includes(kw))
@@ -1490,13 +1491,14 @@ const appLogic = (() => {
 
         if (filters.basic.name) {
             const query = filters.basic.name.toLowerCase();
-            items = items.filter(i => i.full_name && i.full_name.toLowerCase().includes(query));
+            items = items.filter(i => (i.full_name && i.full_name.toLowerCase().includes(query)) || (i.nickname && i.nickname.toLowerCase().includes(query)));
         }
 
         if (filters.basic.keyword) {
             const kw = filters.basic.keyword.toLowerCase();
             items = items.filter(i =>
                 (i.full_name && i.full_name.toLowerCase().includes(kw)) ||
+                (i.nickname && i.nickname.toLowerCase().includes(kw)) ||
                 (i.phone && i.phone.toLowerCase().includes(kw)) ||
                 (i.email && i.email.toLowerCase().includes(kw)) ||
                 (i.notes && i.notes.toLowerCase().includes(kw))
@@ -8547,7 +8549,7 @@ function _wireLoginBtn() {
             ...customers.map(c => ({ ...c, type: 'customer' }))
         ];
 
-        const filtered = all.filter(p => p.full_name?.toLowerCase().includes(query.toLowerCase())).slice(0, 8);
+        const filtered = all.filter(p => p.full_name?.toLowerCase().includes(query.toLowerCase()) || p.nickname?.toLowerCase().includes(query.toLowerCase())).slice(0, 8);
 
         if (filtered.length > 0) {
             results.innerHTML = filtered.map(p => `
@@ -9334,8 +9336,8 @@ function _wireLoginBtn() {
             ...customers.map(c => ({ ...c, type: 'customer' }))
         ];
  
-        const filtered = all.filter(p => p.full_name?.toLowerCase().includes(query.toLowerCase())).slice(0, 5);
- 
+        const filtered = all.filter(p => p.full_name?.toLowerCase().includes(query.toLowerCase()) || p.nickname?.toLowerCase().includes(query.toLowerCase())).slice(0, 5);
+
         if (filtered.length > 0) {
             resultsDiv.innerHTML = filtered.map(p => `
                 <div class="result-item-v2" onclick="app.selectReferrerForModal(${p.id}, '${p.type}', '${modalType}')">
@@ -10041,9 +10043,9 @@ function _wireLoginBtn() {
         }
 
         const allP = await AppDataStore.getAll('prospects');
-        const prospects = (allP || []).filter(p => p.full_name?.toLowerCase().includes(query.toLowerCase()));
+        const prospects = (allP || []).filter(p => p.full_name?.toLowerCase().includes(query.toLowerCase()) || p.nickname?.toLowerCase().includes(query.toLowerCase()));
         const allC = await AppDataStore.getAll('customers');
-        const customers = (allC || []).filter(c => c.full_name?.toLowerCase().includes(query.toLowerCase()));
+        const customers = (allC || []).filter(c => c.full_name?.toLowerCase().includes(query.toLowerCase()) || c.nickname?.toLowerCase().includes(query.toLowerCase()));
 
         let html = '';
         if (prospects.length > 0) {
@@ -14359,7 +14361,7 @@ function _wireLoginBtn() {
             });
 
             const matchedProspects = allProspects
-                .filter(p => p.full_name && p.full_name.toLowerCase().includes(term))
+                .filter(p => (p.full_name && p.full_name.toLowerCase().includes(term)) || (p.nickname && p.nickname.toLowerCase().includes(term)))
                 .slice(0, 5);
             const matchedConsultants = allUsers
                 .filter(u => u.full_name && u.full_name.toLowerCase().includes(term))
@@ -14509,7 +14511,7 @@ function _wireLoginBtn() {
             const allProspects = (await AppDataStore.getAll('prospects')).filter(p => !p.status || p.status === 'active');
             const allUsers = (await AppDataStore.getAll('users')).filter(u => parseInt(u.role?.match(/Level\s+(\d+)/i)?.[1] || 0) >= 3);
 
-            const matchedProspects = allProspects.filter(p => p.full_name?.toLowerCase().includes(term)).slice(0, 5);
+            const matchedProspects = allProspects.filter(p => p.full_name?.toLowerCase().includes(term) || p.nickname?.toLowerCase().includes(term)).slice(0, 5);
             const matchedConsultants = allUsers.filter(u => u.full_name?.toLowerCase().includes(term)).slice(0, 5);
 
             let html = '';
@@ -16259,6 +16261,7 @@ function _wireLoginBtn() {
         for (const p of prospects) {
             if (searchQuery && !(
                 (p.full_name || '').toLowerCase().includes(searchQuery) ||
+                (p.nickname && p.nickname.toLowerCase().includes(searchQuery)) ||
                 (p.phone && p.phone.includes(searchQuery)) ||
                 (p.email && p.email.toLowerCase().includes(searchQuery)) ||
                 (p.id && p.id.toString().includes(searchQuery))
@@ -29529,7 +29532,7 @@ const simulateCampaignSending = async (campaignId) => {
 
         const filteredResults = await Promise.all(messages.map(async m => {
             const prospect = await AppDataStore.getById('prospects', m.prospect_id);
-            const nameMatch = prospect?.full_name?.toLowerCase().includes(search);
+            const nameMatch = prospect?.full_name?.toLowerCase().includes(search) || prospect?.nickname?.toLowerCase().includes(search);
             const statusMatch = status === 'all' || m.status === status;
             return nameMatch && statusMatch;
         }));
