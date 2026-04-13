@@ -12850,7 +12850,7 @@ function _wireLoginBtn() {
                     <h4>📝 Summary</h4>
                     <div class="form-group">
                         <label>Summary</label>
-                        <textarea id="cps-summary" class="form-control" rows="3" placeholder="What was discussed or planned during this CPS session?"></textarea>
+                        <textarea id="cps-summary" class="form-control" rows="3" placeholder="Why is the customer interested to do the CPS? What is the reason they want to come?"></textarea>
                     </div>
                 </div>
 
@@ -15096,18 +15096,6 @@ function _wireLoginBtn() {
                 const address = intakeRow.venue_address  || '';
                 const waze    = intakeRow.waze_link      || '';
 
-                const mbbHqNote = (venue || '').toLowerCase().includes('mbb hq') ? [
-                    ``,
-                    `___________________________________________`,
-                    `给予第一次来DC-KL总部的朋友`,
-                    `欢迎您`,
-                    ``,
-                    `1. 驾车的朋友，可以Park 在B1-basement parking。`,
-                    `2. 搭monorail 的朋友，请下Bukit Nanas station。走向Menara Bangkok Bank 方向`,
-                    `3. 到了时，请打电话给我。因为需要亲自来接您才可以上楼。`,
-                    `4. 在等待的时候，请到保安柜台登记。 告知是去 21 楼 DC，需用到IC`,
-                ] : [];
-
                 const msg = [
                     `✅ Your appointment has been CONFIRMED! / 您的预约已确认！`,
                     ``,
@@ -15120,7 +15108,6 @@ function _wireLoginBtn() {
                     ``,
                     `Please ensure you arrive on time. Dress code: formal/smart casual.`,
                     `请准时出席。着装要求：正式/整洁休闲。`,
-                    ...mbbHqNote,
                 ].filter(l => l !== undefined && !(l === '' && false)).join('\n').replace(/\n{3,}/g, '\n\n').trim();
 
                 const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
@@ -15807,7 +15794,6 @@ function _wireLoginBtn() {
                         <button class="btn-icon" title="Add Purchase" onclick="app.openAddPurchaseModal(${c.id})"><i class="fas fa-shopping-cart"></i></button>
                         <button class="btn-icon" title="Referral" onclick="event.stopPropagation(); app.openCustomerReferralModal(${c.id})"><i class="fas fa-user-plus"></i></button>
                         <button class="btn-icon" title="Recruit" onclick="app.openRecruitModal(${c.id})"><i class="fas fa-user-tie"></i></button>
-                        ${isSystemAdmin(_currentUser) ? `<button class="btn-icon" title="Delete" style="color:var(--red-500);" onclick="event.stopPropagation();app.deleteCustomer(${c.id})"><i class="fas fa-trash"></i></button>` : ''}
                     </td>
                 </tr>
             `;
@@ -16255,7 +16241,7 @@ function _wireLoginBtn() {
 
         const _userLvlMatch = _currentUser?.role?.match(/Level\s+(\d+)/i);
         const _userLevel = _userLvlMatch ? parseInt(_userLvlMatch[1]) : 99;
-        const canDelete = _userLevel === 1;
+        const canDelete = _userLevel <= 5;
         const canReassign = _userLevel <= 5;
         const activeAgents = canReassign ? allUsers.filter(u => {
             const lvl = _getUserLevel(u);
@@ -16434,8 +16420,8 @@ function _wireLoginBtn() {
         // Until RLS is in place, treat this as UI-only gating.
         const userLvlMatch = _currentUser?.role?.match(/Level\s+(\d+)/i);
         const userLevel = userLvlMatch ? parseInt(userLvlMatch[1]) : 99;
-        if (userLevel !== 1) {
-            UI.toast.error('Only Super Admin can delete prospects.');
+        if (userLevel > 5) {
+            UI.toast.error('You do not have permission to delete prospects.');
             return;
         }
         UI.showModal('Delete Prospect', '<p>This will permanently delete this prospect and all linked activities, notes, and names. This cannot be undone. Continue?</p>', [
@@ -16448,9 +16434,9 @@ function _wireLoginBtn() {
         // callback and could theoretically be invoked directly.
         const userLvlMatch = _currentUser?.role?.match(/Level\s+(\d+)/i);
         const userLevel = userLvlMatch ? parseInt(userLvlMatch[1]) : 99;
-        if (userLevel !== 1) {
+        if (userLevel > 5) {
             UI.hideModal();
-            UI.toast.error('Only Super Admin can delete prospects.');
+            UI.toast.error('You do not have permission to delete prospects.');
             return;
         }
         UI.hideModal();
@@ -16473,50 +16459,6 @@ function _wireLoginBtn() {
             await AppDataStore.delete('prospects', id);
             UI.toast.success('Prospect deleted.');
             await app.renderProspectsTable();
-        } catch (err) {
-            UI.toast.error('Failed to delete: ' + (err.message || 'Unknown error'));
-        }
-    };
-
-    const deleteCustomer = async (id) => {
-        const userLvlMatch = _currentUser?.role?.match(/Level\s+(\d+)/i);
-        const userLevel = userLvlMatch ? parseInt(userLvlMatch[1]) : 99;
-        if (userLevel !== 1) {
-            UI.toast.error('Only Super Admin can delete customers.');
-            return;
-        }
-        UI.showModal('Delete Customer', '<p>This will permanently delete this customer and all linked activities, notes, and transactions. This cannot be undone. Continue?</p>', [
-            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Delete', type: 'primary', action: `(async () => { await app.confirmDeleteCustomer(${id}); })()` }
-        ]);
-    };
-    const confirmDeleteCustomer = async (id) => {
-        const userLvlMatch = _currentUser?.role?.match(/Level\s+(\d+)/i);
-        const userLevel = userLvlMatch ? parseInt(userLvlMatch[1]) : 99;
-        if (userLevel !== 1) {
-            UI.hideModal();
-            UI.toast.error('Only Super Admin can delete customers.');
-            return;
-        }
-        UI.hideModal();
-        try {
-            const [acts, allNotes, txns] = await Promise.all([
-                AppDataStore.query('activities', { customer_id: id }).catch(() => []),
-                AppDataStore.getAll('notes').catch(() => []),
-                AppDataStore.query('transactions', { customer_id: id }).catch(() => [])
-            ]);
-            const notes = allNotes.filter(n =>
-                String(n.customer_id) === String(id) ||
-                (n.entity_type === 'customer' && String(n.entity_id) === String(id))
-            );
-            await Promise.all([
-                acts.length ? AppDataStore.deleteMany('activities', acts.map(a => a.id)) : Promise.resolve(),
-                notes.length ? AppDataStore.deleteMany('notes', notes.map(n => n.id)) : Promise.resolve(),
-                txns.length ? AppDataStore.deleteMany('transactions', txns.map(t => t.id)) : Promise.resolve(),
-            ]);
-            await AppDataStore.delete('customers', id);
-            UI.toast.success('Customer deleted.');
-            await app.renderCustomersTable();
         } catch (err) {
             UI.toast.error('Failed to delete: ' + (err.message || 'Unknown error'));
         }
@@ -34069,8 +34011,6 @@ const initImportDemoData = async () => {
         confirmRejectQueueEntry,
         deleteProspect,
         confirmDeleteProspect,
-        deleteCustomer,
-        confirmDeleteCustomer,
         renderProspectsTable,
 
         // Phase 4 Customer Management Functions
