@@ -30649,6 +30649,34 @@ const simulateCampaignSending = async (campaignId) => {
     // ========== PHASE 13: FOLLOW-UP MONITORING & REASSIGNMENT ==========
 
     const showProtectionMonitoringView = async (container) => {
+        const [allProspects, allUsers, allActivities, visibleIds] = await Promise.all([
+            AppDataStore.getAll('prospects'),
+            AppDataStore.getAll('users'),
+            AppDataStore.getAll('activities'),
+            getVisibleUserIds(_currentUser)
+        ]);
+        const agentMap = {};
+        for (const u of allUsers) agentMap[u.id] = u;
+        const now = new Date();
+        const lastActivityMap = {};
+        for (const p of allProspects) {
+            const pActivities = allActivities
+                .filter(a => String(a.prospect_id) === String(p.id))
+                .sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
+            const last = pActivities[0];
+            const daysSince = last ? Math.floor((now - new Date(last.activity_date)) / (1000 * 60 * 60 * 24)) : 999;
+            lastActivityMap[p.id] = { date: last?.activity_date, daysSince, type: last?.activity_type };
+        }
+        const visibleAgents = allUsers.filter(u => {
+            const lvl = _getUserLevel(u);
+            if (lvl < 3 || lvl > 11 || u.status === 'deleted') return false;
+            return visibleIds === 'all' || visibleIds.includes(u.id);
+        });
+        const visibleProspects = visibleIds === 'all'
+            ? allProspects
+            : allProspects.filter(p => visibleIds.includes(p.responsible_agent_id));
+        const monitorData = { visibleProspects, visibleAgents, agentMap, lastActivityMap };
+
         container.innerHTML = `
             <div class="protection-view">
                 <div class="protection-header">
@@ -30660,13 +30688,13 @@ const simulateCampaignSending = async (campaignId) => {
                         <button class="btn primary" onclick="app.navigateTo('import')"><i class="fas fa-upload"></i> Bulk Import</button>
                     </div>
                 </div>
-                <div class="team-summary-cards">${renderTeamSummaryCards()}</div>
+                <div class="team-summary-cards">${renderTeamSummaryCards(monitorData)}</div>
                 <div class="agent-performance">
                     <h3>Agent Performance</h3>
                     <div class="agent-table-container">
                         <table class="agent-performance-table">
                             <thead><tr><th>Agent</th><th>Team</th><th>Assigned</th><th>Followed up (7d)</th><th>Rate</th><th>Inactive (3-7d)</th><th>Inactive (8-14d)</th><th>Inactive (15d+)</th><th>Actions</th></tr></thead>
-                            <tbody>${await renderAgentPerformanceRows()}</tbody>
+                            <tbody>${renderAgentPerformanceRows(monitorData)}</tbody>
                         </table>
                     </div>
                 </div>
@@ -30675,7 +30703,7 @@ const simulateCampaignSending = async (campaignId) => {
                     <div class="inactive-table-container">
                         <table class="inactive-table">
                             <thead><tr><th>Prospect</th><th>Agent</th><th>Days Inactive</th><th>Score</th><th>Protection Deadline</th><th>Status</th><th>Actions</th></tr></thead>
-                            <tbody>${await renderInactiveProspectsRows()}</tbody>
+                            <tbody>${renderInactiveProspectsRows(monitorData)}</tbody>
                         </table>
                     </div>
                 </div>
@@ -30686,40 +30714,63 @@ const simulateCampaignSending = async (campaignId) => {
             </div>`;
     };
 
-    const renderTeamSummaryCards = () => {
-        const teams = [
-            { name: 'Team A', color: 'team-a', active: 156, attention: 52, inactive: 37, critical: 12 },
-            { name: 'Team B', color: 'team-b', active: 142, attention: 48, inactive: 32, critical: 8 },
-            { name: 'Team C', color: 'team-c', active: 98, attention: 31, inactive: 22, critical: 5 },
-            { name: 'Total', color: 'total', active: 396, attention: 131, inactive: 91, critical: 25 }
-        ];
-        return teams.map(t => `<div class="summary-card ${t.color}"><h4>${t.name}</h4><div class="summary-stats"><div><span class="stat-label">Active:</span><span class="stat-value">${t.active}</span></div><div><span class="stat-label">Attention:</span><span class="stat-value warning">${t.attention}</span></div><div><span class="stat-label">Inactive:</span><span class="stat-value danger">${t.inactive}</span></div><div><span class="stat-label">Critical:</span><span class="stat-value danger">${t.critical}</span></div></div></div>`).join('');
+    const renderTeamSummaryCards = ({ visibleProspects, agentMap, lastActivityMap }) => {
+        const teamColors = ['team-a', 'team-b', 'team-c', 'team-d', 'team-e'];
+        const teamStats = {};
+        const totals = { active: 0, attention: 0, inactive: 0, critical: 0 };
+        for (const p of visibleProspects) {
+            const agent = agentMap[p.responsible_agent_id];
+            const teamName = agent?.team || 'Unassigned';
+            if (!teamStats[teamName]) teamStats[teamName] = { active: 0, attention: 0, inactive: 0, critical: 0 };
+            const days = lastActivityMap[p.id]?.daysSince ?? 999;
+            const protDays = calculateProtectionDays(p);
+            if (days > 14 || protDays <= 0) { teamStats[teamName].critical++; totals.critical++; }
+            else if (days > 7) { teamStats[teamName].inactive++; totals.inactive++; }
+            else if (days > 3) { teamStats[teamName].attention++; totals.attention++; }
+            else { teamStats[teamName].active++; totals.active++; }
+        }
+        const teamNames = Object.keys(teamStats).sort();
+        const cards = teamNames.map((name, i) => {
+            const t = teamStats[name];
+            const color = teamColors[i % teamColors.length];
+            return `<div class="summary-card ${color}"><h4>${name}</h4><div class="summary-stats"><div><span class="stat-label">Active:</span><span class="stat-value">${t.active}</span></div><div><span class="stat-label">Attention:</span><span class="stat-value warning">${t.attention}</span></div><div><span class="stat-label">Inactive:</span><span class="stat-value danger">${t.inactive}</span></div><div><span class="stat-label">Critical:</span><span class="stat-value danger">${t.critical}</span></div></div></div>`;
+        });
+        cards.push(`<div class="summary-card total"><h4>Total</h4><div class="summary-stats"><div><span class="stat-label">Active:</span><span class="stat-value">${totals.active}</span></div><div><span class="stat-label">Attention:</span><span class="stat-value warning">${totals.attention}</span></div><div><span class="stat-label">Inactive:</span><span class="stat-value danger">${totals.inactive}</span></div><div><span class="stat-label">Critical:</span><span class="stat-value danger">${totals.critical}</span></div></div></div>`);
+        return cards.join('');
     };
 
-    const renderAgentPerformanceRows = async () => {
-        const agents = [
-            { name: 'Michelle Tan', team: 'A', assigned: 52, followed: 48, i37: 2, i814: 2, i15: 0 },
-            { name: 'Ah Seng', team: 'A', assigned: 50, followed: 31, i37: 8, i814: 6, i15: 5 },
-            { name: 'Mei Ling', team: 'A', assigned: 45, followed: 38, i37: 4, i814: 2, i15: 1 },
-            { name: 'Raj Kumar', team: 'A', assigned: 48, followed: 42, i37: 3, i814: 2, i15: 1 },
-            { name: 'Ong Bee Ling', team: 'A', assigned: 35, followed: 32, i37: 2, i814: 1, i15: 0 }
-        ];
-        return agents.map(a => {
-            const rate = Math.round((a.followed / a.assigned) * 100);
+    const renderAgentPerformanceRows = ({ visibleAgents, visibleProspects, lastActivityMap }) => {
+        return visibleAgents.map(agent => {
+            const agentProspects = visibleProspects.filter(p => String(p.responsible_agent_id) === String(agent.id));
+            const assigned = agentProspects.length;
+            let followedUp7d = 0, i37 = 0, i814 = 0, i15 = 0;
+            for (const p of agentProspects) {
+                const days = lastActivityMap[p.id]?.daysSince ?? 999;
+                if (days <= 7) followedUp7d++;
+                if (days > 3 && days <= 7) i37++;
+                else if (days > 7 && days <= 14) i814++;
+                else if (days > 14) i15++;
+            }
+            const rate = assigned > 0 ? Math.round((followedUp7d / assigned) * 100) : 0;
             const cls = rate < 70 ? 'rate-bad' : rate < 90 ? 'rate-warning' : 'rate-good';
-            return `<tr><td><strong>${a.name}</strong></td><td>Team ${a.team}</td><td>${a.assigned}</td><td>${a.followed}</td><td><span class="rate-badge ${cls}">${rate}%</span></td><td>${a.i37}</td><td>${a.i814}</td><td>${a.i15}</td><td><button class="btn-icon" onclick="app.viewAgentDetails('${a.name}')" title="View"><i class="fas fa-eye"></i></button><button class="btn-icon" onclick="app.openReassignModal('${a.name}')" title="Reassign"><i class="fas fa-exchange-alt"></i></button><button class="btn-icon" onclick="app.bulkReassign('${a.name}')" title="Bulk Reassign"><i class="fas fa-users"></i></button></td></tr>`;
+            const teamName = agent.team || 'Unassigned';
+            return `<tr><td><strong>${agent.full_name || 'Unknown'}</strong></td><td>${teamName}</td><td>${assigned}</td><td>${followedUp7d}</td><td><span class="rate-badge ${cls}">${rate}%</span></td><td>${i37}</td><td>${i814}</td><td>${i15}</td><td><button class="btn-icon" onclick="app.viewAgentDetails(${agent.id})" title="View"><i class="fas fa-eye"></i></button><button class="btn-icon" onclick="app.bulkReassign(${agent.id})" title="Reassign"><i class="fas fa-exchange-alt"></i></button><button class="btn-icon" onclick="app.bulkReassign(${agent.id})" title="Bulk Reassign"><i class="fas fa-users"></i></button></td></tr>`;
         }).join('');
     };
 
-    const renderInactiveProspectsRows = async () => {
-        const prospects = [
-            { name: 'Tan Mei Ling', agent: 'Raj Kumar', days: 14, score: 620, deadline: '17 Mar 2026', status: 'critical' },
-            { name: 'Kok Leong', agent: 'Raj Kumar', days: 16, score: 550, deadline: '15 Mar 2026', status: 'critical' },
-            { name: 'Sarah Lim', agent: 'Ah Seng', days: 12, score: 680, deadline: '20 Mar 2026', status: 'warning' },
-            { name: 'Wong Chee Meng', agent: 'Ah Seng', days: 9, score: 590, deadline: '25 Mar 2026', status: 'warning' },
-            { name: 'Lim Siew Ling', agent: 'Mei Ling', days: 8, score: 710, deadline: '22 Mar 2026', status: 'warning' }
-        ];
-        return prospects.map(p => `<tr><td><strong>${p.name}</strong></td><td>${p.agent}</td><td class="${p.days > 14 ? 'critical' : 'warning'}">${p.days} days</td><td>${p.score}</td><td>${p.deadline}</td><td><span class="status-badge status-${p.status}">${p.status === 'critical' ? '🔴 Critical' : '🟡 Warning'}</span></td><td><button class="btn-icon" onclick="app.openReassignModal('${p.name}')"><i class="fas fa-exchange-alt"></i></button><button class="btn-icon" onclick="app.contactProspect('${p.name}')"><i class="fas fa-phone"></i></button></td></tr>`).join('');
+    const renderInactiveProspectsRows = ({ visibleProspects, agentMap, lastActivityMap }) => {
+        const inactive = visibleProspects
+            .filter(p => (lastActivityMap[p.id]?.daysSince ?? 999) > 7)
+            .sort((a, b) => (lastActivityMap[b.id]?.daysSince ?? 999) - (lastActivityMap[a.id]?.daysSince ?? 999));
+        if (!inactive.length) return '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--gray-500)">No inactive prospects found</td></tr>';
+        return inactive.map(p => {
+            const days = lastActivityMap[p.id]?.daysSince ?? 999;
+            const agentName = agentMap[p.responsible_agent_id]?.full_name || 'Unassigned';
+            const protDays = calculateProtectionDays(p);
+            const status = days > 14 || protDays <= 0 ? 'critical' : 'warning';
+            const deadline = p.protection_deadline ? UI.formatDate(p.protection_deadline) : 'N/A';
+            return `<tr><td><strong>${p.full_name || 'Unknown'}</strong></td><td>${agentName}</td><td class="${days > 14 ? 'critical' : 'warning'}">${days === 999 ? 'Never' : days + ' days'}</td><td>${p.score || 0}</td><td>${deadline}</td><td><span class="status-badge status-${status}">${status === 'critical' ? '🔴 Critical' : '🟡 Warning'}</span></td><td><button class="btn-icon" onclick="app.openReassignModal(${p.id})" title="Reassign"><i class="fas fa-exchange-alt"></i></button><button class="btn-icon" onclick="app.contactProspect(${p.id})" title="Contact"><i class="fas fa-phone"></i></button></td></tr>`;
+        }).join('');
     };
 
     const renderReassignmentHistory = async () => {
@@ -30732,25 +30783,41 @@ const simulateCampaignSending = async (campaignId) => {
         return `<table class="agent-performance-table"><thead><tr><th>Date</th><th>Prospect ID</th><th>From Agent</th><th>To Agent</th><th>Reason</th><th>By</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
     };
 
-    const openReassignModal = async (prospectName) => {
+    const openReassignModal = async (prospectId) => {
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) { UI.toast.error('Prospect not found'); return; }
+        const currentAgent = prospect.responsible_agent_id ? await AppDataStore.getById('users', prospect.responsible_agent_id) : null;
+        const allActivities = await AppDataStore.getAll('activities');
+        const pActs = allActivities.filter(a => String(a.prospect_id) === String(prospectId)).sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
+        const lastAct = pActs[0];
+        const daysSince = lastAct ? Math.floor((Date.now() - new Date(lastAct.activity_date)) / (1000 * 60 * 60 * 24)) : 999;
+        const allUsers = await AppDataStore.getAll('users');
+        const allProspectsForCap = await AppDataStore.getAll('prospects');
+        const activeAgents = allUsers.filter(u => {
+            const lvl = _getUserLevel(u);
+            return lvl >= 3 && lvl <= 11 && u.status !== 'deleted' && u.id !== prospect.responsible_agent_id;
+        });
+        const agentOptions = activeAgents.map(a => {
+            const assignedCount = allProspectsForCap.filter(p => String(p.responsible_agent_id) === String(a.id)).length;
+            const capacity = Math.max(0, 60 - assignedCount);
+            const icon = capacity > 10 ? '🟢' : capacity > 0 ? '🟡' : '🔴';
+            return `<option value="${a.id}">${a.full_name || 'Agent'} (${assignedCount} assigned, capacity +${capacity}) ${icon}</option>`;
+        }).join('');
         const content = `
             <div class="reassign-modal">
+                <input type="hidden" id="reassign-prospect-id" value="${prospectId}">
+                <input type="hidden" id="reassign-from-agent-id" value="${prospect.responsible_agent_id || ''}">
                 <div class="current-info">
                     <h4>Current Information</h4>
                     <div class="info-grid">
-                        <div><strong>Prospect:</strong> ${prospectName}</div><div><strong>Current Agent:</strong> Raj Kumar</div>
-                        <div><strong>Days Inactive:</strong> 14</div><div><strong>Score:</strong> 620</div>
-                        <div><strong>Protection Deadline:</strong> 17 Mar 2026</div><div><strong>Last Activity:</strong> 19 Feb 2026 (Call)</div>
+                        <div><strong>Prospect:</strong> ${prospect.full_name || 'Unknown'}</div><div><strong>Current Agent:</strong> ${currentAgent?.full_name || 'Unassigned'}</div>
+                        <div><strong>Days Inactive:</strong> <span data-days-inactive="${daysSince}">${daysSince === 999 ? 'Never contacted' : daysSince}</span></div><div><strong>Score:</strong> ${prospect.score || 0}</div>
+                        <div><strong>Protection Deadline:</strong> ${prospect.protection_deadline ? UI.formatDate(prospect.protection_deadline) : 'N/A'}</div><div><strong>Last Activity:</strong> ${lastAct ? UI.formatDate(lastAct.activity_date) + ' (' + (lastAct.activity_type || 'Unknown') + ')' : 'Never'}</div>
                     </div>
                 </div>
                 <div class="form-group">
                     <label>Reassign to</label>
-                    <select id="reassign-agent" class="form-control">
-                        <option value="ahseng">Ah Seng (5 inactive, capacity +12) 🟢</option>
-                        <option value="michelle">Michelle Tan (4 inactive, capacity +10) 🟢</option>
-                        <option value="meiling">Mei Ling (7 inactive, capacity +5) 🟡</option>
-                        <option value="ong">Ong Bee Ling (3 inactive, capacity +15) 🟢</option>
-                    </select>
+                    <select id="reassign-agent" class="form-control">${agentOptions || '<option value="">No agents available</option>'}</select>
                 </div>
                 <div class="form-group">
                     <label>Reason for reassignment</label>
@@ -30763,72 +30830,139 @@ const simulateCampaignSending = async (campaignId) => {
                 </div>
                 <div class="form-group">
                     <label>Justification</label>
-                    <textarea id="reassign-justification" class="form-control" rows="3">Raj Kumar has been unresponsive to follow-up reminders. This prospect has high score and needs immediate attention.</textarea>
+                    <textarea id="reassign-justification" class="form-control" rows="3"></textarea>
                 </div>
                 <div class="form-group">
-                    <label class="checkbox-label"><input type="checkbox" checked> Send notification to new agent</label>
-                    <label class="checkbox-label"><input type="checkbox" checked> Reset protection period (30 days)</label>
+                    <label class="checkbox-label"><input type="checkbox" id="reassign-notify" checked> Send notification to new agent</label>
+                    <label class="checkbox-label"><input type="checkbox" id="reassign-reset-protection" checked> Reset protection period (30 days)</label>
                 </div>
             </div>`;
-        UI.showModal(`Reassign Prospect: ${prospectName}`, content, [
+        UI.showModal(`Reassign Prospect: ${prospect.full_name || 'Unknown'}`, content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
             { label: 'CONFIRM REASSIGNMENT', type: 'primary', action: '(async () => { await app.confirmReassignment(); })()' }
         ]);
     };
 
     const confirmReassignment = async () => {
-        await AppDataStore.create('reassignment_history', { prospect_id: Date.now(), from_agent_id: 8, to_agent_id: 6, reassigned_by: _currentUser?.id || 5, reassignment_date: new Date().toISOString(), reassignment_reason: document.querySelector('input[name="reassign-reason"]:checked')?.value || 'inactive', reason_notes: document.getElementById('reassign-justification')?.value || '', days_inactive: 14, protection_deadline: '2026-03-17', created_at: new Date().toISOString() });
-        UI.hideModal(); UI.toast.success('Prospect reassigned successfully');
+        try {
+            const prospectId = parseInt(document.getElementById('reassign-prospect-id')?.value);
+            const fromAgentId = parseInt(document.getElementById('reassign-from-agent-id')?.value) || null;
+            const toAgentId = parseInt(document.getElementById('reassign-agent')?.value);
+            if (!prospectId || !toAgentId) { UI.toast.error('Missing prospect or agent'); return; }
+            await AppDataStore.update('prospects', prospectId, { responsible_agent_id: toAgentId });
+            const resetProtection = document.getElementById('reassign-reset-protection')?.checked;
+            if (resetProtection) {
+                const newDeadline = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+                await AppDataStore.update('prospects', prospectId, { protection_deadline: newDeadline });
+            }
+            const daysInactive = parseInt(document.querySelector('[data-days-inactive]')?.dataset.daysInactive) || 0;
+            const prospect = await AppDataStore.getById('prospects', prospectId);
+            await AppDataStore.create('reassignment_history', {
+                prospect_id: prospectId,
+                from_agent_id: fromAgentId,
+                to_agent_id: toAgentId,
+                reassigned_by: _currentUser?.id,
+                reassignment_date: new Date().toISOString(),
+                reassignment_reason: document.querySelector('input[name="reassign-reason"]:checked')?.value || 'inactive',
+                reason_notes: document.getElementById('reassign-justification')?.value || '',
+                days_inactive: daysInactive,
+                protection_deadline: prospect?.protection_deadline || '',
+                created_at: new Date().toISOString()
+            });
+            UI.hideModal();
+            UI.toast.success('Prospect reassigned successfully');
+            const container = document.getElementById('content-viewport');
+            if (container) await showProtectionMonitoringView(container);
+        } catch (err) {
+            UI.toast.error('Reassignment failed: ' + err.message);
+        }
     };
 
-    const bulkReassign = (agentName) => {
+    const bulkReassign = async (agentId) => {
+        const agent = await AppDataStore.getById('users', agentId);
+        if (!agent) { UI.toast.error('Agent not found'); return; }
+        const allProspects = await AppDataStore.getAll('prospects');
+        const allActivities = await AppDataStore.getAll('activities');
+        const allUsers = await AppDataStore.getAll('users');
+        const now = new Date();
+        const agentProspects = allProspects.filter(p => String(p.responsible_agent_id) === String(agentId));
+        const inactiveProspects = agentProspects.filter(p => {
+            const pActs = allActivities.filter(a => String(a.prospect_id) === String(p.id)).sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
+            const last = pActs[0];
+            p._daysSince = last ? Math.floor((now - new Date(last.activity_date)) / (1000 * 60 * 60 * 24)) : 999;
+            return p._daysSince > 7;
+        }).sort((a, b) => b._daysSince - a._daysSince);
+        if (!inactiveProspects.length) { UI.toast.info('No inactive prospects found for this agent'); return; }
+        const avgDays = Math.round(inactiveProspects.reduce((s, p) => s + (p._daysSince === 999 ? 0 : p._daysSince), 0) / inactiveProspects.length);
+        const otherAgents = allUsers.filter(u => {
+            const lvl = _getUserLevel(u);
+            return lvl >= 3 && lvl <= 11 && u.status !== 'deleted' && u.id !== agentId;
+        });
+        const prospectCheckboxes = inactiveProspects.map(p =>
+            `<label class="checkbox-label"><input type="checkbox" checked data-prospect-id="${p.id}"> ${p.full_name || 'Unknown'} (${p._daysSince === 999 ? 'Never' : p._daysSince + 'd'}, Score ${p.score || 0})</label>`
+        ).join('');
+        const perAgent = otherAgents.length ? Math.ceil(inactiveProspects.length / otherAgents.length) : 0;
+        const distPreview = otherAgents.map((a, i) => {
+            const share = i < inactiveProspects.length % otherAgents.length ? perAgent : Math.floor(inactiveProspects.length / otherAgents.length);
+            return `<li>${a.full_name || 'Agent'}: ${share} prospects</li>`;
+        }).join('');
+        const singleAgentOptions = otherAgents.map(a => `<option value="${a.id}">${a.full_name || 'Agent'}</option>`).join('');
         const content = `<div class="bulk-reassign-modal">
+            <input type="hidden" id="bulk-reassign-from-agent" value="${agentId}">
             <div style="background:var(--gray-50);padding:16px;border-radius:8px;margin-bottom:16px">
-                <div><strong>From Agent:</strong> ${agentName}</div><div><strong>Average inactive days:</strong> 16</div><div><strong>Prospects selected:</strong> 19</div>
+                <div><strong>From Agent:</strong> ${agent.full_name || 'Unknown'}</div><div><strong>Average inactive days:</strong> ${avgDays}</div><div><strong>Prospects selected:</strong> ${inactiveProspects.length}</div>
             </div>
-            <div class="selected-prospects"><h4>Selected Prospects</h4><div class="prospects-list">
-                <label class="checkbox-label"><input type="checkbox" checked> Tan Mei Ling (14d, Score 620)</label>
-                <label class="checkbox-label"><input type="checkbox" checked> Kok Leong (16d, Score 550)</label>
-                <label class="checkbox-label"><input type="checkbox" checked> Lim Siew Ping (18d, Score 580)</label>
-                <label class="checkbox-label"><input type="checkbox" checked> Wong Kok Wai (15d, Score 610)</label>
-                <label class="checkbox-label"><input type="checkbox" checked> 15 more prospects...</label>
+            <div class="selected-prospects"><h4>Selected Prospects</h4><div class="prospects-list" style="max-height:200px;overflow-y:auto">
+                ${prospectCheckboxes}
             </div></div>
             <div class="form-group">
                 <label>Reassign to</label>
                 <div class="radio-group">
-                    <label class="radio-label"><input type="radio" name="bulk-option" value="distribute" checked> Distribute evenly among active agents</label>
-                    <label class="radio-label"><input type="radio" name="bulk-option" value="single"> Assign all to single agent</label>
+                    <label class="radio-label"><input type="radio" name="bulk-option" value="distribute" checked onchange="document.getElementById('bulk-single-agent').style.display='none'"> Distribute evenly among active agents</label>
+                    <label class="radio-label"><input type="radio" name="bulk-option" value="single" onchange="document.getElementById('bulk-single-agent').style.display='block'"> Assign all to single agent</label>
                 </div>
+                <select id="bulk-single-agent" class="form-control" style="display:none;margin-top:8px">${singleAgentOptions}</select>
             </div>
-            <div class="distribution-preview"><h4>Distribution Preview</h4><ul><li>Michelle Tan: 6 prospects</li><li>Ah Seng: 7 prospects</li><li>Ong Bee Ling: 6 prospects</li></ul></div>
-            <div class="form-group"><label>Justification</label><textarea class="form-control" rows="3">${agentName} has consistently low follow-up rate with 19 inactive prospects. Redistributing to higher-performing agents.</textarea></div>
+            <div class="distribution-preview"><h4>Distribution Preview</h4><ul>${distPreview || '<li>No agents available</li>'}</ul></div>
+            <div class="form-group"><label>Justification</label><textarea class="form-control" rows="3">${agent.full_name || 'Agent'} has ${inactiveProspects.length} inactive prospect${inactiveProspects.length !== 1 ? 's' : ''}. Redistributing to other agents.</textarea></div>
         </div>`;
         UI.showModal('Bulk Reassignment', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'CONFIRM BULK REASSIGNMENT', type: 'primary', action: 'app.confirmBulkReassignment()' }
+            { label: 'CONFIRM BULK REASSIGNMENT', type: 'primary', action: '(async () => { await app.confirmBulkReassignment(); })()' }
         ]);
     };
 
     const confirmBulkReassignment = async () => {
         try {
             const option = document.querySelector('input[name="bulk-option"]:checked')?.value || 'distribute';
-            const checkedLabels = Array.from(document.querySelectorAll('.prospects-list input[type="checkbox"]:checked'))
-                .map(cb => cb.parentElement?.textContent?.trim().split('(')[0].trim())
-                .filter(Boolean);
+            const checkedProspectIds = Array.from(document.querySelectorAll('.prospects-list input[type="checkbox"]:checked'))
+                .map(cb => parseInt(cb.dataset.prospectId))
+                .filter(id => !isNaN(id));
             const justification = document.querySelector('.bulk-reassign-modal textarea')?.value || 'Bulk reassignment';
+            if (!checkedProspectIds.length) { UI.toast.error('No prospects selected'); return; }
 
             const allProspects = await AppDataStore.getAll('prospects');
-            const matchedProspects = allProspects.filter(p => checkedLabels.some(name => p.full_name?.toLowerCase().includes(name.toLowerCase())));
+            const matchedProspects = allProspects.filter(p => checkedProspectIds.includes(p.id));
+            const fromAgentId = parseInt(document.getElementById('bulk-reassign-from-agent')?.value) || null;
 
-            const activeAgents = (await AppDataStore.getAll('users')).filter(u => u.status === 'active' && u.id !== _currentUser?.id);
-            if (!activeAgents.length) { UI.toast.error('No active agents to assign to'); return; }
+            const allUsers = await AppDataStore.getAll('users');
+            let targetAgents;
+            if (option === 'single') {
+                const singleId = parseInt(document.getElementById('bulk-single-agent')?.value);
+                const singleAgent = allUsers.find(u => u.id === singleId);
+                targetAgents = singleAgent ? [singleAgent] : [];
+            } else {
+                targetAgents = allUsers.filter(u => {
+                    const lvl = _getUserLevel(u);
+                    return lvl >= 3 && lvl <= 11 && u.status !== 'deleted' && u.id !== fromAgentId;
+                });
+            }
+            if (!targetAgents.length) { UI.toast.error('No active agents to assign to'); return; }
 
             let count = 0;
             for (let i = 0; i < matchedProspects.length; i++) {
                 const prospect = matchedProspects[i];
-                const targetAgent = option === 'distribute'
-                    ? activeAgents[i % activeAgents.length]
-                    : activeAgents[0];
+                const targetAgent = targetAgents[i % targetAgents.length];
                 await AppDataStore.update('prospects', prospect.id, { responsible_agent_id: targetAgent.id });
                 await AppDataStore.create('reassignment_history', {
                     prospect_id: prospect.id,
@@ -30898,17 +31032,63 @@ const simulateCampaignSending = async (campaignId) => {
         }
     };
 
-    const configureAlerts = () => UI.toast.info('Alert configuration coming soon');
-    const viewAgentDetails = async (name) => {
-        const agents = await AppDataStore.getAll('users');
-        const agent = agents.find(a => a.full_name?.toLowerCase().includes(name.toLowerCase()));
-        if (agent) {
-            await showAgentDetail(agent.id);
+    const configureAlerts = () => {
+        const config = JSON.parse(localStorage.getItem('fs_crm_alert_config') || '{}');
+        const warningDays = config.warningDays || 7;
+        const criticalDays = config.criticalDays || 14;
+        const autoReassign = config.autoReassign || false;
+        const autoReassignDays = config.autoReassignDays || 21;
+        const content = `
+            <div class="alert-config-modal">
+                <div class="form-group">
+                    <label>Warning threshold (days inactive)</label>
+                    <input type="number" id="alert-warning-days" class="form-control" value="${warningDays}" min="1" max="30">
+                    <small style="color:var(--gray-500)">Prospects inactive for this many days will show as "Attention"</small>
+                </div>
+                <div class="form-group">
+                    <label>Critical threshold (days inactive)</label>
+                    <input type="number" id="alert-critical-days" class="form-control" value="${criticalDays}" min="1" max="60">
+                    <small style="color:var(--gray-500)">Prospects inactive beyond this will show as "Critical"</small>
+                </div>
+                <hr style="border:none;border-top:1px solid var(--gray-200);margin:16px 0">
+                <div class="form-group">
+                    <label class="checkbox-label"><input type="checkbox" id="alert-auto-reassign" ${autoReassign ? 'checked' : ''}> Enable auto-reassign suggestion</label>
+                    <small style="color:var(--gray-500)">Flag prospects for reassignment after the threshold below</small>
+                </div>
+                <div class="form-group">
+                    <label>Auto-reassign suggestion after (days)</label>
+                    <input type="number" id="alert-auto-days" class="form-control" value="${autoReassignDays}" min="1" max="90">
+                </div>
+            </div>`;
+        UI.showModal('Configure Alerts', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save Configuration', type: 'primary', action: '(async () => { app.saveAlertConfig(); })()' }
+        ]);
+    };
+
+    const saveAlertConfig = () => {
+        const config = {
+            warningDays: parseInt(document.getElementById('alert-warning-days')?.value) || 7,
+            criticalDays: parseInt(document.getElementById('alert-critical-days')?.value) || 14,
+            autoReassign: document.getElementById('alert-auto-reassign')?.checked || false,
+            autoReassignDays: parseInt(document.getElementById('alert-auto-days')?.value) || 21
+        };
+        localStorage.setItem('fs_crm_alert_config', JSON.stringify(config));
+        UI.hideModal();
+        UI.toast.success('Alert configuration saved');
+    };
+
+    const viewAgentDetails = async (agentIdOrName) => {
+        if (typeof agentIdOrName === 'number' || !isNaN(parseInt(agentIdOrName))) {
+            await showAgentDetail(parseInt(agentIdOrName));
         } else {
-            UI.toast.info(`Agent "${name}" not found in database`);
+            const agents = await AppDataStore.getAll('users');
+            const agent = agents.find(a => a.full_name?.toLowerCase().includes(String(agentIdOrName).toLowerCase()));
+            if (agent) await showAgentDetail(agent.id);
+            else UI.toast.info(`Agent "${agentIdOrName}" not found in database`);
         }
     };
-    const contactProspect = async (name) => { await openActivityModal(); };
+    const contactProspect = async (prospectId) => { await openActivityModal(null, prospectId); };
 
     // Phase 13: seed demo data
 
@@ -34137,6 +34317,7 @@ const initImportDemoData = async () => {
         refreshFollowupStats,
         exportFollowupReport,
         configureAlerts,
+        saveAlertConfig,
         viewAgentDetails,
         contactProspect,
 
