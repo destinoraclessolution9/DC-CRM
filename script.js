@@ -25820,6 +25820,7 @@ const exportKPIReport = async (format) => {
                             <th>Target Group</th>
                             <th>Location</th>
                             <th>Speaker</th>
+                            <th>Remarks</th>
                             <th>Status</th>
                             <th>Actions</th>
                         </tr>
@@ -25842,6 +25843,7 @@ const exportKPIReport = async (format) => {
                                 <td>${item.target_group || '-'}</td>
                                 <td>${item.location || '-'}</td>
                                 <td>${item.speaker || '-'}</td>
+                                <td>${item.remarks || '-'}</td>
                                 <td>
                                     <span class="status-badge ${isActive ? 'status-active' : 'status-inactive'}">
                                         ${isActive ? 'Active' : 'Inactive'}
@@ -26002,6 +26004,7 @@ const exportKPIReport = async (format) => {
                 <div class="form-group"><label>Location</label><input type="text" id="mkt-location" class="form-control" placeholder="e.g. KL, Online"></div>
                 <div class="form-group"><label>Speaker</label><input type="text" id="mkt-speaker" class="form-control" placeholder="e.g. Master Tan"></div>
                 <div class="form-group"><label>Description</label><textarea id="mkt-desc" class="form-control"></textarea></div>
+                <div class="form-group"><label>Remarks</label><input type="text" id="mkt-remarks" class="form-control"></div>
                 <div class="form-group"><label><input type="checkbox" id="mkt-active" checked> Is Active</label></div>
 `;
         } else if (type === 'venues') {
@@ -26096,6 +26099,7 @@ const exportKPIReport = async (format) => {
                 <div class="form-group"><label>Location</label><input type="text" id="mkt-location" class="form-control" value="${item.location || ''}" placeholder="e.g. KL, Online"></div>
                 <div class="form-group"><label>Speaker</label><input type="text" id="mkt-speaker" class="form-control" value="${item.speaker || ''}" placeholder="e.g. Master Tan"></div>
                 <div class="form-group"><label>Description</label><textarea id="mkt-desc" class="form-control">${item.description || ''}</textarea></div>
+                <div class="form-group"><label>Remarks</label><input type="text" id="mkt-remarks" class="form-control" value="${item.remarks || ''}"></div>
                 <div class="form-group"><label><input type="checkbox" id="mkt-active" ${(item.is_active || item.status === 'active' || item.status === 'Active') ? 'checked' : ''}> Is Active</label></div>
             `;
         } else if (type === 'venues') {
@@ -26222,6 +26226,7 @@ const exportKPIReport = async (format) => {
             data.location = document.getElementById('mkt-location').value;
             data.speaker = document.getElementById('mkt-speaker').value;
             data.description = document.getElementById('mkt-desc').value;
+            data.remarks = document.getElementById('mkt-remarks').value;
             data.status = data.is_active ? 'active' : 'inactive';
             // Collect selected categories from checkboxes + Others free-text (stored as JSON string)
             const catCheckboxes = document.querySelectorAll('#mkt-event-categories .mkt-event-category-cb:checked');
