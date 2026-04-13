@@ -2894,17 +2894,12 @@ In a production system, this would show the actual file contents.
                 if (timerEl) timerEl.textContent = `${m}:${s}`;
             }, 1000);
 
-            // Start waveform
+            // Start waveform — use CSS animation instead of JS interval to avoid layout thrashing
             const waveform = document.getElementById('voice-waveform');
             if (waveform) {
-                waveform.innerHTML = Array.from({ length: 40 }, () =>
-                    `<div class="waveform-bar" style="height:${Math.floor(Math.random() * 28) + 4}px;"></div>`
+                waveform.innerHTML = Array.from({ length: 40 }, (_, i) =>
+                    `<div class="waveform-bar" style="height:${Math.floor(Math.random() * 28) + 4}px; animation-delay:${(i * 0.05).toFixed(2)}s;"></div>`
                 ).join('');
-                window._waveformInterval = setInterval(() => {
-                    document.querySelectorAll('.waveform-bar').forEach(b => {
-                        b.style.height = (Math.floor(Math.random() * 28) + 4) + 'px';
-                    });
-                }, 150);
             }
 
         } catch (err) {
@@ -3357,7 +3352,7 @@ In a production system, this would show the actual file contents.
             const diff = e.changedTouches[0].clientY - startY;
             if (diff > 80) {
                 refreshEl.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i> Refreshing...';
-                await new Promise(resolve => setTimeout(resolve, 800));
+                // Navigate immediately — no artificial delay
                 await navigateTo(_currentView || 'calendar');
                 refreshEl.classList.remove('show');
                 refreshEl.innerHTML = '<i class="fas fa-arrow-down"></i> Pull to refresh';
@@ -6186,7 +6181,7 @@ In a production system, this would show the actual file contents.
 
         // Simulate training progress
         let progress = 0;
-        const interval = await setInterval(async () => {
+        const interval = setInterval(async () => {
             progress += 10;
             UI.toast.info(`Training progress: ${progress}%`);
 
@@ -6194,18 +6189,21 @@ In a production system, this would show the actual file contents.
                 clearInterval(interval);
 
                 // Update model versions and accuracy
-                const models = Object.values(await AppDataStore.getAll('ai_models') || {});
-                for (const model of models) {
-                    model.model_version = '1.1.0';
-                    model.accuracy += Math.random() * 3 - 1; // Random change
-                    model.trained_at = new Date().toISOString();
-                    model.trained_on_records += Math.floor(Math.random() * 100);
-                    model.updated_at = new Date().toISOString();
+                try {
+                    const models = Object.values(await AppDataStore.getAll('ai_models') || {});
+                    for (const model of models) {
+                        model.model_version = '1.1.0';
+                        model.accuracy += Math.random() * 3 - 1; // Random change
+                        model.trained_at = new Date().toISOString();
+                        model.trained_on_records += Math.floor(Math.random() * 100);
+                        model.updated_at = new Date().toISOString();
 
-                    await AppDataStore.update('ai_models', model.id, model);
+                        await AppDataStore.update('ai_models', model.id, model);
+                    }
+                    UI.toast.success('AI models trained successfully! Accuracy improved.');
+                } catch (err) {
+                    UI.toast.error('Training failed: ' + (err.message || 'Unknown error'));
                 }
-
-                UI.toast.success('AI models trained successfully! Accuracy improved.');
             }
         }, 1000);
     };
@@ -7322,10 +7320,10 @@ function _wireLoginBtn() {
 
                 clearInterval(pollInterval);
                 UI.toast.info('Please add referrer and relation before saving.');
-            } else if (++attempts >= 40) {
+            } else if (++attempts >= 16) {
                 clearInterval(pollInterval);
             }
-        }, 100);
+        }, 250);
     };
 
     const rejectCpsIntake = async (intakeId) => {
@@ -12949,10 +12947,10 @@ function _wireLoginBtn() {
                             setF('cps-referrer', prospect.referred_by);
                             setF('cps-relation', prospect.referral_relationship);
                             clearInterval(cpsInterval);
-                        } else if (++attempts >= 30) {
+                        } else if (++attempts >= 12) {
                             clearInterval(cpsInterval);
                         }
-                    }, 100);
+                    }, 250);
                 }
             }, 200);
         }
@@ -13019,27 +13017,28 @@ function _wireLoginBtn() {
         // 5. Poll for the entity badge container and render the badge if needed
         if (entityRestored) {
             const badgeContainerId = 'selected-entity-info';
-            let attempts = 0;
-            const badgeInterval = setInterval(async () => {
-                const container = document.getElementById(badgeContainerId);
-                if (container) {
-                    const entityName = _selectedEntity.type === 'Prospect'
-                        ? (await AppDataStore.getById('prospects', _selectedEntity.id))?.full_name
-                        : (await AppDataStore.getById('customers', _selectedEntity.id))?.full_name;
-                    if (entityName) {
+            // Pre-fetch entity name ONCE before polling to avoid DB calls inside interval
+            const entityName = _selectedEntity.type === 'Prospect'
+                ? (await AppDataStore.getById('prospects', _selectedEntity.id))?.full_name
+                : (await AppDataStore.getById('customers', _selectedEntity.id))?.full_name;
+            if (entityName) {
+                let attempts = 0;
+                const badgeInterval = setInterval(() => {
+                    const container = document.getElementById(badgeContainerId);
+                    if (container) {
                         container.innerHTML = `
                             <div class="selected-entity-badge">
                                 <span>${_selectedEntity.type}: <strong>${entityName}</strong></span>
                                 <button class="btn btn-sm secondary" onclick="app.clearSelectedEntity()">Clear</button>
                             </div>
                         `;
+                        clearInterval(badgeInterval);
+                    } else if (++attempts >= 12) { // 12 * 250ms = 3 seconds
+                        console.warn('Entity badge container not found after polling');
+                        clearInterval(badgeInterval);
                     }
-                    clearInterval(badgeInterval);
-                } else if (++attempts >= 30) { // 30 * 100ms = 3 seconds
-                    console.warn('Entity badge container not found after polling');
-                    clearInterval(badgeInterval);
-                }
-            }, 100);
+                }, 250);
+            }
         }
         // 6. Type-specific fields
         switch (activity.activity_type) {
@@ -13094,11 +13093,11 @@ function _wireLoginBtn() {
                         setField('cps-summary', activity.summary);
                         setField('cps-interest', prospect.cps_interest);
                         clearInterval(cpsInterval);
-                    } else if (++attempts >= 30) {
+                    } else if (++attempts >= 12) {
                         console.warn('CPS fields did not appear after polling');
                         clearInterval(cpsInterval);
                     }
-                }, 100);
+                }, 250);
             }
         }
 
@@ -22565,32 +22564,35 @@ const deactivateAgent = async (agentId) => {
     };
 
     const initActionPlanReminder = () => {
+        // Only check once per day (not every hour) to reduce unnecessary DB load
+        let _lastReminderDate = null;
         setInterval(async () => {
             const now = new Date();
-            if (now.getDay() === 1) { // Monday
-                const todayStr = now.toISOString().slice(0,10);
-                try {
-                    const allUsers = await AppDataStore.getAll('users');
-                    const agentRoles = ['consultant', 'agent', 'team_leader', 'Level 3', 'Level 4', 'Level 5', 'Level 6'];
-                    for (const user of allUsers) {
-                        if (!agentRoles.some(r => (user.role || '').includes(r))) continue;
-                        const planList = await AppDataStore.query('action_plans', { user_id: user.id, status: 'active' });
-                        const plan = planList[0];
-                        if (!plan) continue;
-                        const existing = await AppDataStore.query('action_plan_checks', { plan_id: plan.id, check_date: todayStr, reminder_sent: true });
-                        if (existing.length === 0) {
-                            await AppDataStore.create('action_plan_checks', {
-                                id: Date.now(),
-                                plan_id: plan.id,
-                                check_date: todayStr,
-                                reminder_sent: true,
-                                created_at: new Date().toISOString()
-                            });
-                        }
+            const todayStr = now.toISOString().slice(0,10);
+            // Skip if already ran today or not Monday
+            if (now.getDay() !== 1 || _lastReminderDate === todayStr) return;
+            _lastReminderDate = todayStr;
+            try {
+                const allUsers = await AppDataStore.getAll('users');
+                const agentRoles = ['consultant', 'agent', 'team_leader', 'Level 3', 'Level 4', 'Level 5', 'Level 6'];
+                for (const user of allUsers) {
+                    if (!agentRoles.some(r => (user.role || '').includes(r))) continue;
+                    const planList = await AppDataStore.query('action_plans', { user_id: user.id, status: 'active' });
+                    const plan = planList[0];
+                    if (!plan) continue;
+                    const existing = await AppDataStore.query('action_plan_checks', { plan_id: plan.id, check_date: todayStr, reminder_sent: true });
+                    if (existing.length === 0) {
+                        await AppDataStore.create('action_plan_checks', {
+                            id: Date.now(),
+                            plan_id: plan.id,
+                            check_date: todayStr,
+                            reminder_sent: true,
+                            created_at: new Date().toISOString()
+                        });
                     }
-                } catch(e) { /* silent — offline or no data */ }
-            }
-        }, 60 * 60 * 1000); // check every hour
+                }
+            } catch(e) { /* silent — offline or no data */ }
+        }, 4 * 60 * 60 * 1000); // check every 4 hours instead of every hour
     };
 
     // ===== END ACTION PLAN FUNCTIONS =====
@@ -28552,17 +28554,10 @@ ALTER TABLE public.promotions
 
 const simulateCampaignSending = async (campaignId) => {
     const messages = (await AppDataStore.getAll('campaign_messages')).filter(m => m.campaign_id === campaignId);
-    let sent = 0;
 
-    const intervalId = setInterval(async () => {
-        if (sent >= messages.length) {
-            clearInterval(intervalId);
-            await AppDataStore.update('whatsapp_campaigns', campaignId, { status: 'completed', completed_date: new Date().toISOString() });
-            await refreshCampaignsTab();
-            return;
-        }
-
-        const msg = messages[sent];
+    // Use sequential async loop instead of setInterval to prevent overlapping DB calls
+    for (let i = 0; i < messages.length; i++) {
+        const msg = messages[i];
         const statusRoll = Math.random();
         let status = 'sent';
         if (statusRoll > 0.1) status = 'delivered';
@@ -28582,8 +28577,13 @@ const simulateCampaignSending = async (campaignId) => {
         if (status === 'replied') updates.replied_count = (campaign.replied_count || 0) + 1;
 
         await AppDataStore.update('whatsapp_campaigns', campaignId, updates);
-        sent++;
-    }, 500);
+
+        // Brief pause between sends to avoid flooding
+        if (i < messages.length - 1) await new Promise(r => setTimeout(r, 300));
+    }
+
+    await AppDataStore.update('whatsapp_campaigns', campaignId, { status: 'completed', completed_date: new Date().toISOString() });
+    await refreshCampaignsTab();
 };
 
     const refreshCampaignsTab = async () => {
@@ -34013,18 +34013,19 @@ const initSecurity = async () => {
 let sessionTimeoutTimer;
 const initSessionTimeout = async () => {
     const timeoutMinutes = parseInt(UserPreferences.getSync('session_timeout', 30));
-    const resetTimeout = async () => {
+    const resetTimeout = () => {
         clearTimeout(sessionTimeoutTimer);
-        sessionTimeoutTimer = (window.app.logoutDueToInactivity, timeoutMinutes * 60 * 1000);
+        sessionTimeoutTimer = setTimeout(window.app.logoutDueToInactivity, timeoutMinutes * 60 * 1000);
     };
+    // Attach listeners ONCE (outside resetTimeout to prevent accumulation)
     ['click', 'mousemove', 'keypress', 'scroll', 'touchstart'].forEach(event => {
-        document.addEventListener(event, resetTimeout);
+        document.addEventListener(event, resetTimeout, { passive: true });
     });
-    await resetTimeout();
+    resetTimeout();
 };
 
 const logoutDueToInactivity = async () => {
-    if (window.UI && window.UI.toast) window.UI.toast.warninging('Session expired due to inactivity');
+    if (window.UI && window.UI.toast) window.UI.toast.warning('Session expired due to inactivity');
     if (typeof AuditLogger !== 'undefined') AuditLogger.warn("AUTH", "LOGOUT", { reason: 'session_timeout' });
     if (typeof window.app.logout === 'function') {
         window.app.logout();

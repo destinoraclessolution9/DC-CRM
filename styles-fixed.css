@@ -5677,8 +5677,13 @@ body {
     width: 3px;
     background: var(--primary);
     border-radius: 2px;
-    transition: height 0.1s ease;
     min-height: 4px;
+    animation: waveformPulse 0.6s ease-in-out infinite alternate;
+}
+
+@keyframes waveformPulse {
+    0% { height: 4px; }
+    100% { height: 28px; }
 }
 
 .transcription-area {
