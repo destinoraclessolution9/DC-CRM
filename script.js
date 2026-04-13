@@ -15027,7 +15027,7 @@ function _wireLoginBtn() {
                             <pre style="background:#f3f4f6; border-radius:8px; padding:12px; font-size:12px; text-align:left; white-space:pre-wrap; max-height:220px; overflow-y:auto;">${msg}</pre>
                         </div>`,
                         [
-                            { label: '📲 Send WhatsApp', type: 'primary',   action: `window.open(${JSON.stringify(waUrl)}, '_blank'); UI.hideModal();` },
+                            { label: '📲 Send WhatsApp', type: 'primary',   action: `window.open('${waUrl}', '_blank'); UI.hideModal();` },
                             { label: 'Skip',              type: 'secondary', action: 'UI.hideModal();' }
                         ]
                     );
