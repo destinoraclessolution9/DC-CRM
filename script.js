@@ -6422,6 +6422,9 @@ function _wireLoginBtn() {
             updateNavVisibility();
             UI.toast.success(`Welcome ${profile.full_name}!`);
 
+            // Auto-subscribe to push notifications for PWA / homescreen users
+            _autoSubscribePush();
+
             // Force password change on first login
             if (profile.force_password_change) {
                 await navigateTo('settings');
@@ -6583,6 +6586,22 @@ function _wireLoginBtn() {
 
         // Action Plan: schedule Monday reminders
         initActionPlanReminder();
+
+        // Auto-subscribe to push notifications for PWA / homescreen users
+        _autoSubscribePush();
+
+        // Route notification clicks to the correct view
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.addEventListener('message', (evt) => {
+                if (evt.data && evt.data.type === 'NOTIFICATION_CLICK') {
+                    const url = evt.data.data?.url || '';
+                    const hash = url.includes('#') ? url.split('#')[1] : '';
+                    if (hash === 'fude')         navigateTo('fude');
+                    else if (hash === 'calendar') navigateTo('calendar');
+                    else if (hash)               navigateTo(hash);
+                }
+            });
+        }
 
         // Mark app as ready
         window.app.ready = true;
@@ -15124,6 +15143,58 @@ function _wireLoginBtn() {
         } catch (e) {
             // Never let notification errors affect the activity save flow.
             console.warn('[PushNotif] notifyActivityCreated failed:', e);
+        }
+    };
+
+    // ========== AUTO-SUBSCRIBE PUSH for PWA / homescreen users ==========
+    const _autoSubscribePush = () => {
+        try {
+            if (!window.PushNotif || !window.PushNotif.isPushSupported()) return;
+            if (localStorage.getItem('push_enabled') === '1') return;
+            // Only auto-prompt for installed PWA (homescreen) — not regular browser tabs
+            const isStandalone = window.matchMedia('(display-mode: standalone)').matches
+                || window.navigator.standalone === true;
+            if (!isStandalone) return;
+            // Delay so login UI settles first, then subscribe (prompts permission if needed)
+            setTimeout(async () => {
+                try {
+                    await window.PushNotif.subscribe();
+                    console.log('[Push] auto-subscribed (standalone PWA)');
+                } catch (e) { console.warn('[Push] auto-subscribe skipped:', e.message || e); }
+            }, 2000);
+        } catch (_) {}
+    };
+
+    // ========== PUSH NOTIFICATION: notify when a 福运相随 highlight is created/updated ==========
+    const _notifyHighlightSaved = async (highlight, isNew) => {
+        try {
+            if (!highlight || !window.PushNotif) return;
+            const targets = new Set();
+            // Notify all active users
+            try {
+                const allUsers = await AppDataStore.getAll('users');
+                (allUsers || []).forEach(u => {
+                    if (u.id != null && u.status !== 'inactive') targets.add(String(u.id));
+                });
+            } catch (_) {}
+            // Don't self-notify the author
+            if (_currentUser && _currentUser.id != null) targets.delete(String(_currentUser.id));
+            if (targets.size === 0) return;
+
+            const typeMap = { highlight: '📰 Highlight', success_story: '🌟 Success Story', recommendation_tip: '💡 Tip' };
+            const typeLabel = typeMap[highlight.type] || 'Highlight';
+
+            await window.PushNotif.sendActivityPush(
+                highlight,
+                Array.from(targets),
+                {
+                    title: isNew ? `福运相随: New ${typeLabel}` : `福运相随: ${typeLabel} Updated`,
+                    body: highlight.title || '',
+                    url: './index.html#fude',
+                }
+            );
+        } catch (e) {
+            console.warn('[PushNotif] notifyHighlightSaved failed:', e);
         }
     };
 
@@ -32733,6 +32804,7 @@ const initImportDemoData = async () => {
         };
 
         try {
+            const isNew = !id;
             if (id) {
                 await AppDataStore.update('news_highlights', parseInt(id), payload);
                 UI.toast.success('Highlight updated.');
@@ -32740,6 +32812,8 @@ const initImportDemoData = async () => {
                 await AppDataStore.create('news_highlights', { id: Date.now(), ...payload, created_at: new Date().toISOString() });
                 UI.toast.success('Highlight added.');
             }
+            // Push notification fan-out (non-blocking, best-effort)
+            _notifyHighlightSaved(payload, isNew).catch(() => {});
             UI.hideModal();
             const viewport = document.getElementById('content-viewport');
             if (viewport) await showFudeView(viewport);
