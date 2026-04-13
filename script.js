@@ -7246,6 +7246,12 @@ function _wireLoginBtn() {
             } catch (__) { intakes = []; }
         }
 
+        // Filter: only show intakes created by the current user or their subordinates
+        const visibleIds = await getVisibleUserIds(_currentUser);
+        if (visibleIds !== 'all') {
+            intakes = intakes.filter(i => visibleIds.includes(i.agent_id));
+        }
+
         if (!intakes || intakes.length === 0) {
             host.innerHTML = '';
             host.style.display = 'none';
