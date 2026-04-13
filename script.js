@@ -15206,6 +15206,25 @@ function _wireLoginBtn() {
         await renderFollowUpReminders();
         await renderTodayActivities();
 
+        // === Auto-refresh open activity tabs so changes reflect immediately ===
+        try {
+            const pid = activity.prospect_id;
+            const cid = activity.customer_id;
+            if (pid) {
+                const bodyEl = document.getElementById(`acc-body-activity-${pid}`);
+                if (bodyEl && bodyEl.style.display !== 'none') {
+                    await switchProspectTab('activity', pid, null, bodyEl);
+                }
+            }
+            if (cid) {
+                const bodyEl = document.getElementById(`cust-acc-body-activity-${cid}`);
+                if (bodyEl && bodyEl.style.display !== 'none') {
+                    const cust = await AppDataStore.getById('customers', cid);
+                    if (cust) await renderCustomerActivityTab(cust, bodyEl.id);
+                }
+            }
+        } catch (e) { console.warn('Activity tab auto-refresh failed:', e); }
+
         if (!stayOpen) {
             UI.hideModal();
             if (_cpsIntakeWaCallback) setTimeout(_cpsIntakeWaCallback, 300);
