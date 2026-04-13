@@ -11870,7 +11870,19 @@ function _wireLoginBtn() {
                     ${marketingEvent?.description ? `<div class="info-row" style="flex-direction:column; align-items:flex-start; gap:4px;"><div style="display:flex; align-items:center; gap:8px; width:100%;"><span class="info-label">Description:</span><button class="btn btn-sm secondary" style="font-size:11px;padding:2px 8px;" onclick="event.stopPropagation();app.sendDescriptionInvite(${activity.id})"><i class="fab fa-whatsapp" style="margin-right:3px;"></i> Invite</button></div><span style="white-space:pre-wrap; color:var(--gray-700);">${marketingEvent.description}</span></div>` : ''}
                     ${activity.summary ? `<div class="info-row"><span class="info-label">Summary:</span> <span>${activity.summary}</span></div>` : ''}
                 </div>
-                
+
+                ${marketingEvent ? `
+                <div class="detail-section">
+                    <h4>Event Details</h4>
+                    ${marketingEvent.ticket_price ? `<div class="info-row"><span class="info-label">Ticket Price:</span> <span>RM ${marketingEvent.ticket_price}</span></div>` : ''}
+                    ${marketingEvent.early_bird_price ? `<div class="info-row"><span class="info-label">Early Bird Price:</span> <span>RM ${marketingEvent.early_bird_price}</span></div>` : ''}
+                    ${marketingEvent.group_purchase_price ? `<div class="info-row"><span class="info-label">Group Purchase Price:</span> <span>RM ${marketingEvent.group_purchase_price}</span></div>` : ''}
+                    ${marketingEvent.duration ? `<div class="info-row"><span class="info-label">Duration:</span> <span>${marketingEvent.duration}</span></div>` : ''}
+                    ${marketingEvent.target_group ? `<div class="info-row"><span class="info-label">Target Group:</span> <span>${marketingEvent.target_group}</span></div>` : ''}
+                    ${marketingEvent.remarks ? `<div class="info-row"><span class="info-label">Remarks:</span> <span>${marketingEvent.remarks}</span></div>` : ''}
+                </div>
+                ` : ''}
+
                 ${isAttendeeType ? '' : `
                 <div class="detail-section">
                     <h4>Consultant</h4>
