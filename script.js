@@ -24513,10 +24513,18 @@ const getTotalMeetings = async (from, to) => {
 };
 
 const getActivityHeadcount = async (from, to) => {
-    const registrations = await AppDataStore.getAll('event_registrations');
+    const [attendees, activities] = await Promise.all([
+        AppDataStore.getAll('event_attendees'),
+        AppDataStore.getAll('activities')
+    ]);
+    const actMap = {};
+    activities.forEach(a => { actMap[a.id] = a; });
     let count = 0;
-    for (const r of registrations) {
-        if (!r.checked_in || r.checked_in_at < from || r.checked_in_at > to) continue;
+    for (const att of attendees) {
+        if (!att.attended && att.attendance_status !== 'Attended') continue;
+        const act = actMap[att.activity_id];
+        const date = act?.activity_date || '';
+        if (date < from || date > to) continue;
         count++;
     }
     return count;
@@ -24748,35 +24756,81 @@ const buildMeetingsDetails = async (from, to) => {
 };
 
 const buildActivityHeadcountDetails = async (from, to) => {
-    const [regs, events, prospects, customers] = await Promise.all([
-        AppDataStore.getAll('event_registrations'),
+    const [allAttendees, activities, events, prospects, customers, users] = await Promise.all([
+        AppDataStore.getAll('event_attendees'),
+        AppDataStore.getAll('activities'),
         AppDataStore.getAll('events'),
         AppDataStore.getAll('prospects'),
-        AppDataStore.getAll('customers')
+        AppDataStore.getAll('customers'),
+        AppDataStore.getAll('users')
     ]);
+    const actMap = {}; activities.forEach(a => { actMap[a.id] = a; });
     const eventMap = {}; events.forEach(e => { eventMap[e.id] = e; });
     const prospMap = {}; prospects.forEach(p => { prospMap[p.id] = p; });
     const custMap = {}; customers.forEach(c => { custMap[c.id] = c; });
-    const rows = [];
+    const userMap = {}; users.forEach(u => { userMap[u.id] = u; });
+
+    const prospectRows = [];
+    const agentRows = [];
+    let prospectCount = 0;
+    let agentCount = 0;
     const byEvent = {};
-    for (const r of regs) {
-        if (!r.checked_in || r.checked_in_at < from || r.checked_in_at > to) continue;
-        const ev = eventMap[r.event_id];
-        const eventTitle = ev?.event_title || ev?.title || `Event #${r.event_id}`;
-        const attendee = r.attendee_type === 'customer'
-            ? custMap[r.customer_id || r.attendee_id]?.full_name
-            : prospMap[r.prospect_id || r.attendee_id]?.full_name;
-        const dateStr = (r.checked_in_at || '').slice(0, 10);
-        rows.push([dateStr, eventTitle, attendee || '—', r.attendee_type || '—']);
+
+    for (const att of allAttendees) {
+        if (!att.attended && att.attendance_status !== 'Attended') continue;
+        const act = actMap[att.activity_id];
+        const date = act?.activity_date || '';
+        if (date < from || date > to) continue;
+
+        const ev = eventMap[att.event_id];
+        const eventTitle = ev?.event_title || ev?.title || `Event #${att.event_id}`;
+        const entityId = att.entity_id || att.attendee_id;
+        const isAgent = att.attendee_type === 'agent';
+
+        let name;
+        if (isAgent) {
+            name = userMap[entityId]?.full_name || att.entity_name || '—';
+            agentRows.push([date, eventTitle, name]);
+            agentCount++;
+        } else {
+            name = att.attendee_type === 'customer'
+                ? (custMap[entityId]?.full_name || att.entity_name || '—')
+                : (prospMap[entityId]?.full_name || att.entity_name || '—');
+            prospectRows.push([date, eventTitle, name, att.attendee_type || 'prospect']);
+            prospectCount++;
+        }
         byEvent[eventTitle] = (byEvent[eventTitle] || 0) + 1;
     }
-    const summary = Object.keys(byEvent).length
+
+    const summaryByEvent = Object.keys(byEvent).length
         ? `<div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:6px;padding:12px 16px;margin-bottom:14px;">
              <div style="font-size:12px;color:var(--gray-500);margin-bottom:8px;font-weight:600;">By Event:</div>
              ${Object.entries(byEvent).sort((a,b) => b[1]-a[1]).map(([name, c]) => `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;"><span>${name}</span><strong>${c} attendee${c===1?'':'s'}</strong></div>`).join('')}
            </div>`
         : '';
-    return summary + renderDetailTable(['Check-in Date', 'Event', 'Attendee', 'Type'], rows);
+
+    const countBadge = `<div style="display:flex;gap:12px;margin-bottom:14px;">
+        <div style="background:#e0f2fe;border:1px solid #7dd3fc;border-radius:6px;padding:10px 16px;flex:1;text-align:center;">
+            <div style="font-size:20px;font-weight:700;color:#0369a1;">${prospectCount}</div>
+            <div style="font-size:12px;color:var(--gray-500);">Prospect / Customer</div>
+        </div>
+        <div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:6px;padding:10px 16px;flex:1;text-align:center;">
+            <div style="font-size:20px;font-weight:700;color:#92400e;">${agentCount}</div>
+            <div style="font-size:12px;color:var(--gray-500);">Agent</div>
+        </div>
+    </div>`;
+
+    const prospectSection = `<div style="margin-bottom:18px;">
+        <h4 style="font-size:14px;font-weight:600;margin-bottom:8px;">Prospect / Customer Attendees (${prospectCount})</h4>
+        ${renderDetailTable(['Date', 'Event', 'Attendee', 'Type'], prospectRows)}
+    </div>`;
+
+    const agentSection = `<div>
+        <h4 style="font-size:14px;font-weight:600;margin-bottom:8px;">Agent Attendees (${agentCount})</h4>
+        ${renderDetailTable(['Date', 'Event', 'Agent'], agentRows)}
+    </div>`;
+
+    return countBadge + summaryByEvent + prospectSection + agentSection;
 };
 
 const showKPIDetails = async (key) => {
