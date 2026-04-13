@@ -15399,6 +15399,9 @@ function _wireLoginBtn() {
 
     let _sortField = 'score';
     let _sortDirection = 'desc';
+    // ── Pagination state for prospects table ──
+    let _prospectPage = 0;
+    const _prospectPageSize = 50;
 
     const sortProspects = async (field) => {
         if (_sortField === field) {
@@ -15407,6 +15410,7 @@ function _wireLoginBtn() {
             _sortField = field;
             _sortDirection = 'desc';
         }
+        _prospectPage = 0; // reset to first page on sort change
         await renderProspectsTable();
     };
 
@@ -15675,12 +15679,15 @@ function _wireLoginBtn() {
         await renderApprovalQueue();
     };
 
+    // ── Pagination state for customers table ──
+    let _customerPage = 0;
+    const _customerPageSize = 50;
+
     const renderCustomersTable = async () => {
         const tbody = document.getElementById('customers-table-body');
         if (!tbody) return;
 
-        const customers = await getVisibleCustomers();
-        const searchQuery = document.getElementById('customer-search')?.value.toLowerCase() || '';
+        const searchQuery = document.getElementById('customer-search')?.value?.trim() || '';
         const typeFilter = document.getElementById('filter-customer-type')?.value || '';
         const guaFilter = document.getElementById('filter-customer-gua')?.value || '';
         const purchaseFilter = document.getElementById('filter-purchase-status')?.value || '';
@@ -15688,45 +15695,69 @@ function _wireLoginBtn() {
         const houseAuditFilter = document.getElementById('filter-customer-house-audit')?.value || '';
         const minEventsFilter = parseInt(document.getElementById('filter-customer-min-events')?.value || '0');
 
-        let allEventRegs = [];
-        if (minEventsFilter > 0) {
-            allEventRegs = await AppDataStore.getAll('event_registrations');
+        // ── Build scoping from role hierarchy ──
+        const visibleIds = await getVisibleUserIds(_currentUser);
+        const queryOpts = {
+            search: searchQuery || undefined,
+            searchFields: searchQuery ? ['full_name', 'phone', 'email'] : undefined,
+            sort: 'full_name',
+            sortDir: 'asc',
+            limit: _customerPageSize,
+            offset: _customerPage * _customerPageSize,
+            filters: {},
+        };
+        if (guaFilter) queryOpts.filters.ming_gua = guaFilter;
+
+        // Scope by agent visibility — customers may use responsible_agent_id OR agent_id
+        if (visibleIds !== 'all') {
+            queryOpts.scopeFields = [
+                { field: 'responsible_agent_id', values: visibleIds },
+                { field: 'agent_id', values: visibleIds },
+            ];
         }
 
-        let html = '';
-        for (const c of customers) {
-            if (searchQuery && !c.full_name.toLowerCase().includes(searchQuery) && !c.phone.includes(searchQuery)) continue;
-            if (guaFilter && c.ming_gua !== guaFilter) continue;
-            // Type and Purchase filters simplified for demo
-            if (typeFilter === 'VIP' && c.lifetime_value < 5000) continue;
+        const result = await AppDataStore.queryAdvanced('customers', queryOpts);
+        let customers = result.data;
+        const totalCount = result.count;
 
-            // 16.3 Star Deficiency filter
+        // ── Fetch users for agent name display ──
+        const allUsers = await AppDataStore.getAll('users');
+        const userById = new Map(allUsers.map(u => [String(u.id), u]));
+
+        let allEventRegs = [];
+        if (minEventsFilter > 0) allEventRegs = await AppDataStore.getAll('event_registrations');
+
+        let html = '';
+        let visibleCount = 0;
+        for (const c of customers) {
+            // VIP type filter (computed)
+            if (typeFilter === 'VIP' && (c.lifetime_value || 0) < 5000) continue;
+
             if (deficiencyFilter) {
                 const needs = c.needs ? (Array.isArray(c.needs) ? c.needs : c.needs.split(',').map(t => t.trim())) : [];
                 if (!needs.includes(deficiencyFilter)) continue;
             }
-
-            // 16.4 House Audit Status filter
             if (houseAuditFilter) {
                 const auditStatus = c.house_audit_status || 'None';
                 if (auditStatus !== houseAuditFilter) continue;
             }
-
-            // 16.8 Event attendance filter
             if (minEventsFilter > 0) {
                 const attendedCount = allEventRegs.filter(r => r.attendee_id === c.id).length;
                 if (attendedCount < minEventsFilter) continue;
             }
 
+            const agent = userById.get(String(c.responsible_agent_id || c.agent_id));
+            const agentName = agent ? agent.full_name : '—';
+
             html += `
                 <tr onclick="app.showCustomerDetail(${c.id})">
                     <td data-label="Name"><strong>${c.full_name}</strong></td>
                     <td data-label="Lifetime Value">RM ${(c.lifetime_value || 0).toLocaleString()} <span style="color:var(--success); font-size:12px;"><i class="fas fa-caret-up"></i></span></td>
-                    <td data-label="Customer Since">${c.customer_since}</td>
-                    <td data-label="Ming Gua">${c.ming_gua}</td>
-                    <td data-label="Agent">Michelle Tan</td>
+                    <td data-label="Customer Since">${c.customer_since || '—'}</td>
+                    <td data-label="Ming Gua">${c.ming_gua || '—'}</td>
+                    <td data-label="Agent">${agentName}</td>
                     <td data-label="Health">${renderQuickHealthBadge(c)}</td>
-                    <td data-label="Status"><span class="score-badge score-A+">${c.status.toUpperCase()}</span></td>
+                    <td data-label="Status"><span class="score-badge score-A+">${(c.status || 'active').toUpperCase()}</span></td>
                     <td onclick="event.stopPropagation()">
                         <button class="btn-icon" title="Edit"><i class="fas fa-edit"></i></button>
                         <button class="btn-icon" title="Add Purchase" onclick="app.openAddPurchaseModal(${c.id})"><i class="fas fa-shopping-cart"></i></button>
@@ -15735,11 +15766,51 @@ function _wireLoginBtn() {
                     </td>
                 </tr>
             `;
+            visibleCount++;
         }
-        tbody.innerHTML = html || '<tr><td colspan="7" style="text-align:center; padding:20px;">No customers found</td></tr>';
+        tbody.innerHTML = html || '<tr><td colspan="8" style="text-align:center; padding:20px;">No customers found</td></tr>';
+
+        // ── Render pagination controls ──
+        const totalPages = Math.ceil(totalCount / _customerPageSize);
+        let paginationEl = document.getElementById('customers-pagination');
+        if (!paginationEl) {
+            paginationEl = document.createElement('div');
+            paginationEl.id = 'customers-pagination';
+            paginationEl.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:8px;padding:16px 0;flex-wrap:wrap;';
+            tbody.closest('.prospects-table-container')?.appendChild(paginationEl);
+        }
+        if (totalPages <= 1) {
+            paginationEl.innerHTML = `<span style="color:var(--text-secondary);font-size:13px;">${totalCount} customer${totalCount !== 1 ? 's' : ''}</span>`;
+        } else {
+            const currentPage = _customerPage + 1;
+            const from = _customerPage * _customerPageSize + 1;
+            const to = Math.min(from + _customerPageSize - 1, totalCount);
+            let pgHtml = `<span style="color:var(--text-secondary);font-size:13px;">Showing ${from}–${to} of ${totalCount}</span>`;
+            pgHtml += `<button class="btn secondary btn-sm" ${_customerPage === 0 ? 'disabled' : ''} onclick="app.customerPageNav('first')" title="First page"><i class="fas fa-angle-double-left"></i></button>`;
+            pgHtml += `<button class="btn secondary btn-sm" ${_customerPage === 0 ? 'disabled' : ''} onclick="app.customerPageNav('prev')"><i class="fas fa-angle-left"></i> Prev</button>`;
+            pgHtml += `<span style="font-weight:600;font-size:14px;">Page ${currentPage} of ${totalPages}</span>`;
+            pgHtml += `<button class="btn secondary btn-sm" ${currentPage >= totalPages ? 'disabled' : ''} onclick="app.customerPageNav('next')">Next <i class="fas fa-angle-right"></i></button>`;
+            pgHtml += `<button class="btn secondary btn-sm" ${currentPage >= totalPages ? 'disabled' : ''} onclick="app.customerPageNav('last')" title="Last page"><i class="fas fa-angle-double-right"></i></button>`;
+            paginationEl.innerHTML = pgHtml;
+        }
     };
 
-    const filterCustomers = async () => await renderCustomersTable();
+    const customerPageNav = async (dir) => {
+        const paginationText = document.getElementById('customers-pagination')?.textContent || '';
+        const totalMatch = paginationText.match(/of (\d+)/);
+        const total = totalMatch ? parseInt(totalMatch[1]) : 9999;
+        const lastPage = Math.max(0, Math.ceil(total / _customerPageSize) - 1);
+        if (dir === 'first') _customerPage = 0;
+        else if (dir === 'prev') _customerPage = Math.max(0, _customerPage - 1);
+        else if (dir === 'next') _customerPage = Math.min(lastPage, _customerPage + 1);
+        else if (dir === 'last') _customerPage = lastPage;
+        await renderCustomersTable();
+    };
+
+    const filterCustomers = async () => {
+        _customerPage = 0; // reset to first page when filters change
+        await renderCustomersTable();
+    };
 
     // ========== MANAGER APPROVAL QUEUE ==========
 
@@ -16087,53 +16158,8 @@ function _wireLoginBtn() {
         const tbody = document.getElementById('prospects-table-body');
         if (!tbody) return;
 
-        // Fetch all three tables in ONE parallel batch, then apply visibility
-        // once — instead of calling getVisibleProspects() and
-        // getVisibleActivities() which each run their own sequential
-        // getVisibleUserIds → tree-walk chain internally.
-        const [allProspects, allActivities, allUsers] = await Promise.all([
-            AppDataStore.getAll('prospects'),
-            AppDataStore.getAll('activities'),
-            AppDataStore.getAll('users'),
-        ]);
-
-        let prospects, activities;
-        if (isSystemAdmin(_currentUser)) {
-            prospects = allProspects;
-            activities = allActivities;
-        } else {
-            const visibleIds = await getVisibleUserIds(_currentUser);
-            if (visibleIds === 'all') {
-                prospects = allProspects;
-                activities = allActivities;
-            } else {
-                prospects = allProspects.filter(p => visibleIds.includes(p.responsible_agent_id));
-                const canView = await buildActivityVisibilityChecker(allUsers);
-                activities = allActivities.filter(canView);
-            }
-        }
-
-        // Index activities by prospect_id so both sorting AND the per-row
-        // "Last Activity" lookup become O(1) instead of O(N) per row.
-        // Previously `activities.filter(a => a.prospect_id == p.id)` was called
-        // twice per row (once in sort, once in the loop) — that's O(N*M) work
-        // that ran on every keystroke in the search box.
-        const latestActivityByProspect = new Map();
-        for (const a of activities) {
-            if (a.prospect_id == null) continue;
-            const key = String(a.prospect_id);
-            const current = latestActivityByProspect.get(key);
-            if (!current) { latestActivityByProspect.set(key, a); continue; }
-            const curKey = (current.activity_date || '') + '|' + (current.id || 0);
-            const newKey = (a.activity_date || '') + '|' + (a.id || 0);
-            if (newKey > curKey) latestActivityByProspect.set(key, a);
-        }
-        const userById = new Map(allUsers.map(u => [String(u.id), u]));
-
-        const _userLvlMatch = _currentUser?.role?.match(/Level\s+(\d+)/i);
-        const _userLevel = _userLvlMatch ? parseInt(_userLvlMatch[1]) : 99;
-        const canDelete = _userLevel <= 5;
-        const searchQuery = document.getElementById('prospect-search')?.value.toLowerCase() || '';
+        // ── Read UI filter values ──
+        const searchQuery = document.getElementById('prospect-search')?.value?.trim() || '';
         const scoreFilter = document.getElementById('filter-score')?.value || '';
         const guaFilter = document.getElementById('filter-gua')?.value || '';
         const statusFilter = document.getElementById('filter-status')?.value || '';
@@ -16142,65 +16168,104 @@ function _wireLoginBtn() {
         const solutionProposedFilter = document.getElementById('filter-solution-proposed')?.value || '';
         const minEventsFilter = parseInt(document.getElementById('filter-min-events')?.value || '0');
 
+        // ── Map sort field to Supabase column ──
+        // 'activity' and 'protection' can't be sorted server-side (computed), fall back to 'score'
+        const sortColMap = { name: 'full_name', score: 'score', activity: 'score', protection: 'score' };
+        const serverSort = sortColMap[_sortField] || 'score';
+
+        // ── Build scoping from role hierarchy ──
+        const visibleIds = await getVisibleUserIds(_currentUser);
+        const queryOpts = {
+            search: searchQuery || undefined,
+            searchFields: searchQuery ? ['full_name', 'phone', 'email'] : undefined,
+            sort: serverSort,
+            sortDir: _sortDirection,
+            limit: _prospectPageSize,
+            offset: _prospectPage * _prospectPageSize,
+            filters: {},
+        };
+
+        // Apply server-side filters where possible
+        if (guaFilter) queryOpts.filters.ming_gua = guaFilter;
+
+        // Scope by agent visibility (the key optimization — agents only download THEIR data)
+        if (visibleIds !== 'all') {
+            queryOpts.scopeField = 'responsible_agent_id';
+            queryOpts.scopeValues = visibleIds;
+        }
+
+        // ── Server-side paginated fetch ──
+        const result = await AppDataStore.queryAdvanced('prospects', queryOpts);
+        let prospects = result.data;
+        const totalCount = result.count;
+
+        // ── Fetch users for agent name display (cached, fast) ──
+        const allUsers = await AppDataStore.getAll('users');
+        const userById = new Map(allUsers.map(u => [String(u.id), u]));
+
+        // ── Fetch latest activity per prospect in this page (scoped, not ALL activities) ──
+        const prospectIds = prospects.map(p => p.id);
+        let latestActivityByProspect = new Map();
+        if (prospectIds.length > 0) {
+            try {
+                // Fetch activities only for visible prospects — NOT the entire table
+                const { data: pageActivities } = await AppDataStore.queryAdvanced('activities', {
+                    scopeField: 'prospect_id',
+                    scopeValues: prospectIds,
+                    sort: 'activity_date',
+                    sortDir: 'desc',
+                    limit: 5000, // generous limit for activities of this page's prospects
+                    offset: 0,
+                });
+                for (const a of (pageActivities || [])) {
+                    if (a.prospect_id == null) continue;
+                    const key = String(a.prospect_id);
+                    const current = latestActivityByProspect.get(key);
+                    if (!current) { latestActivityByProspect.set(key, a); continue; }
+                    const curKey = (current.activity_date || '') + '|' + (current.id || 0);
+                    const newKey = (a.activity_date || '') + '|' + (a.id || 0);
+                    if (newKey > curKey) latestActivityByProspect.set(key, a);
+                }
+            } catch (_) {}
+        }
+
+        // ── Client-side post-filters (for computed fields that can't be pushed to DB) ──
         // Pre-load cross-table data only when those filters are active
         let allProposedSolutions = [];
         let allEventRegs = [];
-        if (solutionProposedFilter) {
-            allProposedSolutions = await AppDataStore.getAll('proposed_solutions');
-        }
-        if (minEventsFilter > 0) {
-            allEventRegs = await AppDataStore.getAll('event_registrations');
-        }
+        if (solutionProposedFilter) allProposedSolutions = await AppDataStore.getAll('proposed_solutions');
+        if (minEventsFilter > 0) allEventRegs = await AppDataStore.getAll('event_registrations');
 
-        // Apply sorting
-        prospects.sort((a, b) => {
-            let valA, valB;
+        const _userLvlMatch = _currentUser?.role?.match(/Level\s+(\d+)/i);
+        const _userLevel = _userLvlMatch ? parseInt(_userLvlMatch[1]) : 99;
+        const canDelete = _userLevel <= 5;
 
-            if (_sortField === 'name') {
-                valA = a.full_name || '';
-                valB = b.full_name || '';
-                return _sortDirection === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
-            } else if (_sortField === 'score') {
-                valA = a.score || 0;
-                valB = b.score || 0;
-                return _sortDirection === 'asc' ? valA - valB : valB - valA;
-            } else if (_sortField === 'activity') {
+        // Client-side post-sort for computed columns (activity date, protection)
+        if (_sortField === 'activity') {
+            prospects.sort((a, b) => {
                 const lastA = latestActivityByProspect.get(String(a.id));
                 const lastB = latestActivityByProspect.get(String(b.id));
-                valA = lastA ? lastA.activity_date : '0000-00-00';
-                valB = lastB ? lastB.activity_date : '0000-00-00';
+                const valA = lastA ? lastA.activity_date : '0000-00-00';
+                const valB = lastB ? lastB.activity_date : '0000-00-00';
                 return _sortDirection === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
-            } else if (_sortField === 'protection') {
-                valA = calculateDaysLeft(a.protection_deadline);
-                valB = calculateDaysLeft(b.protection_deadline);
+            });
+        } else if (_sortField === 'protection') {
+            prospects.sort((a, b) => {
+                const valA = calculateDaysLeft(a.protection_deadline);
+                const valB = calculateDaysLeft(b.protection_deadline);
                 return _sortDirection === 'asc' ? valA - valB : valB - valA;
-            }
-            return 0;
-        });
-
+            });
+        }
 
         let html = '';
         let visibleCount = 0;
 
         for (const p of prospects) {
-            // Search filter (Name, Phone, Email, ID)
-            const matchesSearch = !searchQuery ||
-                (p.full_name || '').toLowerCase().includes(searchQuery) ||
-                (p.phone && p.phone.includes(searchQuery)) ||
-                (p.email && p.email.toLowerCase().includes(searchQuery)) ||
-                (p.id && p.id.toString().includes(searchQuery));
-            if (!matchesSearch) continue;
-
-            // Score filter
+            // Score filter (computed grade — must stay client-side)
             const grade = getScoreGrade(p.score);
             if (scoreFilter && scoreFilter !== grade) continue;
 
-            // Ming Gua filter
-            if (guaFilter && p.ming_gua !== guaFilter) continue;
-
-            // O(1) last-activity lookup from the pre-built index.
             const lastActivity = latestActivityByProspect.get(String(p.id));
-
             const lastActivityText = lastActivity
                 ? `${lastActivity.activity_date} ${lastActivity.activity_type}`
                 : 'No activity';
@@ -16216,19 +16281,14 @@ function _wireLoginBtn() {
                 if (statusFilter === 'critical' && protectionStatus !== 'critical') continue;
             }
 
-            // 16.3 Star Deficiency filter (maps to needs field)
             if (deficiencyFilter) {
                 const needs = p.needs ? (Array.isArray(p.needs) ? p.needs : p.needs.split(',').map(t => t.trim())) : [];
                 if (!needs.includes(deficiencyFilter)) continue;
             }
-
-            // 16.4 House Audit Status filter
             if (houseAuditFilter) {
                 const auditStatus = p.house_audit_status || 'None';
                 if (auditStatus !== houseAuditFilter) continue;
             }
-
-            // 16.5 Solution Proposed (not purchased) filter
             if (solutionProposedFilter) {
                 const hasPending = allProposedSolutions.some(s =>
                     s.prospect_id === p.id &&
@@ -16237,8 +16297,6 @@ function _wireLoginBtn() {
                 );
                 if (!hasPending) continue;
             }
-
-            // 16.8 Event attendance filter
             if (minEventsFilter > 0) {
                 const attendedCount = allEventRegs.filter(r => r.attendee_id === p.id).length;
                 if (attendedCount < minEventsFilter) continue;
@@ -16284,6 +16342,44 @@ function _wireLoginBtn() {
         }
 
         tbody.innerHTML = html;
+
+        // ── Render pagination controls ──
+        const totalPages = Math.ceil(totalCount / _prospectPageSize);
+        let paginationEl = document.getElementById('prospects-pagination');
+        if (!paginationEl) {
+            paginationEl = document.createElement('div');
+            paginationEl.id = 'prospects-pagination';
+            paginationEl.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:8px;padding:16px 0;flex-wrap:wrap;';
+            tbody.closest('.prospects-table-container')?.appendChild(paginationEl);
+        }
+        if (totalPages <= 1) {
+            paginationEl.innerHTML = `<span style="color:var(--text-secondary);font-size:13px;">${totalCount} prospect${totalCount !== 1 ? 's' : ''}</span>`;
+        } else {
+            const currentPage = _prospectPage + 1;
+            const from = _prospectPage * _prospectPageSize + 1;
+            const to = Math.min(from + _prospectPageSize - 1, totalCount);
+            let pgHtml = `<span style="color:var(--text-secondary);font-size:13px;">Showing ${from}–${to} of ${totalCount}</span>`;
+            pgHtml += `<button class="btn secondary btn-sm" ${_prospectPage === 0 ? 'disabled' : ''} onclick="app.prospectPageNav('first')" title="First page"><i class="fas fa-angle-double-left"></i></button>`;
+            pgHtml += `<button class="btn secondary btn-sm" ${_prospectPage === 0 ? 'disabled' : ''} onclick="app.prospectPageNav('prev')"><i class="fas fa-angle-left"></i> Prev</button>`;
+            pgHtml += `<span style="font-weight:600;font-size:14px;">Page ${currentPage} of ${totalPages}</span>`;
+            pgHtml += `<button class="btn secondary btn-sm" ${currentPage >= totalPages ? 'disabled' : ''} onclick="app.prospectPageNav('next')">Next <i class="fas fa-angle-right"></i></button>`;
+            pgHtml += `<button class="btn secondary btn-sm" ${currentPage >= totalPages ? 'disabled' : ''} onclick="app.prospectPageNav('last')" title="Last page"><i class="fas fa-angle-double-right"></i></button>`;
+            paginationEl.innerHTML = pgHtml;
+        }
+    };
+
+    const prospectPageNav = async (dir) => {
+        const visibleIds = await getVisibleUserIds(_currentUser);
+        // Estimate total to compute last page — use cached count from last render
+        const paginationText = document.getElementById('prospects-pagination')?.textContent || '';
+        const totalMatch = paginationText.match(/of (\d+)/);
+        const total = totalMatch ? parseInt(totalMatch[1]) : 9999;
+        const lastPage = Math.max(0, Math.ceil(total / _prospectPageSize) - 1);
+        if (dir === 'first') _prospectPage = 0;
+        else if (dir === 'prev') _prospectPage = Math.max(0, _prospectPage - 1);
+        else if (dir === 'next') _prospectPage = Math.min(lastPage, _prospectPage + 1);
+        else if (dir === 'last') _prospectPage = lastPage;
+        await renderProspectsTable();
     };
 
     const deleteProspect = async (id) => {
@@ -16326,9 +16422,12 @@ function _wireLoginBtn() {
                 String(n.prospect_id) === String(id) ||
                 (n.entity_type === 'prospect' && String(n.entity_id) === String(id))
             );
-            for (const a of acts) await AppDataStore.delete('activities', a.id);
-            for (const n of notes) await AppDataStore.delete('notes', n.id);
-            for (const n of names) await AppDataStore.delete('names', n.id);
+            // Bulk-delete related records in parallel (was sequential — O(N) round trips)
+            await Promise.all([
+                acts.length ? AppDataStore.deleteMany('activities', acts.map(a => a.id)) : Promise.resolve(),
+                notes.length ? AppDataStore.deleteMany('notes', notes.map(n => n.id)) : Promise.resolve(),
+                names.length ? AppDataStore.deleteMany('names', names.map(n => n.id)) : Promise.resolve(),
+            ]);
             await AppDataStore.delete('prospects', id);
             UI.toast.success('Prospect deleted.');
             await app.renderProspectsTable();
@@ -16722,6 +16821,7 @@ function _wireLoginBtn() {
 
 
     const filterProspects = async () => {
+        _prospectPage = 0; // reset to first page when filters change
         await renderProspectsTable();
     };
 
@@ -19708,9 +19808,12 @@ for (const p of allPackages) {
                 String(n.prospect_id) === String(id) ||
                 (n.entity_type === 'prospect' && String(n.entity_id) === String(id))
             );
-            for (const a of acts) await AppDataStore.delete('activities', a.id);
-            for (const n of notes) await AppDataStore.delete('notes', n.id);
-            for (const n of names) await AppDataStore.delete('names', n.id);
+            // Bulk-delete related records in parallel (was sequential — O(N) round trips)
+            await Promise.all([
+                acts.length ? AppDataStore.deleteMany('activities', acts.map(a => a.id)) : Promise.resolve(),
+                notes.length ? AppDataStore.deleteMany('notes', notes.map(n => n.id)) : Promise.resolve(),
+                names.length ? AppDataStore.deleteMany('names', names.map(n => n.id)) : Promise.resolve(),
+            ]);
             await AppDataStore.delete('prospects', id);
             UI.toast.success('Prospect deleted successfully');
             await showProspectsView(document.getElementById('content-viewport'));
@@ -33619,6 +33722,8 @@ const initImportDemoData = async () => {
         downloadProspectVCard,
         saveProspect,
         filterProspects,
+        prospectPageNav,
+        customerPageNav,
         exportData,
         sortProspects,
         switchProspectTab,

@@ -62,7 +62,7 @@ class DataStore {
         // Keyed by tableName → { data: [], ts: Date.now() }
         // TTL: 30 s for mutable tables, 120 s for near-static ones.
         this._cache = new Map();
-        this._cacheTTL = 30_000; // ms
+        this._cacheTTL = 300_000; // 5 min (was 30s — too aggressive for 500 concurrent users)
         this._staticTables = new Set([
             'users', 'roles', 'teams', 'event_categories', 'event_templates',
             'products', 'appointment_locations', 'venues', 'ai_models',
@@ -809,6 +809,150 @@ class DataStore {
             const all = local ? JSON.parse(local) : [];
             return all.filter(row => Object.entries(filters).every(([k, v]) => row[k] == v));
         }
+    }
+
+    // ── Server-side paginated query ────────────────────────────────────
+    // Pushes filtering, sorting, searching, and scoping to Supabase so
+    // only the rows the user actually needs travel over the wire.
+    //
+    // options = {
+    //   filters:      { status: 'active' },              // eq() filters
+    //   search:       'john',                             // ilike search term
+    //   searchFields: ['full_name','phone','email'],      // columns to search
+    //   sort:         'full_name',                        // order column
+    //   sortDir:      'asc' | 'desc',                    // order direction
+    //   limit:        50,                                 // page size (default 50)
+    //   offset:       0,                                  // starting row
+    //   scopeField:   'responsible_agent_id',             // column for scoping
+    //   scopeValues:  [id1, id2],                         // allowed values (from getVisibleUserIds)
+    //   scopeFields:  [{ field, values }],                // multi-field scoping (OR across fields)
+    //   select:       'id,full_name,...'                   // custom select (defaults to light-select)
+    // }
+    //
+    // Returns { data: [], count: totalMatching, limit, offset }
+    async queryAdvanced(tableName, options = {}) {
+        const selectClause = options.select || this._selectClauseForGetAll(tableName);
+        let q = this._readClient()
+            .from(tableName)
+            .select(selectClause, { count: 'exact' });
+
+        // Scoping — restrict to rows the user is allowed to see.
+        // Single-field scope: scopeField + scopeValues
+        // Multi-field scope: scopeFields [{ field, values }] — OR across fields
+        if (options.scopeFields && options.scopeFields.length > 0) {
+            // Build PostgREST OR filter: (field1.in.(v1,v2),field2.in.(v1,v2))
+            const orParts = options.scopeFields.map(
+                s => `${s.field}.in.(${s.values.join(',')})`
+            );
+            q = q.or(orParts.join(','));
+        } else if (options.scopeField && options.scopeValues) {
+            q = q.in(options.scopeField, options.scopeValues);
+        }
+
+        // Equality filters
+        if (options.filters) {
+            for (const [key, value] of Object.entries(options.filters)) {
+                if (value == null || value === '' || value === 'null' || value === 'undefined') continue;
+                q = q.eq(key, value);
+            }
+        }
+
+        // Full-text-style search across multiple columns (ilike OR)
+        if (options.search && options.searchFields && options.searchFields.length > 0) {
+            const term = options.search.replace(/%/g, '');
+            const orClauses = options.searchFields
+                .map(f => `${f}.ilike.%${term}%`)
+                .join(',');
+            q = q.or(orClauses);
+        }
+
+        // Sorting
+        if (options.sort) {
+            q = q.order(options.sort, { ascending: options.sortDir !== 'desc' });
+        }
+
+        // Pagination
+        const limit = options.limit || 50;
+        const offset = options.offset || 0;
+        q = q.range(offset, offset + limit - 1);
+
+        try {
+            const { data, error, count } = await q;
+            if (error) {
+                // If light-select column list is stale, retry with '*'
+                if (selectClause !== '*' && error.code) {
+                    console.warn(`queryAdvanced light-select failed for ${tableName}, retrying with *`);
+                    options.select = '*';
+                    return this.queryAdvanced(tableName, options);
+                }
+                throw error;
+            }
+            return { data: data || [], count: count || 0, limit, offset };
+        } catch (e) {
+            console.error(`queryAdvanced error on ${tableName}:`, e);
+            // Fallback: filter cached/local data client-side with pagination
+            const all = await this.getAll(tableName);
+            let filtered = [...all];
+            if (options.scopeField && options.scopeValues) {
+                filtered = filtered.filter(r => options.scopeValues.includes(r[options.scopeField]));
+            }
+            if (options.filters) {
+                for (const [k, v] of Object.entries(options.filters)) {
+                    if (v == null || v === '') continue;
+                    filtered = filtered.filter(r => String(r[k]) === String(v));
+                }
+            }
+            if (options.search && options.searchFields) {
+                const term = options.search.toLowerCase();
+                filtered = filtered.filter(r =>
+                    options.searchFields.some(f => (r[f] || '').toLowerCase().includes(term))
+                );
+            }
+            if (options.sort) {
+                filtered.sort((a, b) => {
+                    const va = a[options.sort] || '';
+                    const vb = b[options.sort] || '';
+                    const cmp = typeof va === 'number' ? va - vb : String(va).localeCompare(String(vb));
+                    return options.sortDir === 'desc' ? -cmp : cmp;
+                });
+            }
+            const total = filtered.length;
+            return { data: filtered.slice(offset, offset + limit), count: total, limit, offset };
+        }
+    }
+
+    // Bulk delete — runs all deletes in parallel instead of one-by-one
+    async deleteMany(tableName, ids) {
+        if (!ids || ids.length === 0) return;
+        const { error } = await this._writeClient()
+            .from(tableName)
+            .delete()
+            .in('id', ids);
+        if (error) throw error;
+        // Clean up local state for all deleted IDs
+        try {
+            const key = `fs_crm_${tableName}`;
+            const all = JSON.parse(localStorage.getItem(key) || '[]');
+            const idSet = new Set(ids.map(String));
+            localStorage.setItem(key, JSON.stringify(all.filter(r => !idSet.has(String(r.id)))));
+        } catch (_) {}
+        try {
+            const syncQueue = JSON.parse(localStorage.getItem('fs_crm_sync_queue') || '[]');
+            const idSet = new Set(ids.map(String));
+            localStorage.setItem('fs_crm_sync_queue', JSON.stringify(
+                syncQueue.filter(q => !(q.tableName === tableName && idSet.has(String(q.record.id))))
+            ));
+        } catch (_) {}
+        try {
+            const tombstones = JSON.parse(localStorage.getItem('fs_crm_tombstones') || '{}');
+            if (!tombstones[tableName]) tombstones[tableName] = [];
+            for (const id of ids) {
+                if (!tombstones[tableName].includes(String(id))) tombstones[tableName].push(String(id));
+            }
+            localStorage.setItem('fs_crm_tombstones', JSON.stringify(tombstones));
+        } catch (_) {}
+        this.invalidateCache(tableName);
+        this.emit('dataChanged', { action: 'deleteMany', table: tableName, ids });
     }
 
     // Aliases used throughout script.js
