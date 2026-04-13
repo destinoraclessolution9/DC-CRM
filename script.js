@@ -7836,9 +7836,9 @@ function _wireLoginBtn() {
         `, [{ label: 'Close', type: 'secondary', action: 'UI.hideModal()' }]);
     };
 
-    const renderCustomerContractsTab = async (customer) => {
+    const renderCustomerContractsTab = async (customer, containerId = 'profile-tab-content') => {
         const contracts = (await AppDataStore.getAll('contracts').catch(() => [])).filter(c => c.customer_id == customer.id);
-        const container = document.getElementById('profile-tab-content');
+        const container = document.getElementById(containerId);
         container.innerHTML = `
             <div>
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
@@ -16682,97 +16682,174 @@ function _wireLoginBtn() {
 
         const health = await calculateCustomerHealthScore(customer);
 
+        const iconBtn = (title, icon, onclick, opts = {}) => {
+            const bg = opts.bg || '#fff';
+            const color = opts.color || 'var(--gray-500)';
+            const border = opts.border || '1px solid var(--gray-300)';
+            return `<button title="${title}" onclick="event.stopPropagation();${onclick}" style="width:24px;height:24px;border-radius:50%;border:${border};background:${bg};color:${color};cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'"><i class="${icon}"></i></button>`;
+        };
+
         const container = document.getElementById('content-viewport');
         container.innerHTML = `
-            <div class="customer-profile-view">
-                <div class="warning-banner">
-                    <i class="fas fa-exclamation-triangle"></i>
-                    <span>⚠️ DELETE IS NOT AVAILABLE - Customer records are permanent</span>
+            <div class="pv-wrap">
+                <style>
+                    .pv-wrap{background:#fff;border-radius:12px;box-shadow:var(--shadow-md);overflow:hidden;padding-bottom:80px;}
+                    .pv-back{padding:14px 16px 0;}
+                    .pv-hdr{padding:12px 16px 16px;border-bottom:1px solid var(--gray-200);}
+                    .pv-hdr h1{font-size:22px;font-weight:700;margin:6px 0 8px;line-height:1.2;}
+                    .pv-hdr-meta{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px;color:var(--gray-500);}
+                    .acc-container{display:flex;flex-direction:column;gap:8px;padding:12px;}
+                    .acc-item{border:1px solid var(--gray-200);border-radius:12px;overflow:hidden;}
+                    .acc-hdr{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;cursor:pointer;background:var(--gray-50);font-weight:600;font-size:15px;user-select:none;-webkit-tap-highlight-color:transparent;gap:8px;}
+                    .acc-hdr:active{opacity:.85;}
+                    .acc-item.open>.acc-hdr{background:var(--primary);color:#fff;}
+                    .acc-item.open>.acc-hdr .acc-chev{color:#fff;transform:rotate(180deg);}
+                    .acc-chev{transition:transform .25s;color:var(--gray-500);flex-shrink:0;}
+                    .acc-body{padding:16px 14px;background:#fff;}
+                    .acc-loading{text-align:center;padding:24px;color:var(--gray-400);font-size:14px;}
+                    .pv-row{display:flex;align-items:flex-start;padding:9px 0;border-bottom:1px solid var(--gray-100);font-size:14px;gap:8px;}
+                    .pv-row:last-child{border-bottom:none;}
+                    .pv-lbl{color:var(--gray-500);font-weight:500;min-width:110px;flex-shrink:0;}
+                    .pv-val{flex:1;color:var(--gray-800);word-break:break-word;}
+                    .pv-sub{font-size:12px;font-weight:700;color:var(--gray-400);text-transform:uppercase;letter-spacing:.5px;margin:14px 0 6px;padding-top:12px;border-top:1px solid var(--gray-100);}
+                    .pv-sub:first-child{margin-top:0;padding-top:0;border-top:none;}
+                </style>
+                <div class="pv-back">
+                    <button class="btn secondary btn-sm" onclick="app.navigateTo('prospects')">
+                        <i class="fas fa-arrow-left"></i> Back to List
+                    </button>
                 </div>
-
-                <div class="profile-header" style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:24px;">
-                    <div>
-                        <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
-                            <h1 style="font-size:32px; font-weight:700;">${customer.full_name}</h1>
-                            ${renderHealthBadge(health)}
-                        </div>
-                        <div style="display:flex; gap:12px; color:var(--gray-500); font-size:14px;">
+                <div class="pv-hdr" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
+                    <div style="flex:1;min-width:0;">
+                        <div class="pv-hdr-meta">
                             <span>ID: C${customer.id}</span>
-                            <span><i class="fas fa-user-check" style="color:#3b82f6;"></i> Customer</span>
-                            <span><i class="fas fa-building"></i> Company</span>
+                            <span class="badge success">Customer</span>
+                            ${renderHealthBadge(health)}
+                            <span style="font-size:11px;color:var(--gray-400);"><i class="fas fa-lock"></i> Permanent</span>
                         </div>
-                    </div>
-                    <div class="header-actions">
-                        ${(isSystemAdmin(_currentUser) || isMarketingManager(_currentUser)) ? `<button class="btn secondary" onclick="app.openProspectModal(${customer.id})"><i class="fas fa-edit"></i> Edit</button>` : ''}
-                        <button class="btn secondary" onclick="app.openAddPurchaseModal(${customer.id})"><i class="fas fa-plus"></i> Add Purchase</button>
-                        <button class="btn secondary" onclick="app.openCustomerReferralModal(${customer.id})"><i class="fas fa-user-plus"></i> Refer a Friend</button>
-                        <button class="btn secondary" onclick="app.openSendWhatsAppModal('customer', ${customer.id})"><i class="fab fa-whatsapp"></i> WhatsApp</button>
-                        <button class="btn secondary" onclick="app.sendPortalLink(${customer.id})"><i class="fas fa-external-link-alt"></i> Portal Link</button>
-                        <button class="btn primary" style="background:#6b21a8;" onclick="app.openRecruitModal(${customer.id})"><i class="fas fa-user-tie"></i> Recruit as Agent</button>
+                        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:6px 0 4px;">
+                            <span style="font-size:22px;font-weight:700;line-height:1.3;flex-shrink:0;">${customer.full_name}</span>
+                            ${(isSystemAdmin(_currentUser) || isMarketingManager(_currentUser)) ? iconBtn('Edit', 'fas fa-edit', `app.openProspectModal(${customer.id})`) : ''}
+                            ${iconBtn('Add Purchase', 'fas fa-plus', `app.openAddPurchaseModal(${customer.id})`)}
+                            ${iconBtn('Refer a Friend', 'fas fa-user-plus', `app.openCustomerReferralModal(${customer.id})`)}
+                            ${iconBtn('WhatsApp', 'fab fa-whatsapp', `app.openSendWhatsAppModal('customer',${customer.id})`, {color:'#25d366'})}
+                            ${iconBtn('Portal Link', 'fas fa-external-link-alt', `app.sendPortalLink(${customer.id})`)}
+                            ${iconBtn('Recruit as Agent', 'fas fa-user-tie', `app.openRecruitModal(${customer.id})`, {bg:'#6b21a8',color:'#fff',border:'none'})}
+                        </div>
+                        <div style="font-size:12px;color:var(--gray-500);margin-top:2px;">
+                            Customer since ${customer.customer_since || '-'} · Converted at RM ${customer.conversion_amount?.toLocaleString() || '2,200'}
+                        </div>
                     </div>
                 </div>
 
-                <div class="customer-since-banner">
-                    🎉 Customer since ${customer.customer_since} · Converted from Prospect automatically at RM ${customer.conversion_amount?.toLocaleString() || '2,200'}
-                </div>
+                <div class="acc-container" id="cust-acc-container-${customer.id}">
 
-                <div class="profile-content-grid" style="display:grid; grid-template-columns: 1fr 300px; gap:24px;">
-                    <div class="profile-main-column">
-                        <div class="tab-navigation">
-                            <button class="profile-tab-btn active" onclick="app.switchProfileTab(this, 'basic', ${customer.id})">Basic & Info</button>
-                            <button class="profile-tab-btn" onclick="app.switchProfileTab(this, 'platforms', ${customer.id})">Platform IDs</button>
-                             <button class="profile-tab-btn" onclick="app.switchProfileTab(this, 'purchases', ${customer.id})">Purchase History</button>
-                            <button class="profile-tab-btn" onclick="app.switchProfileTab(this, 'activity', ${customer.id})">Activity History</button>
-                            <button class="profile-tab-btn" onclick="app.switchProfileTab(this, 'referrals', ${customer.id})">Referrals Made</button>
-                            <button class="profile-tab-btn" onclick="app.switchProfileTab(this, 'events', ${customer.id})">Events Attended</button>
-                            <button class="profile-tab-btn" onclick="app.switchProfileTab(this, 'contracts', ${customer.id})">Contracts</button>
+                    <!-- 1 Basic Information — open by default -->
+                    <div class="acc-item open" id="cust-acc-info-${customer.id}">
+                        <div class="acc-hdr" onclick="app.toggleCustomerAccordion('info',${customer.id},this.parentElement)">
+                            <span><i class="fas fa-info-circle"></i> Basic Information</span>
+                            <i class="fas fa-chevron-down acc-chev"></i>
                         </div>
-
-                        <div id="profile-tab-content" style="background:var(--white); padding:24px; border-radius:12px; border:1px solid var(--gray-200);">
-                            <!-- Active tab content -->
+                        <div class="acc-body" id="cust-acc-body-info-${customer.id}">
+                            <div class="acc-loading"><i class="fas fa-spinner fa-spin"></i> Loading…</div>
                         </div>
                     </div>
 
-                    <div class="profile-sidebar">
-                        <div id="event-attendance-section"></div>
-                        <div id="agent-eligibility-section"></div>
-                        <div id="customer-tags-section" style="margin-top:24px;"></div>
+                    <!-- 2 Bank & Payment -->
+                    <div class="acc-item" id="cust-acc-bank-${customer.id}">
+                        <div class="acc-hdr" onclick="app.toggleCustomerAccordion('bank',${customer.id},this.parentElement)">
+                            <span><i class="fas fa-university"></i> Bank &amp; Payment</span>
+                            <i class="fas fa-chevron-down acc-chev"></i>
+                        </div>
+                        <div class="acc-body" id="cust-acc-body-bank-${customer.id}" style="display:none" data-loaded="false"></div>
                     </div>
-                </div>
-                
-                <div style="margin-top:24px;">
-                    <button class="btn secondary" onclick="app.navigateTo('prospects')"><i class="fas fa-arrow-left"></i> Back to List</button>
+
+                    <!-- 3 Platform IDs -->
+                    <div class="acc-item" id="cust-acc-platforms-${customer.id}">
+                        <div class="acc-hdr" onclick="app.toggleCustomerAccordion('platforms',${customer.id},this.parentElement)">
+                            <span><i class="fas fa-id-badge"></i> Platform IDs</span>
+                            <i class="fas fa-chevron-down acc-chev"></i>
+                        </div>
+                        <div class="acc-body" id="cust-acc-body-platforms-${customer.id}" style="display:none" data-loaded="false"></div>
+                    </div>
+
+                    <!-- 4 Purchase History -->
+                    <div class="acc-item" id="cust-acc-purchases-${customer.id}">
+                        <div class="acc-hdr" onclick="app.toggleCustomerAccordion('purchases',${customer.id},this.parentElement)">
+                            <span><i class="fas fa-shopping-cart"></i> Purchase History</span>
+                            <i class="fas fa-chevron-down acc-chev"></i>
+                        </div>
+                        <div class="acc-body" id="cust-acc-body-purchases-${customer.id}" style="display:none" data-loaded="false"></div>
+                    </div>
+
+                    <!-- 5 Referrals Made -->
+                    <div class="acc-item" id="cust-acc-referrals-${customer.id}">
+                        <div class="acc-hdr" onclick="app.toggleCustomerAccordion('referrals',${customer.id},this.parentElement)">
+                            <span><i class="fas fa-user-plus"></i> Referrals Made</span>
+                            <i class="fas fa-chevron-down acc-chev"></i>
+                        </div>
+                        <div class="acc-body" id="cust-acc-body-referrals-${customer.id}" style="display:none" data-loaded="false"></div>
+                    </div>
+
+                    <!-- 6 Activity History -->
+                    <div class="acc-item" id="cust-acc-activity-${customer.id}">
+                        <div class="acc-hdr" onclick="app.toggleCustomerAccordion('activity',${customer.id},this.parentElement)">
+                            <span><i class="fas fa-history"></i> Activity History</span>
+                            <i class="fas fa-chevron-down acc-chev"></i>
+                        </div>
+                        <div class="acc-body" id="cust-acc-body-activity-${customer.id}" style="display:none" data-loaded="false"></div>
+                    </div>
+
+                    <!-- 7 Events Attended -->
+                    <div class="acc-item" id="cust-acc-events-${customer.id}">
+                        <div class="acc-hdr" onclick="app.toggleCustomerAccordion('events',${customer.id},this.parentElement)">
+                            <span><i class="fas fa-calendar-check"></i> Events Attended</span>
+                            <i class="fas fa-chevron-down acc-chev"></i>
+                        </div>
+                        <div class="acc-body" id="cust-acc-body-events-${customer.id}" style="display:none" data-loaded="false"></div>
+                    </div>
+
+                    <!-- 8 Agent Eligibility -->
+                    <div class="acc-item" id="cust-acc-eligibility-${customer.id}">
+                        <div class="acc-hdr" onclick="app.toggleCustomerAccordion('eligibility',${customer.id},this.parentElement)">
+                            <span><i class="fas fa-user-tie"></i> Agent Eligibility</span>
+                            <i class="fas fa-chevron-down acc-chev"></i>
+                        </div>
+                        <div class="acc-body" id="cust-acc-body-eligibility-${customer.id}" style="display:none" data-loaded="false"></div>
+                    </div>
+
+                    <!-- 9 Contracts -->
+                    <div class="acc-item" id="cust-acc-contracts-${customer.id}">
+                        <div class="acc-hdr" onclick="app.toggleCustomerAccordion('contracts',${customer.id},this.parentElement)">
+                            <span><i class="fas fa-file-contract"></i> Contracts</span>
+                            <i class="fas fa-chevron-down acc-chev"></i>
+                        </div>
+                        <div class="acc-body" id="cust-acc-body-contracts-${customer.id}" style="display:none" data-loaded="false"></div>
+                    </div>
+
+                    <!-- 10 Notes -->
+                    <div class="acc-item" id="cust-acc-notes-${customer.id}">
+                        <div class="acc-hdr" onclick="app.toggleCustomerAccordion('notes',${customer.id},this.parentElement)">
+                            <span><i class="fas fa-sticky-note"></i> Notes</span>
+                            <i class="fas fa-chevron-down acc-chev"></i>
+                        </div>
+                        <div class="acc-body" id="cust-acc-body-notes-${customer.id}" style="display:none" data-loaded="false"></div>
+                    </div>
+
+                    <!-- 11 Tags -->
+                    <div class="acc-item" id="cust-acc-tags-${customer.id}">
+                        <div class="acc-hdr" onclick="app.toggleCustomerAccordion('tags',${customer.id},this.parentElement)">
+                            <span><i class="fas fa-tags"></i> Tags</span>
+                            <i class="fas fa-chevron-down acc-chev"></i>
+                        </div>
+                        <div class="acc-body" id="cust-acc-body-tags-${customer.id}" style="display:none" data-loaded="false"></div>
+                    </div>
+
                 </div>
             </div>
         `;
-        // Refactor to scrollable layout
-        const scrollContainer = `
-            <div class="scroll-container">
-                <div id="section-basic-bank" class="profile-section">
-                    <!-- Loaded via append -->
-                </div>
-                <div id="section-platforms" class="profile-section">
-                    <!-- Loaded via append -->
-                </div>
-                <div id="section-purchases" class="profile-section">
-                    <!-- Loaded via append -->
-                </div>
-                <div id="section-referrals" class="profile-section">
-                    <!-- Loaded via append -->
-                </div>
-            </div>
-        `;
-
-        container.insertAdjacentHTML('beforeend', scrollContainer);
-
-        // Fill sections
-        await renderBasicBankTab(customer, 'section-basic-bank');
-        await renderPlatformIdsTab(customer, 'section-platforms');
-        await renderPurchaseHistoryTab(customer, 'section-purchases');
-        await renderReferralsTab(customer, 'section-referrals');
-        renderEventHistory(customer);
-        await renderAgentEligibility(customer);
-        await renderCustomerTags(customer);
+        // Pre-load the Info accordion body (open by default)
+        await switchCustomerProfileTab('info', customerId, document.getElementById(`cust-acc-body-info-${customerId}`));
     };
 
     const switchProfileTab = async (btn, tabName, cId) => {
@@ -16805,6 +16882,157 @@ function _wireLoginBtn() {
                 html += '</tbody></table>';
             }
             document.getElementById('profile-tab-content').innerHTML = html;
+        }
+    };
+
+    const switchCustomerProfileTab = async (tab, customerId, container) => {
+        const customer = await AppDataStore.getById('customers', customerId);
+        if (!container || !customer) return;
+
+        if (tab === 'info') {
+            container.innerHTML = `
+                <div class="pv-sub">Contact</div>
+                <div class="pv-row"><span class="pv-lbl">Full Name</span><span class="pv-val"><strong>${customer.full_name}</strong></span></div>
+                <div class="pv-row"><span class="pv-lbl">Phone</span><span class="pv-val">${customer.phone || '-'} ${customer.phone ? '<button class="btn-icon" style="margin-left:4px;"><i class="fas fa-phone"></i></button>' : ''}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Email</span><span class="pv-val">${customer.email || '-'} ${customer.email ? '<button class="btn-icon" style="margin-left:4px;"><i class="fas fa-envelope"></i></button>' : ''}</span></div>
+                <div class="pv-sub">Identity</div>
+                <div class="pv-row"><span class="pv-lbl">IC Number</span><span class="pv-val">${customer.ic_number || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Date of Birth</span><span class="pv-val">${customer.date_of_birth || '-'}${customer.date_of_birth ? ` (Age ${Math.floor((Date.now() - new Date(customer.date_of_birth).getTime()) / 31557600000)})` : ''}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Ming Gua</span><span class="pv-val"><span style="color:#6b21a8;font-weight:600;">${customer.ming_gua || '-'}${customer.element ? ' (' + customer.element + ')' : ''}</span></span></div>
+                <div class="pv-row"><span class="pv-lbl">Gender</span><span class="pv-val">${customer.gender || '-'}</span></div>
+                <div class="pv-sub">Employment</div>
+                <div class="pv-row"><span class="pv-lbl">Occupation</span><span class="pv-val">${customer.occupation || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Company</span><span class="pv-val">${customer.company_name || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Income</span><span class="pv-val">${customer.income_range || '-'}</span></div>
+                <div class="pv-sub">Address</div>
+                <div class="pv-row"><span class="pv-lbl">Address</span><span class="pv-val">${[customer.address, customer.city, customer.state, customer.postal_code].filter(Boolean).join(', ') || '-'}</span></div>
+                <div class="pv-sub">Referral Information</div>
+                <div class="pv-row"><span class="pv-lbl">Referred By</span><span class="pv-val">${customer.referred_by || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Relationship</span><span class="pv-val">${customer.referral_relationship || '-'}</span></div>
+            `;
+            const cfDisplay = await renderCustomFieldDisplay('customer', customer.id);
+            if (cfDisplay) container.insertAdjacentHTML('beforeend', cfDisplay);
+        }
+        else if (tab === 'bank') {
+            container.innerHTML = `
+                <div class="pv-sub">Bank &amp; Payment</div>
+                <div class="pv-row"><span class="pv-lbl">Bank Name</span><span class="pv-val">${customer.bank_name || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Account Number</span><span class="pv-val">${customer.account_number ? customer.account_number.replace(/^(\d{4}).*(\d{4})$/, '$1-****-$2') : '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Account Holder</span><span class="pv-val">${customer.account_holder || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Payment Method</span><span class="pv-val">${customer.payment_methods || '-'}</span></div>
+                <div class="pv-sub">Customer Metrics</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px;">
+                    <div style="background:var(--gray-50);padding:12px;border-radius:8px;text-align:center;">
+                        <div style="font-size:12px;color:var(--gray-500);">Lifetime Value</div>
+                        <div style="font-size:18px;font-weight:700;color:var(--primary);">RM ${(customer.lifetime_value || 0).toLocaleString()}</div>
+                    </div>
+                    <div style="background:var(--gray-50);padding:12px;border-radius:8px;text-align:center;">
+                        <div style="font-size:12px;color:var(--gray-500);">Total Purchases</div>
+                        <div style="font-size:18px;font-weight:700;color:var(--primary);">${customer.total_purchases || 0}</div>
+                    </div>
+                    <div style="background:var(--gray-50);padding:12px;border-radius:8px;text-align:center;">
+                        <div style="font-size:12px;color:var(--gray-500);">Avg Order Value</div>
+                        <div style="font-size:18px;font-weight:700;color:var(--primary);">RM ${customer.total_purchases ? Math.round((customer.lifetime_value || 0) / customer.total_purchases).toLocaleString() : '0'}</div>
+                    </div>
+                    <div style="background:var(--gray-50);padding:12px;border-radius:8px;text-align:center;">
+                        <div style="font-size:12px;color:var(--gray-500);">Last Purchase</div>
+                        <div style="font-size:14px;font-weight:600;">${customer.last_purchase_date || '-'}</div>
+                    </div>
+                </div>
+            `;
+        }
+        else if (tab === 'platforms') {
+            await renderPlatformIdsTab(customer, container.id);
+        }
+        else if (tab === 'purchases') {
+            await renderPurchaseHistoryTab(customer, container.id);
+        }
+        else if (tab === 'referrals') {
+            await renderReferralsTab(customer, container.id);
+        }
+        else if (tab === 'activity') {
+            await renderCustomerActivityTab(customer, container.id);
+        }
+        else if (tab === 'events') {
+            const registrations = (await AppDataStore.getAll('event_registrations')).filter(
+                r => r.attendee_type === 'customer' && r.attendee_id == customerId
+            );
+            if (registrations.length === 0) {
+                container.innerHTML = '<p style="text-align:center;padding:20px;color:var(--gray-400);">No events attended yet.</p>';
+            } else {
+                let totalPts = 0;
+                let rows = '';
+                for (const r of registrations) {
+                    const event = await AppDataStore.getById('events', r.event_id);
+                    const pts = r.points_awarded || 0;
+                    totalPts += pts;
+                    rows += `<div class="pv-row"><span class="pv-lbl">${r.event_date || '-'}</span><span class="pv-val" style="display:flex;justify-content:space-between;">${event?.title || 'Unknown'} <span style="color:var(--success);font-weight:600;flex-shrink:0;">+${pts} pts</span></span></div>`;
+                }
+                container.innerHTML = `
+                    ${rows}
+                    <div style="display:flex;justify-content:space-between;font-weight:700;margin-top:12px;padding-top:12px;border-top:1px solid var(--gray-200);">
+                        <span>Total Events: ${registrations.length}</span>
+                        <span style="color:var(--primary);">${totalPts} Points</span>
+                    </div>
+                `;
+            }
+        }
+        else if (tab === 'eligibility') {
+            container.innerHTML = `
+                <div style="text-align:center;padding:8px 0;">
+                    <div style="font-size:13px;color:#6b21a8;margin-bottom:8px;">Current Status: <strong>Not an Agent</strong></div>
+                    <div style="font-size:12px;color:#7e22ce;margin-bottom:12px;">To become agent: Purchase Agent Package (min RM 3,000)</div>
+                    <div style="display:inline-flex;flex-direction:column;align-items:center;gap:6px;margin-bottom:12px;">
+                        <div style="width:64px;height:64px;border-radius:50%;background:#f3e8ff;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:700;color:#6b21a8;">85%</div>
+                        <div style="font-size:13px;font-weight:600;color:#6b21a8;">Good candidate</div>
+                    </div>
+                    <div style="font-size:12px;color:#7e22ce;font-style:italic;margin-bottom:12px;">
+                        Recommendations: Active participant, makes referrals, good purchase history.
+                    </div>
+                    <button class="btn primary" style="width:100%;background:#6b21a8;border:none;" onclick="app.openRecruitModal(${customer.id})">Offer Agent Package</button>
+                </div>
+            `;
+        }
+        else if (tab === 'contracts') {
+            await renderCustomerContractsTab(customer, container.id);
+        }
+        else if (tab === 'notes') {
+            const customerNotes = await AppDataStore.query('notes', { customer_id: customer.id });
+            container.innerHTML = `
+                <div class="add-note-section">
+                    <textarea id="customer-note-text" class="form-control" rows="3" placeholder="Add a new note..."></textarea>
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
+                        <button class="btn-icon" onclick="app.openVoiceRecorder('customer-note-text', 'customer', ${customer.id})" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+                        <button class="btn primary btn-sm" onclick="app.addCustomerNote(${customer.id})">Add Note</button>
+                    </div>
+                </div>
+                ${customerNotes.length > 0 ? customerNotes.map(n => `
+                    <div style="margin-top:10px;background:var(--gray-50);border-radius:8px;padding:12px;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+                            <span style="font-size:12px;color:var(--gray-500);">${n.date} - ${n.author}${n.is_voice_note ? ' <i class="fas fa-microphone voice-note-icon" title="Voice note"></i>' : ''}</span>
+                            <button class="btn-icon" onclick="app.deleteCustomerNote(${customer.id}, ${n.id})"><i class="fas fa-trash"></i></button>
+                        </div>
+                        <div style="font-size:13px;color:var(--gray-700);">${n.text}</div>
+                    </div>
+                `).join('') : '<p style="color:var(--gray-400);font-size:13px;margin-top:8px;">No notes yet.</p>'}
+            `;
+        }
+        else if (tab === 'tags') {
+            const entityTags = await AppDataStore.query('entity_tags', { entity_type: 'customer', entity_id: customer.id });
+            let tagsHtml = '<p style="color:var(--gray-400);font-size:12px;">No tags yet.</p>';
+            if (entityTags.length > 0) {
+                const tagSpans = await Promise.all(entityTags.map(async (et) => {
+                    const tag = await AppDataStore.getById('tags', et.tag_id);
+                    return tag ? `<span class="score-badge" style="background:${tag.color || 'var(--primary)'};color:white;display:flex;align-items:center;gap:4px;font-size:11px;">${tag.name} <span style="cursor:pointer;" onclick="app.removeTagFromCustomer(${customer.id},${tag.id})">&times;</span></span>` : '';
+                }));
+                tagsHtml = tagSpans.join('');
+            }
+            container.innerHTML = `
+                <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                    ${tagsHtml}
+                    <button class="btn-sm secondary" style="border-radius:20px;font-size:11px;" onclick="app.openAddTagModal(${customer.id},'customer')">+ Add Tag</button>
+                </div>
+            `;
         }
     };
 
@@ -17116,7 +17344,7 @@ function _wireLoginBtn() {
         UI.hideModal();
         UI.toast.success('Referral saved');
         const customer = await AppDataStore.getById('customers', customerId);
-        if (customer) await renderReferralsTab(customer);
+        if (customer) { const cid = `cust-acc-body-referrals-${customerId}`; await renderReferralsTab(customer, document.getElementById(cid) ? cid : 'profile-tab-content'); }
     };
 
     const viewReferralDetail = async (referralId) => {
@@ -17165,7 +17393,7 @@ function _wireLoginBtn() {
         UI.hideModal();
         UI.toast.success('Referral updated');
         const customer = await AppDataStore.getById('customers', customerId);
-        if (customer) await renderReferralsTab(customer);
+        if (customer) { const cid = `cust-acc-body-referrals-${customerId}`; await renderReferralsTab(customer, document.getElementById(cid) ? cid : 'profile-tab-content'); }
     };
 
     const openEditPlatformIdsModal = async (customerId) => {
@@ -17219,7 +17447,7 @@ function _wireLoginBtn() {
         UI.hideModal();
         UI.toast.success('Platform IDs saved');
         const customer = await AppDataStore.getById('customers', customerId);
-        if (customer) await renderPlatformIdsTab(customer);
+        if (customer) { const cid = `cust-acc-body-platforms-${customerId}`; await renderPlatformIdsTab(customer, document.getElementById(cid) ? cid : 'profile-tab-content'); }
     };
 
     const uploadPaymentProof = async (purchaseId, customerId) => {
@@ -17249,13 +17477,13 @@ function _wireLoginBtn() {
             UI.hideModal();
             UI.toast.success('Payment proof uploaded');
             const customer = await AppDataStore.getById('customers', customerId);
-            if (customer) await renderPurchaseHistoryTab(customer);
+            if (customer) { const cid = `cust-acc-body-purchases-${customerId}`; await renderPurchaseHistoryTab(customer, document.getElementById(cid) ? cid : 'profile-tab-content'); }
         } catch (err) {
             await AppDataStore.update('purchases', purchaseId, { proof: fileName });
             UI.hideModal();
             UI.toast.success('Proof filename saved (offline mode)');
             const customer = await AppDataStore.getById('customers', customerId);
-            if (customer) await renderPurchaseHistoryTab(customer);
+            if (customer) { const cid = `cust-acc-body-purchases-${customerId}`; await renderPurchaseHistoryTab(customer, document.getElementById(cid) ? cid : 'profile-tab-content'); }
         }
     };
 
@@ -18347,6 +18575,24 @@ function _wireLoginBtn() {
                 bodyEl.dataset.loaded = 'true';
                 bodyEl.innerHTML = '<div class="acc-loading"><i class="fas fa-spinner fa-spin"></i> Loading…</div>';
                 await switchProspectTab(tab, prospectId, null, bodyEl);
+            }
+        }
+    };
+
+    const toggleCustomerAccordion = async (tab, customerId, itemEl) => {
+        const bodyEl = document.getElementById(`cust-acc-body-${tab}-${customerId}`);
+        if (!bodyEl) return;
+        const isOpen = itemEl.classList.contains('open');
+        if (isOpen) {
+            bodyEl.style.display = 'none';
+            itemEl.classList.remove('open');
+        } else {
+            bodyEl.style.display = 'block';
+            itemEl.classList.add('open');
+            if (bodyEl.dataset.loaded === 'false') {
+                bodyEl.dataset.loaded = 'true';
+                bodyEl.innerHTML = '<div class="acc-loading"><i class="fas fa-spinner fa-spin"></i> Loading…</div>';
+                await switchCustomerProfileTab(tab, customerId, bodyEl);
             }
         }
     };
@@ -33318,6 +33564,8 @@ const initImportDemoData = async () => {
         sortProspects,
         switchProspectTab,
         toggleAccordion,
+        toggleCustomerAccordion,
+        switchCustomerProfileTab,
 
         // Fix scoping for these functions
         openAddNameModal,
