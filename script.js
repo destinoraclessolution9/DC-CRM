@@ -11221,6 +11221,32 @@ function _wireLoginBtn() {
         renderRefillReminders().catch(() => {});
     };
 
+    // Send the activity's event description as a WhatsApp invite message.
+    // Opens wa.me with the description text pre-filled so the agent can review
+    // before sending. The phone number comes from the linked prospect/customer.
+    const sendDescriptionInvite = async (activityId) => {
+        const activity = await AppDataStore.getById('activities', activityId);
+        if (!activity) { UI.toast.error('Activity not found'); return; }
+
+        const event = (activity.event_id) ? await AppDataStore.getById('events', activity.event_id) : null;
+        const description = event?.description || activity.summary || '';
+        if (!description) { UI.toast.error('No description to send'); return; }
+
+        const prospect = activity.prospect_id ? await AppDataStore.getById('prospects', activity.prospect_id) : null;
+        const customer = activity.customer_id ? await AppDataStore.getById('customers', activity.customer_id) : null;
+        const entity = prospect || customer;
+        const phone = entity?.phone;
+        if (!phone) { UI.toast.error('No phone number on file for this contact'); return; }
+
+        let normalized = String(phone).replace(/[^0-9]/g, '');
+        if (normalized.startsWith('0')) normalized = '60' + normalized.slice(1);
+        if (!normalized.startsWith('60') && normalized.length <= 10) normalized = '60' + normalized;
+
+        const waUrl = `https://wa.me/${normalized}?text=${encodeURIComponent(description)}`;
+        window.open(waUrl, '_blank');
+        UI.toast.success('WhatsApp opened — review and send');
+    };
+
     // Dismiss a refill reminder. Updates BOTH the refill_reminders row AND the
     // underlying JSON purchase record's reminder_dismissed_at, so the next cron
     // run won't resurrect it.
@@ -11824,7 +11850,7 @@ function _wireLoginBtn() {
                     <div class="info-row"><span class="info-label">Time:</span> <span>${activity.start_time} - ${activity.end_time}</span></div>
                     ${activity.activity_type !== 'EVENT' ? `<div class="info-row"><span class="info-label">Entity:</span> <span>${entityName}</span></div>` : ''}
                     ${activity.location_address ? `<div class="info-row"><span class="info-label">Location:</span> <span>${activity.location_address}</span></div>` : ''}
-                    ${marketingEvent?.description ? `<div class="info-row" style="flex-direction:column; align-items:flex-start; gap:4px;"><span class="info-label">Description:</span> <span style="white-space:pre-wrap; color:var(--gray-700);">${marketingEvent.description}</span></div>` : ''}
+                    ${marketingEvent?.description ? `<div class="info-row" style="flex-direction:column; align-items:flex-start; gap:4px;"><div style="display:flex; align-items:center; gap:8px; width:100%;"><span class="info-label">Description:</span><button class="btn btn-sm secondary" style="font-size:11px;padding:2px 8px;" onclick="event.stopPropagation();app.sendDescriptionInvite(${activity.id})"><i class="fab fa-whatsapp" style="margin-right:3px;"></i> Invite</button></div><span style="white-space:pre-wrap; color:var(--gray-700);">${marketingEvent.description}</span></div>` : ''}
                     ${activity.summary ? `<div class="info-row"><span class="info-label">Summary:</span> <span>${activity.summary}</span></div>` : ''}
                 </div>
                 
@@ -33973,6 +33999,7 @@ const initImportDemoData = async () => {
         checkRefillReminderTable,
         showRefillMigrationModal,
         sendRefillWhatsApp,
+        sendDescriptionInvite,
         dismissRefillReminder,
         viewRefillProspect,
 
