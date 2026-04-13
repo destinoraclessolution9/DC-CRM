@@ -7222,10 +7222,36 @@ function _wireLoginBtn() {
     const shareCpsIntakeWhatsApp = () => {
         const input = document.getElementById('intake-link-input');
         if (!input || !input.value) return;
-        const msg = encodeURIComponent(
-            `您好！请通过以下链接填妥基本资料以确认您的 CPS 约谈：\nHi! Please fill in your basic information to confirm your CPS appointment:\n\n${input.value}`
-        );
-        window.open(`https://wa.me/?text=${msg}`, '_blank');
+
+        const date = document.getElementById('intake-date')?.value || '';
+        const startTime = document.getElementById('intake-start')?.value || '';
+        const endTime = document.getElementById('intake-end')?.value || '';
+        const venueSel = document.getElementById('intake-venue');
+        const opt = venueSel?.options[venueSel.selectedIndex];
+        const venueName = opt?.getAttribute('data-name') || '';
+        const venueAddress = opt?.getAttribute('data-address') || '';
+        const wazeLink = opt?.getAttribute('data-waze') || '';
+
+        // Format date nicely: "Mon, 13 Apr 2026"
+        let dateStr = date;
+        if (date) {
+            const [y, m, d] = date.split('-').map(Number);
+            const dt = new Date(y, m - 1, d);
+            const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+            const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+            dateStr = `${days[dt.getDay()]}, ${d} ${months[dt.getMonth()]} ${y}`;
+        }
+        const timeStr = `${(startTime || '').slice(0,5)} – ${(endTime || '').slice(0,5)}`;
+
+        let msg = `您好！请通过以下链接填妥基本资料以确认您的 CPS 约谈：\nHi! Please fill in your basic information to confirm your CPS appointment:\n`;
+        msg += `\n📅 日期 Date: ${dateStr}`;
+        msg += `\n⏰ 时间 Time: ${timeStr}`;
+        if (venueName) msg += `\n📍 地点 Venue: ${venueName}`;
+        if (venueAddress) msg += `\n🏠 地址 Address: ${venueAddress}`;
+        if (wazeLink) msg += `\n🗺️ Waze: ${wazeLink}`;
+        msg += `\n\n${input.value}`;
+
+        window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
     };
 
     // Render a "Pending CPS Intake Approvals" section at the top of the calendar today-list.
