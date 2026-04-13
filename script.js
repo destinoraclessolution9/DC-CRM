@@ -17870,15 +17870,13 @@ function _wireLoginBtn() {
 
                     <div class="acc-container" id="acc-container-${prospect.id}">
 
-                        <!-- ① Basic Information — open by default -->
-                        <div class="acc-item open" id="acc-info-${prospect.id}">
+                        <!-- ① Basic Information — collapsed by default -->
+                        <div class="acc-item" id="acc-info-${prospect.id}">
                             <div class="acc-hdr" onclick="app.toggleAccordion('info',${prospect.id},this.parentElement)">
                                 <span><i class="fas fa-info-circle"></i> Basic Information</span>
                                 <i class="fas fa-chevron-down acc-chev"></i>
                             </div>
-                            <div class="acc-body" id="acc-body-info-${prospect.id}">
-                                <div class="acc-loading"><i class="fas fa-spinner fa-spin"></i> Loading…</div>
-                            </div>
+                            <div class="acc-body" id="acc-body-info-${prospect.id}" style="display:none" data-loaded="false"></div>
                         </div>
 
                         <!-- ② Personal Details -->
@@ -17992,8 +17990,7 @@ function _wireLoginBtn() {
                     </div>
             </div>
         `;
-        // Pre-load the Info accordion body (open by default)
-        await switchProspectTab('info', prospectId, null, document.getElementById(`acc-body-info-${prospectId}`));
+        // All accordions start collapsed — no pre-load needed
     };
 
     const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
