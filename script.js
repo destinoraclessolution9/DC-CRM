@@ -10866,10 +10866,21 @@ function _wireLoginBtn() {
 
             let activityHtml = '';
             const seenIds = new Set();
+            // Defensive dedup: when multiple agents create separate EVENT activity
+            // rows for the same event on the same day at the same time, collapse them
+            // to a single calendar card. Without this we render N visually-identical
+            // cards (one per agent), which looks broken to the viewer. Non-EVENT
+            // activities are not deduped — each agent's CPS/FTF/etc is its own row.
+            const seenEventSlots = new Set();
 
             for (const a of dayActivities) {
                 if (!seenIds.has(a.id)) {
                     seenIds.add(a.id);
+                    if (a.activity_type === 'EVENT' && a.event_id) {
+                        const slotKey = `${a.event_id}|${a.start_time || ''}|${a.end_time || ''}`;
+                        if (seenEventSlots.has(slotKey)) continue;
+                        seenEventSlots.add(slotKey);
+                    }
                     // Synchronous lookups from the prefetched maps — no awaits per row.
                     const prospect = a.prospect_id ? prospectMap.get(String(a.prospect_id)) : null;
                     const customer = a.customer_id ? customerMap.get(String(a.customer_id)) : null;
