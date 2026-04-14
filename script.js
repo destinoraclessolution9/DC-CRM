@@ -34079,6 +34079,8 @@ const initImportDemoData = async () => {
         enablePushNotifications,
         disablePushNotifications,
         sendTestPushNotification,
+        // Expose current user id for push-notifications.js (outside the IIFE)
+        get _currentUser() { return _currentUser; },
         openResetPasswordModal,
         executePasswordReset,
         deleteAgent,

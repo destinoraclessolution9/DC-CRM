@@ -24,14 +24,39 @@
         return outputArray;
     };
 
-    // Get the Supabase client that's already created in index.html (service-role for now).
-    const getSupabase = () => (window.supabase && window.supabase.from ? window.supabase : null);
+    // Get a Supabase client that can actually WRITE (service-role, bypasses RLS).
+    // The anon-key client (window.supabase) is blocked by RLS on push_subscriptions.
+    let _writeClient = null;
+    const getWriteClient = () => {
+        if (_writeClient) return _writeClient;
+        // Prefer the AppDataStore write client (same pattern the rest of the app uses)
+        if (window.AppDataStore && typeof window.AppDataStore._writeClient === 'function') {
+            _writeClient = window.AppDataStore._writeClient();
+            if (_writeClient) return _writeClient;
+        }
+        // Fallback: create a service-role client directly
+        if (window._supabaseFactory && window.SUPABASE_URL && window.SUPABASE_SR) {
+            _writeClient = window._supabaseFactory.createClient(window.SUPABASE_URL, window.SUPABASE_SR);
+            return _writeClient;
+        }
+        // Last resort: anon client (will fail if RLS is enabled)
+        return (window.supabase && window.supabase.from) ? window.supabase : null;
+    };
 
-    // Get the current user id (script.js stores it on window._currentUser via its auth flow).
+    // Get the current user id. _currentUser lives inside the IIFE in script.js,
+    // but the app object may expose it, or we can read it from the UI.
     const getCurrentUserId = () => {
         try {
+            // script.js exposes _currentUser on the app closure via various methods
             if (window._currentUser && window._currentUser.id) return String(window._currentUser.id);
             if (window.app && window.app._currentUser && window.app._currentUser.id) return String(window.app._currentUser.id);
+            // AppDataStore may cache it
+            if (window.AppDataStore && window.AppDataStore._currentUserId) return String(window.AppDataStore._currentUserId);
+        } catch (_) {}
+        // Try reading from localStorage (auth session may have it)
+        try {
+            const stored = localStorage.getItem('crm_current_user');
+            if (stored) { const u = JSON.parse(stored); if (u && u.id) return String(u.id); }
         } catch (_) {}
         return null;
     };
@@ -81,14 +106,17 @@
             last_seen_at: new Date().toISOString(),
         };
 
-        const sb = getSupabase();
+        const sb = getWriteClient();
         if (!sb) throw new Error('no_supabase');
 
         // Upsert on endpoint (unique) so re-subscribe updates the user_id / keys.
         const { error } = await sb
             .from('push_subscriptions')
             .upsert(row, { onConflict: 'endpoint' });
-        if (error) throw error;
+        if (error) {
+            console.error('[Push] DB upsert failed:', error);
+            throw error;
+        }
 
         try { localStorage.setItem('push_enabled', '1'); } catch (_) {}
         console.log('[Push] subscribed:', sub.endpoint.slice(0, 60) + '...');
@@ -102,7 +130,7 @@
         const sub = reg && (await reg.pushManager.getSubscription());
         if (sub) {
             try {
-                const sb = getSupabase();
+                const sb = getWriteClient();
                 if (sb) {
                     await sb.from('push_subscriptions').delete().eq('endpoint', sub.endpoint);
                 }
