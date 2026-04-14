@@ -88,7 +88,7 @@
                 <li id="nav-risk" data-view="risk">Consultant Attrition Risk Analysis</li>
 
                 <!-- Phase 17: AI Insights -->
-                <li id="nav-ai-insights" class="dropdown-trigger" style="position:relative; cursor:pointer;">
+                <li id="nav-ai-insights" class="dropdown-trigger" style="display:none; position:relative; cursor:pointer;">
                     AI Insights <i class="fas fa-caret-down"></i>
                     <ul class="dropdown-menu"
                         style="display:none; position:absolute; top:100%; left:0; background:white; box-shadow:0 4px 12px rgba(0,0,0,0.1); border-radius:8px; min-width:200px; z-index:1000; padding:8px 0;">
@@ -106,7 +106,7 @@
                 </li>
 
                 <!-- Phase 19: Security & Compliance -->
-                <li id="nav-security" class="dropdown-trigger" style="position:relative; cursor:pointer;">
+                <li id="nav-security" class="dropdown-trigger" style="display:none; position:relative; cursor:pointer;">
                     Security <i class="fas fa-caret-down"></i>
                     <ul class="dropdown-menu"
                         style="display:none; position:absolute; top:100%; left:0; background:white; box-shadow:0 4px 12px rgba(0,0,0,0.1); border-radius:8px; min-width:200px; z-index:1000; padding:8px 0;">
@@ -170,13 +170,13 @@
                 <!-- Group 4: Tools & Settings -->
                 <li id="nav-workflows" data-view="workflows">Workflow Automation</li>
                 <li id="nav-protection" data-view="protection">Protection Monitoring</li>
-                <li id="nav-lead_forms" data-view="lead_forms" onclick="app.navigateTo('lead_forms')">Lead Capture Forms</li>
-                <li id="nav-surveys" data-view="surveys" onclick="app.navigateTo('surveys')">NPS Surveys</li>
-                <li id="nav-contracts" data-view="contracts" onclick="app.navigateTo('contracts')">Contracts</li>
+                <li id="nav-lead_forms" data-view="lead_forms" onclick="app.navigateTo('lead_forms')" style="display:none;">Lead Capture Forms</li>
+                <li id="nav-surveys" data-view="surveys" onclick="app.navigateTo('surveys')" style="display:none;">NPS Surveys</li>
+                <li id="nav-contracts" data-view="contracts" onclick="app.navigateTo('contracts')" style="display:none;">Contracts</li>
                 <li id="nav-custom_fields" data-view="custom_fields" onclick="app.navigateTo('custom_fields')">Custom Fields</li>
                 <li id="nav-integrations" data-view="integrations" onclick="app.navigateTo('integrations')">Integrations</li>
                 <li id="nav-settings" data-view="settings">Setting - Account</li>
-                <li id="nav-booking_settings" data-view="booking_settings" onclick="app.navigateTo('booking_settings')">Booking Scheduler</li>
+                <li id="nav-booking_settings" data-view="booking_settings" onclick="app.navigateTo('booking_settings')" style="display:none;">Booking Scheduler</li>
             </ul>
 
             <div class="bar-right">
