@@ -696,7 +696,7 @@ const appLogic = (() => {
         agents: [
             { value: 'full_name', label: 'Name', type: 'text' },
             { value: 'agent_code', label: 'Agent Code', type: 'text' },
-            { value: 'team', label: 'Team', type: 'select', options: ['Team A', 'Team B'] },
+            { value: 'team', label: 'Team', type: 'select', options: Array.from({length: 26}, (_, i) => 'Team ' + String.fromCharCode(65 + i)) },
             { value: 'status', label: 'Status', type: 'select', options: ['active', 'probation', 'inactive'] },
             { value: 'email', label: 'Email', type: 'text' },
             { value: 'join_date', label: 'Join Date', type: 'date' }
@@ -951,8 +951,7 @@ const appLogic = (() => {
                     <label>Team</label>
                     <select id="filter-agent-team" class="form-control">
                         <option value="">All Teams</option>
-                        <option value="Team A">Team A</option>
-                        <option value="Team B">Team B</option>
+                        ${Array.from({length: 26}, (_, i) => String.fromCharCode(65 + i)).map(L => `<option value="Team ${L}">Team ${L}</option>`).join('')}
                     </select>
                 </div>
             </div>
@@ -19963,7 +19962,7 @@ for (const p of allPackages) {
                     </div>
                     <div class="form-row">
                         <div class="form-group half"><label>Commission Rate (%)</label><input type="number" class="form-control" value="30"></div>
-                        <div class="form-group half"><label>Team Assignment</label><select class="form-control"><option>Team A</option></select></div>
+                        <div class="form-group half"><label>Team Assignment</label><select class="form-control">${Array.from({length: 26}, (_, i) => String.fromCharCode(65 + i)).map(L => `<option>Team ${L}</option>`).join('')}</select></div>
                     </div>
                     <div class="form-group"><label>Reporting To</label><select class="form-control"><option>Michelle Tan</option></select></div>
                     
@@ -20516,8 +20515,7 @@ const openAddSolutionModal = async (prospectId) => {
                     </div>
                     <select id="filter-agent-team" onchange="app.filterAgents()" class="form-control" style="width:140px;">
                         <option value="">All Teams</option>
-                        <option value="Team A">Team A</option>
-                        <option value="Team B">Team B</option>
+                        ${Array.from({length: 26}, (_, i) => String.fromCharCode(65 + i)).map(L => `<option value="Team ${L}">Team ${L}</option>`).join('')}
                     </select>
                     <select id="filter-agent-role" onchange="app.filterAgents()" class="form-control" style="width:160px;">
                         <option value="">All Roles</option>
@@ -21309,9 +21307,7 @@ const renderCurrentAssignments = async (agentId) => {
                             <label>Team</label>
                             <select id="agent-team" class="form-control">
                                 <option value="">— Unassigned —</option>
-                                <option value="Team A" ${isEdit && agent.team === 'Team A' ? 'selected' : ''}>Team A</option>
-                                <option value="Team B" ${isEdit && agent.team === 'Team B' ? 'selected' : ''}>Team B</option>
-                                <option value="Team C" ${isEdit && agent.team === 'Team C' ? 'selected' : ''}>Team C</option>
+                                ${Array.from({length: 26}, (_, i) => String.fromCharCode(65 + i)).map(L => `<option value="Team ${L}" ${isEdit && agent.team === 'Team ' + L ? 'selected' : ''}>Team ${L}</option>`).join('')}
                             </select>
                         </div>
                         <div class="form-group half">
@@ -30472,7 +30468,7 @@ const simulateCampaignSending = async (campaignId) => {
                         <label class="radio-label"><input type="radio" name="assign-to" value="team" onchange="document.getElementById('team-opts').style.display='block'"> Assign to team</label>
                         <label class="radio-label"><input type="radio" name="assign-to" value="unassigned" onchange="document.getElementById('team-opts').style.display='none'"> Leave unassigned</label>
                         <div id="team-opts" style="display:none;margin-top:12px">
-                            <select class="form-control" style="width:200px"><option>Team A</option><option>Team B</option><option>Team C</option></select>
+                            <select class="form-control" style="width:200px">${Array.from({length: 26}, (_, i) => String.fromCharCode(65 + i)).map(L => `<option>Team ${L}</option>`).join('')}</select>
                             <label class="checkbox-label" style="margin-top:8px"><input type="checkbox"> Distribute evenly</label>
                         </div>
                     </div>
