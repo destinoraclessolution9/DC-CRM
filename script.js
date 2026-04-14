@@ -10309,7 +10309,7 @@ function _wireLoginBtn() {
     };
 
     const createFollowUpDraft = async (opts) => {
-        const { prospectId, customerId, triggerType, messageText, phone, prospectName, eventId, eventDate, eventName, dueDate } = opts;
+        const { prospectId, customerId, triggerType, messageText, phone, prospectName, eventId, eventDate, eventName, dueDate, attachmentUrl } = opts;
         try {
             // Dedup per (prospect_or_customer + trigger + event), regardless of status.
             // Once a draft exists (pending/sent/dismissed), don't recreate it — the agent's
@@ -10337,6 +10337,7 @@ function _wireLoginBtn() {
                 event_date: eventDate || null,
                 event_name: eventName || '',
                 due_date: dueDate || new Date().toISOString().split('T')[0],
+                attachment_url: attachmentUrl || null,
                 status: 'pending'
             });
         } catch (e) {
@@ -10439,7 +10440,8 @@ function _wireLoginBtn() {
             messageText: msg,
             phone: entity.phone || '',
             prospectName: entity.full_name || '',
-            dueDate: dueDate.toISOString().split('T')[0]
+            dueDate: dueDate.toISOString().split('T')[0],
+            attachmentUrl: extraVars.photo_url || null
         });
     };
 
@@ -10518,7 +10520,7 @@ function _wireLoginBtn() {
         }
     };
 
-    // Dispatcher: on APU photo upload
+    // Dispatcher: on APU photo upload — passes latest photo URL to template as {photo_url}
     const dispatchOnApuPhotoTriggers = async (prospectId) => {
         const templates = await loadFollowUpTemplates();
         const triggers = templates.filter(t => t.trigger_category === 'on_apu_photo' && t.is_active);
@@ -10528,8 +10530,12 @@ function _wireLoginBtn() {
         if (!prospect) return;
         prospect._type = 'prospect';
 
+        // Extract latest APU photo URL (most recent upload)
+        const urls = Array.isArray(prospect.apu_form_urls) ? prospect.apu_form_urls : [];
+        const latestPhotoUrl = urls.length ? urls[urls.length - 1] : '';
+
         for (const tpl of triggers) {
-            executeSimpleTrigger(tpl, prospect).catch(e => console.warn(`APU trigger ${tpl.trigger_type} failed:`, e));
+            executeSimpleTrigger(tpl, prospect, { photo_url: latestPhotoUrl }).catch(e => console.warn(`APU trigger ${tpl.trigger_type} failed:`, e));
         }
     };
 
@@ -10712,16 +10718,26 @@ function _wireLoginBtn() {
                     ${drafts.map(d => {
                         const phone = (d.phone || '').replace(/\D/g, '');
                         const waPhone = phone.startsWith('0') ? '60' + phone.slice(1) : phone;
-                        const waUrl = `https://wa.me/${waPhone}?text=${encodeURIComponent(d.message_text || '')}`;
+                        // Append attachment URL to WhatsApp message if present (auto-preview on WA)
+                        let waMessage = d.message_text || '';
+                        if (d.attachment_url && !waMessage.includes(d.attachment_url)) {
+                            waMessage += '\n\n' + d.attachment_url;
+                        }
+                        const waUrl = `https://wa.me/${waPhone}?text=${encodeURIComponent(waMessage)}`;
+                        const thumbHtml = d.attachment_url
+                            ? `<img src="${d.attachment_url}" alt="Attachment" style="width:48px; height:48px; border-radius:6px; object-fit:cover; cursor:pointer; border:1px solid var(--gray-200); flex-shrink:0;" onclick="event.stopPropagation(); window.open('${d.attachment_url}', '_blank');" title="Click to view full image">`
+                            : '';
                         return `
                         <div id="followup-row-${d.id}" style="display:flex; align-items:flex-start; gap:12px; padding:12px; background:var(--gray-50,#f9fafb); border-radius:8px; border-left:4px solid #3b82f6; transition: opacity 0.4s ease, max-height 0.4s ease;">
                             <input type="checkbox" id="followup-check-${d.id}" style="margin-top:4px; width:18px; height:18px; cursor:pointer; accent-color:#3b82f6;" onchange="app.markFollowUpSent(${d.id})" title="Mark as sent">
+                            ${thumbHtml}
                             <div style="flex:1; min-width:0;">
                                 <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
                                     <span style="font-size:16px;">${triggerIcons[d.trigger_type] || '📩'}</span>
                                     <strong style="font-size:13px; color:var(--gray-800,#1f2937);">${d.prospect_name || 'Unknown'}</strong>
                                     <span style="font-size:11px; background:#dbeafe; color:#1d4ed8; padding:2px 8px; border-radius:10px;">${triggerLabels[d.trigger_type] || d.trigger_type}</span>
                                     ${d.event_name ? `<span style="font-size:11px; color:var(--gray-500,#6b7280);">${d.event_name}${d.event_date ? ' — ' + d.event_date : ''}</span>` : ''}
+                                    ${d.attachment_url ? '<span style="font-size:11px; background:#dcfce7; color:#059669; padding:2px 8px; border-radius:10px;"><i class="fas fa-paperclip"></i> Photo</span>' : ''}
                                 </div>
                                 <div style="font-size:12px; color:var(--gray-600,#4b5563); white-space:pre-wrap; max-height:60px; overflow:hidden; text-overflow:ellipsis; line-height:1.4;">${(d.message_text || '').slice(0, 200)}${(d.message_text || '').length > 200 ? '...' : ''}</div>
                             </div>
@@ -27297,7 +27313,7 @@ const exportKPIReport = async (format) => {
                     ${isAdmin ? `<button class="btn primary" onclick="app.openAddTriggerModal()"><i class="fas fa-plus"></i> Add Trigger</button>` : ''}
                 </div>
                 <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:12px 16px; margin-bottom:20px; font-size:13px; color:#1e40af;">
-                    <strong>Variables:</strong> <code>{name}</code> <code>{date}</code> <code>{time}</code> <code>{venue}</code> <code>{event_name}</code> <code>{agent_name}</code>
+                    <strong>Variables:</strong> <code>{name}</code> <code>{date}</code> <code>{time}</code> <code>{venue}</code> <code>{event_name}</code> <code>{agent_name}</code> <code>{photo_url}</code> <small style="color:#666;">(APU only)</small>
                 </div>
         `;
 
@@ -27534,7 +27550,7 @@ const exportKPIReport = async (format) => {
                 <div class="form-group">
                     <label>Message Template *</label>
                     <textarea id="fu-tpl-message" class="form-control" rows="5" style="white-space:pre-wrap;">${tpl.message_template || ''}</textarea>
-                    <small style="color:var(--gray-500); font-size:11px;">Variables: {name}, {date}, {time}, {venue}, {event_name}, {agent_name}</small>
+                    <small style="color:var(--gray-500); font-size:11px;">Variables: {name}, {date}, {time}, {venue}, {event_name}, {agent_name}, {photo_url}</small>
                 </div>
                 <div class="form-row">
                     <div class="form-group half">
