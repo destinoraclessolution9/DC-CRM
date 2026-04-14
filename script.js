@@ -7229,11 +7229,11 @@ function _wireLoginBtn() {
         const timeStr = `${(startTime || '').slice(0,5)} – ${(endTime || '').slice(0,5)}`;
 
         let msg = `您好！请通过以下链接填妥基本资料以确认您的 CPS 约谈：\nHi! Please fill in your basic information to confirm your CPS appointment:\n`;
-        msg += `\n📅 日期 Date: ${dateStr}`;
-        msg += `\n⏰ 时间 Time: ${timeStr}`;
-        if (venueName) msg += `\n📍 地点 Venue: ${venueName}`;
-        if (venueAddress) msg += `\n🏠 地址 Address: ${venueAddress}`;
-        if (wazeLink) msg += `\n🗺️ Waze: ${wazeLink}`;
+        msg += `\n\u{1F4C5} 日期 Date: ${dateStr}`;
+        msg += `\n\u23F0 时间 Time: ${timeStr}`;
+        if (venueName) msg += `\n\u{1F4CD} 地点 Venue: ${venueName}`;
+        if (venueAddress) msg += `\n\u{1F3E0} 地址 Address: ${venueAddress}`;
+        if (wazeLink) msg += `\n\u{1F5FA}\uFE0F Waze: ${wazeLink}`;
         msg += `\n\n${input.value}`;
 
         window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
@@ -11255,12 +11255,12 @@ function _wireLoginBtn() {
                 await AppDataStore.create('whatsapp_templates', {
                     template_name: 'Product Refill Reminder',
                     status: 'APPROVED',
-                    content: "Hi {{name}}, hope you're doing well! Just checking — we noticed your {{product}} will be finishing around {{finish_date}}. Would you like us to prepare your next bottle? 🙏"
+                    content: "Hi {{name}}, hope you're doing well! Just checking — we noticed your {{product}} will be finishing around {{finish_date}}. Would you like us to prepare your next bottle? \u{1F64F}"
                 });
-                template = { content: "Hi {{name}}, hope you're doing well! Just checking — we noticed your {{product}} will be finishing around {{finish_date}}. Would you like us to prepare your next bottle? 🙏" };
+                template = { content: "Hi {{name}}, hope you're doing well! Just checking — we noticed your {{product}} will be finishing around {{finish_date}}. Would you like us to prepare your next bottle? \u{1F64F}" };
             }
         } catch (_) {
-            template = { content: "Hi {{name}}, hope you're doing well! Just checking — we noticed your {{product}} will be finishing around {{finish_date}}. Would you like us to prepare your next bottle? 🙏" };
+            template = { content: "Hi {{name}}, hope you're doing well! Just checking — we noticed your {{product}} will be finishing around {{finish_date}}. Would you like us to prepare your next bottle? \u{1F64F}" };
         }
 
         const firstName = (entity.full_name || '').split(' ')[0] || entity.full_name || 'there';
@@ -11300,15 +11300,22 @@ function _wireLoginBtn() {
         const description = event?.description || activity.summary || '';
         const ticketPrice = event?.ticket_price ? `RM ${event.ticket_price}` : '';
 
-        let lines = [`✨ *${title || 'You are invited!'}* ✨`, ''];
-        if (date) lines.push(`📅 Date: ${date}`);
-        if (time) lines.push(`🕐 Time: ${time}`);
-        if (venue) lines.push(`📍 Venue: ${venue}`);
-        if (ticketPrice) lines.push(`🎟️ Ticket Price: ${ticketPrice}`);
+        // Use Unicode escapes so emojis survive any file-encoding mismatch
+        const E = { sparkle: '\u2728', calendar: '\u{1F4C5}', clock: '\u{1F550}', pin: '\u{1F4CD}', ticket: '\u{1F39F}\uFE0F' };
+        let lines = [`${E.sparkle} *${title || 'You are invited!'}* ${E.sparkle}`, ''];
+        if (date) lines.push(`${E.calendar} Date: ${date}`);
+        if (time) lines.push(`${E.clock} Time: ${time}`);
+        if (venue) lines.push(`${E.pin} Venue: ${venue}`);
+        if (ticketPrice) lines.push(`${E.ticket} Ticket Price: ${ticketPrice}`);
         if (description) lines.push('', description);
 
-        const msg = encodeURIComponent(lines.join('\n'));
-        window.open(`https://wa.me/?text=${msg}`, '_blank');
+        const body = lines.join('\n');
+        // Copy to clipboard first (reliable for emojis), then open WhatsApp
+        try {
+            await navigator.clipboard.writeText(body);
+            UI.toast.success('Message copied \u2014 paste in WhatsApp if emojis look wrong');
+        } catch (_) {}
+        window.open(`https://wa.me/?text=${encodeURIComponent(body)}`, '_blank');
     };
 
     // Dismiss a refill reminder. Updates BOTH the refill_reminders row AND the
@@ -15091,14 +15098,14 @@ function _wireLoginBtn() {
                 ] : [];
 
                 const msg = [
-                    `✅ Your appointment has been CONFIRMED! / 您的预约已确认！`,
+                    `\u2705 Your appointment has been CONFIRMED! / 您的预约已确认！`,
                     ``,
-                    `👤 ${name}`,
-                    `📅 Date / 日期: ${date}`,
-                    `⏰ Time / 时间: ${start}–${end}`,
-                    venue   ? `📍 Venue / 地点: ${venue}` : '',
-                    address ? `🏠 Address / 地址: ${address}` : '',
-                    waze    ? `🗺️ Waze: ${waze}` : '',
+                    `\u{1F464} ${name}`,
+                    `\u{1F4C5} Date / 日期: ${date}`,
+                    `\u23F0 Time / 时间: ${start}–${end}`,
+                    venue   ? `\u{1F4CD} Venue / 地点: ${venue}` : '',
+                    address ? `\u{1F3E0} Address / 地址: ${address}` : '',
+                    waze    ? `\u{1F5FA}\uFE0F Waze: ${waze}` : '',
                     ``,
                     `Please ensure you arrive on time. Dress code: formal/smart casual.`,
                     `请准时出席。着装要求：正式/整洁休闲。`,
