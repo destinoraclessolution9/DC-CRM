@@ -6801,7 +6801,12 @@ function _wireLoginBtn() {
 
     const calculateCustomerHealthScore = async (customer) => {
         let score = 0;
-        const activities = await AppDataStore.query('activities', { customer_id: customer.id }).catch(() => []);
+        // Fire both queries in parallel — they're independent. Previously they ran
+        // sequentially (~2x latency) and blocked the customer profile header render.
+        const [activities, purchases] = await Promise.all([
+            AppDataStore.query('activities', { customer_id: customer.id }).catch(() => []),
+            AppDataStore.query('purchases', { customer_id: customer.id }).catch(() => [])
+        ]);
         if (activities.length > 0) {
             const last = activities.sort((a, b) => (b.activity_date || '').localeCompare(a.activity_date || ''))[0];
             const days = Math.floor((Date.now() - new Date(last.activity_date)) / 86400000);
@@ -6809,7 +6814,6 @@ function _wireLoginBtn() {
             else if (days <= 60) score += 25;
             else if (days <= 90) score += 10;
         }
-        const purchases = await AppDataStore.query('purchases', { customer_id: customer.id }).catch(() => []);
         if (purchases.length > 0) {
             const last = purchases.sort((a, b) => (b.purchase_date || '').localeCompare(a.purchase_date || ''))[0];
             const days = Math.floor((Date.now() - new Date(last.purchase_date)) / 86400000);
@@ -17986,10 +17990,11 @@ function _wireLoginBtn() {
         const container = document.getElementById('content-viewport');
         if (!container) return;
 
-        const solutions = await AppDataStore.query('proposed_solutions', { prospect_id: prospectId });
+        // Only the CPS photo lookup needs activities on the header critical path.
+        // Previously also fetched proposed_solutions/notes/names, but those results
+        // were never used here — each was an extra serial uncached Supabase round
+        // trip that made opening a prospect feel laggy.
         const activities = (await AppDataStore.getAll('activities')).filter(a => a.prospect_id == prospectId);
-        const notes = await AppDataStore.query('notes', { prospect_id: prospectId });
-        const names = await AppDataStore.query('names', { prospect_id: prospectId });
 
         const daysLeft = calculateProtectionDays(prospect);
         const protectionStatus = getProtectionStatus(daysLeft);
