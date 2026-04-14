@@ -19904,7 +19904,7 @@ NOTIFY pgrst, 'reload schema';`;
                         </div>
                     </div>
                     <div class="form-row">
-                        <div class="form-group half"><label>Invoice No. (Auto)</label><input type="text" id="pur-inv" class="form-control" value="INV-${Date.now().toString().slice(-4)}" readonly></div>
+                        <div class="form-group half"><label>Invoice No. <span class="required">*</span></label><input type="text" id="pur-inv" class="form-control" placeholder="Enter invoice number"></div>
                         <div class="form-group half"><label>Status</label>
                             <select id="pur-status" class="form-control">
                                 <option value="PENDING">Pending</option>
@@ -19935,6 +19935,8 @@ NOTIFY pgrst, 'reload schema';`;
     const savePurchase = async (customerId) => {
         const amt = parseFloat(document.getElementById('pur-amt')?.value);
         if (!amt) return UI.toast.error('Amount is required');
+        const invoiceNo = document.getElementById('pur-inv')?.value?.trim();
+        if (!invoiceNo) return UI.toast.error('Invoice No. is required');
 
         const item = document.getElementById('pur-product')?.value === 'Other' ? document.getElementById('pur-other')?.value : document.getElementById('pur-product')?.value;
 
@@ -19965,7 +19967,7 @@ for (const p of allPackages) {
         const pur = {
             customer_id: customerId,
             date: new Date().toISOString().split('T')[0],
-            invoice: document.getElementById('pur-inv')?.value,
+            invoice: invoiceNo,
             item: item,
             amount: amt,
             status: document.getElementById('pur-status')?.value,
