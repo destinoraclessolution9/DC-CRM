@@ -19964,6 +19964,13 @@ for (const p of allPackages) {
         if (matchingPkg) packageId = matchingPkg.id;
 
         const purMethod = document.getElementById('pur-method')?.value || 'Cash';
+        // epp_months is an integer column — send null (not '') when not EPP, otherwise
+        // the Supabase insert fails with "invalid input syntax for type integer" (22P02),
+        // the purchase gets written to localStorage only, and subsequent query() calls
+        // read from Supabase and show RM 0.
+        const eppMonthsRaw = purMethod === 'EPP' ? document.getElementById('epp-months')?.value : '';
+        const eppMonthsInt = parseInt(eppMonthsRaw, 10);
+        const eppBankRaw = purMethod === 'EPP' ? document.getElementById('epp-bank')?.value?.trim() : '';
         const pur = {
             customer_id: customerId,
             date: new Date().toISOString().split('T')[0],
@@ -19974,8 +19981,8 @@ for (const p of allPackages) {
             proof: document.getElementById('pur-file')?.value ? 'image_uploaded.png' : '',
             package_id: packageId,
             payment_method: purMethod,
-            epp_months: purMethod === 'EPP' ? (document.getElementById('epp-months')?.value || '') : '',
-            epp_bank: purMethod === 'EPP' ? (document.getElementById('epp-bank')?.value?.trim() || '') : '',
+            epp_months: Number.isFinite(eppMonthsInt) ? eppMonthsInt : null,
+            epp_bank: eppBankRaw || null,
         };
         await AppDataStore.create('purchases', pur);
 
@@ -19985,7 +19992,9 @@ for (const p of allPackages) {
 
         UI.hideModal();
         UI.toast.success('Purchase added');
-        if (document.getElementById('profile-tab-content')) await renderPurchaseHistoryTab(customer);
+        const accCid = `cust-acc-body-purchases-${customerId}`;
+        if (document.getElementById(accCid)) await renderPurchaseHistoryTab(customer, accCid);
+        else if (document.getElementById('profile-tab-content')) await renderPurchaseHistoryTab(customer);
         else if (document.getElementById('customers-table-body')) await renderCustomersTable();
     };
 
