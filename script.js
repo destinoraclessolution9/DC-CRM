@@ -18467,13 +18467,40 @@ function _wireLoginBtn() {
             const protectionStatus = getProtectionStatus(daysLeft);
             const statusColor = protectionStatus === 'normal' ? 'success' : protectionStatus === 'warning' ? 'secondary' : 'error';
             const statusLabel = protectionStatus === 'normal' ? 'Normal' : protectionStatus === 'warning' ? 'Expiring Soon' : 'Critical';
+            const statusEmoji = protectionStatus === 'normal' ? '🟢' : protectionStatus === 'warning' ? '🟡' : '🔴';
+
+            // Resolve real assigned agent name
+            const agentRec = prospect.responsible_agent_id
+                ? await AppDataStore.getById('users', prospect.responsible_agent_id)
+                : null;
+            const agentName = agentRec?.full_name || 'Unassigned';
+
+            // Format dates consistently (handles ISO + falsy values)
+            const assignedStr = prospect.cps_assignment_date
+                ? UI.formatDate(prospect.cps_assignment_date)
+                : (prospect.created_at ? UI.formatDate(prospect.created_at) : '—');
+            const deadlineStr = prospect.protection_deadline ? UI.formatDate(prospect.protection_deadline) : '—';
+
+            // Real last-contact based on this prospect's activities
+            const protActivities = (await AppDataStore.getAll('activities'))
+                .filter(a => String(a.prospect_id) === String(prospectId));
+            const lastAct = protActivities
+                .slice()
+                .sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date))[0];
+            let lastContactLabel = 'Never';
+            if (lastAct?.activity_date) {
+                const diffMs = Date.now() - new Date(lastAct.activity_date).getTime();
+                const d = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+                lastContactLabel = d <= 0 ? 'Today' : (d === 1 ? '1 day ago' : `${d} days ago`);
+            }
+
             container.innerHTML = `
-                <div class="pv-row"><span class="pv-lbl">Agent</span><span class="pv-val">Michelle Tan</span></div>
-                <div class="pv-row"><span class="pv-lbl">Assigned</span><span class="pv-val">${prospect.cps_assignment_date || '15 Feb 2026'}</span></div>
-                <div class="pv-row"><span class="pv-lbl">Deadline</span><span class="pv-val">${prospect.protection_deadline || '17 Mar 2026'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Agent</span><span class="pv-val">${agentName}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Assigned</span><span class="pv-val">${assignedStr}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Deadline</span><span class="pv-val">${deadlineStr}</span></div>
                 <div class="pv-row"><span class="pv-lbl">Days Left</span><span class="pv-val" style="font-size:16px;font-weight:700;color:var(--${statusColor});">${daysLeft} days</span></div>
-                <div class="pv-row"><span class="pv-lbl">Status</span><span class="pv-val">🟢 ${statusLabel}</span></div>
-                <div class="pv-row"><span class="pv-lbl">Follow-up</span><span class="pv-val">92%</span></div>
+                <div class="pv-row"><span class="pv-lbl">Status</span><span class="pv-val">${statusEmoji} ${statusLabel}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Last Contact</span><span class="pv-val">${lastContactLabel}</span></div>
                 <div class="progress-bar" style="margin:12px 0;">
                     <div class="progress-fill" style="width:${Math.min(100, (daysLeft / 30) * 100)}%;background:var(--${statusColor});"></div>
                 </div>
