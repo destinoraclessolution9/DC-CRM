@@ -15782,7 +15782,7 @@ function _wireLoginBtn() {
                     <span>⚠️ DELETE IS NOT AVAILABLE - Customer records are permanent and cannot be deleted under any circumstances.</span>
                 </div>
 
-                ${(isSystemAdmin(_currentUser) || isMarketingManager(_currentUser)) ? `
+                ${(_getUserLevel(_currentUser) <= 4) ? `
                 <div id="approval-queue-section" style="margin-bottom:24px;">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
                         <h2 style="font-size:18px; font-weight:600; display:flex; align-items:center; gap:8px; margin:0;">
