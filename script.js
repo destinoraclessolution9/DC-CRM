@@ -7225,12 +7225,12 @@ function _wireLoginBtn() {
         const timeStr = `${(startTime || '').slice(0,5)} – ${(endTime || '').slice(0,5)}`;
 
         let msg = `您好！请通过以下链接填妥基本资料以确认您的 CPS 约谈：\nHi! Please fill in your basic information to confirm your CPS appointment:\n`;
-        msg += `\n\u{1F4C5} 日期 Date: ${dateStr}`;
-        msg += `\n\u23F0 时间 Time: ${timeStr}`;
-        if (venueName) msg += `\n\u{1F4CD} 地点 Venue: ${venueName}`;
-        if (venueAddress) msg += `\n\u{1F3E0} 地址 Address: ${venueAddress}`;
-        if (wazeLink) msg += `\n\u{1F5FA}\uFE0F Waze: ${wazeLink}`;
-        msg += `\n\n${input.value}`;
+        msg += `\n${input.value}\n`;
+        msg += `\n📅 日期 Date: ${dateStr}`;
+        msg += `\n⏰ 时间 Time: ${timeStr}`;
+        if (venueName) msg += `\n📍 地点 Venue: ${venueName}`;
+        if (venueAddress) msg += `\n🏠 地址 Address: ${venueAddress}`;
+        if (wazeLink) msg += `\n🗺️ Waze: ${wazeLink}`;
 
         window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
     };
