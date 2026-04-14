@@ -14489,9 +14489,9 @@ function _wireLoginBtn() {
         }
     };
 
-    const updateLunarBirth = () => {
-        const dob = document.getElementById('cps-dob')?.value;
-        const lunarField = document.getElementById('cps-lunar');
+    const updateLunarBirth = (dobId = 'cps-dob', lunarId = 'cps-lunar') => {
+        const dob = document.getElementById(dobId)?.value;
+        const lunarField = document.getElementById(lunarId);
         if (dob && lunarField) {
             const lunarDate = convertSolarToLunar(dob);
             if (lunarDate) {
@@ -16735,7 +16735,7 @@ function _wireLoginBtn() {
                                 <label style="margin-bottom:0;">Date of Birth</label>
                                 <input type="checkbox" id="prospect-use-dob" ${['solar','both'].includes(prospect?.life_chart_type) ? 'checked' : ''} title="Use for life chart">
                             </div>
-                            <input type="date" id="prospect-dob" class="form-control" value="${prospect?.date_of_birth || ''}">
+                            <input type="date" id="prospect-dob" class="form-control" value="${prospect?.date_of_birth || ''}" onchange="app.updateLunarBirth('prospect-dob','prospect-lunar')">
                         </div>
                         <div class="form-group half">
                             <div style="display:flex;align-items:center;gap:8px;">
