@@ -3145,11 +3145,7 @@ In a production system, this would show the actual file contents.
             items: [
                 { view: 'workflows',       label: 'Workflow Automation', icon: 'fas fa-sitemap' },
                 { view: 'protection',      label: 'Protection Monitor',  icon: 'fas fa-shield-alt' },
-                { view: 'lead_forms',      label: 'Lead Capture Forms',  icon: 'fas fa-wpforms' },
-                { view: 'surveys',         label: 'NPS Surveys',         icon: 'fas fa-poll' },
-                { view: 'contracts',       label: 'Contracts',           icon: 'fas fa-file-signature' },
                 { view: 'integrations',    label: 'Integrations',        icon: 'fas fa-plug' },
-                { view: 'booking_settings',label: 'Booking Scheduler',   icon: 'fas fa-calendar-check' },
             ]
         },
     ];
@@ -3161,8 +3157,8 @@ In a production system, this would show the actual file contents.
     const _getAllowedNavIds = () => {
         const _l12 = ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'reports', 'documents', 'settings', 'fude', 'milestones'];
         const perms = {
-            1: ['calendar','prospects','referrals','pipeline','promotions','marketing-automation','marketing-lists','cases','agents','performance','reports','risk','ai-insights','security','admin','protection','documents','import','integrations','settings','fude','milestones','workflows','lead_forms','surveys','contracts','custom_fields','booking_settings'],
-            2: ['calendar','prospects','referrals','pipeline','promotions','marketing-automation','marketing-lists','cases','agents','performance','reports','risk','ai-insights','security','admin','protection','documents','import','integrations','settings','fude','milestones','workflows','lead_forms','surveys','contracts','custom_fields','booking_settings'],
+            1: ['calendar','prospects','referrals','pipeline','promotions','marketing-automation','marketing-lists','cases','agents','performance','reports','risk','admin','protection','documents','import','integrations','settings','fude','milestones','workflows','custom_fields'],
+            2: ['calendar','prospects','referrals','pipeline','promotions','marketing-automation','marketing-lists','cases','agents','performance','reports','risk','admin','protection','documents','import','integrations','settings','fude','milestones','workflows','custom_fields'],
             3: ['calendar','prospects','referrals','pipeline','promotions','cases','performance','reports','protection','documents','settings','fude'],
             4: ['calendar','prospects','referrals','pipeline','promotions','cases','performance','reports','protection','documents','settings','fude'],
             5: _l12, 6: _l12, 7: _l12, 8: _l12, 9: _l12, 10: _l12,
@@ -6240,8 +6236,8 @@ In a production system, this would show the actual file contents.
         // Map Level 1-14 to visible nav IDs (suffix after 'nav-')
         const _l12 = ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'reports', 'documents', 'settings', 'fude', 'milestones'];
         const levelPermissions = {
-            1: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'agents', 'performance', 'reports', 'risk', 'ai-insights', 'security', 'admin', 'protection', 'documents', 'import', 'integrations', 'settings', 'fude', 'milestones', 'workflows', 'lead_forms', 'surveys', 'contracts', 'custom_fields', 'booking_settings'],
-            2: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'agents', 'performance', 'reports', 'risk', 'ai-insights', 'security', 'admin', 'protection', 'documents', 'import', 'integrations', 'settings', 'fude', 'milestones', 'workflows', 'lead_forms', 'surveys', 'contracts', 'custom_fields', 'booking_settings'],
+            1: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'import', 'integrations', 'settings', 'fude', 'milestones', 'workflows', 'custom_fields'],
+            2: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'import', 'integrations', 'settings', 'fude', 'milestones', 'workflows', 'custom_fields'],
             3: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'performance', 'reports', 'protection', 'documents', 'settings', 'fude'],
             4: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'performance', 'reports', 'protection', 'documents', 'settings', 'fude'],
             5: _l12, 6: _l12, 7: _l12, 8: _l12, 9: _l12, 10: _l12,
@@ -6277,9 +6273,9 @@ In a production system, this would show the actual file contents.
         const allNavIds = [
             'calendar', 'pipeline', 'protection', 'agents', 'prospects', 'referrals',
             'cases', 'documents', 'import', 'promotions', 'marketing-automation', 'marketing-lists',
-            'performance', 'reports', 'risk', 'ai-insights', 'security', 'admin',
+            'performance', 'reports', 'risk', 'admin',
             'integrations', 'settings', 'milestones', 'fude',
-            'workflows', 'lead_forms', 'surveys', 'contracts', 'custom_fields', 'booking_settings'
+            'workflows', 'custom_fields'
         ];
 
         allNavIds.forEach(id => {
