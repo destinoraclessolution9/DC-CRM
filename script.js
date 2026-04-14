@@ -3143,7 +3143,6 @@ In a production system, this would show the actual file contents.
         {
             title: 'Tools',
             items: [
-                { view: 'workflows',       label: 'Workflow Automation', icon: 'fas fa-sitemap' },
                 { view: 'protection',      label: 'Protection Monitor',  icon: 'fas fa-shield-alt' },
                 { view: 'lead_forms',      label: 'Lead Capture Forms',  icon: 'fas fa-wpforms' },
                 { view: 'surveys',         label: 'NPS Surveys',         icon: 'fas fa-poll' },
@@ -3161,8 +3160,8 @@ In a production system, this would show the actual file contents.
     const _getAllowedNavIds = () => {
         const _l12 = ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'reports', 'documents', 'settings', 'fude', 'milestones'];
         const perms = {
-            1: ['calendar','prospects','referrals','pipeline','promotions','marketing-automation','marketing-lists','cases','agents','performance','reports','risk','ai-insights','security','admin','protection','documents','import','integrations','settings','fude','milestones','workflows','lead_forms','surveys','contracts','custom_fields','booking_settings'],
-            2: ['calendar','prospects','referrals','pipeline','promotions','marketing-automation','marketing-lists','cases','agents','performance','reports','risk','ai-insights','security','admin','protection','documents','import','integrations','settings','fude','milestones','workflows','lead_forms','surveys','contracts','custom_fields','booking_settings'],
+            1: ['calendar','prospects','referrals','pipeline','promotions','marketing-automation','marketing-lists','cases','agents','performance','reports','risk','ai-insights','security','admin','protection','documents','import','integrations','settings','fude','milestones','lead_forms','surveys','contracts','custom_fields','booking_settings'],
+            2: ['calendar','prospects','referrals','pipeline','promotions','marketing-automation','marketing-lists','cases','agents','performance','reports','risk','ai-insights','security','admin','protection','documents','import','integrations','settings','fude','milestones','lead_forms','surveys','contracts','custom_fields','booking_settings'],
             3: ['calendar','prospects','referrals','pipeline','promotions','cases','performance','reports','protection','documents','settings','fude'],
             4: ['calendar','prospects','referrals','pipeline','promotions','cases','performance','reports','protection','documents','settings','fude'],
             5: _l12, 6: _l12, 7: _l12, 8: _l12, 9: _l12, 10: _l12,
@@ -8109,8 +8108,10 @@ function _wireLoginBtn() {
             _currentView = 'ranking';
             await showRankingPerformanceView(viewport);
         } else if (viewId === 'workflows') {
-            _currentView = 'workflows';
-            await showWorkflowAutomationView(viewport);
+            // Redirect legacy workflows route to Marketing Automation → Automation tab
+            _currentMarketingTab = 'automation';
+            _currentView = 'marketing_automation';
+            await showMarketingAutomationView(viewport);
         } else if (viewId === 'booking_settings') {
             _currentView = 'booking_settings';
             await showBookingSettingsView(viewport);
@@ -10202,7 +10203,8 @@ function _wireLoginBtn() {
         renderBirthdaySection().catch(e => console.warn('renderBirthdaySection failed:', e));
         renderRefillReminders().catch(e => console.warn('renderRefillReminders failed:', e));
         renderPendingCpsIntakes().catch(e => console.warn('renderPendingCpsIntakes failed:', e));
-        triggerBirthdayFollowUps().then(() => renderFollowUpReminders()).catch(e => console.warn('Follow-up reminders failed:', e));
+        _migrateFollowUpTemplateColumns().catch(e => console.warn('Follow-up template migration failed:', e));
+        dispatchBirthdayTriggers().then(() => renderFollowUpReminders()).catch(e => console.warn('Follow-up reminders failed:', e));
 
         // Show Special Program progress popup (once per session, for participating agents)
         // Deferred so it doesn't block the calendar paint.
@@ -10229,6 +10231,57 @@ function _wireLoginBtn() {
     };
 
     const invalidateFollowUpTemplatesCache = () => { _followUpTemplatesCache = null; };
+
+    // Default trigger config for JS-side migration (mirrors SQL migration backfill)
+    const _TRIGGER_DEFAULTS = {
+        cps_9star: { trigger_category: 'after_cps', event_keywords: '9 star,nine star,九星', cps_interest_match: '个人改命', solution_match: 'power ring', icon: '⭐', description: 'After CPS with interest 个人改命 or Power Ring proposed. Invites to next 9 Star Basic Class.', sort_order: 1, template_name: '9 Star Class Invite', message_template: 'Hi {name}, we would like to invite you to our upcoming 9 Star Basic Class on {date} at {venue}. Looking forward to seeing you!', delay_days: 0, event_window_days: 30 },
+        cps_fengshui: { trigger_category: 'after_cps', event_keywords: 'diy,风水diy,环境风水', cps_interest_match: '风水', solution_match: '风水方案,fengshui,office audit,home audit', icon: '🏠', description: 'After CPS with interest 风水 or 风水方案 proposed. Invites to next Feng Shui DIY.', sort_order: 2, template_name: 'Feng Shui DIY Invite', message_template: 'Hi {name}, we would like to invite you to our upcoming Feng Shui DIY on {date} at {venue}. Looking forward to seeing you!', delay_days: 0, event_window_days: 30 },
+        cps_huiji: { trigger_category: 'after_cps', event_keywords: '汇集,huiji,hui ji', cps_interest_match: '', solution_match: '', icon: '🏛️', description: 'After any CPS consultation. Invites to next 汇集 event.', sort_order: 3, template_name: 'HuiJi Invite', message_template: 'Hi {name}, thank you for your CPS consultation! We would like to invite you to our upcoming 汇集 event on {date} at {venue}. Looking forward to seeing you there! — {agent_name}', delay_days: 0, event_window_days: 30 },
+        apu_appointment: { trigger_category: 'on_apu_photo', event_keywords: '', cps_interest_match: '', solution_match: '', icon: '📋', description: 'When APU photo is attached. Reminds prospect to make an appointment.', sort_order: 4, template_name: 'APU Appointment Reminder', message_template: 'Hi {name}, your APU form has been received. Please schedule your appointment with {agent_name} at your earliest convenience.', delay_days: 0, event_window_days: 0 },
+        diy_review: { trigger_category: 'on_event_attendance', event_keywords: 'diy', cps_interest_match: '', solution_match: '', icon: '🔄', description: 'After attending a DIY event. Follows up after delay to review progress.', sort_order: 5, template_name: 'DIY 3-Day Review Follow-up', message_template: 'Hi {name}, hope you enjoyed {event_name}! How has your progress been? — {agent_name}', delay_days: 3, event_window_days: 0 },
+        birthday: { trigger_category: 'on_birthday', event_keywords: '', cps_interest_match: '', solution_match: '', icon: '🎂', description: 'Daily on calendar load. Sends birthday greeting to prospects/customers.', sort_order: 6, template_name: 'Birthday Greeting', message_template: 'Hi {name}, wishing you a very happy birthday! — {agent_name}', delay_days: 0, event_window_days: 0 }
+    };
+
+    // One-time JS migration: ensure all templates exist + backfill new columns
+    const _migrateFollowUpTemplateColumns = async () => {
+        try {
+            const templates = await AppDataStore.getAll('follow_up_templates');
+            const existing = (templates || []);
+
+            // Seed missing templates
+            for (const [tType, defaults] of Object.entries(_TRIGGER_DEFAULTS)) {
+                if (!existing.some(t => t.trigger_type === tType)) {
+                    await AppDataStore.create('follow_up_templates', {
+                        id: Date.now() + Math.random(),
+                        trigger_type: tType,
+                        is_active: true,
+                        created_at: new Date().toISOString(),
+                        updated_at: new Date().toISOString(),
+                        ...defaults
+                    });
+                }
+            }
+
+            // Backfill new columns on existing rows that haven't been migrated
+            for (const tpl of existing) {
+                if (tpl.trigger_category) continue; // already migrated
+                const defaults = _TRIGGER_DEFAULTS[tpl.trigger_type];
+                if (!defaults) continue;
+                await AppDataStore.update('follow_up_templates', tpl.id, {
+                    trigger_category: defaults.trigger_category,
+                    event_keywords: defaults.event_keywords,
+                    cps_interest_match: defaults.cps_interest_match,
+                    solution_match: defaults.solution_match,
+                    icon: defaults.icon,
+                    description: defaults.description,
+                    sort_order: defaults.sort_order,
+                    event_window_days: tpl.event_window_days === 21 ? 30 : (tpl.event_window_days || defaults.event_window_days),
+                    updated_at: new Date().toISOString()
+                });
+            }
+            invalidateFollowUpTemplatesCache();
+        } catch (e) { console.warn('Follow-up template migration failed:', e); }
+    };
 
     const getFollowUpTemplate = async (triggerType) => {
         const templates = await loadFollowUpTemplates();
@@ -10276,156 +10329,176 @@ function _wireLoginBtn() {
         }
     };
 
-    // Trigger 1: CPS done + 个人改命 → invite to next 9 Star Basic Class
-    const triggerCps9StarFollowUp = async (prospectId, prospectName, phone) => {
-        const tpl = await getFollowUpTemplate('cps_9star');
-        if (!tpl) return;
-        // Find next 9 star event
-        const events = await AppDataStore.getAll('events');
-        const today = new Date().toISOString().split('T')[0];
-        const nineStarEvents = events.filter(e => {
-            const title = ((e.event_title || e.title) || '').toLowerCase();
-            const eDate = e.event_date || e.date || '';
-            return (title.includes('9 star') || title.includes('nine star') || title.includes('九星')) && eDate >= today && (e.status || '').toLowerCase() !== 'cancelled';
-        }).sort((a, b) => (a.event_date || a.date || '').localeCompare(b.event_date || b.date || ''));
+    // ========== GENERIC TRIGGER ENGINE (data-driven from follow_up_templates) ==========
 
-        const nextEvent = nineStarEvents[0];
-        if (!nextEvent) return; // no upcoming 9 star class
-
-        const msg = interpolateTemplate(tpl.message_template, {
-            name: prospectName,
-            date: nextEvent.event_date || nextEvent.date || '',
-            time: (nextEvent.start_time || nextEvent.time || '').slice(0, 5),
-            venue: nextEvent.location || '',
-            event_name: nextEvent.event_title || nextEvent.title || '9 Star Basic Class'
-        });
-
-        await createFollowUpDraft({
-            prospectId,
-            triggerType: 'cps_9star',
-            messageText: msg,
-            phone,
-            prospectName,
-            eventId: nextEvent.id,
-            eventDate: nextEvent.event_date || nextEvent.date,
-            eventName: nextEvent.event_title || nextEvent.title,
-            dueDate: today
-        });
-    };
-
-    // Trigger 2: CPS done + 风水 → invite to Feng Shui DIY / 汇集 within window days
-    const triggerCpsFengshuiFollowUp = async (prospectId, prospectName, phone) => {
-        const tpl = await getFollowUpTemplate('cps_fengshui');
-        if (!tpl) return;
+    // Shared: find next matching event by keywords within window
+    const _findNextMatchingEvent = async (tpl) => {
+        const keywords = (tpl.event_keywords || '').split(',').map(k => k.trim().toLowerCase()).filter(Boolean);
+        if (!keywords.length) return null;
         const events = await AppDataStore.getAll('events');
         const today = new Date();
         const todayStr = today.toISOString().split('T')[0];
         const windowEnd = new Date(today);
-        windowEnd.setDate(windowEnd.getDate() + (tpl.event_window_days || 21));
+        windowEnd.setDate(windowEnd.getDate() + (tpl.event_window_days || 30));
         const windowEndStr = windowEnd.toISOString().split('T')[0];
 
-        const fsEvents = events.filter(e => {
+        return events.filter(e => {
             const title = ((e.event_title || e.title) || '').toLowerCase();
             const eDate = e.event_date || e.date || '';
-            const isFsDiy = title.includes('diy') || title.includes('风水diy');
-            const isHuiji = title.includes('汇集') || title.includes('huiji') || title.includes('hui ji');
-            return (isFsDiy || isHuiji) && eDate >= todayStr && eDate <= windowEndStr && (e.status || '').toLowerCase() !== 'cancelled';
-        }).sort((a, b) => (a.event_date || a.date || '').localeCompare(b.event_date || b.date || ''));
+            return keywords.some(kw => title.includes(kw)) && eDate >= todayStr && eDate <= windowEndStr && (e.status || '').toLowerCase() !== 'cancelled';
+        }).sort((a, b) => (a.event_date || a.date || '').localeCompare(b.event_date || b.date || ''))[0] || null;
+    };
 
-        const nextEvent = fsEvents[0];
-        if (!nextEvent) return; // no upcoming feng shui event within window
+    // Generic: event-based trigger (for after_cps and similar)
+    const executeEventBasedTrigger = async (tpl, prospectId, prospectName, phone) => {
+        if (!tpl || !tpl.is_active) return;
+        const nextEvent = await _findNextMatchingEvent(tpl);
+        if (!nextEvent) return;
 
         const msg = interpolateTemplate(tpl.message_template, {
             name: prospectName,
             date: nextEvent.event_date || nextEvent.date || '',
             time: (nextEvent.start_time || nextEvent.time || '').slice(0, 5),
             venue: nextEvent.location || '',
-            event_name: nextEvent.event_title || nextEvent.title || 'Feng Shui DIY'
-        });
-
-        await createFollowUpDraft({
-            prospectId,
-            triggerType: 'cps_fengshui',
-            messageText: msg,
-            phone,
-            prospectName,
-            eventId: nextEvent.id,
-            eventDate: nextEvent.event_date || nextEvent.date,
-            eventName: nextEvent.event_title || nextEvent.title,
-            dueDate: todayStr
-        });
-    };
-
-    // Trigger 3: APU photo attached → appointment reminder
-    const triggerApuFollowUp = async (prospectId) => {
-        const tpl = await getFollowUpTemplate('apu_appointment');
-        if (!tpl) return;
-        const prospect = await AppDataStore.getById('prospects', prospectId);
-        if (!prospect) return;
-
-        const msg = interpolateTemplate(tpl.message_template, {
-            name: prospect.full_name || '',
+            event_name: nextEvent.event_title || nextEvent.title || '',
             agent_name: _currentUser?.full_name || ''
         });
 
         await createFollowUpDraft({
             prospectId,
-            triggerType: 'apu_appointment',
+            triggerType: tpl.trigger_type,
             messageText: msg,
-            phone: prospect.phone || '',
-            prospectName: prospect.full_name || '',
+            phone,
+            prospectName,
+            eventId: nextEvent.id,
+            eventDate: nextEvent.event_date || nextEvent.date,
+            eventName: nextEvent.event_title || nextEvent.title,
             dueDate: new Date().toISOString().split('T')[0]
         });
     };
 
-    // Trigger 4: Feng Shui DIY attended → 3-day review follow-up
-    const triggerDiyReviewFollowUp = async (entityId, entityType, eventId, activityDate) => {
-        const tpl = await getFollowUpTemplate('diy_review');
-        if (!tpl) return;
+    // Generic: simple trigger (no event lookup — APU, birthday, etc.)
+    const executeSimpleTrigger = async (tpl, entity, extraVars = {}) => {
+        if (!tpl || !tpl.is_active) return;
+        const msg = interpolateTemplate(tpl.message_template, {
+            name: entity.full_name || '',
+            agent_name: _currentUser?.full_name || '',
+            ...extraVars
+        });
 
-        // Check if event is a DIY event
+        const dueDate = new Date();
+        dueDate.setDate(dueDate.getDate() + (tpl.delay_days || 0));
+
+        await createFollowUpDraft({
+            prospectId: entity._type !== 'customer' ? entity.id : null,
+            customerId: entity._type === 'customer' ? entity.id : null,
+            triggerType: tpl.trigger_type,
+            messageText: msg,
+            phone: entity.phone || '',
+            prospectName: entity.full_name || '',
+            dueDate: dueDate.toISOString().split('T')[0]
+        });
+    };
+
+    // Dispatcher: after CPS consultation — checks cps_interest_match + solution_match
+    const dispatchAfterCpsTriggers = async (prospectId) => {
+        const templates = await loadFollowUpTemplates();
+        const cpsTriggers = templates.filter(t => t.trigger_category === 'after_cps' && t.is_active);
+        if (!cpsTriggers.length) return;
+
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) return;
+        const interest = (prospect.cps_interest || '').trim().toLowerCase();
+
+        let solutionNames = [];
+        try {
+            const solutions = await AppDataStore.query('proposed_solutions', { prospect_id: prospectId });
+            solutionNames = (solutions || []).map(s => (s.solution || '').toLowerCase());
+        } catch (e) { /* proposed_solutions may not exist yet */ }
+
+        for (const tpl of cpsTriggers) {
+            const interestList = (tpl.cps_interest_match || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+            const solutionList = (tpl.solution_match || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+
+            // If both match lists are empty, trigger fires unconditionally
+            const interestOk = !interestList.length || interestList.some(m => interest === m);
+            const solutionOk = !solutionList.length || solutionList.some(m => solutionNames.some(s => s.includes(m)));
+
+            if (interestList.length || solutionList.length) {
+                // At least one match list is defined — need at least one to match
+                if (!interestOk && !solutionOk) continue;
+            }
+
+            executeEventBasedTrigger(tpl, prospectId, prospect.full_name, prospect.phone).catch(e => console.warn(`CPS trigger ${tpl.trigger_type} failed:`, e));
+        }
+    };
+
+    // Dispatcher: on event attendance
+    const dispatchOnEventAttendanceTriggers = async (entityId, entityType, eventId, activityDate) => {
+        const templates = await loadFollowUpTemplates();
+        const triggers = templates.filter(t => t.trigger_category === 'on_event_attendance' && t.is_active);
+        if (!triggers.length) return;
+
         const event = await AppDataStore.getById('events', eventId);
         if (!event) return;
         const title = ((event.event_title || event.title) || '').toLowerCase();
-        if (!title.includes('diy')) return; // only for DIY events
 
         const entity = entityType === 'customer'
             ? await AppDataStore.getById('customers', entityId)
             : await AppDataStore.getById('prospects', entityId);
         if (!entity) return;
 
-        const msg = interpolateTemplate(tpl.message_template, {
-            name: entity.full_name || '',
-            event_name: event.event_title || event.title || 'Feng Shui DIY',
-            agent_name: _currentUser?.full_name || ''
-        });
+        for (const tpl of triggers) {
+            const keywords = (tpl.event_keywords || '').split(',').map(k => k.trim().toLowerCase()).filter(Boolean);
+            if (keywords.length && !keywords.some(kw => title.includes(kw))) continue;
 
-        // Due date = attendance date + delay_days (default 3)
-        const dueDate = new Date(activityDate || Date.now());
-        dueDate.setDate(dueDate.getDate() + (tpl.delay_days || 3));
+            const msg = interpolateTemplate(tpl.message_template, {
+                name: entity.full_name || '',
+                event_name: event.event_title || event.title || '',
+                agent_name: _currentUser?.full_name || ''
+            });
 
-        await createFollowUpDraft({
-            prospectId: entityType !== 'customer' ? entityId : null,
-            customerId: entityType === 'customer' ? entityId : null,
-            triggerType: 'diy_review',
-            messageText: msg,
-            phone: entity.phone || '',
-            prospectName: entity.full_name || '',
-            eventId,
-            eventDate: activityDate,
-            eventName: event.event_title || event.title,
-            dueDate: dueDate.toISOString().split('T')[0]
-        });
+            const dueDate = new Date(activityDate || Date.now());
+            dueDate.setDate(dueDate.getDate() + (tpl.delay_days || 0));
+
+            await createFollowUpDraft({
+                prospectId: entityType !== 'customer' ? entityId : null,
+                customerId: entityType === 'customer' ? entityId : null,
+                triggerType: tpl.trigger_type,
+                messageText: msg,
+                phone: entity.phone || '',
+                prospectName: entity.full_name || '',
+                eventId,
+                eventDate: activityDate,
+                eventName: event.event_title || event.title,
+                dueDate: dueDate.toISOString().split('T')[0]
+            });
+        }
     };
 
-    // Trigger 5: Birthday greeting — called on calendar load
-    const triggerBirthdayFollowUps = async () => {
-        const tpl = await getFollowUpTemplate('birthday');
-        if (!tpl) return;
+    // Dispatcher: on APU photo upload
+    const dispatchOnApuPhotoTriggers = async (prospectId) => {
+        const templates = await loadFollowUpTemplates();
+        const triggers = templates.filter(t => t.trigger_category === 'on_apu_photo' && t.is_active);
+        if (!triggers.length) return;
+
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) return;
+        prospect._type = 'prospect';
+
+        for (const tpl of triggers) {
+            executeSimpleTrigger(tpl, prospect).catch(e => console.warn(`APU trigger ${tpl.trigger_type} failed:`, e));
+        }
+    };
+
+    // Dispatcher: birthday triggers — called on calendar load
+    const dispatchBirthdayTriggers = async () => {
+        const templates = await loadFollowUpTemplates();
+        const triggers = templates.filter(t => t.trigger_category === 'on_birthday' && t.is_active);
+        if (!triggers.length) return;
 
         const today = new Date();
         const todayMD = `${(today.getMonth() + 1).toString().padStart(2, '0')}-${today.getDate().toString().padStart(2, '0')}`;
-        const todayStr = today.toISOString().split('T')[0];
 
         const [prospects, customers] = await Promise.all([
             AppDataStore.getAll('prospects'),
@@ -10439,27 +10512,13 @@ function _wireLoginBtn() {
 
         for (const person of allPeople) {
             if (!person.date_of_birth) continue;
-            const dob = person.date_of_birth; // YYYY-MM-DD
-            const dobMD = dob.slice(5); // MM-DD
+            const dobMD = person.date_of_birth.slice(5);
             if (dobMD !== todayMD) continue;
-
-            // Only create for agent's own prospects/customers
             if (person.responsible_agent_id && person.responsible_agent_id != _currentUser?.id) continue;
 
-            const msg = interpolateTemplate(tpl.message_template, {
-                name: person.full_name || '',
-                agent_name: _currentUser?.full_name || ''
-            });
-
-            await createFollowUpDraft({
-                prospectId: person._type === 'prospect' ? person.id : null,
-                customerId: person._type === 'customer' ? person.id : null,
-                triggerType: 'birthday',
-                messageText: msg,
-                phone: person.phone || '',
-                prospectName: person.full_name || '',
-                dueDate: todayStr
-            });
+            for (const tpl of triggers) {
+                executeSimpleTrigger(tpl, person).catch(e => console.warn(`Birthday trigger ${tpl.trigger_type} failed:`, e));
+            }
         }
     };
 
@@ -10487,20 +10546,14 @@ function _wireLoginBtn() {
         }
 
         container.style.display = 'block';
-        const triggerLabels = {
-            cps_9star: '9 Star Class Invite',
-            cps_fengshui: 'Feng Shui DIY / 汇集 Invite',
-            apu_appointment: 'APU Appointment Reminder',
-            diy_review: 'DIY Review Follow-up',
-            birthday: 'Birthday Greeting'
-        };
-        const triggerIcons = {
-            cps_9star: '⭐',
-            cps_fengshui: '🏠',
-            apu_appointment: '📋',
-            diy_review: '🔄',
-            birthday: '🎂'
-        };
+        // Build labels/icons from DB templates (data-driven, supports custom triggers)
+        const _tpls = await loadFollowUpTemplates();
+        const triggerLabels = {};
+        const triggerIcons = {};
+        for (const t of _tpls) {
+            triggerLabels[t.trigger_type] = t.template_name || t.trigger_type;
+            triggerIcons[t.trigger_type] = t.icon || '📩';
+        }
 
         container.innerHTML = `
             <div style="background:var(--white,#fff); border:1px solid var(--gray-200,#e5e7eb); border-radius:12px; padding:16px; margin-top:16px;">
@@ -13784,9 +13837,9 @@ function _wireLoginBtn() {
                 }
                 UI.toast.success(checked ? 'Marked as Attended' : 'Attendance removed');
 
-                // Trigger follow-up: DIY review (3-day delay) when marking attended
+                // Trigger follow-up: event attendance triggers (data-driven)
                 if (checked && entityId && eventId) {
-                    triggerDiyReviewFollowUp(entityId, entityType || 'prospect', eventId, activityDate).catch(e => console.warn('DIY review follow-up failed:', e));
+                    dispatchOnEventAttendanceTriggers(entityId, entityType || 'prospect', eventId, activityDate).catch(e => console.warn('Event attendance follow-up failed:', e));
                 }
             } catch (err) {
                 console.error('toggleAttendeeAttended write-back error:', err);
@@ -15169,19 +15222,9 @@ function _wireLoginBtn() {
             }
         } catch (e) { console.warn('Milestone auto-mark failed:', e); }
 
-        // === Follow-Up Automation: trigger CPS-based follow-ups (non-blocking) ===
+        // === Follow-Up Automation: trigger CPS-based follow-ups (data-driven, non-blocking) ===
         if (activity.activity_type === 'CPS' && activity.prospect_id) {
-            try {
-                const _fuProspect = await AppDataStore.getById('prospects', activity.prospect_id);
-                if (_fuProspect) {
-                    const interest = (_fuProspect.cps_interest || '').trim();
-                    if (interest === '个人改命') {
-                        triggerCps9StarFollowUp(activity.prospect_id, _fuProspect.full_name, _fuProspect.phone).catch(e => console.warn('CPS 9star follow-up failed:', e));
-                    } else if (interest === '风水') {
-                        triggerCpsFengshuiFollowUp(activity.prospect_id, _fuProspect.full_name, _fuProspect.phone).catch(e => console.warn('CPS fengshui follow-up failed:', e));
-                    }
-                }
-            } catch (e) { console.warn('Follow-up trigger failed:', e); }
+            dispatchAfterCpsTriggers(activity.prospect_id).catch(e => console.warn('CPS follow-up triggers failed:', e));
         }
 
         await renderCalendar();
@@ -19164,7 +19207,7 @@ NOTIFY pgrst, 'reload schema';`;
             UI.toast.success('APU photo uploaded');
 
             // Trigger follow-up: APU appointment reminder
-            triggerApuFollowUp(prospectId).catch(e => console.warn('APU follow-up failed:', e));
+            dispatchOnApuPhotoTriggers(prospectId).catch(e => console.warn('APU follow-up triggers failed:', e));
 
             const bodyEl = document.getElementById(`acc-body-names-${prospectId}`);
             if (bodyEl) {
@@ -26929,8 +26972,8 @@ const exportKPIReport = async (format) => {
                     <button class="marketing-tab ${_currentMarketingTab === 'campaigns' ? 'active' : ''}" onclick="app.switchMarketingTab('campaigns')">
                         <i class="fas fa-bullhorn"></i> Active Campaigns
                     </button>
-                    <button class="marketing-tab ${_currentMarketingTab === 'followup_auto' ? 'active' : ''}" onclick="app.switchMarketingTab('followup_auto')">
-                        <i class="fas fa-paper-plane"></i> Follow-Up Auto
+                    <button class="marketing-tab ${_currentMarketingTab === 'automation' ? 'active' : ''}" onclick="app.switchMarketingTab('automation')">
+                        <i class="fas fa-cogs"></i> Automation
                     </button>
                     <button class="marketing-tab ${_currentMarketingTab === 'analytics' ? 'active' : ''}" onclick="app.switchMarketingTab('analytics')">
                         <i class="fas fa-chart-line"></i> Campaign Analytics
@@ -26964,7 +27007,7 @@ const exportKPIReport = async (format) => {
             t.classList.remove('active');
             if (t.textContent.includes(tab === 'templates' ? 'Message Templates' :
                 tab === 'campaigns' ? 'Active Campaigns' :
-                    tab === 'followup_auto' ? 'Follow-Up Auto' :
+                    tab === 'automation' ? 'Automation' :
                     tab === 'products' ? 'Products & Services' :
                         tab === 'packages' ? 'Promotion Packages' :
                             tab === 'promotions' ? 'Monthly Promotions' : 'Campaign Analytics')) {
@@ -26982,8 +27025,8 @@ const exportKPIReport = async (format) => {
             return await renderTemplatesTab();
         } else if (_currentMarketingTab === 'campaigns') {
             return await renderCampaignsTab();
-        } else if (_currentMarketingTab === 'followup_auto') {
-            return await renderFollowUpAutoTab();
+        } else if (_currentMarketingTab === 'automation') {
+            return await renderAutomationTab();
         } else if (_currentMarketingTab === 'analytics') {
             return await renderAnalyticsTab();
         } else if (_currentMarketingTab === 'products') {
@@ -26993,67 +27036,107 @@ const exportKPIReport = async (format) => {
         }
     };
 
-    // ========== FOLLOW-UP AUTO TAB ==========
-    const renderFollowUpAutoTab = async () => {
+    // ========== AUTOMATION TAB (merged Follow-Up Triggers + Custom Workflows) ==========
+    const renderAutomationTab = async () => {
         const templates = await loadFollowUpTemplates();
         invalidateFollowUpTemplatesCache(); // force fresh on next load
 
-        const triggerLabels = {
-            cps_9star: '9 Star Class Invite',
-            cps_fengshui: 'Feng Shui DIY / 汇集 Invite',
-            apu_appointment: 'APU Appointment Reminder',
-            diy_review: 'DIY 3-Day Review Follow-up',
-            birthday: 'Birthday Greeting'
-        };
-        const triggerDescriptions = {
-            cps_9star: 'Triggered when CPS is done and prospect interest is 个人改命. Invites to next 9 Star Basic Class.',
-            cps_fengshui: 'Triggered when CPS is done and prospect interest is 风水. Invites to Feng Shui DIY or 汇集 event within the event window.',
-            apu_appointment: 'Triggered when an APU photo is attached. Reminds prospect to make an appointment.',
-            diy_review: 'Triggered when prospect attends Feng Shui DIY. Follows up after delay to review progress.',
-            birthday: 'Triggered daily on calendar load. Sends birthday greeting to prospects/customers.'
-        };
+        const isAdmin = isSystemAdmin(_currentUser) || (_currentUser?.role <= 2);
+        const categoryLabels = { after_cps: 'After CPS', on_event_attendance: 'Event Attendance', on_apu_photo: 'APU Photo', on_birthday: 'Birthday' };
+        const categoryColors = { after_cps: '#3b82f6', on_event_attendance: '#8b5cf6', on_apu_photo: '#f59e0b', on_birthday: '#ec4899' };
+        const sorted = [...templates].sort((a, b) => (a.sort_order || 99) - (b.sort_order || 99));
 
+        // ── Section 1: Follow-Up Triggers ──
         let html = `
-            <div style="margin-bottom:20px;">
-                <h2 style="margin:0 0 8px;">Follow-Up Automation</h2>
-                <p style="color:var(--gray-500); font-size:14px; margin:0;">Manage automated follow-up message templates. Messages are drafted as reminders on the calendar for agents to send via WhatsApp.</p>
-            </div>
-            <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:12px 16px; margin-bottom:20px; font-size:13px; color:#1e40af;">
-                <strong>Available variables:</strong> <code>{name}</code> <code>{date}</code> <code>{time}</code> <code>{venue}</code> <code>{event_name}</code> <code>{agent_name}</code>
-            </div>
-            <div style="display:flex; flex-direction:column; gap:12px;">
+            <div style="margin-bottom:32px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                    <div>
+                        <h2 style="margin:0 0 8px;"><i class="fas fa-paper-plane" style="color:var(--primary);"></i> Follow-Up Triggers</h2>
+                        <p style="color:var(--gray-500); font-size:14px; margin:0;">Automation triggers that create WhatsApp reminder drafts on the calendar.</p>
+                    </div>
+                    ${isAdmin ? `<button class="btn primary" onclick="app.openAddTriggerModal()"><i class="fas fa-plus"></i> Add Trigger</button>` : ''}
+                </div>
+                <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:12px 16px; margin-bottom:20px; font-size:13px; color:#1e40af;">
+                    <strong>Variables:</strong> <code>{name}</code> <code>{date}</code> <code>{time}</code> <code>{venue}</code> <code>{event_name}</code> <code>{agent_name}</code>
+                </div>
         `;
 
-        for (const tpl of templates) {
+        if (isAdmin) {
+            // Editable table for super admin
             html += `
+                <div style="overflow-x:auto;">
+                <table class="data-table" style="width:100%; font-size:13px;">
+                    <thead>
+                        <tr>
+                            <th style="width:30px;">#</th>
+                            <th style="width:30px;"></th>
+                            <th>Name</th>
+                            <th>Category</th>
+                            <th>Event Keywords</th>
+                            <th>CPS Interest</th>
+                            <th>Solution Match</th>
+                            <th style="width:50px;">Delay</th>
+                            <th style="width:60px;">Window</th>
+                            <th style="width:60px;">Active</th>
+                            <th style="width:80px;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+            for (const tpl of sorted) {
+                const catLabel = categoryLabels[tpl.trigger_category] || tpl.trigger_category || '—';
+                const catColor = categoryColors[tpl.trigger_category] || '#6b7280';
+                html += `
+                        <tr>
+                            <td style="color:var(--gray-400);">${tpl.sort_order || '—'}</td>
+                            <td style="font-size:18px; text-align:center;">${tpl.icon || '📩'}</td>
+                            <td>
+                                <strong>${tpl.template_name || tpl.trigger_type}</strong>
+                                <div style="font-size:11px; color:var(--gray-500); max-width:250px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${tpl.description || ''}</div>
+                            </td>
+                            <td><span style="font-size:11px; padding:2px 8px; border-radius:10px; background:${catColor}20; color:${catColor}; white-space:nowrap;">${catLabel}</span></td>
+                            <td style="font-size:12px; color:var(--gray-600); max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${(tpl.event_keywords || '').replace(/"/g, '&quot;')}">${tpl.event_keywords || '<span style="color:var(--gray-300);">—</span>'}</td>
+                            <td style="font-size:12px; color:var(--gray-600); max-width:100px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${(tpl.cps_interest_match || '').replace(/"/g, '&quot;')}">${tpl.cps_interest_match || '<span style="color:var(--gray-300);">—</span>'}</td>
+                            <td style="font-size:12px; color:var(--gray-600); max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${(tpl.solution_match || '').replace(/"/g, '&quot;')}">${tpl.solution_match || '<span style="color:var(--gray-300);">—</span>'}</td>
+                            <td style="text-align:center;">${tpl.delay_days || 0}d</td>
+                            <td style="text-align:center;">${tpl.event_window_days || 0}d</td>
+                            <td style="text-align:center;">
+                                <input type="checkbox" ${tpl.is_active ? 'checked' : ''} onchange="event.stopPropagation(); app.toggleFollowUpTemplate(${tpl.id}, this.checked)" style="accent-color:#3b82f6; cursor:pointer;">
+                            </td>
+                            <td>
+                                <div style="display:flex; gap:4px;">
+                                    <button class="btn secondary btn-sm" onclick="event.stopPropagation(); app.openEditTriggerModal(${tpl.id})" style="font-size:11px; padding:4px 8px;"><i class="fas fa-edit"></i></button>
+                                    <button class="btn secondary btn-sm" onclick="event.stopPropagation(); app.deleteTrigger(${tpl.id})" style="font-size:11px; padding:4px 8px; color:var(--danger);"><i class="fas fa-trash"></i></button>
+                                </div>
+                            </td>
+                        </tr>
+                `;
+            }
+            html += `</tbody></table></div>`;
+        } else {
+            // Read-only card view for non-admins
+            html += `<div style="display:flex; flex-direction:column; gap:12px;">`;
+            for (const tpl of sorted) {
+                html += `
                 <div style="background:var(--white,#fff); border:1px solid var(--gray-200,#e5e7eb); border-radius:10px; padding:16px; position:relative;">
                     <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
                         <div>
-                            <h3 style="margin:0; font-size:15px; color:var(--gray-800);">${triggerLabels[tpl.trigger_type] || tpl.template_name}</h3>
-                            <p style="margin:4px 0 0; font-size:12px; color:var(--gray-500);">${triggerDescriptions[tpl.trigger_type] || ''}</p>
+                            <h3 style="margin:0; font-size:15px; color:var(--gray-800);">${tpl.icon || '📩'} ${tpl.template_name || tpl.trigger_type}</h3>
+                            <p style="margin:4px 0 0; font-size:12px; color:var(--gray-500);">${tpl.description || ''}</p>
                         </div>
-                        <div style="display:flex; align-items:center; gap:10px;">
-                            <label style="display:flex; align-items:center; gap:6px; font-size:13px; cursor:pointer;">
-                                <input type="checkbox" ${tpl.is_active ? 'checked' : ''} onchange="app.toggleFollowUpTemplate(${tpl.id}, this.checked)" style="accent-color:#3b82f6;">
-                                ${tpl.is_active ? '<span style="color:#059669; font-weight:600;">Active</span>' : '<span style="color:var(--gray-400);">Inactive</span>'}
-                            </label>
-                            <button class="btn secondary btn-sm" onclick="app.openEditFollowUpTemplateModal(${tpl.id})" style="font-size:12px;">
-                                <i class="fas fa-edit"></i> Edit
-                            </button>
-                        </div>
+                        <span style="font-size:12px; padding:2px 8px; border-radius:10px; background:${tpl.is_active ? '#dcfce7' : '#f3f4f6'}; color:${tpl.is_active ? '#059669' : 'var(--gray-400)'};">${tpl.is_active ? 'Active' : 'Inactive'}</span>
                     </div>
                     <div style="background:var(--gray-50,#f9fafb); border-radius:6px; padding:10px 12px; font-size:13px; color:var(--gray-700); white-space:pre-wrap; max-height:80px; overflow:hidden; line-height:1.5;">${tpl.message_template || ''}</div>
                     <div style="display:flex; gap:16px; margin-top:10px; font-size:12px; color:var(--gray-500);">
                         ${tpl.delay_days > 0 ? `<span><i class="fas fa-clock"></i> Delay: ${tpl.delay_days} day${tpl.delay_days > 1 ? 's' : ''}</span>` : ''}
                         ${tpl.event_window_days > 0 ? `<span><i class="fas fa-calendar-alt"></i> Event window: ${tpl.event_window_days} days</span>` : ''}
                     </div>
-                </div>
-            `;
+                </div>`;
+            }
+            html += `</div>`;
         }
 
-        html += `</div>`;
-
-        // Sent/Dismissed history summary
+        // Follow-Up Statistics
         let drafts = [];
         try {
             drafts = await AppDataStore.getAll('follow_up_drafts');
@@ -27063,20 +27146,66 @@ const exportKPIReport = async (format) => {
         const dismissedCount = drafts.filter(d => d.status === 'dismissed').length;
 
         html += `
-            <div style="margin-top:24px; background:var(--white,#fff); border:1px solid var(--gray-200); border-radius:10px; padding:16px;">
-                <h3 style="margin:0 0 12px; font-size:15px;">Follow-Up Statistics</h3>
-                <div style="display:flex; gap:24px;">
-                    <div style="text-align:center;">
-                        <div style="font-size:28px; font-weight:700; color:#f59e0b;">${pendingCount}</div>
-                        <div style="font-size:12px; color:var(--gray-500);">Pending</div>
+                <div style="margin-top:24px; background:var(--white,#fff); border:1px solid var(--gray-200); border-radius:10px; padding:16px;">
+                    <h3 style="margin:0 0 12px; font-size:15px;">Follow-Up Statistics</h3>
+                    <div style="display:flex; gap:24px;">
+                        <div style="text-align:center;">
+                            <div style="font-size:28px; font-weight:700; color:#f59e0b;">${pendingCount}</div>
+                            <div style="font-size:12px; color:var(--gray-500);">Pending</div>
+                        </div>
+                        <div style="text-align:center;">
+                            <div style="font-size:28px; font-weight:700; color:#059669;">${sentCount}</div>
+                            <div style="font-size:12px; color:var(--gray-500);">Sent</div>
+                        </div>
+                        <div style="text-align:center;">
+                            <div style="font-size:28px; font-weight:700; color:var(--gray-400);">${dismissedCount}</div>
+                            <div style="font-size:12px; color:var(--gray-500);">Dismissed</div>
+                        </div>
                     </div>
-                    <div style="text-align:center;">
-                        <div style="font-size:28px; font-weight:700; color:#059669;">${sentCount}</div>
-                        <div style="font-size:12px; color:var(--gray-500);">Sent</div>
+                </div>
+            </div>
+
+            <hr style="margin:32px 0; border:none; border-top:1px solid var(--gray-200);">
+
+            <!-- Section 2: Custom Workflows -->
+            <div>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                    <div>
+                        <h2 style="margin:0 0 8px;"><i class="fas fa-sitemap" style="color:var(--primary);"></i> Custom Workflows</h2>
+                        <p style="color:var(--gray-500); font-size:14px; margin:0;">Create automated IF → THEN workflows with triggers and actions.</p>
                     </div>
-                    <div style="text-align:center;">
-                        <div style="font-size:28px; font-weight:700; color:var(--gray-400);">${dismissedCount}</div>
-                        <div style="font-size:12px; color:var(--gray-500);">Dismissed</div>
+                    <button class="btn primary" onclick="app.openCreateWorkflowModal()"><i class="fas fa-plus"></i> Create Workflow</button>
+                </div>
+        `;
+
+        // Load workflows
+        let workflows = [];
+        try { workflows = await AppDataStore.getAll('automation_workflows') || []; } catch (e) { /* ignore */ }
+
+        if (workflows.length > 0) {
+            html += `<div id="workflows-list">${workflows.map(w => renderWorkflowCard(w)).join('')}</div>`;
+        } else {
+            html += `
+                <div style="text-align:center; padding:40px; color:var(--gray-500); background:var(--gray-50); border-radius:10px; border:1px solid var(--gray-200);">
+                    <i class="fas fa-cogs" style="font-size:48px; margin-bottom:12px; color:var(--gray-300);"></i>
+                    <p>No custom workflows yet</p>
+                    <p style="font-size:12px;">Create your first workflow to automate tasks like scoring updates, reassignment alerts, and follow-up reminders.</p>
+                    <button class="btn primary" style="margin-top:12px;" onclick="app.openCreateWorkflowModal()"><i class="fas fa-plus"></i> Create First Workflow</button>
+                </div>
+            `;
+        }
+
+        // Quick Templates
+        html += `
+                <div style="margin-top:24px;">
+                    <h3 style="margin:0 0 12px; font-size:15px;"><i class="fas fa-clipboard-list"></i> Quick Templates</h3>
+                    <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(250px, 1fr)); gap:12px;">
+                        ${renderWorkflowTemplate('Birthday Greeting', 'birthday', 'Send WhatsApp greeting on customer birthday', 'fas fa-birthday-cake')}
+                        ${renderWorkflowTemplate('Protection Expiring', 'protection_expiring', 'Alert agent 7 days before protection expires', 'fas fa-shield-alt')}
+                        ${renderWorkflowTemplate('Inactivity Alert', 'inactivity', 'Flag prospects with >7 days no follow-up', 'fas fa-exclamation-triangle')}
+                        ${renderWorkflowTemplate('New Prospect Welcome', 'new_prospect', 'Send welcome message when prospect created', 'fas fa-user-plus')}
+                        ${renderWorkflowTemplate('Event Follow-up', 'event_attendance', 'Create follow-up task after event attendance', 'fas fa-calendar-check')}
+                        ${renderWorkflowTemplate('Score Threshold', 'score_change', 'Notify agent when prospect reaches 600+ score', 'fas fa-chart-line')}
                     </div>
                 </div>
             </div>
@@ -27091,74 +27220,165 @@ const exportKPIReport = async (format) => {
             invalidateFollowUpTemplatesCache();
             UI.toast.success(isActive ? 'Template activated' : 'Template deactivated');
             const container = document.getElementById('marketing-tab-content');
-            if (container) container.innerHTML = await renderFollowUpAutoTab();
+            if (container) container.innerHTML = await renderAutomationTab();
         } catch (e) {
             UI.toast.error('Failed to update template');
         }
     };
 
-    const openEditFollowUpTemplateModal = async (templateId) => {
-        const templates = await loadFollowUpTemplates();
-        const tpl = templates.find(t => t.id === templateId);
-        if (!tpl) { UI.toast.error('Template not found'); return; }
-
-        const content = `
-            <div class="form-group">
-                <label>Template Name</label>
-                <input type="text" id="fu-tpl-name" class="form-control" value="${tpl.template_name || ''}">
-            </div>
-            <div class="form-group">
-                <label>Message Template</label>
-                <textarea id="fu-tpl-message" class="form-control" rows="6" style="white-space:pre-wrap;">${tpl.message_template || ''}</textarea>
-                <small style="color:var(--gray-500); font-size:11px;">Variables: {name}, {date}, {time}, {venue}, {event_name}, {agent_name}</small>
-            </div>
-            <div class="form-row">
-                <div class="form-group half">
-                    <label>Delay Days</label>
-                    <input type="number" id="fu-tpl-delay" class="form-control" value="${tpl.delay_days || 0}" min="0" max="30">
-                    <small style="color:var(--gray-500); font-size:11px;">Days to wait before showing reminder (0 = immediate)</small>
+    // Build trigger form HTML (shared by add + edit)
+    const _buildTriggerFormHtml = (tpl = {}) => {
+        const isAfterCps = (tpl.trigger_category || '') === 'after_cps';
+        return `
+            <div style="max-height:70vh; overflow-y:auto;">
+                <div class="form-row">
+                    <div class="form-group half">
+                        <label>Trigger Name *</label>
+                        <input type="text" id="fu-tpl-name" class="form-control" value="${(tpl.template_name || '').replace(/"/g, '&quot;')}" placeholder="e.g. 9 Star Class Invite">
+                    </div>
+                    <div class="form-group half">
+                        <label>Icon / Emoji</label>
+                        <input type="text" id="fu-tpl-icon" class="form-control" value="${tpl.icon || ''}" placeholder="e.g. ⭐" style="font-size:18px;">
+                    </div>
                 </div>
-                <div class="form-group half">
-                    <label>Event Window (days)</label>
-                    <input type="number" id="fu-tpl-window" class="form-control" value="${tpl.event_window_days || 0}" min="0" max="90">
-                    <small style="color:var(--gray-500); font-size:11px;">Look-ahead days to find matching events (0 = N/A)</small>
+                <div class="form-row">
+                    <div class="form-group half">
+                        <label>Trigger Category *</label>
+                        <select id="fu-tpl-category" class="form-control" onchange="(function(v){ var c=document.getElementById('fu-cps-fields'); if(c) c.style.display = v==='after_cps'?'block':'none'; })(this.value)">
+                            <option value="after_cps" ${tpl.trigger_category === 'after_cps' ? 'selected' : ''}>After CPS Consultation</option>
+                            <option value="on_event_attendance" ${tpl.trigger_category === 'on_event_attendance' ? 'selected' : ''}>On Event Attendance</option>
+                            <option value="on_apu_photo" ${tpl.trigger_category === 'on_apu_photo' ? 'selected' : ''}>On APU Photo Upload</option>
+                            <option value="on_birthday" ${tpl.trigger_category === 'on_birthday' ? 'selected' : ''}>On Birthday</option>
+                        </select>
+                    </div>
+                    <div class="form-group half">
+                        <label>Sort Order</label>
+                        <input type="number" id="fu-tpl-sort" class="form-control" value="${tpl.sort_order || 0}" min="0">
+                    </div>
                 </div>
+                <div class="form-group">
+                    <label>Event Keywords <small style="color:var(--gray-500);">(comma-separated, matched against event title)</small></label>
+                    <input type="text" id="fu-tpl-keywords" class="form-control" value="${(tpl.event_keywords || '').replace(/"/g, '&quot;')}" placeholder="e.g. 9 star,nine star,九星">
+                </div>
+                <div id="fu-cps-fields" style="display:${isAfterCps ? 'block' : 'none'};">
+                    <div class="form-row">
+                        <div class="form-group half">
+                            <label>CPS Interest Match <small style="color:var(--gray-500);">(comma-separated)</small></label>
+                            <input type="text" id="fu-tpl-interest" class="form-control" value="${(tpl.cps_interest_match || '').replace(/"/g, '&quot;')}" placeholder="e.g. 个人改命">
+                        </div>
+                        <div class="form-group half">
+                            <label>Solution Match <small style="color:var(--gray-500);">(comma-separated)</small></label>
+                            <input type="text" id="fu-tpl-solution" class="form-control" value="${(tpl.solution_match || '').replace(/"/g, '&quot;')}" placeholder="e.g. power ring">
+                        </div>
+                    </div>
+                    <small style="color:var(--gray-500); font-size:11px; display:block; margin-bottom:12px;">Leave both empty to fire on every CPS consultation. If either matches, the trigger fires.</small>
+                </div>
+                <div class="form-group">
+                    <label>Description</label>
+                    <input type="text" id="fu-tpl-desc" class="form-control" value="${(tpl.description || '').replace(/"/g, '&quot;')}" placeholder="Short description of when this trigger fires">
+                </div>
+                <div class="form-group">
+                    <label>Message Template *</label>
+                    <textarea id="fu-tpl-message" class="form-control" rows="5" style="white-space:pre-wrap;">${tpl.message_template || ''}</textarea>
+                    <small style="color:var(--gray-500); font-size:11px;">Variables: {name}, {date}, {time}, {venue}, {event_name}, {agent_name}</small>
+                </div>
+                <div class="form-row">
+                    <div class="form-group half">
+                        <label>Delay Days</label>
+                        <input type="number" id="fu-tpl-delay" class="form-control" value="${tpl.delay_days || 0}" min="0" max="90">
+                    </div>
+                    <div class="form-group half">
+                        <label>Event Window (days)</label>
+                        <input type="number" id="fu-tpl-window" class="form-control" value="${tpl.event_window_days || 0}" min="0" max="90">
+                    </div>
+                </div>
+                ${!tpl.id ? `
+                <div class="form-group">
+                    <label>Trigger Type Slug <small style="color:var(--gray-500);">(unique identifier, lowercase)</small></label>
+                    <input type="text" id="fu-tpl-slug" class="form-control" value="" placeholder="e.g. custom_my_trigger">
+                </div>` : ''}
             </div>
         `;
+    };
 
-        UI.showModal('Edit Follow-Up Template', content, [
+    // Read form values into data object
+    const _readTriggerForm = () => {
+        const name = document.getElementById('fu-tpl-name')?.value?.trim();
+        const message = document.getElementById('fu-tpl-message')?.value;
+        if (!name || !message) { UI.toast.error('Name and message template are required'); return null; }
+        return {
+            template_name: name,
+            icon: document.getElementById('fu-tpl-icon')?.value?.trim() || '📩',
+            trigger_category: document.getElementById('fu-tpl-category')?.value || 'after_cps',
+            sort_order: parseInt(document.getElementById('fu-tpl-sort')?.value) || 0,
+            event_keywords: document.getElementById('fu-tpl-keywords')?.value?.trim() || '',
+            cps_interest_match: document.getElementById('fu-tpl-interest')?.value?.trim() || '',
+            solution_match: document.getElementById('fu-tpl-solution')?.value?.trim() || '',
+            description: document.getElementById('fu-tpl-desc')?.value?.trim() || '',
+            message_template: message,
+            delay_days: parseInt(document.getElementById('fu-tpl-delay')?.value) || 0,
+            event_window_days: parseInt(document.getElementById('fu-tpl-window')?.value) || 0,
+            updated_at: new Date().toISOString()
+        };
+    };
+
+    const openAddTriggerModal = () => {
+        UI.showModal('Add Follow-Up Trigger', _buildTriggerFormHtml(), [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save', type: 'primary', action: `(async () => { await app.saveFollowUpTemplate(${templateId}); })()` }
+            { label: 'Save', type: 'primary', action: `(async () => { await app.saveNewTrigger(); })()` }
         ]);
     };
 
-    const saveFollowUpTemplate = async (templateId) => {
-        const name = document.getElementById('fu-tpl-name')?.value?.trim();
-        const message = document.getElementById('fu-tpl-message')?.value;
-        const delay = parseInt(document.getElementById('fu-tpl-delay')?.value) || 0;
-        const window_ = parseInt(document.getElementById('fu-tpl-window')?.value) || 0;
-
-        if (!name || !message) {
-            UI.toast.error('Name and message are required');
-            return;
-        }
-
+    const saveNewTrigger = async () => {
+        const data = _readTriggerForm();
+        if (!data) return;
+        const slug = (document.getElementById('fu-tpl-slug')?.value?.trim() || '').toLowerCase().replace(/[^a-z0-9_]/g, '_');
+        if (!slug) { UI.toast.error('Trigger type slug is required'); return; }
+        // Check uniqueness
+        const existing = await loadFollowUpTemplates();
+        if (existing.some(t => t.trigger_type === slug)) { UI.toast.error('A trigger with this slug already exists'); return; }
+        data.trigger_type = slug;
+        data.is_active = true;
+        data.id = Date.now();
+        data.created_at = new Date().toISOString();
         try {
-            await AppDataStore.update('follow_up_templates', templateId, {
-                template_name: name,
-                message_template: message,
-                delay_days: delay,
-                event_window_days: window_,
-                updated_at: new Date().toISOString()
-            });
+            await AppDataStore.create('follow_up_templates', data);
             invalidateFollowUpTemplatesCache();
             UI.hideModal();
-            UI.toast.success('Template saved');
+            UI.toast.success('Trigger created');
             const container = document.getElementById('marketing-tab-content');
-            if (container) container.innerHTML = await renderFollowUpAutoTab();
-        } catch (e) {
-            UI.toast.error('Failed to save: ' + (e.message || ''));
-        }
+            if (container) container.innerHTML = await renderAutomationTab();
+        } catch (e) { UI.toast.error('Failed to create: ' + (e.message || '')); }
+    };
+
+    const openEditTriggerModal = async (templateId) => {
+        const templates = await loadFollowUpTemplates();
+        const tpl = templates.find(t => t.id === templateId);
+        if (!tpl) { UI.toast.error('Template not found'); return; }
+        UI.showModal('Edit Follow-Up Trigger', _buildTriggerFormHtml(tpl), [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save', type: 'primary', action: `(async () => { await app.saveTriggerEdit(${templateId}); })()` }
+        ]);
+    };
+
+    const saveTriggerEdit = async (templateId) => {
+        const data = _readTriggerForm();
+        if (!data) return;
+        try {
+            await AppDataStore.update('follow_up_templates', templateId, data);
+            invalidateFollowUpTemplatesCache();
+            UI.hideModal();
+            UI.toast.success('Trigger saved');
+            const container = document.getElementById('marketing-tab-content');
+            if (container) container.innerHTML = await renderAutomationTab();
+        } catch (e) { UI.toast.error('Failed to save: ' + (e.message || '')); }
+    };
+
+    const deleteTrigger = async (templateId) => {
+        UI.showModal('Delete Trigger', '<p>Are you sure you want to delete this trigger? This cannot be undone.</p>', [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Delete', type: 'primary', action: `(async () => { await AppDataStore.delete('follow_up_templates', ${templateId}); app.invalidateFollowUpTemplatesCache(); UI.hideModal(); UI.toast.success('Trigger deleted'); const c = document.getElementById('marketing-tab-content'); if (c) c.innerHTML = await app.renderAutomationTab(); })()` }
+        ]);
     };
 
     // ========== PRODUCTS TAB ==========
@@ -32811,8 +33031,8 @@ const initImportDemoData = async () => {
 
         UI.hideModal();
         UI.toast.success(workflowId ? 'Workflow updated' : 'Workflow created');
-        const viewport = document.getElementById('content-viewport');
-        if (viewport) await showWorkflowAutomationView(viewport);
+        const _tabC = document.getElementById('marketing-tab-content');
+        if (_tabC) _tabC.innerHTML = await renderAutomationTab();
     };
 
     const createWorkflowFromTemplate = async (triggerType) => {
@@ -32844,8 +33064,8 @@ const initImportDemoData = async () => {
 
         await AppDataStore.create('automation_workflows', data);
         UI.toast.success(`Workflow "${tpl.name}" created from template`);
-        const viewport = document.getElementById('content-viewport');
-        if (viewport) await showWorkflowAutomationView(viewport);
+        const _tabC2 = document.getElementById('marketing-tab-content');
+        if (_tabC2) _tabC2.innerHTML = await renderAutomationTab();
     };
 
     const toggleWorkflow = async (workflowId) => {
@@ -32854,8 +33074,8 @@ const initImportDemoData = async () => {
         const newStatus = wf.status === 'active' ? 'paused' : 'active';
         await AppDataStore.update('automation_workflows', workflowId, { status: newStatus });
         UI.toast.success(`Workflow ${newStatus === 'active' ? 'activated' : 'paused'}`);
-        const viewport = document.getElementById('content-viewport');
-        if (viewport) await showWorkflowAutomationView(viewport);
+        const _tabC3 = document.getElementById('marketing-tab-content');
+        if (_tabC3) _tabC3.innerHTML = await renderAutomationTab();
     };
 
     const editWorkflow = async (workflowId) => {
@@ -32865,7 +33085,7 @@ const initImportDemoData = async () => {
     const deleteWorkflow = async (workflowId) => {
         UI.showModal('Delete Workflow', '<p>Are you sure you want to delete this workflow?</p>', [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Delete', type: 'primary', action: `(async () => { await AppDataStore.delete('automation_workflows', ${workflowId}); UI.hideModal(); UI.toast.success('Workflow deleted'); const vp = document.getElementById('content-viewport'); if (vp) await app.showWorkflowAutomationView(vp); })()` }
+            { label: 'Delete', type: 'primary', action: `(async () => { await AppDataStore.delete('automation_workflows', ${workflowId}); UI.hideModal(); UI.toast.success('Workflow deleted'); const tc = document.getElementById('marketing-tab-content'); if (tc) tc.innerHTML = await app.renderAutomationTab(); })()` }
         ]);
     };
 
@@ -34258,19 +34478,22 @@ const initImportDemoData = async () => {
         downloadVersion,
         restoreVersion,
 
-        // Follow-Up Automation
+        // Follow-Up Automation (data-driven)
         renderFollowUpReminders,
         markFollowUpSent,
         dismissFollowUp,
-        triggerCps9StarFollowUp,
-        triggerCpsFengshuiFollowUp,
-        triggerApuFollowUp,
-        triggerDiyReviewFollowUp,
-        triggerBirthdayFollowUps,
-        renderFollowUpAutoTab,
+        dispatchAfterCpsTriggers,
+        dispatchOnEventAttendanceTriggers,
+        dispatchOnApuPhotoTriggers,
+        dispatchBirthdayTriggers,
+        renderAutomationTab,
         toggleFollowUpTemplate,
-        openEditFollowUpTemplateModal,
-        saveFollowUpTemplate,
+        invalidateFollowUpTemplatesCache,
+        openAddTriggerModal,
+        openEditTriggerModal,
+        saveTriggerEdit,
+        saveNewTrigger,
+        deleteTrigger,
 
         // Phase 12 Marketing Functions
         showMonthlyPromotionView,
@@ -34542,7 +34765,8 @@ const initImportDemoData = async () => {
                 if (typeof showRankingPerformanceView === 'function') await showRankingPerformanceView(viewport);
                 break;
             case 'workflows':
-                if (typeof showWorkflowAutomationView === 'function') await showWorkflowAutomationView(viewport);
+                _currentMarketingTab = 'automation';
+                if (typeof showMarketingAutomationView === 'function') await showMarketingAutomationView(viewport);
                 break;
             case 'milestones':
                 if (typeof showMilestonesView === 'function') await showMilestonesView(viewport);
