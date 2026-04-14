@@ -52,7 +52,9 @@ class DataStore {
             // Marketing list sub-catalogs
             'bujishu', 'formula',
             // Formula Healthcare refill reminder system
-            'refill_reminders'
+            'refill_reminders',
+            // Egg Purchasing system (Super Admin only)
+            'egg_processed_orders', 'egg_urgent_orders', 'egg_config', 'egg_run_history'
         ];
         this.initialized = false;
         this._events = {};

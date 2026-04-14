@@ -3155,7 +3155,7 @@ In a production system, this would show the actual file contents.
     const _getAllowedNavIds = () => {
         const _l12 = ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'reports', 'documents', 'settings', 'fude', 'milestones'];
         const perms = {
-            1: ['calendar','prospects','referrals','pipeline','promotions','marketing-automation','marketing-lists','cases','agents','performance','reports','risk','ai-insights','security','admin','protection','documents','import','integrations','settings','fude','milestones','lead_forms','surveys','contracts','custom_fields','booking_settings'],
+            1: ['calendar','prospects','referrals','pipeline','promotions','marketing-automation','marketing-lists','cases','agents','performance','reports','risk','ai-insights','security','admin','protection','documents','import','integrations','settings','fude','milestones','lead_forms','surveys','contracts','custom_fields','booking_settings','egg-purchasing'],
             2: ['calendar','prospects','referrals','pipeline','promotions','marketing-automation','marketing-lists','cases','agents','performance','reports','risk','ai-insights','security','admin','protection','documents','import','integrations','settings','fude','milestones','lead_forms','surveys','contracts','custom_fields','booking_settings'],
             3: ['calendar','prospects','referrals','pipeline','promotions','cases','performance','reports','protection','documents','settings','fude'],
             4: ['calendar','prospects','referrals','pipeline','promotions','cases','performance','reports','protection','documents','settings','fude'],
@@ -6234,7 +6234,7 @@ In a production system, this would show the actual file contents.
         // Map Level 1-14 to visible nav IDs (suffix after 'nav-')
         const _l12 = ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'reports', 'documents', 'settings', 'fude', 'milestones'];
         const levelPermissions = {
-            1: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'import', 'integrations', 'settings', 'fude', 'milestones', 'custom_fields'],
+            1: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'import', 'integrations', 'settings', 'fude', 'milestones', 'custom_fields', 'egg-purchasing'],
             2: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'import', 'integrations', 'settings', 'fude', 'milestones', 'custom_fields'],
             3: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'performance', 'reports', 'protection', 'documents', 'settings', 'fude'],
             4: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'performance', 'reports', 'protection', 'documents', 'settings', 'fude'],
@@ -6273,7 +6273,7 @@ In a production system, this would show the actual file contents.
             'cases', 'documents', 'import', 'promotions', 'marketing-automation', 'marketing-lists',
             'performance', 'reports', 'risk', 'admin',
             'integrations', 'settings', 'milestones', 'fude',
-            'custom_fields'
+            'custom_fields', 'egg-purchasing'
         ];
 
         allNavIds.forEach(id => {
@@ -8136,6 +8136,15 @@ function _wireLoginBtn() {
         } else if (viewId === 'fude') {
             _currentView = 'fude';
             await showFudeView(viewport);
+        } else if (viewId === 'egg_purchasing') {
+            // Super Admin only gate — bounce non-admins to calendar
+            if (!isSystemAdmin(_currentUser)) {
+                UI.toast.error('Super Admin only');
+                await navigateTo('calendar');
+                return;
+            }
+            _currentView = 'egg_purchasing';
+            await showEggPurchasingView(viewport);
         } else {
             viewport.innerHTML = `
                 <div class="placeholder-view">
@@ -34296,6 +34305,1646 @@ const initImportDemoData = async () => {
         }
     };
 
+    // ==================== EGG PURCHASING SYSTEM (Super Admin only) ====================
+    // Weekly farm order generation: ingest CSV + XLSX invoices, dedupe against
+    // history, reconcile late-arriving "urgent" orders manually, render the
+    // Chinese farm order text + KL/PG wholesale/online breakdown, persist to
+    // Supabase. Full design captured in conversation at 2026-04-14.
+    //
+    // Run flow (Tab 1) is a 3-phase wizard where NOTHING hits the database
+    // until Commit in Phase 3, so the user can always discard and redo.
+
+    let _eggState = {
+        currentTab: 'run',
+        currentPhase: 1,
+        weekStartDate: null,
+        csvFile: null, csvRows: [], csvHeaders: [],
+        xlsxFile: null, xlsxRows: [], xlsxHeaders: [],
+        normalizedRows: [],     // all rows after filter/map, before dedup
+        newRows: [],            // rows not yet in processed_orders history
+        urgentOrders: [],       // pending/applied urgents from recent weeks (from DB)
+        matches: [],            // [{ urgentKey, candidateKey, strength }]
+        excludedKeys: new Set(),// unique_keys marked to exclude
+        excludedToUrgent: {},   // unique_key -> urgent id (for reconciliation linking)
+        config: null,
+        farmOrderText: '',
+        channelBreakdownText: '',
+        stats: {}
+    };
+
+    // --- Date helpers ---
+    const eggGetCurrentMonday = () => {
+        const now = new Date();
+        const day = now.getDay();  // 0=Sun, 1=Mon, ... 6=Sat
+        const offset = day === 0 ? -6 : 1 - day;
+        const mon = new Date(now);
+        mon.setDate(now.getDate() + offset);
+        mon.setHours(0, 0, 0, 0);
+        return mon;
+    };
+
+    const eggFormatDateShort = (d) => {
+        if (!d) return '';
+        const dt = d instanceof Date ? d : new Date(d);
+        if (isNaN(dt)) return '';
+        return `${String(dt.getDate()).padStart(2,'0')}/${String(dt.getMonth()+1).padStart(2,'0')}/${String(dt.getFullYear()).slice(2)}`;
+    };
+
+    const eggFormatDateIso = (d) => {
+        if (!d) return '';
+        const dt = d instanceof Date ? d : new Date(d);
+        if (isNaN(dt)) return '';
+        return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+    };
+
+    const eggParseFlexibleDate = (val) => {
+        if (val == null || val === '') return null;
+        if (val instanceof Date) return isNaN(val) ? null : val;
+        // Excel serial number (days since 1899-12-30 epoch)
+        if (typeof val === 'number') {
+            const d = new Date(Math.round((val - 25569) * 86400 * 1000));
+            return isNaN(d) ? null : d;
+        }
+        const s = String(val).trim();
+        if (!s) return null;
+        // Try dd/mm/yyyy [HH:MM[:SS]]
+        let m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})(?:[\s,T]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+        if (m) {
+            let [, d, mo, y, hh, mm, ss] = m;
+            let year = y.length === 2 ? 2000 + parseInt(y, 10) : parseInt(y, 10);
+            return new Date(year, parseInt(mo,10)-1, parseInt(d,10), parseInt(hh||0,10), parseInt(mm||0,10), parseInt(ss||0,10));
+        }
+        // Try ISO / native parsing
+        const iso = new Date(s);
+        return isNaN(iso) ? null : iso;
+    };
+
+    const eggNormalizeAgentName = (name) => {
+        if (!name) return '';
+        return String(name).trim().toLowerCase().replace(/\s+/g, ' ');
+    };
+
+    // --- Config ---
+    const eggDefaultConfig = () => ({
+        region_mapping: [
+            { keyword: 'Bay Avenue, PG', region: 'PG' },
+            { keyword: 'Pavillion 2', region: 'KL' },
+            { keyword: 'Formula2u, MBB', region: 'IGNORE' },
+            { keyword: 'MBB', region: 'IGNORE' }
+        ],
+        ignore_jb_king: true,
+        ignore_jb_gold: true,
+        product_mapping: {
+            'GOLD FRESH HEALTH PLUS EGG': 'GOLD',
+            'KING EGGS': 'KING',
+            'KIN EGGS': 'KING'
+        },
+        wholesale_groups: ['Kim','June','NDV','Liew','Hui Chin','Darren','Sampson'],
+        default_region_fallback: 'KL',
+        watch_window_weeks: 4
+    });
+
+    const eggLoadConfig = async () => {
+        try {
+            const rows = await AppDataStore.query('egg_config', { id: 1 });
+            if (rows && rows.length > 0 && rows[0].data) {
+                _eggState.config = rows[0].data;
+                return _eggState.config;
+            }
+        } catch (err) {
+            console.warn('egg: failed to load config, using defaults', err);
+        }
+        _eggState.config = eggDefaultConfig();
+        return _eggState.config;
+    };
+
+    const eggSaveConfig = async (newConfig) => {
+        try {
+            const rows = await AppDataStore.query('egg_config', { id: 1 });
+            const payload = {
+                data: newConfig,
+                updated_at: new Date().toISOString(),
+                updated_by: _currentUser?.full_name || _currentUser?.email || 'unknown'
+            };
+            if (rows && rows.length > 0) {
+                await AppDataStore.update('egg_config', rows[0].id, payload);
+            } else {
+                await AppDataStore.create('egg_config', { id: 1, ...payload });
+            }
+            _eggState.config = newConfig;
+            UI.toast.success('Configuration saved');
+        } catch (err) {
+            console.error('egg: save config failed', err);
+            UI.toast.error('Failed to save config: ' + (err.message || 'unknown'));
+        }
+    };
+
+    // --- File parsing ---
+    const eggReadFile = (file) => new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target.result);
+        reader.onerror = () => reject(new Error('File read failed'));
+        if (file.name.toLowerCase().endsWith('.csv')) reader.readAsText(file, 'UTF-8');
+        else reader.readAsArrayBuffer(file);
+    });
+
+    const eggParseCsv = async (file) => {
+        const text = await eggReadFile(file);
+        const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
+        return { headers: parsed.meta.fields || [], rows: parsed.data };
+    };
+
+    const eggParseXlsx = async (file) => {
+        const buf = await eggReadFile(file);
+        const wb = XLSX.read(buf, { type: 'array', cellDates: true });
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+        const headers = rows.length > 0 ? Object.keys(rows[0]) : [];
+        return { headers, rows };
+    };
+
+    // --- Row normalization (map CSV + XLSX to a common shape) ---
+    // Standard shape: { order_no, product_name, quantity, outlet, order_date, group_name, state, agent_name, source }
+    const eggGetField = (row, candidates) => {
+        for (const key of candidates) {
+            if (row[key] != null && row[key] !== '') return row[key];
+            // Case-insensitive fallback
+            const found = Object.keys(row).find(k => k.toLowerCase().trim() === key.toLowerCase());
+            if (found && row[found] != null && row[found] !== '') return row[found];
+        }
+        return '';
+    };
+
+    const eggNormalizeCsvRow = (row) => ({
+        order_no: String(eggGetField(row, ['Order No.', 'Order No', 'OrderNo', 'order_no'])).trim(),
+        product_name: String(eggGetField(row, ['Product Name', 'product_name', 'Product'])).trim(),
+        quantity: Number(eggGetField(row, ['Quantity', 'Qty', 'quantity'])) || 0,
+        outlet: String(eggGetField(row, ['Self Collection', 'Outlet', 'Outlet Name', 'outlet'])).trim(),
+        order_date: eggGetField(row, ['Order Date', 'order_date', 'Date']),
+        group_name: String(eggGetField(row, ['Group', 'Group Name', 'group_name'])).trim(),
+        state: String(eggGetField(row, ['States', 'State', 'state'])).trim(),
+        agent_name: String(eggGetField(row, ['Full Name', 'Agent Name', 'Purchase To', 'agent_name'])).trim(),
+        source: 'CSV'
+    });
+
+    const eggNormalizeXlsxRow = (row) => ({
+        order_no: String(eggGetField(row, ['Purchase Number', 'Order No.', 'order_no', 'Purchase No'])).trim(),
+        product_name: String(eggGetField(row, ['Product Name', 'product_name'])).trim(),
+        quantity: Number(eggGetField(row, ['Product Quantity', 'Quantity', 'Qty', 'quantity'])) || 0,
+        outlet: String(eggGetField(row, ['Outlet Name', 'Outlet', 'Self Collection', 'outlet'])).trim(),
+        order_date: eggGetField(row, ['Purchase Date Time', 'Order Date', 'Purchase Date', 'order_date']),
+        group_name: String(eggGetField(row, ['Group Name', 'Group', 'group_name'])).trim(),
+        state: String(eggGetField(row, ['States', 'State', 'state'])).trim(),
+        agent_name: String(eggGetField(row, ['Purchase To', 'Full Name', 'Agent Name', 'agent_name'])).trim(),
+        source: 'EXCEL'
+    });
+
+    // --- Region / product / channel mapping ---
+    // All three accept `config` defensively — if called before config is loaded,
+    // they fall back to sensible defaults instead of throwing.
+    const eggAssignRegion = (outlet, state, config) => {
+        const cfg = config || {};
+        const outletStr = String(outlet || '').toLowerCase();
+        for (const rule of (cfg.region_mapping || [])) {
+            if (outletStr.includes(String(rule.keyword).toLowerCase())) {
+                return rule.region;
+            }
+        }
+        // Fallback via state
+        if (state && /johor/i.test(state)) return 'JB';
+        return cfg.default_region_fallback || 'KL';
+    };
+
+    const eggMapProduct = (productName, config) => {
+        const cfg = config || {};
+        const name = String(productName || '').trim();
+        const mapping = cfg.product_mapping || {};
+        for (const key of Object.keys(mapping)) {
+            if (name.toUpperCase().includes(key.toUpperCase())) {
+                return mapping[key];
+            }
+        }
+        return 'UNKNOWN';
+    };
+
+    const eggClassifyChannel = (groupName, config) => {
+        if (!groupName) return 'Online';
+        const cfg = config || {};
+        const g = String(groupName).trim();
+        const wholesale = (cfg.wholesale_groups || []).some(w => g.toLowerCase().includes(String(w).toLowerCase()));
+        return wholesale ? 'Wholesale' : 'Online';
+    };
+
+    const eggBuildUniqueKey = (r) => `${r.order_no || '-'}_${r.product}_${r.quantity}_${r.region}`;
+
+    // --- Pipeline step: filter + map all raw rows to the standard shape, apply drop rules ---
+    const eggProcessRows = (rawRows, config) => {
+        const now = new Date();
+        const out = [];
+        const seenInBatch = new Set();  // in-batch dedup: prevent same row appearing in both CSV + XLSX
+        let droppedDupes = 0;
+        for (const r of rawRows) {
+            // Product mapping first (needed for JB drop rule)
+            const product = eggMapProduct(r.product_name, config);
+            if (!['GOLD', 'KING'].includes(product)) continue;
+
+            // Region
+            const region = eggAssignRegion(r.outlet, r.state, config);
+            if (region === 'IGNORE') continue;
+
+            // Drop JB entirely (both GOLD and KING)
+            if (region === 'JB') {
+                if (product === 'KING' && config.ignore_jb_king) continue;
+                if (product === 'GOLD' && config.ignore_jb_gold) continue;
+            }
+
+            // Quantity sanity
+            const qty = Number(r.quantity) || 0;
+            if (qty <= 0) continue;
+
+            // Date filter: only include orders with date <= now
+            const od = eggParseFlexibleDate(r.order_date);
+            // If date is unparseable, include it (don't drop) — better to show than hide
+            if (od && od > now) continue;
+
+            const channel = eggClassifyChannel(r.group_name, config);
+            const normalized = {
+                ...r,
+                product,
+                region,
+                quantity: qty,
+                channel,
+                order_date_parsed: od ? od.toISOString() : null
+            };
+            normalized.unique_key = eggBuildUniqueKey(normalized);
+
+            // In-batch dedup — CSV + XLSX might both contain the same physical order line
+            if (seenInBatch.has(normalized.unique_key)) { droppedDupes++; continue; }
+            seenInBatch.add(normalized.unique_key);
+
+            out.push(normalized);
+        }
+        _eggState.droppedDupes = droppedDupes;
+        return out;
+    };
+
+    // --- Load urgent orders from recent weeks (pending + applied) ---
+    const eggLoadRecentUrgents = async () => {
+        try {
+            // Query all urgents with status pending or applied — filter by week window in JS
+            // (AppDataStore.query uses equality matches; we want an IN-list so we'll fetch pending + applied separately)
+            const [pending, applied] = await Promise.all([
+                AppDataStore.query('egg_urgent_orders', { status: 'pending' }),
+                AppDataStore.query('egg_urgent_orders', { status: 'applied' })
+            ]);
+            const all = [...(pending||[]), ...(applied||[])];
+            // Keep only urgents from within watch_window_weeks of the selected week
+            const watchWeeks = (_eggState.config && _eggState.config.watch_window_weeks) || 4;
+            const cutoff = new Date(_eggState.weekStartDate || eggGetCurrentMonday());
+            cutoff.setDate(cutoff.getDate() - watchWeeks * 7);
+            return all.filter(u => {
+                if (!u.week_start_date) return true;
+                return new Date(u.week_start_date) >= cutoff;
+            }).sort((a,b) => String(b.week_start_date||'').localeCompare(String(a.week_start_date||'')));
+        } catch (err) {
+            console.error('egg: load urgents failed', err);
+            return [];
+        }
+    };
+
+    // --- Dedup against processed_orders history ---
+    const eggDedupAgainstHistory = async (rows) => {
+        try {
+            // Fetch unique_keys for rows we care about. Getting all is simplest.
+            const history = await AppDataStore.query('egg_processed_orders', {});
+            const seen = new Set((history||[]).filter(h => !h.excluded_reason).map(h => h.unique_key));
+            return rows.filter(r => !seen.has(r.unique_key));
+        } catch (err) {
+            console.error('egg: dedup failed, returning all rows', err);
+            return rows;
+        }
+    };
+
+    // --- Aggregate for farm order text ---
+    const eggAggregate = (rows) => {
+        const sum = { KL: { GOLD: 0, KING: 0 }, PG: { GOLD: 0, KING: 0 } };
+        for (const r of rows) {
+            if (!sum[r.region]) continue;
+            if (!sum[r.region][r.product]) sum[r.region][r.product] = 0;
+            sum[r.region][r.product] += Number(r.quantity) || 0;
+        }
+        return sum;
+    };
+
+    const eggAggregateByChannel = (rows) => {
+        const sum = {
+            KL: { Wholesale: { GOLD:0, KING:0 }, Online: { GOLD:0, KING:0 } },
+            PG: { Wholesale: { GOLD:0, KING:0 }, Online: { GOLD:0, KING:0 } }
+        };
+        for (const r of rows) {
+            if (!sum[r.region]) continue;
+            if (!sum[r.region][r.channel]) continue;
+            sum[r.region][r.channel][r.product] = (sum[r.region][r.channel][r.product]||0) + (Number(r.quantity)||0);
+        }
+        return sum;
+    };
+
+    // --- Farm order text renderers ---
+    const eggRenderFarmOrderText = (summary, dateObj) => {
+        const d = eggFormatDateShort(dateObj || new Date());
+        // NOTE: JB values are MANUAL — the automated pipeline filters JB rows out,
+        // but the JB lines stay in the template so the super admin can type the
+        // actual JB numbers in the editable Phase 3 preview before sending to the farm.
+        return `老师好，這個星期下的单子。
+${d}
+KL
+KINGEGGS 高鮮帝王蛋- ${summary.KL.KING || 0} carton
+GOLD FRESH HEALTH PLUS EGG 高鮮蛋 - ${summary.KL.GOLD || 0} cartons
+
+PG
+KINGEGGS 高鮮帝王蛋- ${summary.PG.KING || 0} carton
+GOLD FRESH HEALTH PLUS EGG 高鮮蛋 - ${summary.PG.GOLD || 0} cartons
+
+JB
+KINGEGGS 高鮮帝王蛋- 0 carton
+GOLD FRESH HEALTH PLUS EGG 高鮮蛋 - 0 cartons
+
+KL 星期二到
+PG 星期三到
+JB 星期二到
+`;
+    };
+
+    const eggRenderChannelBreakdown = (channelSum) => {
+        let out = '=== 批发 / 线上分类汇总 ===\n';
+        for (const region of ['KL', 'PG']) {
+            for (const ch of ['Wholesale', 'Online']) {
+                const g = channelSum[region][ch].GOLD || 0;
+                const k = channelSum[region][ch].KING || 0;
+                out += `${region} - ${ch}: GOLD ${g} cartons, KING ${k} cartons\n`;
+            }
+        }
+        return out;
+    };
+
+    // --- Match detection (for Phase 2 reconciliation highlighting) ---
+    const eggFindMatches = (newRows, urgents) => {
+        const matches = [];
+        for (const u of urgents) {
+            const uAgent = eggNormalizeAgentName(u.agent_name);
+            for (const r of newRows) {
+                const rAgent = eggNormalizeAgentName(r.agent_name);
+                if (rAgent && uAgent && rAgent === uAgent && r.product === u.product && r.region === u.region) {
+                    let strength = 'possible';
+                    if (Number(r.quantity) === Number(u.quantity)) strength = 'strong';
+                    else if (Math.abs(Number(r.quantity) - Number(u.quantity)) / Math.max(Number(u.quantity),1) <= 0.2) strength = 'weak';
+                    matches.push({ urgentId: u.id, urgentKey: `U${u.id}`, candidateKey: r.unique_key, strength });
+                }
+            }
+        }
+        return matches;
+    };
+
+    // ==================== MAIN VIEW RENDERER ====================
+
+    const showEggPurchasingView = async (container) => {
+        _currentView = 'egg_purchasing';
+        if (!isSystemAdmin(_currentUser)) {
+            container.innerHTML = `<div class="placeholder-view"><h1>Access Denied</h1><p>Egg Purchasing is restricted to Super Admin only.</p></div>`;
+            return;
+        }
+        await eggLoadConfig();
+
+        container.innerHTML = `
+            <div class="egg-purchasing-view" style="padding:24px;">
+                <div class="egg-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+                    <div>
+                        <h1 style="margin:0;display:flex;align-items:center;gap:10px;">
+                            <i class="fas fa-egg" style="color:#f59e0b;"></i> Egg Purchasing
+                        </h1>
+                        <div style="color:var(--gray-500);font-size:13px;margin-top:4px;">
+                            Weekly farm order generation. Super Admin only.
+                        </div>
+                    </div>
+                    <button class="btn secondary" onclick="app.eggRefresh()">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                </div>
+
+                <div class="egg-tabs" style="display:flex;gap:4px;border-bottom:2px solid var(--gray-200);margin-bottom:20px;">
+                    <button class="egg-tab-btn active" data-tab="run" onclick="app.eggSwitchTab('run')"
+                        style="padding:12px 20px;background:none;border:none;border-bottom:3px solid #f59e0b;font-weight:600;cursor:pointer;color:#f59e0b;">
+                        <i class="fas fa-play-circle"></i> Run This Week
+                    </button>
+                    <button class="egg-tab-btn" data-tab="urgent" onclick="app.eggSwitchTab('urgent')"
+                        style="padding:12px 20px;background:none;border:none;border-bottom:3px solid transparent;font-weight:600;cursor:pointer;color:var(--gray-600);">
+                        <i class="fas fa-bolt"></i> Urgent Orders
+                    </button>
+                    <button class="egg-tab-btn" data-tab="history" onclick="app.eggSwitchTab('history')"
+                        style="padding:12px 20px;background:none;border:none;border-bottom:3px solid transparent;font-weight:600;cursor:pointer;color:var(--gray-600);">
+                        <i class="fas fa-history"></i> Run History
+                    </button>
+                    <button class="egg-tab-btn" data-tab="config" onclick="app.eggSwitchTab('config')"
+                        style="padding:12px 20px;background:none;border:none;border-bottom:3px solid transparent;font-weight:600;cursor:pointer;color:var(--gray-600);">
+                        <i class="fas fa-cog"></i> Configuration
+                    </button>
+                </div>
+
+                <div id="egg-tab-content"></div>
+            </div>
+        `;
+
+        await eggSwitchTab(_eggState.currentTab || 'run');
+    };
+
+    const eggSwitchTab = async (tab) => {
+        _eggState.currentTab = tab;
+        document.querySelectorAll('.egg-tab-btn').forEach(btn => {
+            const isActive = btn.getAttribute('data-tab') === tab;
+            btn.classList.toggle('active', isActive);
+            btn.style.borderBottomColor = isActive ? '#f59e0b' : 'transparent';
+            btn.style.color = isActive ? '#f59e0b' : 'var(--gray-600)';
+        });
+        const host = document.getElementById('egg-tab-content');
+        if (!host) return;
+        if (tab === 'run') await eggRenderRunTab(host);
+        else if (tab === 'urgent') await eggRenderUrgentTab(host);
+        else if (tab === 'history') await eggRenderHistoryTab(host);
+        else if (tab === 'config') await eggRenderConfigTab(host);
+    };
+
+    const eggRefresh = async () => {
+        const host = document.getElementById('egg-tab-content');
+        if (host) await eggSwitchTab(_eggState.currentTab);
+    };
+
+    // ==================== TAB 1 — RUN (3-PHASE WIZARD) ====================
+
+    const eggRenderRunTab = async (host) => {
+        const phase = _eggState.currentPhase || 1;
+        if (phase === 1) return eggRenderPhase1(host);
+        if (phase === 2) return eggRenderPhase2(host);
+        if (phase === 3) return eggRenderPhase3(host);
+    };
+
+    const eggRenderPhase1 = (host) => {
+        const weekIso = eggFormatDateIso(_eggState.weekStartDate || eggGetCurrentMonday());
+        const csvInfo = _eggState.csvFile ? `<div style="color:#059669;"><i class="fas fa-check-circle"></i> ${_eggState.csvFile.name} — ${_eggState.csvRows.length} rows</div>` : '<div style="color:var(--gray-400);">No file selected</div>';
+        const xlsInfo = _eggState.xlsxFile ? `<div style="color:#059669;"><i class="fas fa-check-circle"></i> ${_eggState.xlsxFile.name} — ${_eggState.xlsxRows.length} rows</div>` : '<div style="color:var(--gray-400);">No file selected</div>';
+        const ready = _eggState.csvFile && _eggState.xlsxFile;
+
+        host.innerHTML = `
+            <div class="egg-phase-banner" style="display:flex;gap:8px;margin-bottom:20px;">
+                <div style="flex:1;padding:10px;background:#fef3c7;border-left:4px solid #f59e0b;border-radius:6px;">
+                    <strong>Phase 1:</strong> Upload
+                </div>
+                <div style="flex:1;padding:10px;background:var(--gray-100);border-left:4px solid var(--gray-300);border-radius:6px;color:var(--gray-500);">
+                    <strong>Phase 2:</strong> Reconcile
+                </div>
+                <div style="flex:1;padding:10px;background:var(--gray-100);border-left:4px solid var(--gray-300);border-radius:6px;color:var(--gray-500);">
+                    <strong>Phase 3:</strong> Preview &amp; Commit
+                </div>
+            </div>
+
+            <div style="background:white;padding:24px;border-radius:12px;border:1px solid var(--gray-200);">
+                <h3 style="margin-top:0;">Upload Invoice Files</h3>
+                <p style="color:var(--gray-500);font-size:13px;">Drop both files below. CSV is the Order Tracking Details export, XLSX is the Download Egg Order file.</p>
+
+                <div style="margin:16px 0;">
+                    <label style="font-weight:600;display:block;margin-bottom:6px;">Week Start (Monday)</label>
+                    <input type="date" id="egg-week-start" value="${weekIso}" onchange="app.eggSetWeekStart(this.value)"
+                        style="padding:8px 12px;border:1px solid var(--gray-300);border-radius:6px;font-size:14px;">
+                    <span style="color:var(--gray-500);font-size:12px;margin-left:10px;">This identifies which urgent orders to pull for reconciliation.</span>
+                </div>
+
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px;">
+                    <div class="egg-drop-zone" id="egg-drop-csv" style="padding:24px;border:2px dashed var(--gray-300);border-radius:8px;text-align:center;cursor:pointer;"
+                        ondragover="event.preventDefault();this.style.borderColor='#f59e0b';"
+                        ondragleave="this.style.borderColor='var(--gray-300)';"
+                        ondrop="event.preventDefault();this.style.borderColor='var(--gray-300)';app.eggHandleCsvDrop(event);"
+                        onclick="document.getElementById('egg-csv-input').click();">
+                        <i class="fas fa-file-csv" style="font-size:32px;color:#10b981;margin-bottom:10px;"></i>
+                        <div style="font-weight:600;">Order Tracking Details (.csv)</div>
+                        <div style="color:var(--gray-500);font-size:12px;margin:6px 0;">Drop file here or click to browse</div>
+                        ${csvInfo}
+                        <input type="file" id="egg-csv-input" accept=".csv" style="display:none;" onchange="app.eggHandleCsvInput(event)">
+                    </div>
+
+                    <div class="egg-drop-zone" id="egg-drop-xlsx" style="padding:24px;border:2px dashed var(--gray-300);border-radius:8px;text-align:center;cursor:pointer;"
+                        ondragover="event.preventDefault();this.style.borderColor='#f59e0b';"
+                        ondragleave="this.style.borderColor='var(--gray-300)';"
+                        ondrop="event.preventDefault();this.style.borderColor='var(--gray-300)';app.eggHandleXlsxDrop(event);"
+                        onclick="document.getElementById('egg-xlsx-input').click();">
+                        <i class="fas fa-file-excel" style="font-size:32px;color:#059669;margin-bottom:10px;"></i>
+                        <div style="font-weight:600;">Download Egg Order (.xlsx)</div>
+                        <div style="color:var(--gray-500);font-size:12px;margin:6px 0;">Drop file here or click to browse</div>
+                        ${xlsInfo}
+                        <input type="file" id="egg-xlsx-input" accept=".xlsx,.xls" style="display:none;" onchange="app.eggHandleXlsxInput(event)">
+                    </div>
+                </div>
+
+                <div style="margin-top:24px;display:flex;justify-content:space-between;align-items:center;">
+                    <button class="btn secondary" onclick="app.eggResetRun()">
+                        <i class="fas fa-redo"></i> Reset
+                    </button>
+                    <button class="btn primary" onclick="app.eggGoToPhase2()" ${ready ? '' : 'disabled'}
+                        style="${ready ? '' : 'opacity:0.5;cursor:not-allowed;'}">
+                        Next: Reconcile <i class="fas fa-arrow-right"></i>
+                    </button>
+                </div>
+            </div>
+        `;
+    };
+
+    const eggSetWeekStart = (iso) => {
+        // Parse as LOCAL date (not UTC) to avoid off-by-day bugs in non-UTC+8 timezones.
+        // `new Date("2026-04-13")` is UTC midnight; we want local midnight instead.
+        if (!iso) { _eggState.weekStartDate = null; return; }
+        const parts = String(iso).split('-').map(Number);
+        if (parts.length !== 3 || parts.some(isNaN)) { _eggState.weekStartDate = null; return; }
+        _eggState.weekStartDate = new Date(parts[0], parts[1] - 1, parts[2]);
+    };
+
+    const eggHandleCsvDrop = async (event) => {
+        const file = event.dataTransfer.files[0];
+        if (file) await eggLoadCsvFile(file);
+    };
+    const eggHandleCsvInput = async (event) => {
+        const file = event.target.files[0];
+        if (file) await eggLoadCsvFile(file);
+    };
+    const eggLoadCsvFile = async (file) => {
+        if (!file.name.toLowerCase().endsWith('.csv')) {
+            UI.toast.error('Please drop a .csv file');
+            // Reset file input so user can re-pick
+            const inp = document.getElementById('egg-csv-input'); if (inp) inp.value = '';
+            return;
+        }
+        try {
+            const { headers, rows } = await eggParseCsv(file);
+            _eggState.csvFile = file;
+            _eggState.csvHeaders = headers;
+            _eggState.csvRows = rows;
+            UI.toast.success(`CSV loaded: ${rows.length} rows`);
+            await eggRenderRunTab(document.getElementById('egg-tab-content'));
+        } catch (err) {
+            UI.toast.error('CSV parse failed: ' + err.message);
+            const inp = document.getElementById('egg-csv-input'); if (inp) inp.value = '';
+        }
+    };
+
+    const eggHandleXlsxDrop = async (event) => {
+        const file = event.dataTransfer.files[0];
+        if (file) await eggLoadXlsxFile(file);
+    };
+    const eggHandleXlsxInput = async (event) => {
+        const file = event.target.files[0];
+        if (file) await eggLoadXlsxFile(file);
+    };
+    const eggLoadXlsxFile = async (file) => {
+        const lower = file.name.toLowerCase();
+        if (!lower.endsWith('.xlsx') && !lower.endsWith('.xls')) {
+            UI.toast.error('Please drop a .xlsx file');
+            const inp = document.getElementById('egg-xlsx-input'); if (inp) inp.value = '';
+            return;
+        }
+        try {
+            const { headers, rows } = await eggParseXlsx(file);
+            _eggState.xlsxFile = file;
+            _eggState.xlsxHeaders = headers;
+            _eggState.xlsxRows = rows;
+            UI.toast.success(`XLSX loaded: ${rows.length} rows`);
+            await eggRenderRunTab(document.getElementById('egg-tab-content'));
+        } catch (err) {
+            UI.toast.error('XLSX parse failed: ' + err.message);
+            const inp = document.getElementById('egg-xlsx-input'); if (inp) inp.value = '';
+        }
+    };
+
+    const eggResetRun = () => {
+        _eggState.csvFile = null; _eggState.csvRows = []; _eggState.csvHeaders = [];
+        _eggState.xlsxFile = null; _eggState.xlsxRows = []; _eggState.xlsxHeaders = [];
+        _eggState.normalizedRows = [];
+        _eggState.newRows = [];
+        _eggState.urgentOrders = [];
+        _eggState.matches = [];
+        _eggState.excludedKeys = new Set();
+        _eggState.excludedToUrgent = {};
+        _eggState.farmOrderText = '';
+        _eggState.channelBreakdownText = '';
+        _eggState.stats = {};
+        _eggState.droppedDupes = 0;
+        _eggState.currentPhase = 1;
+        // Reset any live file inputs so the same file can be re-picked
+        const csvInp = document.getElementById('egg-csv-input'); if (csvInp) csvInp.value = '';
+        const xlsInp = document.getElementById('egg-xlsx-input'); if (xlsInp) xlsInp.value = '';
+        eggRenderRunTab(document.getElementById('egg-tab-content'));
+    };
+
+    const eggGoToPhase2 = async () => {
+        if (!_eggState.csvFile || !_eggState.xlsxFile) {
+            UI.toast.error('Upload both files first');
+            return;
+        }
+        UI.toast.info('Processing rows...');
+
+        // Defensive: ensure config is loaded. Normally showEggPurchasingView loads
+        // it on tab entry, but race conditions during page init can leave it null.
+        if (!_eggState.config) await eggLoadConfig();
+
+        // Normalize and filter
+        const csvNorm = _eggState.csvRows.map(eggNormalizeCsvRow);
+        const xlsNorm = _eggState.xlsxRows.map(eggNormalizeXlsxRow);
+        const combined = [...csvNorm, ...xlsNorm];
+        const config = _eggState.config;
+        const processed = eggProcessRows(combined, config);
+
+        // Dedup against history
+        const newRows = await eggDedupAgainstHistory(processed);
+        _eggState.normalizedRows = processed;
+        _eggState.newRows = newRows;
+
+        // Load recent urgents for reconciliation
+        _eggState.urgentOrders = await eggLoadRecentUrgents();
+
+        // Compute matches (highlights only)
+        _eggState.matches = eggFindMatches(newRows, _eggState.urgentOrders);
+        _eggState.excludedKeys = new Set();
+        _eggState.excludedToUrgent = {};
+
+        _eggState.currentPhase = 2;
+        await eggRenderRunTab(document.getElementById('egg-tab-content'));
+    };
+
+    const eggRenderPhase2 = (host) => {
+        const newRows = _eggState.newRows || [];
+        const urgents = _eggState.urgentOrders || [];
+        const matches = _eggState.matches || [];
+        const byCandidate = {};
+        for (const m of matches) {
+            if (!byCandidate[m.candidateKey]) byCandidate[m.candidateKey] = [];
+            byCandidate[m.candidateKey].push(m);
+        }
+
+        const urgentRowsHtml = urgents.length === 0 ?
+            `<div style="padding:16px;text-align:center;color:var(--gray-500);">No urgent orders on record for the last ${(_eggState.config?.watch_window_weeks||4)} weeks.</div>` :
+            urgents.map(u => {
+                const statusColor = u.status === 'pending' ? '#f59e0b' : u.status === 'applied' ? '#3b82f6' : '#6b7280';
+                return `
+                    <tr>
+                        <td>${u.agent_name || '-'}</td>
+                        <td>${u.product}</td>
+                        <td>${u.region}</td>
+                        <td style="text-align:right;">${u.quantity}</td>
+                        <td>${u.week_start_date || '-'}</td>
+                        <td><span style="background:${statusColor};color:white;padding:2px 8px;border-radius:10px;font-size:11px;">${u.status}</span></td>
+                        <td>${u.notes || ''}</td>
+                    </tr>
+                `;
+            }).join('');
+
+        // Note: inline urgent orders (added via "Add Urgent Order" in Phase 2) are
+        // saved directly to DB and reload into _eggState.urgentOrders, so they
+        // appear in the normal urgent table above — no separate "unsaved" list needed.
+
+        const candidateRowsHtml = newRows.length === 0 ?
+            `<div style="padding:16px;text-align:center;color:var(--gray-500);">No new orders to reconcile.</div>` :
+            `<table style="width:100%;border-collapse:collapse;">
+                <thead>
+                    <tr style="background:var(--gray-50);text-align:left;">
+                        <th style="padding:8px;width:40px;"></th>
+                        <th style="padding:8px;">Agent</th>
+                        <th style="padding:8px;">Order No</th>
+                        <th style="padding:8px;">Product</th>
+                        <th style="padding:8px;">Region</th>
+                        <th style="padding:8px;text-align:right;">Qty</th>
+                        <th style="padding:8px;">Channel</th>
+                        <th style="padding:8px;">Match</th>
+                    </tr>
+                </thead>
+                <tbody>
+                ${newRows.map(r => {
+                    const ms = byCandidate[r.unique_key] || [];
+                    const strongest = ms.find(m => m.strength === 'strong') || ms.find(m => m.strength === 'weak') || ms[0];
+                    const checked = _eggState.excludedKeys.has(r.unique_key) ? 'checked' : '';
+                    const rowStyle = strongest ? 'background:#fef2f2;' : '';
+                    const matchBadge = !strongest ? '-' :
+                        strongest.strength === 'strong' ? `<span style="background:#dc2626;color:white;padding:2px 8px;border-radius:10px;font-size:11px;">STRONG</span>` :
+                        strongest.strength === 'weak'   ? `<span style="background:#f59e0b;color:white;padding:2px 8px;border-radius:10px;font-size:11px;">WEAK</span>` :
+                        `<span style="background:#6b7280;color:white;padding:2px 8px;border-radius:10px;font-size:11px;">possible</span>`;
+                    return `
+                        <tr style="border-top:1px solid var(--gray-200);${rowStyle}">
+                            <td style="padding:8px;"><input type="checkbox" ${checked} onchange="app.eggToggleExclude('${r.unique_key}', ${strongest ? strongest.urgentId : 'null'})"></td>
+                            <td style="padding:8px;">${r.agent_name || '-'}</td>
+                            <td style="padding:8px;font-family:monospace;font-size:12px;">${r.order_no || '-'}</td>
+                            <td style="padding:8px;">${r.product}</td>
+                            <td style="padding:8px;">${r.region}</td>
+                            <td style="padding:8px;text-align:right;">${r.quantity}</td>
+                            <td style="padding:8px;">${r.channel}</td>
+                            <td style="padding:8px;">${matchBadge}</td>
+                        </tr>
+                    `;
+                }).join('')}
+                </tbody>
+            </table>`;
+
+        host.innerHTML = `
+            <div class="egg-phase-banner" style="display:flex;gap:8px;margin-bottom:20px;">
+                <div style="flex:1;padding:10px;background:var(--gray-100);border-left:4px solid var(--gray-300);border-radius:6px;color:var(--gray-500);">
+                    <strong>Phase 1:</strong> Upload
+                </div>
+                <div style="flex:1;padding:10px;background:#fef3c7;border-left:4px solid #f59e0b;border-radius:6px;">
+                    <strong>Phase 2:</strong> Reconcile
+                </div>
+                <div style="flex:1;padding:10px;background:var(--gray-100);border-left:4px solid var(--gray-300);border-radius:6px;color:var(--gray-500);">
+                    <strong>Phase 3:</strong> Preview &amp; Commit
+                </div>
+            </div>
+
+            <div style="background:#fffbeb;border:1px solid #f59e0b;border-radius:8px;padding:14px;margin-bottom:20px;">
+                <strong><i class="fas fa-question-circle"></i> Were any urgent / ad-hoc orders placed last week that bypassed the normal sales order flow?</strong>
+                <div style="color:var(--gray-600);font-size:13px;margin-top:6px;">
+                    If yes: review the urgent orders below, then check any rows in this week's files that match (so you don't double-ship). You can also add an urgent order inline.
+                </div>
+            </div>
+
+            <div style="background:white;padding:20px;border-radius:12px;border:1px solid var(--gray-200);margin-bottom:20px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                    <h3 style="margin:0;">Recent Urgent Orders (last ${(_eggState.config?.watch_window_weeks||4)} weeks)</h3>
+                    <button class="btn primary btn-sm" onclick="app.eggOpenInlineUrgentModal()">
+                        <i class="fas fa-plus"></i> Add Urgent Order
+                    </button>
+                </div>
+                <div style="max-height:260px;overflow-y:auto;">
+                    <table style="width:100%;border-collapse:collapse;">
+                        <thead>
+                            <tr style="background:var(--gray-50);text-align:left;">
+                                <th style="padding:8px;">Agent</th>
+                                <th style="padding:8px;">Product</th>
+                                <th style="padding:8px;">Region</th>
+                                <th style="padding:8px;text-align:right;">Qty</th>
+                                <th style="padding:8px;">Week</th>
+                                <th style="padding:8px;">Status</th>
+                                <th style="padding:8px;">Notes</th>
+                            </tr>
+                        </thead>
+                        <tbody>${urgentRowsHtml}</tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div style="background:white;padding:20px;border-radius:12px;border:1px solid var(--gray-200);">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                    <h3 style="margin:0;">Orders in this run (${newRows.length} new rows after dedup)</h3>
+                    <div>
+                        <button class="btn secondary btn-sm" onclick="app.eggAutoCheckStrong()">Auto-check strong matches</button>
+                        <button class="btn secondary btn-sm" onclick="app.eggClearExclusions()">Clear all</button>
+                    </div>
+                </div>
+                <div style="color:var(--gray-500);font-size:12px;margin-bottom:8px;">
+                    Rows highlighted in pink have potential matches with urgent orders above. Check the box to exclude a row from the farm order.
+                </div>
+                ${candidateRowsHtml}
+            </div>
+
+            <div style="margin-top:20px;display:flex;justify-content:space-between;">
+                <button class="btn secondary" onclick="app.eggGoToPhase1()">
+                    <i class="fas fa-arrow-left"></i> Back to Upload
+                </button>
+                <button class="btn primary" onclick="app.eggGoToPhase3()">
+                    Next: Preview Farm Order <i class="fas fa-arrow-right"></i>
+                </button>
+            </div>
+        `;
+    };
+
+    const eggGoToPhase1 = async () => {
+        _eggState.currentPhase = 1;
+        await eggRenderRunTab(document.getElementById('egg-tab-content'));
+    };
+
+    const eggToggleExclude = (uniqueKey, urgentId) => {
+        if (_eggState.excludedKeys.has(uniqueKey)) {
+            _eggState.excludedKeys.delete(uniqueKey);
+            delete _eggState.excludedToUrgent[uniqueKey];
+        } else {
+            _eggState.excludedKeys.add(uniqueKey);
+            // urgentId is a real number when there's a matching urgent, or null otherwise
+            if (typeof urgentId === 'number' && urgentId > 0) {
+                _eggState.excludedToUrgent[uniqueKey] = urgentId;
+            }
+        }
+    };
+
+    const eggAutoCheckStrong = async () => {
+        for (const m of (_eggState.matches || [])) {
+            if (m.strength === 'strong') {
+                _eggState.excludedKeys.add(m.candidateKey);
+                _eggState.excludedToUrgent[m.candidateKey] = m.urgentId;
+            }
+        }
+        await eggRenderRunTab(document.getElementById('egg-tab-content'));
+    };
+
+    const eggClearExclusions = async () => {
+        _eggState.excludedKeys = new Set();
+        _eggState.excludedToUrgent = {};
+        await eggRenderRunTab(document.getElementById('egg-tab-content'));
+    };
+
+    const eggOpenInlineUrgentModal = () => {
+        const content = `
+            <div style="display:grid;gap:12px;min-width:400px;">
+                <div>
+                    <label style="font-weight:600;display:block;margin-bottom:4px;">Agent Name</label>
+                    <input type="text" id="egg-inline-agent" class="form-control">
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                    <div>
+                        <label style="font-weight:600;display:block;margin-bottom:4px;">Product</label>
+                        <select id="egg-inline-product" class="form-control">
+                            <option value="GOLD">GOLD</option>
+                            <option value="KING">KING</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="font-weight:600;display:block;margin-bottom:4px;">Region</label>
+                        <select id="egg-inline-region" class="form-control">
+                            <option value="KL">KL</option>
+                            <option value="PG">PG</option>
+                        </select>
+                    </div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                    <div>
+                        <label style="font-weight:600;display:block;margin-bottom:4px;">Quantity (cartons)</label>
+                        <input type="number" id="egg-inline-qty" class="form-control" min="1" value="1">
+                    </div>
+                    <div>
+                        <label style="font-weight:600;display:block;margin-bottom:4px;">Channel</label>
+                        <select id="egg-inline-channel" class="form-control">
+                            <option value="Wholesale">Wholesale</option>
+                            <option value="Online">Online</option>
+                        </select>
+                    </div>
+                </div>
+                <div>
+                    <label style="font-weight:600;display:block;margin-bottom:4px;">Week Start Date</label>
+                    <input type="date" id="egg-inline-week" class="form-control" value="${eggFormatDateIso(_eggState.weekStartDate || eggGetCurrentMonday())}">
+                </div>
+                <div>
+                    <label style="font-weight:600;display:block;margin-bottom:4px;">Notes (optional)</label>
+                    <textarea id="egg-inline-notes" class="form-control" rows="2"></textarea>
+                </div>
+            </div>
+        `;
+        UI.showModal('Add Urgent Order', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Add', type: 'primary', action: 'app.eggSaveInlineUrgent()' }
+        ]);
+    };
+
+    const eggSaveInlineUrgent = async () => {
+        const agent = document.getElementById('egg-inline-agent')?.value?.trim();
+        const product = document.getElementById('egg-inline-product')?.value;
+        const region = document.getElementById('egg-inline-region')?.value;
+        const qty = parseInt(document.getElementById('egg-inline-qty')?.value || '0', 10);
+        const channel = document.getElementById('egg-inline-channel')?.value;
+        const week = document.getElementById('egg-inline-week')?.value;
+        const notes = document.getElementById('egg-inline-notes')?.value;
+        if (!agent || !qty || qty <= 0) {
+            UI.toast.error('Agent and positive quantity required');
+            return;
+        }
+        try {
+            const rec = await AppDataStore.create('egg_urgent_orders', {
+                agent_name: agent, product, region, quantity: qty,
+                channel, week_start_date: week, status: 'pending',
+                notes: notes || null,
+                created_by: _currentUser?.full_name || _currentUser?.email || 'unknown'
+            });
+            UI.hideModal();
+            UI.toast.success('Urgent order added');
+            // Refresh recent urgents list
+            _eggState.urgentOrders = await eggLoadRecentUrgents();
+            _eggState.matches = eggFindMatches(_eggState.newRows, _eggState.urgentOrders);
+            await eggRenderRunTab(document.getElementById('egg-tab-content'));
+        } catch (err) {
+            UI.toast.error('Save failed: ' + (err.message || 'unknown'));
+        }
+    };
+
+    const eggGoToPhase3 = async () => {
+        // Build final row set with exclusions applied
+        const keep = (_eggState.newRows || []).filter(r => !_eggState.excludedKeys.has(r.unique_key));
+        const summary = eggAggregate(keep);
+        const channelSum = eggAggregateByChannel(keep);
+        _eggState.farmOrderText = eggRenderFarmOrderText(summary, new Date());
+        _eggState.channelBreakdownText = eggRenderChannelBreakdown(channelSum);
+        _eggState.stats = {
+            totalProcessed: (_eggState.normalizedRows || []).length,
+            newAfterDedup: (_eggState.newRows || []).length,
+            excluded: _eggState.excludedKeys.size,
+            finalCount: keep.length,
+            totalCartons: keep.reduce((s, r) => s + Number(r.quantity||0), 0)
+        };
+        _eggState.currentPhase = 3;
+        await eggRenderRunTab(document.getElementById('egg-tab-content'));
+    };
+
+    const eggRenderPhase3 = (host) => {
+        const s = _eggState.stats || {};
+        host.innerHTML = `
+            <div class="egg-phase-banner" style="display:flex;gap:8px;margin-bottom:20px;">
+                <div style="flex:1;padding:10px;background:var(--gray-100);border-left:4px solid var(--gray-300);border-radius:6px;color:var(--gray-500);">
+                    <strong>Phase 1:</strong> Upload
+                </div>
+                <div style="flex:1;padding:10px;background:var(--gray-100);border-left:4px solid var(--gray-300);border-radius:6px;color:var(--gray-500);">
+                    <strong>Phase 2:</strong> Reconcile
+                </div>
+                <div style="flex:1;padding:10px;background:#fef3c7;border-left:4px solid #f59e0b;border-radius:6px;">
+                    <strong>Phase 3:</strong> Preview &amp; Commit
+                </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:repeat(5, 1fr);gap:12px;margin-bottom:20px;">
+                <div style="background:white;padding:14px;border-radius:8px;border:1px solid var(--gray-200);text-align:center;">
+                    <div style="color:var(--gray-500);font-size:11px;text-transform:uppercase;">Total Processed</div>
+                    <div style="font-size:22px;font-weight:700;">${s.totalProcessed || 0}</div>
+                </div>
+                <div style="background:white;padding:14px;border-radius:8px;border:1px solid var(--gray-200);text-align:center;">
+                    <div style="color:var(--gray-500);font-size:11px;text-transform:uppercase;">New After Dedup</div>
+                    <div style="font-size:22px;font-weight:700;color:#059669;">${s.newAfterDedup || 0}</div>
+                </div>
+                <div style="background:white;padding:14px;border-radius:8px;border:1px solid var(--gray-200);text-align:center;">
+                    <div style="color:var(--gray-500);font-size:11px;text-transform:uppercase;">Reconciled (excluded)</div>
+                    <div style="font-size:22px;font-weight:700;color:#dc2626;">${s.excluded || 0}</div>
+                </div>
+                <div style="background:white;padding:14px;border-radius:8px;border:1px solid var(--gray-200);text-align:center;">
+                    <div style="color:var(--gray-500);font-size:11px;text-transform:uppercase;">To Ship</div>
+                    <div style="font-size:22px;font-weight:700;color:#f59e0b;">${s.finalCount || 0}</div>
+                </div>
+                <div style="background:white;padding:14px;border-radius:8px;border:1px solid var(--gray-200);text-align:center;">
+                    <div style="color:var(--gray-500);font-size:11px;text-transform:uppercase;">Total Cartons</div>
+                    <div style="font-size:22px;font-weight:700;">${s.totalCartons || 0}</div>
+                </div>
+            </div>
+
+            <div style="background:white;padding:20px;border-radius:12px;border:1px solid var(--gray-200);margin-bottom:16px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                    <h3 style="margin:0;">Farm Order <span style="font-size:12px;color:var(--gray-500);font-weight:normal;">(editable — fill in JB values manually before sending)</span></h3>
+                    <div>
+                        <button class="btn secondary btn-sm" onclick="app.eggResetFarmOrderText()"><i class="fas fa-undo"></i> Reset</button>
+                        <button class="btn secondary btn-sm" onclick="app.eggCopyFarmOrder()"><i class="fas fa-copy"></i> Copy</button>
+                        <button class="btn secondary btn-sm" onclick="app.eggDownloadFarmOrder()"><i class="fas fa-download"></i> Download .txt</button>
+                    </div>
+                </div>
+                <textarea id="egg-farm-order-text" style="width:100%;background:#f8fafc;padding:16px;border:1px solid var(--gray-200);border-radius:6px;font-family:monospace;font-size:13px;line-height:1.6;min-height:340px;resize:vertical;box-sizing:border-box;">${_eggState.farmOrderText}</textarea>
+                <div style="font-size:11px;color:var(--gray-500);margin-top:6px;">
+                    <i class="fas fa-info-circle"></i> JB numbers default to 0 — edit this text directly to enter the actual JB KING/GOLD cartons before copying to the farm.
+                </div>
+            </div>
+
+            <div style="background:white;padding:20px;border-radius:12px;border:1px solid var(--gray-200);margin-bottom:16px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                    <h3 style="margin:0;">Channel Breakdown (KL / PG)</h3>
+                    <button class="btn secondary btn-sm" onclick="app.eggCopyChannelBreakdown()"><i class="fas fa-copy"></i> Copy</button>
+                </div>
+                <pre id="egg-channel-text" style="background:#f8fafc;padding:16px;border-radius:6px;font-family:monospace;font-size:13px;white-space:pre-wrap;margin:0;">${_eggState.channelBreakdownText}</pre>
+            </div>
+
+            <div style="margin-top:24px;display:flex;justify-content:space-between;">
+                <button class="btn secondary" onclick="app.eggGoToPhase2()">
+                    <i class="fas fa-arrow-left"></i> Back to Reconcile
+                </button>
+                <div>
+                    <button class="btn secondary" onclick="app.eggDiscardRun()">
+                        <i class="fas fa-times"></i> Discard Run
+                    </button>
+                    <button class="btn primary" onclick="app.eggCommitRun()" style="background:#059669;border-color:#059669;">
+                        <i class="fas fa-check"></i> Commit &amp; Save
+                    </button>
+                </div>
+            </div>
+        `;
+    };
+
+    // Read the CURRENT value of the editable farm order textarea — user may
+    // have typed in JB numbers or made other manual edits. Falls back to
+    // _eggState.farmOrderText if the textarea isn't in the DOM (shouldn't happen
+    // in normal Phase 3 flow but defensive).
+    const eggGetFarmOrderText = () => {
+        const ta = document.getElementById('egg-farm-order-text');
+        return ta ? ta.value : (_eggState.farmOrderText || '');
+    };
+
+    const eggCopyFarmOrder = async () => {
+        try {
+            await navigator.clipboard.writeText(eggGetFarmOrderText());
+            UI.toast.success('Copied to clipboard (including any JB edits)');
+        } catch (err) {
+            UI.toast.error('Copy failed');
+        }
+    };
+
+    const eggCopyChannelBreakdown = async () => {
+        try {
+            await navigator.clipboard.writeText(_eggState.channelBreakdownText);
+            UI.toast.success('Copied to clipboard');
+        } catch (err) {
+            UI.toast.error('Copy failed');
+        }
+    };
+
+    const eggDownloadFarmOrder = () => {
+        const text = eggGetFarmOrderText() + '\n' + _eggState.channelBreakdownText;
+        const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `farm_order_${eggFormatDateIso(new Date())}.txt`;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
+    // Re-generate the farm order text from the current run (resets any JB edits)
+    const eggResetFarmOrderText = () => {
+        const ta = document.getElementById('egg-farm-order-text');
+        if (ta) ta.value = _eggState.farmOrderText;
+        UI.toast.info('Farm order text reset to auto-generated value');
+    };
+
+    const eggDiscardRun = async () => {
+        if (!confirm('Discard this run? No data will be saved.')) return;
+        eggResetRun();
+    };
+
+    const eggCommitRun = async () => {
+        if (!confirm('Commit this farm order? Processed rows will be saved to history and urgent orders will be marked reconciled.')) return;
+        const keep = (_eggState.newRows || []).filter(r => !_eggState.excludedKeys.has(r.unique_key));
+        const excluded = (_eggState.newRows || []).filter(r => _eggState.excludedKeys.has(r.unique_key));
+        const weekIso = eggFormatDateIso(_eggState.weekStartDate || eggGetCurrentMonday());
+        const now = new Date().toISOString();
+        const runBy = _currentUser?.full_name || _currentUser?.email || 'unknown';
+
+        try {
+            UI.toast.info('Saving run...');
+            // 1. Save run history first to get a run_id
+            const summary = eggAggregate(keep);
+            const runRec = await AppDataStore.create('egg_run_history', {
+                run_at: now,
+                week_start_date: weekIso,
+                csv_filename: _eggState.csvFile?.name || null,
+                excel_filename: _eggState.xlsxFile?.name || null,
+                rows_processed: (_eggState.normalizedRows || []).length,
+                rows_new: keep.length,
+                rows_excluded: excluded.length,
+                urgent_applied: (_eggState.urgentOrders || []).filter(u => u.status === 'pending' && u.week_start_date === weekIso).length,
+                reconciliations_applied: Object.keys(_eggState.excludedToUrgent || {}).length,
+                totals: summary,
+                // Use the edited textarea value — captures any JB numbers the
+                // user typed in manually before clicking Commit.
+                farm_order_text: eggGetFarmOrderText(),
+                channel_breakdown_text: _eggState.channelBreakdownText,
+                reconciliation_log: _eggState.excludedToUrgent,
+                run_by: runBy
+            });
+            const runId = runRec?.id;
+
+            // 2. Save kept rows to processed_orders (per-row try/catch so one bad
+            //    row doesn't abort the whole commit — we'd rather save 99/100 and
+            //    report the failure than lose everything on a unique-key clash)
+            let rowErrors = 0;
+            const rowErrorDetails = [];
+            for (const r of keep) {
+                try {
+                    await AppDataStore.create('egg_processed_orders', {
+                        unique_key: r.unique_key,
+                        order_no: r.order_no,
+                        product: r.product,
+                        quantity: r.quantity,
+                        region: r.region,
+                        agent_name: r.agent_name,
+                        channel: r.channel,
+                        source: r.source,
+                        group_name: r.group_name,
+                        order_date: r.order_date_parsed,
+                        week_start: weekIso,
+                        processed_at: now,
+                        run_id: runId
+                    });
+                } catch (rowErr) {
+                    rowErrors++;
+                    rowErrorDetails.push({ key: r.unique_key, err: rowErr.message });
+                    console.warn('egg: row save failed', r.unique_key, rowErr);
+                }
+            }
+
+            // 3. Save excluded rows with reason (audit trail)
+            for (const r of excluded) {
+                const urgentId = _eggState.excludedToUrgent[r.unique_key];
+                try {
+                    await AppDataStore.create('egg_processed_orders', {
+                        unique_key: r.unique_key,
+                        order_no: r.order_no,
+                        product: r.product,
+                        quantity: r.quantity,
+                        region: r.region,
+                        agent_name: r.agent_name,
+                        channel: r.channel,
+                        source: r.source,
+                        group_name: r.group_name,
+                        order_date: r.order_date_parsed,
+                        week_start: weekIso,
+                        processed_at: now,
+                        run_id: runId,
+                        reconciled_with_urgent_id: urgentId || null,
+                        excluded_reason: urgentId ? `Reconciled with urgent #${urgentId}` : 'Manually excluded'
+                    });
+                } catch (rowErr) {
+                    rowErrors++;
+                    rowErrorDetails.push({ key: r.unique_key, err: rowErr.message });
+                    console.warn('egg: excluded row save failed', r.unique_key, rowErr);
+                }
+            }
+
+            // 4. Mark urgent orders: those linked to excluded rows → reconciled
+            const reconciledIds = new Set(Object.values(_eggState.excludedToUrgent || {}).filter(v => v != null));
+            for (const uid of reconciledIds) {
+                // Find the unique_key that matched
+                const matchedKey = Object.keys(_eggState.excludedToUrgent).find(k => _eggState.excludedToUrgent[k] === uid);
+                try {
+                    await AppDataStore.update('egg_urgent_orders', uid, {
+                        status: 'reconciled',
+                        reconciled_at: now,
+                        reconciled_with_unique_key: matchedKey,
+                        reconciled_run_id: runId,
+                        reconciled_by: runBy
+                    });
+                } catch (upErr) {
+                    console.warn('egg: urgent reconcile failed', uid, upErr);
+                }
+            }
+
+            // 5. Any remaining "pending" urgents for THIS week that weren't reconciled
+            //    get flipped to applied (the run included their excess in the farm order)
+            const pendingForThisWeek = (_eggState.urgentOrders || []).filter(u =>
+                u.status === 'pending' && u.week_start_date === weekIso && !reconciledIds.has(u.id)
+            );
+            for (const u of pendingForThisWeek) {
+                try {
+                    await AppDataStore.update('egg_urgent_orders', u.id, {
+                        status: 'applied',
+                        applied_at: now,
+                        applied_run_id: runId
+                    });
+                } catch (upErr) {
+                    console.warn('egg: urgent apply failed', u.id, upErr);
+                }
+            }
+
+            if (rowErrors > 0) {
+                UI.toast.error(`Run committed with ${rowErrors} row error(s) — check browser console for details.`);
+                console.error('egg: rowErrorDetails', rowErrorDetails);
+            } else {
+                UI.toast.success(`Run committed. ${keep.length} rows saved, ${excluded.length} reconciled.`);
+            }
+            eggResetRun();
+        } catch (err) {
+            console.error('egg: commit failed', err);
+            UI.toast.error('Commit failed: ' + (err.message || 'unknown'));
+        }
+    };
+
+    // ==================== TAB 2 — URGENT ORDERS ====================
+
+    const eggRenderUrgentTab = async (host) => {
+        const filter = _eggState.urgentFilter || 'active';
+        let urgents = [];
+        try {
+            urgents = await AppDataStore.query('egg_urgent_orders', {}) || [];
+        } catch (err) {
+            UI.toast.error('Failed to load urgent orders');
+        }
+        urgents.sort((a,b) => String(b.week_start_date||'').localeCompare(String(a.week_start_date||'')));
+
+        const filterFn = {
+            active: u => ['pending','applied'].includes(u.status),
+            resolved: u => ['reconciled','absorbed'].includes(u.status),
+            stale: u => ['expired','cancelled'].includes(u.status),
+            all: u => true
+        };
+        const filtered = urgents.filter(filterFn[filter] || filterFn.all);
+
+        const activeCount = urgents.filter(filterFn.active).length;
+        const appliedCount = urgents.filter(u => u.status === 'applied').length;
+
+        const rowsHtml = filtered.length === 0 ?
+            `<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--gray-500);">No urgent orders.</td></tr>` :
+            filtered.map(u => {
+                const statusColor = {
+                    pending:'#f59e0b', applied:'#3b82f6', reconciled:'#059669',
+                    absorbed:'#6b7280', expired:'#6b7280', cancelled:'#6b7280'
+                }[u.status] || '#6b7280';
+                const actions = (u.status === 'pending') ? `
+                    <button class="btn-icon" title="Edit" onclick="event.stopPropagation();app.eggEditUrgent(${u.id})"><i class="fas fa-edit"></i></button>
+                    <button class="btn-icon" title="Cancel" onclick="event.stopPropagation();app.eggCancelUrgent(${u.id})"><i class="fas fa-times"></i></button>
+                ` : (u.status === 'applied') ? `
+                    <button class="btn-icon" title="Reconcile manually" onclick="event.stopPropagation();app.eggReconcileManually(${u.id})"><i class="fas fa-link"></i></button>
+                    <button class="btn-icon" title="Mark expired" onclick="event.stopPropagation();app.eggExpireUrgent(${u.id})"><i class="fas fa-clock"></i></button>
+                ` : '';
+                return `
+                    <tr style="border-top:1px solid var(--gray-200);">
+                        <td style="padding:8px;">${u.week_start_date || '-'}</td>
+                        <td style="padding:8px;">${u.agent_name || '-'}</td>
+                        <td style="padding:8px;">${u.product}</td>
+                        <td style="padding:8px;">${u.region}</td>
+                        <td style="padding:8px;text-align:right;">${u.quantity}</td>
+                        <td style="padding:8px;">${u.channel || 'Wholesale'}</td>
+                        <td style="padding:8px;"><span style="background:${statusColor};color:white;padding:2px 8px;border-radius:10px;font-size:11px;">${u.status}</span></td>
+                        <td style="padding:8px;font-size:12px;color:var(--gray-600);">${u.notes || ''}</td>
+                        <td style="padding:8px;">${actions}</td>
+                    </tr>
+                `;
+            }).join('');
+
+        host.innerHTML = `
+            <div style="background:#eff6ff;border:1px solid #3b82f6;border-radius:8px;padding:14px;margin-bottom:16px;">
+                <strong><i class="fas fa-eye"></i> Watch Board:</strong>
+                ${appliedCount} urgent order${appliedCount === 1 ? '' : 's'} currently applied and watching for matching invoices.
+                ${activeCount} total active (pending + applied).
+            </div>
+
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                <div style="display:flex;gap:6px;">
+                    <button class="btn ${filter==='active'?'primary':'secondary'} btn-sm" onclick="app.eggSetUrgentFilter('active')">Active</button>
+                    <button class="btn ${filter==='resolved'?'primary':'secondary'} btn-sm" onclick="app.eggSetUrgentFilter('resolved')">Resolved</button>
+                    <button class="btn ${filter==='stale'?'primary':'secondary'} btn-sm" onclick="app.eggSetUrgentFilter('stale')">Stale</button>
+                    <button class="btn ${filter==='all'?'primary':'secondary'} btn-sm" onclick="app.eggSetUrgentFilter('all')">All</button>
+                </div>
+                <button class="btn primary" onclick="app.eggOpenAddUrgentModal()">
+                    <i class="fas fa-plus"></i> Add Urgent Order
+                </button>
+            </div>
+
+            <div style="background:white;padding:16px;border-radius:12px;border:1px solid var(--gray-200);">
+                <table style="width:100%;border-collapse:collapse;">
+                    <thead>
+                        <tr style="background:var(--gray-50);text-align:left;">
+                            <th style="padding:8px;">Week</th>
+                            <th style="padding:8px;">Agent</th>
+                            <th style="padding:8px;">Product</th>
+                            <th style="padding:8px;">Region</th>
+                            <th style="padding:8px;text-align:right;">Qty</th>
+                            <th style="padding:8px;">Channel</th>
+                            <th style="padding:8px;">Status</th>
+                            <th style="padding:8px;">Notes</th>
+                            <th style="padding:8px;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rowsHtml}</tbody>
+                </table>
+            </div>
+        `;
+    };
+
+    const eggSetUrgentFilter = async (f) => {
+        _eggState.urgentFilter = f;
+        await eggRenderUrgentTab(document.getElementById('egg-tab-content'));
+    };
+
+    const eggOpenAddUrgentModal = (editId) => {
+        const isEdit = !!editId;
+        const existing = isEdit ? (_eggState.urgentOrders || []).find(u => u.id === editId) : null;
+        const weekIso = existing?.week_start_date || eggFormatDateIso(_eggState.weekStartDate || eggGetCurrentMonday());
+        const content = `
+            <div style="display:grid;gap:12px;min-width:400px;">
+                <input type="hidden" id="egg-urg-id" value="${editId || ''}">
+                <div>
+                    <label style="font-weight:600;display:block;margin-bottom:4px;">Agent Name</label>
+                    <input type="text" id="egg-urg-agent" class="form-control" value="${existing?.agent_name || ''}">
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                    <div>
+                        <label style="font-weight:600;display:block;margin-bottom:4px;">Product</label>
+                        <select id="egg-urg-product" class="form-control">
+                            <option value="GOLD" ${existing?.product==='GOLD'?'selected':''}>GOLD</option>
+                            <option value="KING" ${existing?.product==='KING'?'selected':''}>KING</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="font-weight:600;display:block;margin-bottom:4px;">Region</label>
+                        <select id="egg-urg-region" class="form-control">
+                            <option value="KL" ${existing?.region==='KL'?'selected':''}>KL</option>
+                            <option value="PG" ${existing?.region==='PG'?'selected':''}>PG</option>
+                        </select>
+                    </div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                    <div>
+                        <label style="font-weight:600;display:block;margin-bottom:4px;">Quantity (cartons)</label>
+                        <input type="number" id="egg-urg-qty" class="form-control" min="1" value="${existing?.quantity || 1}">
+                    </div>
+                    <div>
+                        <label style="font-weight:600;display:block;margin-bottom:4px;">Channel</label>
+                        <select id="egg-urg-channel" class="form-control">
+                            <option value="Wholesale" ${existing?.channel==='Wholesale'?'selected':''}>Wholesale</option>
+                            <option value="Online" ${existing?.channel==='Online'?'selected':''}>Online</option>
+                        </select>
+                    </div>
+                </div>
+                <div>
+                    <label style="font-weight:600;display:block;margin-bottom:4px;">Week Start Date</label>
+                    <input type="date" id="egg-urg-week" class="form-control" value="${weekIso}">
+                </div>
+                <div>
+                    <label style="font-weight:600;display:block;margin-bottom:4px;">Notes (optional)</label>
+                    <textarea id="egg-urg-notes" class="form-control" rows="2">${existing?.notes || ''}</textarea>
+                </div>
+            </div>
+        `;
+        UI.showModal(isEdit ? 'Edit Urgent Order' : 'Add Urgent Order', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: isEdit ? 'Save' : 'Add', type: 'primary', action: 'app.eggSaveUrgentModal()' }
+        ]);
+    };
+
+    const eggSaveUrgentModal = async () => {
+        const id = document.getElementById('egg-urg-id')?.value;
+        const agent = document.getElementById('egg-urg-agent')?.value?.trim();
+        const product = document.getElementById('egg-urg-product')?.value;
+        const region = document.getElementById('egg-urg-region')?.value;
+        const qty = parseInt(document.getElementById('egg-urg-qty')?.value || '0', 10);
+        const channel = document.getElementById('egg-urg-channel')?.value;
+        const week = document.getElementById('egg-urg-week')?.value;
+        const notes = document.getElementById('egg-urg-notes')?.value;
+        if (!agent || !qty || qty <= 0) {
+            UI.toast.error('Agent and positive quantity required');
+            return;
+        }
+        try {
+            if (id) {
+                await AppDataStore.update('egg_urgent_orders', parseInt(id,10), {
+                    agent_name: agent, product, region, quantity: qty, channel,
+                    week_start_date: week, notes: notes || null
+                });
+                UI.toast.success('Urgent order updated');
+            } else {
+                await AppDataStore.create('egg_urgent_orders', {
+                    agent_name: agent, product, region, quantity: qty, channel,
+                    week_start_date: week, status: 'pending',
+                    notes: notes || null,
+                    created_by: _currentUser?.full_name || _currentUser?.email || 'unknown'
+                });
+                UI.toast.success('Urgent order added');
+            }
+            UI.hideModal();
+            await eggRenderUrgentTab(document.getElementById('egg-tab-content'));
+        } catch (err) {
+            UI.toast.error('Save failed: ' + (err.message || 'unknown'));
+        }
+    };
+
+    const eggEditUrgent = (id) => {
+        // Load fresh from DB for edit
+        AppDataStore.query('egg_urgent_orders', { id }).then(rows => {
+            if (rows && rows.length > 0) {
+                _eggState.urgentOrders = [rows[0]];
+                eggOpenAddUrgentModal(id);
+            }
+        });
+    };
+
+    const eggCancelUrgent = async (id) => {
+        if (!confirm('Cancel this urgent order?')) return;
+        try {
+            await AppDataStore.update('egg_urgent_orders', id, { status: 'cancelled' });
+            UI.toast.success('Urgent order cancelled');
+            await eggRenderUrgentTab(document.getElementById('egg-tab-content'));
+        } catch (err) {
+            UI.toast.error('Cancel failed: ' + (err.message || 'unknown'));
+        }
+    };
+
+    const eggExpireUrgent = async (id) => {
+        if (!confirm('Mark this urgent order as expired? Use this when you confirm the agent never created the real sales order.')) return;
+        try {
+            await AppDataStore.update('egg_urgent_orders', id, { status: 'expired' });
+            UI.toast.success('Marked expired');
+            await eggRenderUrgentTab(document.getElementById('egg-tab-content'));
+        } catch (err) {
+            UI.toast.error('Update failed: ' + (err.message || 'unknown'));
+        }
+    };
+
+    const eggReconcileManually = async (id) => {
+        // Show a picker of recent processed orders to link against
+        try {
+            const urgent = (await AppDataStore.query('egg_urgent_orders', { id }))?.[0];
+            if (!urgent) { UI.toast.error('Urgent order not found'); return; }
+            const candidates = await AppDataStore.query('egg_processed_orders', {
+                product: urgent.product, region: urgent.region
+            }) || [];
+            const unlinkedCandidates = candidates.filter(c => !c.reconciled_with_urgent_id && !c.excluded_reason);
+            if (unlinkedCandidates.length === 0) {
+                UI.toast.info('No matching processed orders found to link against');
+                return;
+            }
+            const sorted = unlinkedCandidates.sort((a,b) => String(b.processed_at||'').localeCompare(String(a.processed_at||'')));
+            const recentSlice = sorted.slice(0, 50);
+            const content = `
+                <div style="max-height:60vh;overflow-y:auto;">
+                    <div style="padding:10px;background:#fef3c7;border-left:4px solid #f59e0b;border-radius:6px;margin-bottom:12px;">
+                        Link urgent #${id} (${urgent.agent_name} • ${urgent.product} • ${urgent.region} • ${urgent.quantity} cartons) to one of these processed orders:
+                    </div>
+                    <table style="width:100%;border-collapse:collapse;">
+                        <thead>
+                            <tr style="background:var(--gray-50);text-align:left;">
+                                <th style="padding:6px;">Select</th>
+                                <th style="padding:6px;">Order No</th>
+                                <th style="padding:6px;">Agent</th>
+                                <th style="padding:6px;">Qty</th>
+                                <th style="padding:6px;">Week</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${recentSlice.map(c => `
+                                <tr style="border-top:1px solid var(--gray-200);">
+                                    <td style="padding:6px;"><input type="radio" name="egg-reconcile-pick" value="${c.id}" data-key="${c.unique_key}"></td>
+                                    <td style="padding:6px;font-family:monospace;font-size:12px;">${c.order_no || '-'}</td>
+                                    <td style="padding:6px;">${c.agent_name || '-'}</td>
+                                    <td style="padding:6px;">${c.quantity}</td>
+                                    <td style="padding:6px;">${c.week_start || '-'}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+            UI.showModal('Manual Reconciliation', content, [
+                { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+                { label: 'Link & Reconcile', type: 'primary', action: `app.eggCompleteManualReconcile(${id})` }
+            ]);
+        } catch (err) {
+            UI.toast.error('Reconcile failed: ' + (err.message || 'unknown'));
+        }
+    };
+
+    const eggCompleteManualReconcile = async (urgentId) => {
+        const picked = document.querySelector('input[name="egg-reconcile-pick"]:checked');
+        if (!picked) { UI.toast.error('Select a processed order to link'); return; }
+        const processedId = parseInt(picked.value, 10);
+        const uniqueKey = picked.getAttribute('data-key');
+        const now = new Date().toISOString();
+        const runBy = _currentUser?.full_name || _currentUser?.email || 'unknown';
+        try {
+            await AppDataStore.update('egg_urgent_orders', urgentId, {
+                status: 'reconciled',
+                reconciled_at: now,
+                reconciled_with_unique_key: uniqueKey,
+                reconciled_by: runBy
+            });
+            await AppDataStore.update('egg_processed_orders', processedId, {
+                reconciled_with_urgent_id: urgentId,
+                excluded_reason: `Manually reconciled with urgent #${urgentId}`
+            });
+            UI.hideModal();
+            UI.toast.success('Manual reconciliation saved');
+            await eggRenderUrgentTab(document.getElementById('egg-tab-content'));
+        } catch (err) {
+            UI.toast.error('Reconcile failed: ' + (err.message || 'unknown'));
+        }
+    };
+
+    // ==================== TAB 3 — RUN HISTORY ====================
+
+    const eggRenderHistoryTab = async (host) => {
+        let runs = [];
+        try {
+            runs = await AppDataStore.query('egg_run_history', {}) || [];
+        } catch (err) {
+            UI.toast.error('Failed to load history');
+        }
+        runs.sort((a,b) => String(b.run_at||'').localeCompare(String(a.run_at||'')));
+
+        const rowsHtml = runs.length === 0 ?
+            `<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--gray-500);">No runs yet.</td></tr>` :
+            runs.map(r => {
+                const totals = r.totals || {};
+                const tot = (totals.KL?.GOLD || 0) + (totals.KL?.KING || 0) + (totals.PG?.GOLD || 0) + (totals.PG?.KING || 0);
+                return `
+                    <tr style="border-top:1px solid var(--gray-200);">
+                        <td style="padding:8px;font-size:12px;">${r.run_at ? new Date(r.run_at).toLocaleString() : '-'}</td>
+                        <td style="padding:8px;">${r.week_start_date || '-'}</td>
+                        <td style="padding:8px;font-size:12px;">${r.csv_filename || '-'} / ${r.excel_filename || '-'}</td>
+                        <td style="padding:8px;text-align:right;">${r.rows_new || 0}</td>
+                        <td style="padding:8px;text-align:right;">${r.rows_excluded || 0}</td>
+                        <td style="padding:8px;text-align:right;">${tot}</td>
+                        <td style="padding:8px;">${r.run_by || '-'}</td>
+                        <td style="padding:8px;">
+                            <button class="btn-icon" title="View" onclick="app.eggViewRun(${r.id})"><i class="fas fa-eye"></i></button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+
+        host.innerHTML = `
+            <div style="background:white;padding:16px;border-radius:12px;border:1px solid var(--gray-200);">
+                <h3 style="margin-top:0;">Run History</h3>
+                <table style="width:100%;border-collapse:collapse;">
+                    <thead>
+                        <tr style="background:var(--gray-50);text-align:left;">
+                            <th style="padding:8px;">Run At</th>
+                            <th style="padding:8px;">Week</th>
+                            <th style="padding:8px;">Files</th>
+                            <th style="padding:8px;text-align:right;">Rows</th>
+                            <th style="padding:8px;text-align:right;">Excluded</th>
+                            <th style="padding:8px;text-align:right;">Cartons</th>
+                            <th style="padding:8px;">Run By</th>
+                            <th style="padding:8px;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rowsHtml}</tbody>
+                </table>
+            </div>
+        `;
+    };
+
+    const eggViewRun = async (runId) => {
+        try {
+            const rows = await AppDataStore.query('egg_run_history', { id: runId });
+            if (!rows || rows.length === 0) { UI.toast.error('Run not found'); return; }
+            const r = rows[0];
+            const content = `
+                <div style="max-height:70vh;overflow-y:auto;min-width:600px;">
+                    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px;">
+                        <div style="padding:10px;background:var(--gray-50);border-radius:6px;">
+                            <div style="font-size:11px;color:var(--gray-500);text-transform:uppercase;">Week</div>
+                            <div style="font-weight:700;">${r.week_start_date || '-'}</div>
+                        </div>
+                        <div style="padding:10px;background:var(--gray-50);border-radius:6px;">
+                            <div style="font-size:11px;color:var(--gray-500);text-transform:uppercase;">Rows Saved</div>
+                            <div style="font-weight:700;color:#059669;">${r.rows_new || 0}</div>
+                        </div>
+                        <div style="padding:10px;background:var(--gray-50);border-radius:6px;">
+                            <div style="font-size:11px;color:var(--gray-500);text-transform:uppercase;">Reconciled</div>
+                            <div style="font-weight:700;color:#dc2626;">${r.rows_excluded || 0}</div>
+                        </div>
+                    </div>
+                    <h4>Farm Order</h4>
+                    <pre style="background:#f8fafc;padding:16px;border-radius:6px;font-family:monospace;font-size:13px;white-space:pre-wrap;">${r.farm_order_text || ''}</pre>
+                    <h4>Channel Breakdown</h4>
+                    <pre style="background:#f8fafc;padding:16px;border-radius:6px;font-family:monospace;font-size:13px;white-space:pre-wrap;">${r.channel_breakdown_text || ''}</pre>
+                </div>
+            `;
+            UI.showModal(`Run ${r.id} — ${r.run_at ? new Date(r.run_at).toLocaleString() : ''}`, content, [
+                { label: 'Close', type: 'secondary', action: 'UI.hideModal()' }
+            ]);
+        } catch (err) {
+            UI.toast.error('View failed: ' + (err.message || 'unknown'));
+        }
+    };
+
+    // ==================== TAB 4 — CONFIGURATION ====================
+
+    const eggRenderConfigTab = async (host) => {
+        await eggLoadConfig();
+        const cfg = _eggState.config;
+        const json = JSON.stringify(cfg, null, 2);
+        host.innerHTML = `
+            <div style="background:white;padding:20px;border-radius:12px;border:1px solid var(--gray-200);">
+                <h3 style="margin-top:0;">Configuration</h3>
+                <p style="color:var(--gray-500);font-size:13px;">
+                    Edit the JSON configuration for region rules, product mapping, and wholesale groups.
+                </p>
+                <textarea id="egg-config-json" class="form-control" style="width:100%;height:380px;font-family:monospace;font-size:13px;">${json}</textarea>
+                <div style="margin-top:14px;display:flex;gap:8px;">
+                    <button class="btn primary" onclick="app.eggSaveConfigFromTextarea()"><i class="fas fa-save"></i> Save</button>
+                    <button class="btn secondary" onclick="app.eggResetConfigToDefault()"><i class="fas fa-undo"></i> Reset to Defaults</button>
+                </div>
+            </div>
+        `;
+    };
+
+    const eggSaveConfigFromTextarea = async () => {
+        const text = document.getElementById('egg-config-json')?.value;
+        try {
+            const parsed = JSON.parse(text);
+            await eggSaveConfig(parsed);
+            await eggRenderConfigTab(document.getElementById('egg-tab-content'));
+        } catch (err) {
+            UI.toast.error('Invalid JSON: ' + err.message);
+        }
+    };
+
+    const eggResetConfigToDefault = async () => {
+        if (!confirm('Reset configuration to defaults? Current values will be overwritten.')) return;
+        await eggSaveConfig(eggDefaultConfig());
+        await eggRenderConfigTab(document.getElementById('egg-tab-content'));
+    };
+
+    // ==================== /EGG PURCHASING ====================
+
     return {
         init,
         navigateTo,
@@ -34966,6 +36615,48 @@ const initImportDemoData = async () => {
         executeRiskActions: () => UI.toast.info('Executing selected actions...'),
         refreshPerformanceInsights: () => UI.toast.info('Refreshing insights...'),
 
+        // ========== EGG PURCHASING (Super Admin only) ==========
+        showEggPurchasingView,
+        eggSwitchTab,
+        eggRefresh,
+        // Phase 1
+        eggHandleCsvDrop,
+        eggHandleCsvInput,
+        eggHandleXlsxDrop,
+        eggHandleXlsxInput,
+        eggSetWeekStart,
+        eggResetRun,
+        eggGoToPhase1,
+        eggGoToPhase2,
+        eggGoToPhase3,
+        // Phase 2
+        eggToggleExclude,
+        eggAutoCheckStrong,
+        eggClearExclusions,
+        eggOpenInlineUrgentModal,
+        eggSaveInlineUrgent,
+        // Phase 3
+        eggCopyFarmOrder,
+        eggCopyChannelBreakdown,
+        eggDownloadFarmOrder,
+        eggResetFarmOrderText,
+        eggDiscardRun,
+        eggCommitRun,
+        // Tab 2 — Urgent Orders
+        eggSetUrgentFilter,
+        eggOpenAddUrgentModal,
+        eggSaveUrgentModal,
+        eggEditUrgent,
+        eggCancelUrgent,
+        eggExpireUrgent,
+        eggReconcileManually,
+        eggCompleteManualReconcile,
+        // Tab 3 — History
+        eggViewRun,
+        // Tab 4 — Config
+        eggSaveConfigFromTextarea,
+        eggResetConfigToDefault,
+
         // ========== GLOBAL DATA SYNCHRONIZATION ==========
        refreshCurrentView: async () => {   // ✅ now async
     const viewport = document.getElementById('content-viewport');
@@ -35024,6 +36715,9 @@ const initImportDemoData = async () => {
                 break;
             case 'fude':
                 if (typeof showFudeView === 'function') await showFudeView(viewport);
+                break;
+            case 'egg_purchasing':
+                if (typeof showEggPurchasingView === 'function') await showEggPurchasingView(viewport);
                 break;
             default:
                 // No specific refresh for this view
