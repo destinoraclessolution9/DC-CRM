@@ -10201,7 +10201,10 @@ function _wireLoginBtn() {
         renderRefillReminders().catch(e => console.warn('renderRefillReminders failed:', e));
         renderPendingCpsIntakes().catch(e => console.warn('renderPendingCpsIntakes failed:', e));
         _migrateFollowUpTemplateColumns().catch(e => console.warn('Follow-up template migration failed:', e));
-        dispatchBirthdayTriggers().then(() => renderFollowUpReminders()).catch(e => console.warn('Follow-up reminders failed:', e));
+        Promise.all([
+            dispatchBirthdayTriggers(),
+            dispatchProactiveEventInvites()
+        ]).then(() => renderFollowUpReminders()).catch(e => console.warn('Follow-up reminders failed:', e));
 
         // Show Special Program progress popup (once per session, for participating agents)
         // Deferred so it doesn't block the calendar paint.
@@ -10296,14 +10299,18 @@ function _wireLoginBtn() {
     const createFollowUpDraft = async (opts) => {
         const { prospectId, customerId, triggerType, messageText, phone, prospectName, eventId, eventDate, eventName, dueDate } = opts;
         try {
-            // Avoid duplicate drafts for same prospect + trigger + event
+            // Dedup per (prospect_or_customer + trigger + event), regardless of status.
+            // Once a draft exists (pending/sent/dismissed), don't recreate it — the agent's
+            // decision sticks. This prevents proactive scans from re-spawning dismissed invites.
             const existing = await AppDataStore.getAll('follow_up_drafts');
-            const dup = existing.find(d =>
-                d.prospect_id == prospectId &&
-                d.trigger_type === triggerType &&
-                d.status === 'pending' &&
-                (triggerType === 'birthday' ? d.due_date === dueDate : (d.event_id == eventId || !eventId))
-            );
+            const dup = existing.find(d => {
+                const personMatch = (prospectId && d.prospect_id == prospectId) ||
+                                    (customerId && d.customer_id == customerId);
+                if (!personMatch) return false;
+                if (d.trigger_type !== triggerType) return false;
+                if (triggerType === 'birthday') return d.due_date === dueDate;
+                return d.event_id == eventId || !eventId;
+            });
             if (dup) return null; // already exists
 
             return await AppDataStore.create('follow_up_drafts', {
@@ -10485,6 +10492,108 @@ function _wireLoginBtn() {
 
         for (const tpl of triggers) {
             executeSimpleTrigger(tpl, prospect).catch(e => console.warn(`APU trigger ${tpl.trigger_type} failed:`, e));
+        }
+    };
+
+    // Dispatcher: PROACTIVE event invites — scans upcoming events and finds eligible
+    // prospects/customers based on each trigger's match conditions. Called on calendar load.
+    // Creates draft invites for each match. Dismissed/sent drafts are NOT recreated.
+    const dispatchProactiveEventInvites = async () => {
+        const templates = await loadFollowUpTemplates();
+        const eventTriggers = templates.filter(t =>
+            t.trigger_category === 'after_cps' &&
+            t.is_active &&
+            (t.event_keywords || '').trim() &&
+            ((t.cps_interest_match || '').trim() || (t.solution_match || '').trim())
+            // Skip triggers with no match criteria (e.g. cps_huiji) — too broad for proactive scan
+        );
+        if (!eventTriggers.length) return;
+
+        const today = new Date();
+        const todayStr = today.toISOString().split('T')[0];
+
+        const [events, prospects, customers] = await Promise.all([
+            AppDataStore.getAll('events'),
+            AppDataStore.getAll('prospects'),
+            AppDataStore.getAll('customers')
+        ]);
+
+        // Index proposed_solutions by entity id (one query, cached locally)
+        let allSolutions = [];
+        try { allSolutions = await AppDataStore.getAll('proposed_solutions') || []; } catch (e) { /* table may not exist */ }
+        const solutionsByProspect = {};
+        const solutionsByCustomer = {};
+        for (const s of allSolutions) {
+            const name = (s.solution || '').toLowerCase();
+            if (s.prospect_id) (solutionsByProspect[s.prospect_id] = solutionsByProspect[s.prospect_id] || []).push(name);
+            if (s.customer_id) (solutionsByCustomer[s.customer_id] = solutionsByCustomer[s.customer_id] || []).push(name);
+        }
+
+        const allPeople = [
+            ...prospects.map(p => ({ ...p, _type: 'prospect' })),
+            ...customers.map(c => ({ ...c, _type: 'customer' }))
+        ];
+
+        for (const tpl of eventTriggers) {
+            const keywords = (tpl.event_keywords || '').split(',').map(k => k.trim().toLowerCase()).filter(Boolean);
+            const interestList = (tpl.cps_interest_match || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+            const solutionList = (tpl.solution_match || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+
+            const windowEnd = new Date(today);
+            windowEnd.setDate(windowEnd.getDate() + (tpl.event_window_days || 30));
+            const windowEndStr = windowEnd.toISOString().split('T')[0];
+
+            // Find next matching event in window
+            const matchingEvents = events.filter(e => {
+                const title = ((e.event_title || e.title) || '').toLowerCase();
+                const eDate = e.event_date || e.date || '';
+                return keywords.some(kw => title.includes(kw)) &&
+                    eDate >= todayStr && eDate <= windowEndStr &&
+                    (e.status || '').toLowerCase() !== 'cancelled';
+            }).sort((a, b) => (a.event_date || a.date || '').localeCompare(b.event_date || b.date || ''));
+
+            const nextEvent = matchingEvents[0];
+            if (!nextEvent) continue;
+
+            // Find eligible people (current agent only)
+            for (const person of allPeople) {
+                if (person.responsible_agent_id && person.responsible_agent_id != _currentUser?.id) continue;
+
+                const interest = (person.cps_interest || '').trim().toLowerCase();
+                const interestOk = interestList.length && interestList.some(m => interest === m);
+
+                let solutionOk = false;
+                if (solutionList.length) {
+                    const personSolutions = person._type === 'prospect'
+                        ? (solutionsByProspect[person.id] || [])
+                        : (solutionsByCustomer[person.id] || []);
+                    solutionOk = solutionList.some(m => personSolutions.some(s => s.includes(m)));
+                }
+
+                if (!interestOk && !solutionOk) continue;
+
+                const msg = interpolateTemplate(tpl.message_template, {
+                    name: person.full_name || '',
+                    date: nextEvent.event_date || nextEvent.date || '',
+                    time: (nextEvent.start_time || nextEvent.time || '').slice(0, 5),
+                    venue: nextEvent.location || '',
+                    event_name: nextEvent.event_title || nextEvent.title || '',
+                    agent_name: _currentUser?.full_name || ''
+                });
+
+                await createFollowUpDraft({
+                    prospectId: person._type === 'prospect' ? person.id : null,
+                    customerId: person._type === 'customer' ? person.id : null,
+                    triggerType: tpl.trigger_type,
+                    messageText: msg,
+                    phone: person.phone || '',
+                    prospectName: person.full_name || '',
+                    eventId: nextEvent.id,
+                    eventDate: nextEvent.event_date || nextEvent.date,
+                    eventName: nextEvent.event_title || nextEvent.title,
+                    dueDate: todayStr
+                });
+            }
         }
     };
 
@@ -34529,6 +34638,7 @@ const initImportDemoData = async () => {
         dispatchOnEventAttendanceTriggers,
         dispatchOnApuPhotoTriggers,
         dispatchBirthdayTriggers,
+        dispatchProactiveEventInvites,
         renderAutomationTab,
         toggleFollowUpTemplate,
         invalidateFollowUpTemplatesCache,
