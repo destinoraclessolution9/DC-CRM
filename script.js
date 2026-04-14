@@ -36750,16 +36750,28 @@ JB 星期二到
                 const { table, action } = e.detail;
                 const view = _currentView;
 
-                // Map tables to views that need refresh
+                // Map tables to views that need refresh. Must include every
+                // table each view reads so SWR revalidation + mutations auto-
+                // refresh the list. When you add a new view to refreshCurrentView,
+                // also add its table dependencies here.
                 const viewDependencies = {
-                    'month': ['activities', 'prospects', 'customers'],
-                    'week': ['activities', 'prospects', 'customers'],
-                    'day': ['activities', 'prospects', 'customers'],
+                    'month': ['activities', 'prospects', 'customers', 'events'],
+                    'week': ['activities', 'prospects', 'customers', 'events'],
+                    'day': ['activities', 'prospects', 'customers', 'events'],
                     'pipeline': ['prospects', 'activities'],
-                    'reports': ['purchases', 'transactions', 'activities', 'agent_targets'],
+                    'reports': ['purchases', 'transactions', 'activities', 'agent_targets', 'prospects', 'customers'],
                     'protection': ['prospects', 'activities'],
                     'prospects': ['prospects', 'customers', 'activities'],
-                    'referrals': ['referrals', 'prospects', 'customers']
+                    'referrals': ['referrals', 'prospects', 'customers'],
+                    'agents': ['users', 'prospects', 'customers', 'activities', 'agent_targets'],
+                    'cases': ['case_studies', 'prospects', 'customers'],
+                    'promotions': ['monthly_promotions', 'promotions', 'promotion_packages'],
+                    'marketing_automation': ['whatsapp_campaigns', 'whatsapp_templates', 'campaign_messages'],
+                    'ranking': ['users', 'prospects', 'purchases', 'transactions'],
+                    'workflows': ['whatsapp_campaigns', 'whatsapp_templates'],
+                    'milestones': ['user_milestones', 'users'],
+                    'fude': ['user_fudi_summary', 'recommendation_rewards'],
+                    'egg_purchasing': ['egg_processed_orders', 'egg_urgent_orders', 'egg_config', 'egg_run_history']
                 };
 
                 if (viewDependencies[view] && viewDependencies[view].includes(table)) {

@@ -117,8 +117,13 @@ class DataStore {
     }
 
     emit(event, data) {
-        if (!this._events[event]) return;
-        this._events[event].forEach(cb => cb(data));
+        if (this._events[event]) {
+            this._events[event].forEach(cb => cb(data));
+        }
+        // Always dispatch dataChanged as a window event — the app's initSync
+        // listener in script.js depends on this to auto-refresh the current
+        // view after mutations and SWR revalidation. This fires regardless of
+        // whether any internal listeners were registered.
         if (event === 'dataChanged') {
             window.dispatchEvent(new CustomEvent('dataChanged', { detail: data }));
         }
@@ -236,11 +241,106 @@ class DataStore {
         this._cache.clear();
     }
 
-    async getAll(tableName) {
-        // Return cached data if still fresh — avoids redundant Supabase round trips
-        const cached = this._cacheGet(tableName);
-        if (cached) return cached;
+    // ── Stale-while-revalidate (SWR) helpers ─────────────────────────────
+    // Read the previous session's snapshot from localStorage. Returns null if
+    // missing, empty, or corrupt. Applies the same tombstone + soft-delete
+    // filtering as the main fetch path so SWR results stay consistent.
+    _swrGetLocal(tableName) {
+        try {
+            const raw = localStorage.getItem(`fs_crm_${tableName}`);
+            if (!raw) return null;
+            const data = JSON.parse(raw);
+            if (!Array.isArray(data) || data.length === 0) return null;
+            const tombstoneRaw = localStorage.getItem('fs_crm_tombstones');
+            const tombstones = tombstoneRaw ? JSON.parse(tombstoneRaw) : {};
+            const deletedIds = new Set(tombstones[tableName] || []);
+            return data.filter(r =>
+                !deletedIds.has(String(r.id)) &&
+                !(tableName === 'users' && r.status === 'deleted')
+            );
+        } catch (_) {
+            return null;
+        }
+    }
 
+    // Background fetch that refreshes stale data. Dedupes with _inFlightGetAll
+    // so a concurrent { fresh: true } call shares this network request. Only
+    // emits dataChanged when the fresh rows actually differ from the stale
+    // snapshot — prevents unnecessary re-renders when nothing changed.
+    async _swrRevalidate(tableName) {
+        if (!this._swrInFlight) this._swrInFlight = new Set();
+        if (this._swrInFlight.has(tableName)) return;
+        this._swrInFlight.add(tableName);
+
+        const prevEntry = this._cache.get(tableName);
+        const prevSnapshot = (prevEntry && prevEntry.data) || [];
+
+        try {
+            if (!this._inFlightGetAll) this._inFlightGetAll = new Map();
+            let fetchPromise = this._inFlightGetAll.get(tableName);
+            if (!fetchPromise) {
+                fetchPromise = this._getAllImpl(tableName).finally(() => {
+                    this._inFlightGetAll.delete(tableName);
+                });
+                this._inFlightGetAll.set(tableName, fetchPromise);
+            }
+            const fresh = await fetchPromise;
+
+            if (this._snapshotsDiffer(prevSnapshot, fresh)) {
+                // _getAllImpl already updated the in-memory cache with fresh
+                // data. Emitting dataChanged triggers refreshCurrentView in
+                // script.js for any view that depends on this table.
+                console.log(`[SWR] ${tableName}: revalidated (changed ${prevSnapshot.length} → ${fresh.length}), refreshing view`);
+                this.emit('dataChanged', { action: 'revalidate', table: tableName });
+            }
+        } catch (_) {
+            // Silent failure — user keeps seeing the stale data
+        } finally {
+            this._swrInFlight.delete(tableName);
+        }
+    }
+
+    // Cheap change detection: fingerprint rows by id + last-modified stamp
+    // and compare as a single string. O(n log n) on row count.
+    _snapshotsDiffer(a, b) {
+        if (!Array.isArray(a) || !Array.isArray(b)) return true;
+        if (a.length !== b.length) return true;
+        const fingerprint = (arr) =>
+            arr.map(r => `${r.id}:${r.updated_at || r.created_at || r.modified_at || ''}`)
+               .sort().join('|');
+        return fingerprint(a) !== fingerprint(b);
+    }
+
+    async getAll(tableName, options = {}) {
+        // Opt-out of SWR: callers that need guaranteed-fresh data (e.g. a
+        // duplicate check before an insert) can pass { fresh: true } to force
+        // a full Supabase round trip and bypass both caches.
+        if (options && options.fresh) {
+            this.invalidateCache(tableName);
+        } else {
+            // Tier 1 — in-memory cache hit (fastest path)
+            const cached = this._cacheGet(tableName);
+            if (cached) return cached;
+
+            // Tier 2 — stale-while-revalidate: if the previous session wrote
+            // this table to localStorage, serve it instantly and kick off a
+            // background fetch to refresh it. Makes repeat page loads feel
+            // instant — the list shows immediately and live values stream in
+            // within 1–3 s via the dataChanged event.
+            const stale = this._swrGetLocal(tableName);
+            if (stale) {
+                // Prime the in-memory cache with the stale snapshot so parallel
+                // callers during the same render cycle reuse it instead of
+                // firing more background fetches.
+                this._cacheSet(tableName, stale);
+                console.log(`[SWR] ${tableName}: served ${stale.length} rows instantly from cache`);
+                // Fire-and-forget background refresh
+                this._swrRevalidate(tableName).catch(() => {});
+                return stale;
+            }
+        }
+
+        // Tier 3 — cold path (first-ever visit or explicit fresh request).
         // In-flight promise deduplication: if another caller already started a
         // fetch for this table on the current cold cache, await the same promise
         // instead of firing a second network request. This is critical during
