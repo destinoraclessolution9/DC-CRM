@@ -12304,6 +12304,10 @@ function _wireLoginBtn() {
         }
         const venueRequiredTypes = ['CPS','FTF','EVENT','GR','XG'];
         const venueRequired = venueRequiredTypes.includes(activity.activity_type);
+        // Pre-populate co-agent state from this activity so the shared add/edit helpers
+        // (toggleCoAgentSection, searchAgents, renderCoAgents) operate on the right list.
+        _selectedCoAgents = Array.isArray(activity.co_agents) ? activity.co_agents.map(a => ({ ...a })) : [];
+        const hasCoAgents = _selectedCoAgents.length > 0;
         UI.showModal('Edit Appointment Timing', `
             <div class="form-group">
                 <label>Date</label>
@@ -12326,10 +12330,32 @@ function _wireLoginBtn() {
                     ${venues.sort((a, b) => (a.sequence || 0) - (b.sequence || 0)).map(v => `<option value="${v.name} | ${v.location}" ${activity.venue === v.name + ' | ' + v.location ? 'selected' : ''}>${v.name} | ${v.location}</option>`).join('')}
                 </select>
             </div>
+            <div class="form-section">
+                <h4>👥 Co-Agent Assignment</h4>
+                <div class="form-group">
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="allow-join" ${hasCoAgents ? 'checked' : ''} onchange="app.toggleCoAgentSection()">
+                        <span class="toggle-label">Allow Join</span>
+                    </label>
+                </div>
+            </div>
+            <div id="co-agent-section" style="display: ${hasCoAgents ? 'block' : 'none'}; background: #f0fdfa; padding: 12px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #ccfbf1;">
+                <div class="form-group">
+                    <label>Search and Add Co-Agents</label>
+                    <div class="co-agent-search" style="position:relative;">
+                        <input type="text" id="co-agent-search-input" class="form-control" placeholder="Type consultant name..." onkeyup="app.searchAgents()">
+                        <div id="agent-search-results" class="search-results-dropdown"></div>
+                    </div>
+                </div>
+                <div id="selected-co-agents" class="co-agent-list"></div>
+                <p class="help-text">Maximum 5 co-agents. They will receive calendar invitations.</p>
+            </div>
         `, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
             { label: 'Save', type: 'primary', action: `(async () => { await app.saveActivityTiming(${activityId}); })()` }
         ]);
+        // Render any pre-existing co-agents into the newly mounted #selected-co-agents container.
+        setTimeout(() => { if (typeof renderCoAgents === 'function') renderCoAgents(); }, 50);
     };
 
     const autoSetEndTime = () => {
@@ -12348,7 +12374,13 @@ function _wireLoginBtn() {
         const end = document.getElementById('edit-timing-end')?.value;
         const venue = document.getElementById('edit-timing-venue')?.value || '';
         if (!date || !start || !end) { UI.toast.error('Please fill in all timing fields'); return; }
+        // Only persist co_agents when the Allow Join toggle is present in this modal —
+        // that way this helper stays safe if another caller ever reuses it.
+        const allowJoinEl = document.getElementById('allow-join');
         const updates = { activity_date: date, start_time: start, end_time: end, venue };
+        if (allowJoinEl) {
+            updates.co_agents = allowJoinEl.checked ? _selectedCoAgents : [];
+        }
         // Mirror venue to location_address so it persists server-side (the `venue` column may
         // be missing from the Supabase schema and silently stripped on save). Only mirror when
         // the venue is non-empty so we don't clobber existing FSA/SITE site addresses.
