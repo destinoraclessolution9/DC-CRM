@@ -7081,6 +7081,7 @@ function _wireLoginBtn() {
             venueData = await AppDataStore.getAll('venues').catch(() => []);
         }
         const venueOptions = (venueData || [])
+            .sort((a, b) => (a.sequence || 0) - (b.sequence || 0))
             .map(v => `<option value="${v.id}" data-name="${(v.name || '').replace(/"/g, '&quot;')}" data-address="${(v.address || v.location || '').replace(/"/g, '&quot;')}" data-waze="${(v.waze_link || '').replace(/"/g, '&quot;')}">${v.name} | ${v.location || ''}</option>`)
             .join('');
 
@@ -12092,7 +12093,7 @@ function _wireLoginBtn() {
                 <label>Venue${venueRequired ? ' <span class="required">*</span>' : ''}</label>
                 <select id="edit-timing-venue" class="form-control">
                     <option value="">-- Select Venue --</option>
-                    ${venues.map(v => `<option value="${v.name} | ${v.location}" ${activity.venue === v.name + ' | ' + v.location ? 'selected' : ''}>${v.name} | ${v.location}</option>`).join('')}
+                    ${venues.sort((a, b) => (a.sequence || 0) - (b.sequence || 0)).map(v => `<option value="${v.name} | ${v.location}" ${activity.venue === v.name + ' | ' + v.location ? 'selected' : ''}>${v.name} | ${v.location}</option>`).join('')}
                 </select>
             </div>
         `, [
@@ -12734,6 +12735,7 @@ function _wireLoginBtn() {
             _venueData = await AppDataStore.getAll('venues');
         }
         const _venueOptions = (_venueData || [])
+            .sort((a, b) => (a.sequence || 0) - (b.sequence || 0))
             .map(v => `<option value="${v.name} | ${v.location}">${v.name} | ${v.location}</option>`)
             .join('');
         const _productOptions = (await AppDataStore.getAll('products'))
@@ -26239,6 +26241,7 @@ const exportKPIReport = async (format) => {
                 seen.add(key);
                 return true;
             });
+            data.sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
         }
 
         if (_currentMarketingListTab === 'products') {
@@ -26336,10 +26339,12 @@ const exportKPIReport = async (format) => {
                 </table>
             `;
         } else if (_currentMarketingListTab === 'venues') {
+            const seqOptions = Array.from({length: data.length}, (_, i) => i + 1);
             return `
                 <table class="data-table">
                     <thead>
                         <tr>
+                            <th style="width:60px">#</th>
                             <th>Venue Name</th>
                             <th>Location</th>
                             <th>Address</th>
@@ -26348,8 +26353,13 @@ const exportKPIReport = async (format) => {
                         </tr>
                     </thead>
                     <tbody>
-                        ${data.length === 0 ? '<tr><td colspan="5" style="text-align:center; color: var(--gray-400); padding: 32px;">No venues added yet.</td></tr>' : data.map(item => `
+                        ${data.length === 0 ? '<tr><td colspan="6" style="text-align:center; color: var(--gray-400); padding: 32px;">No venues added yet.</td></tr>' : data.map((item, idx) => `
                             <tr>
+                                <td>
+                                    <select class="form-control" style="width:55px; padding:2px 4px; font-size:13px; text-align:center;" onchange="app.updateVenueSequence('${item.id}', this.value)" title="Drag to reorder">
+                                        ${seqOptions.map(n => `<option value="${n}" ${(item.sequence || idx + 1) === n ? 'selected' : ''}>${n}</option>`).join('')}
+                                    </select>
+                                </td>
                                 <td><strong>${item.name}</strong></td>
                                 <td>${item.location || '-'}</td>
                                 <td>${item.address || '-'}</td>
@@ -26756,7 +26766,9 @@ const exportKPIReport = async (format) => {
             if (id) {
                 await AppDataStore.update('venues', id, { name, location, address, waze_link, updated_at: new Date().toISOString() });
             } else {
-                await AppDataStore.create('venues', { name, location, address, waze_link, created_at: new Date().toISOString() });
+                const allVenues = await AppDataStore.getAll('venues');
+                const maxSeq = allVenues.reduce((max, v) => Math.max(max, v.sequence || 0), 0);
+                await AppDataStore.create('venues', { name, location, address, waze_link, sequence: maxSeq + 1, created_at: new Date().toISOString() });
             }
         } catch (err) {
             UI.toast.error('Save failed: ' + (err.message || err));
@@ -26767,6 +26779,32 @@ const exportKPIReport = async (format) => {
         UI.hideModal();
         const viewport = document.getElementById('content-viewport');
         await showMarketingListsView(viewport);
+    };
+
+    const updateVenueSequence = async (movedId, newSeq) => {
+        newSeq = parseInt(newSeq, 10);
+        try {
+            let venues = await AppDataStore.getAll('venues');
+            const seen = new Set();
+            venues = venues.filter(v => {
+                const key = (v.name || '') + '|' + (v.location || '');
+                if (seen.has(key)) return false;
+                seen.add(key);
+                return true;
+            });
+            venues.sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
+            const oldIdx = venues.findIndex(v => String(v.id) === String(movedId));
+            if (oldIdx === -1) return;
+            const [moved] = venues.splice(oldIdx, 1);
+            venues.splice(newSeq - 1, 0, moved);
+            const updates = venues.map((v, i) => AppDataStore.update('venues', v.id, { sequence: i + 1 }));
+            await Promise.all(updates);
+            const viewport = document.getElementById('content-viewport');
+            await showMarketingListsView(viewport);
+        } catch (err) {
+            console.error('updateVenueSequence error:', err);
+            UI.toast.error('Reorder failed');
+        }
     };
 
     const deleteMarketingListItem = async (id) => {
@@ -34607,6 +34645,7 @@ const initImportDemoData = async () => {
         openMarketingListEditModal,
         saveMarketingListItem,
         saveVenue,
+        updateVenueSequence,
         deleteMarketingListItem,
 
         // Feature: Automated Scoring
