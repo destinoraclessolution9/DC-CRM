@@ -10338,22 +10338,49 @@ function _wireLoginBtn() {
 
     // ========== GENERIC TRIGGER ENGINE (data-driven from follow_up_templates) ==========
 
-    // Shared: find next matching event by keywords within window
-    const _findNextMatchingEvent = async (tpl) => {
-        const keywords = (tpl.event_keywords || '').split(',').map(k => k.trim().toLowerCase()).filter(Boolean);
-        if (!keywords.length) return null;
+    // Parse event.categories (JSON string or array) into array of strings
+    const _parseEventCats = (raw) => {
+        if (!raw) return [];
+        if (Array.isArray(raw)) return raw;
+        try {
+            const parsed = JSON.parse(raw);
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (e) {
+            return String(raw).split(',').map(s => s.trim()).filter(Boolean);
+        }
+    };
+
+    // Check if an event matches template target categories (used by all event-based triggers)
+    const _eventMatchesTemplate = (event, tpl) => {
+        const targetCats = (tpl.event_keywords || '').split(',').map(k => k.trim()).filter(Boolean);
+        if (!targetCats.length) return false;
+        const eventCats = _parseEventCats(event.categories);
+        return targetCats.some(tc => eventCats.includes(tc));
+    };
+
+    // Shared: find ALL matching events by category within window (sorted by date ascending)
+    const _findMatchingEvents = async (tpl) => {
+        const targetCats = (tpl.event_keywords || '').split(',').map(k => k.trim()).filter(Boolean);
+        if (!targetCats.length) return [];
         const events = await AppDataStore.getAll('events');
         const today = new Date();
         const todayStr = today.toISOString().split('T')[0];
         const windowEnd = new Date(today);
-        windowEnd.setDate(windowEnd.getDate() + (tpl.event_window_days || 30));
+        windowEnd.setDate(windowEnd.getDate() + (tpl.event_window_days || 60));
         const windowEndStr = windowEnd.toISOString().split('T')[0];
 
         return events.filter(e => {
-            const title = ((e.event_title || e.title) || '').toLowerCase();
             const eDate = e.event_date || e.date || '';
-            return keywords.some(kw => title.includes(kw)) && eDate >= todayStr && eDate <= windowEndStr && (e.status || '').toLowerCase() !== 'cancelled';
-        }).sort((a, b) => (a.event_date || a.date || '').localeCompare(b.event_date || b.date || ''))[0] || null;
+            return _eventMatchesTemplate(e, tpl) &&
+                eDate >= todayStr && eDate <= windowEndStr &&
+                (e.status || '').toLowerCase() !== 'cancelled';
+        }).sort((a, b) => (a.event_date || a.date || '').localeCompare(b.event_date || b.date || ''));
+    };
+
+    // Legacy alias: find the NEXT matching event (used by reactive triggers)
+    const _findNextMatchingEvent = async (tpl) => {
+        const matches = await _findMatchingEvents(tpl);
+        return matches[0] || null;
     };
 
     // Generic: event-based trigger (for after_cps and similar)
@@ -10448,7 +10475,6 @@ function _wireLoginBtn() {
 
         const event = await AppDataStore.getById('events', eventId);
         if (!event) return;
-        const title = ((event.event_title || event.title) || '').toLowerCase();
 
         const entity = entityType === 'customer'
             ? await AppDataStore.getById('customers', entityId)
@@ -10456,8 +10482,8 @@ function _wireLoginBtn() {
         if (!entity) return;
 
         for (const tpl of triggers) {
-            const keywords = (tpl.event_keywords || '').split(',').map(k => k.trim().toLowerCase()).filter(Boolean);
-            if (keywords.length && !keywords.some(kw => title.includes(kw))) continue;
+            // Match by event categories (same logic as other triggers)
+            if (!_eventMatchesTemplate(event, tpl)) continue;
 
             const msg = interpolateTemplate(tpl.message_template, {
                 name: entity.full_name || '',
@@ -10538,25 +10564,25 @@ function _wireLoginBtn() {
         ];
 
         for (const tpl of eventTriggers) {
-            const keywords = (tpl.event_keywords || '').split(',').map(k => k.trim().toLowerCase()).filter(Boolean);
+            const targetCats = (tpl.event_keywords || '').split(',').map(k => k.trim()).filter(Boolean);
+            if (!targetCats.length) continue;
             const interestList = (tpl.cps_interest_match || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
             const solutionList = (tpl.solution_match || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
 
             const windowEnd = new Date(today);
-            windowEnd.setDate(windowEnd.getDate() + (tpl.event_window_days || 30));
+            windowEnd.setDate(windowEnd.getDate() + (tpl.event_window_days || 60));
             const windowEndStr = windowEnd.toISOString().split('T')[0];
 
-            // Find next matching event in window
+            // Find ALL matching events in window by CATEGORY (not title keywords)
             const matchingEvents = events.filter(e => {
-                const title = ((e.event_title || e.title) || '').toLowerCase();
                 const eDate = e.event_date || e.date || '';
-                return keywords.some(kw => title.includes(kw)) &&
-                    eDate >= todayStr && eDate <= windowEndStr &&
-                    (e.status || '').toLowerCase() !== 'cancelled';
+                if (eDate < todayStr || eDate > windowEndStr) return false;
+                if ((e.status || '').toLowerCase() === 'cancelled') return false;
+                const eventCats = _parseEventCats(e.categories);
+                return targetCats.some(tc => eventCats.includes(tc));
             }).sort((a, b) => (a.event_date || a.date || '').localeCompare(b.event_date || b.date || ''));
 
-            const nextEvent = matchingEvents[0];
-            if (!nextEvent) continue;
+            if (!matchingEvents.length) continue;
 
             // Find eligible people (current agent only)
             for (const person of allPeople) {
@@ -10575,27 +10601,30 @@ function _wireLoginBtn() {
 
                 if (!interestOk && !solutionOk) continue;
 
-                const msg = interpolateTemplate(tpl.message_template, {
-                    name: person.full_name || '',
-                    date: nextEvent.event_date || nextEvent.date || '',
-                    time: (nextEvent.start_time || nextEvent.time || '').slice(0, 5),
-                    venue: nextEvent.location || '',
-                    event_name: nextEvent.event_title || nextEvent.title || '',
-                    agent_name: _currentUser?.full_name || ''
-                });
+                // Create a draft for EACH matching event (dedup per event_id handles repeats)
+                for (const ev of matchingEvents) {
+                    const msg = interpolateTemplate(tpl.message_template, {
+                        name: person.full_name || '',
+                        date: ev.event_date || ev.date || '',
+                        time: (ev.start_time || ev.time || '').slice(0, 5),
+                        venue: ev.location || '',
+                        event_name: ev.event_title || ev.title || '',
+                        agent_name: _currentUser?.full_name || ''
+                    });
 
-                await createFollowUpDraft({
-                    prospectId: person._type === 'prospect' ? person.id : null,
-                    customerId: person._type === 'customer' ? person.id : null,
-                    triggerType: tpl.trigger_type,
-                    messageText: msg,
-                    phone: person.phone || '',
-                    prospectName: person.full_name || '',
-                    eventId: nextEvent.id,
-                    eventDate: nextEvent.event_date || nextEvent.date,
-                    eventName: nextEvent.event_title || nextEvent.title,
-                    dueDate: todayStr
-                });
+                    await createFollowUpDraft({
+                        prospectId: person._type === 'prospect' ? person.id : null,
+                        customerId: person._type === 'customer' ? person.id : null,
+                        triggerType: tpl.trigger_type,
+                        messageText: msg,
+                        phone: person.phone || '',
+                        prospectName: person.full_name || '',
+                        eventId: ev.id,
+                        eventDate: ev.event_date || ev.date,
+                        eventName: ev.event_title || ev.title,
+                        dueDate: todayStr
+                    });
+                }
             }
         }
     };
@@ -13861,6 +13890,7 @@ function _wireLoginBtn() {
                 if (!selectedCats.includes(c)) selectedCats.push(c);
             });
         }
+        if (!selectedCats.length) return UI.toast.error('At least one category is required');
 
         const data = {
             event_title: title,
@@ -26928,6 +26958,7 @@ const exportKPIReport = async (format) => {
             }
             data.categories = JSON.stringify(selectedCats);
             if (!data.event_title) return UI.toast.error('Title is required');
+            if (!selectedCats.length) return UI.toast.error('At least one category is required');
         } else {
             data.package_name = document.getElementById('mkt-pkname').value.trim();
             data.price = parseFloat(document.getElementById('mkt-price').value) || 0;
@@ -27272,7 +27303,7 @@ const exportKPIReport = async (format) => {
                             <th style="width:30px;"></th>
                             <th>Name</th>
                             <th>Category</th>
-                            <th>Event Keywords</th>
+                            <th>Event Categories</th>
                             <th>CPS Interest</th>
                             <th>Solution Match</th>
                             <th style="width:50px;">Delay</th>
@@ -27295,7 +27326,11 @@ const exportKPIReport = async (format) => {
                                 <div style="font-size:11px; color:var(--gray-500); max-width:250px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${tpl.description || ''}</div>
                             </td>
                             <td><span style="font-size:11px; padding:2px 8px; border-radius:10px; background:${catColor}20; color:${catColor}; white-space:nowrap;">${catLabel}</span></td>
-                            <td style="font-size:12px; color:var(--gray-600); max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${(tpl.event_keywords || '').replace(/"/g, '&quot;')}">${tpl.event_keywords || '<span style="color:var(--gray-300);">—</span>'}</td>
+                            <td style="font-size:12px; color:var(--gray-600); max-width:220px;">${(() => {
+                                const cats = (tpl.event_keywords || '').split(',').map(s => s.trim()).filter(Boolean);
+                                if (!cats.length) return '<span style="color:var(--gray-300);">—</span>';
+                                return cats.map(c => `<span style="display:inline-block;background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:10px;padding:1px 6px;margin:1px 2px 1px 0;font-size:10px;">${c}</span>`).join('');
+                            })()}</td>
                             <td style="font-size:12px; color:var(--gray-600); max-width:100px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${(tpl.cps_interest_match || '').replace(/"/g, '&quot;')}">${tpl.cps_interest_match || '<span style="color:var(--gray-300);">—</span>'}</td>
                             <td style="font-size:12px; color:var(--gray-600); max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${(tpl.solution_match || '').replace(/"/g, '&quot;')}">${tpl.solution_match || '<span style="color:var(--gray-300);">—</span>'}</td>
                             <td style="text-align:center;">${tpl.delay_days || 0}d</td>
@@ -27457,8 +27492,18 @@ const exportKPIReport = async (format) => {
                     </div>
                 </div>
                 <div class="form-group">
-                    <label>Event Keywords <small style="color:var(--gray-500);">(comma-separated, matched against event title)</small></label>
-                    <input type="text" id="fu-tpl-keywords" class="form-control" value="${(tpl.event_keywords || '').replace(/"/g, '&quot;')}" placeholder="e.g. 9 star,nine star,九星">
+                    <label>Target Event Categories <small style="color:var(--gray-500);">(events with any of these categories will trigger this invite)</small></label>
+                    <div id="fu-tpl-cats-box" style="display:flex;flex-wrap:wrap;gap:6px;max-height:200px;overflow-y:auto;padding:8px;border:1px solid var(--gray-200);border-radius:6px;background:var(--gray-50, #f9fafb);">
+                        ${(() => {
+                            const selected = new Set((tpl.event_keywords || '').split(',').map(s => s.trim()).filter(Boolean));
+                            return EVENT_CATEGORIES.map(cat => `
+                                <label style="display:flex;align-items:center;gap:6px;padding:6px 8px;border:1px solid var(--gray-200);border-radius:6px;background:#fff;cursor:pointer;font-size:12px;">
+                                    <input type="checkbox" class="fu-tpl-cat-cb" value="${cat.replace(/"/g, '&quot;')}" ${selected.has(cat) ? 'checked' : ''}>
+                                    <span>${cat}</span>
+                                </label>
+                            `).join('');
+                        })()}
+                    </div>
                 </div>
                 <div id="fu-cps-fields" style="display:${isAfterCps ? 'block' : 'none'};">
                     <div class="form-row">
@@ -27506,12 +27551,15 @@ const exportKPIReport = async (format) => {
         const name = document.getElementById('fu-tpl-name')?.value?.trim();
         const message = document.getElementById('fu-tpl-message')?.value;
         if (!name || !message) { UI.toast.error('Name and message template are required'); return null; }
+        // Collect selected event categories from checkbox grid
+        const catBoxes = document.querySelectorAll('#fu-tpl-cats-box .fu-tpl-cat-cb:checked');
+        const selectedCats = Array.from(catBoxes).map(cb => cb.value);
         return {
             template_name: name,
             icon: document.getElementById('fu-tpl-icon')?.value?.trim() || '📩',
             trigger_category: document.getElementById('fu-tpl-category')?.value || 'after_cps',
             sort_order: parseInt(document.getElementById('fu-tpl-sort')?.value) || 0,
-            event_keywords: document.getElementById('fu-tpl-keywords')?.value?.trim() || '',
+            event_keywords: selectedCats.join(','),
             cps_interest_match: document.getElementById('fu-tpl-interest')?.value?.trim() || '',
             solution_match: document.getElementById('fu-tpl-solution')?.value?.trim() || '',
             description: document.getElementById('fu-tpl-desc')?.value?.trim() || '',
