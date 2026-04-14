@@ -34370,13 +34370,15 @@ const initImportDemoData = async () => {
         xlsxFile: null, xlsxRows: [], xlsxHeaders: [],
         normalizedRows: [],     // all rows after filter/map, before dedup
         newRows: [],            // rows not yet in processed_orders history
-        urgentOrders: [],       // pending/applied urgents from recent weeks (from DB)
-        matches: [],            // [{ urgentKey, candidateKey, strength }]
-        excludedKeys: new Set(),// unique_keys marked to exclude
-        excludedToUrgent: {},   // unique_key -> urgent id (for reconciliation linking)
+        urgentOrders: [],       // (legacy, unused in simplified flow — kept for Tab 2)
+        matches: [],            // (legacy, unused in simplified flow)
+        excludedKeys: new Set(),// unique_keys marked to push up to last week (exclude from current)
+        excludedToUrgent: {},   // (legacy, unused in simplified flow)
+        lastWeekTopUp: { GOLD: 0, KING: 0 },  // user-entered ad-hoc top-up quantities from last week
         config: null,
         farmOrderText: '',
         channelBreakdownText: '',
+        channelBreakdownHtml: '',
         stats: {}
     };
 
@@ -34636,30 +34638,6 @@ const initImportDemoData = async () => {
         return out;
     };
 
-    // --- Load urgent orders from recent weeks (pending + applied) ---
-    const eggLoadRecentUrgents = async () => {
-        try {
-            // Query all urgents with status pending or applied — filter by week window in JS
-            // (AppDataStore.query uses equality matches; we want an IN-list so we'll fetch pending + applied separately)
-            const [pending, applied] = await Promise.all([
-                AppDataStore.query('egg_urgent_orders', { status: 'pending' }),
-                AppDataStore.query('egg_urgent_orders', { status: 'applied' })
-            ]);
-            const all = [...(pending||[]), ...(applied||[])];
-            // Keep only urgents from within watch_window_weeks of the selected week
-            const watchWeeks = (_eggState.config && _eggState.config.watch_window_weeks) || 4;
-            const cutoff = new Date(_eggState.weekStartDate || eggGetCurrentMonday());
-            cutoff.setDate(cutoff.getDate() - watchWeeks * 7);
-            return all.filter(u => {
-                if (!u.week_start_date) return true;
-                return new Date(u.week_start_date) >= cutoff;
-            }).sort((a,b) => String(b.week_start_date||'').localeCompare(String(a.week_start_date||'')));
-        } catch (err) {
-            console.error('egg: load urgents failed', err);
-            return [];
-        }
-    };
-
     // --- Dedup against processed_orders history ---
     const eggDedupAgainstHistory = async (rows) => {
         try {
@@ -34723,34 +34701,80 @@ JB 星期二到
 `;
     };
 
-    const eggRenderChannelBreakdown = (channelSum) => {
+    // Sections render in the order the user requested:
+    //   PG Wholesale → PG Online → KL Wholesale → KL Online
+    const _EGG_CHANNEL_SECTIONS = [
+        { region: 'PG', channel: 'Wholesale', title: 'PG - Wholesale' },
+        { region: 'PG', channel: 'Online',    title: 'PG - Online' },
+        { region: 'KL', channel: 'Wholesale', title: 'KL - Wholesale' },
+        { region: 'KL', channel: 'Online',    title: 'KL - Online' }
+    ];
+
+    // HTML version — renders each section as its own mini-table styled like
+    // "Orders in this run" so the super admin can visually scan the exact
+    // rows that rolled into each channel for the current week.
+    const eggRenderChannelBreakdownHtml = (rows) => {
+        return _EGG_CHANNEL_SECTIONS.map(sec => {
+            const sectionRows = rows.filter(r => r.region === sec.region && r.channel === sec.channel);
+            const totalGold = sectionRows.filter(r => r.product === 'GOLD').reduce((s, r) => s + Number(r.quantity||0), 0);
+            const totalKing = sectionRows.filter(r => r.product === 'KING').reduce((s, r) => s + Number(r.quantity||0), 0);
+            const body = sectionRows.length === 0 ?
+                `<tr><td colspan="5" style="padding:10px;text-align:center;color:var(--gray-400);font-size:12px;">No orders</td></tr>` :
+                sectionRows.map(r => {
+                    const dateStr = r.order_date_parsed ? eggFormatDateShort(r.order_date_parsed) : '-';
+                    return `
+                        <tr style="border-top:1px solid var(--gray-200);">
+                            <td style="padding:6px 8px;">${r.agent_name || '-'}</td>
+                            <td style="padding:6px 8px;font-size:12px;">${dateStr}</td>
+                            <td style="padding:6px 8px;font-family:monospace;font-size:12px;">${r.order_no || '-'}</td>
+                            <td style="padding:6px 8px;">${r.product}</td>
+                            <td style="padding:6px 8px;text-align:right;">${r.quantity}</td>
+                        </tr>
+                    `;
+                }).join('');
+            return `
+                <div style="margin-bottom:14px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;background:#f8fafc;padding:8px 12px;border:1px solid var(--gray-200);border-bottom:none;border-top-left-radius:6px;border-top-right-radius:6px;">
+                        <strong>${sec.title}</strong>
+                        <span style="font-size:12px;color:var(--gray-600);">GOLD ${totalGold} • KING ${totalKing}</span>
+                    </div>
+                    <table style="width:100%;border-collapse:collapse;border:1px solid var(--gray-200);">
+                        <thead>
+                            <tr style="background:var(--gray-50);text-align:left;font-size:12px;">
+                                <th style="padding:6px 8px;">Agent</th>
+                                <th style="padding:6px 8px;">Order Date</th>
+                                <th style="padding:6px 8px;">Order No</th>
+                                <th style="padding:6px 8px;">Product</th>
+                                <th style="padding:6px 8px;text-align:right;">Qty</th>
+                            </tr>
+                        </thead>
+                        <tbody>${body}</tbody>
+                    </table>
+                </div>
+            `;
+        }).join('');
+    };
+
+    // Text version — used for clipboard copy, .txt download, and run history.
+    // Keeps the totals line + lists each row underneath so downstream tools
+    // (e.g. WhatsApp, email) still have a readable per-row breakdown.
+    const eggRenderChannelBreakdownText = (rows) => {
         let out = '=== 批发 / 线上分类汇总 ===\n';
-        for (const region of ['KL', 'PG']) {
-            for (const ch of ['Wholesale', 'Online']) {
-                const g = channelSum[region][ch].GOLD || 0;
-                const k = channelSum[region][ch].KING || 0;
-                out += `${region} - ${ch}: GOLD ${g} cartons, KING ${k} cartons\n`;
+        for (const sec of _EGG_CHANNEL_SECTIONS) {
+            const sectionRows = rows.filter(r => r.region === sec.region && r.channel === sec.channel);
+            const totalGold = sectionRows.filter(r => r.product === 'GOLD').reduce((s, r) => s + Number(r.quantity||0), 0);
+            const totalKing = sectionRows.filter(r => r.product === 'KING').reduce((s, r) => s + Number(r.quantity||0), 0);
+            out += `\n${sec.title}: GOLD ${totalGold} cartons, KING ${totalKing} cartons\n`;
+            for (const r of sectionRows) {
+                const dateStr = r.order_date_parsed ? eggFormatDateShort(r.order_date_parsed) : '-';
+                const agent = (r.agent_name || '-').padEnd(20).slice(0, 20);
+                const date = dateStr.padEnd(10);
+                const ordNo = (r.order_no || '-').padEnd(15).slice(0, 15);
+                const prod = (r.product || '').padEnd(6);
+                out += `  ${agent} ${date} ${ordNo} ${prod} ${r.quantity}\n`;
             }
         }
         return out;
-    };
-
-    // --- Match detection (for Phase 2 reconciliation highlighting) ---
-    const eggFindMatches = (newRows, urgents) => {
-        const matches = [];
-        for (const u of urgents) {
-            const uAgent = eggNormalizeAgentName(u.agent_name);
-            for (const r of newRows) {
-                const rAgent = eggNormalizeAgentName(r.agent_name);
-                if (rAgent && uAgent && rAgent === uAgent && r.product === u.product && r.region === u.region) {
-                    let strength = 'possible';
-                    if (Number(r.quantity) === Number(u.quantity)) strength = 'strong';
-                    else if (Math.abs(Number(r.quantity) - Number(u.quantity)) / Math.max(Number(u.quantity),1) <= 0.2) strength = 'weak';
-                    matches.push({ urgentId: u.id, urgentKey: `U${u.id}`, candidateKey: r.unique_key, strength });
-                }
-            }
-        }
-        return matches;
     };
 
     // ==================== MAIN VIEW RENDERER ====================
@@ -34978,8 +35002,10 @@ JB 星期二到
         _eggState.matches = [];
         _eggState.excludedKeys = new Set();
         _eggState.excludedToUrgent = {};
+        _eggState.lastWeekTopUp = { GOLD: 0, KING: 0 };
         _eggState.farmOrderText = '';
         _eggState.channelBreakdownText = '';
+        _eggState.channelBreakdownHtml = '';
         _eggState.stats = {};
         _eggState.droppedDupes = 0;
         _eggState.currentPhase = 1;
@@ -35012,11 +35038,10 @@ JB 星期二到
         _eggState.normalizedRows = processed;
         _eggState.newRows = newRows;
 
-        // Load recent urgents for reconciliation
-        _eggState.urgentOrders = await eggLoadRecentUrgents();
-
-        // Compute matches (highlights only)
-        _eggState.matches = eggFindMatches(newRows, _eggState.urgentOrders);
+        // Simplified flow: no more urgent-order reconciliation. User just enters
+        // last-week top-up amounts and ticks the rows that were placed last week.
+        _eggState.urgentOrders = [];
+        _eggState.matches = [];
         _eggState.excludedKeys = new Set();
         _eggState.excludedToUrgent = {};
 
@@ -35026,34 +35051,7 @@ JB 星期二到
 
     const eggRenderPhase2 = (host) => {
         const newRows = _eggState.newRows || [];
-        const urgents = _eggState.urgentOrders || [];
-        const matches = _eggState.matches || [];
-        const byCandidate = {};
-        for (const m of matches) {
-            if (!byCandidate[m.candidateKey]) byCandidate[m.candidateKey] = [];
-            byCandidate[m.candidateKey].push(m);
-        }
-
-        const urgentRowsHtml = urgents.length === 0 ?
-            `<div style="padding:16px;text-align:center;color:var(--gray-500);">No urgent orders on record for the last ${(_eggState.config?.watch_window_weeks||4)} weeks.</div>` :
-            urgents.map(u => {
-                const statusColor = u.status === 'pending' ? '#f59e0b' : u.status === 'applied' ? '#3b82f6' : '#6b7280';
-                return `
-                    <tr>
-                        <td>${u.agent_name || '-'}</td>
-                        <td>${u.product}</td>
-                        <td>${u.region}</td>
-                        <td style="text-align:right;">${u.quantity}</td>
-                        <td>${u.week_start_date || '-'}</td>
-                        <td><span style="background:${statusColor};color:white;padding:2px 8px;border-radius:10px;font-size:11px;">${u.status}</span></td>
-                        <td>${u.notes || ''}</td>
-                    </tr>
-                `;
-            }).join('');
-
-        // Note: inline urgent orders (added via "Add Urgent Order" in Phase 2) are
-        // saved directly to DB and reload into _eggState.urgentOrders, so they
-        // appear in the normal urgent table above — no separate "unsaved" list needed.
+        const topUp = _eggState.lastWeekTopUp || { GOLD: 0, KING: 0 };
 
         const candidateRowsHtml = newRows.length === 0 ?
             `<div style="padding:16px;text-align:center;color:var(--gray-500);">No new orders to reconcile.</div>` :
@@ -35062,6 +35060,7 @@ JB 星期二到
                     <tr style="background:var(--gray-50);text-align:left;">
                         <th style="padding:8px;width:40px;"></th>
                         <th style="padding:8px;">Agent</th>
+                        <th style="padding:8px;">Order Date</th>
                         <th style="padding:8px;">Order No</th>
                         <th style="padding:8px;">Product</th>
                         <th style="padding:8px;">Region</th>
@@ -35072,24 +35071,24 @@ JB 星期二到
                 </thead>
                 <tbody>
                 ${newRows.map(r => {
-                    const ms = byCandidate[r.unique_key] || [];
-                    const strongest = ms.find(m => m.strength === 'strong') || ms.find(m => m.strength === 'weak') || ms[0];
-                    const checked = _eggState.excludedKeys.has(r.unique_key) ? 'checked' : '';
-                    const rowStyle = strongest ? 'background:#fef2f2;' : '';
-                    const matchBadge = !strongest ? '-' :
-                        strongest.strength === 'strong' ? `<span style="background:#dc2626;color:white;padding:2px 8px;border-radius:10px;font-size:11px;">STRONG</span>` :
-                        strongest.strength === 'weak'   ? `<span style="background:#f59e0b;color:white;padding:2px 8px;border-radius:10px;font-size:11px;">WEAK</span>` :
-                        `<span style="background:#6b7280;color:white;padding:2px 8px;border-radius:10px;font-size:11px;">possible</span>`;
+                    const pushed = _eggState.excludedKeys.has(r.unique_key);
+                    const checked = pushed ? 'checked' : '';
+                    const rowStyle = pushed ? 'background:#fef2f2;' : '';
+                    const matchBadge = pushed ?
+                        `<span style="background:#dc2626;color:white;padding:2px 8px;border-radius:10px;font-size:11px;">PUSHED UP</span>` :
+                        '-';
+                    const dateStr = r.order_date_parsed ? eggFormatDateShort(r.order_date_parsed) : '-';
                     return `
-                        <tr style="border-top:1px solid var(--gray-200);${rowStyle}">
-                            <td style="padding:8px;"><input type="checkbox" ${checked} onchange="app.eggToggleExclude('${r.unique_key}', ${strongest ? strongest.urgentId : 'null'})"></td>
+                        <tr data-egg-key="${r.unique_key}" style="border-top:1px solid var(--gray-200);${rowStyle}">
+                            <td style="padding:8px;"><input type="checkbox" ${checked} onchange="app.eggToggleExclude('${r.unique_key}')"></td>
                             <td style="padding:8px;">${r.agent_name || '-'}</td>
+                            <td style="padding:8px;font-size:12px;">${dateStr}</td>
                             <td style="padding:8px;font-family:monospace;font-size:12px;">${r.order_no || '-'}</td>
                             <td style="padding:8px;">${r.product}</td>
                             <td style="padding:8px;">${r.region}</td>
                             <td style="padding:8px;text-align:right;">${r.quantity}</td>
                             <td style="padding:8px;">${r.channel}</td>
-                            <td style="padding:8px;">${matchBadge}</td>
+                            <td class="egg-match-cell" style="padding:8px;">${matchBadge}</td>
                         </tr>
                     `;
                 }).join('')}
@@ -35109,48 +35108,37 @@ JB 星期二到
                 </div>
             </div>
 
-            <div style="background:#fffbeb;border:1px solid #f59e0b;border-radius:8px;padding:14px;margin-bottom:20px;">
-                <strong><i class="fas fa-question-circle"></i> Were any urgent / ad-hoc orders placed last week that bypassed the normal sales order flow?</strong>
-                <div style="color:var(--gray-600);font-size:13px;margin-top:6px;">
-                    If yes: review the urgent orders below, then check any rows in this week's files that match (so you don't double-ship). You can also add an urgent order inline.
+            <div style="background:#fffbeb;border:1px solid #f59e0b;border-radius:8px;padding:16px;margin-bottom:20px;">
+                <strong><i class="fas fa-question-circle"></i> Last Week Top-Up</strong>
+                <div style="color:var(--gray-600);font-size:13px;margin:6px 0 12px 0;">
+                    Did you add any ad-hoc orders last week that bypassed the normal sales flow? Enter the quantities you added, then tick the rows below that were actually placed last week so they're excluded from this week's farm order.
                 </div>
-            </div>
-
-            <div style="background:white;padding:20px;border-radius:12px;border:1px solid var(--gray-200);margin-bottom:20px;">
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-                    <h3 style="margin:0;">Recent Urgent Orders (last ${(_eggState.config?.watch_window_weeks||4)} weeks)</h3>
-                    <button class="btn primary btn-sm" onclick="app.eggOpenInlineUrgentModal()">
-                        <i class="fas fa-plus"></i> Add Urgent Order
-                    </button>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;max-width:480px;">
+                    <div>
+                        <label style="font-weight:600;display:block;margin-bottom:4px;font-size:13px;">GOLD (cartons)</label>
+                        <input type="number" min="0" step="1" value="${topUp.GOLD || 0}"
+                            oninput="app.eggSetLastWeekTopUp('GOLD', this.value)"
+                            style="width:100%;padding:8px 12px;border:1px solid var(--gray-300);border-radius:6px;font-size:14px;">
+                    </div>
+                    <div>
+                        <label style="font-weight:600;display:block;margin-bottom:4px;font-size:13px;">KIN / KING (cartons)</label>
+                        <input type="number" min="0" step="1" value="${topUp.KING || 0}"
+                            oninput="app.eggSetLastWeekTopUp('KING', this.value)"
+                            style="width:100%;padding:8px 12px;border:1px solid var(--gray-300);border-radius:6px;font-size:14px;">
+                    </div>
                 </div>
-                <div style="max-height:260px;overflow-y:auto;">
-                    <table style="width:100%;border-collapse:collapse;">
-                        <thead>
-                            <tr style="background:var(--gray-50);text-align:left;">
-                                <th style="padding:8px;">Agent</th>
-                                <th style="padding:8px;">Product</th>
-                                <th style="padding:8px;">Region</th>
-                                <th style="padding:8px;text-align:right;">Qty</th>
-                                <th style="padding:8px;">Week</th>
-                                <th style="padding:8px;">Status</th>
-                                <th style="padding:8px;">Notes</th>
-                            </tr>
-                        </thead>
-                        <tbody>${urgentRowsHtml}</tbody>
-                    </table>
-                </div>
+                <div id="egg-pushup-counter" style="margin-top:12px;font-size:13px;">${eggPushUpCounterHtml()}</div>
             </div>
 
             <div style="background:white;padding:20px;border-radius:12px;border:1px solid var(--gray-200);">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
                     <h3 style="margin:0;">Orders in this run (${newRows.length} new rows after dedup)</h3>
                     <div>
-                        <button class="btn secondary btn-sm" onclick="app.eggAutoCheckStrong()">Auto-check strong matches</button>
-                        <button class="btn secondary btn-sm" onclick="app.eggClearExclusions()">Clear all</button>
+                        <button class="btn secondary btn-sm" onclick="app.eggClearExclusions()">Clear push-ups</button>
                     </div>
                 </div>
                 <div style="color:var(--gray-500);font-size:12px;margin-bottom:8px;">
-                    Rows highlighted in pink have potential matches with urgent orders above. Check the box to exclude a row from the farm order.
+                    Tick a row to <strong>push it up</strong> — marks it as already placed last week and excludes it from this week's farm order.
                 </div>
                 ${candidateRowsHtml}
             </div>
@@ -35166,32 +35154,61 @@ JB 星期二到
         `;
     };
 
+    // Compute the live "pushed up so far" counter compared against user's top-up input
+    const eggPushUpCounterHtml = () => {
+        const newRows = _eggState.newRows || [];
+        const topUp = _eggState.lastWeekTopUp || { GOLD: 0, KING: 0 };
+        const pushed = newRows.filter(r => _eggState.excludedKeys.has(r.unique_key));
+        const goldSum = pushed.filter(r => r.product === 'GOLD').reduce((s, r) => s + Number(r.quantity||0), 0);
+        const kingSum = pushed.filter(r => r.product === 'KING').reduce((s, r) => s + Number(r.quantity||0), 0);
+        const goldTarget = Number(topUp.GOLD) || 0;
+        const kingTarget = Number(topUp.KING) || 0;
+        const goldColor = goldSum === goldTarget ? '#059669' : '#b45309';
+        const kingColor = kingSum === kingTarget ? '#059669' : '#b45309';
+        const goldIcon = goldSum === goldTarget ? '<i class="fas fa-check-circle"></i>' : '<i class="fas fa-exclamation-triangle"></i>';
+        const kingIcon = kingSum === kingTarget ? '<i class="fas fa-check-circle"></i>' : '<i class="fas fa-exclamation-triangle"></i>';
+        return `
+            <span style="color:var(--gray-600);">Pushed up so far:</span>
+            <span style="color:${goldColor};font-weight:600;margin-left:8px;">${goldIcon} GOLD ${goldSum} / ${goldTarget}</span>
+            <span style="color:${kingColor};font-weight:600;margin-left:12px;">${kingIcon} KING ${kingSum} / ${kingTarget}</span>
+        `;
+    };
+
+    // Persist the user's last-week top-up input and refresh the live counter
+    // without re-rendering (which would lose input focus).
+    const eggSetLastWeekTopUp = (product, val) => {
+        _eggState.lastWeekTopUp = _eggState.lastWeekTopUp || { GOLD: 0, KING: 0 };
+        _eggState.lastWeekTopUp[product] = Number(val) || 0;
+        const counter = document.getElementById('egg-pushup-counter');
+        if (counter) counter.innerHTML = eggPushUpCounterHtml();
+    };
+
     const eggGoToPhase1 = async () => {
         _eggState.currentPhase = 1;
         await eggRenderRunTab(document.getElementById('egg-tab-content'));
     };
 
-    const eggToggleExclude = (uniqueKey, urgentId) => {
+    const eggToggleExclude = (uniqueKey) => {
         if (_eggState.excludedKeys.has(uniqueKey)) {
             _eggState.excludedKeys.delete(uniqueKey);
-            delete _eggState.excludedToUrgent[uniqueKey];
         } else {
             _eggState.excludedKeys.add(uniqueKey);
-            // urgentId is a real number when there's a matching urgent, or null otherwise
-            if (typeof urgentId === 'number' && urgentId > 0) {
-                _eggState.excludedToUrgent[uniqueKey] = urgentId;
+        }
+        // Partial DOM update — avoids full re-render so the user's scroll
+        // position and the top-up input focus are preserved.
+        const tr = document.querySelector(`tr[data-egg-key="${uniqueKey}"]`);
+        if (tr) {
+            const pushed = _eggState.excludedKeys.has(uniqueKey);
+            tr.style.background = pushed ? '#fef2f2' : '';
+            const cell = tr.querySelector('.egg-match-cell');
+            if (cell) {
+                cell.innerHTML = pushed
+                    ? '<span style="background:#dc2626;color:white;padding:2px 8px;border-radius:10px;font-size:11px;">PUSHED UP</span>'
+                    : '-';
             }
         }
-    };
-
-    const eggAutoCheckStrong = async () => {
-        for (const m of (_eggState.matches || [])) {
-            if (m.strength === 'strong') {
-                _eggState.excludedKeys.add(m.candidateKey);
-                _eggState.excludedToUrgent[m.candidateKey] = m.urgentId;
-            }
-        }
-        await eggRenderRunTab(document.getElementById('egg-tab-content'));
+        const counter = document.getElementById('egg-pushup-counter');
+        if (counter) counter.innerHTML = eggPushUpCounterHtml();
     };
 
     const eggClearExclusions = async () => {
@@ -35200,95 +35217,34 @@ JB 星期二到
         await eggRenderRunTab(document.getElementById('egg-tab-content'));
     };
 
-    const eggOpenInlineUrgentModal = () => {
-        const content = `
-            <div style="display:grid;gap:12px;min-width:400px;">
-                <div>
-                    <label style="font-weight:600;display:block;margin-bottom:4px;">Agent Name</label>
-                    <input type="text" id="egg-inline-agent" class="form-control">
-                </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-                    <div>
-                        <label style="font-weight:600;display:block;margin-bottom:4px;">Product</label>
-                        <select id="egg-inline-product" class="form-control">
-                            <option value="GOLD">GOLD</option>
-                            <option value="KING">KING</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label style="font-weight:600;display:block;margin-bottom:4px;">Region</label>
-                        <select id="egg-inline-region" class="form-control">
-                            <option value="KL">KL</option>
-                            <option value="PG">PG</option>
-                        </select>
-                    </div>
-                </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-                    <div>
-                        <label style="font-weight:600;display:block;margin-bottom:4px;">Quantity (cartons)</label>
-                        <input type="number" id="egg-inline-qty" class="form-control" min="1" value="1">
-                    </div>
-                    <div>
-                        <label style="font-weight:600;display:block;margin-bottom:4px;">Channel</label>
-                        <select id="egg-inline-channel" class="form-control">
-                            <option value="Wholesale">Wholesale</option>
-                            <option value="Online">Online</option>
-                        </select>
-                    </div>
-                </div>
-                <div>
-                    <label style="font-weight:600;display:block;margin-bottom:4px;">Week Start Date</label>
-                    <input type="date" id="egg-inline-week" class="form-control" value="${eggFormatDateIso(_eggState.weekStartDate || eggGetCurrentMonday())}">
-                </div>
-                <div>
-                    <label style="font-weight:600;display:block;margin-bottom:4px;">Notes (optional)</label>
-                    <textarea id="egg-inline-notes" class="form-control" rows="2"></textarea>
-                </div>
-            </div>
-        `;
-        UI.showModal('Add Urgent Order', content, [
-            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Add', type: 'primary', action: 'app.eggSaveInlineUrgent()' }
-        ]);
-    };
-
-    const eggSaveInlineUrgent = async () => {
-        const agent = document.getElementById('egg-inline-agent')?.value?.trim();
-        const product = document.getElementById('egg-inline-product')?.value;
-        const region = document.getElementById('egg-inline-region')?.value;
-        const qty = parseInt(document.getElementById('egg-inline-qty')?.value || '0', 10);
-        const channel = document.getElementById('egg-inline-channel')?.value;
-        const week = document.getElementById('egg-inline-week')?.value;
-        const notes = document.getElementById('egg-inline-notes')?.value;
-        if (!agent || !qty || qty <= 0) {
-            UI.toast.error('Agent and positive quantity required');
-            return;
-        }
-        try {
-            const rec = await AppDataStore.create('egg_urgent_orders', {
-                agent_name: agent, product, region, quantity: qty,
-                channel, week_start_date: week, status: 'pending',
-                notes: notes || null,
-                created_by: _currentUser?.full_name || _currentUser?.email || 'unknown'
-            });
-            UI.hideModal();
-            UI.toast.success('Urgent order added');
-            // Refresh recent urgents list
-            _eggState.urgentOrders = await eggLoadRecentUrgents();
-            _eggState.matches = eggFindMatches(_eggState.newRows, _eggState.urgentOrders);
-            await eggRenderRunTab(document.getElementById('egg-tab-content'));
-        } catch (err) {
-            UI.toast.error('Save failed: ' + (err.message || 'unknown'));
-        }
-    };
-
     const eggGoToPhase3 = async () => {
+        // Tally check — compare pushed-up quantities against the last-week
+        // top-up the user entered. Mismatch = warning popup only; we still
+        // proceed to Phase 3 so the user is never blocked.
+        const topUp = _eggState.lastWeekTopUp || { GOLD: 0, KING: 0 };
+        const pushed = (_eggState.newRows || []).filter(r => _eggState.excludedKeys.has(r.unique_key));
+        const pushedGold = pushed.filter(r => r.product === 'GOLD').reduce((s, r) => s + Number(r.quantity||0), 0);
+        const pushedKing = pushed.filter(r => r.product === 'KING').reduce((s, r) => s + Number(r.quantity||0), 0);
+        const targetGold = Number(topUp.GOLD) || 0;
+        const targetKing = Number(topUp.KING) || 0;
+        if (pushedGold !== targetGold || pushedKing !== targetKing) {
+            const diffGold = pushedGold - targetGold;
+            const diffKing = pushedKing - targetKing;
+            const sign = (n) => n > 0 ? `+${n}` : `${n}`;
+            alert(
+                `Heads up — the pushed-up quantities don't tally with the top-up you entered:\n\n` +
+                `GOLD: pushed up ${pushedGold}, top-up was ${targetGold} (diff: ${sign(diffGold)})\n` +
+                `KING: pushed up ${pushedKing}, top-up was ${targetKing} (diff: ${sign(diffKing)})\n\n` +
+                `You can still proceed — this is just a reminder.`
+            );
+        }
+
         // Build final row set with exclusions applied
         const keep = (_eggState.newRows || []).filter(r => !_eggState.excludedKeys.has(r.unique_key));
         const summary = eggAggregate(keep);
-        const channelSum = eggAggregateByChannel(keep);
         _eggState.farmOrderText = eggRenderFarmOrderText(summary, new Date());
-        _eggState.channelBreakdownText = eggRenderChannelBreakdown(channelSum);
+        _eggState.channelBreakdownHtml = eggRenderChannelBreakdownHtml(keep);
+        _eggState.channelBreakdownText = eggRenderChannelBreakdownText(keep);
         _eggState.stats = {
             totalProcessed: (_eggState.normalizedRows || []).length,
             newAfterDedup: (_eggState.newRows || []).length,
@@ -35358,7 +35314,10 @@ JB 星期二到
                     <h3 style="margin:0;">Channel Breakdown (KL / PG)</h3>
                     <button class="btn secondary btn-sm" onclick="app.eggCopyChannelBreakdown()"><i class="fas fa-copy"></i> Copy</button>
                 </div>
-                <pre id="egg-channel-text" style="background:#f8fafc;padding:16px;border-radius:6px;font-family:monospace;font-size:13px;white-space:pre-wrap;margin:0;">${_eggState.channelBreakdownText}</pre>
+                <div style="color:var(--gray-500);font-size:12px;margin-bottom:10px;">
+                    Rows you pushed up to last week are excluded automatically — they are not in this download.
+                </div>
+                <div id="egg-channel-html">${_eggState.channelBreakdownHtml}</div>
             </div>
 
             <div style="margin-top:24px;display:flex;justify-content:space-between;">
@@ -35428,7 +35387,7 @@ JB 星期二到
     };
 
     const eggCommitRun = async () => {
-        if (!confirm('Commit this farm order? Processed rows will be saved to history and urgent orders will be marked reconciled.')) return;
+        if (!confirm('Commit this farm order? Processed rows will be saved to history.')) return;
         const keep = (_eggState.newRows || []).filter(r => !_eggState.excludedKeys.has(r.unique_key));
         const excluded = (_eggState.newRows || []).filter(r => _eggState.excludedKeys.has(r.unique_key));
         const weekIso = eggFormatDateIso(_eggState.weekStartDate || eggGetCurrentMonday());
@@ -35439,6 +35398,7 @@ JB 星期二到
             UI.toast.info('Saving run...');
             // 1. Save run history first to get a run_id
             const summary = eggAggregate(keep);
+            const topUp = _eggState.lastWeekTopUp || { GOLD: 0, KING: 0 };
             const runRec = await AppDataStore.create('egg_run_history', {
                 run_at: now,
                 week_start_date: weekIso,
@@ -35447,14 +35407,19 @@ JB 星期二到
                 rows_processed: (_eggState.normalizedRows || []).length,
                 rows_new: keep.length,
                 rows_excluded: excluded.length,
-                urgent_applied: (_eggState.urgentOrders || []).filter(u => u.status === 'pending' && u.week_start_date === weekIso).length,
-                reconciliations_applied: Object.keys(_eggState.excludedToUrgent || {}).length,
+                urgent_applied: 0,
+                reconciliations_applied: excluded.length,
                 totals: summary,
                 // Use the edited textarea value — captures any JB numbers the
                 // user typed in manually before clicking Commit.
                 farm_order_text: eggGetFarmOrderText(),
                 channel_breakdown_text: _eggState.channelBreakdownText,
-                reconciliation_log: _eggState.excludedToUrgent,
+                // Record the user's top-up input alongside the pushed-up keys
+                // for audit — all lives in the same JSON column.
+                reconciliation_log: {
+                    last_week_top_up: { GOLD: Number(topUp.GOLD)||0, KING: Number(topUp.KING)||0 },
+                    pushed_up_keys: Array.from(_eggState.excludedKeys || [])
+                },
                 run_by: runBy
             });
             const runId = runRec?.id;
@@ -35489,8 +35454,8 @@ JB 星期二到
             }
 
             // 3. Save excluded rows with reason (audit trail)
+            // Simplified flow: all exclusions are "pushed up to previous week top-up"
             for (const r of excluded) {
-                const urgentId = _eggState.excludedToUrgent[r.unique_key];
                 try {
                     await AppDataStore.create('egg_processed_orders', {
                         unique_key: r.unique_key,
@@ -35506,8 +35471,8 @@ JB 星期二到
                         week_start: weekIso,
                         processed_at: now,
                         run_id: runId,
-                        reconciled_with_urgent_id: urgentId || null,
-                        excluded_reason: urgentId ? `Reconciled with urgent #${urgentId}` : 'Manually excluded'
+                        reconciled_with_urgent_id: null,
+                        excluded_reason: 'Pushed up to previous week top-up'
                     });
                 } catch (rowErr) {
                     rowErrors++;
@@ -35516,46 +35481,14 @@ JB 星期二到
                 }
             }
 
-            // 4. Mark urgent orders: those linked to excluded rows → reconciled
-            const reconciledIds = new Set(Object.values(_eggState.excludedToUrgent || {}).filter(v => v != null));
-            for (const uid of reconciledIds) {
-                // Find the unique_key that matched
-                const matchedKey = Object.keys(_eggState.excludedToUrgent).find(k => _eggState.excludedToUrgent[k] === uid);
-                try {
-                    await AppDataStore.update('egg_urgent_orders', uid, {
-                        status: 'reconciled',
-                        reconciled_at: now,
-                        reconciled_with_unique_key: matchedKey,
-                        reconciled_run_id: runId,
-                        reconciled_by: runBy
-                    });
-                } catch (upErr) {
-                    console.warn('egg: urgent reconcile failed', uid, upErr);
-                }
-            }
-
-            // 5. Any remaining "pending" urgents for THIS week that weren't reconciled
-            //    get flipped to applied (the run included their excess in the farm order)
-            const pendingForThisWeek = (_eggState.urgentOrders || []).filter(u =>
-                u.status === 'pending' && u.week_start_date === weekIso && !reconciledIds.has(u.id)
-            );
-            for (const u of pendingForThisWeek) {
-                try {
-                    await AppDataStore.update('egg_urgent_orders', u.id, {
-                        status: 'applied',
-                        applied_at: now,
-                        applied_run_id: runId
-                    });
-                } catch (upErr) {
-                    console.warn('egg: urgent apply failed', u.id, upErr);
-                }
-            }
+            // Simplified flow: no urgent-order table sync needed — pushed-up rows
+            // already land in egg_processed_orders with excluded_reason above.
 
             if (rowErrors > 0) {
                 UI.toast.error(`Run committed with ${rowErrors} row error(s) — check browser console for details.`);
                 console.error('egg: rowErrorDetails', rowErrorDetails);
             } else {
-                UI.toast.success(`Run committed. ${keep.length} rows saved, ${excluded.length} reconciled.`);
+                UI.toast.success(`Run committed. ${keep.length} rows saved, ${excluded.length} pushed up.`);
             }
             eggResetRun();
         } catch (err) {
@@ -36679,10 +36612,8 @@ JB 星期二到
         eggGoToPhase3,
         // Phase 2
         eggToggleExclude,
-        eggAutoCheckStrong,
         eggClearExclusions,
-        eggOpenInlineUrgentModal,
-        eggSaveInlineUrgent,
+        eggSetLastWeekTopUp,
         // Phase 3
         eggCopyFarmOrder,
         eggCopyChannelBreakdown,
