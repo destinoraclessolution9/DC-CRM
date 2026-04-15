@@ -12613,14 +12613,134 @@ function _wireLoginBtn() {
     const openMeetingOutcomeModal = async (activityId) => {
         const activity = await AppDataStore.getById('activities', activityId) || {};
         const products = (await AppDataStore.getAll('products')).filter(p => p.is_active !== false);
-        const productOptions = products.map(p => `<option value="${p.name}" ${activity.solution_sold === p.name ? 'selected' : ''}>${p.name}</option>`).join('') || '<option value="">No products available</option>';
+
+        // ── Direct link to the prospect's DC Closing Record ──
+        // When this activity is linked to a prospect we mirror the DC Closing
+        // Record fields here and write through to prospects.closing_record on
+        // save, so "Quick Add → Outcome → Case Closed Well Done!" lands in the
+        // same place agents see on the prospect profile.
+        let prospect = null;
+        let cr = {};
+        if (activity.prospect_id) {
+            prospect = await AppDataStore.getById('prospects', activity.prospect_id);
+            cr = prospect?.closing_record || {};
+        }
+        const crStatus = cr.status || 'draft';
+        const crLocked = (crStatus === 'submitted' || crStatus === 'approved');
+
+        // Pre-fill order: closing_record → activity → prospect → blank
+        const selectedProduct = cr.product || activity.solution_sold || '';
+        const productOptions = products.length
+            ? products.map(p => `<option value="${p.name}" ${selectedProduct === p.name ? 'selected' : ''}>${p.name}</option>`).join('')
+            : '<option value="">No products available</option>';
+
+        const paymentMethod = cr.payment_method || activity.payment_method || 'Cash';
+        const isPOP = paymentMethod === 'POP';
+        // Auto-check "Case Closed" when either the activity flag is set OR the
+        // existing closing record already has data so the agent can keep editing.
+        const isClosingChecked = !!(activity.is_closing || cr.product || cr.sale_amount || cr.invoice_number);
+
+        const v = {
+            full_name:     cr.full_name     || prospect?.full_name     || '',
+            phone:         cr.phone         || prospect?.phone         || '',
+            email:         cr.email         || prospect?.email         || '',
+            ic_number:     cr.ic_number     || prospect?.ic_number     || '',
+            date_of_birth: cr.date_of_birth || prospect?.date_of_birth || '',
+            address:       cr.address       || [prospect?.address, prospect?.city, prospect?.state, prospect?.postal_code].filter(Boolean).join(', ') || '',
+            sale_amount:   cr.sale_amount   || activity.amount_closed  || activity.closing_amount || '',
+            pop_monthly:   cr.pop_monthly   || activity.pop_monthly_amount || '',
+            pop_tenure:    cr.pop_tenure    || activity.pop_tenure        || '',
+            pop_down:      cr.pop_down_payment || activity.pop_down_payment || '',
+            invoice_no:    cr.invoice_number || activity.invoice_number    || '',
+            closing_date:  cr.closing_date   || activity.collection_date   || '',
+            closing_remarks: cr.closing_remarks || '',
+            sales_idea:    cr.sales_idea    || '',
+            plan_details:  cr.plan_details  || '',
+            success_story: cr.success_story || '',
+        };
+
+        const linkBadge = activity.prospect_id ? `
+            <div style="font-size:11px;color:var(--gray-500);margin-bottom:8px;">
+                <i class="fas fa-link"></i> Linked to <strong>${escapeHtml(prospect?.full_name || 'prospect')}</strong> → DC Closing Record
+            </div>` : '';
+
+        const lockedNotice = crLocked ? `
+            <div style="margin-bottom:14px;padding:8px 12px;border-radius:8px;background:#e3f2fd;border:1px solid #2196f3;color:#1565c0;font-size:12px;">
+                <i class="fas fa-lock"></i> Closing record is <strong>${crStatus}</strong> — activity fields will be saved, but the locked closing record won't be overwritten.
+            </div>` : '';
+
+        const customerInfoSection = activity.prospect_id ? `
+            <div style="font-weight:600;color:var(--gray-700);margin:8px 0 6px;">Customer Information</div>
+            <div class="form-group">
+                <label>Full Name</label>
+                <input id="mo-full-name" class="form-control" value="${escapeHtml(v.full_name)}" placeholder="Full name">
+            </div>
+            <div class="form-row">
+                <div class="form-group half">
+                    <label>Phone</label>
+                    <input id="mo-phone" class="form-control" value="${escapeHtml(v.phone)}" placeholder="Phone">
+                </div>
+                <div class="form-group half">
+                    <label>Email</label>
+                    <input id="mo-email" class="form-control" value="${escapeHtml(v.email)}" placeholder="Email">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group half">
+                    <label>IC Number</label>
+                    <input id="mo-ic" class="form-control" value="${escapeHtml(v.ic_number)}" placeholder="NRIC/Passport">
+                </div>
+                <div class="form-group half">
+                    <label>Date of Birth</label>
+                    <input id="mo-dob" type="date" class="form-control" value="${v.date_of_birth || ''}">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Address</label>
+                <textarea id="mo-address" class="form-control" rows="2" placeholder="Full address">${escapeHtml(v.address)}</textarea>
+            </div>
+            <div style="font-weight:600;color:var(--gray-700);margin:14px 0 6px;">Meeting Outcome</div>
+        ` : '';
+
+        const remarksAndUploadSection = activity.prospect_id ? `
+            <div class="form-group">
+                <label>Remarks</label>
+                <textarea id="mo-remarks" class="form-control" rows="2" placeholder="e.g. Ring Size, Special Request...">${escapeHtml(v.closing_remarks)}</textarea>
+            </div>
+            <div class="form-group">
+                <label>Upload Purchased Invoice</label>
+                <input id="mo-invoice-file" type="file" class="form-control" accept="image/png,image/jpeg,application/pdf">
+            </div>
+        ` : '';
+
+        const caseStudySection = activity.prospect_id ? `
+            <div style="margin-top:16px;border-top:1px solid #eee;padding-top:12px;">
+                <div style="font-weight:600;color:var(--gray-700);margin-bottom:8px;">📁 Case Study (Optional)</div>
+                <div class="form-group">
+                    <label>Sales Idea</label>
+                    <textarea id="mo-sales-idea" class="form-control" rows="2" placeholder="Describe the sales idea...">${escapeHtml(v.sales_idea)}</textarea>
+                </div>
+                <div class="form-group">
+                    <label>Plan Details</label>
+                    <textarea id="mo-plan-details" class="form-control" rows="2" placeholder="Details of the plan proposed...">${escapeHtml(v.plan_details)}</textarea>
+                </div>
+                <div class="form-group">
+                    <label>Success Story</label>
+                    <textarea id="mo-success-story" class="form-control" rows="2" placeholder="What made this a success?">${escapeHtml(v.success_story)}</textarea>
+                </div>
+            </div>
+        ` : '';
+
         const content = `
+            ${linkBadge}
+            ${lockedNotice}
             <div class="form-group">
                 <label class="checkbox-label">
-                    <input type="checkbox" id="mo-is-closing" onchange="document.getElementById('mo-closing-fields').style.display = this.checked ? 'block' : 'none'" ${activity.is_closing ? 'checked' : ''}> Case Closed Well Done!
+                    <input type="checkbox" id="mo-is-closing" onchange="document.getElementById('mo-closing-fields').style.display = this.checked ? 'block' : 'none'" ${isClosingChecked ? 'checked' : ''}> Case Closed Well Done!
                 </label>
             </div>
-            <div id="mo-closing-fields" style="display: ${activity.is_closing ? 'block' : 'none'}; padding-left: 20px;">
+            <div id="mo-closing-fields" style="display: ${isClosingChecked ? 'block' : 'none'}; padding-left: 20px;">
+                ${customerInfoSection}
                 <div class="form-group">
                     <label>Product/Service Sold</label>
                     <select id="mo-solution-sold" class="form-control">${productOptions}</select>
@@ -12628,41 +12748,43 @@ function _wireLoginBtn() {
                 <div class="form-row">
                     <div class="form-group half">
                         <label>Amount Closed (RM)</label>
-                        <input type="number" id="mo-amount-closed" class="form-control" value="${activity.amount_closed || ''}" placeholder="0.00">
+                        <input type="number" id="mo-amount-closed" class="form-control" value="${v.sale_amount}" placeholder="0.00">
                     </div>
                     <div class="form-group half">
                         <label>Payment Method</label>
                         <select id="mo-payment-method" class="form-control" onchange="document.getElementById('mo-pop-fields').style.display = this.value === 'POP' ? 'block' : 'none'">
-                            ${['Cash','Bank Transfer','Credit Card','Cheque','POP'].map(m => `<option value="${m}" ${activity.payment_method === m ? 'selected' : ''}>${m}</option>`).join('')}
+                            ${['Cash','Bank Transfer','Credit Card','Cheque','EPP','POP'].map(m => `<option value="${m}" ${paymentMethod === m ? 'selected' : ''}>${m}</option>`).join('')}
                         </select>
                     </div>
                 </div>
-                <div id="mo-pop-fields" style="display: ${activity.payment_method === 'POP' ? 'block' : 'none'}; background: var(--gray-50); padding: 12px; border-radius: 6px; margin-bottom: 12px;">
+                <div id="mo-pop-fields" style="display: ${isPOP ? 'block' : 'none'}; background: var(--gray-50); padding: 12px; border-radius: 6px; margin-bottom: 12px;">
                     <div class="form-row">
                         <div class="form-group half">
                             <label>Payment Amount per Month (RM)</label>
-                            <input type="number" id="mo-pop-monthly" class="form-control" value="${activity.pop_monthly_amount || ''}" placeholder="0.00">
+                            <input type="number" id="mo-pop-monthly" class="form-control" value="${v.pop_monthly}" placeholder="0.00">
                         </div>
                         <div class="form-group half">
                             <label>Tenure (months)</label>
-                            <input type="number" id="mo-pop-tenure" class="form-control" value="${activity.pop_tenure || ''}" placeholder="12">
+                            <input type="number" id="mo-pop-tenure" class="form-control" value="${v.pop_tenure}" placeholder="12">
                         </div>
                     </div>
                     <div class="form-group half">
                         <label>Down Payment (RM)</label>
-                        <input type="number" id="mo-pop-down" class="form-control" value="${activity.pop_down_payment || ''}" placeholder="0.00">
+                        <input type="number" id="mo-pop-down" class="form-control" value="${v.pop_down}" placeholder="0.00">
                     </div>
                 </div>
                 <div class="form-row">
                     <div class="form-group half">
                         <label>Invoice Number</label>
-                        <input type="text" id="mo-invoice-number" class="form-control" value="${activity.invoice_number || ''}" placeholder="INV-2026-001">
+                        <input type="text" id="mo-invoice-number" class="form-control" value="${escapeHtml(v.invoice_no)}" placeholder="INV-2026-001">
                     </div>
                     <div class="form-group half">
                         <label>Collection Date</label>
-                        <input type="date" id="mo-collection-date" class="form-control" value="${activity.collection_date || ''}">
+                        <input type="date" id="mo-collection-date" class="form-control" value="${v.closing_date}">
                     </div>
                 </div>
+                ${remarksAndUploadSection}
+                ${caseStudySection}
             </div>
             <div class="form-group" style="margin-top:12px;">
                 <label class="checkbox-label">
@@ -12672,7 +12794,7 @@ function _wireLoginBtn() {
             <div id="mo-unable-fields" style="display: ${activity.unable_to_serve ? 'block' : 'none'}; padding-left: 20px;">
                 <div class="form-group">
                     <label>Reason</label>
-                    <textarea id="mo-unable-reason" class="form-control" rows="2">${activity.unable_reason || ''}</textarea>
+                    <textarea id="mo-unable-reason" class="form-control" rows="2">${escapeHtml(activity.unable_reason || '')}</textarea>
                 </div>
             </div>
             <div class="form-group" style="margin-top:12px;">
@@ -12688,6 +12810,14 @@ function _wireLoginBtn() {
     };
 
     const saveMeetingOutcome = async (activityId) => {
+        // Helper: read a field that may not exist in the DOM (e.g. customer-info
+        // fields are only rendered when the activity is linked to a prospect).
+        const readField = (id) => {
+            const el = document.getElementById(id);
+            if (!el) return null; // signal "not rendered"
+            return (el.value || '').trim();
+        };
+
         const isClosed = document.getElementById('mo-is-closing')?.checked || false;
         const updates = {
             is_closing: isClosed,
@@ -12711,8 +12841,62 @@ function _wireLoginBtn() {
             updates.unable_reason = document.getElementById('mo-unable-reason')?.value;
         }
         await AppDataStore.update('activities', activityId, updates);
+
+        // ── Mirror to prospect's DC Closing Record ──
+        // When the activity is linked to a prospect AND the user marked the
+        // case as closed, write the same fields through to the prospect's
+        // closing_record JSONB so the data lands on the DC Closing Record tab.
+        // We refuse to overwrite a record that's already submitted/approved
+        // so we don't sneak edits past the manager approval flow.
+        let crSyncStatus = 'none';
+        if (isClosed) {
+            const activity = await AppDataStore.getById('activities', activityId);
+            if (activity?.prospect_id) {
+                const prospect = await AppDataStore.getById('prospects', activity.prospect_id);
+                const existingCR = prospect?.closing_record || null;
+                const existingStatus = existingCR?.status || 'draft';
+                if (existingStatus === 'draft') {
+                    const paymentMethod = document.getElementById('mo-payment-method')?.value || 'Cash';
+                    const newCR = {
+                        ...(existingCR || {}),
+                        full_name:     readField('mo-full-name')     ?? existingCR?.full_name     ?? prospect?.full_name     ?? '',
+                        phone:         readField('mo-phone')         ?? existingCR?.phone         ?? prospect?.phone         ?? '',
+                        email:         readField('mo-email')         ?? existingCR?.email         ?? prospect?.email         ?? '',
+                        ic_number:     readField('mo-ic')            ?? existingCR?.ic_number     ?? prospect?.ic_number     ?? '',
+                        date_of_birth: readField('mo-dob')           ?? existingCR?.date_of_birth ?? prospect?.date_of_birth ?? '',
+                        address:       readField('mo-address')       ?? existingCR?.address       ?? '',
+                        product:        document.getElementById('mo-solution-sold')?.value || '',
+                        sale_amount:    document.getElementById('mo-amount-closed')?.value || '',
+                        payment_method: paymentMethod,
+                        pop_monthly:     paymentMethod === 'POP' ? (document.getElementById('mo-pop-monthly')?.value || '') : '',
+                        pop_tenure:      paymentMethod === 'POP' ? (document.getElementById('mo-pop-tenure')?.value  || '') : '',
+                        pop_down_payment: paymentMethod === 'POP' ? (document.getElementById('mo-pop-down')?.value    || '') : '',
+                        invoice_number:  document.getElementById('mo-invoice-number')?.value?.trim() || '',
+                        closing_date:    document.getElementById('mo-collection-date')?.value || '',
+                        closing_remarks: readField('mo-remarks')      ?? existingCR?.closing_remarks ?? '',
+                        sales_idea:      readField('mo-sales-idea')   ?? existingCR?.sales_idea     ?? '',
+                        plan_details:    readField('mo-plan-details') ?? existingCR?.plan_details   ?? '',
+                        success_story:   readField('mo-success-story')?? existingCR?.success_story  ?? '',
+                        status: 'draft',
+                    };
+                    try {
+                        await AppDataStore.update('prospects', activity.prospect_id, { closing_record: newCR });
+                        crSyncStatus = 'synced';
+                    } catch (e) {
+                        console.warn('Failed to sync closing_record:', e);
+                        crSyncStatus = 'failed';
+                    }
+                } else {
+                    crSyncStatus = 'locked';
+                }
+            }
+        }
+
         UI.hideModal();
-        UI.toast.success('Meeting outcome saved');
+        if (crSyncStatus === 'synced')      UI.toast.success('Saved to activity and DC Closing Record');
+        else if (crSyncStatus === 'locked') UI.toast.success('Activity saved (closing record locked — not overwritten)');
+        else if (crSyncStatus === 'failed') UI.toast.success('Activity saved (closing record sync failed — try again from prospect profile)');
+        else                                UI.toast.success('Meeting outcome saved');
         if (document.querySelector('.calendar-view-container')) { await renderCalendar(); await renderTodayActivities(); }
     };
 
