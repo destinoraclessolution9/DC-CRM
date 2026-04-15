@@ -11623,8 +11623,9 @@ function _wireLoginBtn() {
     };
 
     // Send the activity's event description as a WhatsApp invite message.
-    // Opens wa.me with the description text pre-filled so the agent can review
-    // before sending. The phone number comes from the linked prospect/customer.
+    // Copies the invite to the OS clipboard and opens WhatsApp Web so the agent
+    // can pick a contact and paste. Clipboard-first keeps 4-byte UTF-8 emojis
+    // intact (the WA `?text=` URL param mangles them on Chinese-locale Windows).
     const sendDescriptionInvite = async (activityId) => {
         const activity = await AppDataStore.getById('activities', activityId);
         if (!activity) { UI.toast.error('Activity not found'); return; }
@@ -11647,11 +11648,21 @@ function _wireLoginBtn() {
         if (description) lines.push('', description);
 
         const body = lines.join('\n');
-        // WhatsApp's `?text=` URL param mangles 4-byte UTF-8 emojis on several platforms
-        // (WA Desktop on Chinese-locale Windows, older WA Web). Chinese chars survive
-        // because they're 3-byte and map to legacy MBCS, but emojis arrive as "?".
-        // Reliable path: copy the message to the OS clipboard (which preserves UTF-8
-        // perfectly), open WhatsApp WITHOUT prefilled text, and prompt the user to paste.
+
+        // Open WhatsApp FIRST, while still inside the synchronous part of the
+        // click handler. `window.open` after an `await` loses the user-gesture
+        // context and gets suppressed by popup blockers in some browsers.
+        //
+        // Use https://web.whatsapp.com/ — NOT https://wa.me/. The bare wa.me/
+        // URL (no phone, no ?text= param) is rejected by the WhatsApp Desktop
+        // URL handler on Windows and shows "this link could not be opened".
+        // web.whatsapp.com always loads the WA Web client directly and is not
+        // intercepted by the desktop app's protocol handler, so the tab opens
+        // reliably and the compose field is empty for a clean paste.
+        window.open('https://web.whatsapp.com/', '_blank');
+
+        // Copy to the OS clipboard (preserves UTF-8 emojis perfectly) so the
+        // user can paste after picking a contact.
         let copied = false;
         try {
             await navigator.clipboard.writeText(body);
@@ -11669,8 +11680,6 @@ function _wireLoginBtn() {
                 document.body.removeChild(ta);
             } catch (__) {}
         }
-
-        window.open('https://wa.me/', '_blank');
 
         if (copied) {
             UI.toast.success('\u2705 Invite copied \u2014 pick a contact in WhatsApp and paste (Ctrl+V or long-press)');
