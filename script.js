@@ -16644,8 +16644,17 @@ function _wireLoginBtn() {
         if (!tbody) return;
 
         const allEntries = await AppDataStore.getAll('approval_queue');
+        // Hide stale info_update entries for prospects that were never converted
+        // to customers — those should never have reached the queue (a previous
+        // bug created them on every prospect edit). Approval gating only makes
+        // sense once the prospect is a customer, so filter them out here too.
+        const allProspects = await AppDataStore.getAll('prospects');
+        const convertedIds = new Set(
+            (allProspects || []).filter(p => p?.status === 'converted').map(p => String(p.id))
+        );
         const pending = allEntries
             .filter(e => e.status === 'pending')
+            .filter(e => e.approval_type !== 'info_update' || convertedIds.has(String(e.prospect_id)))
             .sort((a, b) => new Date(b.submitted_at) - new Date(a.submitted_at));
 
         const countEl = document.getElementById('approval-queue-count');
@@ -17603,9 +17612,15 @@ function _wireLoginBtn() {
                 await AppDataStore.update('prospects', parseInt(editId), data);
                 UI.toast.success('Prospect updated successfully');
 
-                // Create approval entry for non-manager edits
+                // Create approval entry for non-manager edits — but ONLY when the
+                // prospect has been converted to a customer. Pure prospects can be
+                // edited freely; the approval queue exists to protect customer data,
+                // not to gate every agent's edit on a prospect that isn't even a
+                // customer yet. (Without this guard the super admin's queue gets
+                // flooded with meaningless "Info Update" entries.)
                 const isManager = isSystemAdmin(_currentUser) || isMarketingManager(_currentUser);
-                if (!isManager) {
+                const isConverted = snapshotBefore?.status === 'converted';
+                if (!isManager && isConverted) {
                     try {
                         await AppDataStore.create('approval_queue', {
                             id: Date.now(),
