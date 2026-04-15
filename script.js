@@ -363,13 +363,11 @@ const appLogic = (() => {
     const canViewActivity = async (activity) => {
         const user = _currentUser;
         if (!user) return false;
-        // Public/open activities are visible to everyone in the same team
+        // Public/open activities are visible to every agent — see the matching
+        // comment in buildActivityVisibilityChecker for why the previous
+        // same-team gate was wrong.
         if (activity.is_public || activity.visibility === 'public' || activity.visibility === 'open') {
-            if (!user.team_id) return true;
-            const allUsersForTeam = await AppDataStore.getAll('users');
-            const leadAgent = allUsersForTeam.find(u => String(u.id) === String(activity.lead_agent_id));
-            if (!leadAgent || !leadAgent.team_id || String(leadAgent.team_id) === String(user.team_id)) return true;
-            return false;
+            return true;
         }
         // If explicitly marked private, check ownership; any other value (open, null, undefined) allows role check
         if (activity.visibility === 'private') {
@@ -415,12 +413,14 @@ const appLogic = (() => {
         return (activity) => {
             if (!activity) return false;
 
-            // Public / open activities
+            // Public / open activities — visible to every agent regardless of
+            // team or reporting hierarchy. The form's own help text promises
+            // "Open events are visible to all agents", and the previous team
+            // gate silently hid company-wide events from anyone outside the
+            // creator's team (and confused users into thinking the public
+            // toggle was broken).
             if (activity.is_public || activity.visibility === 'public' || activity.visibility === 'open') {
-                if (!userTeamId) return true;
-                const leadTeam = teamById.get(String(activity.lead_agent_id));
-                if (leadTeam == null) return true; // lead not found or has no team
-                return leadTeam === userTeamId;
+                return true;
             }
 
             // Private activities — only owner / co-agent / admin
@@ -10912,10 +10912,18 @@ function _wireLoginBtn() {
         if (_filters.type && _filters.type !== 'all') {
             actQueryOpts.filters.activity_type = _filters.type;
         }
-        // Scope by user hierarchy for non-admins
+        // Scope by user hierarchy for non-admins, OR'd with public/open events
+        // so that "Open Event (Public)" activities reach every agent's calendar
+        // regardless of who created them. Without the OR clause, an agent would
+        // only ever fetch activities whose lead_agent_id is inside their own
+        // reporting subtree — which is exactly why public events created by
+        // unrelated agents (e.g. company-wide Super Admin events) silently
+        // disappeared from every other agent's calendar.
         if (!isSystemAdmin(_currentUser) && visibleIds !== 'all') {
-            actQueryOpts.scopeField = 'lead_agent_id';
-            actQueryOpts.scopeValues = visibleIds;
+            actQueryOpts.scopeFields = [
+                { field: 'lead_agent_id', values: visibleIds },
+                { field: 'visibility', values: ['open', 'public'] }
+            ];
         }
 
         // Fetch month activities + lookup tables in parallel.
@@ -11207,9 +11215,14 @@ function _wireLoginBtn() {
         if (_filters && _filters.type && _filters.type !== 'all') {
             queryOpts.filters.activity_type = _filters.type;
         }
+        // Same OR-with-public-events scoping as renderCalendar: an agent must
+        // see today's public events even when the creator is outside their
+        // reporting subtree.
         if (!isSystemAdmin(_currentUser) && visibleIds !== 'all') {
-            queryOpts.scopeField = 'lead_agent_id';
-            queryOpts.scopeValues = visibleIds;
+            queryOpts.scopeFields = [
+                { field: 'lead_agent_id', values: visibleIds },
+                { field: 'visibility', values: ['open', 'public'] }
+            ];
         }
 
         // Non-admins also need a parallel JSONB query for today's activities where

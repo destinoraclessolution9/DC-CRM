@@ -1100,7 +1100,19 @@ class DataStore {
             // Fallback: filter cached/local data client-side with pagination
             const all = await this.getAll(tableName);
             let filtered = [...all];
-            if (options.scopeField && options.scopeValues) {
+            // Multi-field OR scoping mirrors the PostgREST `or(...)` path above
+            // so offline / fallback queries yield the same row set as the
+            // online query (e.g. for the calendar's `lead_agent_id IN (visible)
+            // OR visibility IN ('open','public')` rule).
+            if (options.scopeFields && options.scopeFields.length > 0) {
+                filtered = filtered.filter(r =>
+                    options.scopeFields.some(s => {
+                        const cell = r[s.field];
+                        if (cell == null) return false;
+                        return s.values.some(v => String(v) === String(cell));
+                    })
+                );
+            } else if (options.scopeField && options.scopeValues) {
                 filtered = filtered.filter(r => options.scopeValues.includes(r[options.scopeField]));
             }
             if (options.filters) {
