@@ -14088,7 +14088,9 @@ function _wireLoginBtn() {
         if (!selectedCats.length) return UI.toast.error('At least one category is required');
 
         const data = {
-            event_title: title,
+            // `title` is the real DB column; older code reads `event_title`
+            // first and falls back, so writing `title` is sufficient.
+            title: title,
             ticket_price: parseFloat(document.getElementById('mkt-price')?.value) || 0,
             early_bird_price: document.getElementById('mkt-early-bird-price')?.value || '',
             group_purchase_price: document.getElementById('mkt-group-price')?.value || '',
@@ -27272,7 +27274,11 @@ const exportKPIReport = async (format) => {
             if (!data.capsules_per_bottle) return UI.toast.error('Capsules per bottle is required (for refill reminders)');
             if (!data.daily_dosage) return UI.toast.error('Daily dosage is required (for refill reminders)');
         } else if (type === 'events') {
-            data.event_title = document.getElementById('mkt-title').value.trim();
+            // Write to `title` (the real DB column). Older code paths read
+            // `event_title` first then fall back to `title`, so writing to
+            // `title` is sufficient — the unknown-column retry would silently
+            // strip `event_title` anyway, dropping the user's edit.
+            data.title = document.getElementById('mkt-title').value.trim();
             data.ticket_price = parseFloat(document.getElementById('mkt-price').value) || 0;
             data.early_bird_price = document.getElementById('mkt-early-bird-price').value;
             data.group_purchase_price = document.getElementById('mkt-group-price').value;
@@ -27293,7 +27299,7 @@ const exportKPIReport = async (format) => {
                 customCats.forEach(c => { if (!selectedCats.includes(c)) selectedCats.push(c); });
             }
             data.categories = JSON.stringify(selectedCats);
-            if (!data.event_title) return UI.toast.error('Title is required');
+            if (!data.title) return UI.toast.error('Title is required');
             if (!selectedCats.length) return UI.toast.error('At least one category is required');
         } else {
             data.package_name = document.getElementById('mkt-pkname').value.trim();
