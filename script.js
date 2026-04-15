@@ -19446,7 +19446,11 @@ function _wireLoginBtn() {
                         <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Collection Date</label><input id="cr-close-date" type="date" class="form-control" value="${d.closing_date || ''}"></div>
                     </div>
                     <div class="form-group" style="margin-bottom:10px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Remarks</label><textarea id="cr-remarks" class="form-control" rows="2" placeholder="e.g. Ring Size, Special Request...">${d.closing_remarks || ''}</textarea></div>
-                    <div class="form-group" style="margin-bottom:14px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Upload Purchased Invoice</label><input id="cr-invoice-file" type="file" class="form-control" accept="image/png,image/jpeg,application/pdf"></div>
+                    <div class="form-group" style="margin-bottom:14px;">
+                        <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Upload Purchased Invoice</label>
+                        <input id="cr-invoice-file" type="file" class="form-control" accept="image/png,image/jpeg,application/pdf">
+                        ${d.invoice_file ? `<div style="margin-top:6px;font-size:11px;color:var(--gray-500);"><i class="fas fa-paperclip"></i> Current: <a href="${d.invoice_file}" target="_blank" style="color:var(--primary);">${escapeHtml(d.invoice_file_name || 'view')}</a> <span style="color:var(--gray-400);">(choosing a new file will replace it)</span></div>` : ''}
+                    </div>
 
                     <div class="pv-sub">📁 Case Study (Optional)</div>
                     <div class="form-group" style="margin-bottom:10px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Sales Idea</label><textarea id="cr-sales-idea" class="form-control" rows="2" placeholder="Describe the sales idea...">${d.sales_idea || ''}</textarea></div>
@@ -19488,6 +19492,7 @@ function _wireLoginBtn() {
                     ` : ''}
                     <div class="pv-row"><span class="pv-lbl">Invoice No.</span><span class="pv-val">${d.invoice_number || '-'}</span></div>
                     <div class="pv-row"><span class="pv-lbl">Collection Date</span><span class="pv-val">${d.closing_date || '-'}</span></div>
+                    <div class="pv-row"><span class="pv-lbl">Invoice File</span><span class="pv-val">${d.invoice_file ? `<a href="${d.invoice_file}" target="_blank" style="color:var(--primary);"><i class="fas fa-paperclip"></i> ${escapeHtml(d.invoice_file_name || 'View')}</a>` : '-'}</span></div>
                     ${(d.sales_idea || d.plan_details || d.success_story) ? `
                     <div class="pv-sub">Case Study</div>
                     ${d.sales_idea ? `<div class="pv-row"><span class="pv-lbl">Sales Idea</span><span class="pv-val">${d.sales_idea}</span></div>` : ''}
@@ -19520,6 +19525,7 @@ function _wireLoginBtn() {
                     ` : ''}
                     <div class="pv-row"><span class="pv-lbl">Invoice No.</span><span class="pv-val">${d.invoice_number || '-'}</span></div>
                     <div class="pv-row"><span class="pv-lbl">Collection Date</span><span class="pv-val">${d.closing_date || '-'}</span></div>
+                    <div class="pv-row"><span class="pv-lbl">Invoice File</span><span class="pv-val">${d.invoice_file ? `<a href="${d.invoice_file}" target="_blank" style="color:var(--primary);"><i class="fas fa-paperclip"></i> ${escapeHtml(d.invoice_file_name || 'View')}</a>` : '-'}</span></div>
                     ${(d.sales_idea || d.plan_details || d.success_story) ? `
                     <div class="pv-sub">Case Study</div>
                     ${d.sales_idea ? `<div class="pv-row"><span class="pv-lbl">Sales Idea</span><span class="pv-val">${d.sales_idea}</span></div>` : ''}
@@ -20142,8 +20148,25 @@ NOTIFY pgrst, 'reload schema';`;
         }
     };
 
-    const gatherClosingFormData = () => {
+    const gatherClosingFormData = async (existingCr = {}) => {
         const paymentMethod = document.getElementById('cr-payment-method')?.value || 'Cash';
+
+        // Read newly-selected invoice file (if any). Otherwise preserve the one
+        // already on the record so re-saving a draft doesn't wipe it.
+        const fileInput = document.getElementById('cr-invoice-file');
+        const file = fileInput?.files?.[0] || null;
+        let invoice_file = existingCr.invoice_file || null;
+        let invoice_file_name = existingCr.invoice_file_name || null;
+        if (file) {
+            invoice_file = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = e => resolve(e.target.result);
+                reader.onerror = () => reject(reader.error);
+                reader.readAsDataURL(file);
+            });
+            invoice_file_name = file.name;
+        }
+
         return {
             full_name: document.getElementById('cr-full-name')?.value?.trim() || '',
             phone: document.getElementById('cr-phone')?.value?.trim() || '',
@@ -20163,6 +20186,8 @@ NOTIFY pgrst, 'reload schema';`;
             sales_idea: document.getElementById('cr-sales-idea')?.value?.trim() || '',
             plan_details: document.getElementById('cr-plan-details')?.value?.trim() || '',
             success_story: document.getElementById('cr-success-story')?.value?.trim() || '',
+            invoice_file,
+            invoice_file_name,
         };
     };
 
@@ -20423,21 +20448,32 @@ NOTIFY pgrst, 'reload schema';`;
     };
 
     const saveClosingRecord = async (prospectId) => {
-        const data = gatherClosingFormData();
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        const existingCr = prospect?.closing_record || {};
+        const data = await gatherClosingFormData(existingCr);
         if (!data.full_name) return UI.toast.error('Full name is required');
-        await AppDataStore.update('prospects', prospectId, { closing_record: { ...data, status: 'draft' } });
+        // Spread existingCr first so fields like pre2025_purchases survive a draft re-save.
+        await AppDataStore.update('prospects', prospectId, {
+            closing_record: { ...existingCr, ...data, status: 'draft' }
+        });
         UI.toast.success('Draft saved');
+        const bodyEl = document.getElementById(`acc-body-closing-${prospectId}`);
+        if (bodyEl) await switchProspectTab('closing', prospectId, null, bodyEl);
     };
 
     const submitClosingRecord = async (prospectId) => {
-        const data = gatherClosingFormData();
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        const existingCr = prospect?.closing_record || {};
+        const data = await gatherClosingFormData(existingCr);
         if (!data.full_name) return UI.toast.error('Full name is required');
         if (!data.product) return UI.toast.error('Product/service is required');
         if (!data.sale_amount) return UI.toast.error('Amount closed is required');
         if (!data.invoice_number) return UI.toast.error('Invoice number is required');
 
         const saleAmount = parseFloat(data.sale_amount) || 0;
-        const updates = { closing_record: { ...data, status: 'submitted', submitted_at: new Date().toISOString() } };
+        const updates = {
+            closing_record: { ...existingCr, ...data, status: 'submitted', submitted_at: new Date().toISOString() }
+        };
 
         // Auto-trigger conversion approval when sale >= RM 2,000
         if (saleAmount >= 2000) {
@@ -20451,7 +20487,8 @@ NOTIFY pgrst, 'reload schema';`;
         // Create approval queue entries for non-managers
         const isManager = isSystemAdmin(_currentUser) || isMarketingManager(_currentUser);
         if (!isManager) {
-            const prospect = await AppDataStore.getById('prospects', prospectId);
+            // Re-fetch post-update so snapshot captures the freshly submitted closing_record
+            const freshProspect = await AppDataStore.getById('prospects', prospectId);
             try {
                 // New sale approval entry
                 await AppDataStore.create('approval_queue', {
@@ -20463,8 +20500,8 @@ NOTIFY pgrst, 'reload schema';`;
                     submitted_by: _currentUser?.id,
                     submitted_at: new Date().toISOString(),
                     snapshot_before: null,
-                    snapshot_after: { ...data, sale_amount: saleAmount, prospect_name: prospect?.full_name },
-                    description: `New sale RM ${saleAmount.toLocaleString()} for ${prospect?.full_name || 'prospect'}`
+                    snapshot_after: { ...data, sale_amount: saleAmount, prospect_name: freshProspect?.full_name },
+                    description: `New sale RM ${saleAmount.toLocaleString()} for ${freshProspect?.full_name || 'prospect'}`
                 });
                 // If auto-conversion triggered, also create new_customer entry
                 if (saleAmount >= 2000) {
@@ -20477,8 +20514,8 @@ NOTIFY pgrst, 'reload schema';`;
                         submitted_by: _currentUser?.id,
                         submitted_at: new Date().toISOString(),
                         snapshot_before: null,
-                        snapshot_after: prospect,
-                        description: `New customer conversion for ${prospect?.full_name} (auto-triggered by sale RM ${saleAmount.toLocaleString()})`
+                        snapshot_after: freshProspect,
+                        description: `New customer conversion for ${freshProspect?.full_name} (auto-triggered by sale RM ${saleAmount.toLocaleString()})`
                     });
                 }
             } catch (e) { /* approval queue write failed silently */ }
