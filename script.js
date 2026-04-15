@@ -35258,11 +35258,15 @@ const initImportDemoData = async () => {
     };
 
     const eggClassifyChannel = (groupName, config) => {
-        if (!groupName) return 'Online';
+        // Rows that match a name in `wholesale_groups` are actually the agent-
+        // managed ONLINE orders (the config name is historical — the list holds
+        // agent/group identifiers that sell via the online channel). Everything
+        // else (no group, or group outside that list) is a Wholesale order.
+        if (!groupName) return 'Wholesale';
         const cfg = config || {};
         const g = String(groupName).trim();
-        const wholesale = (cfg.wholesale_groups || []).some(w => g.toLowerCase().includes(String(w).toLowerCase()));
-        return wholesale ? 'Wholesale' : 'Online';
+        const isInGroupList = (cfg.wholesale_groups || []).some(w => g.toLowerCase().includes(String(w).toLowerCase()));
+        return isInGroupList ? 'Online' : 'Wholesale';
     };
 
     const eggBuildUniqueKey = (r) => `${r.order_no || '-'}_${r.product}_${r.quantity}_${r.region}`;
@@ -35992,7 +35996,10 @@ JB 星期二到
             <div style="background:white;padding:20px;border-radius:12px;border:1px solid var(--gray-200);margin-bottom:16px;">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
                     <h3 style="margin:0;">Channel Breakdown (KL / PG)</h3>
-                    <button class="btn secondary btn-sm" onclick="app.eggCopyChannelBreakdown()"><i class="fas fa-copy"></i> Copy</button>
+                    <div style="display:flex;gap:8px;">
+                        <button class="btn secondary btn-sm" onclick="app.eggCopyChannelBreakdown()"><i class="fas fa-copy"></i> Copy</button>
+                        <button class="btn secondary btn-sm" onclick="app.eggDownloadChannelBreakdownXlsx()"><i class="fas fa-file-excel"></i> Download Excel</button>
+                    </div>
                 </div>
                 <div style="color:var(--gray-500);font-size:12px;margin-bottom:10px;">
                     Rows you pushed up to last week are excluded automatically — they are not in this download.
@@ -36040,6 +36047,43 @@ JB 星期二到
             UI.toast.success('Copied to clipboard');
         } catch (err) {
             UI.toast.error('Copy failed');
+        }
+    };
+
+    // Generate an .xlsx of the Channel Breakdown — same sections as the on-screen
+    // table (PG Wholesale → PG Online → KL Wholesale → KL Online), with a
+    // section-header row + totals row between each group so it prints cleanly.
+    // Pushed-up rows are already excluded from `keep`, matching the note in the UI.
+    const eggDownloadChannelBreakdownXlsx = () => {
+        try {
+            const keep = (_eggState.newRows || []).filter(r => !_eggState.excludedKeys.has(r.unique_key));
+            const headerCols = ['Section', 'Agent', 'Order Date', 'Order No', 'Product', 'Qty'];
+            const aoa = [headerCols];
+            for (const sec of _EGG_CHANNEL_SECTIONS) {
+                const sectionRows = keep.filter(r => r.region === sec.region && r.channel === sec.channel);
+                const totalGold = sectionRows.filter(r => r.product === 'GOLD').reduce((s, r) => s + Number(r.quantity||0), 0);
+                const totalKing = sectionRows.filter(r => r.product === 'KING').reduce((s, r) => s + Number(r.quantity||0), 0);
+                aoa.push([sec.title, '', '', '', `GOLD ${totalGold}`, `KING ${totalKing}`]);
+                if (sectionRows.length === 0) {
+                    aoa.push(['', 'No orders', '', '', '', '']);
+                } else {
+                    for (const r of sectionRows) {
+                        const dateStr = r.order_date_parsed ? eggFormatDateShort(r.order_date_parsed) : '-';
+                        aoa.push(['', r.agent_name || '-', dateStr, r.order_no || '-', r.product || '', Number(r.quantity)||0]);
+                    }
+                }
+                aoa.push(['', '', '', '', '', '']); // blank separator row
+            }
+            const ws = XLSX.utils.aoa_to_sheet(aoa);
+            ws['!cols'] = [{ wch: 18 }, { wch: 22 }, { wch: 12 }, { wch: 16 }, { wch: 10 }, { wch: 10 }];
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Channel Breakdown');
+            const weekIso = eggFormatDateIso(_eggState.weekStartDate || eggGetCurrentMonday());
+            XLSX.writeFile(wb, `channel_breakdown_${weekIso}.xlsx`);
+            UI.toast.success('Excel file downloaded');
+        } catch (err) {
+            console.error('egg: xlsx download failed', err);
+            UI.toast.error('Excel download failed: ' + (err.message || 'unknown'));
         }
     };
 
@@ -37300,6 +37344,7 @@ JB 星期二到
         // Phase 3
         eggCopyFarmOrder,
         eggCopyChannelBreakdown,
+        eggDownloadChannelBreakdownXlsx,
         eggDownloadFarmOrder,
         eggResetFarmOrderText,
         eggDiscardRun,
