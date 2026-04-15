@@ -11647,12 +11647,36 @@ function _wireLoginBtn() {
         if (description) lines.push('', description);
 
         const body = lines.join('\n');
-        // Copy to clipboard first (reliable for emojis), then open WhatsApp
+        // WhatsApp's `?text=` URL param mangles 4-byte UTF-8 emojis on several platforms
+        // (WA Desktop on Chinese-locale Windows, older WA Web). Chinese chars survive
+        // because they're 3-byte and map to legacy MBCS, but emojis arrive as "?".
+        // Reliable path: copy the message to the OS clipboard (which preserves UTF-8
+        // perfectly), open WhatsApp WITHOUT prefilled text, and prompt the user to paste.
+        let copied = false;
         try {
             await navigator.clipboard.writeText(body);
-            UI.toast.success('Message copied \u2014 paste in WhatsApp if emojis look wrong');
-        } catch (_) {}
-        window.open(`https://wa.me/?text=${encodeURIComponent(body)}`, '_blank');
+            copied = true;
+        } catch (_) {
+            // Fallback for older browsers / blocked clipboard API
+            try {
+                const ta = document.createElement('textarea');
+                ta.value = body;
+                ta.style.position = 'fixed';
+                ta.style.left = '-9999px';
+                document.body.appendChild(ta);
+                ta.select();
+                copied = document.execCommand('copy');
+                document.body.removeChild(ta);
+            } catch (__) {}
+        }
+
+        window.open('https://wa.me/', '_blank');
+
+        if (copied) {
+            UI.toast.success('\u2705 Invite copied \u2014 pick a contact in WhatsApp and paste (Ctrl+V or long-press)');
+        } else {
+            UI.toast.error('Could not copy invite \u2014 please copy manually from the description');
+        }
     };
 
     // Dismiss a refill reminder. Updates BOTH the refill_reminders row AND the
