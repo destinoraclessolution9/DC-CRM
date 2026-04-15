@@ -8400,6 +8400,27 @@ input:checked+.slider:before {
     font-weight: 600;
 }
 
+/* Calendar appointment cards: co-agent invite states (pending / rejected) */
+.calendar-appointment.pending-invite {
+    background: #fffbeb;
+    border: 1px dashed #f59e0b;
+    border-left-width: 3px;
+}
+
+.calendar-appointment.pending-invite::before {
+    content: '⏳ Pending your response';
+    display: block;
+    font-size: 10px;
+    font-weight: 600;
+    color: #b45309;
+    margin-bottom: 4px;
+}
+
+.calendar-appointment.rejected-invite {
+    background: #fef2f2;
+    opacity: 0.75;
+}
+
 /* ========== PHASE 20: SYSTEM ADMINISTRATION & DEPLOYMENT ========== */
 .admin-dashboard,
 .tenant-management,

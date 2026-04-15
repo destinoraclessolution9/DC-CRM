@@ -10947,7 +10947,19 @@ function _wireLoginBtn() {
                     if (entityName) {
                         const isEvent = a.activity_type === 'EVENT';
                         const agent = (!isEvent && a.lead_agent_id) ? userMap.get(String(a.lead_agent_id)) : null;
-                        const agentName = agent ? agent.full_name : null;
+                        // Fall back through lead → first co-agent → "Unassigned" so the UI
+                        // never renders a literal "null" when the lead user isn't in userMap.
+                        const firstCoAgentName = Array.isArray(a.co_agents) && a.co_agents[0]?.name;
+                        const agentName = agent?.full_name || firstCoAgentName || 'Unassigned';
+                        const coAgentCount = Array.isArray(a.co_agents) ? a.co_agents.length : 0;
+                        const extraCoAgents = agent?.full_name ? coAgentCount : Math.max(coAgentCount - 1, 0);
+
+                        // Pending invite: does the current viewer need to Accept/Reject this co-agent slot?
+                        const myCoAgentStatus = _currentUser && Array.isArray(a.co_agents)
+                            ? a.co_agents.find(ca => String(ca.id) === String(_currentUser.id))?.status
+                            : null;
+                        const isPendingInvite = myCoAgentStatus === 'pending';
+                        const isRejectedInvite = myCoAgentStatus === 'rejected';
 
                         // For EVENTs: show event title instead of agent/entity
                         let eventTitle = null;
@@ -10964,16 +10976,23 @@ function _wireLoginBtn() {
                         const displayVenue = a.venue || eventVenue || a.location_address || '';
 
                         activityHtml += `
-                            <div class="calendar-appointment ${a.activity_type.toLowerCase()} ${a.closing_amount ? 'closed-case' : ''}"
+                            <div class="calendar-appointment ${a.activity_type.toLowerCase()} ${a.closing_amount ? 'closed-case' : ''} ${isPendingInvite ? 'pending-invite' : ''} ${isRejectedInvite ? 'rejected-invite' : ''}"
                                 onclick="event.stopPropagation(); app.viewActivityDetails(${a.id})">
                                 <div class="appointment-time">${(a.start_time || '00:00').slice(0,5)} - ${(a.end_time || '00:00').slice(0,5)}</div>
                                 ${isEvent
                                     ? `<div class="appointment-customer">📅 ${eventTitle || a.activity_title || 'Event'}</div>`
-                                    : `<div class="appointment-agent">👤 ${agentName} ${a.co_agents && a.co_agents.length > 0 ? '<small>+1</small>' : ''}</div>
+                                    : `<div class="appointment-agent">👤 ${agentName}${extraCoAgents > 0 ? ` <small>+${extraCoAgents}</small>` : ''}</div>
                                 <div class="appointment-customer">📋 ${entityName}</div>`
                                 }
                                 <div class="appointment-type">🏷️ ${a.activity_type}</div>
                                 ${displayVenue ? `<div class="appointment-venue">📍 ${displayVenue}</div>` : ''}
+                                ${isPendingInvite ? `
+                                <div class="co-agent-invite-actions" style="display:flex;gap:4px;margin-top:6px;padding-top:6px;border-top:1px dashed rgba(0,0,0,0.1);">
+                                    <button class="btn btn-sm" style="flex:1;background:#dcfce7;color:#166534;border:none;padding:3px 6px;border-radius:4px;cursor:pointer;font-size:11px;" onclick="event.stopPropagation();(async()=>{await app.respondCoAgentInvite(${a.id},'accepted');})()"><i class="fas fa-check"></i> Accept</button>
+                                    <button class="btn btn-sm" style="flex:1;background:#fee2e2;color:#991b1b;border:none;padding:3px 6px;border-radius:4px;cursor:pointer;font-size:11px;" onclick="event.stopPropagation();(async()=>{await app.respondCoAgentInvite(${a.id},'rejected');})()"><i class="fas fa-times"></i> Reject</button>
+                                </div>
+                                ` : ''}
+                                ${isRejectedInvite ? `<div class="appointment-status-rejected" style="margin-top:6px;padding:3px 6px;background:#fee2e2;color:#991b1b;border-radius:4px;font-size:11px;text-align:center;"><i class="fas fa-times-circle"></i> You rejected this</div>` : ''}
                                 ${a.closing_amount ? `
                                 <div class="appointment-closed">
                                     <div class="closed-badge">✓ CLOSED</div>
@@ -12183,8 +12202,28 @@ function _wireLoginBtn() {
                     <h4>Agents</h4>
                     <div class="info-row"><span class="info-label">Lead:</span> <span>${await getAgentName(activity.lead_agent_id)}</span></div>
                     ${activity.co_agents?.length ? `
-                        <div class="info-row"><span class="info-label">Co-Agents:</span>
-                            <span>${activity.co_agents.map(a => a.name).join(', ')}</span>
+                        <div class="info-row" style="flex-direction:column;align-items:flex-start;gap:6px;">
+                            <span class="info-label">Co-Agents:</span>
+                            <div style="width:100%;">
+                                ${activity.co_agents.map(ca => {
+                                    const caStatus = ca.status || 'accepted';
+                                    const statusIcon = caStatus === 'accepted'
+                                        ? '<i class="fas fa-check-circle" style="color:#16a34a;margin-right:4px;" title="Accepted"></i>'
+                                        : caStatus === 'rejected'
+                                            ? '<i class="fas fa-times-circle" style="color:#dc2626;margin-right:4px;" title="Rejected"></i>'
+                                            : '<i class="fas fa-clock" style="color:#f59e0b;margin-right:4px;" title="Pending response"></i>';
+                                    const isMe = _currentUser && String(_currentUser.id) === String(ca.id);
+                                    const canRespond = isMe && caStatus === 'pending';
+                                    return `<div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--gray-100);">
+                                        <span>${statusIcon}<strong>${ca.name}</strong> <span style="font-size:11px;color:#888;">${ca.co_role || ''}</span></span>
+                                        ${canRespond ? `
+                                        <span>
+                                            <button class="btn btn-sm" style="background:#dcfce7;color:#166534;border:none;padding:3px 8px;border-radius:4px;cursor:pointer;margin-right:4px;" onclick="event.stopPropagation();app.respondCoAgentInvite(${activityId},'accepted')"><i class="fas fa-check"></i> Accept</button>
+                                            <button class="btn btn-sm" style="background:#fee2e2;color:#991b1b;border:none;padding:3px 8px;border-radius:4px;cursor:pointer;" onclick="event.stopPropagation();app.respondCoAgentInvite(${activityId},'rejected')"><i class="fas fa-times"></i> Reject</button>
+                                        </span>` : ''}
+                                    </div>`;
+                                }).join('')}
+                            </div>
                         </div>
                     ` : ''}
                     ${activity.consultants?.length ? `
@@ -12378,6 +12417,15 @@ function _wireLoginBtn() {
         // that way this helper stays safe if another caller ever reuses it.
         const allowJoinEl = document.getElementById('allow-join');
         const updates = { activity_date: date, start_time: start, end_time: end, venue };
+        // Snapshot the existing co-agents so we can compute the delta (who was added this turn)
+        // and notify only them after the save lands. We do this BEFORE the update call so the
+        // comparison isn't tainted by the freshly-saved row.
+        const preSave = await AppDataStore.getById('activities', activityId);
+        const oldCoAgentIds = new Set(
+            Array.isArray(preSave?.co_agents)
+                ? preSave.co_agents.map(ca => ca && ca.id != null && String(ca.id)).filter(Boolean)
+                : []
+        );
         if (allowJoinEl) {
             updates.co_agents = allowJoinEl.checked ? _selectedCoAgents : [];
         }
@@ -12397,6 +12445,18 @@ function _wireLoginBtn() {
         }
         UI.hideModal();
         UI.toast.success('Appointment timing updated');
+
+        // Push-notify any newly-added co-agents (delta only, so existing ones aren't spammed).
+        if (Array.isArray(updates.co_agents) && updates.co_agents.length > 0) {
+            const newIds = updates.co_agents
+                .map(ca => ca && ca.id != null && String(ca.id))
+                .filter(id => id && !oldCoAgentIds.has(id));
+            if (newIds.length > 0) {
+                const savedSnapshot = { ...(preSave || {}), ...updates, id: activityId };
+                _notifyCoAgentAdded(savedSnapshot, newIds).catch(() => {});
+            }
+        }
+
         if (document.querySelector('.calendar-view-container')) { await renderCalendar(); await renderTodayActivities(); }
     };
 
@@ -14914,7 +14974,8 @@ function _wireLoginBtn() {
         }
         if (_selectedCoAgents.find(a => a.id === id)) return;
 
-        _selectedCoAgents.push({ id, name, co_role: 'Supporting' });
+        // Newly-added co-agents start as "pending" so the invitee has to Accept/Reject.
+        _selectedCoAgents.push({ id, name, co_role: 'Supporting', status: 'pending' });
         renderCoAgents();
         const aRes = document.getElementById('agent-search-results');
         if (aRes) aRes.style.display = 'none';
@@ -14935,9 +14996,17 @@ function _wireLoginBtn() {
     const renderCoAgents = () => {
         const container = document.getElementById('selected-co-agents');
         if (container) {
-            container.innerHTML = _selectedCoAgents.map(a => `
+            container.innerHTML = _selectedCoAgents.map(a => {
+                // Missing status = legacy entry written before the accept/reject flow — treat as accepted.
+                const status = a.status || 'accepted';
+                const statusIcon = status === 'accepted'
+                    ? '<i class="fas fa-check-circle" style="color:#16a34a;" title="Accepted"></i>'
+                    : status === 'rejected'
+                        ? '<i class="fas fa-times-circle" style="color:#dc2626;" title="Rejected"></i>'
+                        : '<i class="fas fa-clock" style="color:#f59e0b;" title="Pending response"></i>';
+                return `
                 <div class="co-agent-tag" style="display:inline-flex; align-items:center; gap:8px; padding:6px 12px; margin-bottom:8px;">
-                    <span>${a.name}</span>
+                    <span>${statusIcon} ${a.name}</span>
                     <select class="form-control" style="width: auto; padding: 2px 6px; font-size: 11px; height: 24px;" onchange="app.updateCoAgentRole(${a.id}, this.value)">
                         <option value="Supporting" ${a.co_role === 'Supporting' ? 'selected' : ''}>Supporting</option>
                         <option value="Observer" ${a.co_role === 'Observer' ? 'selected' : ''}>Observer</option>
@@ -14945,7 +15014,54 @@ function _wireLoginBtn() {
                     </select>
                     <span class="remove" onclick="app.removeCoAgent(${a.id})" style="cursor:pointer; font-weight:bold; margin-left:4px;">&times;</span>
                 </div>
-            `).join('');
+            `;
+            }).join('');
+        }
+    };
+
+    // Called by the invited co-agent to accept/reject an appointment they were assigned to.
+    // Updates their entry in activity.co_agents, re-renders the affected views, and notifies
+    // the lead agent so the assigner knows the status changed.
+    const respondCoAgentInvite = async (activityId, response) => {
+        if (!_currentUser || _currentUser.id == null) {
+            UI.toast.error('You must be logged in to respond.');
+            return;
+        }
+        if (response !== 'accepted' && response !== 'rejected') {
+            UI.toast.error('Invalid response');
+            return;
+        }
+        const activity = await AppDataStore.getById('activities', activityId);
+        if (!activity) { UI.toast.error('Activity not found'); return; }
+        const coAgents = Array.isArray(activity.co_agents) ? activity.co_agents : [];
+        const myEntry = coAgents.find(ca => String(ca.id) === String(_currentUser.id));
+        if (!myEntry) { UI.toast.error('You are not a co-agent on this appointment'); return; }
+
+        const updatedCoAgents = coAgents.map(ca =>
+            String(ca.id) === String(_currentUser.id)
+                ? { ...ca, status: response, responded_at: new Date().toISOString() }
+                : ca
+        );
+        try {
+            await AppDataStore.update('activities', activityId, { co_agents: updatedCoAgents });
+        } catch (e) {
+            UI.toast.error('Could not save response: ' + (e.message || 'Unknown error'));
+            return;
+        }
+
+        UI.toast.success(response === 'accepted' ? 'Appointment accepted ✓' : 'Appointment rejected');
+        // Notify the lead agent so they know the response came in (best-effort, non-blocking).
+        _notifyCoAgentResponse({ ...activity, co_agents: updatedCoAgents }, myEntry, response).catch(() => {});
+
+        // Refresh whichever views are currently visible.
+        if (document.querySelector('.calendar-view-container')) {
+            await renderCalendar();
+            await renderTodayActivities();
+        }
+        // If the activity detail modal is open, re-open it to reflect the new status.
+        if (document.querySelector('.modal-overlay.active')) {
+            UI.hideModal();
+            setTimeout(() => viewActivityDetails(activityId), 150);
         }
     };
 
@@ -15490,7 +15606,12 @@ function _wireLoginBtn() {
             const targets = new Set();
             if (savedActivity.lead_agent_id != null) targets.add(String(savedActivity.lead_agent_id));
             if (Array.isArray(savedActivity.co_agents)) {
-                savedActivity.co_agents.forEach(id => id != null && targets.add(String(id)));
+                // co_agents is an array of {id, name, co_role, status} objects — not raw IDs.
+                // The previous version iterated each object as if it were an ID and pushed
+                // "[object Object]" into the targets set, so co-agents never got notified.
+                savedActivity.co_agents.forEach(ca => {
+                    if (ca && ca.id != null) targets.add(String(ca.id));
+                });
             }
             // Include admins / team leads so management sees new activity across the org.
             try {
@@ -15533,6 +15654,67 @@ function _wireLoginBtn() {
         } catch (e) {
             // Never let notification errors affect the activity save flow.
             console.warn('[PushNotif] notifyActivityCreated failed:', e);
+        }
+    };
+
+    // Notify only specific co-agents (delta case: someone was added to an existing activity).
+    // Uses the same Edge Function as _notifyActivityCreated so all push infra is shared.
+    const _notifyCoAgentAdded = async (savedActivity, newCoAgentIds) => {
+        try {
+            if (!savedActivity || !window.PushNotif) return;
+            if (!Array.isArray(newCoAgentIds) || newCoAgentIds.length === 0) return;
+            const targets = newCoAgentIds
+                .filter(id => id != null)
+                .map(String)
+                .filter(id => !_currentUser || String(_currentUser.id) !== id);
+            if (targets.length === 0) return;
+
+            const whoLabel = _currentUser
+                ? (_currentUser.full_name || _currentUser.name || _currentUser.email || 'Someone')
+                : 'Someone';
+            const typeLabel = savedActivity.activity_type || 'Activity';
+            const dateLabel = savedActivity.activity_date || '';
+            const timeLabel = savedActivity.start_time || '';
+
+            await window.PushNotif.sendActivityPush(
+                savedActivity,
+                targets,
+                {
+                    title: `You've been invited to a ${typeLabel}`,
+                    body: `${whoLabel} added you as co-agent${dateLabel ? ` on ${dateLabel}${timeLabel ? ` at ${timeLabel}` : ''}` : ''}. Tap to accept or reject.`,
+                    url: `./index.html#calendar`,
+                }
+            );
+        } catch (e) {
+            console.warn('[PushNotif] notifyCoAgentAdded failed:', e);
+        }
+    };
+
+    // Notify the lead agent when a co-agent accepts or rejects their invitation.
+    const _notifyCoAgentResponse = async (savedActivity, coAgent, response) => {
+        try {
+            if (!savedActivity || !window.PushNotif || !coAgent) return;
+            const leadId = savedActivity.lead_agent_id;
+            if (leadId == null) return;
+            // Don't self-notify — e.g. lead agent responding to an invite on their own activity.
+            if (_currentUser && String(_currentUser.id) === String(leadId)) return;
+
+            const typeLabel = savedActivity.activity_type || 'Activity';
+            const dateLabel = savedActivity.activity_date || '';
+            const timeLabel = savedActivity.start_time || '';
+            const verb = response === 'accepted' ? 'accepted' : 'rejected';
+
+            await window.PushNotif.sendActivityPush(
+                savedActivity,
+                [String(leadId)],
+                {
+                    title: `Co-agent ${verb} your ${typeLabel}`,
+                    body: `${coAgent.name || 'Co-agent'} ${verb} the invitation${dateLabel ? ` on ${dateLabel}${timeLabel ? ` at ${timeLabel}` : ''}` : ''}.`,
+                    url: `./index.html#calendar`,
+                }
+            );
+        } catch (e) {
+            console.warn('[PushNotif] notifyCoAgentResponse failed:', e);
         }
     };
 
@@ -36018,6 +36200,7 @@ JB 星期二到
         addCoAgent,
         removeCoAgent,
         updateCoAgentRole,
+        respondCoAgentInvite,
         saveActivity,
         saveAndAddAnother,
         viewActivityDetails,
