@@ -12879,12 +12879,73 @@ function _wireLoginBtn() {
                         success_story:   readField('mo-success-story')?? existingCR?.success_story  ?? '',
                         status: 'draft',
                     };
+
+                    // ── Auto-submit for manager approval when all required fields are filled ──
+                    // Mirrors submitClosingRecord() so agents don't have to also click "Submit"
+                    // on the DC Closing Record tab — that hidden second step was the reason
+                    // closed cases never reached the Manager Approval Queue.
+                    const hasRequiredFields =
+                        newCR.full_name && newCR.product && newCR.sale_amount && newCR.invoice_number;
+                    const saleAmount = parseFloat(newCR.sale_amount) || 0;
+                    if (hasRequiredFields) {
+                        newCR.status = 'submitted';
+                        newCR.submitted_at = new Date().toISOString();
+                    }
+
                     try {
-                        await AppDataStore.update('prospects', activity.prospect_id, { closing_record: newCR });
-                        crSyncStatus = 'synced';
+                        const prospectUpdates = { closing_record: newCR };
+                        if (hasRequiredFields && saleAmount >= 2000) {
+                            prospectUpdates.conversion_status = 'pending_approval';
+                            prospectUpdates.conversion_requested_at = new Date().toISOString();
+                            prospectUpdates.conversion_requested_by = _currentUser?.id;
+                        }
+                        await AppDataStore.update('prospects', activity.prospect_id, prospectUpdates);
+                        crSyncStatus = hasRequiredFields ? 'submitted' : 'synced';
                     } catch (e) {
                         console.warn('Failed to sync closing_record:', e);
                         crSyncStatus = 'failed';
+                    }
+
+                    // Create approval_queue entries for non-managers — only if the
+                    // closing record was successfully submitted above. Without this
+                    // step the super admin's Manager Approval Queue stays empty and
+                    // the sale is invisible to leadership.
+                    if (crSyncStatus === 'submitted') {
+                        const isManager = isSystemAdmin(_currentUser) || isMarketingManager(_currentUser);
+                        if (!isManager) {
+                            try {
+                                await AppDataStore.create('approval_queue', {
+                                    id: Date.now(),
+                                    approval_type: 'new_sale',
+                                    status: 'pending',
+                                    prospect_id: activity.prospect_id,
+                                    customer_id: null,
+                                    submitted_by: _currentUser?.id,
+                                    submitted_at: new Date().toISOString(),
+                                    snapshot_before: null,
+                                    snapshot_after: { ...newCR, sale_amount: saleAmount, prospect_name: prospect?.full_name },
+                                    description: `New sale RM ${saleAmount.toLocaleString()} for ${prospect?.full_name || 'prospect'}`
+                                });
+                                if (saleAmount >= 2000) {
+                                    await AppDataStore.create('approval_queue', {
+                                        id: Date.now() + 1,
+                                        approval_type: 'new_customer',
+                                        status: 'pending',
+                                        prospect_id: activity.prospect_id,
+                                        customer_id: null,
+                                        submitted_by: _currentUser?.id,
+                                        submitted_at: new Date().toISOString(),
+                                        snapshot_before: null,
+                                        snapshot_after: { ...prospect, closing_record: newCR, conversion_status: 'pending_approval' },
+                                        description: `New customer conversion for ${prospect?.full_name} (auto-triggered by sale RM ${saleAmount.toLocaleString()})`
+                                    });
+                                    crSyncStatus = 'submitted_with_conversion';
+                                }
+                            } catch (qe) {
+                                console.warn('Failed to create approval_queue entry:', qe);
+                                crSyncStatus = 'submitted_no_queue';
+                            }
+                        }
                     }
                 } else {
                     crSyncStatus = 'locked';
@@ -12893,10 +12954,13 @@ function _wireLoginBtn() {
         }
 
         UI.hideModal();
-        if (crSyncStatus === 'synced')      UI.toast.success('Saved to activity and DC Closing Record');
-        else if (crSyncStatus === 'locked') UI.toast.success('Activity saved (closing record locked — not overwritten)');
-        else if (crSyncStatus === 'failed') UI.toast.success('Activity saved (closing record sync failed — try again from prospect profile)');
-        else                                UI.toast.success('Meeting outcome saved');
+        if (crSyncStatus === 'submitted_with_conversion') UI.toast.success('✓ Submitted to manager for approval — sale ≥ RM 2,000 also requested customer conversion');
+        else if (crSyncStatus === 'submitted_no_queue')   UI.toast.error('Closing saved but approval queue write failed — please retry from the prospect profile');
+        else if (crSyncStatus === 'submitted')            UI.toast.success('✓ Submitted to manager for approval');
+        else if (crSyncStatus === 'synced')               UI.toast.success('Saved as draft (fill product, amount, invoice & full name to auto-submit for approval)');
+        else if (crSyncStatus === 'locked')               UI.toast.success('Activity saved (closing record locked — not overwritten)');
+        else if (crSyncStatus === 'failed')               UI.toast.success('Activity saved (closing record sync failed — try again from prospect profile)');
+        else                                              UI.toast.success('Meeting outcome saved');
         if (document.querySelector('.calendar-view-container')) { await renderCalendar(); await renderTodayActivities(); }
     };
 
