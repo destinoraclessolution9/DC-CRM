@@ -17301,6 +17301,49 @@ function _wireLoginBtn() {
         return 'D';
     };
 
+    // Manual prospect grade picker. Agents set A–G manually from the prospect
+    // detail header badge. Stored in prospects.manual_grade (nullable TEXT).
+    const openProspectGradePicker = async (prospectId) => {
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) { UI.toast.error('Prospect not found'); return; }
+        const currentUser = _currentUser || await Auth.getCurrentUser();
+        const isAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || currentUser.role?.includes('Level 3') || currentUser.role?.includes('Level 7') || currentUser.role === 'team_leader';
+        const isOwner = prospect.responsible_agent_id == currentUser.id;
+        if (!isAdmin && !isOwner) {
+            UI.toast.error('You cannot set the grade for this prospect.');
+            return;
+        }
+        const current = prospect.manual_grade || '';
+        const grades = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
+        const btn = (g) => {
+            const active = g === current;
+            return `<button type="button" onclick="(async () => { await app.setProspectGrade(${prospectId}, '${g}'); })()" style="padding:14px;font-weight:700;font-size:18px;border-radius:10px;border:2px solid ${active ? 'var(--primary)' : 'var(--gray-300)'};background:${active ? 'var(--primary)' : '#fff'};color:${active ? '#fff' : 'var(--gray-800)'};cursor:pointer;transition:all .15s;" onmouseover="if(!${active}){this.style.background='var(--gray-100)';this.style.borderColor='var(--gray-400)';}" onmouseout="if(!${active}){this.style.background='#fff';this.style.borderColor='var(--gray-300)';}">${g}</button>`;
+        };
+        const content = `
+            <div style="padding:4px 0;">
+                <p style="margin:0 0 14px;color:var(--gray-600);font-size:14px;">Select a grade for <strong>${prospect.full_name || 'this prospect'}</strong>.</p>
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;">
+                    ${grades.map(btn).join('')}
+                    <button type="button" onclick="(async () => { await app.setProspectGrade(${prospectId}, null); })()" style="padding:14px;font-weight:600;font-size:14px;border-radius:10px;border:2px solid var(--gray-300);background:#fff;color:var(--gray-500);cursor:pointer;" title="Clear grade">None</button>
+                </div>
+            </div>
+        `;
+        UI.showModal('Set Prospect Grade', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }
+        ]);
+    };
+
+    const setProspectGrade = async (prospectId, grade) => {
+        try {
+            await AppDataStore.update('prospects', prospectId, { manual_grade: grade });
+            UI.toast.success(grade ? `Grade set to ${grade}` : 'Grade cleared');
+            UI.hideModal();
+            await showProspectDetail(prospectId);
+        } catch (err) {
+            UI.toast.error('Failed to update grade: ' + (err.message || 'Unknown error'));
+        }
+    };
+
     const calculateProtectionDays = (prospect) => {
         if (!prospect.protection_deadline) return 30;
         const deadline = new Date(prospect.protection_deadline);
@@ -18713,7 +18756,7 @@ function _wireLoginBtn() {
                         <div class="pv-hdr-meta">
                             <span>ID: P100${prospect.id}</span>
                             <span class="badge success">Active</span>
-                            <span class="badge info">Grade ${getScoreGrade(prospect.score)}</span>
+                            <span class="badge info" onclick="event.stopPropagation();app.openProspectGradePicker(${prospect.id})" style="cursor:pointer;user-select:none;" title="Click to set grade">Grade ${prospect.manual_grade || '—'} <i class="fas fa-caret-down" style="font-size:10px;opacity:.7;"></i></span>
                         </div>
                         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:6px 0 8px;">
                             <span style="font-size:22px;font-weight:700;line-height:1.3;flex-shrink:0;">${prospect.full_name}</span>${prospect.nickname ? `<span style="font-size:15px;font-weight:400;color:var(--gray-500);">"${prospect.nickname}"</span>` : ''}
@@ -36702,6 +36745,8 @@ JB 星期二到
         editProspect,
         downloadProspectVCard,
         saveProspect,
+        openProspectGradePicker,
+        setProspectGrade,
         filterProspects,
         prospectPageNav,
         customerPageNav,
