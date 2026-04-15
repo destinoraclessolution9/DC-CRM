@@ -832,6 +832,9 @@ class DataStore {
                     // Case (a): try to INSERT so the user's edit is preserved. Pull the
                     // existing local row to fill in fields the form didn't touch (created_at,
                     // created_by, etc.) so we don't accidentally clobber them with NULLs.
+                    // Stale local rows often carry columns that no longer exist in the
+                    // schema (e.g. `event_title` from before commit 7a8b725) — strip
+                    // unknown columns one at a time and retry until the insert sticks.
                     let baseRow = {};
                     try {
                         const key = `fs_crm_${tableName}`;
@@ -839,16 +842,44 @@ class DataStore {
                         const existing = all.find(r => String(r.id) === String(id));
                         if (existing) baseRow = existing;
                     } catch (_) {}
-                    const insertPayload = { ...baseRow, ...updateData, id };
+                    let insertPayload = { ...baseRow, ...updateData, id };
                     let inserted = null;
-                    try {
-                        const { data: insData, error: insErr } = await this._writeClient()
-                            .from(tableName)
-                            .insert(insertPayload)
-                            .select()
-                            .single();
-                        if (!insErr && insData) inserted = insData;
-                    } catch (_) {}
+                    let lastInsertErr = null;
+                    for (let insAttempt = 0; insAttempt < 30; insAttempt++) {
+                        try {
+                            const { data: insData, error: insErr } = await this._writeClient()
+                                .from(tableName)
+                                .insert(insertPayload)
+                                .select()
+                                .single();
+                            if (!insErr && insData) { inserted = insData; break; }
+                            if (insErr) {
+                                lastInsertErr = insErr;
+                                const insCol = this._extractUnknownCol(insErr);
+                                if (insCol && insCol in insertPayload) {
+                                    delete insertPayload[insCol];
+                                    continue;
+                                }
+                                if (this._isSchemaError(insErr)) {
+                                    // Drop any object/array columns that PostgREST can't coerce.
+                                    const cleaned = {};
+                                    for (const [k, v] of Object.entries(insertPayload)) {
+                                        if (v === null || v === undefined || typeof v !== 'object') cleaned[k] = v;
+                                    }
+                                    if (Object.keys(cleaned).length < Object.keys(insertPayload).length) {
+                                        insertPayload = cleaned;
+                                        continue;
+                                    }
+                                }
+                                // Unknown error type — give up
+                                break;
+                            }
+                            break;
+                        } catch (thrown) {
+                            lastInsertErr = thrown;
+                            break;
+                        }
+                    }
                     if (inserted) {
                         try {
                             const key = `fs_crm_${tableName}`;
@@ -862,10 +893,10 @@ class DataStore {
                         this.emit('dataChanged', { action: 'update', table: tableName, record: inserted });
                         return inserted;
                     }
-                    // Insert failed too (schema mismatch, RLS, etc.). Fall through to the
-                    // local-save path below — preserves the user's edit in localStorage and
-                    // queues it for auto-sync on the next successful read.
-                    console.warn(`PGRST116 on update to ${tableName} id=${id}; insert fallback also failed — saving locally`);
+                    // Insert failed even after stripping (RLS, FK violation, etc.). Fall
+                    // through to the local-save path below — preserves the user's edit
+                    // in localStorage and queues it for auto-sync on the next read.
+                    console.warn(`PGRST116 on update to ${tableName} id=${id}; insert fallback failed:`, lastInsertErr?.message || lastInsertErr);
                     break;
                 }
                 console.warn(`Error on update to ${tableName}: ${e.message} (code: ${e.code}) — saving locally`);
