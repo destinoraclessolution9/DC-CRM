@@ -11623,9 +11623,18 @@ function _wireLoginBtn() {
     };
 
     // Send the activity's event description as a WhatsApp invite message.
-    // Copies the invite to the OS clipboard and opens WhatsApp Web so the agent
-    // can pick a contact and paste. Clipboard-first keeps 4-byte UTF-8 emojis
-    // intact (the WA `?text=` URL param mangles them on Chinese-locale Windows).
+    //
+    // Flow: copy the full invite (with emojis) to the OS clipboard, then show
+    // a modal with the message preview and a big "Open WhatsApp" button. We
+    // deliberately do NOT call window.open with any WhatsApp URL automatically:
+    // on some Windows machines a broken `whatsapp://` protocol handler (e.g.
+    // HKCU\Software\Classes\whatsapp registered but no shell\open\command) is
+    // triggered when Chrome tries to deep-link wa.me / web.whatsapp.com, and
+    // Windows surfaces "this link could not be opened" before the tab loads.
+    // Putting the navigation behind an explicit button click inside a modal
+    // keeps the user gesture intact and lets them see the copied text first —
+    // if opening WhatsApp from the app still fails, they can just alt-tab to
+    // their already-open WhatsApp and paste.
     const sendDescriptionInvite = async (activityId) => {
         const activity = await AppDataStore.getById('activities', activityId);
         if (!activity) { UI.toast.error('Activity not found'); return; }
@@ -11649,20 +11658,7 @@ function _wireLoginBtn() {
 
         const body = lines.join('\n');
 
-        // Open WhatsApp FIRST, while still inside the synchronous part of the
-        // click handler. `window.open` after an `await` loses the user-gesture
-        // context and gets suppressed by popup blockers in some browsers.
-        //
-        // Use https://web.whatsapp.com/ — NOT https://wa.me/. The bare wa.me/
-        // URL (no phone, no ?text= param) is rejected by the WhatsApp Desktop
-        // URL handler on Windows and shows "this link could not be opened".
-        // web.whatsapp.com always loads the WA Web client directly and is not
-        // intercepted by the desktop app's protocol handler, so the tab opens
-        // reliably and the compose field is empty for a clean paste.
-        window.open('https://web.whatsapp.com/', '_blank');
-
-        // Copy to the OS clipboard (preserves UTF-8 emojis perfectly) so the
-        // user can paste after picking a contact.
+        // Copy to the OS clipboard (preserves UTF-8 emojis perfectly).
         let copied = false;
         try {
             await navigator.clipboard.writeText(body);
@@ -11681,11 +11677,31 @@ function _wireLoginBtn() {
             } catch (__) {}
         }
 
-        if (copied) {
-            UI.toast.success('\u2705 Invite copied \u2014 pick a contact in WhatsApp and paste (Ctrl+V or long-press)');
-        } else {
-            UI.toast.error('Could not copy invite \u2014 please copy manually from the description');
-        }
+        // Escape HTML in the preview so special chars render correctly
+        const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[c]));
+
+        const previewHtml = `
+            <div style="display:flex;flex-direction:column;gap:12px;">
+                <div style="padding:10px 12px;background:${copied ? '#dcfce7' : '#fee2e2'};color:${copied ? '#166534' : '#991b1b'};border-radius:6px;font-size:13px;">
+                    <i class="fas ${copied ? 'fa-check-circle' : 'fa-exclamation-circle'}"></i>
+                    ${copied
+                        ? 'Invite copied to clipboard \u2014 paste it in WhatsApp with Ctrl+V'
+                        : 'Could not auto-copy \u2014 please select the text below and copy it manually'}
+                </div>
+                <div style="font-size:12px;color:var(--gray-600);">Preview:</div>
+                <textarea readonly rows="14" onclick="this.select()" style="width:100%;font-family:inherit;font-size:13px;padding:10px;border:1px solid var(--gray-300);border-radius:6px;background:#f9fafb;white-space:pre-wrap;resize:vertical;">${escapeHtml(body)}</textarea>
+                <div style="font-size:11px;color:var(--gray-500);line-height:1.5;">
+                    <strong>Next step:</strong> open WhatsApp (desktop app or web), pick the contact you want to invite, click in the chat, and press Ctrl+V to paste. The emojis will come through correctly.
+                </div>
+            </div>
+        `;
+
+        UI.showModal('\u{1F4E4} WhatsApp Invite Ready', previewHtml, [
+            { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
+            { label: '\uD83D\uDCF1 Open WhatsApp Web', type: 'primary', action: '(() => { window.open("https://web.whatsapp.com/", "_blank", "noopener"); UI.hideModal(); })()' }
+        ]);
     };
 
     // Dismiss a refill reminder. Updates BOTH the refill_reminders row AND the
