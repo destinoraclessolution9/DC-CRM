@@ -803,18 +803,70 @@ class DataStore {
                     }
                     if (Object.keys(stripped).length < Object.keys(updateData).length) { updateData = stripped; continue; }
                 }
-                // PGRST116 = zero rows matched .single() — the row no longer exists in Supabase
-                // (stale id from local cache). Purge it so the next getAll() returns clean state,
-                // and let the caller's insert-or-update pattern recover on the next pass.
+                // PGRST116 = zero rows matched .single() — the row doesn't exist in Supabase.
+                // Two cases:
+                //   (a) Local-only record that never reached Supabase (e.g. an offline create
+                //       that failed to sync). Editing it must persist the user's changes, so
+                //       we INSERT the row instead of silently dropping the edit.
+                //   (b) Row was explicitly deleted (tombstoned). Honor the deletion by
+                //       cleaning up the stale local copy.
                 if (e?.code === 'PGRST116') {
+                    let isTombstoned = false;
+                    try {
+                        const tRaw = localStorage.getItem('fs_crm_tombstones');
+                        const tombstones = tRaw ? JSON.parse(tRaw) : {};
+                        isTombstoned = (tombstones[tableName] || []).map(String).includes(String(id));
+                    } catch (_) {}
+                    if (isTombstoned) {
+                        // Case (b): row was explicitly deleted — honor it, clean up the stale
+                        // local copy, return null so the caller can show "deleted" feedback.
+                        try {
+                            const key = `fs_crm_${tableName}`;
+                            const all = JSON.parse(localStorage.getItem(key) || '[]');
+                            const filtered = all.filter(r => String(r.id) !== String(id));
+                            if (filtered.length !== all.length) localStorage.setItem(key, JSON.stringify(filtered));
+                        } catch (_) {}
+                        this.invalidateCache(tableName);
+                        return null;
+                    }
+                    // Case (a): try to INSERT so the user's edit is preserved. Pull the
+                    // existing local row to fill in fields the form didn't touch (created_at,
+                    // created_by, etc.) so we don't accidentally clobber them with NULLs.
+                    let baseRow = {};
                     try {
                         const key = `fs_crm_${tableName}`;
                         const all = JSON.parse(localStorage.getItem(key) || '[]');
-                        const filtered = all.filter(r => String(r.id) !== String(id));
-                        if (filtered.length !== all.length) localStorage.setItem(key, JSON.stringify(filtered));
+                        const existing = all.find(r => String(r.id) === String(id));
+                        if (existing) baseRow = existing;
                     } catch (_) {}
-                    this.invalidateCache(tableName);
-                    return null;
+                    const insertPayload = { ...baseRow, ...updateData, id };
+                    let inserted = null;
+                    try {
+                        const { data: insData, error: insErr } = await this._writeClient()
+                            .from(tableName)
+                            .insert(insertPayload)
+                            .select()
+                            .single();
+                        if (!insErr && insData) inserted = insData;
+                    } catch (_) {}
+                    if (inserted) {
+                        try {
+                            const key = `fs_crm_${tableName}`;
+                            const all = JSON.parse(localStorage.getItem(key) || '[]');
+                            const idx = all.findIndex(r => String(r.id) === String(id));
+                            const full = { ...inserted, ...updates };
+                            if (idx >= 0) all[idx] = full; else all.push(full);
+                            localStorage.setItem(key, JSON.stringify(all));
+                        } catch (_) {}
+                        this.invalidateCache(tableName);
+                        this.emit('dataChanged', { action: 'update', table: tableName, record: inserted });
+                        return inserted;
+                    }
+                    // Insert failed too (schema mismatch, RLS, etc.). Fall through to the
+                    // local-save path below — preserves the user's edit in localStorage and
+                    // queues it for auto-sync on the next successful read.
+                    console.warn(`PGRST116 on update to ${tableName} id=${id}; insert fallback also failed — saving locally`);
+                    break;
                 }
                 console.warn(`Error on update to ${tableName}: ${e.message} (code: ${e.code}) — saving locally`);
                 break;

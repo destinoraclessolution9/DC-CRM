@@ -27497,7 +27497,16 @@ const exportKPIReport = async (format) => {
 
         try {
             if (id) {
-                await AppDataStore.update(type, id, data);
+                // update() returns null only when the row was already tombstoned
+                // (explicitly deleted) — don't pretend the edit was saved in that case.
+                const result = await AppDataStore.update(type, id, data);
+                if (result === null) {
+                    UI.toast.error('This record was deleted and could not be updated.');
+                    UI.hideModal();
+                    const viewport = document.getElementById('content-viewport');
+                    await showMarketingListsView(viewport);
+                    return;
+                }
                 UI.toast.success('Record updated successfully');
             } else {
                 data.created_by = _currentUser ? _currentUser.id : null;
