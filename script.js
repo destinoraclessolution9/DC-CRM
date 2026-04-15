@@ -129,6 +129,14 @@ const appLogic = (() => {
     let _pendingIntakeRow = null;  // Full intake row, used to send WhatsApp confirmation
     let _currentDate = new Date(); // Dynamic start date
     let _filters = { agent: 'all', type: 'all', from: '', to: '' };
+    // Stamped by navigateTo. Used by initSync's dataChanged listener to
+    // suppress the SWR revalidation refresh that would otherwise fire 1–3s
+    // after every navigation and rebuild the entire view (visible flash,
+    // lost scroll position, lost in-progress clicks). After this guard
+    // window passes, mutations and remote-driven revalidations refresh
+    // the view as before.
+    let _lastNavigatedAt = 0;
+    const _SWR_REFRESH_GUARD_MS = 5000;
 
     // ========== ROLE HELPERS ==========
     // Extract numeric level from a role string. "Level 10 Agent" -> 10, "Level 1 Super Admin" -> 1.
@@ -8056,6 +8064,10 @@ function _wireLoginBtn() {
 
     const navigateTo = async (viewId) => {
         UI.hideModal();
+        // Stamp the navigation time so initSync can suppress the SWR
+        // revalidation refresh that would otherwise blow away the DOM 1–3s
+        // after the page paints (visible flash / lost scroll position).
+        _lastNavigatedAt = Date.now();
         document.querySelectorAll('.nav-links li').forEach(li => {
             li.classList.toggle('active', li.getAttribute('data-view') === viewId);
         });
@@ -20895,10 +20907,15 @@ const openAddSolutionModal = async (prospectId) => {
         const curLvlMatch = _currentUser?.role?.match(/Level\s+(\d+)/i);
         const canAssignUpline = curLvlMatch ? parseInt(curLvlMatch[1]) <= 4 : false;
 
-        // Pre-fetch prospects & customers once, then count per agent
-        const [allProspects, allCustomers] = await Promise.all([
+        // Pre-fetch prospects, customers AND agent_stats once, then look up per agent.
+        // Previously this loop fired one Supabase query per agent for agent_stats
+        // — N+1 round trips that dominated render time on the Agents page.
+        // getAll() hits the in-memory + SWR cache, so this is one shared fetch
+        // for the whole page instead of one network call per row.
+        const [allProspects, allCustomers, allAgentStats] = await Promise.all([
             AppDataStore.getAll('prospects'),
-            AppDataStore.getAll('customers')
+            AppDataStore.getAll('customers'),
+            AppDataStore.getAll('agent_stats')
         ]);
         const prospectCountMap = {};
         const customerCountMap = {};
@@ -20910,6 +20927,10 @@ const openAddSolutionModal = async (prospectId) => {
             const aid = String(c.responsible_agent_id || c.agent_id);
             if (aid) customerCountMap[aid] = (customerCountMap[aid] || 0) + 1;
         }
+        const statsByAgentId = new Map();
+        for (const s of allAgentStats) {
+            statsByAgentId.set(String(s.agent_id), s);
+        }
 
         let html = '';
         for (const agent of agents) {
@@ -20920,19 +20941,22 @@ const openAddSolutionModal = async (prospectId) => {
 
             const prospectCount = prospectCountMap[String(agent.id)] || 0;
             const customerCount = customerCountMap[String(agent.id)] || 0;
-            const stats = (await AppDataStore.query('agent_stats', { agent_id: agent.id }))[0] || { followup_rate: 0 };
+            const stats = statsByAgentId.get(String(agent.id)) || { followup_rate: 0 };
             const rateClass = stats.followup_rate >= 90 ? 'rate-good' : (stats.followup_rate >= 70 ? 'rate-warning' : 'rate-critical');
             const status = agent.status || 'active';
 
+            // escapeHtml is synchronous — `await` here just yields a microtask
+            // per call, ~6 yields per row times N agents = hundreds of needless
+            // event-loop ticks during render.
             html += `
                 <tr data-agent-id="${agent.id}" class="agent-row">
                     <td data-label="Name">
-                        <div style="font-weight:600;">${await escapeHtml(agent.full_name)}</div>
-                        <div style="font-size:12px; color:var(--gray-500);">${await escapeHtml(agent.agent_code) || 'N/A'}</div>
+                        <div style="font-weight:600;">${escapeHtml(agent.full_name)}</div>
+                        <div style="font-size:12px; color:var(--gray-500);">${escapeHtml(agent.agent_code) || 'N/A'}</div>
                     </td>
-                    <td data-label="Team">${await escapeHtml(agent.team) || 'Unassigned'}</td>
+                    <td data-label="Team">${escapeHtml(agent.team) || 'Unassigned'}</td>
                     <td data-label="Status"><span class="status-badge status-${status}">${status.toUpperCase()}</span></td>
-                    <td data-label="License Expiry">${await escapeHtml(agent.license_expiry) || 'N/A'}</td>
+                    <td data-label="License Expiry">${escapeHtml(agent.license_expiry) || 'N/A'}</td>
                     <td data-label="Prospects">${prospectCount} prospects</td>
                     <td data-label="Customers">${customerCount} customers</td>
                     <td data-label="Follow-up">
@@ -25248,21 +25272,28 @@ container.innerHTML = `
         ]);
 
         renderKPIStats(kpis, prevKpis);
-        await renderTargetOverview();
-        await renderPerformanceTable();
-        await renderAgentLeaderboard();
-        await renderRevenueChart(_currentTimeFilter, ranges.current);
-
-        // Render hierarchical target comparison
-        const targetSection = document.getElementById('kpi-target-comparison-section');
-        if (targetSection) {
-            try {
-                targetSection.innerHTML = await renderKPITargetComparison();
-            } catch (e) {
-                console.warn('KPI target comparison render failed:', e);
-                targetSection.innerHTML = '';
-            }
-        }
+        // These four renders are independent — they paint into different
+        // DOM containers and don't read each other's results. Awaiting
+        // them sequentially serialized ~4 separate getAll() round trips
+        // and chart-rendering work that should run in parallel.
+        await Promise.all([
+            renderTargetOverview(),
+            renderPerformanceTable(),
+            renderAgentLeaderboard(),
+            renderRevenueChart(_currentTimeFilter, ranges.current),
+            // Hierarchical target comparison runs in the same parallel batch.
+            // Wrapped so a render failure doesn't reject the whole Promise.all.
+            (async () => {
+                const targetSection = document.getElementById('kpi-target-comparison-section');
+                if (!targetSection) return;
+                try {
+                    targetSection.innerHTML = await renderKPITargetComparison();
+                } catch (e) {
+                    console.warn('KPI target comparison render failed:', e);
+                    targetSection.innerHTML = '';
+                }
+            })(),
+        ]);
     };
 
     const getDateRanges = (filter, from, to) => {
@@ -33197,18 +33228,61 @@ const initImportDemoData = async () => {
     // ========== FEATURE: RANKING PERFORMANCE OVERVIEW ==========
     const showRankingPerformanceView = async (container) => {
         _currentView = 'ranking';
-        const users = await AppDataStore.getAll('users');
+        // Pre-fetch all four tables in parallel ONCE, then bucket by agent_id
+        // for O(1) per-agent lookups. Previously this loop did three serial
+        // getAll() calls inside a per-agent for loop and re-filtered the entire
+        // activities/purchases/prospects arrays for every agent — O(agents ×
+        // records). With 100 agents and 5k activities that's 500k comparisons
+        // inside the render path, and each await-in-loop forces a microtask
+        // yield even when the cache is hot.
+        const [users, allActivities, allPurchases, allProspects] = await Promise.all([
+            AppDataStore.getAll('users'),
+            AppDataStore.getAll('activities'),
+            AppDataStore.getAll('purchases'),
+            AppDataStore.getAll('prospects'),
+        ]);
         const agents = users.filter(u => u.role && (u.role.includes('Level') || u.role === 'agent' || u.role === 'consultant'));
         const now = new Date();
         const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
         const monthEnd = now.toISOString().split('T')[0];
 
-        // Gather agent stats
+        // Bucket activities for the current month by lead_agent_id
+        const activitiesByAgent = new Map();
+        for (const a of allActivities) {
+            if (!a.lead_agent_id) continue;
+            if (a.activity_date < monthStart || a.activity_date > monthEnd) continue;
+            const k = String(a.lead_agent_id);
+            let bucket = activitiesByAgent.get(k);
+            if (!bucket) { bucket = []; activitiesByAgent.set(k, bucket); }
+            bucket.push(a);
+        }
+        // Bucket purchases for the current month by agent_id
+        const purchasesByAgent = new Map();
+        for (const p of allPurchases) {
+            if (!p.agent_id) continue;
+            if (p.purchase_date < monthStart || p.purchase_date > monthEnd) continue;
+            const k = String(p.agent_id);
+            let bucket = purchasesByAgent.get(k);
+            if (!bucket) { bucket = []; purchasesByAgent.set(k, bucket); }
+            bucket.push(p);
+        }
+        // Bucket prospects by responsible_agent_id
+        const prospectsByAgent = new Map();
+        for (const p of allProspects) {
+            if (!p.responsible_agent_id) continue;
+            const k = String(p.responsible_agent_id);
+            let bucket = prospectsByAgent.get(k);
+            if (!bucket) { bucket = []; prospectsByAgent.set(k, bucket); }
+            bucket.push(p);
+        }
+
+        // Gather agent stats — O(1) lookup per agent against the buckets above
         const agentStats = [];
         for (const agent of agents) {
-            const activities = (await AppDataStore.getAll('activities')).filter(a => a.lead_agent_id === agent.id && a.activity_date >= monthStart && a.activity_date <= monthEnd);
-            const purchases = (await AppDataStore.getAll('purchases')).filter(p => p.agent_id === agent.id && p.purchase_date >= monthStart && p.purchase_date <= monthEnd);
-            const prospects = (await AppDataStore.getAll('prospects')).filter(p => p.responsible_agent_id === agent.id);
+            const aid = String(agent.id);
+            const activities = activitiesByAgent.get(aid) || [];
+            const purchases = purchasesByAgent.get(aid) || [];
+            const prospects = prospectsByAgent.get(aid) || [];
             const cpsCount = activities.filter(a => a.activity_type === 'CPS').length;
             const totalSales = purchases.reduce((s, p) => s + (p.amount || 0), 0);
             const meetingCount = activities.filter(a => ['FTF', 'FSA', 'GR', 'SITE', 'XG'].includes(a.activity_type)).length;
@@ -36921,6 +36995,17 @@ JB 星期二到
                 };
 
                 if (viewDependencies[view] && viewDependencies[view].includes(table)) {
+                    // Suppress the SWR revalidation flash. SWR fires
+                    // dataChanged with action='revalidate' after the cold
+                    // page paint, ~1–3s after the user navigates. Rebuilding
+                    // the entire view at that moment is what users perceive
+                    // as "lag" — the page appears, then flashes and resets.
+                    // Mutations (create/update/delete/restore) still refresh
+                    // immediately; only the post-nav revalidate flash is
+                    // suppressed. Fresh data is picked up on the next nav.
+                    if (action === 'revalidate' && (Date.now() - _lastNavigatedAt) < _SWR_REFRESH_GUARD_MS) {
+                        return;
+                    }
                     appLogic.refreshCurrentView();
                 }
             });
