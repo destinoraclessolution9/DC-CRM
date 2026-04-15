@@ -10818,6 +10818,37 @@ function _wireLoginBtn() {
         }
     };
 
+    // Fetch activities where the current user is in the co_agents JSONB array.
+    // The standard renderCalendar / renderTodayActivities query scopes by lead_agent_id
+    // (so non-admins only see activities they own or supervise), which silently drops
+    // any activity where the user is just a co-agent. This helper covers the gap with
+    // a JSONB containment query, run in parallel and merged client-side.
+    //
+    // Returns an array of activity rows (possibly empty). Best-effort: any error is
+    // swallowed so it never breaks calendar rendering for the lead-agent path.
+    const _fetchActivitiesAsCoAgent = async (rangeStart, rangeEnd) => {
+        try {
+            if (!_currentUser || _currentUser.id == null) return [];
+            const client = AppDataStore._readClient && AppDataStore._readClient();
+            if (!client) return [];
+            let q = client
+                .from('activities')
+                .select('*')
+                .contains('co_agents', [{ id: _currentUser.id }]);
+            if (rangeStart) q = q.gte('activity_date', rangeStart);
+            if (rangeEnd) q = q.lte('activity_date', rangeEnd);
+            const { data, error } = await q;
+            if (error) {
+                console.warn('[co-agent fetch] failed:', error.message || error);
+                return [];
+            }
+            return data || [];
+        } catch (e) {
+            console.warn('[co-agent fetch] threw:', e.message || e);
+            return [];
+        }
+    };
+
     const renderCalendar = async () => {
         updateMonthHeader(_currentDate);
 
@@ -10887,13 +10918,31 @@ function _wireLoginBtn() {
             actQueryOpts.scopeValues = visibleIds;
         }
 
-        // Fetch month activities + lookup tables in parallel
-        const [actResult, allEvents, allUsers] = await Promise.all([
+        // Fetch month activities + lookup tables in parallel.
+        // Non-admins also need a parallel JSONB query for activities where they are
+        // a co-agent (the lead_agent_id IN (...) scope above silently drops those).
+        const needsCoAgentMerge = !isSystemAdmin(_currentUser) && _currentUser?.id != null;
+        const coAgentFetch = needsCoAgentMerge
+            ? _fetchActivitiesAsCoAgent(rangeStart, monthEnd)
+            : Promise.resolve([]);
+        const [actResult, allEvents, allUsers, coAgentRows] = await Promise.all([
             AppDataStore.queryAdvanced('activities', actQueryOpts),
             AppDataStore.getAll('events'),
             AppDataStore.getAll('users'),
+            coAgentFetch,
         ]);
+        // Merge & dedupe by activity id so co-agent-only invitations show on the
+        // viewer's calendar even though the lead_agent_id scope excluded them.
         let rawActivities = actResult.data;
+        if (coAgentRows && coAgentRows.length > 0) {
+            const seen = new Set(rawActivities.map(a => String(a.id)));
+            for (const a of coAgentRows) {
+                if (!seen.has(String(a.id))) {
+                    seen.add(String(a.id));
+                    rawActivities.push(a);
+                }
+            }
+        }
 
         const eventIds = new Set(allEvents.map(e => String(e.id)));
         const userMap = new Map(allUsers.map(u => [String(u.id), u]));
@@ -11163,11 +11212,28 @@ function _wireLoginBtn() {
             queryOpts.scopeValues = visibleIds;
         }
 
-        const [actResult, allEventsRTA, allUsersRTA] = await Promise.all([
+        // Non-admins also need a parallel JSONB query for today's activities where
+        // they are a co-agent — the lead_agent_id scope above drops those rows.
+        const needsCoAgentMergeRTA = !isSystemAdmin(_currentUser) && _currentUser?.id != null;
+        const coAgentFetchRTA = needsCoAgentMergeRTA
+            ? _fetchActivitiesAsCoAgent(dateStr, dateStr)
+            : Promise.resolve([]);
+        const [actResult, allEventsRTA, allUsersRTA, coAgentRowsRTA] = await Promise.all([
             AppDataStore.queryAdvanced('activities', queryOpts),
             AppDataStore.getAll('events'),
             AppDataStore.getAll('users'),
+            coAgentFetchRTA,
         ]);
+        // Merge co-agent rows in so the viewer sees today's invited activities too.
+        if (coAgentRowsRTA && coAgentRowsRTA.length > 0) {
+            const seenRTA = new Set(actResult.data.map(a => String(a.id)));
+            for (const a of coAgentRowsRTA) {
+                if (!seenRTA.has(String(a.id))) {
+                    seenRTA.add(String(a.id));
+                    actResult.data.push(a);
+                }
+            }
+        }
         const existingEventIds = new Set(allEventsRTA.map(e => String(e.id)));
         const userMapRTA = new Map(allUsersRTA.map(u => [String(u.id), u]));
 
