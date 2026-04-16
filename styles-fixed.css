@@ -8333,6 +8333,206 @@ input:checked+.slider:before {
     align-items: center;
 }
 
+/* Cases Module — Redesigned toolbar */
+.cases-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+
+.cases-search-wrap {
+    flex: 1;
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.cases-search-icon {
+    position: absolute;
+    left: 14px;
+    color: var(--gray-400);
+    font-size: 14px;
+    pointer-events: none;
+}
+
+.cases-search-input {
+    width: 100%;
+    padding: 10px 38px 10px 42px;
+    border: 1.5px solid var(--gray-200);
+    border-radius: 8px;
+    font-size: 14px;
+    background: var(--white);
+    transition: border-color 0.15s, box-shadow 0.15s;
+    outline: none;
+    color: var(--gray-800);
+}
+
+.cases-search-input:focus {
+    border-color: var(--primary-400, #9b2335);
+    box-shadow: 0 0 0 3px rgba(139,0,0,0.07);
+}
+
+.cases-search-input::placeholder { color: var(--gray-400); }
+
+.cases-search-clear {
+    position: absolute;
+    right: 10px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--gray-400);
+    padding: 4px 6px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    font-size: 13px;
+    transition: color 0.15s;
+}
+.cases-search-clear:hover { color: var(--gray-600); }
+
+.cases-filter-btn {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 9px 16px;
+    border: 1.5px solid var(--gray-200);
+    border-radius: 8px;
+    background: var(--white);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+    color: var(--gray-600);
+    transition: all 0.15s;
+}
+.cases-filter-btn:hover,
+.cases-filter-btn.active {
+    border-color: var(--primary-600, #7a0018);
+    color: var(--primary-600, #7a0018);
+    background: #fdf4f4;
+}
+
+.cases-filter-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 4px;
+    border-radius: 9px;
+    background: var(--primary-600, #7a0018);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+/* Advanced filters panel */
+.cases-adv-panel {
+    background: var(--white);
+    border: 1.5px solid var(--gray-200);
+    border-radius: 10px;
+    padding: 16px 20px 12px;
+    margin-bottom: 16px;
+    margin-top: 8px;
+}
+
+.cases-adv-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(155px, 1fr));
+    gap: 10px 16px;
+    margin-bottom: 12px;
+}
+
+.adv-field {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.adv-field label {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--gray-500);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.adv-field select,
+.adv-field input[type="date"] {
+    padding: 7px 10px;
+    border: 1.5px solid var(--gray-200);
+    border-radius: 6px;
+    font-size: 13px;
+    background: var(--white);
+    color: var(--gray-700);
+    outline: none;
+    transition: border-color 0.15s;
+}
+.adv-field select:focus,
+.adv-field input[type="date"]:focus {
+    border-color: var(--primary-400, #9b2335);
+}
+
+.cases-adv-footer {
+    display: flex;
+    justify-content: flex-end;
+    border-top: 1px solid var(--gray-100);
+    padding-top: 10px;
+}
+
+.cases-adv-footer .btn-link {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--gray-500);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: color 0.15s;
+}
+.cases-adv-footer .btn-link:hover { color: var(--primary-600, #7a0018); }
+
+/* Cases section headers */
+.cases-section-hdr {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 24px;
+    margin-bottom: 12px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid var(--gray-100);
+}
+
+.cases-section-hdr .section-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: #fdf4f4;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--primary-600, #7a0018);
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+.cases-section-hdr h2 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--gray-800);
+}
+
+.cases-section-desc {
+    font-size: 13px;
+    color: var(--gray-400);
+    margin-left: 2px;
+}
+
 .case-detail-view {
     height: 100%;
     display: flex;
