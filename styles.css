@@ -9568,3 +9568,107 @@ input:checked+.slider:before {
     .campaigns-table-container { padding: 0 12px 16px; }
     .campaigns-filters      { padding: 12px 16px; }
 }
+
+/* ========== TODAY'S ACTIVITIES — CARD LAYOUT ========== */
+.today-activity-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 4px 0;
+}
+
+.today-act-card {
+    background: var(--white);
+    border-radius: 8px;
+    border: 1px solid var(--gray-200);
+    border-left: 4px solid var(--gray-300);
+    padding: 10px 12px;
+    cursor: pointer;
+    transition: box-shadow 0.15s;
+}
+
+.today-act-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+.today-act-card.cps   { border-left-color: #10b981; }
+.today-act-card.ftf   { border-left-color: #3b82f6; }
+.today-act-card.fsa   { border-left-color: #f59e0b; }
+.today-act-card.event { border-left-color: #ef4444; }
+
+.tac-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 5px;
+}
+
+.tac-time {
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--gray-900);
+    min-width: 44px;
+}
+
+.tac-type {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 600;
+    background: var(--gray-100);
+    color: var(--gray-700);
+}
+
+.tac-type.cps   { background: #d1fae5; color: #065f46; }
+.tac-type.ftf   { background: #dbeafe; color: #1e40af; }
+.tac-type.fsa   { background: #fef3c7; color: #92400e; }
+.tac-type.event { background: #fee2e2; color: #991b1b; }
+
+.tac-status {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--gray-500);
+    text-transform: capitalize;
+}
+
+.tac-names {
+    margin-bottom: 8px;
+}
+
+.tac-agent {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--gray-800);
+}
+
+.tac-customer {
+    font-size: 13px;
+    color: var(--gray-600);
+    margin-top: 1px;
+}
+
+.tac-actions {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+/* ========== ACTIVITY DETAILS — INLINE ACTION BUTTONS ========== */
+.act-actions-section { margin-top: 8px; }
+
+.act-actions-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.act-action-btn {
+    width: 100% !important;
+    text-align: center;
+    padding: 10px 16px;
+    font-size: 14px;
+}
+
+.act-action-delete {
+    background: #7f1d1d !important;
+    border-color: #7f1d1d !important;
+    color: white !important;
+}
