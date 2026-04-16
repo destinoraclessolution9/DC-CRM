@@ -11094,14 +11094,14 @@ function _wireLoginBtn() {
                         activityHtml += `
                             <div class="calendar-appointment ${a.activity_type.toLowerCase()} ${a.closing_amount ? 'closed-case' : ''} ${isPendingInvite ? 'pending-invite' : ''} ${isRejectedInvite ? 'rejected-invite' : ''}"
                                 onclick="event.stopPropagation(); app.viewActivityDetails(${a.id})">
-                                <div class="appointment-time">${(a.start_time || '00:00').slice(0,5)} - ${(a.end_time || '00:00').slice(0,5)}</div>
+                                <div class="appointment-time">${(a.start_time || '00:00').slice(0,5)}</div>
                                 ${isEvent
-                                    ? `<div class="appointment-customer">📅 ${eventTitle || a.activity_title || 'Event'}</div>`
-                                    : `<div class="appointment-agent">👤 ${agentName}${extraCoAgents > 0 ? ` <small>+${extraCoAgents}</small>` : ''}</div>
-                                <div class="appointment-customer">📋 ${entityName}</div>`
+                                    ? `<div class="appointment-customer">${eventTitle || a.activity_title || 'Event'}</div>`
+                                    : `<div class="appointment-customer">${entityName}</div>
+                                <div class="appointment-agent">${agentName}${extraCoAgents > 0 ? ` +${extraCoAgents}` : ''}</div>`
                                 }
-                                <div class="appointment-type">🏷️ ${a.activity_type}</div>
-                                ${displayVenue ? `<div class="appointment-venue">📍 ${displayVenue}</div>` : ''}
+                                <div class="appointment-type">${a.activity_type}</div>
+                                ${displayVenue ? `<div class="appointment-venue">${displayVenue}</div>` : ''}
                                 ${isPendingInvite ? `
                                 <div class="co-agent-invite-actions" style="display:flex;gap:4px;margin-top:6px;padding-top:6px;border-top:1px dashed rgba(0,0,0,0.1);">
                                     <button class="btn btn-sm" style="flex:1;background:#dcfce7;color:#166534;border:none;padding:3px 6px;border-radius:4px;cursor:pointer;font-size:11px;" onclick="event.stopPropagation();(async()=>{await app.respondCoAgentInvite(${a.id},'accepted');})()"><i class="fas fa-check"></i> Accept</button>
@@ -11323,20 +11323,7 @@ function _wireLoginBtn() {
             return;
         }
 
-        let html = `
-                    <table class="search-results-table">
-                    <thead>
-                        <tr>
-                            <th>Time</th>
-                            <th>Agent</th>
-                            <th>Customer</th>
-                            <th>Type</th>
-                            <th>Status</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-            `;
+        let html = `<div class="today-activity-list">`;
 
         for (const a of activities) {
             // Sync lookups from prefetched maps (no awaits per row).
@@ -11344,32 +11331,32 @@ function _wireLoginBtn() {
             const prospect = a.prospect_id ? prospectMapRTA.get(String(a.prospect_id)) : null;
             const customer = a.customer_id ? customerMapRTA.get(String(a.customer_id)) : null;
             const entityName = prospect ? prospect.full_name : (customer ? customer.full_name : (a.customer_name || 'N/A'));
+            const typeClass = (a.activity_type || '').toLowerCase();
+            const statusText = a.status || 'scheduled';
 
             html += `
-                    <tr>
-                        <td>${a.start_time || '--:--'}</td>
-                        <td>${agent.full_name}</td>
-                        <td>${entityName}</td>
-                        <td>${a.activity_type}</td>
-                        <td>${a.status || 'scheduled'}
-                            ${a.closing_amount ? '<br><small style="color:green;">Closed</small>' : ''}
-                        </td>
-                        <td>
-                            <button class="btn btn-sm secondary" onclick="app.viewActivityDetails(${a.id})">View</button>
-                            <button class="btn btn-sm secondary" onclick="(async()=>{await app.openMeetingOutcomeModal(${a.id});})()">📝 Outcome</button>
-                            <button class="btn btn-sm secondary" onclick="(async()=>{await app.openPostMeetupNotesModal(${a.id},${a.prospect_id || 'null'});})()">📝 Notes</button>
-                            <button class="btn btn-sm secondary" onclick="app.editActivity(${a.id})">Edit</button>
-                            <button class="btn btn-sm secondary" onclick="app.rescheduleActivity(${a.id})">Reschedule</button>
-                            <button class="btn btn-sm secondary" onclick="app.addCoAgentToActivity(${a.id})">+ Add co</button>
-                        </td>
-                    </tr>
-                `;
+                <div class="today-act-card ${typeClass}" onclick="app.viewActivityDetails(${a.id})">
+                    <div class="tac-meta">
+                        <span class="tac-time">${a.start_time ? a.start_time.slice(0,5) : '--:--'}</span>
+                        <span class="tac-type ${typeClass}">${a.activity_type}</span>
+                        <span class="tac-status">${statusText}${a.closing_amount ? ' · Closed' : ''}</span>
+                    </div>
+                    <div class="tac-names">
+                        <div class="tac-agent">${agent.full_name}</div>
+                        ${entityName !== 'N/A' ? `<div class="tac-customer">${entityName}</div>` : ''}
+                    </div>
+                    <div class="tac-actions" onclick="event.stopPropagation()">
+                        <button class="btn btn-sm secondary" onclick="app.viewActivityDetails(${a.id})">View</button>
+                        <button class="btn btn-sm secondary" onclick="(async()=>{await app.openMeetingOutcomeModal(${a.id});})()">Outcome</button>
+                        <button class="btn btn-sm secondary" onclick="(async()=>{await app.openPostMeetupNotesModal(${a.id},${a.prospect_id || 'null'});})()">Notes</button>
+                        <button class="btn btn-sm secondary" onclick="app.editActivity(${a.id})">Edit</button>
+                        <button class="btn btn-sm secondary" onclick="app.addCoAgentToActivity(${a.id})">+ Co</button>
+                    </div>
+                </div>
+            `;
         }
 
-        html += `
-                    </tbody>
-                </table>
-    `;
+        html += `</div>`;
 
         grid.innerHTML = html;
     };
@@ -12440,39 +12427,25 @@ function _wireLoginBtn() {
                 </div>
                 ` : ''}
                 ${attendeeHtml}
+                <div class="detail-section act-actions-section">
+                    <h4>Actions</h4>
+                    <div class="act-actions-list">
+                        ${activity.prospect_id ? `<button class="btn secondary act-action-btn" onclick="UI.hideModal(); app.showProspectDetail(${activity.prospect_id})">Prospect Profile</button>` : ''}
+                        ${activity.activity_type === 'CPS' && activity.prospect_id
+                            ? `<button class="btn secondary act-action-btn" onclick="app.uploadCPSForm(${activityId}, ${activity.prospect_id})">Upload CPS Form</button>
+                               <button class="btn secondary act-action-btn" onclick="app.uploadAPUForm(${activityId}, ${activity.prospect_id})">APU</button>`
+                            : `<button class="btn secondary act-action-btn" onclick="(async () => { await app.markActivityComplete(${activityId}); })()">Mark Complete</button>`
+                        }
+                        <button class="btn secondary act-action-btn" onclick="app.editActivityTiming(${activityId})">Edit</button>
+                        <button class="btn secondary act-action-btn" onclick="(async () => { await app.openMeetingOutcomeModal(${activityId}); })()">Outcome</button>
+                        ${activity.prospect_id ? `<button class="btn secondary act-action-btn" onclick="(async () => { await app.openPostMeetupNotesModal(${activityId}, ${activity.prospect_id}); })()">Post Notes</button>` : ''}
+                        <button class="btn primary act-action-btn act-action-delete" onclick="(async () => { await app.deleteActivity(${activityId}); })()">Delete</button>
+                    </div>
+                </div>
             </div>
         `;
 
-        const modalActions = [
-            activity.prospect_id
-                ? { label: '👤 Prospect Profile', type: 'secondary', action: `UI.hideModal(); app.showProspectDetail(${activity.prospect_id})` }
-                : { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
-            ...(activity.activity_type === 'CPS' && activity.prospect_id
-                ? [
-                    { label: '📷 Upload CPS Form', type: 'secondary', action: `app.uploadCPSForm(${activityId}, ${activity.prospect_id})` },
-                    { label: '📎 APU', type: 'secondary', action: `app.uploadAPUForm(${activityId}, ${activity.prospect_id})` }
-                  ]
-                : [{ label: 'Mark Complete', type: 'secondary', action: `(async () => { await app.markActivityComplete(${activityId}); })()` }]
-            ),
-            { label: 'Edit', type: 'secondary', action: `app.editActivityTiming(${activityId})` }
-        ];
-
-        modalActions.push({
-            label: '📝 Outcome',
-            type: 'secondary',
-            action: `(async () => { await app.openMeetingOutcomeModal(${activityId}); })()`
-        });
-        if (activity.prospect_id) {
-            modalActions.push({
-                label: '📝 Post Notes',
-                type: 'secondary',
-                action: `(async () => { await app.openPostMeetupNotesModal(${activityId}, ${activity.prospect_id}); })()`
-            });
-        }
-
-        modalActions.push({ label: 'Delete', type: 'primary', action: `(async () => { await app.deleteActivity(${activityId}); })()` });
-
-        UI.showModal('Activity Details', content, modalActions);
+        UI.showModal('Activity Details', content, []);
     };
 
     const uploadCPSForm = (activityId, prospectId) => {
@@ -35267,33 +35240,38 @@ const initImportDemoData = async () => {
                 ${adminHighlightsSection}
                 ${adminRewardsSection}
                 <div class="fude-section">
-                    <h2>📰 Highlights &amp; News</h2>
-                    <div class="news-list">${publicNews.length
-                        ? publicNews.map(n => `<div class="news-item">
-                            <h3 style="margin:0 0 4px;">${n.title}</h3>
-                            <p style="margin:0 0 4px;color:var(--gray-600,#4b5563);">${n.content || ''}</p>
-                            <small style="color:var(--gray-400,#9ca3af);">${fmtDate(n.created_at)}</small>
-                          </div>`).join('')
-                        : '<p style="color:var(--gray-500,#6b7280);">No highlights yet.</p>'}</div>
+                    <div class="fude-mag-header"><h2>📰 Highlights &amp; News</h2></div>
+                    ${publicNews.length === 0
+                        ? '<p style="color:var(--gray-500,#6b7280);">No highlights yet.</p>'
+                        : (() => {
+                            const [hero, ...rest] = publicNews;
+                            const heroBg = hero.image_url
+                                ? `<img class="fude-hero-card-bg" src="${hero.image_url}" alt="" onerror="this.style.display='none'">`
+                                : '';
+                            const heroCard = `<div class="fude-hero-card">${heroBg}<div class="fude-hero-card-overlay"><span class="fude-hero-badge">Latest</span><h3>${hero.title}</h3>${hero.content ? `<p>${hero.content}</p>` : ''}<span class="fude-hero-date">${fmtDate(hero.created_at)}</span></div></div>`;
+                            const grid = rest.length
+                                ? `<div class="fude-news-grid">${rest.map(n => `<div class="fude-card">${n.image_url ? `<img class="fude-card-img" src="${n.image_url}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="fude-card-img-placeholder" style="display:none;">📰</div>` : `<div class="fude-card-img-placeholder">📰</div>`}<div class="fude-card-body"><span class="fude-card-tag">News</span><h3>${n.title}</h3>${n.content ? `<p>${n.content}</p>` : ''}<div class="fude-card-date">${fmtDate(n.created_at)}</div></div></div>`).join('')}</div>`
+                                : '';
+                            return heroCard + grid;
+                          })()
+                    }
                 </div>
                 <div class="fude-section">
-                    <h2>🌟 Success Stories</h2>
-                    <div class="stories-list">${successStories.length
-                        ? successStories.map(s => `<div class="story-item">
-                            <h3 style="margin:0 0 4px;">${s.title}</h3>
-                            <p style="margin:0;color:var(--gray-600,#4b5563);">${s.content || ''}</p>
-                          </div>`).join('')
-                        : '<p style="color:var(--gray-500,#6b7280);">No success stories yet.</p>'}</div>
+                    <div class="fude-mag-header"><h2>🌟 Success Stories</h2></div>
+                    ${successStories.length === 0
+                        ? '<p style="color:var(--gray-500,#6b7280);">No success stories yet.</p>'
+                        : `<div class="fude-stories-grid">${successStories.map(s => `<div class="fude-story-card">${s.image_url ? `<img class="fude-story-img" src="${s.image_url}" alt="" onerror="this.style.display='none'">` : ''}<div class="fude-story-body"><span class="fude-story-quote">"</span><h3>${s.title}</h3><p>${s.content || ''}</p></div></div>`).join('')}</div>`
+                    }
                 </div>
                 ${recommendationTips.length ? `
                 <div class="fude-section">
-                    <h2>💡 Recommendation Tips</h2>
-                    <div class="tips-list">${recommendationTips.map(t => `
-                        <div class="news-item" style="display:flex;gap:12px;align-items:flex-start;">
-                            <span style="font-size:1.4rem;flex-shrink:0;">💡</span>
-                            <div>
-                                <h3 style="margin:0 0 4px;">${t.title}</h3>
-                                <p style="margin:0;color:var(--gray-600,#4b5563);">${t.content || ''}</p>
+                    <div class="fude-mag-header"><h2>💡 Recommendation Tips</h2></div>
+                    <div class="fude-tips-stack">${recommendationTips.map(t => `
+                        <div class="fude-tip-card">
+                            <span class="fude-tip-icon">💡</span>
+                            <div class="fude-tip-content">
+                                <h3>${t.title}</h3>
+                                <p>${t.content || ''}</p>
                             </div>
                         </div>`).join('')}
                     </div>
@@ -35322,6 +35300,11 @@ const initImportDemoData = async () => {
                 <div class="form-group">
                     <label>Content</label>
                     <textarea id="highlight-content" class="form-control" rows="4" placeholder="Enter content...">${h?.content || ''}</textarea>
+                </div>
+                <div class="form-group">
+                    <label>Photo URL <span style="color:#9ca3af;font-weight:400;">(optional — paste an image link)</span></label>
+                    <input type="url" id="highlight-image-url" class="form-control" value="${h?.image_url || ''}" placeholder="https://example.com/photo.jpg">
+                    ${h?.image_url ? `<img src="${h.image_url}" style="margin-top:8px;width:100%;max-height:140px;object-fit:cover;border-radius:8px;" onerror="this.style.display='none'">` : ''}
                 </div>
                 <div class="form-group">
                     <label>Type</label>
@@ -35354,6 +35337,7 @@ const initImportDemoData = async () => {
         const payload = {
             title,
             content:   document.getElementById('highlight-content')?.value || '',
+            image_url: document.getElementById('highlight-image-url')?.value?.trim() || null,
             type:      document.getElementById('highlight-type')?.value || 'highlight',
             is_active: document.getElementById('highlight-active')?.checked ?? true,
             author_id: _currentUser?.id || null
