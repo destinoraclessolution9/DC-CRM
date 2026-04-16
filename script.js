@@ -18874,6 +18874,15 @@ function _wireLoginBtn() {
                             <div class="acc-body" id="acc-body-formula-${prospect.id}" style="display:none" data-loaded="false"></div>
                         </div>
 
+                        <!-- ⑦c Feng Shui Audit -->
+                        <div class="acc-item" id="acc-fengshui-${prospect.id}">
+                            <div class="acc-hdr" onclick="app.toggleAccordion('fengshui',${prospect.id},this.parentElement)">
+                                <span><i class="fas fa-compass"></i> Feng Shui Audit</span>
+                                <i class="fas fa-chevron-down acc-chev"></i>
+                            </div>
+                            <div class="acc-body" id="acc-body-fengshui-${prospect.id}" style="display:none" data-loaded="false"></div>
+                        </div>
+
                         <!-- ⑧ Notes -->
                         <div class="acc-item" id="acc-notes-${prospect.id}">
                             <div class="acc-hdr" onclick="app.toggleAccordion('notes',${prospect.id},this.parentElement)">
@@ -19251,10 +19260,25 @@ function _wireLoginBtn() {
             const meetups = allActivities.filter(a => MEETUP_TYPES.includes(a.activity_type))
                 .sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
 
-            // Aggregate across all meetings
+            // Feng Shui Audit product selections flow into Solutions (same format as post-meetup notes)
+            const fengShuiAudits = _readFengShuiAudits(prospect);
+            const auditSolutions = fengShuiAudits
+                .map(a => a.products)
+                .filter(Boolean);
+            const auditNeeds = fengShuiAudits
+                .map(a => a.key_notes)
+                .filter(Boolean);
+
+            // Aggregate across all meetings (+ feng shui audits for solutions/needs)
             const allPains = [...new Set(meetups.flatMap(a => [a.note_pain_points, a.core_problem].filter(Boolean)))];
-            const allNeeds = [...new Set(meetups.flatMap(a => [a.note_needs, a.note_key_points].filter(Boolean)))];
-            const allSolutions = [...new Set(meetups.flatMap(a => [a.opportunity_potential, a.note_outcome].filter(Boolean)))];
+            const allNeeds = [...new Set([
+                ...meetups.flatMap(a => [a.note_needs, a.note_key_points].filter(Boolean)),
+                ...auditNeeds,
+            ])];
+            const allSolutions = [...new Set([
+                ...meetups.flatMap(a => [a.opportunity_potential, a.note_outcome].filter(Boolean)),
+                ...auditSolutions,
+            ])];
             const allNextSteps = [...new Set(meetups.flatMap(a => [a.next_action, a.note_next_steps].filter(Boolean)))];
 
             const dealCards = meetups.filter(a =>
@@ -19278,8 +19302,8 @@ function _wireLoginBtn() {
                 <div class="pv-row"><span class="pv-lbl">Timeline</span><span class="pv-val">${prospect.decision_timeline || '-'}</span></div>
                 <div class="pv-row"><span class="pv-lbl">Decision Maker</span><span class="pv-val">${prospect.decision_maker === 'yes' ? 'Yes' : prospect.decision_maker === 'no' ? 'No' : 'Unknown'}</span></div>
 
-                ${meetups.length > 0 ? `
-                <div class="pv-sub" style="margin-top:12px;">Deal Analysis from ${meetups.length} Meet Up${meetups.length > 1 ? 's' : ''}</div>
+                ${(meetups.length > 0 || fengShuiAudits.length > 0) ? `
+                <div class="pv-sub" style="margin-top:12px;">Deal Analysis from ${meetups.length} Meet Up${meetups.length !== 1 ? 's' : ''}${fengShuiAudits.length > 0 ? ` + ${fengShuiAudits.length} Feng Shui Audit${fengShuiAudits.length !== 1 ? 's' : ''}` : ''}</div>
 
                 ${allPains.length > 0 ? `
                 <div style="background:#fff3f3;border-left:3px solid #ef4444;border-radius:0 8px 8px 0;padding:10px 12px;margin-bottom:8px;">
@@ -19305,8 +19329,8 @@ function _wireLoginBtn() {
                     ${allNextSteps.map(s => `<div style="font-size:13px;color:var(--gray-700);margin-bottom:3px;">• ${s}</div>`).join('')}
                 </div>` : ''}
 
-                ${dealCards.length === 0 ? '<p style="text-align:center;padding:12px;color:var(--gray-400);font-size:13px;">No deal analysis recorded yet. Add notes during meet ups.</p>' : ''}
-                ` : '<p style="text-align:center;padding:20px;color:var(--gray-400);font-size:13px;">No meet ups recorded yet.</p>'}
+                ${(dealCards.length === 0 && allNeeds.length === 0 && allSolutions.length === 0) ? '<p style="text-align:center;padding:12px;color:var(--gray-400);font-size:13px;">No deal analysis recorded yet. Add notes during meet ups or log a feng shui audit.</p>' : ''}
+                ` : '<p style="text-align:center;padding:20px;color:var(--gray-400);font-size:13px;">No meet ups or feng shui audits recorded yet.</p>'}
             `;
         }
         else if (tab === 'nextactions') {
@@ -19673,6 +19697,164 @@ function _wireLoginBtn() {
                         <button class="btn secondary btn-sm" onclick="event.stopPropagation();app.addProductPurchaseRow(${pid},'${tab}')" style="white-space:nowrap;height:32px;"><i class="fas fa-plus"></i> Add</button>
                     </div>
                 </div>
+            `;
+        }
+        else if (tab === 'fengshui') {
+            // ── ⑦c Feng Shui Audit — sequence per audit event: layout plan file, audit report file,
+            //    key notes, product selections (products/bujishu/formula — auto-flow to Potential),
+            //    Before photos (up to 50 w/ remarks), After photos (up to 50 w/ remarks),
+            //    Site Review entries (multi-date, remarks, up to 5 photos each).
+            const pid = prospect.id;
+            let audits = [];
+            try {
+                const src = prospect.feng_shui_audits;
+                audits = Array.isArray(src) ? src : JSON.parse(src || '[]');
+            } catch(_) { audits = []; }
+            // Newest first
+            audits = [...audits].sort((a, b) =>
+                new Date(b.audit_date || 0) - new Date(a.audit_date || 0) || (b.id || 0) - (a.id || 0)
+            );
+
+            const renderAuditCard = (a) => {
+                const beforePhotos = Array.isArray(a.before_photos) ? a.before_photos : [];
+                const afterPhotos  = Array.isArray(a.after_photos)  ? a.after_photos  : [];
+                const siteReviews  = Array.isArray(a.site_reviews)  ? a.site_reviews  : [];
+                const parsedProducts = parseSelectedItems(a.products || '');
+                const productBadges = parsedProducts.selected.length
+                    ? parsedProducts.selected.map(p => `<span class="badge info" style="font-size:11px;margin:2px;">${escapeHtml(p)}</span>`).join('')
+                    : '<span style="color:var(--gray-400);font-size:12px;font-style:italic;">No products selected</span>';
+
+                const renderPhotoRow = (photos, phase) => {
+                    if (!photos.length) return `<p style="font-size:12px;color:var(--gray-400);font-style:italic;padding:8px;">No ${phase} photos yet</p>`;
+                    return `<div style="display:flex;flex-wrap:wrap;gap:10px;">
+                        ${photos.map((p, i) => `
+                            <div style="width:120px;border:1px solid var(--gray-200);border-radius:6px;overflow:hidden;background:#fff;">
+                                <div style="position:relative;">
+                                    <img src="${p.url}" style="width:100%;height:90px;object-fit:cover;cursor:pointer;" onclick="window.open('${p.url}','_blank')">
+                                    <button type="button" title="Remove" onclick="event.stopPropagation();app.removeFengShuiPhoto(${pid},${a.id},'${phase}',${i})" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:#fff;border:none;border-radius:50%;width:20px;height:20px;font-size:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;"><i class="fas fa-times"></i></button>
+                                </div>
+                                <input type="text" class="form-control" value="${escapeHtml(p.remarks || '')}" placeholder="Remark..." style="font-size:11px;height:26px;border:none;border-top:1px solid var(--gray-200);border-radius:0;" onchange="event.stopPropagation();app.updateFengShuiPhotoRemark(${pid},${a.id},'${phase}',${i},this.value)">
+                            </div>
+                        `).join('')}
+                    </div>`;
+                };
+
+                const renderSiteReviews = () => {
+                    if (!siteReviews.length) return `<p style="font-size:12px;color:var(--gray-400);font-style:italic;padding:8px;">No site reviews yet. Add one below.</p>`;
+                    return siteReviews
+                        .slice()
+                        .sort((x, y) => new Date(y.date || 0) - new Date(x.date || 0) || (y.id || 0) - (x.id || 0))
+                        .map(sr => {
+                            const srPhotos = Array.isArray(sr.photos) ? sr.photos : [];
+                            return `
+                            <div style="background:#fff;border:1px solid var(--gray-200);border-radius:6px;padding:10px;margin-bottom:8px;">
+                                <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap;">
+                                    <input type="date" class="form-control" value="${sr.date || ''}" style="width:150px;height:30px;font-size:12px;" onchange="event.stopPropagation();app.updateFengShuiSiteReviewField(${pid},${a.id},${sr.id},'date',this.value)">
+                                    <span style="font-size:11px;color:var(--gray-400);">${srPhotos.length}/5 photos</span>
+                                    <div style="flex:1;"></div>
+                                    ${srPhotos.length < 5 ? `
+                                        <label for="fsa-sr-photos-${a.id}-${sr.id}" class="btn secondary btn-sm" style="height:30px;font-size:11px;padding:0 8px;cursor:pointer;"><i class="fas fa-camera"></i> Add Photo</label>
+                                        <input id="fsa-sr-photos-${a.id}-${sr.id}" type="file" accept="image/*" multiple style="display:none" onchange="event.stopPropagation();app.uploadFengShuiSitePhotos(${pid},${a.id},${sr.id},this)">
+                                    ` : ''}
+                                    <button class="btn btn-sm" style="height:30px;font-size:11px;padding:0 8px;color:var(--error);background:transparent;border:1px solid var(--gray-200);" onclick="event.stopPropagation();app.removeFengShuiSiteReview(${pid},${a.id},${sr.id})"><i class="fas fa-trash"></i></button>
+                                </div>
+                                <textarea class="form-control" rows="2" placeholder="Site review key notes / remarks..." style="font-size:12px;margin-bottom:6px;" onchange="event.stopPropagation();app.updateFengShuiSiteReviewField(${pid},${a.id},${sr.id},'remarks',this.value)">${escapeHtml(sr.remarks || '')}</textarea>
+                                ${srPhotos.length > 0 ? `
+                                <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                                    ${srPhotos.map((url, i) => `
+                                        <div style="position:relative;">
+                                            <img src="${url}" style="width:76px;height:76px;object-fit:cover;border-radius:4px;cursor:pointer;border:1px solid var(--gray-200);" onclick="window.open('${url}','_blank')">
+                                            <button type="button" title="Remove" onclick="event.stopPropagation();app.removeFengShuiSitePhoto(${pid},${a.id},${sr.id},${i})" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:9px;cursor:pointer;"><i class="fas fa-times"></i></button>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                                ` : ''}
+                            </div>`;
+                        }).join('');
+                };
+
+                const fileLink = (url, name) => url
+                    ? `<a href="${url}" target="_blank" style="color:var(--primary);"><i class="fas fa-paperclip"></i> ${escapeHtml(name || 'View file')}</a>`
+                    : '<span style="color:var(--gray-400);font-style:italic;">Not uploaded</span>';
+
+                return `
+                    <div class="fsa-card" style="border:1px solid var(--gray-200);border-radius:10px;margin-bottom:14px;overflow:hidden;background:#fafafa;">
+                        <div style="background:linear-gradient(135deg,#e0f2fe,#ede9fe);padding:10px 14px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;border-bottom:1px solid var(--gray-200);">
+                            <div style="flex:1;min-width:200px;">
+                                <div style="font-weight:600;font-size:14px;color:#1e3a8a;"><i class="fas fa-compass"></i> ${escapeHtml(a.audit_title || 'Feng Shui Audit')}</div>
+                                <div style="font-size:12px;color:var(--gray-500);margin-top:2px;"><i class="fas fa-calendar"></i> ${a.audit_date || '—'}</div>
+                            </div>
+                            <div style="display:flex;gap:6px;">
+                                <button class="btn secondary btn-sm" onclick="event.stopPropagation();app.openFengShuiAuditModal(${pid},${a.id})"><i class="fas fa-edit"></i> Edit</button>
+                                <button class="btn btn-sm" style="color:var(--error);background:#fff;border:1px solid var(--gray-200);" onclick="event.stopPropagation();app.deleteFengShuiAudit(${pid},${a.id})"><i class="fas fa-trash"></i></button>
+                            </div>
+                        </div>
+
+                        <div style="padding:12px 14px;">
+                            <div class="pv-row"><span class="pv-lbl">Layout Plan</span><span class="pv-val">
+                                ${fileLink(a.layout_plan_url, a.layout_plan_name)}
+                                <label for="fsa-layout-${a.id}" class="btn secondary btn-sm" style="margin-left:8px;height:26px;font-size:11px;padding:0 8px;cursor:pointer;"><i class="fas fa-upload"></i> ${a.layout_plan_url ? 'Replace' : 'Upload'}</label>
+                                <input id="fsa-layout-${a.id}" type="file" accept=".doc,.docx,.pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf" style="display:none" onchange="event.stopPropagation();app.uploadFengShuiFile(${pid},${a.id},'layout_plan',this)">
+                                ${a.layout_plan_url ? `<button class="btn btn-sm" style="margin-left:4px;height:26px;font-size:11px;padding:0 8px;color:var(--error);background:transparent;border:1px solid var(--gray-200);" onclick="event.stopPropagation();app.removeFengShuiFile(${pid},${a.id},'layout_plan')"><i class="fas fa-times"></i></button>` : ''}
+                            </span></div>
+                            <div class="pv-row"><span class="pv-lbl">Audit Report</span><span class="pv-val">
+                                ${fileLink(a.audit_report_url, a.audit_report_name)}
+                                <label for="fsa-report-${a.id}" class="btn secondary btn-sm" style="margin-left:8px;height:26px;font-size:11px;padding:0 8px;cursor:pointer;"><i class="fas fa-upload"></i> ${a.audit_report_url ? 'Replace' : 'Upload'}</label>
+                                <input id="fsa-report-${a.id}" type="file" accept=".doc,.docx,.pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf" style="display:none" onchange="event.stopPropagation();app.uploadFengShuiFile(${pid},${a.id},'audit_report',this)">
+                                ${a.audit_report_url ? `<button class="btn btn-sm" style="margin-left:4px;height:26px;font-size:11px;padding:0 8px;color:var(--error);background:transparent;border:1px solid var(--gray-200);" onclick="event.stopPropagation();app.removeFengShuiFile(${pid},${a.id},'audit_report')"><i class="fas fa-times"></i></button>` : ''}
+                            </span></div>
+
+                            <div class="pv-sub" style="margin-top:12px;"><i class="fas fa-key"></i> Key Notes for House / Needs</div>
+                            <div style="background:#fff;border:1px solid var(--gray-200);border-radius:6px;padding:8px 10px;font-size:13px;color:var(--gray-700);white-space:pre-wrap;min-height:32px;">${escapeHtml(a.key_notes || '') || '<span style="color:var(--gray-400);font-style:italic;">No notes yet — click Edit to add</span>'}</div>
+
+                            <div class="pv-sub" style="margin-top:12px;"><i class="fas fa-bolt"></i> Product Potential Needed
+                                <span style="font-size:10px;font-weight:400;color:var(--gray-400);margin-left:6px;"><i class="fas fa-link"></i> Auto-links to Potential &amp; Opportunities</span>
+                            </div>
+                            <div style="background:#fff;border:1px solid var(--gray-200);border-radius:6px;padding:8px 10px;min-height:32px;">
+                                ${productBadges}
+                                ${parsedProducts.remarks ? `<div style="font-size:12px;color:var(--gray-600);margin-top:6px;font-style:italic;">Remarks: ${escapeHtml(parsedProducts.remarks)}</div>` : ''}
+                            </div>
+
+                            <div class="pv-sub" style="margin-top:12px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;">
+                                <span><i class="fas fa-camera-retro"></i> Before Photos <span style="font-size:10px;color:var(--gray-400);">(${beforePhotos.length}/50)</span></span>
+                                ${beforePhotos.length < 50 ? `
+                                    <label for="fsa-before-${a.id}" class="btn secondary btn-sm" style="height:28px;font-size:11px;padding:0 8px;cursor:pointer;"><i class="fas fa-upload"></i> Upload Before</label>
+                                    <input id="fsa-before-${a.id}" type="file" accept="image/*" multiple style="display:none" onchange="event.stopPropagation();app.uploadFengShuiPhotos(${pid},${a.id},'before',this)">
+                                ` : ''}
+                            </div>
+                            ${renderPhotoRow(beforePhotos, 'before')}
+
+                            <div class="pv-sub" style="margin-top:12px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;">
+                                <span><i class="fas fa-camera-retro"></i> After Photos <span style="font-size:10px;color:var(--gray-400);">(${afterPhotos.length}/50)</span></span>
+                                ${afterPhotos.length < 50 ? `
+                                    <label for="fsa-after-${a.id}" class="btn secondary btn-sm" style="height:28px;font-size:11px;padding:0 8px;cursor:pointer;"><i class="fas fa-upload"></i> Upload After</label>
+                                    <input id="fsa-after-${a.id}" type="file" accept="image/*" multiple style="display:none" onchange="event.stopPropagation();app.uploadFengShuiPhotos(${pid},${a.id},'after',this)">
+                                ` : ''}
+                            </div>
+                            ${renderPhotoRow(afterPhotos, 'after')}
+
+                            <div class="pv-sub" style="margin-top:12px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;">
+                                <span><i class="fas fa-clipboard-check"></i> Site Review Key Notes <span style="font-size:10px;color:var(--gray-400);">(${siteReviews.length} ${siteReviews.length === 1 ? 'entry' : 'entries'})</span></span>
+                                <button class="btn secondary btn-sm" style="height:28px;font-size:11px;padding:0 8px;" onclick="event.stopPropagation();app.addFengShuiSiteReview(${pid},${a.id})"><i class="fas fa-plus"></i> Add Site Review</button>
+                            </div>
+                            ${renderSiteReviews()}
+                        </div>
+                    </div>
+                `;
+            };
+
+            container.innerHTML = `
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                    <div style="font-size:12px;color:var(--gray-500);"><i class="fas fa-info-circle"></i> ${audits.length} audit ${audits.length === 1 ? 'event' : 'events'} recorded</div>
+                    <button class="btn primary btn-sm" onclick="event.stopPropagation();app.openFengShuiAuditModal(${pid})"><i class="fas fa-plus"></i> New Audit Event</button>
+                </div>
+                ${audits.length > 0 ? audits.map(renderAuditCard).join('') : `
+                    <div style="text-align:center;padding:28px 14px;color:var(--gray-400);font-size:13px;background:#fafafa;border:1px dashed var(--gray-200);border-radius:8px;">
+                        <i class="fas fa-compass" style="font-size:28px;display:block;margin-bottom:8px;opacity:.5;"></i>
+                        No feng shui audits recorded yet.<br>
+                        <span style="font-size:12px;">Click <strong>New Audit Event</strong> to log a layout plan, audit report, before/after photos, and site reviews.</span>
+                    </div>
+                `}
             `;
         }
     };
@@ -20470,6 +20652,381 @@ NOTIFY pgrst, 'reload schema';`;
         await _writeProductPurchases(prospectId, prospect, type, records);
         UI.toast.success('Record removed');
         await _refreshProductPurchaseTab(prospectId, type);
+    };
+
+    // ── ⑦c Feng Shui Audit helpers ───────────────────────────────────────
+    // Storage model: prospects.feng_shui_audits (JSONB array). Each audit event has:
+    //   { id, audit_date, audit_title, layout_plan_url/name, audit_report_url/name,
+    //     key_notes, products (serialized same as post-meetup notes),
+    //     before_photos [{url, remarks}], after_photos [{url, remarks}],
+    //     site_reviews [{ id, date, remarks, photos: [url] }] }
+    // Product selections auto-flow into Potential & Opportunities (see potential tab
+    // aggregation, which reads from prospect.feng_shui_audits[].products).
+    const _readFengShuiAudits = (prospect) => {
+        try {
+            const src = prospect?.feng_shui_audits;
+            return Array.isArray(src) ? src.map(x => ({ ...x })) : JSON.parse(src || '[]');
+        } catch(_) { return []; }
+    };
+
+    const _writeFengShuiAudits = async (prospectId, audits) => {
+        await AppDataStore.update('prospects', prospectId, { feng_shui_audits: audits });
+        AppDataStore.invalidateCache?.('prospects');
+    };
+
+    const _refreshFengShuiTab = async (prospectId) => {
+        const bodyEl = document.getElementById(`acc-body-fengshui-${prospectId}`);
+        if (bodyEl) await switchProspectTab('fengshui', prospectId, null, bodyEl);
+    };
+
+    const _uploadFengShuiToBucket = async (file, pathPrefix) => {
+        const sb = window.supabase || window.supabaseClient;
+        if (!sb || !sb.storage) {
+            // Fallback: store as data URL so the UI still works offline
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = e => resolve(e.target.result);
+                reader.onerror = () => reject(reader.error);
+                reader.readAsDataURL(file);
+            });
+        }
+        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const path = `${pathPrefix}_${Date.now()}_${safeName}`;
+        const { error: upErr } = await sb.storage.from('attachments').upload(path, file, { upsert: false, contentType: file.type });
+        if (upErr) throw upErr;
+        const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
+        return urlData?.publicUrl || null;
+    };
+
+    // Open modal to create (no auditId) or edit (with auditId) an audit header —
+    // date, title, key notes, and product selections (checkbox groups mirroring
+    // Post-Meetup Notes exactly so the data format is reusable in the Potential tab).
+    const openFengShuiAuditModal = async (prospectId, auditId) => {
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) { UI.toast.error('Prospect not found'); return; }
+        const audits = _readFengShuiAudits(prospect);
+        const existing = auditId ? audits.find(a => a.id === auditId) : null;
+
+        // Same data sources as Post-Meetup Notes → Potential & Opportunities
+        const [products, bujishuItems, formulaItems] = await Promise.all([
+            AppDataStore.getAll('products').then(r => r.filter(p => p.is_active !== false)),
+            AppDataStore.getAll('bujishu').then(r => r.filter(b => b.is_active !== false)),
+            AppDataStore.getAll('formula').then(r => r.filter(f => f.is_active !== false)),
+        ]);
+        const parsedProducts = parseSelectedItems(existing?.products || '');
+
+        const makeCheckbox = (value, group) => {
+            const checked = parsedProducts.selected.includes(value) ? 'checked' : '';
+            return `<label style="display:flex;align-items:center;gap:6px;margin-bottom:4px;cursor:pointer;font-size:13px;padding:3px 8px;border-radius:4px;" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background=''">
+                <input type="checkbox" name="fsa-products" value="${escapeHtml(value)}" data-group="${escapeHtml(group)}" ${checked}> ${escapeHtml(value)}
+            </label>`;
+        };
+        const productCheckboxes = [
+            ...(products.length ? [`<div style="font-weight:600;font-size:12px;color:var(--primary);margin-bottom:4px;border-bottom:1px solid var(--gray-200);padding-bottom:3px;">Products</div>`] : []),
+            ...products.map(p => makeCheckbox(p.name, 'Products')),
+            ...(bujishuItems.length ? [`<div style="font-weight:600;font-size:12px;color:var(--primary);margin:8px 0 4px;border-bottom:1px solid var(--gray-200);padding-bottom:3px;">Bujishu</div>`] : []),
+            ...bujishuItems.map(b => makeCheckbox(b.name, 'Bujishu')),
+            ...(formulaItems.length ? [`<div style="font-weight:600;font-size:12px;color:var(--primary);margin:8px 0 4px;border-bottom:1px solid var(--gray-200);padding-bottom:3px;">Formula</div>`] : []),
+            ...formulaItems.map(f => makeCheckbox(f.name, 'Formula')),
+        ];
+
+        const today = new Date().toISOString().slice(0, 10);
+        const content = `
+            <div class="form-row" style="display:flex;gap:8px;">
+                <div class="form-group" style="flex:1;">
+                    <label>Audit Date</label>
+                    <input type="date" id="fsa-modal-date" class="form-control" value="${existing?.audit_date || today}">
+                </div>
+                <div class="form-group" style="flex:2;">
+                    <label>Audit Title</label>
+                    <input type="text" id="fsa-modal-title" class="form-control" placeholder="e.g. Main House Audit — Level 1" value="${escapeHtml(existing?.audit_title || '')}">
+                </div>
+            </div>
+            <div class="form-group">
+                <label><i class="fas fa-key"></i> Important Key Notes for the House / Needs</label>
+                <textarea id="fsa-modal-notes" class="form-control" rows="4" placeholder="Observations, needs, client concerns, compass readings, key flying-star sectors...">${escapeHtml(existing?.key_notes || '')}</textarea>
+            </div>
+            <div class="form-group">
+                <label><i class="fas fa-bolt"></i> Product Potential Needed
+                    <span style="font-size:11px;font-weight:400;color:var(--gray-400);margin-left:4px;">— auto-flows to Potential &amp; Opportunities</span>
+                </label>
+                <div style="border:1px solid var(--gray-300);border-radius:6px;padding:10px;max-height:220px;overflow-y:auto;background:#fafafa;">
+                    ${productCheckboxes.length > 0 ? productCheckboxes.join('') : '<p style="color:var(--gray-400);font-size:12px;margin:0;">No products/items available in marketing list.</p>'}
+                </div>
+                <textarea id="fsa-modal-product-remarks" class="form-control" rows="2" placeholder="Additional product remarks..." style="margin-top:6px;">${escapeHtml(parsedProducts.remarks || '')}</textarea>
+                <div style="font-size:11px;color:var(--gray-400);margin-top:3px;"><i class="fas fa-link"></i> Linked to prospect profile → Potential &amp; Opportunities</div>
+            </div>
+            <p style="font-size:12px;color:var(--gray-500);margin-top:8px;background:#eff6ff;border-left:3px solid var(--primary);padding:6px 10px;border-radius:4px;">
+                <i class="fas fa-info-circle"></i> After saving, you can upload the layout-plan file, audit report, before/after photos, and add site review entries from the audit card.
+            </p>
+        `;
+        UI.showModal(auditId ? '✏️ Edit Feng Shui Audit' : '➕ New Feng Shui Audit', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: auditId ? 'Save' : 'Create Audit', type: 'primary', action: `(async () => { await app.saveFengShuiAudit(${prospectId}, ${auditId || 'null'}); })()` }
+        ]);
+    };
+
+    const saveFengShuiAudit = async (prospectId, auditId) => {
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) { UI.toast.error('Prospect not found'); return; }
+        const audits = _readFengShuiAudits(prospect);
+
+        const audit_date = document.getElementById('fsa-modal-date')?.value || '';
+        const audit_title = document.getElementById('fsa-modal-title')?.value?.trim() || '';
+        const key_notes = document.getElementById('fsa-modal-notes')?.value?.trim() || '';
+        const products = serializeMultiSelectToText('fsa-products', 'fsa-modal-product-remarks');
+
+        if (!audit_date) { UI.toast.error('Audit date is required'); return; }
+        if (!audit_title) { UI.toast.error('Audit title is required'); return; }
+
+        if (auditId) {
+            const idx = audits.findIndex(a => a.id === auditId);
+            if (idx === -1) { UI.toast.error('Audit not found'); return; }
+            audits[idx] = { ...audits[idx], audit_date, audit_title, key_notes, products };
+        } else {
+            audits.push({
+                id: Date.now(),
+                audit_date,
+                audit_title,
+                layout_plan_url: null,
+                layout_plan_name: null,
+                audit_report_url: null,
+                audit_report_name: null,
+                key_notes,
+                products,
+                before_photos: [],
+                after_photos: [],
+                site_reviews: [],
+                created_at: new Date().toISOString(),
+            });
+        }
+        await _writeFengShuiAudits(prospectId, audits);
+        UI.hideModal();
+        UI.toast.success(auditId ? 'Feng shui audit updated' : 'Feng shui audit created');
+        await _refreshFengShuiTab(prospectId);
+        // Auto-refresh the Potential tab if currently open — product selections flow there
+        const potentialBody = document.getElementById(`acc-body-potential-${prospectId}`);
+        if (potentialBody && potentialBody.dataset.loaded === 'true') {
+            await switchProspectTab('potential', prospectId, null, potentialBody);
+        }
+    };
+
+    const deleteFengShuiAudit = async (prospectId, auditId) => {
+        if (!confirm('Delete this feng shui audit? All uploaded files and photos will be unlinked (files remain in storage).')) return;
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) return;
+        const audits = _readFengShuiAudits(prospect).filter(a => a.id !== auditId);
+        await _writeFengShuiAudits(prospectId, audits);
+        UI.toast.success('Feng shui audit deleted');
+        await _refreshFengShuiTab(prospectId);
+        const potentialBody = document.getElementById(`acc-body-potential-${prospectId}`);
+        if (potentialBody && potentialBody.dataset.loaded === 'true') {
+            await switchProspectTab('potential', prospectId, null, potentialBody);
+        }
+    };
+
+    const uploadFengShuiFile = async (prospectId, auditId, fileType, fileInput) => {
+        const file = fileInput?.files?.[0];
+        if (!file) return;
+        if (file.size > 20 * 1024 * 1024) { UI.toast.error('File too large (max 20MB)'); return; }
+
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) return;
+        const audits = _readFengShuiAudits(prospect);
+        const idx = audits.findIndex(a => a.id === auditId);
+        if (idx === -1) { UI.toast.error('Audit not found'); return; }
+
+        try {
+            const url = await _uploadFengShuiToBucket(file, `feng_shui_audits/${prospectId}_${auditId}_${fileType}`);
+            if (!url) { UI.toast.error('Upload failed'); return; }
+            audits[idx][`${fileType}_url`] = url;
+            audits[idx][`${fileType}_name`] = file.name;
+            await _writeFengShuiAudits(prospectId, audits);
+            UI.toast.success(`${fileType === 'layout_plan' ? 'Layout plan' : 'Audit report'} uploaded`);
+            await _refreshFengShuiTab(prospectId);
+        } catch (err) {
+            console.error('Feng shui file upload failed:', err);
+            UI.toast.error('Upload failed: ' + (err.message || 'Unknown error'));
+        }
+    };
+
+    const removeFengShuiFile = async (prospectId, auditId, fileType) => {
+        if (!confirm('Remove this file from the audit?')) return;
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) return;
+        const audits = _readFengShuiAudits(prospect);
+        const idx = audits.findIndex(a => a.id === auditId);
+        if (idx === -1) return;
+        audits[idx][`${fileType}_url`] = null;
+        audits[idx][`${fileType}_name`] = null;
+        await _writeFengShuiAudits(prospectId, audits);
+        UI.toast.success('File removed');
+        await _refreshFengShuiTab(prospectId);
+    };
+
+    const uploadFengShuiPhotos = async (prospectId, auditId, phase, fileInput) => {
+        const files = fileInput?.files;
+        if (!files || !files.length) return;
+
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) return;
+        const audits = _readFengShuiAudits(prospect);
+        const idx = audits.findIndex(a => a.id === auditId);
+        if (idx === -1) { UI.toast.error('Audit not found'); return; }
+
+        const key = `${phase}_photos`;
+        const existing = Array.isArray(audits[idx][key]) ? audits[idx][key] : [];
+        const remaining = 50 - existing.length;
+        if (remaining <= 0) { UI.toast.error(`Already at 50 ${phase} photos`); return; }
+
+        const toUpload = Array.from(files).slice(0, remaining);
+        let uploaded = 0;
+        try {
+            for (const file of toUpload) {
+                if (file.size > 5 * 1024 * 1024) {
+                    UI.toast.error(`"${file.name}" too large (max 5MB) — skipped`);
+                    continue;
+                }
+                const url = await _uploadFengShuiToBucket(file, `feng_shui_audits/${prospectId}_${auditId}_${phase}`);
+                if (url) {
+                    existing.push({ url, remarks: '' });
+                    uploaded++;
+                }
+            }
+            if (uploaded === 0) { UI.toast.error('No photos uploaded'); return; }
+            audits[idx][key] = existing;
+            await _writeFengShuiAudits(prospectId, audits);
+            UI.toast.success(`${uploaded} ${phase} photo${uploaded > 1 ? 's' : ''} uploaded`);
+            await _refreshFengShuiTab(prospectId);
+        } catch (err) {
+            console.error(`Feng shui ${phase} photo upload failed:`, err);
+            UI.toast.error('Upload failed: ' + (err.message || 'Unknown error'));
+        }
+    };
+
+    const removeFengShuiPhoto = async (prospectId, auditId, phase, index) => {
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) return;
+        const audits = _readFengShuiAudits(prospect);
+        const idx = audits.findIndex(a => a.id === auditId);
+        if (idx === -1) return;
+        const key = `${phase}_photos`;
+        const arr = Array.isArray(audits[idx][key]) ? audits[idx][key] : [];
+        if (index < 0 || index >= arr.length) return;
+        arr.splice(index, 1);
+        audits[idx][key] = arr;
+        await _writeFengShuiAudits(prospectId, audits);
+        UI.toast.success('Photo removed');
+        await _refreshFengShuiTab(prospectId);
+    };
+
+    const updateFengShuiPhotoRemark = async (prospectId, auditId, phase, index, remarks) => {
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) return;
+        const audits = _readFengShuiAudits(prospect);
+        const idx = audits.findIndex(a => a.id === auditId);
+        if (idx === -1) return;
+        const key = `${phase}_photos`;
+        const arr = Array.isArray(audits[idx][key]) ? audits[idx][key] : [];
+        if (!arr[index]) return;
+        arr[index].remarks = (remarks || '').trim();
+        audits[idx][key] = arr;
+        await _writeFengShuiAudits(prospectId, audits);
+        // Silent save — no toast so it doesn't spam when typing across many photos
+    };
+
+    const addFengShuiSiteReview = async (prospectId, auditId) => {
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) return;
+        const audits = _readFengShuiAudits(prospect);
+        const idx = audits.findIndex(a => a.id === auditId);
+        if (idx === -1) return;
+        if (!Array.isArray(audits[idx].site_reviews)) audits[idx].site_reviews = [];
+        audits[idx].site_reviews.push({
+            id: Date.now(),
+            date: new Date().toISOString().slice(0, 10),
+            remarks: '',
+            photos: [],
+        });
+        await _writeFengShuiAudits(prospectId, audits);
+        UI.toast.success('Site review entry added');
+        await _refreshFengShuiTab(prospectId);
+    };
+
+    const updateFengShuiSiteReviewField = async (prospectId, auditId, siteId, field, value) => {
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) return;
+        const audits = _readFengShuiAudits(prospect);
+        const idx = audits.findIndex(a => a.id === auditId);
+        if (idx === -1) return;
+        const sr = (audits[idx].site_reviews || []).find(s => s.id === siteId);
+        if (!sr) return;
+        sr[field] = (value || '').toString();
+        await _writeFengShuiAudits(prospectId, audits);
+    };
+
+    const uploadFengShuiSitePhotos = async (prospectId, auditId, siteId, fileInput) => {
+        const files = fileInput?.files;
+        if (!files || !files.length) return;
+
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) return;
+        const audits = _readFengShuiAudits(prospect);
+        const idx = audits.findIndex(a => a.id === auditId);
+        if (idx === -1) return;
+        const sr = (audits[idx].site_reviews || []).find(s => s.id === siteId);
+        if (!sr) return;
+        if (!Array.isArray(sr.photos)) sr.photos = [];
+        const remaining = 5 - sr.photos.length;
+        if (remaining <= 0) { UI.toast.error('Already at 5 photos for this site review'); return; }
+
+        const toUpload = Array.from(files).slice(0, remaining);
+        let uploaded = 0;
+        try {
+            for (const file of toUpload) {
+                if (file.size > 5 * 1024 * 1024) {
+                    UI.toast.error(`"${file.name}" too large (max 5MB) — skipped`);
+                    continue;
+                }
+                const url = await _uploadFengShuiToBucket(file, `feng_shui_audits/${prospectId}_${auditId}_sr${siteId}`);
+                if (url) { sr.photos.push(url); uploaded++; }
+            }
+            if (uploaded === 0) { UI.toast.error('No photos uploaded'); return; }
+            await _writeFengShuiAudits(prospectId, audits);
+            UI.toast.success(`${uploaded} photo${uploaded > 1 ? 's' : ''} uploaded`);
+            await _refreshFengShuiTab(prospectId);
+        } catch (err) {
+            console.error('Feng shui site review photo upload failed:', err);
+            UI.toast.error('Upload failed: ' + (err.message || 'Unknown error'));
+        }
+    };
+
+    const removeFengShuiSitePhoto = async (prospectId, auditId, siteId, index) => {
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) return;
+        const audits = _readFengShuiAudits(prospect);
+        const idx = audits.findIndex(a => a.id === auditId);
+        if (idx === -1) return;
+        const sr = (audits[idx].site_reviews || []).find(s => s.id === siteId);
+        if (!sr || !Array.isArray(sr.photos)) return;
+        if (index < 0 || index >= sr.photos.length) return;
+        sr.photos.splice(index, 1);
+        await _writeFengShuiAudits(prospectId, audits);
+        UI.toast.success('Photo removed');
+        await _refreshFengShuiTab(prospectId);
+    };
+
+    const removeFengShuiSiteReview = async (prospectId, auditId, siteId) => {
+        if (!confirm('Remove this site review entry?')) return;
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) return;
+        const audits = _readFengShuiAudits(prospect);
+        const idx = audits.findIndex(a => a.id === auditId);
+        if (idx === -1) return;
+        audits[idx].site_reviews = (audits[idx].site_reviews || []).filter(s => s.id !== siteId);
+        await _writeFengShuiAudits(prospectId, audits);
+        UI.toast.success('Site review removed');
+        await _refreshFengShuiTab(prospectId);
     };
 
     const saveClosingRecord = async (prospectId) => {
@@ -36891,6 +37448,20 @@ JB 星期二到
         addProductPurchaseRow,
         addProductPurchaseAttachment,
         deleteProductPurchaseRecord,
+        // ⑦c Feng Shui Audit
+        openFengShuiAuditModal,
+        saveFengShuiAudit,
+        deleteFengShuiAudit,
+        uploadFengShuiFile,
+        removeFengShuiFile,
+        uploadFengShuiPhotos,
+        removeFengShuiPhoto,
+        updateFengShuiPhotoRemark,
+        addFengShuiSiteReview,
+        updateFengShuiSiteReviewField,
+        uploadFengShuiSitePhotos,
+        removeFengShuiSitePhoto,
+        removeFengShuiSiteReview,
         approveClosingRecord,
         rejectClosingRecord,
         extendProtection,
