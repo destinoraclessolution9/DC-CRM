@@ -9919,19 +9919,20 @@ input:checked+.slider:before {
 }
 
 .tac-actions .btn {
-    border-radius: 20px !important;
-    padding: 6px 12px !important;
-    font-size: 11.5px !important;
-    font-weight: 600 !important;
+    border-radius: 50% !important;
+    width: 34px !important;
+    height: 34px !important;
+    padding: 0 !important;
+    font-size: 13px !important;
     display: inline-flex !important;
     align-items: center;
-    gap: 5px;
+    justify-content: center;
     border: none !important;
-    letter-spacing: 0.01em;
     transition: transform 0.13s ease, box-shadow 0.13s ease !important;
+    flex-shrink: 0;
 }
 
-.tac-actions .btn:hover { transform: translateY(-1px); }
+.tac-actions .btn:hover { transform: translateY(-2px) scale(1.08); }
 
 .tac-btn-view    { background: linear-gradient(135deg,#3b82f6,#2563eb) !important; color:#fff !important; box-shadow:0 2px 8px rgba(37,99,235,.28) !important; }
 .tac-btn-outcome { background: linear-gradient(135deg,#10b981,#059669) !important; color:#fff !important; box-shadow:0 2px 8px rgba(5,150,105,.28) !important; }

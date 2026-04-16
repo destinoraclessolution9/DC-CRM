@@ -11346,11 +11346,11 @@ function _wireLoginBtn() {
                         ${entityName !== 'N/A' ? `<div class="tac-customer">${entityName}</div>` : ''}
                     </div>
                     <div class="tac-actions" onclick="event.stopPropagation()">
-                        <button class="btn btn-sm tac-btn-view" onclick="app.viewActivityDetails(${a.id})"><i class="fas fa-eye"></i> View</button>
-                        <button class="btn btn-sm tac-btn-outcome" onclick="(async()=>{await app.openMeetingOutcomeModal(${a.id});})()"><i class="fas fa-clipboard-check"></i> Outcome</button>
-                        <button class="btn btn-sm tac-btn-notes" onclick="(async()=>{await app.openPostMeetupNotesModal(${a.id},${a.prospect_id || 'null'});})()"><i class="fas fa-sticky-note"></i> Notes</button>
-                        <button class="btn btn-sm tac-btn-edit" onclick="app.editActivity(${a.id})"><i class="fas fa-pen"></i> Edit</button>
-                        <button class="btn btn-sm tac-btn-co" onclick="app.addCoAgentToActivity(${a.id})"><i class="fas fa-user-plus"></i> Co</button>
+                        <button class="btn btn-sm tac-btn-view" title="View" onclick="app.viewActivityDetails(${a.id})"><i class="fas fa-eye"></i></button>
+                        <button class="btn btn-sm tac-btn-outcome" title="Outcome" onclick="(async()=>{await app.openMeetingOutcomeModal(${a.id});})()"><i class="fas fa-clipboard-check"></i></button>
+                        <button class="btn btn-sm tac-btn-notes" title="Notes" onclick="(async()=>{await app.openPostMeetupNotesModal(${a.id},${a.prospect_id || 'null'});})()"><i class="fas fa-sticky-note"></i></button>
+                        <button class="btn btn-sm tac-btn-edit" title="Edit" onclick="app.editActivity(${a.id})"><i class="fas fa-pen"></i></button>
+                        <button class="btn btn-sm tac-btn-co" title="Add Co-Agent" onclick="app.addCoAgentToActivity(${a.id})"><i class="fas fa-user-plus"></i></button>
                     </div>
                 </div>
             `;
