@@ -94,7 +94,13 @@ class DataStore {
         // also re-downloads the 9.7 MB blob, defeating the point. So keep this
         // list authoritative.
         this._lightSelects = {
-            prospects: 'id,full_name,nickname,title,gender,nationality,phone,email,ic_number,date_of_birth,lunar_birth,ming_gua,element,occupation,company_name,income_range,address,city,state,postal_code,responsible_agent_id,cps_agent_id,cps_assignment_date,protection_deadline,pipeline_stage,deal_value,expected_close_date,status,referred_by,referred_by_id,referred_by_type,referral_relationship,cps_invitation_method,cps_invitation_details,cps_attachment,score,tags,notes,created_at,updated_at,cps_form_date,cps_form_name,closing_record,conversion_status,conversion_requested_by,conversion_rejected_by,conversion_rejected_at,closed_at,closed_date,closing_date,potential_level,close_probability,is_own_business,business_name,business_industry,business_area,business_title_role,business_started,company_size,pre2025_purchases,original_source,source_id,source,lead_agent_id,life_chart_type,manual_grade,feng_shui_audits'
+            prospects: 'id,full_name,nickname,title,gender,nationality,phone,email,ic_number,date_of_birth,lunar_birth,ming_gua,element,occupation,company_name,income_range,address,city,state,postal_code,responsible_agent_id,cps_agent_id,cps_assignment_date,protection_deadline,pipeline_stage,deal_value,expected_close_date,status,referred_by,referred_by_id,referred_by_type,referral_relationship,cps_invitation_method,cps_invitation_details,cps_attachment,score,tags,notes,created_at,updated_at,cps_form_date,cps_form_name,closing_record,conversion_status,conversion_requested_by,conversion_rejected_by,conversion_rejected_at,closed_at,closed_date,closing_date,potential_level,close_probability,is_own_business,business_name,business_industry,business_area,business_title_role,business_started,company_size,pre2025_purchases,original_source,source_id,source,lead_agent_id,life_chart_type,manual_grade,feng_shui_audits',
+            // Activities: exclude google_sync metadata and other detail-only columns
+            // that are never needed for list/summary views. All display columns
+            // (activity_type, date, title, venue, status, etc.) are included.
+            // If a new column is added to the activities table, add it here.
+            // PostgREST returns 400 on unknown columns → fallback to '*' is safe.
+            activities: 'id,activity_type,activity_date,activity_title,prospect_id,customer_id,lead_agent_id,created_by,start_time,end_time,visibility,is_public,co_agents,event_id,closing_amount,is_closing,solution_sold,location_address,venue,status,unable_to_serve,created_at,updated_at,notes'
         };
     }
 
@@ -276,6 +282,52 @@ class DataStore {
         const prevSnapshot = (prevEntry && prevEntry.data) || [];
 
         try {
+            // ── Incremental (delta) sync ─────────────────────────────────
+            // If we have a lastSync timestamp, only fetch rows changed since
+            // then instead of downloading the full table. For large tables
+            // (activities, prospects) this turns a 2 MB background download
+            // into a near-zero payload on most revalidations.
+            // Falls back to full fetch if: no timestamp, table has no
+            // updated_at column (PostgREST 400), or network error.
+            const lastSync = localStorage.getItem(`fs_crm_${tableName}_last_sync`);
+            if (lastSync) {
+                try {
+                    const delta = await this.getAllSince(tableName, lastSync);
+                    const now = new Date().toISOString();
+                    if (delta.length > 0) {
+                        // Merge delta into the existing cached snapshot.
+                        // Server rows always win; tombstoned ids are filtered out.
+                        const merged = new Map(prevSnapshot.map(r => [String(r.id), r]));
+                        for (const r of delta) merged.set(String(r.id), r);
+                        const tombstoneRaw = localStorage.getItem('fs_crm_tombstones');
+                        const deletedIds = new Set(
+                            tombstoneRaw ? (JSON.parse(tombstoneRaw)[tableName] || []) : []
+                        );
+                        const result = Array.from(merged.values())
+                            .filter(r => !deletedIds.has(String(r.id)));
+                        this._cacheSet(tableName, result);
+                        setTimeout(() => {
+                            try {
+                                localStorage.setItem(`fs_crm_${tableName}`, JSON.stringify(result));
+                                localStorage.setItem(`fs_crm_${tableName}_last_sync`, now);
+                            } catch (_) {}
+                        }, 0);
+                        console.log(`[SWR] ${tableName}: delta sync — ${delta.length} changed rows merged`);
+                        this.emit('dataChanged', { action: 'revalidate', table: tableName });
+                    } else {
+                        // No changes since last sync — just refresh the timestamp.
+                        try { localStorage.setItem(`fs_crm_${tableName}_last_sync`, now); } catch (_) {}
+                        console.log(`[SWR] ${tableName}: delta sync — no changes`);
+                    }
+                    return; // Delta path succeeded — skip full fetch below.
+                } catch (_) {
+                    // Delta fetch failed (e.g. table has no updated_at column,
+                    // or network hiccup). Fall through to full fetch.
+                    console.warn(`[SWR] ${tableName}: delta sync failed, falling back to full fetch`);
+                }
+            }
+
+            // ── Full fetch (cold cache or delta fallback) ────────────────
             if (!this._inFlightGetAll) this._inFlightGetAll = new Map();
             let fetchPromise = this._inFlightGetAll.get(tableName);
             if (!fetchPromise) {
@@ -290,7 +342,7 @@ class DataStore {
                 // _getAllImpl already updated the in-memory cache with fresh
                 // data. Emitting dataChanged triggers refreshCurrentView in
                 // script.js for any view that depends on this table.
-                console.log(`[SWR] ${tableName}: revalidated (changed ${prevSnapshot.length} → ${fresh.length}), refreshing view`);
+                console.log(`[SWR] ${tableName}: full revalidated (changed ${prevSnapshot.length} → ${fresh.length}), refreshing view`);
                 this.emit('dataChanged', { action: 'revalidate', table: tableName });
             }
         } catch (_) {
@@ -359,6 +411,27 @@ class DataStore {
         return fetchPromise;
     }
 
+    // Fetch only rows where updated_at > sinceISO. Used by _swrRevalidate for
+    // incremental (delta) sync so background revalidations download only changed
+    // rows instead of the full table. Applies the same light-select as getAll.
+    // Throws on error so the caller can fall back to a full fetch.
+    async getAllSince(tableName, sinceISO) {
+        const selectClause = this._selectClauseForGetAll(tableName);
+        let { data, error } = await this._readClient()
+            .from(tableName)
+            .select(selectClause)
+            .gt('updated_at', sinceISO);
+        // If the light-select column list is stale, retry with '*'
+        if (error && selectClause !== '*') {
+            ({ data, error } = await this._readClient()
+                .from(tableName)
+                .select('*')
+                .gt('updated_at', sinceISO));
+        }
+        if (error) throw error;
+        return data || [];
+    }
+
     async _getAllImpl(tableName) {
         const selectClause = this._selectClauseForGetAll(tableName);
         try {
@@ -397,14 +470,22 @@ class DataStore {
                     });
                     this._cacheSet(tableName, merged);
                     setTimeout(() => {
-                        try { localStorage.setItem(`fs_crm_${tableName}`, JSON.stringify(merged)); } catch (_) {}
+                        try {
+                            localStorage.setItem(`fs_crm_${tableName}`, JSON.stringify(merged));
+                            // Record sync time so _swrRevalidate can use delta fetch next time
+                            localStorage.setItem(`fs_crm_${tableName}_last_sync`, new Date().toISOString());
+                        } catch (_) {}
                     }, 0);
                     return merged;
                 }
             } catch (_) {}
             this._cacheSet(tableName, result);
             setTimeout(() => {
-                try { localStorage.setItem(`fs_crm_${tableName}`, JSON.stringify(result)); } catch (_) {}
+                try {
+                    localStorage.setItem(`fs_crm_${tableName}`, JSON.stringify(result));
+                    // Record sync time so _swrRevalidate can use delta fetch next time
+                    localStorage.setItem(`fs_crm_${tableName}_last_sync`, new Date().toISOString());
+                } catch (_) {}
             }, 0);
             return result;
         } catch (e) {
