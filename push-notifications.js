@@ -145,7 +145,7 @@
     const sendActivityPush = async (activity, targetUserIds, opts = {}) => {
         if (!Array.isArray(targetUserIds) || targetUserIds.length === 0) return { ok: true, sent: 0 };
         try {
-            const sb = getSupabase();
+            const sb = getWriteClient();
             // Use the ANON or service-role JWT that's already embedded in index.html.
             // In production, should use the user's access token via supabase.auth.getSession()
             const authKey = (sb && sb.supabaseKey) || window.SUPABASE_SR || '';
