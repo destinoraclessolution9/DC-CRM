@@ -21270,8 +21270,11 @@ for (const p of allPackages) {
         const eppMonthsRaw = purMethod === 'EPP' ? document.getElementById('epp-months')?.value : '';
         const eppMonthsInt = parseInt(eppMonthsRaw, 10);
         const eppBankRaw = purMethod === 'EPP' ? document.getElementById('epp-bank')?.value?.trim() : '';
+        // Fetch customer first so we can attribute the purchase to the responsible agent
+        const customer = await AppDataStore.getById('customers', customerId);
         const pur = {
             customer_id: customerId,
+            agent_id: customer?.responsible_agent_id || null,
             date: new Date().toISOString().split('T')[0],
             invoice: invoiceNo,
             item: item,
@@ -21286,7 +21289,6 @@ for (const p of allPackages) {
         await AppDataStore.create('purchases', pur);
 
         // Update lifetime value
-        const customer = await AppDataStore.getById('customers', customerId);
         await AppDataStore.update('customers', customerId, { lifetime_value: (customer.lifetime_value || 0) + amt });
 
         UI.hideModal();
@@ -33634,9 +33636,13 @@ const initImportDemoData = async () => {
             AppDataStore.getAll('customers'),
             AppDataStore.getAll('activities')
         ]);
+        // Build customer map for agent fallback (old purchases may lack agent_id)
+        const customerMap = {};
+        customers.forEach(c => { customerMap[c.id] = c; });
         let salesActual = 0;
         for (const p of purchases) {
-            if (p.agent_id !== agentId) continue;
+            const pAgent = p.agent_id || customerMap[p.customer_id]?.responsible_agent_id;
+            if (pAgent !== agentId) continue;
             if (p.date < from || p.date > to) continue;
             if (p.is_agent_package) continue;
             salesActual += (p.amount || 0);
