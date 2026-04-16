@@ -11251,7 +11251,7 @@ function _wireLoginBtn() {
         const userMapRTA = new Map(allUsersRTA.map(u => [String(u.id), u]));
 
         let activities = actResult.data.filter(a =>
-            a.activity_type !== 'EVENT' || !a.event_id || existingEventIds.has(String(a.event_id))
+            a.activity_type !== 'EVENT'
         );
 
         // Case status filter (computed — must stay client-side)
