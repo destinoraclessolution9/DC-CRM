@@ -37537,7 +37537,10 @@ JB 星期二到
         enablePushNotifications,
         disablePushNotifications,
         sendTestPushNotification,
-        // Expose current user id for push-notifications.js (outside the IIFE)
+        // Expose current user id for push-notifications.js (outside the IIFE).
+        // NOTE: Object.assign flattens getters to their value at call time (always null).
+        // Use a plain function so the closure is preserved after assignment.
+        getCurrentUserId: () => (_currentUser && _currentUser.id) ? String(_currentUser.id) : null,
         get _currentUser() { return _currentUser; },
         openResetPasswordModal,
         executePasswordReset,

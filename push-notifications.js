@@ -43,20 +43,15 @@
         return (window.supabase && window.supabase.from) ? window.supabase : null;
     };
 
-    // Get the current user id. _currentUser lives inside the IIFE in script.js,
-    // but the app object may expose it, or we can read it from the UI.
+    // Get the current user id. Uses app.getCurrentUserId() which closes over
+    // the live _currentUser variable inside the IIFE (Object.assign flattens
+    // getters so window.app._currentUser is always stale — the function is not).
     const getCurrentUserId = () => {
         try {
-            // script.js exposes _currentUser on the app closure via various methods
-            if (window._currentUser && window._currentUser.id) return String(window._currentUser.id);
-            if (window.app && window.app._currentUser && window.app._currentUser.id) return String(window.app._currentUser.id);
-            // AppDataStore may cache it
-            if (window.AppDataStore && window.AppDataStore._currentUserId) return String(window.AppDataStore._currentUserId);
-        } catch (_) {}
-        // Try reading from localStorage (auth session may have it)
-        try {
-            const stored = localStorage.getItem('crm_current_user');
-            if (stored) { const u = JSON.parse(stored); if (u && u.id) return String(u.id); }
+            if (window.app && typeof window.app.getCurrentUserId === 'function') {
+                const id = window.app.getCurrentUserId();
+                if (id) return id;
+            }
         } catch (_) {}
         return null;
     };
