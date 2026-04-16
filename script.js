@@ -12430,16 +12430,16 @@ function _wireLoginBtn() {
                 <div class="detail-section act-actions-section">
                     <h4>Actions</h4>
                     <div class="act-actions-list">
-                        ${activity.prospect_id ? `<button class="act-action-btn act-btn-profile" onclick="UI.hideModal(); app.showProspectDetail(${activity.prospect_id})"><i class="fas fa-user"></i> Prospect Profile</button>` : ''}
+                        ${activity.prospect_id ? `<button class="act-action-btn act-btn-profile" onclick="UI.hideModal(); app.showProspectDetail(${activity.prospect_id})"><span class="act-icon"><i class="fas fa-user"></i></span><span class="act-label">Prospect</span></button>` : ''}
                         ${activity.activity_type === 'CPS' && activity.prospect_id
-                            ? `<button class="act-action-btn act-btn-doc" onclick="app.uploadCPSForm(${activityId}, ${activity.prospect_id})"><i class="fas fa-file-upload"></i> Upload CPS</button>
-                               <button class="act-action-btn act-btn-doc" onclick="app.uploadAPUForm(${activityId}, ${activity.prospect_id})"><i class="fas fa-file-alt"></i> APU</button>`
-                            : `<button class="act-action-btn act-btn-complete" onclick="(async () => { await app.markActivityComplete(${activityId}); })()"><i class="fas fa-check-circle"></i> Mark Complete</button>`
+                            ? `<button class="act-action-btn act-btn-doc" onclick="app.uploadCPSForm(${activityId}, ${activity.prospect_id})"><span class="act-icon"><i class="fas fa-file-upload"></i></span><span class="act-label">Upload CPS</span></button>
+                               <button class="act-action-btn act-btn-doc" onclick="app.uploadAPUForm(${activityId}, ${activity.prospect_id})"><span class="act-icon"><i class="fas fa-file-alt"></i></span><span class="act-label">APU</span></button>`
+                            : `<button class="act-action-btn act-btn-complete" onclick="(async () => { await app.markActivityComplete(${activityId}); })()"><span class="act-icon"><i class="fas fa-check-circle"></i></span><span class="act-label">Complete</span></button>`
                         }
-                        <button class="act-action-btn act-btn-edit" onclick="app.editActivityTiming(${activityId})"><i class="fas fa-pen"></i> Edit</button>
-                        <button class="act-action-btn act-btn-outcome" onclick="(async () => { await app.openMeetingOutcomeModal(${activityId}); })()"><i class="fas fa-clipboard-check"></i> Outcome</button>
-                        ${activity.prospect_id ? `<button class="act-action-btn act-btn-notes" onclick="(async () => { await app.openPostMeetupNotesModal(${activityId}, ${activity.prospect_id}); })()"><i class="fas fa-sticky-note"></i> Post Notes</button>` : ''}
-                        <button class="act-action-btn act-action-delete" onclick="(async () => { await app.deleteActivity(${activityId}); })()"><i class="fas fa-trash"></i> Delete</button>
+                        <button class="act-action-btn act-btn-edit" onclick="app.editActivityTiming(${activityId})"><span class="act-icon"><i class="fas fa-pen"></i></span><span class="act-label">Edit</span></button>
+                        <button class="act-action-btn act-btn-outcome" onclick="(async () => { await app.openMeetingOutcomeModal(${activityId}); })()"><span class="act-icon"><i class="fas fa-clipboard-check"></i></span><span class="act-label">Outcome</span></button>
+                        ${activity.prospect_id ? `<button class="act-action-btn act-btn-notes" onclick="(async () => { await app.openPostMeetupNotesModal(${activityId}, ${activity.prospect_id}); })()"><span class="act-icon"><i class="fas fa-sticky-note"></i></span><span class="act-label">Notes</span></button>` : ''}
+                        <button class="act-action-btn act-action-delete" onclick="(async () => { await app.deleteActivity(${activityId}); })()"><i class="fas fa-trash-alt"></i> Delete</button>
                     </div>
                 </div>
             </div>
