@@ -16371,27 +16371,9 @@ function _wireLoginBtn() {
                                 <option value="reassign">Reassignable</option>
                                 <option value="critical">Critical</option>
                             </select>
-                            <select id="filter-deficiency" onchange="app.filterProspects()">
-                                <option value="">Star Deficiency: All</option>
-                                <option value="Wealth">Wealth</option>
-                                <option value="Career">Career</option>
-                                <option value="Relationship">Romance/Relationship</option>
-                                <option value="Health">Health</option>
+                            <select id="filter-agent" onchange="app.filterProspects()">
+                                <option value="">All Agents</option>
                             </select>
-                            <select id="filter-house-audit" onchange="app.filterProspects()">
-                                <option value="">House Audit: All</option>
-                                <option value="Pending">Pending</option>
-                                <option value="Scheduled">Scheduled</option>
-                                <option value="Completed">Completed</option>
-                                <option value="None">Not Done</option>
-                            </select>
-                            <select id="filter-solution-proposed" onchange="app.filterProspects()">
-                                <option value="">Solution Proposed: All</option>
-                                <option value="PR3 Ring">PR3 Ring (proposed)</option>
-                                <option value="PR4 Power Ring">PR4 Power Ring (proposed)</option>
-                                <option value="PR5 Ring">PR5 Ring (proposed)</option>
-                            </select>
-                            <input type="number" id="filter-min-events" min="0" placeholder="Min events attended" onchange="app.filterProspects()" style="width:160px; padding:6px 10px; border:1px solid var(--border); border-radius:6px; background:var(--surface); color:var(--text);">
                             <button class="btn primary" onclick="app.filterProspects()">Apply Filters</button>
                         </div>
                     </div>
@@ -17088,10 +17070,7 @@ function _wireLoginBtn() {
         const scoreFilter = document.getElementById('filter-score')?.value || '';
         const guaFilter = document.getElementById('filter-gua')?.value || '';
         const statusFilter = document.getElementById('filter-status')?.value || '';
-        const deficiencyFilter = document.getElementById('filter-deficiency')?.value || '';
-        const houseAuditFilter = document.getElementById('filter-house-audit')?.value || '';
-        const solutionProposedFilter = document.getElementById('filter-solution-proposed')?.value || '';
-        const minEventsFilter = parseInt(document.getElementById('filter-min-events')?.value || '0');
+        const agentFilter = document.getElementById('filter-agent')?.value || '';
 
         // ── Build activity index (O(1) lookups) ──
         const latestActivityByProspect = new Map();
@@ -17106,11 +17085,17 @@ function _wireLoginBtn() {
         }
         const userById = new Map(allUsers.map(u => [String(u.id), u]));
 
-        // ── Pre-load cross-table data only when those filters are active ──
-        let allProposedSolutions = [];
-        let allEventRegs = [];
-        if (solutionProposedFilter) allProposedSolutions = await AppDataStore.getAll('proposed_solutions');
-        if (minEventsFilter > 0) allEventRegs = await AppDataStore.getAll('event_registrations');
+        // ── Populate agent filter dropdown (agents visible to current user) ──
+        const agentFilterEl = document.getElementById('filter-agent');
+        if (agentFilterEl) {
+            const currentAgentVal = agentFilterEl.value;
+            const visibleAgents = allUsers.filter(u => {
+                const lvl = _getUserLevel(u);
+                return lvl >= 3 && lvl <= 11 && u.status !== 'deleted';
+            }).sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''));
+            agentFilterEl.innerHTML = '<option value="">All Agents</option>' +
+                visibleAgents.map(a => `<option value="${a.id}"${String(a.id) === currentAgentVal ? ' selected' : ''}>${a.full_name || 'Agent'}</option>`).join('');
+        }
 
         const _userLvlMatch = _currentUser?.role?.match(/Level\s+(\d+)/i);
         const _userLevel = _userLvlMatch ? parseInt(_userLvlMatch[1]) : 99;
@@ -17158,6 +17143,7 @@ function _wireLoginBtn() {
             const grade = getScoreGrade(p.score);
             if (scoreFilter && scoreFilter !== grade) continue;
             if (guaFilter && p.ming_gua !== guaFilter) continue;
+            if (agentFilter && String(p.responsible_agent_id) !== agentFilter) continue;
 
             const daysLeft = calculateProtectionDays(p);
             const protectionStatus = getProtectionStatus(daysLeft);
@@ -17166,24 +17152,6 @@ function _wireLoginBtn() {
                 if (statusFilter === 'attention' && protectionStatus !== 'warning') continue;
                 if (statusFilter === 'reassign' && protectionStatus !== 'normal') continue;
                 if (statusFilter === 'critical' && protectionStatus !== 'critical') continue;
-            }
-            if (deficiencyFilter) {
-                const needs = p.needs ? (Array.isArray(p.needs) ? p.needs : p.needs.split(',').map(t => t.trim())) : [];
-                if (!needs.includes(deficiencyFilter)) continue;
-            }
-            if (houseAuditFilter) {
-                const auditStatus = p.house_audit_status || 'None';
-                if (auditStatus !== houseAuditFilter) continue;
-            }
-            if (solutionProposedFilter) {
-                const hasPending = allProposedSolutions.some(s =>
-                    s.prospect_id === p.id && s.solution === solutionProposedFilter && s.status !== 'Purchased'
-                );
-                if (!hasPending) continue;
-            }
-            if (minEventsFilter > 0) {
-                const attendedCount = allEventRegs.filter(r => r.attendee_id === p.id).length;
-                if (attendedCount < minEventsFilter) continue;
             }
             filtered.push(p);
         }
