@@ -35277,9 +35277,33 @@ const initImportDemoData = async () => {
                     <textarea id="highlight-content" class="form-control" rows="4" placeholder="Enter content...">${h?.content || ''}</textarea>
                 </div>
                 <div class="form-group">
-                    <label>Photo URL <span style="color:#9ca3af;font-weight:400;">(optional — paste an image link)</span></label>
-                    <input type="url" id="highlight-image-url" class="form-control" value="${h?.image_url || ''}" placeholder="https://example.com/photo.jpg">
-                    ${h?.image_url ? `<img src="${h.image_url}" style="margin-top:8px;width:100%;max-height:140px;object-fit:cover;border-radius:8px;" onerror="this.style.display='none'">` : ''}
+                    <label>Photo</label>
+                    <div style="display:flex;flex-direction:column;gap:8px;">
+                        <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;background:var(--gray-100,#f3f4f6);border:1px dashed var(--gray-300,#d1d5db);border-radius:8px;padding:10px 14px;font-size:14px;color:var(--gray-600,#4b5563);">
+                            <i class="fas fa-upload"></i> Upload image file
+                            <input type="file" id="highlight-image-file" accept="image/*" style="display:none;" onchange="
+                                const file = this.files[0];
+                                if (file) {
+                                    const reader = new FileReader();
+                                    reader.onload = e => {
+                                        const prev = document.getElementById('highlight-image-preview');
+                                        if (prev) { prev.src = e.target.result; prev.style.display='block'; }
+                                        document.getElementById('highlight-image-url').value = '';
+                                        document.getElementById('highlight-url-preview').style.display='none';
+                                    };
+                                    reader.readAsDataURL(file);
+                                }
+                            ">
+                        </label>
+                        <img id="highlight-image-preview" style="width:100%;max-height:140px;object-fit:cover;border-radius:8px;display:none;" onerror="this.style.display='none'">
+                        <div style="display:flex;align-items:center;gap:8px;color:var(--gray-400,#9ca3af);font-size:13px;"><span style="flex:1;height:1px;background:currentColor;opacity:.4;"></span>or paste a URL<span style="flex:1;height:1px;background:currentColor;opacity:.4;"></span></div>
+                        <input type="url" id="highlight-image-url" class="form-control" value="${h?.image_url || ''}" placeholder="https://example.com/photo.jpg" oninput="
+                            const prev = document.getElementById('highlight-url-preview');
+                            if (this.value) { prev.src = this.value; prev.style.display='block'; document.getElementById('highlight-image-file').value=''; document.getElementById('highlight-image-preview').style.display='none'; }
+                            else { prev.style.display='none'; }
+                        ">
+                        <img id="highlight-url-preview" src="${h?.image_url || ''}" style="width:100%;max-height:140px;object-fit:cover;border-radius:8px;${h?.image_url ? '' : 'display:none;'}" onerror="this.style.display='none'">
+                    </div>
                 </div>
                 <div class="form-group">
                     <label>Type</label>
@@ -35309,10 +35333,29 @@ const initImportDemoData = async () => {
         const title = document.getElementById('highlight-title')?.value?.trim();
         if (!title) { UI.toast.error('Title is required.'); return; }
 
+        // Resolve image URL: uploaded file takes priority over pasted URL
+        let imageUrl = document.getElementById('highlight-image-url')?.value?.trim() || null;
+        const fileInput = document.getElementById('highlight-image-file');
+        const file = fileInput?.files?.[0];
+        if (file) {
+            const sb = window.supabase || window.supabaseClient;
+            if (!sb || !sb.storage) {
+                UI.toast.error('Supabase not connected — cannot upload image');
+                return;
+            }
+            if (file.size > 5 * 1024 * 1024) { UI.toast.error('Image too large (max 5MB)'); return; }
+            const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+            const path = `highlights/${Date.now()}_${safeName}`;
+            const { error: upErr } = await sb.storage.from('attachments').upload(path, file, { upsert: false, contentType: file.type });
+            if (upErr) { UI.toast.error('Upload failed: ' + upErr.message); return; }
+            const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
+            imageUrl = urlData?.publicUrl || null;
+        }
+
         const payload = {
             title,
             content:   document.getElementById('highlight-content')?.value || '',
-            image_url: document.getElementById('highlight-image-url')?.value?.trim() || null,
+            image_url: imageUrl,
             type:      document.getElementById('highlight-type')?.value || 'highlight',
             is_active: document.getElementById('highlight-active')?.checked ?? true,
             author_id: _currentUser?.id || null
