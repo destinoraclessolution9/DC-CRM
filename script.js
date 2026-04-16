@@ -15806,7 +15806,7 @@ function _wireLoginBtn() {
         }
 
         // Auto-create CPS Invitation Case in Success Case Library
-        if (type === 'CPS' && (activity.cps_invitation_method || activity.cps_invitation_details)) {
+        if (type === 'CPS') {
             try {
                 await AppDataStore.create('case_studies', {
                     title: `CPS: ${activity.activity_title}`,

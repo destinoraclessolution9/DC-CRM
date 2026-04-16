@@ -162,7 +162,18 @@ alter table referrals
 
 -- ---- case_studies -------------------------------------------------------
 alter table case_studies
-    add column if not exists activity_id bigint;
+    add column if not exists activity_id bigint,
+    -- case_type distinguishes CPS invitation cases ('cps') from closed cases ('closed').
+    -- Without this column every case_studies row defaults to 'cps' in the JS filter,
+    -- meaning closed cases accidentally appear in the CPS Invitation Cases table.
+    add column if not exists case_type text default 'cps',
+    -- cps_invitation_method / cps_invitation_details are written by both the
+    -- Quick-Add-Activity CPS flow and the Case Study edit modal.  Without these
+    -- columns data.js strips them on every save, so the Inv. Method / Details
+    -- columns always show '-' for every user except the original writer (who has
+    -- the values in their own localStorage).
+    add column if not exists cps_invitation_method text,
+    add column if not exists cps_invitation_details text;
 
 
 -- ---- entity_tags --------------------------------------------------------
