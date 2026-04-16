@@ -9448,6 +9448,7 @@ function _wireLoginBtn() {
 
     let _caseFilters = { search: '', product: 'all', from: '', to: '', visibility: 'all', agent: 'all', tag: 'all' };
     let _caseActiveTab = 'cps'; // 'cps' | 'closed'
+    let _caseAdvOpen = false;
 
 
 
@@ -9457,49 +9458,80 @@ function _wireLoginBtn() {
         const agents = allUsers.filter(u => u.status !== 'inactive');
         const allTags = (await AppDataStore.getAll('tags')) || [];
 
-        // Shared filter bar — one set of filters that applies to both tables
+        // Count active advanced filters for badge
+        const activeAdvCount = [
+            _caseFilters.product !== 'all',
+            _caseFilters.agent !== 'all',
+            _caseFilters.from !== '',
+            _caseFilters.to !== '',
+            _caseFilters.tag !== 'all',
+            _caseFilters.visibility !== 'all'
+        ].filter(Boolean).length;
+
+        // Shared filter bar — simple search + collapsible advanced filters
         const filterBar = `
-            <div class="filter-bar">
-                <div class="filter-group">
-                    <i class="fas fa-search"></i>
-                    <input type="text" id="case-search" placeholder="Search title or prospect/customer..." value="${_caseFilters.search}" onkeyup="app.handleCaseSearch(event)">
+            <div class="cases-toolbar">
+                <div class="cases-search-wrap">
+                    <i class="fas fa-search cases-search-icon"></i>
+                    <input type="text" id="case-search" class="cases-search-input"
+                        placeholder="Search cases, prospects, customers…"
+                        value="${_caseFilters.search}"
+                        onkeyup="app.handleCaseSearch(event)">
+                    <button class="cases-search-clear" title="Clear search"
+                        onclick="document.getElementById('case-search').value=''; app.handleCaseSearch({target:{value:''}})">
+                        <i class="fas fa-times"></i>
+                    </button>
                 </div>
-                <div class="filter-group">
-                    <label>Product</label>
-                    <select id="case-product-filter" onchange="app.handleCaseFilterChange()">
-                        <option value="all">All Products</option>
-                        ${products.map(p => `<option value="${p.name}" ${_caseFilters.product === p.name ? 'selected' : ''}>${p.name}</option>`).join('')}
-                    </select>
+                <button id="cases-adv-toggle-btn" class="cases-filter-btn${_caseAdvOpen ? ' active' : ''}"
+                    onclick="app.toggleCaseAdvFilters()">
+                    <i class="fas fa-sliders-h"></i> Filters
+                    ${activeAdvCount > 0 ? `<span class="cases-filter-count">${activeAdvCount}</span>` : ''}
+                </button>
+            </div>
+            <div class="cases-adv-panel" id="cases-adv-panel" style="display:${_caseAdvOpen ? 'block' : 'none'};">
+                <div class="cases-adv-grid">
+                    <div class="adv-field">
+                        <label>Product</label>
+                        <select id="case-product-filter" onchange="app.handleCaseFilterChange()">
+                            <option value="all">All Products</option>
+                            ${products.map(p => `<option value="${p.name}" ${_caseFilters.product === p.name ? 'selected' : ''}>${p.name}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="adv-field">
+                        <label>Agent</label>
+                        <select id="case-agent-filter" onchange="app.handleCaseFilterChange()">
+                            <option value="all">All Agents</option>
+                            ${agents.map(u => `<option value="${u.id}" ${_caseFilters.agent === String(u.id) ? 'selected' : ''}>${u.full_name || u.username}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="adv-field">
+                        <label>Date From</label>
+                        <input type="date" id="case-date-from" value="${_caseFilters.from}" onchange="app.handleCaseFilterChange()">
+                    </div>
+                    <div class="adv-field">
+                        <label>Date To</label>
+                        <input type="date" id="case-date-to" value="${_caseFilters.to}" onchange="app.handleCaseFilterChange()">
+                    </div>
+                    <div class="adv-field">
+                        <label>Tag</label>
+                        <select id="case-tag-filter" onchange="app.handleCaseFilterChange()">
+                            <option value="all">All Tags</option>
+                            ${allTags.map(t => `<option value="${t.id}" ${_caseFilters.tag === String(t.id) ? 'selected' : ''}>${t.name}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="adv-field">
+                        <label>Visibility</label>
+                        <select id="case-visibility-filter" onchange="app.handleCaseFilterChange()">
+                            <option value="all" ${_caseFilters.visibility === 'all' ? 'selected' : ''}>All</option>
+                            <option value="public" ${_caseFilters.visibility === 'public' ? 'selected' : ''}>Public Only</option>
+                            <option value="mine" ${_caseFilters.visibility === 'mine' ? 'selected' : ''}>My Cases</option>
+                        </select>
+                    </div>
                 </div>
-                <div class="filter-group">
-                    <label>Agent</label>
-                    <select id="case-agent-filter" onchange="app.handleCaseFilterChange()">
-                        <option value="all">All Agents</option>
-                        ${agents.map(u => `<option value="${u.id}" ${_caseFilters.agent === String(u.id) ? 'selected' : ''}>${u.full_name || u.username}</option>`).join('')}
-                    </select>
-                </div>
-                <div class="filter-group">
-                    <label>From</label>
-                    <input type="date" id="case-date-from" value="${_caseFilters.from}" onchange="app.handleCaseFilterChange()">
-                </div>
-                <div class="filter-group">
-                    <label>To</label>
-                    <input type="date" id="case-date-to" value="${_caseFilters.to}" onchange="app.handleCaseFilterChange()">
-                </div>
-                <div class="filter-group">
-                    <label>Tag</label>
-                    <select id="case-tag-filter" onchange="app.handleCaseFilterChange()">
-                        <option value="all">All Tags</option>
-                        ${allTags.map(t => `<option value="${t.id}" ${_caseFilters.tag === String(t.id) ? 'selected' : ''}>${t.name}</option>`).join('')}
-                    </select>
-                </div>
-                <div class="filter-group">
-                    <label>Visibility</label>
-                    <select id="case-visibility-filter" onchange="app.handleCaseFilterChange()">
-                        <option value="all" ${_caseFilters.visibility === 'all' ? 'selected' : ''}>All</option>
-                        <option value="public" ${_caseFilters.visibility === 'public' ? 'selected' : ''}>Public Only</option>
-                        <option value="mine" ${_caseFilters.visibility === 'mine' ? 'selected' : ''}>My Cases</option>
-                    </select>
+                <div class="cases-adv-footer">
+                    <button class="btn-link" onclick="app.clearCaseFilters()">
+                        <i class="fas fa-times-circle"></i> Clear All Filters
+                    </button>
                 </div>
             </div>`;
 
@@ -9518,9 +9550,10 @@ function _wireLoginBtn() {
                 ${filterBar}
 
                 <!-- CPS Invitation Cases Section -->
-                <div style="margin-top:20px; margin-bottom:10px; display:flex; align-items:center; gap:8px;">
-                    <i class="fas fa-handshake" style="color:var(--primary-600);"></i>
-                    <h2 style="margin:0; font-size:18px;">CPS Invitation Cases</h2>
+                <div class="cases-section-hdr">
+                    <div class="section-icon"><i class="fas fa-handshake"></i></div>
+                    <h2>CPS Invitation Cases</h2>
+                    <span class="cases-section-desc">Prospects invited via CPS method</span>
                 </div>
                 <div class="table-container">
                     <table class="crm-table">
@@ -9545,9 +9578,10 @@ function _wireLoginBtn() {
                 </div>
 
                 <!-- Closed Cases Section -->
-                <div style="margin-top:30px; margin-bottom:10px; display:flex; align-items:center; gap:8px;">
-                    <i class="fas fa-check-circle" style="color:var(--primary-600);"></i>
-                    <h2 style="margin:0; font-size:18px;">Closed Cases</h2>
+                <div class="cases-section-hdr" style="margin-top:32px;">
+                    <div class="section-icon"><i class="fas fa-trophy"></i></div>
+                    <h2>Closed Cases</h2>
+                    <span class="cases-section-desc">Successfully closed deals &amp; stories</span>
                 </div>
                 <div class="table-container">
                     <table class="crm-table">
@@ -9597,6 +9631,19 @@ function _wireLoginBtn() {
         _caseFilters.agent = document.getElementById('case-agent-filter')?.value || 'all';
         _caseFilters.tag = document.getElementById('case-tag-filter')?.value || 'all';
         await renderCasesList();
+    };
+
+    const toggleCaseAdvFilters = () => {
+        _caseAdvOpen = !_caseAdvOpen;
+        const panel = document.getElementById('cases-adv-panel');
+        const btn = document.getElementById('cases-adv-toggle-btn');
+        if (panel) panel.style.display = _caseAdvOpen ? 'block' : 'none';
+        if (btn) btn.classList.toggle('active', _caseAdvOpen);
+    };
+
+    const clearCaseFilters = async () => {
+        _caseFilters = { search: '', product: 'all', from: '', to: '', visibility: 'all', agent: 'all', tag: 'all' };
+        await showCasesView(document.getElementById('content-viewport'));
     };
 
     const renderCasesList = async () => {
@@ -37891,6 +37938,8 @@ JB 星期二到
         switchCaseTab,
         handleCaseSearch,
         handleCaseFilterChange,
+        toggleCaseAdvFilters,
+        clearCaseFilters,
         renderCasesList,
         showCaseStudyDetail,
         toggleCasePublic,
