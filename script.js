@@ -17669,6 +17669,7 @@ function _wireLoginBtn() {
             responsible_agent_id: _currentUser?.id || null,
             cps_assignment_date: new Date().toISOString().split('T')[0],
             pipeline_stage: 'new',
+            score: editId ? undefined : 200,
             expected_close_date: null,
             deal_value: 0,
             life_chart_type: (() => {
