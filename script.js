@@ -35240,33 +35240,38 @@ const initImportDemoData = async () => {
                 ${adminHighlightsSection}
                 ${adminRewardsSection}
                 <div class="fude-section">
-                    <h2>📰 Highlights &amp; News</h2>
-                    <div class="news-list">${publicNews.length
-                        ? publicNews.map(n => `<div class="news-item">
-                            <h3 style="margin:0 0 4px;">${n.title}</h3>
-                            <p style="margin:0 0 4px;color:var(--gray-600,#4b5563);">${n.content || ''}</p>
-                            <small style="color:var(--gray-400,#9ca3af);">${fmtDate(n.created_at)}</small>
-                          </div>`).join('')
-                        : '<p style="color:var(--gray-500,#6b7280);">No highlights yet.</p>'}</div>
+                    <div class="fude-mag-header"><h2>📰 Highlights &amp; News</h2></div>
+                    ${publicNews.length === 0
+                        ? '<p style="color:var(--gray-500,#6b7280);">No highlights yet.</p>'
+                        : (() => {
+                            const [hero, ...rest] = publicNews;
+                            const heroBg = hero.image_url
+                                ? `<img class="fude-hero-card-bg" src="${hero.image_url}" alt="" onerror="this.style.display='none'">`
+                                : '';
+                            const heroCard = `<div class="fude-hero-card">${heroBg}<div class="fude-hero-card-overlay"><span class="fude-hero-badge">Latest</span><h3>${hero.title}</h3>${hero.content ? `<p>${hero.content}</p>` : ''}<span class="fude-hero-date">${fmtDate(hero.created_at)}</span></div></div>`;
+                            const grid = rest.length
+                                ? `<div class="fude-news-grid">${rest.map(n => `<div class="fude-card">${n.image_url ? `<img class="fude-card-img" src="${n.image_url}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="fude-card-img-placeholder" style="display:none;">📰</div>` : `<div class="fude-card-img-placeholder">📰</div>`}<div class="fude-card-body"><span class="fude-card-tag">News</span><h3>${n.title}</h3>${n.content ? `<p>${n.content}</p>` : ''}<div class="fude-card-date">${fmtDate(n.created_at)}</div></div></div>`).join('')}</div>`
+                                : '';
+                            return heroCard + grid;
+                          })()
+                    }
                 </div>
                 <div class="fude-section">
-                    <h2>🌟 Success Stories</h2>
-                    <div class="stories-list">${successStories.length
-                        ? successStories.map(s => `<div class="story-item">
-                            <h3 style="margin:0 0 4px;">${s.title}</h3>
-                            <p style="margin:0;color:var(--gray-600,#4b5563);">${s.content || ''}</p>
-                          </div>`).join('')
-                        : '<p style="color:var(--gray-500,#6b7280);">No success stories yet.</p>'}</div>
+                    <div class="fude-mag-header"><h2>🌟 Success Stories</h2></div>
+                    ${successStories.length === 0
+                        ? '<p style="color:var(--gray-500,#6b7280);">No success stories yet.</p>'
+                        : `<div class="fude-stories-grid">${successStories.map(s => `<div class="fude-story-card">${s.image_url ? `<img class="fude-story-img" src="${s.image_url}" alt="" onerror="this.style.display='none'">` : ''}<div class="fude-story-body"><span class="fude-story-quote">"</span><h3>${s.title}</h3><p>${s.content || ''}</p></div></div>`).join('')}</div>`
+                    }
                 </div>
                 ${recommendationTips.length ? `
                 <div class="fude-section">
-                    <h2>💡 Recommendation Tips</h2>
-                    <div class="tips-list">${recommendationTips.map(t => `
-                        <div class="news-item" style="display:flex;gap:12px;align-items:flex-start;">
-                            <span style="font-size:1.4rem;flex-shrink:0;">💡</span>
-                            <div>
-                                <h3 style="margin:0 0 4px;">${t.title}</h3>
-                                <p style="margin:0;color:var(--gray-600,#4b5563);">${t.content || ''}</p>
+                    <div class="fude-mag-header"><h2>💡 Recommendation Tips</h2></div>
+                    <div class="fude-tips-stack">${recommendationTips.map(t => `
+                        <div class="fude-tip-card">
+                            <span class="fude-tip-icon">💡</span>
+                            <div class="fude-tip-content">
+                                <h3>${t.title}</h3>
+                                <p>${t.content || ''}</p>
                             </div>
                         </div>`).join('')}
                     </div>
@@ -35295,6 +35300,11 @@ const initImportDemoData = async () => {
                 <div class="form-group">
                     <label>Content</label>
                     <textarea id="highlight-content" class="form-control" rows="4" placeholder="Enter content...">${h?.content || ''}</textarea>
+                </div>
+                <div class="form-group">
+                    <label>Photo URL <span style="color:#9ca3af;font-weight:400;">(optional — paste an image link)</span></label>
+                    <input type="url" id="highlight-image-url" class="form-control" value="${h?.image_url || ''}" placeholder="https://example.com/photo.jpg">
+                    ${h?.image_url ? `<img src="${h.image_url}" style="margin-top:8px;width:100%;max-height:140px;object-fit:cover;border-radius:8px;" onerror="this.style.display='none'">` : ''}
                 </div>
                 <div class="form-group">
                     <label>Type</label>
@@ -35327,6 +35337,7 @@ const initImportDemoData = async () => {
         const payload = {
             title,
             content:   document.getElementById('highlight-content')?.value || '',
+            image_url: document.getElementById('highlight-image-url')?.value?.trim() || null,
             type:      document.getElementById('highlight-type')?.value || 'highlight',
             is_active: document.getElementById('highlight-active')?.checked ?? true,
             author_id: _currentUser?.id || null
