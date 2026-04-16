@@ -11346,11 +11346,11 @@ function _wireLoginBtn() {
                         ${entityName !== 'N/A' ? `<div class="tac-customer">${entityName}</div>` : ''}
                     </div>
                     <div class="tac-actions" onclick="event.stopPropagation()">
-                        <button class="btn btn-sm secondary" onclick="app.viewActivityDetails(${a.id})">View</button>
-                        <button class="btn btn-sm secondary" onclick="(async()=>{await app.openMeetingOutcomeModal(${a.id});})()">Outcome</button>
-                        <button class="btn btn-sm secondary" onclick="(async()=>{await app.openPostMeetupNotesModal(${a.id},${a.prospect_id || 'null'});})()">Notes</button>
-                        <button class="btn btn-sm secondary" onclick="app.editActivity(${a.id})">Edit</button>
-                        <button class="btn btn-sm secondary" onclick="app.addCoAgentToActivity(${a.id})">+ Co</button>
+                        <button class="btn btn-sm tac-btn-view" onclick="app.viewActivityDetails(${a.id})"><i class="fas fa-eye"></i> View</button>
+                        <button class="btn btn-sm tac-btn-outcome" onclick="(async()=>{await app.openMeetingOutcomeModal(${a.id});})()"><i class="fas fa-clipboard-check"></i> Outcome</button>
+                        <button class="btn btn-sm tac-btn-notes" onclick="(async()=>{await app.openPostMeetupNotesModal(${a.id},${a.prospect_id || 'null'});})()"><i class="fas fa-sticky-note"></i> Notes</button>
+                        <button class="btn btn-sm tac-btn-edit" onclick="app.editActivity(${a.id})"><i class="fas fa-pen"></i> Edit</button>
+                        <button class="btn btn-sm tac-btn-co" onclick="app.addCoAgentToActivity(${a.id})"><i class="fas fa-user-plus"></i> Co</button>
                     </div>
                 </div>
             `;
@@ -12312,7 +12312,7 @@ function _wireLoginBtn() {
                     <h4>Attendees <span style="font-size:11px;color:#9CA3AF;font-weight:400;">(${prospectAttendees.length})</span></h4>
                     ${prospectRows || '<div class="info-row">No prospect/customer attendees.</div>'}
                     <div style="margin-top:10px; text-align:right;">
-                        <button class="btn primary btn-sm" onclick="app.showAddAttendeeSearch('${activity.event_id}', '${activityId}')">+ Add Attendee</button>
+                        <button class="btn-add-slot" onclick="app.showAddAttendeeSearch('${activity.event_id}', '${activityId}')"><i class="fas fa-user-plus"></i> + Add Attendee</button>
                     </div>
                 </div>
             `;
@@ -12323,7 +12323,7 @@ function _wireLoginBtn() {
                     <h4>Agent Attendance <span style="font-size:11px;color:#9CA3AF;font-weight:400;">(${agentAttendees.length})</span></h4>
                     ${agentRows || '<div class="info-row">No agents/consultants added.</div>'}
                     <div style="margin-top:10px; text-align:right;">
-                        <button class="btn primary btn-sm" onclick="app.showAddConsultantSearch('${activity.event_id}', '${activityId}')"><i class="fas fa-user-tie"></i> + Add Agent / Consultant</button>
+                        <button class="btn-add-slot" onclick="app.showAddConsultantSearch('${activity.event_id}', '${activityId}')"><i class="fas fa-user-tie"></i> + Add Agent / Consultant</button>
                     </div>
                 </div>
             `;
@@ -12430,16 +12430,16 @@ function _wireLoginBtn() {
                 <div class="detail-section act-actions-section">
                     <h4>Actions</h4>
                     <div class="act-actions-list">
-                        ${activity.prospect_id ? `<button class="btn secondary act-action-btn" onclick="UI.hideModal(); app.showProspectDetail(${activity.prospect_id})">Prospect Profile</button>` : ''}
+                        ${activity.prospect_id ? `<button class="act-action-btn act-btn-profile" onclick="UI.hideModal(); app.showProspectDetail(${activity.prospect_id})"><i class="fas fa-user"></i> Prospect Profile</button>` : ''}
                         ${activity.activity_type === 'CPS' && activity.prospect_id
-                            ? `<button class="btn secondary act-action-btn" onclick="app.uploadCPSForm(${activityId}, ${activity.prospect_id})">Upload CPS Form</button>
-                               <button class="btn secondary act-action-btn" onclick="app.uploadAPUForm(${activityId}, ${activity.prospect_id})">APU</button>`
-                            : `<button class="btn secondary act-action-btn" onclick="(async () => { await app.markActivityComplete(${activityId}); })()">Mark Complete</button>`
+                            ? `<button class="act-action-btn act-btn-doc" onclick="app.uploadCPSForm(${activityId}, ${activity.prospect_id})"><i class="fas fa-file-upload"></i> Upload CPS</button>
+                               <button class="act-action-btn act-btn-doc" onclick="app.uploadAPUForm(${activityId}, ${activity.prospect_id})"><i class="fas fa-file-alt"></i> APU</button>`
+                            : `<button class="act-action-btn act-btn-complete" onclick="(async () => { await app.markActivityComplete(${activityId}); })()"><i class="fas fa-check-circle"></i> Mark Complete</button>`
                         }
-                        <button class="btn secondary act-action-btn" onclick="app.editActivityTiming(${activityId})">Edit</button>
-                        <button class="btn secondary act-action-btn" onclick="(async () => { await app.openMeetingOutcomeModal(${activityId}); })()">Outcome</button>
-                        ${activity.prospect_id ? `<button class="btn secondary act-action-btn" onclick="(async () => { await app.openPostMeetupNotesModal(${activityId}, ${activity.prospect_id}); })()">Post Notes</button>` : ''}
-                        <button class="btn primary act-action-btn act-action-delete" onclick="(async () => { await app.deleteActivity(${activityId}); })()">Delete</button>
+                        <button class="act-action-btn act-btn-edit" onclick="app.editActivityTiming(${activityId})"><i class="fas fa-pen"></i> Edit</button>
+                        <button class="act-action-btn act-btn-outcome" onclick="(async () => { await app.openMeetingOutcomeModal(${activityId}); })()"><i class="fas fa-clipboard-check"></i> Outcome</button>
+                        ${activity.prospect_id ? `<button class="act-action-btn act-btn-notes" onclick="(async () => { await app.openPostMeetupNotesModal(${activityId}, ${activity.prospect_id}); })()"><i class="fas fa-sticky-note"></i> Post Notes</button>` : ''}
+                        <button class="act-action-btn act-action-delete" onclick="(async () => { await app.deleteActivity(${activityId}); })()"><i class="fas fa-trash"></i> Delete</button>
                     </div>
                 </div>
             </div>
