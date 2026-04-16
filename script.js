@@ -17189,7 +17189,7 @@ function _wireLoginBtn() {
                 <tr onclick="app.showProspectDetail(${p.id})">
                     <td data-label="Name"><strong>${p.full_name || '(No Name)'}</strong></td>
                     <td data-label="Agent" onclick="event.stopPropagation()">${canReassign
-                        ? `<select class="form-control" style="padding:2px 6px;font-size:12px;min-width:120px;border:1px solid var(--border);border-radius:4px;background:var(--surface);cursor:pointer;" onchange="app.quickReassign(${p.id}, this.value)" title="Reassign agent">${activeAgents.map(a => `<option value="${a.id}" ${String(a.id) === String(p.responsible_agent_id) ? 'selected' : ''}>${a.full_name || 'Agent'}</option>`).join('')}</select>`
+                        ? `<select class="form-control" style="padding:2px 6px;font-size:12px;min-width:120px;border:1px solid var(--border);border-radius:4px;background:var(--surface);cursor:pointer;" onchange="app.quickReassign(${p.id}, this.value)" title="Reassign agent">${!p.responsible_agent_id ? '<option value="" selected>— Unassigned —</option>' : ''}${activeAgents.map(a => `<option value="${a.id}" ${String(a.id) === String(p.responsible_agent_id) ? 'selected' : ''}>${a.full_name || 'Agent'}</option>`).join('')}</select>`
                         : agentName}</td>
                     <td data-label="Score">
                         <span class="score-badge score-${grade.replace('+', '-plus')}">${p.score || 0} (${grade})</span>
