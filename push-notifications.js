@@ -106,16 +106,25 @@
             last_seen_at: new Date().toISOString(),
         };
 
-        const sb = getWriteClient();
-        if (!sb) throw new Error('no_supabase');
+        // Use direct PostgREST REST call (same pattern as the rest of the app).
+        const baseUrl = window.SUPABASE_URL;
+        const sr = window.SUPABASE_SR;
+        if (!baseUrl || !sr) throw new Error('no_supabase');
 
-        // Upsert on endpoint (unique) so re-subscribe updates the user_id / keys.
-        const { error } = await sb
-            .from('push_subscriptions')
-            .upsert(row, { onConflict: 'endpoint' });
-        if (error) {
-            console.error('[Push] DB upsert failed:', error);
-            throw error;
+        const resp = await fetch(`${baseUrl}/rest/v1/push_subscriptions`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'apikey': sr,
+                'Authorization': `Bearer ${sr}`,
+                'Prefer': 'resolution=merge-duplicates',
+            },
+            body: JSON.stringify(row),
+        });
+        if (!resp.ok) {
+            const errText = await resp.text().catch(() => resp.status);
+            console.error('[Push] DB upsert failed:', errText);
+            throw new Error('db_save_failed: ' + errText);
         }
 
         try { localStorage.setItem('push_enabled', '1'); } catch (_) {}
