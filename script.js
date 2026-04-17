@@ -10181,15 +10181,17 @@ function _wireLoginBtn() {
                         <button class="btn secondary btn-sm" onclick="app.goToToday()">Today</button>
                     </div>
                     <div class="calendar-controls">
-                        <button class="cal-icon-btn cal-btn-filter" onclick="app.openCalendarFilterModal()" title="Filter">
-                            <i class="fas fa-search"></i>
-                        </button>
-                        <button class="cal-icon-btn cal-btn-wa" onclick="app.openShareCpsIntakeLinkModal()" title="Share CPS Intake Link">
-                            <i class="fab fa-whatsapp"></i>
-                        </button>
-                        <button class="cal-icon-btn cal-btn-add" onclick="app.openActivityModal()" title="Quick Add Activity">
-                            <i class="fas fa-plus"></i>
-                        </button>
+                        <div class="cal-controls-pill">
+                            <button class="cal-icon-btn cal-btn-filter" onclick="app.openCalendarFilterModal()" title="Filter">
+                                <i class="fas fa-search"></i>
+                            </button>
+                            <button class="cal-icon-btn cal-btn-wa" onclick="app.openShareCpsIntakeLinkModal()" title="Share CPS Intake Link">
+                                <i class="fab fa-whatsapp"></i>
+                            </button>
+                            <button class="cal-icon-btn cal-btn-add" onclick="app.openActivityModal()" title="Quick Add Activity">
+                                <i class="fas fa-plus"></i>
+                            </button>
+                        </div>
                     </div>
                 </div>
 
