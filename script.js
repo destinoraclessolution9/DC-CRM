@@ -16145,16 +16145,25 @@ function _wireLoginBtn() {
     const _autoSubscribePush = () => {
         try {
             if (!window.PushNotif || !window.PushNotif.isPushSupported()) return;
-            if (localStorage.getItem('push_enabled') === '1') return;
             // Only auto-prompt for installed PWA (homescreen) — not regular browser tabs
             const isStandalone = window.matchMedia('(display-mode: standalone)').matches
                 || window.navigator.standalone === true;
             if (!isStandalone) return;
-            // Delay so login UI settles first, then subscribe (prompts permission if needed)
+            // Delay so login UI settles first, then verify + subscribe if needed
             setTimeout(async () => {
                 try {
+                    // Even if push_enabled=1, verify the browser subscription still exists.
+                    // The Edge Function prunes expired endpoints from the DB, but the
+                    // localStorage flag stays set — causing silent notification failures.
+                    if (localStorage.getItem('push_enabled') === '1') {
+                        const reg = window._swRegistration || (await navigator.serviceWorker.ready);
+                        const existingSub = reg && (await reg.pushManager.getSubscription());
+                        if (existingSub) return; // still active, nothing to do
+                        // Subscription was lost — clear flag and re-subscribe below
+                        localStorage.removeItem('push_enabled');
+                        console.log('[Push] stale push_enabled flag cleared — re-subscribing');
+                    }
                     await window.PushNotif.subscribe();
-                    // Push auto-subscribed (standalone PWA)
                 } catch (e) { console.warn('[Push] auto-subscribe skipped:', e.message || e); }
             }, 2000);
         } catch (_) {}
