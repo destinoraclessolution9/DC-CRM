@@ -10611,6 +10611,76 @@ function _wireLoginBtn() {
         }
     };
 
+    // One-time bulk: create APU follow-up drafts for all prospects who already have
+    // apu_form_urls but never got the trigger (uploaded before auto-trigger was added).
+    // Assigns each draft to the prospect's own responsible_agent_id, not the admin running this.
+    const bulkDispatchApuReminders = async () => {
+        UI.toast.success('Scanning prospects with APU photos…');
+        try {
+            // Force-refresh cache so we get the latest templates
+            invalidateFollowUpTemplatesCache();
+            const templates = await loadFollowUpTemplates();
+            const triggers = templates.filter(t => t.trigger_category === 'on_apu_photo' && t.is_active);
+            if (!triggers.length) {
+                UI.toast.error('No active APU template found — enable "APU Appointment Reminder" in Automation settings first.');
+                return;
+            }
+
+            const [allProspects, allDrafts] = await Promise.all([
+                AppDataStore.getAll('prospects'),
+                AppDataStore.getAll('follow_up_drafts').catch(() => [])
+            ]);
+
+            const withApu = allProspects.filter(p => Array.isArray(p.apu_form_urls) && p.apu_form_urls.length > 0);
+            if (!withApu.length) { UI.toast.error('No prospects with APU photos found.'); return; }
+
+            let created = 0, skipped = 0;
+
+            for (const p of withApu) {
+                const latestPhotoUrl = p.apu_form_urls[p.apu_form_urls.length - 1];
+                for (const tpl of triggers) {
+                    const dup = allDrafts.find(d =>
+                        d.prospect_id == p.id &&
+                        d.trigger_type === tpl.trigger_type &&
+                        !d.event_id
+                    );
+                    if (dup) { skipped++; continue; }
+
+                    const msg = interpolateTemplate(tpl.message_template, {
+                        name: p.full_name || '',
+                        agent_name: _currentUser?.full_name || '',
+                        photo_url: latestPhotoUrl
+                    });
+                    const dueDate = new Date();
+                    dueDate.setDate(dueDate.getDate() + (tpl.delay_days || 0));
+
+                    const draft = await AppDataStore.create('follow_up_drafts', {
+                        prospect_id: p.id,
+                        customer_id: null,
+                        agent_id: p.responsible_agent_id || _currentUser?.id || null,
+                        trigger_type: tpl.trigger_type,
+                        message_text: msg,
+                        phone: p.phone || '',
+                        prospect_name: p.full_name || '',
+                        event_id: null,
+                        event_date: null,
+                        event_name: '',
+                        due_date: dueDate.toISOString().split('T')[0],
+                        attachment_url: latestPhotoUrl || null,
+                        status: 'pending'
+                    });
+                    if (draft) { created++; allDrafts.push(draft); }
+                }
+            }
+
+            UI.toast.success(`APU reminders: ${created} created, ${skipped} already existed.`);
+            renderFollowUpReminders();
+        } catch (e) {
+            console.error('bulkDispatchApuReminders failed:', e);
+            UI.toast.error('Bulk APU dispatch failed — check console.');
+        }
+    };
+
     // Dispatcher: PROACTIVE event invites — scans upcoming events and finds eligible
     // prospects/customers based on each trigger's match conditions. Called on calendar load.
     // Creates draft invites for each match. Dismissed/sent drafts are NOT recreated.
@@ -37799,6 +37869,7 @@ JB 星期二到
         dispatchAfterCpsTriggers,
         dispatchOnEventAttendanceTriggers,
         dispatchOnApuPhotoTriggers,
+        bulkDispatchApuReminders,
         dispatchBirthdayTriggers,
         dispatchProactiveEventInvites,
         renderAutomationTab,
