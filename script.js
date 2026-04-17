@@ -6322,6 +6322,7 @@ const Auth = {
     async function logout() {
         await Auth.logout();
         _currentUser = null;
+        localStorage.removeItem('remember_me'); // clear "keep me logged in" on explicit logout
         document.getElementById('app-shell').style.display = 'none';
         document.getElementById('login-container').style.display = 'flex';
         UI.hideModal();      // close the user menu modal
@@ -6334,6 +6335,9 @@ function _wireLoginBtn() {
     const btn = document.getElementById('loginBtn');
     if (!btn || btn._supabaseSetup) return;
     btn._supabaseSetup = true;
+    // Restore remembered checkbox state
+    const rememberChk = document.getElementById('rememberMe');
+    if (rememberChk) rememberChk.checked = localStorage.getItem('remember_me') === '1';
     btn.onclick = async () => {
         const email = document.getElementById('loginEmail')?.value?.trim();
         const password = document.getElementById('loginPassword')?.value;
@@ -6415,6 +6419,13 @@ function _wireLoginBtn() {
             
             _currentUser = profile;
             await UserPreferences.load(profile.id);
+            // Save "remember me" preference before leaving login screen
+            const _rememberChk = document.getElementById('rememberMe');
+            if (_rememberChk && _rememberChk.checked) {
+                localStorage.setItem('remember_me', '1');
+            } else {
+                localStorage.removeItem('remember_me');
+            }
             document.getElementById('login-container').style.display = 'none';
             document.getElementById('app-shell').style.display = 'block';
             updateUserDisplay();
@@ -38366,6 +38377,8 @@ const initSecurity = async () => {
 
 let sessionTimeoutTimer;
 const initSessionTimeout = async () => {
+    // If "Keep me logged in" was checked at last login, skip inactivity timeout entirely
+    if (localStorage.getItem('remember_me') === '1') return;
     const timeoutMinutes = parseInt(UserPreferences.getSync('session_timeout', 30));
     const resetTimeout = () => {
         clearTimeout(sessionTimeoutTimer);
