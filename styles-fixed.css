@@ -353,7 +353,7 @@ body {
 
 .calendar-controls {
     display: flex;
-    gap: 16px;
+    gap: 10px;
     align-items: center;
 }
 
@@ -9278,4 +9278,210 @@ input:checked+.slider:before {
 .four-pillar-card .pc-admin.reset {
     border-color: #d97706;
     color: #d97706;
+}
+
+/* ===== CALENDAR HEADER — WHITE PILL + 3 CIRCULAR ICON BUTTONS ===== */
+.cal-controls-pill {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: #fff;
+    border-radius: 999px;
+    padding: 6px 10px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.12);
+}
+
+.cal-icon-btn {
+    width: 40px !important;
+    height: 40px !important;
+    border-radius: 50% !important;
+    border: none !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: transform 0.15s ease;
+    padding: 0 !important;
+    line-height: 1;
+}
+
+.cal-icon-btn:hover { transform: scale(1.1); }
+
+.cal-btn-filter {
+    background: transparent !important;
+    color: #1a1a1a !important;
+    font-size: 20px !important;
+    box-shadow: none !important;
+}
+
+.cal-btn-wa {
+    background: #25d366 !important;
+    color: #fff !important;
+    font-size: 23px !important;
+    box-shadow: 0 2px 10px rgba(37,211,102,0.45) !important;
+}
+
+.cal-btn-add {
+    background: #e8393d !important;
+    color: #fff !important;
+    font-size: 21px !important;
+    font-weight: 700;
+    box-shadow: 0 2px 10px rgba(232,57,61,0.45) !important;
+}
+
+/* ===== TODAY'S ACTIVITIES — CIRCULAR GRADIENT ICON BUTTONS ===== */
+.tac-actions {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+}
+
+.tac-actions .btn {
+    border-radius: 50% !important;
+    width: 34px !important;
+    height: 34px !important;
+    padding: 0 !important;
+    font-size: 13px !important;
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    border: none !important;
+    transition: transform 0.13s ease, box-shadow 0.13s ease !important;
+    flex-shrink: 0;
+}
+
+.tac-actions .btn:hover { transform: translateY(-2px) scale(1.08); }
+
+.tac-btn-view    { background: linear-gradient(135deg,#3b82f6,#2563eb) !important; color:#fff !important; box-shadow:0 2px 8px rgba(37,99,235,.28) !important; }
+.tac-btn-outcome { background: linear-gradient(135deg,#10b981,#059669) !important; color:#fff !important; box-shadow:0 2px 8px rgba(5,150,105,.28) !important; }
+.tac-btn-notes   { background: linear-gradient(135deg,#6366f1,#4f46e5) !important; color:#fff !important; box-shadow:0 2px 8px rgba(79,70,229,.28) !important; }
+.tac-btn-edit    { background: linear-gradient(135deg,#f59e0b,#d97706) !important; color:#fff !important; box-shadow:0 2px 8px rgba(217,119,6,.28) !important; }
+.tac-btn-co      { background: linear-gradient(135deg,#94a3b8,#64748b) !important; color:#fff !important; box-shadow:0 2px 8px rgba(100,116,139,.2) !important; }
+
+/* ===== ACTIVITY DETAILS — ICON-CARD ACTION BUTTONS ===== */
+.act-actions-section { margin-top: 12px; }
+
+.act-actions-list {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin-top: 14px;
+}
+
+.act-action-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 8px;
+    padding: 14px 6px 11px;
+    border-radius: 16px;
+    font-size: 11px;
+    font-weight: 600;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+    text-align: center;
+    background: #ffffff;
+    color: #374151;
+    line-height: 1.25;
+    letter-spacing: 0.01em;
+    width: 100%;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+}
+
+.act-action-btn:hover { transform: translateY(-3px); }
+
+.act-action-btn .act-icon {
+    width: 38px;
+    height: 38px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 15px;
+    flex-shrink: 0;
+    transition: transform 0.15s ease;
+}
+
+.act-action-btn:hover .act-icon { transform: scale(1.08); }
+
+.act-action-btn .act-label {
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+    padding: 0 2px;
+}
+
+.act-btn-profile  { border-color:rgba(3,105,161,.12);  color:#0369a1; box-shadow:0 2px 10px rgba(3,105,161,.08); }
+.act-btn-profile  .act-icon { background:#e0f2fe; color:#0369a1; }
+.act-btn-profile:hover  { box-shadow:0 6px 20px rgba(3,105,161,.18); }
+
+.act-btn-doc      { border-color:rgba(91,33,182,.12);  color:#5b21b6; box-shadow:0 2px 10px rgba(91,33,182,.08); }
+.act-btn-doc      .act-icon { background:#ede9fe; color:#5b21b6; }
+.act-btn-doc:hover      { box-shadow:0 6px 20px rgba(91,33,182,.18); }
+
+.act-btn-complete { border-color:rgba(5,150,105,.12);  color:#065f46; box-shadow:0 2px 10px rgba(5,150,105,.08); }
+.act-btn-complete .act-icon { background:#d1fae5; color:#059669; }
+.act-btn-complete:hover { box-shadow:0 6px 20px rgba(5,150,105,.18); }
+
+.act-btn-edit     { border-color:rgba(180,83,9,.12);   color:#92400e; box-shadow:0 2px 10px rgba(180,83,9,.08); }
+.act-btn-edit     .act-icon { background:#fef3c7; color:#d97706; }
+.act-btn-edit:hover     { box-shadow:0 6px 20px rgba(180,83,9,.18); }
+
+.act-btn-outcome  { border-color:rgba(6,95,70,.12);    color:#065f46; box-shadow:0 2px 10px rgba(6,95,70,.08); }
+.act-btn-outcome  .act-icon { background:#d1fae5; color:#059669; }
+.act-btn-outcome:hover  { box-shadow:0 6px 20px rgba(6,95,70,.18); }
+
+.act-btn-notes    { border-color:rgba(55,48,163,.12);  color:#3730a3; box-shadow:0 2px 10px rgba(55,48,163,.08); }
+.act-btn-notes    .act-icon { background:#e0e7ff; color:#4f46e5; }
+.act-btn-notes:hover    { box-shadow:0 6px 20px rgba(55,48,163,.18); }
+
+.act-action-delete {
+    grid-column: 1 / -1;
+    flex-direction: row !important;
+    padding: 13px 20px !important;
+    border-radius: 14px !important;
+    background: linear-gradient(135deg, #7f1d1d 0%, #a01c2e 100%) !important;
+    color: #fff !important;
+    font-size: 13.5px !important;
+    font-weight: 600 !important;
+    border-color: transparent !important;
+    box-shadow: 0 4px 16px rgba(127,29,29,.38) !important;
+    gap: 8px !important;
+    justify-content: center !important;
+    letter-spacing: 0.02em;
+}
+
+.act-action-delete:hover {
+    transform: translateY(-2px) !important;
+    box-shadow: 0 8px 22px rgba(127,29,29,.48) !important;
+}
+
+/* ===== ADD ATTENDEE / AGENT SLOT BUTTON ===== */
+.btn-add-slot {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 8px 18px;
+    border-radius: 22px;
+    border: 1.5px dashed var(--primary);
+    background: rgba(127,29,29,0.04);
+    color: var(--primary);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, box-shadow 0.15s, transform 0.15s;
+    letter-spacing: 0.01em;
+}
+
+.btn-add-slot:hover {
+    background: var(--primary);
+    color: white;
+    box-shadow: 0 4px 12px rgba(127,29,29,.25);
+    transform: translateY(-1px);
 }
