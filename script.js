@@ -36089,15 +36089,26 @@ const initImportDemoData = async () => {
         return out;
     };
 
-    // --- Dedup against processed_orders history ---
+    // --- Dedup against last 20 rows of the previous week's run ---
+    // Supplier files sometimes carry over the tail end of last week's orders.
+    // Comparing against the previous week's final 20 committed rows catches those duplicates.
     const eggDedupAgainstHistory = async (rows) => {
         try {
-            // Fetch unique_keys for rows we care about. Getting all is simplest.
-            const history = await AppDataStore.query('egg_processed_orders', {});
-            const seen = new Set((history||[]).filter(h => !h.excluded_reason).map(h => h.unique_key));
-            return rows.filter(r => !seen.has(r.unique_key));
+            const runs = await AppDataStore.query('egg_run_history', {}) || [];
+            const currentWeekIso = eggFormatDateIso(_eggState.weekStartDate || eggGetCurrentMonday());
+            // Most recent run from any week before the current one
+            const prevRun = runs
+                .filter(r => r.week_start_date && r.week_start_date < currentWeekIso)
+                .sort((a, b) => (b.week_start_date || '').localeCompare(a.week_start_date || ''))[0];
+            if (!prevRun) return rows;
+
+            const prevOrders = await AppDataStore.query('egg_processed_orders', { run_id: prevRun.id }) || [];
+            // Sort by processed_at ascending so slice(-20) gives the last 20 committed rows
+            prevOrders.sort((a, b) => (a.processed_at || '').localeCompare(b.processed_at || ''));
+            const last20Keys = new Set(prevOrders.slice(-20).map(h => h.unique_key));
+            return rows.filter(r => !last20Keys.has(r.unique_key));
         } catch (err) {
-            console.error('egg: dedup failed, returning all rows', err);
+            console.error('egg: prev-week dedup failed, returning all rows', err);
             return rows;
         }
     };
