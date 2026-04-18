@@ -6242,7 +6242,7 @@ In a production system, this would show the actual file contents.
         // Map Level 1-14 to visible nav IDs (suffix after 'nav-')
         const _l12 = ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'reports', 'documents', 'settings', 'fude', 'milestones'];
         const levelPermissions = {
-            1: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'import', 'integrations', 'settings', 'fude', 'milestones', 'custom_fields', 'egg-purchasing'],
+            1: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'import', 'integrations', 'settings', 'fude', 'milestones', 'custom_fields', 'egg-purchasing', 'standard-functions'],
             2: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'import', 'integrations', 'settings', 'fude', 'milestones', 'custom_fields'],
             3: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'performance', 'reports', 'protection', 'documents', 'settings', 'fude'],
             4: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'performance', 'reports', 'protection', 'documents', 'settings', 'fude'],
@@ -6281,7 +6281,7 @@ In a production system, this would show the actual file contents.
             'cases', 'documents', 'import', 'promotions', 'marketing-automation', 'marketing-lists',
             'performance', 'reports', 'risk', 'admin',
             'integrations', 'settings', 'milestones', 'fude',
-            'custom_fields', 'egg-purchasing'
+            'custom_fields', 'egg-purchasing', 'standard-functions'
         ];
 
         allNavIds.forEach(id => {
@@ -8168,6 +8168,14 @@ function _wireLoginBtn() {
             }
             _currentView = 'egg_purchasing';
             await showEggPurchasingView(viewport);
+        } else if (viewId === 'standard_functions') {
+            if (!isSystemAdmin(_currentUser)) {
+                UI.toast.error('Super Admin only');
+                await navigateTo('calendar');
+                return;
+            }
+            _currentView = 'standard_functions';
+            await showStandardFunctionsView(viewport);
         } else {
             viewport.innerHTML = `
                 <div class="placeholder-view">
@@ -13839,20 +13847,20 @@ function _wireLoginBtn() {
                             setF('cps-email', prospect.email);
                             setF('cps-dob', prospect.date_of_birth);
                             if (prospect.date_of_birth) {
-                                const dobChk = document.getElementById('has-dob');
+                                const dobChk = document.getElementById('cps-use-dob');
                                 if (dobChk) dobChk.checked = true;
                             }
                             setF('cps-lunar', prospect.lunar_birth);
-                            setF('cps-gua', prospect.ming_gua);
+                            setF('cps-minggua', prospect.ming_gua);
                             setF('cps-occupation', prospect.occupation);
                             setF('cps-company', prospect.company_name);
                             setF('cps-income', prospect.income_range);
                             setF('cps-address', prospect.address);
                             setF('cps-city', prospect.city);
                             setF('cps-state', prospect.state);
-                            setF('cps-zip', prospect.postal_code);
+                            setF('cps-postal', prospect.postal_code);
                             setF('cps-referrer', prospect.referred_by);
-                            setF('cps-relation', prospect.referral_relationship);
+                            setF('cps-relationship', prospect.referral_relationship);
                             clearInterval(cpsInterval);
                         } else if (++attempts >= 12) {
                             clearInterval(cpsInterval);
@@ -13985,18 +13993,18 @@ function _wireLoginBtn() {
                         setField('cps-email', prospect.email);
                         setField('cps-dob', prospect.date_of_birth);
                         if (prospect.date_of_birth) {
-                            const dobChk = document.getElementById('has-dob');
+                            const dobChk = document.getElementById('cps-use-dob');
                             if (dobChk) dobChk.checked = true;
                         }
                         setField('cps-lunar', prospect.lunar_birth);
-                        setField('cps-gua', prospect.ming_gua);
+                        setField('cps-minggua', prospect.ming_gua);
                         setField('cps-occupation', prospect.occupation);
                         setField('cps-company', prospect.company_name);
                         setField('cps-income', prospect.income_range);
                         setField('cps-address', prospect.address);
                         setField('cps-city', prospect.city);
                         setField('cps-state', prospect.state);
-                        setField('cps-zip', prospect.postal_code);
+                        setField('cps-postal', prospect.postal_code);
                         setField('cps-summary', activity.summary);
                         setField('cps-interest', prospect.cps_interest);
                         clearInterval(cpsInterval);
@@ -14097,6 +14105,311 @@ function _wireLoginBtn() {
     if (typeof renderTodayActivities === 'function') await renderTodayActivities();
 };
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // STANDARD FUNCTION — Basic Information Block
+    // Single source of truth for the reusable prospect/customer field set.
+    // Used in 3 places:
+    //   1. Add / Edit Prospect modal (openProspectModal)
+    //   2. Quick Add Activity → CPS type (New Customer Information)
+    //   3. Standard Functions admin page (Level 1 only, preview/documentation)
+    // To add a new field: update buildBasicInfoBlock + collectBasicInfoData.
+    // All 3 call sites pick it up automatically.
+    // ═══════════════════════════════════════════════════════════════════════
+    const BASIC_INFO_INCOME_RANGES = [
+        ['< RM3k', 'Below RM 3,000'],
+        ['RM3-5k', 'RM 3,000 – RM 5,000'],
+        ['RM5-8k', 'RM 5,001 – RM 8,000'],
+        ['RM8-12k', 'RM 8,001 – RM 12,000'],
+        ['RM12-20k', 'RM 12,001 – RM 20,000'],
+        ['> RM20k', 'Above RM 20,000'],
+    ];
+    const BASIC_INFO_RELATIONS = ['Friend','Family','Spouse','Siblings','Cousin','Colleague','Ex Colleague','Ex Classmate','Business Partner','Customer'];
+    const BASIC_INFO_INTERESTS = [
+        ['个人改命', '个人改命 (Personal Destiny Change)'],
+        ['风水', '风水 (Feng Shui)'],
+        ['画作', '画作 (Calligraphy)'],
+        ['满堂系列', '满堂系列 (Bujishu Home Furnishing)'],
+        ['Formula', 'Formula Healthcare'],
+        ['代理配套', '代理配套 (Agent Package)'],
+    ];
+    const BASIC_INFO_MING_GUA = [
+        ['MG1','MG1 坎'],['MG2','MG2 坤'],['MG3','MG3 震'],['MG4','MG4 巽'],
+        ['MG5','MG5'],['MG6','MG6 乾'],['MG7','MG7 兑'],['MG8','MG8 艮'],['MG9','MG9 离']
+    ];
+
+    const buildBasicInfoBlock = (prefix, data = null) => {
+        const d = data || {};
+        const sel = (v, opt) => v === opt ? 'selected' : '';
+        const chk = (cond) => cond ? 'checked' : '';
+        const esc = (s) => (s == null ? '' : String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'));
+        const relOther = d.referral_relationship
+            && !BASIC_INFO_RELATIONS.includes(d.referral_relationship)
+            && d.referral_relationship !== 'Other';
+        const useDob = ['solar','both'].includes(d.life_chart_type);
+        const useLunar = ['lunar','both'].includes(d.life_chart_type) || !data;
+        const readOnly = prefix === 'preview';
+        const disabled = readOnly ? 'disabled' : '';
+        const searchHandler = readOnly ? '' : `onkeyup="app.debounceCall('${prefix}-referrer', () => app.searchBasicInfoReferrers('${prefix}'), 250)"`;
+        const clearHandler = readOnly ? '' : `onclick="app.clearBasicInfoReferrer('${prefix}')"`;
+
+        return `
+            <div class="form-section basic-info-block" data-prefix="${prefix}">
+                <div class="form-row">
+                    <div class="form-group half">
+                        <label>Title</label>
+                        <select id="${prefix}-title" class="form-control" ${disabled}>
+                            ${['Mr.','Ms.','Mrs.','Dr.'].map(v => `<option value="${v}" ${sel(d.title, v)}>${v}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="form-group half">
+                        <label>Full Name <span class="required">*</span></label>
+                        <input type="text" id="${prefix}-name" class="form-control" value="${esc(d.full_name)}" placeholder="e.g., Tan Ah Kow" ${disabled} required>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group half">
+                        <label>Nickname</label>
+                        <input type="text" id="${prefix}-nickname" class="form-control" value="${esc(d.nickname)}" placeholder="e.g., Ah Kow" ${disabled}>
+                    </div>
+                    <div class="form-group half">
+                        <label>Gender</label>
+                        <select id="${prefix}-gender" class="form-control" ${disabled}>
+                            ${['Male','Female','Other'].map(v => `<option value="${v}" ${sel(d.gender, v)}>${v}</option>`).join('')}
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group half">
+                        <label>Nationality</label>
+                        <input type="text" id="${prefix}-nationality" class="form-control" value="${esc(d.nationality || 'Malaysian')}" ${disabled}>
+                    </div>
+                    <div class="form-group half">
+                        <label>Phone <span class="required">*</span></label>
+                        <input type="tel" id="${prefix}-phone" class="form-control" value="${esc(d.phone)}" placeholder="e.g., 012-3456789" ${disabled} required>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group half">
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <label style="margin-bottom:0;">Date of Birth</label>
+                            <input type="checkbox" id="${prefix}-use-dob" ${chk(useDob)} ${disabled} title="Use for life chart">
+                            <small style="color:var(--gray-400);font-size:11px;">Use for life chart</small>
+                        </div>
+                        <input type="date" id="${prefix}-dob" class="form-control" value="${esc(d.date_of_birth)}" onchange="app.updateLunarBirth('${prefix}-dob','${prefix}-lunar')" ${disabled}>
+                    </div>
+                    <div class="form-group half">
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <label style="margin-bottom:0;">Lunar Birth</label>
+                            <input type="checkbox" id="${prefix}-use-lunar" ${chk(useLunar)} ${disabled} title="Use for life chart">
+                            <small style="color:var(--gray-400);font-size:11px;">Use for life chart</small>
+                        </div>
+                        <input type="text" id="${prefix}-lunar" class="form-control" value="${esc(d.lunar_birth)}" placeholder="Lunar date" ${disabled}>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group half">
+                        <label>Ming Gua</label>
+                        <select id="${prefix}-minggua" class="form-control" ${disabled}>
+                            <option value="">-- Select --</option>
+                            ${BASIC_INFO_MING_GUA.map(([v,l]) => `<option value="${v}" ${sel(d.ming_gua, v)}>${l}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="form-group half">
+                        <label>IC Number</label>
+                        <input type="text" id="${prefix}-ic" class="form-control" value="${esc(d.ic_number)}" placeholder="e.g., 901212-10-1234" ${disabled}>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group half">
+                        <label>Occupation</label>
+                        <input type="text" id="${prefix}-occupation" class="form-control" value="${esc(d.occupation)}" placeholder="e.g., Engineer" ${disabled}>
+                    </div>
+                    <div class="form-group half">
+                        <label>Company Name</label>
+                        <input type="text" id="${prefix}-company" class="form-control" value="${esc(d.company_name)}" placeholder="e.g., ABC Sdn Bhd" ${disabled}>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group half">
+                        <label>Income Range</label>
+                        <select id="${prefix}-income" class="form-control" ${disabled}>
+                            <option value="">-- Select Range --</option>
+                            ${BASIC_INFO_INCOME_RANGES.map(([v,l]) => `<option value="${v}" ${sel(d.income_range, v)}>${l}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="form-group half">
+                        <label>Email</label>
+                        <input type="email" id="${prefix}-email" class="form-control" value="${esc(d.email)}" placeholder="email@example.com" ${disabled}>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Prospect Interest / 客户兴趣</label>
+                    <select id="${prefix}-interest" class="form-control" ${disabled}>
+                        <option value="">-- Select Interest --</option>
+                        ${BASIC_INFO_INTERESTS.map(([v,l]) => `<option value="${v}" ${sel(d.cps_interest, v)}>${l}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Marital Status</label>
+                    <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
+                        ${['Single','Married','Others'].map(opt => `
+                            <label style="display:flex;align-items:center;gap:6px;font-weight:normal;margin:0;cursor:pointer;">
+                                <input type="checkbox" class="${prefix}-marital-cb" value="${opt}" ${chk(d.marital_status === opt)} ${disabled} onchange="document.querySelectorAll('.${prefix}-marital-cb').forEach(cb=>{if(cb!==this)cb.checked=false;});">
+                                ${opt}
+                            </label>
+                        `).join('')}
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Children</label>
+                    <div id="prospect-children-list" style="display:flex;flex-direction:column;gap:8px;"></div>
+                    <button type="button" class="btn secondary btn-sm" style="margin-top:8px;" onclick="app.addProspectChildRow()" ${disabled}><i class="fas fa-plus"></i> Add Child</button>
+                </div>
+                <div class="form-group">
+                    <label>Address</label>
+                    <textarea id="${prefix}-address" class="form-control" rows="2" placeholder="Street address" ${disabled}>${esc(d.address)}</textarea>
+                </div>
+                <div class="form-row">
+                    <div class="form-group half">
+                        <input type="text" id="${prefix}-city" class="form-control" placeholder="City" value="${esc(d.city)}" ${disabled}>
+                    </div>
+                    <div class="form-group half">
+                        <input type="text" id="${prefix}-state" class="form-control" placeholder="State" value="${esc(d.state)}" ${disabled}>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <input type="text" id="${prefix}-postal" class="form-control" placeholder="Postal Code" value="${esc(d.postal_code)}" ${disabled}>
+                </div>
+                <div class="form-row">
+                    <div class="form-group half">
+                        <label>Referred By <span class="required">*</span></label>
+                        <div style="position:relative;">
+                            <input type="text" id="${prefix}-referrer" class="form-control" placeholder="Search prospect or consultant..." ${searchHandler} ${disabled}>
+                            <div id="${prefix}-referrer-results" class="search-results-dropdown" style="display:none;position:absolute;z-index:1000;background:white;border:1px solid #ddd;border-radius:4px;width:100%;max-height:180px;overflow-y:auto;box-shadow:0 4px 8px rgba(0,0,0,0.1);"></div>
+                        </div>
+                        <div id="${prefix}-referrer-info" style="margin-top:6px;">${d.referred_by ? `<div class="selected-entity-badge"><span><strong>${esc(d.referred_by)}</strong></span><button class="btn btn-sm secondary" ${clearHandler}>Clear</button></div>` : ''}</div>
+                    </div>
+                    <div class="form-group half">
+                        <label>Relationship <span class="required">*</span></label>
+                        <select id="${prefix}-relationship" class="form-control" onchange="document.getElementById('${prefix}-relationship-other-div').style.display = this.value === 'Other' ? 'block' : 'none'" ${disabled}>
+                            <option value="">-- Select --</option>
+                            ${BASIC_INFO_RELATIONS.map(v => `<option value="${v}" ${sel(d.referral_relationship, v)}>${v}</option>`).join('')}
+                            <option value="Other" ${d.referral_relationship === 'Other' || relOther ? 'selected' : ''}>Other</option>
+                        </select>
+                    </div>
+                </div>
+                <div id="${prefix}-relationship-other-div" class="form-group" style="display:${relOther ? 'block' : 'none'};margin-top:10px;">
+                    <label>Please specify relation</label>
+                    <input type="text" id="${prefix}-relationship-other" class="form-control" placeholder="Specify relation..." value="${relOther ? esc(d.referral_relationship) : ''}" ${disabled}>
+                </div>
+            </div>
+        `;
+    };
+
+    // Collect all Basic Info fields from the DOM for saving. Used by both
+    // saveProspect and saveActivity (CPS) so they stay in sync.
+    const collectBasicInfoData = (prefix) => {
+        const d = (id) => document.getElementById(id)?.value?.trim() || '';
+        const useDob = document.getElementById(`${prefix}-use-dob`)?.checked;
+        const useLunar = document.getElementById(`${prefix}-use-lunar`)?.checked;
+        let lifeChartType = null;
+        if (useDob && useLunar) lifeChartType = 'both';
+        else if (useDob) lifeChartType = 'solar';
+        else if (useLunar) lifeChartType = 'lunar';
+        const rel = d(`${prefix}-relationship`);
+        const relOther = d(`${prefix}-relationship-other`);
+        return {
+            title: d(`${prefix}-title`) || null,
+            full_name: d(`${prefix}-name`),
+            nickname: d(`${prefix}-nickname`) || null,
+            gender: d(`${prefix}-gender`) || null,
+            nationality: d(`${prefix}-nationality`) || null,
+            phone: d(`${prefix}-phone`),
+            email: d(`${prefix}-email`) || null,
+            ic_number: d(`${prefix}-ic`) || null,
+            date_of_birth: d(`${prefix}-dob`) || null,
+            lunar_birth: d(`${prefix}-lunar`) || null,
+            occupation: d(`${prefix}-occupation`) || null,
+            company_name: d(`${prefix}-company`) || null,
+            income_range: d(`${prefix}-income`) || null,
+            address: d(`${prefix}-address`) || null,
+            city: d(`${prefix}-city`) || null,
+            state: d(`${prefix}-state`) || null,
+            postal_code: d(`${prefix}-postal`) || null,
+            ming_gua: d(`${prefix}-minggua`) || null,
+            cps_interest: d(`${prefix}-interest`) || null,
+            marital_status: document.querySelector(`.${prefix}-marital-cb:checked`)?.value || null,
+            children: JSON.stringify(collectProspectChildren()),
+            referral_relationship: rel === 'Other' ? (relOther || 'Other') : rel,
+            life_chart_type: lifeChartType,
+        };
+    };
+
+    // Thin dispatchers so the shared block's referrer widget routes to the
+    // right form-specific search/clear handler based on prefix.
+    const searchBasicInfoReferrers = async (prefix) => {
+        if (prefix === 'cps') return searchReferrers();
+        if (prefix === 'prospect') return searchProspectReferrers();
+    };
+    const clearBasicInfoReferrer = (prefix) => {
+        if (prefix === 'cps') return clearSelectedReferrer();
+        if (prefix === 'prospect') return clearProspectReferrer();
+    };
+
+    // Standard Functions page — Level 1 only. Shows a read-only preview of
+    // each reusable block so admins can see the canonical field set that
+    // powers Add Prospect / Edit Prospect / CPS New Customer Info in one
+    // place. Edit buildBasicInfoBlock() to change any field — all 3 call
+    // sites update automatically.
+    const showStandardFunctionsView = async (container) => {
+        container.innerHTML = `
+            <style>
+                .sf-wrap{max-width:1100px;margin:0 auto;padding:20px;}
+                .sf-header{margin-bottom:20px;}
+                .sf-header h1{font-size:24px;font-weight:700;margin:0 0 6px;color:var(--gray-900);}
+                .sf-header p{color:var(--gray-500);font-size:14px;margin:0;}
+                .sf-card{background:#fff;border:1px solid var(--gray-200);border-radius:12px;box-shadow:var(--shadow-sm);margin-bottom:20px;overflow:hidden;}
+                .sf-card-hdr{padding:14px 18px;background:var(--gray-50);border-bottom:1px solid var(--gray-200);display:flex;justify-content:space-between;align-items:center;gap:12px;}
+                .sf-card-hdr h3{margin:0;font-size:16px;font-weight:600;color:var(--gray-900);}
+                .sf-card-hdr .sf-meta{font-size:12px;color:var(--gray-500);}
+                .sf-card-body{padding:18px;}
+                .sf-usage{background:#fffbea;border-left:3px solid #f59e0b;padding:10px 14px;border-radius:6px;margin-bottom:14px;font-size:13px;color:#78350f;}
+                .sf-usage code{background:rgba(0,0,0,0.05);padding:1px 6px;border-radius:3px;font-size:12px;}
+                .sf-preview-wrap{border:1px dashed var(--gray-300);border-radius:8px;padding:14px;background:var(--gray-50);}
+                .sf-preview-wrap .form-control{pointer-events:none;}
+            </style>
+            <div class="sf-wrap">
+                <div class="sf-header">
+                    <h1><i class="fas fa-cubes"></i> Standard Functions</h1>
+                    <p>Reusable form blocks shared across the CRM. Edit once — all consumers update automatically.</p>
+                </div>
+
+                <div class="sf-card">
+                    <div class="sf-card-hdr">
+                        <h3>👤 Basic Information</h3>
+                        <span class="sf-meta">Used in 3 places</span>
+                    </div>
+                    <div class="sf-card-body">
+                        <div class="sf-usage">
+                            <strong>Consumers:</strong>
+                            <ul style="margin:6px 0 0;padding-left:20px;">
+                                <li>Prospects → <em>Add New Prospect</em> button</li>
+                                <li>Prospects → <em>Edit Prospect</em> action</li>
+                                <li>Calendar → Quick Add Activity → <em>CPS type</em> (New Customer Information)</li>
+                            </ul>
+                            <div style="margin-top:8px;">
+                                <strong>To add a field:</strong> edit <code>buildBasicInfoBlock()</code> and <code>collectBasicInfoData()</code> in <code>script.js</code>. All 3 consumers pick it up on next page reload.
+                            </div>
+                        </div>
+                        <div class="sf-preview-wrap">
+                            ${buildBasicInfoBlock('preview')}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    };
+
     const updateActivityForm = async () => {
         const type = document.getElementById('modal-activity-type')?.value;
         const container = document.getElementById('dynamic-form-fields');
@@ -14121,168 +14434,7 @@ function _wireLoginBtn() {
                 html = `
                     <div class="form-section">
                         <h4>👤 New Customer Information</h4>
-                        <div class="form-row">
-                            <div class="form-group half">
-                                <label>Title</label>
-                                <select id="cps-title" class="form-control">
-                                    <option value="Mr.">Mr.</option>
-                                    <option value="Ms.">Ms.</option>
-                                    <option value="Mrs.">Mrs.</option>
-                                    <option value="Dr.">Dr.</option>
-                                </select>
-                            </div>
-                            <div class="form-group half">
-                                <label>Full Name <span class="required">*</span></label>
-                                <input type="text" id="cps-name" class="form-control" placeholder="e.g., Tan Ah Kow" required>
-                            </div>
-                        </div>
-                        <div class="form-row">
-                            <div class="form-group half">
-                                <label>Nickname</label>
-                                <input type="text" id="cps-nickname" class="form-control" placeholder="e.g., Ah Kow">
-                            </div>
-                            <div class="form-group half">
-                                <label>Gender</label>
-                                <select id="cps-gender" class="form-control">
-                                    <option value="Male">Male</option>
-                                    <option value="Female">Female</option>
-                                    <option value="Other">Other</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="form-row">
-                            <div class="form-group half">
-                                <label>Nationality</label>
-                                <input type="text" id="cps-nationality" class="form-control" placeholder="e.g., Malaysian" value="Malaysian">
-                            </div>
-                            <div class="form-group half">
-                                <label>Phone Number <span class="required">*</span></label>
-                                <input type="tel" id="cps-phone" class="form-control" placeholder="e.g., 012-3456789" required>
-                            </div>
-                        </div>
-                        <div class="form-row">
-                            <div class="form-group half">
-                                <div style="display:flex; align-items:center; gap:8px;">
-                                    <label style="margin-bottom:0;">Date of Birth</label>
-                                    <input type="checkbox" id="has-dob">
-                                </div>
-                                <input type="date" id="cps-dob" class="form-control" onchange="app.updateLunarBirth()">
-                            </div>
-                            <div class="form-group half">
-                                <div style="display:flex; align-items:center; gap:8px;">
-                                    <label style="margin-bottom:0;">Lunar Birth</label>
-                                    <input type="checkbox" id="has-lunar" checked>
-                                </div>
-                                <input type="text" id="cps-lunar" class="form-control" placeholder="Lunar date">
-                            </div>
-                        </div>
-                        <div class="form-row">
-                            <div class="form-group half">
-                                <label>Ming Gua</label>
-                                <select id="cps-gua" class="form-control">
-                                    <option value="">-- Select --</option>
-                                    <option value="MG1">MG1 坎</option>
-                                    <option value="MG2">MG2 坤</option>
-                                    <option value="MG3">MG3 震</option>
-                                    <option value="MG4">MG4 巽</option>
-                                    <option value="MG5">MG5</option>
-                                    <option value="MG6">MG6 乾</option>
-                                    <option value="MG7">MG7 兑</option>
-                                    <option value="MG8">MG8 艮</option>
-                                    <option value="MG9">MG9 离</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="form-row">
-                            <div class="form-group half">
-                                <label>Occupation</label>
-                                <input type="text" id="cps-occupation" class="form-control" placeholder="e.g., Engineer">
-                            </div>
-                            <div class="form-group half">
-                                <label>Company Name</label>
-                                <input type="text" id="cps-company" class="form-control" placeholder="e.g., ABC Sdn Bhd">
-                            </div>
-                        </div>
-                        <div class="form-row">
-                            <div class="form-group half">
-                                <label>IC Number</label>
-                                <input type="text" id="cps-ic" class="form-control" placeholder="e.g., 901212-10-1234">
-                            </div>
-                            <div class="form-group half">
-                                <label>Income Range</label>
-                                <select id="cps-income" class="form-control">
-                                    <option value="">-- Select Range --</option>
-                                    <option value="Below RM 3,000">Below RM 3,000</option>
-                                    <option value="RM 3,000 - RM 5,000">RM 3,000 - RM 5,000</option>
-                                    <option value="RM 5,001 - RM 10,000">RM 5,001 - RM 10,000</option>
-                                    <option value="RM 10,001 - RM 20,000">RM 10,001 - RM 20,000</option>
-                                    <option value="Above RM 20,000">Above RM 20,000</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="form-section" style="border:none; padding:0; margin-top:10px;">
-                            <label>Address</label>
-                            <textarea id="cps-address" class="form-control" rows="2" placeholder="Street address..."></textarea>
-                            <div class="form-row" style="margin-top:10px;">
-                                <div class="form-group half">
-                                    <input type="text" id="cps-city" class="form-control" placeholder="City">
-                                </div>
-                                <div class="form-group half">
-                                    <input type="text" id="cps-state" class="form-control" placeholder="State">
-                                </div>
-                            </div>
-                            <div class="form-row">
-                                <div class="form-group half">
-                                    <input type="text" id="cps-zip" class="form-control" placeholder="Postal Code">
-                                </div>
-                                <div class="form-group half">
-                                    <input type="email" id="cps-email" class="form-control" placeholder="email@example.com">
-                                </div>
-                            </div>
-                        </div>
-                        <div class="form-row">
-                            <div class="form-group half">
-                                <label>Referrer <span class="required">*</span></label>
-                                <div class="search-with-results" style="position: relative;">
-                                    <input type="text" id="cps-referrer" class="form-control" placeholder="Search referrer..." onkeyup="app.debounceCall('cps-referrer', () => app.searchReferrers(), 250)">
-                                    <div id="referrer-results" class="search-results-dropdown" style="display:none; position:absolute; z-index:1000; background:white; border:1px solid #ddd; width:100%;"></div>
-                                </div>
-                                <div id="selected-referrer-info" class="selected-entity-info" style="margin-top: 8px;"></div>
-                            </div>
-                            <div class="form-group half">
-                                <label>Relation <span class="required">*</span></label>
-                                <select id="cps-relation" class="form-control" onchange="document.getElementById('cps-relation-other-div').style.display = this.value === 'Other' ? 'block' : 'none'">
-                                    <option value="">-- Select Relation --</option>
-                                    <option value="Friend">Friend</option>
-                                    <option value="Family">Family</option>
-                                    <option value="Spouse">Spouse</option>
-                                    <option value="Siblings">Siblings</option>
-                                    <option value="Cousin">Cousin</option>
-                                    <option value="Colleague">Colleague</option>
-                                    <option value="Ex Colleague">Ex Colleague</option>
-                                    <option value="Ex Classmate">Ex Classmate</option>
-                                    <option value="Business Partner">Business Partner</option>
-                                    <option value="Customer">Customer</option>
-                                    <option value="Other">Other</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div id="cps-relation-other-div" class="form-group" style="display:none; margin-top: 10px;">
-                            <label>Please specify relation</label>
-                            <input type="text" id="cps-relation-other" class="form-control" placeholder="Specify relation...">
-                        </div>
-                        <div class="form-group">
-                            <label>Prospect Interest / 客户兴趣</label>
-                            <select id="cps-interest" class="form-control">
-                                <option value="">-- Select Interest --</option>
-                                <option value="个人改命">个人改命 (Personal Destiny Change)</option>
-                                <option value="风水">风水 (Feng Shui)</option>
-                                <option value="画作">画作 (Calligraphy)</option>
-                                <option value="满堂系列">满堂系列 (Bujishu Home Furnishing)</option>
-                                <option value="Formula">Formula Healthcare</option>
-                                <option value="代理配套">代理配套 (Agent Package)</option>
-                            </select>
-                        </div>
+                        ${buildBasicInfoBlock('cps')}
                         <div class="form-group">
                             <label>Attachment (PDF, JPG, PNG up to 5MB)</label>
                             <input type="file" id="cps-attachment" class="form-control" accept=".pdf, .png, .jpg, .jpeg">
@@ -14318,10 +14470,6 @@ function _wireLoginBtn() {
                         </div>
                     </div>
                 `;
-                setTimeout(() => {
-                    const input = document.getElementById('cps-referrer');
-                    if (input) input.onkeyup = () => app.debounceCall('cps-referrer', () => app.searchReferrers(), 250);
-                }, 100);
                 break;
 
             case 'FTF':
@@ -15150,7 +15298,7 @@ function _wireLoginBtn() {
     const searchReferrers = async () => {
         try {
             const term = document.getElementById('cps-referrer')?.value.toLowerCase();
-            const resultsDiv = document.getElementById('referrer-results');
+            const resultsDiv = document.getElementById('cps-referrer-results');
 
             if (!term || term.length < 1) {
                 if (resultsDiv) resultsDiv.style.display = 'none';
@@ -15209,7 +15357,7 @@ function _wireLoginBtn() {
 
     const selectReferrer = (id, name, type) => {
         _selectedReferrer = { id, name, type };
-        const infoDiv = document.getElementById('selected-referrer-info');
+        const infoDiv = document.getElementById('cps-referrer-info');
         if (infoDiv) {
             infoDiv.innerHTML = `
                 <div class="selected-entity-badge">
@@ -15218,7 +15366,7 @@ function _wireLoginBtn() {
                 </div>
             `;
         }
-        const results = document.getElementById('referrer-results');
+        const results = document.getElementById('cps-referrer-results');
         if (results) results.style.display = 'none';
         const input = document.getElementById('cps-referrer');
         if (input) input.value = '';
@@ -15226,7 +15374,7 @@ function _wireLoginBtn() {
 
     const clearSelectedReferrer = () => {
         _selectedReferrer = null;
-        const infoDiv = document.getElementById('selected-referrer-info');
+        const infoDiv = document.getElementById('cps-referrer-info');
         if (infoDiv) infoDiv.innerHTML = '';
     };
 
@@ -15613,7 +15761,7 @@ function _wireLoginBtn() {
         if (type === 'CPS') {
             const name = document.getElementById('cps-name')?.value;
             const phone = document.getElementById('cps-phone')?.value;
-            const relation = document.getElementById('cps-relation')?.value;
+            const relation = document.getElementById('cps-relationship')?.value;
             const referrerInputName = document.getElementById('cps-referrer')?.value.trim();
 
             // All CPS must have a referrer — business runs by recommendation only
@@ -15672,45 +15820,18 @@ function _wireLoginBtn() {
             }
             window._cpsDuplicateConfirmed = false; // reset flag
 
-            const relationDetails = relation === 'Other' ? document.getElementById('cps-relation-other')?.value : relation;
-
+            // All Basic Info fields pulled via the shared collector — keeps
+            // CPS + Prospect forms in lockstep. Activity-specific metadata
+            // (responsible_agent_id, referred_by_*, score) is merged after.
+            const basic = collectBasicInfoData('cps');
             const prospectData = {
-                title: document.getElementById('cps-title')?.value || '',
-                full_name: name,
-                nickname: document.getElementById('cps-nickname')?.value || '',
-                gender: document.getElementById('cps-gender')?.value || '',
-                nationality: document.getElementById('cps-nationality')?.value || 'Malaysian',
-                phone,
-                ic_number: document.getElementById('cps-ic')?.value || '',
-                email: document.getElementById('cps-email')?.value || '',
-                occupation: document.getElementById('cps-occupation')?.value || '',
-                company_name: document.getElementById('cps-company')?.value || '',
-                income_range: document.getElementById('cps-income')?.value || '',
-                address: document.getElementById('cps-address')?.value || '',
-                city: document.getElementById('cps-city')?.value || '',
-                state: document.getElementById('cps-state')?.value || '',
-                postal_code: document.getElementById('cps-zip')?.value || '',
-                ming_gua: document.getElementById('cps-gua')?.value || '',
-                cps_interest: document.getElementById('cps-interest')?.value || '',
+                ...basic,
                 score: SCORING_RULES.CREATE_PROSPECT,
                 responsible_agent_id: _currentUser?.id || null,
                 referred_by_id: _selectedReferrer?.id || null,
                 referred_by_type: _selectedReferrer?.type || null,
                 referred_by: _selectedReferrer?.name || document.getElementById('cps-referrer')?.value || '',
-                referral_relationship: relationDetails
             };
-
-            // Always save both dates if entered — checkbox only controls life_chart_type
-            const dobVal = document.getElementById('cps-dob')?.value || '';
-            const lunarVal = document.getElementById('cps-lunar')?.value || '';
-            if (dobVal) prospectData.date_of_birth = dobVal;
-            if (lunarVal) prospectData.lunar_birth = lunarVal;
-
-            const hasDob = document.getElementById('has-dob')?.checked;
-            const hasLunar = document.getElementById('has-lunar')?.checked;
-            if (hasDob && hasLunar) prospectData.life_chart_type = 'both';
-            else if (hasDob) prospectData.life_chart_type = 'solar';
-            else if (hasLunar) prospectData.life_chart_type = 'lunar';
 
             let prospect;
             try {
@@ -17485,156 +17606,7 @@ function _wireLoginBtn() {
                 <input type="hidden" id="edit-prospect-id" value="${prospectId || ''}">
                 <div class="form-section">
                     <h4>Basic Information</h4>
-                    <div class="form-row">
-                        <div class="form-group half">
-                            <label>Title</label>
-                            <select id="prospect-title" class="form-control">
-                                <option value="Mr." ${prospect?.title === 'Mr.' ? 'selected' : ''}>Mr.</option>
-                                <option value="Ms." ${prospect?.title === 'Ms.' ? 'selected' : ''}>Ms.</option>
-                                <option value="Mrs." ${prospect?.title === 'Mrs.' ? 'selected' : ''}>Mrs.</option>
-                                <option value="Dr." ${prospect?.title === 'Dr.' ? 'selected' : ''}>Dr.</option>
-                            </select>
-                        </div>
-                        <div class="form-group half">
-                            <label>Full Name <span class="required">*</span></label>
-                            <input type="text" id="prospect-name" class="form-control" value="${prospect?.full_name || ''}" required>
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group half">
-                            <label>Nickname</label>
-                            <input type="text" id="prospect-nickname" class="form-control" value="${prospect?.nickname || ''}">
-                        </div>
-                        <div class="form-group half">
-                            <label>Gender</label>
-                            <select id="prospect-gender" class="form-control">
-                                <option value="Male" ${prospect?.gender === 'Male' ? 'selected' : ''}>Male</option>
-                                <option value="Female" ${prospect?.gender === 'Female' ? 'selected' : ''}>Female</option>
-                                <option value="Other" ${prospect?.gender === 'Other' ? 'selected' : ''}>Other</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group half">
-                            <label>Nationality</label>
-                            <input type="text" id="prospect-nationality" class="form-control" value="${prospect?.nationality || 'Malaysian'}">
-                        </div>
-                        <div class="form-group half">
-                            <label>Phone <span class="required">*</span></label>
-                            <input type="tel" id="prospect-phone" class="form-control" value="${prospect?.phone || ''}" required>
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group half">
-                            <div style="display:flex;align-items:center;gap:8px;">
-                                <label style="margin-bottom:0;">Date of Birth</label>
-                                <input type="checkbox" id="prospect-use-dob" ${['solar','both'].includes(prospect?.life_chart_type) ? 'checked' : ''} title="Use for life chart">
-                            </div>
-                            <input type="date" id="prospect-dob" class="form-control" value="${prospect?.date_of_birth || ''}" onchange="app.updateLunarBirth('prospect-dob','prospect-lunar')">
-                        </div>
-                        <div class="form-group half">
-                            <div style="display:flex;align-items:center;gap:8px;">
-                                <label style="margin-bottom:0;">Lunar Birth</label>
-                                <input type="checkbox" id="prospect-use-lunar" ${['lunar','both'].includes(prospect?.life_chart_type) || !prospect ? 'checked' : ''} title="Use for life chart">
-                            </div>
-                            <input type="text" id="prospect-lunar" class="form-control" value="${prospect?.lunar_birth || ''}">
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group half">
-                            <label>Ming Gua</label>
-                            <select id="prospect-minggua" class="form-control">
-                                <option value="">-- Select --</option>
-                                ${[['MG1','MG1 坎'],['MG2','MG2 坤'],['MG3','MG3 震'],['MG4','MG4 巽'],['MG5','MG5'],['MG6','MG6 乾'],['MG7','MG7 兑'],['MG8','MG8 艮'],['MG9','MG9 离']].map(([val,lbl]) => `
-                                    <option value="${val}" ${prospect?.ming_gua === val ? 'selected' : ''}>${lbl}</option>
-                                `).join('')}
-                            </select>
-                        </div>
-                        <div class="form-group half">
-                            <label>IC Number</label>
-                            <input type="text" id="prospect-ic" class="form-control" value="${prospect?.ic_number || ''}">
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group half">
-                            <label>Occupation</label>
-                            <input type="text" id="prospect-occupation" class="form-control" value="${prospect?.occupation || ''}">
-                        </div>
-                        <div class="form-group half">
-                            <label>Company Name</label>
-                            <input type="text" id="prospect-company" class="form-control" value="${prospect?.company_name || ''}">
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group half">
-                            <label>Income Range</label>
-                            <select id="prospect-income" class="form-control">
-                                <option value="">-- Select Range --</option>
-                                <option value="< RM3k" ${prospect?.income_range === '< RM3k' ? 'selected' : ''}>Below RM 3,000</option>
-                                <option value="RM3-5k" ${prospect?.income_range === 'RM3-5k' ? 'selected' : ''}>RM 3,000 - RM 5,000</option>
-                                <option value="RM5-8k" ${prospect?.income_range === 'RM5-8k' ? 'selected' : ''}>RM 5,000 - RM 8,000</option>
-                                <option value="RM8-12k" ${prospect?.income_range === 'RM8-12k' ? 'selected' : ''}>RM 8,000 - RM 12,000</option>
-                                <option value="RM12-20k" ${prospect?.income_range === 'RM12-20k' ? 'selected' : ''}>RM 12,000 - RM 20,000</option>
-                                <option value="> RM20k" ${prospect?.income_range === '> RM20k' ? 'selected' : ''}>Above RM 20,000</option>
-                            </select>
-                        </div>
-                        <div class="form-group half">
-                            <label>Email</label>
-                            <input type="email" id="prospect-email" class="form-control" value="${prospect?.email || ''}">
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <label>Marital Status</label>
-                        <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
-                            ${['Single','Married','Others'].map(opt => `
-                                <label style="display:flex;align-items:center;gap:6px;font-weight:normal;margin:0;cursor:pointer;">
-                                    <input type="checkbox" class="prospect-marital-cb" value="${opt}" ${prospect?.marital_status === opt ? 'checked' : ''} onchange="document.querySelectorAll('.prospect-marital-cb').forEach(cb=>{if(cb!==this)cb.checked=false;});">
-                                    ${opt}
-                                </label>
-                            `).join('')}
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <label>Children</label>
-                        <div id="prospect-children-list" style="display:flex;flex-direction:column;gap:8px;"></div>
-                        <button type="button" class="btn secondary btn-sm" style="margin-top:8px;" onclick="app.addProspectChildRow()"><i class="fas fa-plus"></i> Add Child</button>
-                    </div>
-                    <div class="form-group">
-                        <label>Address</label>
-                        <textarea id="prospect-address" class="form-control" rows="2" placeholder="Street address">${prospect?.address || ''}</textarea>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group half">
-                            <input type="text" id="prospect-city" class="form-control" placeholder="City" value="${prospect?.city || ''}">
-                        </div>
-                        <div class="form-group half">
-                            <input type="text" id="prospect-state" class="form-control" placeholder="State" value="${prospect?.state || ''}">
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <input type="text" id="prospect-postal" class="form-control" placeholder="Postal Code" value="${prospect?.postal_code || ''}">
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group half">
-                            <label>Referred By <span class="required">*</span></label>
-                            <div style="position:relative;">
-                                <input type="text" id="prospect-referrer" class="form-control" placeholder="Search prospect or consultant..." onkeyup="app.debounceCall('prospect-referrer', () => app.searchProspectReferrers(), 250)">
-                                <div id="prospect-referrer-results" style="display:none;position:absolute;z-index:1000;background:white;border:1px solid #ddd;border-radius:4px;width:100%;max-height:180px;overflow-y:auto;box-shadow:0 4px 8px rgba(0,0,0,0.1);"></div>
-                            </div>
-                            <div id="prospect-referrer-info" style="margin-top:6px;">${prospect?.referred_by ? `<div class="selected-entity-badge"><span><strong>${prospect.referred_by}</strong></span><button class="btn btn-sm secondary" onclick="app.clearProspectReferrer()">Clear</button></div>` : ''}</div>
-                        </div>
-                        <div class="form-group half">
-                            <label>Relationship <span class="required">*</span></label>
-                            <select id="prospect-relationship" class="form-control">
-                                <option value="">-- Select --</option>
-                                <option value="Family" ${prospect?.referral_relationship === 'Family' ? 'selected' : ''}>Family</option>
-                                <option value="Cousin" ${prospect?.referral_relationship === 'Cousin' ? 'selected' : ''}>Cousin</option>
-                                <option value="Friend" ${prospect?.referral_relationship === 'Friend' ? 'selected' : ''}>Friend</option>
-                                <option value="Colleague" ${prospect?.referral_relationship === 'Colleague' ? 'selected' : ''}>Colleague</option>
-                                <option value="Business Partner" ${prospect?.referral_relationship === 'Business Partner' ? 'selected' : ''}>Business Partner</option>
-                            </select>
-                        </div>
-                    </div>
+                    ${buildBasicInfoBlock('prospect', prospect)}
                 </div>
             </div>
         `;
@@ -17731,47 +17703,23 @@ function _wireLoginBtn() {
             UI.toast.error('Relationship is required.');
             return;
         }
-
-        const d = (id) => document.getElementById(id)?.value || null;
+        // All Basic Info fields pulled via the shared collector — keeps
+        // CPS + Prospect forms in lockstep. Prospect-specific metadata
+        // (responsible_agent_id, referred_by_*, pipeline_stage, score) below.
+        const basic = collectBasicInfoData('prospect');
         const data = {
-            title: d('prospect-title'),
-            full_name: name,
-            nickname: d('prospect-nickname') || null,
-            gender: d('prospect-gender'),
-            nationality: d('prospect-nationality'),
-            phone: phone,
-            email: d('prospect-email') || null,
-            ic_number: d('prospect-ic') || null,
-            date_of_birth: d('prospect-dob') || null,
-            lunar_birth: d('prospect-lunar') || null,
-            occupation: d('prospect-occupation') || null,
-            company_name: d('prospect-company') || null,
-            income_range: d('prospect-income') || null,
-            marital_status: (document.querySelector('.prospect-marital-cb:checked')?.value) || null,
-            children: JSON.stringify(collectProspectChildren()),
-            address: d('prospect-address') || null,
-            city: d('prospect-city') || null,
-            state: d('prospect-state') || null,
-            postal_code: d('prospect-postal') || null,
-            ming_gua: d('prospect-minggua') || null,
+            ...basic,
+            full_name: name, // validated above
+            phone: phone,    // validated above
             referred_by: _selectedProspectReferrer?.name || null,
             referred_by_id: _selectedProspectReferrer?.id || null,
             referred_by_type: _selectedProspectReferrer?.type || null,
-            referral_relationship: relationship,
             responsible_agent_id: _currentUser?.id || null,
             cps_assignment_date: new Date().toISOString().split('T')[0],
             pipeline_stage: 'new',
             score: editId ? undefined : 200,
             expected_close_date: null,
             deal_value: 0,
-            life_chart_type: (() => {
-                const d = document.getElementById('prospect-use-dob')?.checked;
-                const l = document.getElementById('prospect-use-lunar')?.checked;
-                if (d && l) return 'both';
-                if (d) return 'solar';
-                if (l) return 'lunar';
-                return null;
-            })()
         };
 
         // Capture snapshot before update for approval queue
@@ -37625,6 +37573,9 @@ JB 星期二到
         addProspectChildRow,
         selectReferrer,
         clearSelectedReferrer,
+        searchBasicInfoReferrers,
+        clearBasicInfoReferrer,
+        showStandardFunctionsView,
         searchConsultants,
         selectConsultant,
         removeConsultant,
