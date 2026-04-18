@@ -13182,81 +13182,15 @@ function _wireLoginBtn() {
     const openPostMeetupNotesModal = async (activityId, prospectId) => {
         const activity = await AppDataStore.getById('activities', activityId) || {};
 
-        // Fetch product/event data for multi-select dropdowns
-        const [products, bujishuItems, formulaItems, events] = await Promise.all([
+        // Fetch product/event data for the multi-select checkbox groups.
+        const [products, bujishu, formula, events] = await Promise.all([
             AppDataStore.getAll('products').then(r => r.filter(p => p.is_active !== false)),
             AppDataStore.getAll('bujishu').then(r => r.filter(b => b.is_active !== false)),
             AppDataStore.getAll('formula').then(r => r.filter(f => f.is_active !== false)),
             AppDataStore.getAll('events').then(r => r.filter(e => e.is_active !== false && e.status !== 'inactive')),
         ]);
 
-        const parsedOpp = parseSelectedItems(activity.opportunity_potential || '');
-        const parsedNA = parseSelectedItems(activity.next_action || '');
-
-        const makeCheckbox = (name, value, group, selectedArr) => {
-            const checked = selectedArr.includes(value) ? 'checked' : '';
-            const groupAttr = group ? ` data-group="${escapeHtml(group)}"` : '';
-            return `<label style="display:flex;align-items:center;gap:6px;margin-bottom:4px;cursor:pointer;font-size:13px;padding:3px 8px;border-radius:4px;" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background=''">
-                <input type="checkbox" name="${name}" value="${escapeHtml(value)}"${groupAttr} ${checked}> ${escapeHtml(value)}
-            </label>`;
-        };
-
-        const oppCheckboxes = [
-            ...(products.length ? [`<div style="font-weight:600;font-size:12px;color:var(--primary);margin-bottom:4px;border-bottom:1px solid var(--gray-200);padding-bottom:3px;">Products</div>`] : []),
-            ...products.map(p => makeCheckbox('pmn-opp-items', p.name, 'Products', parsedOpp.selected)),
-            ...(bujishuItems.length ? [`<div style="font-weight:600;font-size:12px;color:var(--primary);margin:8px 0 4px;border-bottom:1px solid var(--gray-200);padding-bottom:3px;">Bujishu</div>`] : []),
-            ...bujishuItems.map(b => makeCheckbox('pmn-opp-items', b.name, 'Bujishu', parsedOpp.selected)),
-            ...(formulaItems.length ? [`<div style="font-weight:600;font-size:12px;color:var(--primary);margin:8px 0 4px;border-bottom:1px solid var(--gray-200);padding-bottom:3px;">Formula</div>`] : []),
-            ...formulaItems.map(f => makeCheckbox('pmn-opp-items', f.name, 'Formula', parsedOpp.selected)),
-        ];
-
-        const naCheckboxes = events.map(e => makeCheckbox('pmn-na-items', e.event_title || e.title || '', '', parsedNA.selected));
-
-        const content = `
-            <div class="form-group">
-                <label>Key Points Discussed:</label>
-                <div style="display:flex; gap:8px;">
-                    <textarea id="pmn-key-points" class="form-control" rows="2" placeholder="Main discussion points...">${activity.note_key_points || ''}</textarea>
-                    <button class="btn-icon" onclick="app.openVoiceRecorder('pmn-key-points', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
-                </div>
-            </div>
-            <div class="form-group">
-                <label>Customer Needs/Interests:</label>
-                <div style="display:flex; gap:8px;">
-                    <textarea id="pmn-needs" class="form-control" rows="2" placeholder="What are they looking for?">${activity.note_needs || ''}</textarea>
-                    <button class="btn-icon" onclick="app.openVoiceRecorder('pmn-needs', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
-                </div>
-            </div>
-            <div class="form-group">
-                <label>Pain Points:</label>
-                <div style="display:flex; gap:8px;">
-                    <textarea id="pmn-pain-points" class="form-control" rows="2" placeholder="Dislikes or problems to solve...">${activity.note_pain_points || ''}</textarea>
-                    <button class="btn-icon" onclick="app.openVoiceRecorder('pmn-pain-points', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
-                </div>
-            </div>
-            <div class="form-group">
-                <label>Potential &amp; Opportunities:</label>
-                <div style="border:1px solid var(--gray-300);border-radius:6px;padding:10px;max-height:180px;overflow-y:auto;background:#fafafa;">
-                    ${oppCheckboxes.length > 0 ? oppCheckboxes.join('') : '<p style="color:var(--gray-400);font-size:12px;margin:0;">No products/items available.</p>'}
-                </div>
-                <div style="display:flex; gap:8px; margin-top:6px;">
-                    <textarea id="pmn-opportunity-remarks" class="form-control" rows="2" placeholder="Additional remarks...">${parsedOpp.remarks}</textarea>
-                    <button class="btn-icon" onclick="app.openVoiceRecorder('pmn-opportunity-remarks', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
-                </div>
-                <div style="font-size:11px;color:var(--gray-400);margin-top:3px;"><i class="fas fa-link"></i> Linked to prospect profile → Potential &amp; Opportunities / Pipeline → Target to Sign</div>
-            </div>
-            <div class="form-group">
-                <label>Next Actions:</label>
-                <div style="border:1px solid var(--gray-300);border-radius:6px;padding:10px;max-height:180px;overflow-y:auto;background:#fafafa;">
-                    ${naCheckboxes.length > 0 ? naCheckboxes.join('') : '<p style="color:var(--gray-400);font-size:12px;margin:0;">No active events found.</p>'}
-                </div>
-                <div style="display:flex; gap:8px; margin-top:6px;">
-                    <textarea id="pmn-next-action-remarks" class="form-control" rows="2" placeholder="Additional remarks...">${parsedNA.remarks}</textarea>
-                    <button class="btn-icon" onclick="app.openVoiceRecorder('pmn-next-action-remarks', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
-                </div>
-                <div style="font-size:11px;color:var(--gray-400);margin-top:3px;"><i class="fas fa-link"></i> Linked to prospect profile → Next Actions / Pipeline → Action Needed to Close Deal</div>
-            </div>
-        `;
+        const content = buildPostMeetupNotesBlock('pmn', activity, { products, bujishu, formula, events });
         UI.showModal('📝 Post-Meetup Notes', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
             { label: 'Save', type: 'primary', action: `(async () => { await app.savePostMeetupNotes(${activityId}, ${prospectId}); })()` }
@@ -13264,14 +13198,7 @@ function _wireLoginBtn() {
     };
 
     const savePostMeetupNotes = async (activityId, prospectId) => {
-        const updates = {
-            note_key_points: document.getElementById('pmn-key-points')?.value || '',
-            summary: document.getElementById('pmn-key-points')?.value || '',
-            note_needs: document.getElementById('pmn-needs')?.value || '',
-            note_pain_points: document.getElementById('pmn-pain-points')?.value || '',
-            opportunity_potential: serializeMultiSelectToText('pmn-opp-items', 'pmn-opportunity-remarks'),
-            next_action: serializeEventSelectToText('pmn-na-items', 'pmn-next-action-remarks'),
-        };
+        const updates = collectPostMeetupNotesData('pmn');
 
         // Write DIRECTLY via service-role REST so we can catch real errors.
         // AppDataStore.update() silently falls back to localStorage on schema
@@ -13390,6 +13317,58 @@ function _wireLoginBtn() {
         setTimeout(() => {
             document.getElementById('note-key-points')?.focus();
         }, 650);
+    };
+
+    // Aggregated read-only view of every post-meetup note this prospect has
+    // accumulated. Opens from the profile header button — quicker than
+    // expanding each activity row in turn. Empty or note-less meetings are
+    // still shown (date + type) so the agent sees chronology; visits that
+    // never captured notes are flagged as "— no notes captured —".
+    const openMeetupHistoryModal = async (prospectId) => {
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) { UI.toast.error('Prospect not found'); return; }
+        const MEETUP_TYPES = ['CPS','FTF','FSA','GR','XG','CALL','EMAIL','WHATSAPP'];
+        const activities = (await AppDataStore.getAll('activities'))
+            .filter(a => a.prospect_id == prospectId && MEETUP_TYPES.includes(a.activity_type))
+            .sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date) || b.id - a.id);
+
+        const fmt = (txt) => txt ? escapeHtml(txt).replace(/\n/g, '<br>') : '';
+        const section = (label, text) => text
+            ? `<div style="margin-top:8px;"><div style="font-size:11px;font-weight:600;color:var(--gray-500);text-transform:uppercase;letter-spacing:.5px;">${label}</div><div style="font-size:13px;color:var(--gray-800);margin-top:2px;">${fmt(text)}</div></div>`
+            : '';
+
+        const body = activities.length === 0
+            ? '<p style="text-align:center;padding:24px;color:var(--gray-400);">No meet-up history recorded yet.</p>'
+            : activities.map(a => {
+                const hasAnyNote = a.note_key_points || a.note_needs || a.note_pain_points || a.opportunity_potential || a.next_action || a.summary;
+                return `
+                    <div style="border:1px solid var(--gray-200);border-radius:8px;padding:12px 14px;margin-bottom:10px;background:#fff;">
+                        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+                            <div>
+                                <div style="font-weight:600;font-size:14px;"><i class="fas fa-user-friends" style="color:var(--primary);"></i> ${escapeHtml(a.activity_type || 'Meeting')}${a.activity_title ? ' — ' + escapeHtml(a.activity_title) : ''}</div>
+                                <div style="font-size:12px;color:var(--gray-500);margin-top:2px;">${escapeHtml(a.activity_date || '')}</div>
+                            </div>
+                            <button class="btn btn-sm secondary" style="font-size:11px;padding:3px 8px;" onclick="UI.hideModal();app.openPostMeetupNotesModal(${a.id}, ${prospectId})"><i class="fas fa-edit"></i> Edit</button>
+                        </div>
+                        ${hasAnyNote ? `
+                            ${section('Key Points', a.note_key_points || a.summary)}
+                            ${section('Customer Needs', a.note_needs)}
+                            ${section('Pain Points', a.note_pain_points)}
+                            ${section('Potential & Opportunities', a.opportunity_potential)}
+                            ${section('Next Actions', a.next_action)}
+                        ` : '<div style="margin-top:8px;color:var(--gray-400);font-size:12px;font-style:italic;">— no notes captured —</div>'}
+                    </div>
+                `;
+            }).join('');
+
+        UI.showModal(`📋 Meet-Up History — ${escapeHtml(prospect.full_name)}`, `
+            <div style="max-height:70vh;overflow-y:auto;padding-right:4px;">
+                <div style="font-size:12px;color:var(--gray-500);margin-bottom:10px;">${activities.length} meet-up${activities.length === 1 ? '' : 's'} · most recent first</div>
+                ${body}
+            </div>
+        `, [
+            { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
+        ]);
     };
 
     const rescheduleActivity = async (activityId) => {
@@ -14356,6 +14335,111 @@ function _wireLoginBtn() {
         if (prefix === 'prospect') return clearProspectReferrer();
     };
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // STANDARD FUNCTION — Post-Meetup Notes Block
+    // Single source of truth for the Post-Meetup Notes form.
+    // Used in:
+    //   1. openPostMeetupNotesModal (per-activity edit)
+    //   2. Standard Functions admin page (preview/documentation)
+    // To add a new field: update buildPostMeetupNotesBlock + collectPostMeetupNotesData.
+    // ═══════════════════════════════════════════════════════════════════════
+    const buildPostMeetupNotesBlock = (prefix, activity = {}, opts = {}) => {
+        const a = activity || {};
+        const readOnly = prefix === 'preview';
+        const disabled = readOnly ? 'disabled' : '';
+        const products = opts.products || [];
+        const bujishuItems = opts.bujishu || [];
+        const formulaItems = opts.formula || [];
+        const events = opts.events || [];
+        const parsedOpp = opts.parsedOpp || parseSelectedItems(a.opportunity_potential || '');
+        const parsedNA = opts.parsedNA || parseSelectedItems(a.next_action || '');
+
+        const cb = (name, value, group, selectedArr) => {
+            const checked = selectedArr.includes(value) ? 'checked' : '';
+            const groupAttr = group ? ` data-group="${escapeHtml(group)}"` : '';
+            return `<label style="display:flex;align-items:center;gap:6px;margin-bottom:4px;cursor:pointer;font-size:13px;padding:3px 8px;border-radius:4px;" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background=''">
+                <input type="checkbox" name="${prefix}-${name}" value="${escapeHtml(value)}"${groupAttr} ${checked} ${disabled}> ${escapeHtml(value)}
+            </label>`;
+        };
+
+        const oppCheckboxes = [
+            ...(products.length ? [`<div style="font-weight:600;font-size:12px;color:var(--primary);margin-bottom:4px;border-bottom:1px solid var(--gray-200);padding-bottom:3px;">Products</div>`] : []),
+            ...products.map(p => cb('opp-items', p.name, 'Products', parsedOpp.selected)),
+            ...(bujishuItems.length ? [`<div style="font-weight:600;font-size:12px;color:var(--primary);margin:8px 0 4px;border-bottom:1px solid var(--gray-200);padding-bottom:3px;">Bujishu</div>`] : []),
+            ...bujishuItems.map(b => cb('opp-items', b.name, 'Bujishu', parsedOpp.selected)),
+            ...(formulaItems.length ? [`<div style="font-weight:600;font-size:12px;color:var(--primary);margin:8px 0 4px;border-bottom:1px solid var(--gray-200);padding-bottom:3px;">Formula</div>`] : []),
+            ...formulaItems.map(f => cb('opp-items', f.name, 'Formula', parsedOpp.selected)),
+        ];
+        const naCheckboxes = events.map(e => cb('na-items', e.event_title || e.title || '', '', parsedNA.selected));
+
+        // Voice-recorder button only makes sense in the editable context.
+        const voiceBtn = (targetId) => readOnly ? '' : `<button class="btn-icon" onclick="app.openVoiceRecorder('${targetId}', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>`;
+
+        return `
+            <div class="post-meetup-notes-block" data-prefix="${prefix}">
+                <div class="form-group">
+                    <label>Key Points Discussed:</label>
+                    <div style="display:flex;gap:8px;">
+                        <textarea id="${prefix}-key-points" class="form-control" rows="2" placeholder="Main discussion points..." ${disabled}>${escapeHtml(a.note_key_points || '')}</textarea>
+                        ${voiceBtn(`${prefix}-key-points`)}
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Customer Needs/Interests:</label>
+                    <div style="display:flex;gap:8px;">
+                        <textarea id="${prefix}-needs" class="form-control" rows="2" placeholder="What are they looking for?" ${disabled}>${escapeHtml(a.note_needs || '')}</textarea>
+                        ${voiceBtn(`${prefix}-needs`)}
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Pain Points:</label>
+                    <div style="display:flex;gap:8px;">
+                        <textarea id="${prefix}-pain-points" class="form-control" rows="2" placeholder="Dislikes or problems to solve..." ${disabled}>${escapeHtml(a.note_pain_points || '')}</textarea>
+                        ${voiceBtn(`${prefix}-pain-points`)}
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Potential &amp; Opportunities:</label>
+                    <div style="border:1px solid var(--gray-300);border-radius:6px;padding:10px;max-height:180px;overflow-y:auto;background:#fafafa;">
+                        ${oppCheckboxes.length > 0 ? oppCheckboxes.join('') : '<p style="color:var(--gray-400);font-size:12px;margin:0;">No products/items available.</p>'}
+                    </div>
+                    <div style="display:flex;gap:8px;margin-top:6px;">
+                        <textarea id="${prefix}-opportunity-remarks" class="form-control" rows="2" placeholder="Additional remarks..." ${disabled}>${escapeHtml(parsedOpp.remarks || '')}</textarea>
+                        ${voiceBtn(`${prefix}-opportunity-remarks`)}
+                    </div>
+                    <div style="font-size:11px;color:var(--gray-400);margin-top:3px;"><i class="fas fa-link"></i> Linked to prospect profile → Potential &amp; Opportunities / Pipeline → Target to Sign</div>
+                </div>
+                <div class="form-group">
+                    <label>Next Actions:</label>
+                    <div style="border:1px solid var(--gray-300);border-radius:6px;padding:10px;max-height:180px;overflow-y:auto;background:#fafafa;">
+                        ${naCheckboxes.length > 0 ? naCheckboxes.join('') : '<p style="color:var(--gray-400);font-size:12px;margin:0;">No active events found.</p>'}
+                    </div>
+                    <div style="display:flex;gap:8px;margin-top:6px;">
+                        <textarea id="${prefix}-next-action-remarks" class="form-control" rows="2" placeholder="Additional remarks..." ${disabled}>${escapeHtml(parsedNA.remarks || '')}</textarea>
+                        ${voiceBtn(`${prefix}-next-action-remarks`)}
+                    </div>
+                    <div style="font-size:11px;color:var(--gray-400);margin-top:3px;"><i class="fas fa-link"></i> Linked to prospect profile → Next Actions / Pipeline → Action Needed to Close Deal</div>
+                </div>
+            </div>
+        `;
+    };
+
+    // Collect Post-Meetup Notes values from the DOM using the block's prefix.
+    // Uses the same serializer helpers as the legacy modal so stored shape is
+    // unchanged — `opportunity_potential` and `next_action` remain the
+    // checkbox-list + remarks text format the rest of the app already parses.
+    const collectPostMeetupNotesData = (prefix) => {
+        const keyPoints = document.getElementById(`${prefix}-key-points`)?.value || '';
+        return {
+            note_key_points: keyPoints,
+            summary: keyPoints,
+            note_needs: document.getElementById(`${prefix}-needs`)?.value || '',
+            note_pain_points: document.getElementById(`${prefix}-pain-points`)?.value || '',
+            opportunity_potential: serializeMultiSelectToText(`${prefix}-opp-items`, `${prefix}-opportunity-remarks`),
+            next_action: serializeEventSelectToText(`${prefix}-na-items`, `${prefix}-next-action-remarks`),
+        };
+    };
+
     // Standard Functions page — Level 1 only. Shows a read-only preview of
     // each reusable block so admins can see the canonical field set that
     // powers Add Prospect / Edit Prospect / CPS New Customer Info in one
@@ -14403,6 +14487,28 @@ function _wireLoginBtn() {
                         </div>
                         <div class="sf-preview-wrap">
                             ${buildBasicInfoBlock('preview')}
+                        </div>
+                    </div>
+                </div>
+
+                <div class="sf-card">
+                    <div class="sf-card-hdr">
+                        <h3>📝 Post-Meetup Notes</h3>
+                        <span class="sf-meta">Used in 2 places</span>
+                    </div>
+                    <div class="sf-card-body">
+                        <div class="sf-usage">
+                            <strong>Consumers:</strong>
+                            <ul style="margin:6px 0 0;padding-left:20px;">
+                                <li>Prospect Profile → Meet Up History → per-activity <em>Notes</em> button</li>
+                                <li>Activity Details → <em>Post-Meetup Notes</em> action</li>
+                            </ul>
+                            <div style="margin-top:8px;">
+                                <strong>To add a field:</strong> edit <code>buildPostMeetupNotesBlock()</code> and <code>collectPostMeetupNotesData()</code> in <code>script.js</code>. Both consumers pick it up on next page reload.
+                            </div>
+                        </div>
+                        <div class="sf-preview-wrap">
+                            ${buildPostMeetupNotesBlock('preview', {}, {})}
                         </div>
                     </div>
                 </div>
@@ -18814,7 +18920,7 @@ function _wireLoginBtn() {
                         </div>
                         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:6px 0 8px;">
                             <span style="font-size:22px;font-weight:700;line-height:1.3;flex-shrink:0;">${prospect.full_name}</span>${prospect.nickname ? `<span style="font-size:15px;font-weight:400;color:var(--gray-500);">"${prospect.nickname}"</span>` : ''}
-                            <button title="Edit" onclick="app.editProspect(${prospect.id})" style="width:24px;height:24px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--gray-500);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fas fa-edit"></i></button><button title="Convert to Customer" onclick="app.convertToCustomer(${prospect.id})" style="width:24px;height:24px;border-radius:50%;border:none;background:var(--primary);color:#fff;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'"><i class="fas fa-user-check"></i></button><button title="Save to Phone Contacts" onclick="app.downloadProspectVCard(${prospect.id})" style="width:24px;height:24px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--success);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fas fa-address-book"></i></button>
+                            <button title="Edit" onclick="app.editProspect(${prospect.id})" style="width:24px;height:24px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--gray-500);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fas fa-edit"></i></button><button title="Convert to Customer" onclick="app.convertToCustomer(${prospect.id})" style="width:24px;height:24px;border-radius:50%;border:none;background:var(--primary);color:#fff;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'"><i class="fas fa-user-check"></i></button><button title="Meet-Up History" onclick="app.openMeetupHistoryModal(${prospect.id})" style="width:24px;height:24px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--primary);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fas fa-history"></i></button><button title="Save to Phone Contacts" onclick="app.downloadProspectVCard(${prospect.id})" style="width:24px;height:24px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--success);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fas fa-address-book"></i></button>
                         </div>
                     </div>
                     ${cpsPhoto ? `<img src="${cpsPhoto.url}" onclick="event.stopPropagation();app.zoomCpsPhoto('${cpsPhoto.url}')" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:2px solid var(--gray-200);cursor:zoom-in;flex-shrink:0;margin-top:4px;" title="CPS Photo — click to enlarge">` : ''}
@@ -19132,6 +19238,7 @@ function _wireLoginBtn() {
                         ${a.score_value ? `<div style="margin-bottom:6px;"><span class="badge success" style="font-size:11px;">+${a.score_value} pts</span></div>` : ''}
                         <div class="meet-actions">
                             <button class="btn btn-sm secondary" onclick="event.stopPropagation();app.attachActivityPhoto(${a.id})"><i class="fas fa-camera"></i> Photo</button>
+                            <button class="btn btn-sm secondary" onclick="event.stopPropagation();app.openPostMeetupNotesModal(${a.id}, ${prospect.id})"><i class="fas fa-sticky-note"></i> Notes</button>
                             ${a.is_closed ? `<span class="badge success" style="align-self:center;font-size:12px;"><i class="fas fa-handshake"></i> Sale Closed</span>` : `<button class="btn btn-sm primary" onclick="event.stopPropagation();app.recordSalesClosure(${prospect.id},${a.id})"><i class="fas fa-handshake"></i> Close Sale</button>`}
                         </div>
                         ${a.photo_urls && a.photo_urls.length > 0 ? `
@@ -37576,6 +37683,7 @@ JB 星期二到
         searchBasicInfoReferrers,
         clearBasicInfoReferrer,
         showStandardFunctionsView,
+        openMeetupHistoryModal,
         searchConsultants,
         selectConsultant,
         removeConsultant,
