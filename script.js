@@ -36089,9 +36089,9 @@ const initImportDemoData = async () => {
         return out;
     };
 
-    // --- Dedup against last 20 rows of the previous week's run ---
-    // Supplier files sometimes carry over the tail end of last week's orders.
-    // Comparing against the previous week's final 20 committed rows catches those duplicates.
+    // --- Dedup against all committed rows of the previous week's run ---
+    // Supplier files carry over some rows from the previous week. We check every
+    // committed order from last week's run so none slip through regardless of position.
     const eggDedupAgainstHistory = async (rows) => {
         try {
             const runs = await AppDataStore.query('egg_run_history', {}) || [];
@@ -36103,10 +36103,8 @@ const initImportDemoData = async () => {
             if (!prevRun) return rows;
 
             const prevOrders = await AppDataStore.query('egg_processed_orders', { run_id: prevRun.id }) || [];
-            // Sort by processed_at ascending so slice(-20) gives the last 20 committed rows
-            prevOrders.sort((a, b) => (a.processed_at || '').localeCompare(b.processed_at || ''));
-            const last20Keys = new Set(prevOrders.slice(-20).map(h => h.unique_key));
-            return rows.filter(r => !last20Keys.has(r.unique_key));
+            const prevKeys = new Set(prevOrders.filter(h => !h.excluded_reason).map(h => h.unique_key));
+            return rows.filter(r => !prevKeys.has(r.unique_key));
         } catch (err) {
             console.error('egg: prev-week dedup failed, returning all rows', err);
             return rows;
