@@ -17276,8 +17276,11 @@ function _wireLoginBtn() {
                 }
             }
             if (prospect?.closing_record?.status === 'submitted') {
+                const approvedCr = { ...prospect.closing_record, status: 'approved', approved_at: now };
+                const existingHistory = Array.isArray(prospect.closing_records_history) ? prospect.closing_records_history : [];
                 await AppDataStore.update('prospects', entry.prospect_id, {
-                    closing_record: { ...prospect.closing_record, status: 'approved', approved_at: now }
+                    closing_record: null,
+                    closing_records_history: [...existingHistory, approvedCr]
                 });
             }
         }
@@ -19650,10 +19653,66 @@ function _wireLoginBtn() {
                 </div>`;
 
             const isConverted = prospect.status === 'converted' || prospect.conversion_status === 'approved';
-            if ((!cr || status === 'draft') && !isConverted) {
+
+            // Closing history (archived approved records)
+            const crHistory = Array.isArray(prospect.closing_records_history) ? prospect.closing_records_history : [];
+            const _crStatusBadge = (h) => {
+                if (h.case_completed) return `<span style="background:#dcfce7;color:#166534;border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600;"><i class="fas fa-check-circle"></i> Completed</span>`;
+                const s = h.delivery_status || 'pending';
+                if (s === 'delivered') return `<span style="background:#dbeafe;color:#1e40af;border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600;"><i class="fas fa-truck"></i> Delivered</span>`;
+                return `<span style="background:#fef9c3;color:#854d0e;border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600;"><i class="fas fa-clock"></i> Pending</span>`;
+            };
+            const historyHtml = crHistory.length ? `
+                <div style="margin-bottom:16px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
+                    <div style="background:#f0fdf4;padding:8px 12px;font-weight:600;font-size:13px;border-bottom:1px solid #e5e7eb;color:#166534;">
+                        <i class="fas fa-history"></i> Closing History (${crHistory.length} record${crHistory.length>1?'s':''})
+                    </div>
+                    ${crHistory.map((h, hi) => `
+                        <details style="border-bottom:1px solid #f3f4f6;">
+                            <summary style="padding:8px 12px;cursor:pointer;font-size:13px;font-weight:600;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:8px;">
+                                <span style="flex:1;">#${hi+1} — ${escapeHtml(h.product||'N/A')} · RM ${h.sale_amount ? parseFloat(h.sale_amount).toLocaleString() : '0'}</span>
+                                ${_crStatusBadge(h)}
+                                <span style="font-size:11px;color:var(--gray-400);font-weight:400;">${h.closing_date || (h.approved_at ? h.approved_at.split('T')[0] : '')}</span>
+                            </summary>
+                            <div style="padding:10px 12px;background:#fafafa;font-size:12px;border-top:1px solid #f3f4f6;">
+                                <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;margin-bottom:10px;">
+                                    <div><span style="color:var(--gray-400);">Payment:</span> ${escapeHtml(h.payment_method||'-')}</div>
+                                    <div><span style="color:var(--gray-400);">Invoice:</span> ${escapeHtml(h.invoice_number||'-')}</div>
+                                    ${h.invoice_file ? `<div style="grid-column:1/-1;"><a href="${h.invoice_file}" target="_blank" style="color:var(--primary);"><i class="fas fa-paperclip"></i> ${escapeHtml(h.invoice_file_name||'View invoice')}</a></div>` : ''}
+                                    ${h.closing_remarks ? `<div style="grid-column:1/-1;"><span style="color:var(--gray-400);">Sale Remarks:</span> ${escapeHtml(h.closing_remarks)}</div>` : ''}
+                                </div>
+                                <div style="border-top:1px solid #e5e7eb;padding-top:10px;">
+                                    <div style="font-size:11px;font-weight:700;color:var(--gray-500);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">📦 Delivery Tracking</div>
+                                    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+                                        <select id="crh-status-${pid}-${hi}" class="form-control" style="flex:1;min-width:120px;height:30px;font-size:12px;">
+                                            <option value="pending" ${(!h.delivery_status||h.delivery_status==='pending')?'selected':''}>⏳ Pending Delivery</option>
+                                            <option value="delivered" ${h.delivery_status==='delivered'?'selected':''}>🚚 Delivered</option>
+                                            <option value="completed" ${h.delivery_status==='completed'?'selected':''}>✅ Completed</option>
+                                        </select>
+                                        <label style="display:flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap;font-weight:600;color:${h.case_completed?'#166534':'var(--gray-600)'};">
+                                            <input type="checkbox" id="crh-completed-${pid}-${hi}" ${h.case_completed?'checked':''} style="width:15px;height:15px;cursor:pointer;">
+                                            Case Completed
+                                        </label>
+                                    </div>
+                                    <div style="margin-bottom:8px;">
+                                        <label style="font-size:11px;font-weight:600;color:var(--gray-500);display:block;margin-bottom:4px;">Delivery Proof Attachment</label>
+                                        ${h.delivery_proof ? `<div style="margin-bottom:4px;"><a href="${h.delivery_proof}" target="_blank" style="color:var(--primary);font-size:12px;"><i class="fas fa-paperclip"></i> ${escapeHtml(h.delivery_proof_name||'View proof')}</a> <span style="color:var(--gray-400);font-size:11px;">(upload new to replace)</span></div>` : ''}
+                                        <input type="file" id="crh-proof-${pid}-${hi}" accept="image/*,application/pdf" style="font-size:11px;width:100%;" onchange="(function(el){var f=el.files[0];if(!f)return;var r=new FileReader();r.onload=function(e){el.dataset.b64=e.target.result;el.dataset.fname=f.name;};r.readAsDataURL(f);})(this)">
+                                    </div>
+                                    <div style="margin-bottom:8px;">
+                                        <label style="font-size:11px;font-weight:600;color:var(--gray-500);display:block;margin-bottom:4px;">Remarks</label>
+                                        <textarea id="crh-remarks-${pid}-${hi}" class="form-control" rows="2" style="font-size:12px;" placeholder="Post-sale notes, delivery details...">${escapeHtml(h.delivery_remarks||'')}</textarea>
+                                    </div>
+                                    <button class="btn primary btn-sm" style="width:100%;height:30px;" onclick="event.stopPropagation();app.saveClosingHistoryEntry(${pid},${hi})"><i class="fas fa-save"></i> Save</button>
+                                </div>
+                            </div>
+                        </details>`).join('')}
+                </div>` : '';
+
+            if (!cr || status === 'draft') {
                 const d = cr || {};
                 const isPOP = d.payment_method === 'POP';
-                container.innerHTML = pre2025Html + `
+                container.innerHTML = pre2025Html + historyHtml + `
                     <div class="cr-status draft" style="margin-bottom:14px;padding:8px 12px;border-radius:8px;background:#fff8e1;border:1px solid #ffc107;color:#856404;font-size:13px;font-weight:600;">
                         <i class="fas fa-edit"></i> Draft — Fill in details and submit for manager approval
                     </div>
@@ -19716,15 +19775,16 @@ function _wireLoginBtn() {
                         <button class="btn primary btn-sm" style="flex:1;" onclick="event.stopPropagation();app.submitClosingRecord(${prospect.id})"><i class="fas fa-paper-plane"></i> Submit for Approval</button>
                     </div>
                 `;
-            } else if (status === 'submitted' && !isConverted) {
+            } else if (status === 'submitted') {
                 const d = cr;
+                const approveLabel = isConverted ? 'Approve Sale' : 'Approve & Create Customer';
                 const managerButtons = isManager ? `
                     <div style="display:flex;gap:8px;margin-top:14px;">
-                        <button class="btn primary btn-sm" style="flex:1;" onclick="event.stopPropagation();app.approveClosingRecord(${prospect.id})"><i class="fas fa-check"></i> Approve & Create Customer</button>
+                        <button class="btn primary btn-sm" style="flex:1;" onclick="event.stopPropagation();app.approveClosingRecord(${prospect.id})"><i class="fas fa-check"></i> ${approveLabel}</button>
                         <button class="btn danger btn-sm" style="flex:1;" onclick="event.stopPropagation();app.rejectClosingRecord(${prospect.id})"><i class="fas fa-times"></i> Reject</button>
                     </div>
                 ` : `<p style="text-align:center;color:var(--gray-400);font-size:13px;margin-top:12px;"><i class="fas fa-clock"></i> Awaiting manager review.</p>`;
-                container.innerHTML = pre2025Html + `
+                container.innerHTML = pre2025Html + historyHtml + `
                     <div class="cr-status submitted" style="margin-bottom:14px;padding:8px 12px;border-radius:8px;background:#e3f2fd;border:1px solid #2196f3;color:#1565c0;font-size:13px;font-weight:600;">
                         <i class="fas fa-clock"></i> Submitted — Pending manager approval
                     </div>
@@ -19756,19 +19816,15 @@ function _wireLoginBtn() {
                     ${managerButtons}
                 `;
             } else {
+                // Legacy: closing_record still has status='approved' (not yet archived).
+                // Show the record and allow starting a new closing.
                 const d = cr || {};
-                container.innerHTML = pre2025Html + `
-                    <div class="cr-status approved" style="margin-bottom:14px;padding:8px 12px;border-radius:8px;background:#e8f5e9;border:1px solid #4caf50;color:#2e7d32;font-size:13px;font-weight:600;">
-                        <i class="fas fa-check-circle"></i> Approved — Converted to Customer Profile
+                container.innerHTML = pre2025Html + historyHtml + `
+                    <div class="cr-status approved" style="margin-bottom:14px;padding:8px 12px;border-radius:8px;background:#e8f5e9;border:1px solid #4caf50;color:#2e7d32;font-size:13px;font-weight:600;display:flex;justify-content:space-between;align-items:center;">
+                        <span><i class="fas fa-check-circle"></i> Approved — Converted to Customer Profile</span>
+                        <button class="btn secondary btn-sm" style="font-size:11px;" onclick="event.stopPropagation();app.archiveAndNewClosingRecord(${prospect.id})"><i class="fas fa-plus"></i> New Closing</button>
                     </div>
-                    <div class="pv-sub">Customer Information</div>
-                    <div class="pv-row"><span class="pv-lbl">Full Name</span><span class="pv-val">${d.full_name || '-'}</span></div>
-                    <div class="pv-row"><span class="pv-lbl">Phone</span><span class="pv-val">${d.phone || '-'}</span></div>
-                    <div class="pv-row"><span class="pv-lbl">Email</span><span class="pv-val">${d.email || '-'}</span></div>
-                    <div class="pv-row"><span class="pv-lbl">IC Number</span><span class="pv-val">${d.ic_number || '-'}</span></div>
-                    <div class="pv-row"><span class="pv-lbl">Date of Birth</span><span class="pv-val">${d.date_of_birth || '-'}</span></div>
-                    <div class="pv-row"><span class="pv-lbl">Address</span><span class="pv-val">${d.address || '-'}</span></div>
-                    <div class="pv-sub">Meeting Outcome</div>
+                    <div class="pv-sub">Last Closing</div>
                     <div class="pv-row"><span class="pv-lbl">Product/Service</span><span class="pv-val">${d.product || '-'}</span></div>
                     <div class="pv-row"><span class="pv-lbl">Amount Closed</span><span class="pv-val">${d.sale_amount ? 'RM ' + parseFloat(d.sale_amount).toLocaleString() : '-'}</span></div>
                     <div class="pv-row"><span class="pv-lbl">Payment Method</span><span class="pv-val">${d.payment_method || '-'}</span></div>
@@ -19786,7 +19842,6 @@ function _wireLoginBtn() {
                     ${d.plan_details ? `<div class="pv-row"><span class="pv-lbl">Plan Details</span><span class="pv-val">${d.plan_details}</span></div>` : ''}
                     ${d.success_story ? `<div class="pv-row"><span class="pv-lbl">Success Story</span><span class="pv-val">${d.success_story}</span></div>` : ''}
                     ` : ''}
-                    <p style="font-size:12px;color:var(--gray-400);margin-top:12px;text-align:center;"><i class="fas fa-lock"></i> This record is locked. Customer profile has been created.</p>
                 `;
             }
         }
@@ -21258,12 +21313,13 @@ NOTIFY pgrst, 'reload schema';`;
         if (!data.invoice_number) return UI.toast.error('Invoice number is required');
 
         const saleAmount = parseFloat(data.sale_amount) || 0;
+        const isAlreadyConverted = prospect.status === 'converted' || prospect.conversion_status === 'approved';
         const updates = {
             closing_record: { ...existingCr, ...data, status: 'submitted', submitted_at: new Date().toISOString() }
         };
 
-        // Auto-trigger conversion approval when sale >= RM 2,000
-        if (saleAmount >= 2000) {
+        // Auto-trigger conversion approval only for first-time conversions
+        if (saleAmount >= 2000 && !isAlreadyConverted) {
             updates.conversion_status = 'pending_approval';
             updates.conversion_requested_at = new Date().toISOString();
             updates.conversion_requested_by = _currentUser?.id;
@@ -21290,8 +21346,8 @@ NOTIFY pgrst, 'reload schema';`;
                     snapshot_after: { ...data, sale_amount: saleAmount, prospect_name: freshProspect?.full_name },
                     description: `New sale RM ${saleAmount.toLocaleString()} for ${freshProspect?.full_name || 'prospect'}`
                 });
-                // If auto-conversion triggered, also create new_customer entry
-                if (saleAmount >= 2000) {
+                // If auto-conversion triggered and not already a customer, create new_customer entry
+                if (saleAmount >= 2000 && !isAlreadyConverted) {
                     await AppDataStore.create('approval_queue', {
                         id: Date.now() + 1,
                         approval_type: 'new_customer',
@@ -21308,7 +21364,7 @@ NOTIFY pgrst, 'reload schema';`;
             } catch (e) { /* approval queue write failed silently */ }
         }
 
-        if (saleAmount >= 2000) {
+        if (saleAmount >= 2000 && !isAlreadyConverted) {
             UI.toast.success('Closing record submitted. Sale ≥ RM 2,000 — conversion request auto-submitted for manager approval!');
         } else {
             UI.toast.success('Closing record submitted for approval');
@@ -21317,11 +21373,81 @@ NOTIFY pgrst, 'reload schema';`;
         if (bodyEl) await switchProspectTab('closing', prospectId, null, bodyEl);
     };
 
+    const saveClosingHistoryEntry = async (prospectId, index) => {
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        const history = [...(Array.isArray(prospect.closing_records_history) ? prospect.closing_records_history : [])];
+        if (index < 0 || index >= history.length) return UI.toast.error('Record not found');
+        const pid = prospectId;
+        const hi = index;
+        const statusEl = document.getElementById(`crh-status-${pid}-${hi}`);
+        const completedEl = document.getElementById(`crh-completed-${pid}-${hi}`);
+        const remarksEl = document.getElementById(`crh-remarks-${pid}-${hi}`);
+        const proofEl = document.getElementById(`crh-proof-${pid}-${hi}`);
+        const updates = {
+            delivery_status: statusEl?.value || history[hi].delivery_status || 'pending',
+            case_completed: completedEl?.checked ?? (history[hi].case_completed || false),
+            delivery_remarks: remarksEl?.value ?? (history[hi].delivery_remarks || '')
+        };
+        if (proofEl?.dataset.b64) {
+            updates.delivery_proof = proofEl.dataset.b64;
+            updates.delivery_proof_name = proofEl.dataset.fname || 'proof';
+        }
+        history[index] = { ...history[index], ...updates };
+        await AppDataStore.update('prospects', prospectId, { closing_records_history: history });
+        UI.toast.success('Delivery info saved');
+        const bodyEl = document.getElementById(`acc-body-closing-${prospectId}`);
+        if (bodyEl) await switchProspectTab('closing', prospectId, null, bodyEl);
+    };
+
+    const archiveAndNewClosingRecord = async (prospectId) => {
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect?.closing_record) return;
+        const cr = prospect.closing_record;
+        const existingHistory = Array.isArray(prospect.closing_records_history) ? prospect.closing_records_history : [];
+        await AppDataStore.update('prospects', prospectId, {
+            closing_records_history: [...existingHistory, cr],
+            closing_record: null
+        });
+        const bodyEl = document.getElementById(`acc-body-closing-${prospectId}`);
+        if (bodyEl) await switchProspectTab('closing', prospectId, null, bodyEl);
+    };
+
     const approveClosingRecord = async (prospectId) => {
         const prospect = await AppDataStore.getById('prospects', prospectId);
         if (!prospect?.closing_record) return UI.toast.error('No closing record found');
-        // Reuse the full-copy conversion — copies ALL prospect fields to customer
-        await approveProspectConversion(prospectId);
+        const isAlreadyConverted = prospect.status === 'converted' || prospect.conversion_status === 'approved';
+        if (isAlreadyConverted) {
+            // Additional sale on existing customer — add purchase, archive CR, reset
+            const cr = prospect.closing_record;
+            const now = new Date().toISOString();
+            const saleAmount = parseFloat(cr.sale_amount) || 0;
+            const customers = await AppDataStore.getAll('customers');
+            const customer = customers.find(c => c.converted_from_prospect_id == prospectId);
+            if (customer) {
+                await AppDataStore.create('purchases', {
+                    id: Date.now(),
+                    customer_id: customer.id,
+                    date: cr.closing_date || now.split('T')[0],
+                    invoice: cr.invoice_number || '',
+                    item: cr.product || '',
+                    amount: saleAmount,
+                    status: 'COMPLETED',
+                    payment_method: cr.payment_method || 'Cash'
+                });
+                await AppDataStore.update('customers', customer.id, {
+                    lifetime_value: (customer.lifetime_value || 0) + saleAmount
+                });
+            }
+            const existingHistory = Array.isArray(prospect.closing_records_history) ? prospect.closing_records_history : [];
+            await AppDataStore.update('prospects', prospectId, {
+                closing_records_history: [...existingHistory, { ...cr, status: 'approved', approved_at: now }],
+                closing_record: null
+            });
+            UI.toast.success(`Sale of RM ${saleAmount.toLocaleString()} approved!`);
+        } else {
+            // First conversion — reuse full-copy conversion
+            await approveProspectConversion(prospectId);
+        }
         const bodyEl = document.getElementById(`acc-body-closing-${prospectId}`);
         if (bodyEl) await switchProspectTab('closing', prospectId, null, bodyEl);
     };
@@ -22013,9 +22139,11 @@ const openAddSolutionModal = async (prospectId) => {
             conversion_approved_at: now,
             conversion_approved_by: _currentUser?.id
         };
-        // Also mark closing record approved if it was submitted
-        if (cr?.status === 'submitted') {
-            updatedFields.closing_record = { ...cr, status: 'approved', approved_at: now };
+        // Archive closing record to history and reset so a new closing can be started
+        if (cr) {
+            const existingHistory = Array.isArray(prospect.closing_records_history) ? prospect.closing_records_history : [];
+            updatedFields.closing_records_history = [...existingHistory, { ...cr, status: 'approved', approved_at: now }];
+            updatedFields.closing_record = null;
         }
         await AppDataStore.update('prospects', prospectId, updatedFields);
 
@@ -37824,6 +37952,8 @@ JB 星期二到
         removeFengShuiSitePhoto,
         removeFengShuiSiteReview,
         approveClosingRecord,
+        archiveAndNewClosingRecord,
+        saveClosingHistoryEntry,
         rejectClosingRecord,
         extendProtection,
         transferProspect,
