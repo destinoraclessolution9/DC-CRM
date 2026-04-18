@@ -12787,190 +12787,16 @@ function _wireLoginBtn() {
         const activity = await AppDataStore.getById('activities', activityId) || {};
         const products = (await AppDataStore.getAll('products')).filter(p => p.is_active !== false);
 
-        // ── Direct link to the prospect's DC Closing Record ──
-        // When this activity is linked to a prospect we mirror the DC Closing
-        // Record fields here and write through to prospects.closing_record on
-        // save, so "Quick Add → Outcome → Case Closed Well Done!" lands in the
-        // same place agents see on the prospect profile.
+        // When linked to a prospect, prefill from closing_record → activity → prospect.
+        // The shared builder handles the merging; we just hand it the raw rows.
         let prospect = null;
-        let cr = {};
+        let closingRecord = {};
         if (activity.prospect_id) {
             prospect = await AppDataStore.getById('prospects', activity.prospect_id);
-            cr = prospect?.closing_record || {};
+            closingRecord = prospect?.closing_record || {};
         }
-        const crStatus = cr.status || 'draft';
-        const crLocked = (crStatus === 'submitted' || crStatus === 'approved');
 
-        // Pre-fill order: closing_record → activity → prospect → blank
-        const selectedProduct = cr.product || activity.solution_sold || '';
-        const productOptions = products.length
-            ? products.map(p => `<option value="${p.name}" ${selectedProduct === p.name ? 'selected' : ''}>${p.name}</option>`).join('')
-            : '<option value="">No products available</option>';
-
-        const paymentMethod = cr.payment_method || activity.payment_method || 'Cash';
-        const isPOP = paymentMethod === 'POP';
-        // Auto-check "Case Closed" when either the activity flag is set OR the
-        // existing closing record already has data so the agent can keep editing.
-        const isClosingChecked = !!(activity.is_closing || cr.product || cr.sale_amount || cr.invoice_number);
-
-        const v = {
-            full_name:     cr.full_name     || prospect?.full_name     || '',
-            phone:         cr.phone         || prospect?.phone         || '',
-            email:         cr.email         || prospect?.email         || '',
-            ic_number:     cr.ic_number     || prospect?.ic_number     || '',
-            date_of_birth: cr.date_of_birth || prospect?.date_of_birth || '',
-            address:       cr.address       || [prospect?.address, prospect?.city, prospect?.state, prospect?.postal_code].filter(Boolean).join(', ') || '',
-            sale_amount:   cr.sale_amount   || activity.amount_closed  || activity.closing_amount || '',
-            pop_monthly:   cr.pop_monthly   || activity.pop_monthly_amount || '',
-            pop_tenure:    cr.pop_tenure    || activity.pop_tenure        || '',
-            pop_down:      cr.pop_down_payment || activity.pop_down_payment || '',
-            invoice_no:    cr.invoice_number || activity.invoice_number    || '',
-            closing_date:  cr.closing_date   || activity.collection_date   || '',
-            closing_remarks: cr.closing_remarks || '',
-            sales_idea:    cr.sales_idea    || '',
-            plan_details:  cr.plan_details  || '',
-            success_story: cr.success_story || '',
-        };
-
-        const linkBadge = activity.prospect_id ? `
-            <div style="font-size:11px;color:var(--gray-500);margin-bottom:8px;">
-                <i class="fas fa-link"></i> Linked to <strong>${escapeHtml(prospect?.full_name || 'prospect')}</strong> → DC Closing Record
-            </div>` : '';
-
-        const lockedNotice = crLocked ? `
-            <div style="margin-bottom:14px;padding:8px 12px;border-radius:8px;background:#e3f2fd;border:1px solid #2196f3;color:#1565c0;font-size:12px;">
-                <i class="fas fa-lock"></i> Closing record is <strong>${crStatus}</strong> — activity fields will be saved, but the locked closing record won't be overwritten.
-            </div>` : '';
-
-        const customerInfoSection = activity.prospect_id ? `
-            <div style="font-weight:600;color:var(--gray-700);margin:8px 0 6px;">Customer Information</div>
-            <div class="form-group">
-                <label>Full Name</label>
-                <input id="mo-full-name" class="form-control" value="${escapeHtml(v.full_name)}" placeholder="Full name">
-            </div>
-            <div class="form-row">
-                <div class="form-group half">
-                    <label>Phone</label>
-                    <input id="mo-phone" class="form-control" value="${escapeHtml(v.phone)}" placeholder="Phone">
-                </div>
-                <div class="form-group half">
-                    <label>Email</label>
-                    <input id="mo-email" class="form-control" value="${escapeHtml(v.email)}" placeholder="Email">
-                </div>
-            </div>
-            <div class="form-row">
-                <div class="form-group half">
-                    <label>IC Number</label>
-                    <input id="mo-ic" class="form-control" value="${escapeHtml(v.ic_number)}" placeholder="NRIC/Passport">
-                </div>
-                <div class="form-group half">
-                    <label>Date of Birth</label>
-                    <input id="mo-dob" type="date" class="form-control" value="${v.date_of_birth || ''}">
-                </div>
-            </div>
-            <div class="form-group">
-                <label>Address</label>
-                <textarea id="mo-address" class="form-control" rows="2" placeholder="Full address">${escapeHtml(v.address)}</textarea>
-            </div>
-            <div style="font-weight:600;color:var(--gray-700);margin:14px 0 6px;">Meeting Outcome</div>
-        ` : '';
-
-        const remarksAndUploadSection = activity.prospect_id ? `
-            <div class="form-group">
-                <label>Remarks</label>
-                <textarea id="mo-remarks" class="form-control" rows="2" placeholder="e.g. Ring Size, Special Request...">${escapeHtml(v.closing_remarks)}</textarea>
-            </div>
-            <div class="form-group">
-                <label>Upload Purchased Invoice</label>
-                <input id="mo-invoice-file" type="file" class="form-control" accept="image/png,image/jpeg,application/pdf">
-            </div>
-        ` : '';
-
-        const caseStudySection = activity.prospect_id ? `
-            <div style="margin-top:16px;border-top:1px solid #eee;padding-top:12px;">
-                <div style="font-weight:600;color:var(--gray-700);margin-bottom:8px;">📁 Case Study (Optional)</div>
-                <div class="form-group">
-                    <label>Sales Idea</label>
-                    <textarea id="mo-sales-idea" class="form-control" rows="2" placeholder="Describe the sales idea...">${escapeHtml(v.sales_idea)}</textarea>
-                </div>
-                <div class="form-group">
-                    <label>Plan Details</label>
-                    <textarea id="mo-plan-details" class="form-control" rows="2" placeholder="Details of the plan proposed...">${escapeHtml(v.plan_details)}</textarea>
-                </div>
-                <div class="form-group">
-                    <label>Success Story</label>
-                    <textarea id="mo-success-story" class="form-control" rows="2" placeholder="What made this a success?">${escapeHtml(v.success_story)}</textarea>
-                </div>
-            </div>
-        ` : '';
-
-        const content = `
-            ${linkBadge}
-            ${lockedNotice}
-            <div class="form-group">
-                <label class="checkbox-label">
-                    <input type="checkbox" id="mo-is-closing" onchange="document.getElementById('mo-closing-fields').style.display = this.checked ? 'block' : 'none'" ${isClosingChecked ? 'checked' : ''}> Case Closed Well Done!
-                </label>
-            </div>
-            <div id="mo-closing-fields" style="display: ${isClosingChecked ? 'block' : 'none'}; padding-left: 20px;">
-                ${customerInfoSection}
-                <div class="form-group">
-                    <label>Product/Service Sold</label>
-                    <select id="mo-solution-sold" class="form-control">${productOptions}</select>
-                </div>
-                <div class="form-row">
-                    <div class="form-group half">
-                        <label>Amount Closed (RM)</label>
-                        <input type="number" id="mo-amount-closed" class="form-control" value="${v.sale_amount}" placeholder="0.00">
-                    </div>
-                    <div class="form-group half">
-                        <label>Payment Method</label>
-                        <select id="mo-payment-method" class="form-control" onchange="document.getElementById('mo-pop-fields').style.display = this.value === 'POP' ? 'block' : 'none'">
-                            ${['Cash','Bank Transfer','Credit Card','Cheque','EPP','POP'].map(m => `<option value="${m}" ${paymentMethod === m ? 'selected' : ''}>${m}</option>`).join('')}
-                        </select>
-                    </div>
-                </div>
-                <div id="mo-pop-fields" style="display: ${isPOP ? 'block' : 'none'}; background: var(--gray-50); padding: 12px; border-radius: 6px; margin-bottom: 12px;">
-                    <div class="form-row">
-                        <div class="form-group half">
-                            <label>Payment Amount per Month (RM)</label>
-                            <input type="number" id="mo-pop-monthly" class="form-control" value="${v.pop_monthly}" placeholder="0.00">
-                        </div>
-                        <div class="form-group half">
-                            <label>Tenure (months)</label>
-                            <input type="number" id="mo-pop-tenure" class="form-control" value="${v.pop_tenure}" placeholder="12">
-                        </div>
-                    </div>
-                    <div class="form-group half">
-                        <label>Down Payment (RM)</label>
-                        <input type="number" id="mo-pop-down" class="form-control" value="${v.pop_down}" placeholder="0.00">
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group half">
-                        <label>Invoice Number</label>
-                        <input type="text" id="mo-invoice-number" class="form-control" value="${escapeHtml(v.invoice_no)}" placeholder="INV-2026-001">
-                    </div>
-                    <div class="form-group half">
-                        <label>Collection Date</label>
-                        <input type="date" id="mo-collection-date" class="form-control" value="${v.closing_date}">
-                    </div>
-                </div>
-                ${remarksAndUploadSection}
-                ${caseStudySection}
-            </div>
-            <div class="form-group" style="margin-top:12px;">
-                <label class="checkbox-label">
-                    <input type="checkbox" id="mo-unable-to-serve" onchange="document.getElementById('mo-unable-fields').style.display = this.checked ? 'block' : 'none'" ${activity.unable_to_serve ? 'checked' : ''}> Unable to Serve
-                </label>
-            </div>
-            <div id="mo-unable-fields" style="display: ${activity.unable_to_serve ? 'block' : 'none'}; padding-left: 20px;">
-                <div class="form-group">
-                    <label>Reason</label>
-                    <textarea id="mo-unable-reason" class="form-control" rows="2">${escapeHtml(activity.unable_reason || '')}</textarea>
-                </div>
-            </div>
-        `;
+        const content = buildMeetingOutcomeBlock('mo', activity, { products, prospect, closingRecord });
         UI.showModal('📝 Meeting Outcome', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
             { label: 'Save', type: 'primary', action: `(async () => { await app.saveMeetingOutcome(${activityId}); })()` }
@@ -12978,35 +12804,29 @@ function _wireLoginBtn() {
     };
 
     const saveMeetingOutcome = async (activityId) => {
-        // Helper: read a field that may not exist in the DOM (e.g. customer-info
-        // fields are only rendered when the activity is linked to a prospect).
-        const readField = (id) => {
-            const el = document.getElementById(id);
-            if (!el) return null; // signal "not rendered"
-            return (el.value || '').trim();
-        };
-
-        const isClosed = document.getElementById('mo-is-closing')?.checked || false;
+        // All DOM reads go through the shared collector so CPS/Prospect/
+        // Standard Functions all see the same field set.
+        const mo = collectMeetingOutcomeData('mo');
+        const isClosed = mo.is_closing;
         const updates = {
             is_closing: isClosed,
-            unable_to_serve: document.getElementById('mo-unable-to-serve')?.checked || false,
-            continue_follow_up: document.getElementById('mo-continue-follow-up')?.checked || false,
+            unable_to_serve: mo.unable_to_serve,
         };
         if (isClosed) {
-            updates.solution_sold = document.getElementById('mo-solution-sold')?.value;
-            updates.amount_closed = document.getElementById('mo-amount-closed')?.value;
-            updates.closing_amount = document.getElementById('mo-amount-closed')?.value;
-            updates.payment_method = document.getElementById('mo-payment-method')?.value;
-            updates.invoice_number = document.getElementById('mo-invoice-number')?.value;
-            updates.collection_date = document.getElementById('mo-collection-date')?.value;
+            updates.solution_sold = mo.solution_sold;
+            updates.amount_closed = mo.amount_closed;
+            updates.closing_amount = mo.amount_closed;
+            updates.payment_method = mo.payment_method;
+            updates.invoice_number = mo.invoice_number;
+            updates.collection_date = mo.collection_date;
             if (updates.payment_method === 'POP') {
-                updates.pop_monthly_amount = document.getElementById('mo-pop-monthly')?.value;
-                updates.pop_tenure = document.getElementById('mo-pop-tenure')?.value;
-                updates.pop_down_payment = document.getElementById('mo-pop-down')?.value;
+                updates.pop_monthly_amount = mo.pop_monthly;
+                updates.pop_tenure = mo.pop_tenure;
+                updates.pop_down_payment = mo.pop_down;
             }
         }
         if (updates.unable_to_serve) {
-            updates.unable_reason = document.getElementById('mo-unable-reason')?.value;
+            updates.unable_reason = mo.unable_reason;
         }
         await AppDataStore.update('activities', activityId, updates);
 
@@ -13024,27 +12844,30 @@ function _wireLoginBtn() {
                 const existingCR = prospect?.closing_record || null;
                 const existingStatus = existingCR?.status || 'draft';
                 if (existingStatus === 'draft') {
-                    const paymentMethod = document.getElementById('mo-payment-method')?.value || 'Cash';
+                    const paymentMethod = mo.payment_method || 'Cash';
+                    // mo.* returns null when the customer-info section wasn't
+                    // rendered (activity not linked to a prospect) — fall back
+                    // to the existing record then the prospect row in that case.
                     const newCR = {
                         ...(existingCR || {}),
-                        full_name:     readField('mo-full-name')     ?? existingCR?.full_name     ?? prospect?.full_name     ?? '',
-                        phone:         readField('mo-phone')         ?? existingCR?.phone         ?? prospect?.phone         ?? '',
-                        email:         readField('mo-email')         ?? existingCR?.email         ?? prospect?.email         ?? '',
-                        ic_number:     readField('mo-ic')            ?? existingCR?.ic_number     ?? prospect?.ic_number     ?? '',
-                        date_of_birth: readField('mo-dob')           ?? existingCR?.date_of_birth ?? prospect?.date_of_birth ?? '',
-                        address:       readField('mo-address')       ?? existingCR?.address       ?? '',
-                        product:        document.getElementById('mo-solution-sold')?.value || '',
-                        sale_amount:    document.getElementById('mo-amount-closed')?.value || '',
+                        full_name:     mo.full_name     ?? existingCR?.full_name     ?? prospect?.full_name     ?? '',
+                        phone:         mo.phone         ?? existingCR?.phone         ?? prospect?.phone         ?? '',
+                        email:         mo.email         ?? existingCR?.email         ?? prospect?.email         ?? '',
+                        ic_number:     mo.ic_number     ?? existingCR?.ic_number     ?? prospect?.ic_number     ?? '',
+                        date_of_birth: mo.date_of_birth ?? existingCR?.date_of_birth ?? prospect?.date_of_birth ?? '',
+                        address:       mo.address       ?? existingCR?.address       ?? '',
+                        product:        mo.solution_sold || '',
+                        sale_amount:    mo.amount_closed || '',
                         payment_method: paymentMethod,
-                        pop_monthly:     paymentMethod === 'POP' ? (document.getElementById('mo-pop-monthly')?.value || '') : '',
-                        pop_tenure:      paymentMethod === 'POP' ? (document.getElementById('mo-pop-tenure')?.value  || '') : '',
-                        pop_down_payment: paymentMethod === 'POP' ? (document.getElementById('mo-pop-down')?.value    || '') : '',
-                        invoice_number:  document.getElementById('mo-invoice-number')?.value?.trim() || '',
-                        closing_date:    document.getElementById('mo-collection-date')?.value || '',
-                        closing_remarks: readField('mo-remarks')      ?? existingCR?.closing_remarks ?? '',
-                        sales_idea:      readField('mo-sales-idea')   ?? existingCR?.sales_idea     ?? '',
-                        plan_details:    readField('mo-plan-details') ?? existingCR?.plan_details   ?? '',
-                        success_story:   readField('mo-success-story')?? existingCR?.success_story  ?? '',
+                        pop_monthly:      paymentMethod === 'POP' ? (mo.pop_monthly || '') : '',
+                        pop_tenure:       paymentMethod === 'POP' ? (mo.pop_tenure  || '') : '',
+                        pop_down_payment: paymentMethod === 'POP' ? (mo.pop_down    || '') : '',
+                        invoice_number:  mo.invoice_number || '',
+                        closing_date:    mo.collection_date || '',
+                        closing_remarks: mo.closing_remarks ?? existingCR?.closing_remarks ?? '',
+                        sales_idea:      mo.sales_idea      ?? existingCR?.sales_idea     ?? '',
+                        plan_details:    mo.plan_details    ?? existingCR?.plan_details   ?? '',
+                        success_story:   mo.success_story   ?? existingCR?.success_story  ?? '',
                         status: 'draft',
                     };
 
@@ -14430,6 +14253,239 @@ function _wireLoginBtn() {
         };
     };
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // STANDARD FUNCTION — Meeting Outcome Block (DC Closing Record)
+    // Single source of truth for the closing/outcome form. Used by:
+    //   1. Activity Details → "Outcome" action
+    //   2. Today's Activities → clipboard icon
+    //   3. Meet Up History → "Close Sale" button
+    //   4. Standard Functions admin page (preview)
+    // Add a field: update buildMeetingOutcomeBlock + collectMeetingOutcomeData.
+    // Approval/queue/conversion logic stays in saveMeetingOutcome — this block
+    // covers form UI + field collection only.
+    // ═══════════════════════════════════════════════════════════════════════
+    const buildMeetingOutcomeBlock = (prefix, activity = {}, opts = {}) => {
+        const a = activity || {};
+        const readOnly = prefix === 'preview';
+        const disabled = readOnly ? 'disabled' : '';
+        const products = opts.products || [];
+        const prospect = opts.prospect || null;
+        const cr = opts.closingRecord || a.closing_record || {};
+        const crStatus = cr.status || 'draft';
+        const crLocked = (crStatus === 'submitted' || crStatus === 'approved');
+        const hasProspect = !!a.prospect_id || !!prospect || readOnly;
+
+        const selectedProduct = cr.product || a.solution_sold || '';
+        const productOptions = products.length
+            ? products.map(p => `<option value="${escapeHtml(p.name)}" ${selectedProduct === p.name ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('')
+            : '<option value="">No products available</option>';
+
+        const paymentMethod = cr.payment_method || a.payment_method || 'Cash';
+        const isPOP = paymentMethod === 'POP';
+        const isClosingChecked = !!(a.is_closing || cr.product || cr.sale_amount || cr.invoice_number);
+
+        const v = {
+            full_name:       cr.full_name       || prospect?.full_name     || '',
+            phone:           cr.phone           || prospect?.phone         || '',
+            email:           cr.email           || prospect?.email         || '',
+            ic_number:       cr.ic_number       || prospect?.ic_number     || '',
+            date_of_birth:   cr.date_of_birth   || prospect?.date_of_birth || '',
+            address:         cr.address         || [prospect?.address, prospect?.city, prospect?.state, prospect?.postal_code].filter(Boolean).join(', ') || '',
+            sale_amount:     cr.sale_amount     || a.amount_closed  || a.closing_amount || '',
+            pop_monthly:     cr.pop_monthly     || a.pop_monthly_amount || '',
+            pop_tenure:      cr.pop_tenure      || a.pop_tenure        || '',
+            pop_down:        cr.pop_down_payment || a.pop_down_payment || '',
+            invoice_no:      cr.invoice_number  || a.invoice_number    || '',
+            closing_date:    cr.closing_date    || a.collection_date   || '',
+            closing_remarks: cr.closing_remarks || '',
+            sales_idea:      cr.sales_idea      || '',
+            plan_details:    cr.plan_details    || '',
+            success_story:   cr.success_story   || '',
+        };
+
+        const linkBadge = a.prospect_id ? `
+            <div style="font-size:11px;color:var(--gray-500);margin-bottom:8px;">
+                <i class="fas fa-link"></i> Linked to <strong>${escapeHtml(prospect?.full_name || 'prospect')}</strong> → DC Closing Record
+            </div>` : '';
+
+        const lockedNotice = crLocked ? `
+            <div style="margin-bottom:14px;padding:8px 12px;border-radius:8px;background:#e3f2fd;border:1px solid #2196f3;color:#1565c0;font-size:12px;">
+                <i class="fas fa-lock"></i> Closing record is <strong>${escapeHtml(crStatus)}</strong> — activity fields will be saved, but the locked closing record won't be overwritten.
+            </div>` : '';
+
+        const customerInfoSection = hasProspect ? `
+            <div style="font-weight:600;color:var(--gray-700);margin:8px 0 6px;">Customer Information</div>
+            <div class="form-group">
+                <label>Full Name</label>
+                <input id="${prefix}-full-name" class="form-control" value="${escapeHtml(v.full_name)}" placeholder="Full name" ${disabled}>
+            </div>
+            <div class="form-row">
+                <div class="form-group half">
+                    <label>Phone</label>
+                    <input id="${prefix}-phone" class="form-control" value="${escapeHtml(v.phone)}" placeholder="Phone" ${disabled}>
+                </div>
+                <div class="form-group half">
+                    <label>Email</label>
+                    <input id="${prefix}-email" class="form-control" value="${escapeHtml(v.email)}" placeholder="Email" ${disabled}>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group half">
+                    <label>IC Number</label>
+                    <input id="${prefix}-ic" class="form-control" value="${escapeHtml(v.ic_number)}" placeholder="NRIC/Passport" ${disabled}>
+                </div>
+                <div class="form-group half">
+                    <label>Date of Birth</label>
+                    <input id="${prefix}-dob" type="date" class="form-control" value="${escapeHtml(v.date_of_birth)}" ${disabled}>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Address</label>
+                <textarea id="${prefix}-address" class="form-control" rows="2" placeholder="Full address" ${disabled}>${escapeHtml(v.address)}</textarea>
+            </div>
+            <div style="font-weight:600;color:var(--gray-700);margin:14px 0 6px;">Meeting Outcome</div>
+        ` : '';
+
+        const remarksAndUploadSection = hasProspect ? `
+            <div class="form-group">
+                <label>Remarks</label>
+                <textarea id="${prefix}-remarks" class="form-control" rows="2" placeholder="e.g. Ring Size, Special Request..." ${disabled}>${escapeHtml(v.closing_remarks)}</textarea>
+            </div>
+            <div class="form-group">
+                <label>Upload Purchased Invoice</label>
+                <input id="${prefix}-invoice-file" type="file" class="form-control" accept="image/png,image/jpeg,application/pdf" ${disabled}>
+            </div>
+        ` : '';
+
+        const caseStudySection = hasProspect ? `
+            <div style="margin-top:16px;border-top:1px solid #eee;padding-top:12px;">
+                <div style="font-weight:600;color:var(--gray-700);margin-bottom:8px;">📁 Case Study (Optional)</div>
+                <div class="form-group">
+                    <label>Sales Idea</label>
+                    <textarea id="${prefix}-sales-idea" class="form-control" rows="2" placeholder="Describe the sales idea..." ${disabled}>${escapeHtml(v.sales_idea)}</textarea>
+                </div>
+                <div class="form-group">
+                    <label>Plan Details</label>
+                    <textarea id="${prefix}-plan-details" class="form-control" rows="2" placeholder="Details of the plan proposed..." ${disabled}>${escapeHtml(v.plan_details)}</textarea>
+                </div>
+                <div class="form-group">
+                    <label>Success Story</label>
+                    <textarea id="${prefix}-success-story" class="form-control" rows="2" placeholder="What made this a success?" ${disabled}>${escapeHtml(v.success_story)}</textarea>
+                </div>
+            </div>
+        ` : '';
+
+        const paymentOptions = ['Cash','Bank Transfer','Credit Card','Cheque','EPP','POP']
+            .map(m => `<option value="${m}" ${paymentMethod === m ? 'selected' : ''}>${m}</option>`).join('');
+
+        return `
+            <div class="meeting-outcome-block" data-prefix="${prefix}">
+                ${linkBadge}
+                ${lockedNotice}
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="${prefix}-is-closing" onchange="document.getElementById('${prefix}-closing-fields').style.display = this.checked ? 'block' : 'none'" ${isClosingChecked ? 'checked' : ''} ${disabled}> Case Closed Well Done!
+                    </label>
+                </div>
+                <div id="${prefix}-closing-fields" style="display:${isClosingChecked ? 'block' : 'none'};padding-left:20px;">
+                    ${customerInfoSection}
+                    <div class="form-group">
+                        <label>Product/Service Sold</label>
+                        <select id="${prefix}-solution-sold" class="form-control" ${disabled}>${productOptions}</select>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group half">
+                            <label>Amount Closed (RM)</label>
+                            <input type="number" id="${prefix}-amount-closed" class="form-control" value="${escapeHtml(v.sale_amount)}" placeholder="0.00" ${disabled}>
+                        </div>
+                        <div class="form-group half">
+                            <label>Payment Method</label>
+                            <select id="${prefix}-payment-method" class="form-control" onchange="document.getElementById('${prefix}-pop-fields').style.display = this.value === 'POP' ? 'block' : 'none'" ${disabled}>
+                                ${paymentOptions}
+                            </select>
+                        </div>
+                    </div>
+                    <div id="${prefix}-pop-fields" style="display:${isPOP ? 'block' : 'none'};background:var(--gray-50);padding:12px;border-radius:6px;margin-bottom:12px;">
+                        <div class="form-row">
+                            <div class="form-group half">
+                                <label>Payment Amount per Month (RM)</label>
+                                <input type="number" id="${prefix}-pop-monthly" class="form-control" value="${escapeHtml(v.pop_monthly)}" placeholder="0.00" ${disabled}>
+                            </div>
+                            <div class="form-group half">
+                                <label>Tenure (months)</label>
+                                <input type="number" id="${prefix}-pop-tenure" class="form-control" value="${escapeHtml(v.pop_tenure)}" placeholder="12" ${disabled}>
+                            </div>
+                        </div>
+                        <div class="form-group half">
+                            <label>Down Payment (RM)</label>
+                            <input type="number" id="${prefix}-pop-down" class="form-control" value="${escapeHtml(v.pop_down)}" placeholder="0.00" ${disabled}>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group half">
+                            <label>Invoice Number</label>
+                            <input type="text" id="${prefix}-invoice-number" class="form-control" value="${escapeHtml(v.invoice_no)}" placeholder="INV-2026-001" ${disabled}>
+                        </div>
+                        <div class="form-group half">
+                            <label>Collection Date</label>
+                            <input type="date" id="${prefix}-collection-date" class="form-control" value="${escapeHtml(v.closing_date)}" ${disabled}>
+                        </div>
+                    </div>
+                    ${remarksAndUploadSection}
+                    ${caseStudySection}
+                </div>
+                <div class="form-group" style="margin-top:12px;">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="${prefix}-unable-to-serve" onchange="document.getElementById('${prefix}-unable-fields').style.display = this.checked ? 'block' : 'none'" ${a.unable_to_serve ? 'checked' : ''} ${disabled}> Unable to Serve
+                    </label>
+                </div>
+                <div id="${prefix}-unable-fields" style="display:${a.unable_to_serve ? 'block' : 'none'};padding-left:20px;">
+                    <div class="form-group">
+                        <label>Reason</label>
+                        <textarea id="${prefix}-unable-reason" class="form-control" rows="2" ${disabled}>${escapeHtml(a.unable_reason || '')}</textarea>
+                    </div>
+                </div>
+            </div>
+        `;
+    };
+
+    // Read all Meeting Outcome fields from the DOM. `hasProspect` surfaces
+    // whether the customer-info section was rendered so the caller can keep
+    // its nullable-field merging logic unchanged.
+    const collectMeetingOutcomeData = (prefix) => {
+        const read = (id) => {
+            const el = document.getElementById(id);
+            if (!el) return null;
+            return (el.value || '').trim();
+        };
+        const readBool = (id) => document.getElementById(id)?.checked || false;
+        return {
+            is_closing: readBool(`${prefix}-is-closing`),
+            unable_to_serve: readBool(`${prefix}-unable-to-serve`),
+            unable_reason: read(`${prefix}-unable-reason`) ?? '',
+            // Customer Info (only present when linked to a prospect)
+            full_name: read(`${prefix}-full-name`),
+            phone: read(`${prefix}-phone`),
+            email: read(`${prefix}-email`),
+            ic_number: read(`${prefix}-ic`),
+            date_of_birth: read(`${prefix}-dob`),
+            address: read(`${prefix}-address`),
+            // Closing details
+            solution_sold: read(`${prefix}-solution-sold`),
+            amount_closed: read(`${prefix}-amount-closed`),
+            payment_method: read(`${prefix}-payment-method`),
+            pop_monthly: read(`${prefix}-pop-monthly`),
+            pop_tenure: read(`${prefix}-pop-tenure`),
+            pop_down: read(`${prefix}-pop-down`),
+            invoice_number: read(`${prefix}-invoice-number`),
+            collection_date: read(`${prefix}-collection-date`),
+            closing_remarks: read(`${prefix}-remarks`),
+            sales_idea: read(`${prefix}-sales-idea`),
+            plan_details: read(`${prefix}-plan-details`),
+            success_story: read(`${prefix}-success-story`),
+        };
+    };
+
     // Standard Functions page — Level 1 only. Shows a read-only preview of
     // each reusable block so admins can see the canonical field set that
     // powers Add Prospect / Edit Prospect / CPS New Customer Info in one
@@ -14499,6 +14555,29 @@ function _wireLoginBtn() {
                         </div>
                         <div class="sf-preview-wrap">
                             ${buildPostMeetupNotesBlock('preview', {}, {})}
+                        </div>
+                    </div>
+                </div>
+
+                <div class="sf-card">
+                    <div class="sf-card-hdr">
+                        <h3>💼 Meeting Outcome</h3>
+                        <span class="sf-meta">Used in 3 places</span>
+                    </div>
+                    <div class="sf-card-body">
+                        <div class="sf-usage">
+                            <strong>Consumers:</strong>
+                            <ul style="margin:6px 0 0;padding-left:20px;">
+                                <li>Activity Details → <em>Outcome</em> action button</li>
+                                <li>Today's Activities → clipboard icon</li>
+                                <li>Prospect Profile → Meet Up History → <em>Close Sale</em> button</li>
+                            </ul>
+                            <div style="margin-top:8px;">
+                                <strong>To add a field:</strong> edit <code>buildMeetingOutcomeBlock()</code> and <code>collectMeetingOutcomeData()</code> in <code>script.js</code>. All 3 consumers pick it up on next page reload.
+                            </div>
+                        </div>
+                        <div class="sf-preview-wrap">
+                            ${buildMeetingOutcomeBlock('preview', { prospect_id: 'preview' }, {})}
                         </div>
                     </div>
                 </div>
@@ -19229,7 +19308,7 @@ function _wireLoginBtn() {
                         <div class="meet-actions">
                             <button class="btn btn-sm secondary" onclick="event.stopPropagation();app.attachActivityPhoto(${a.id})"><i class="fas fa-camera"></i> Photo</button>
                             <button class="btn btn-sm secondary" onclick="event.stopPropagation();app.openPostMeetupNotesModal(${a.id}, ${prospect.id})"><i class="fas fa-sticky-note"></i> Notes</button>
-                            ${a.is_closed ? `<span class="badge success" style="align-self:center;font-size:12px;"><i class="fas fa-handshake"></i> Sale Closed</span>` : `<button class="btn btn-sm primary" onclick="event.stopPropagation();app.recordSalesClosure(${prospect.id},${a.id})"><i class="fas fa-handshake"></i> Close Sale</button>`}
+                            ${a.is_closed ? `<span class="badge success" style="align-self:center;font-size:12px;"><i class="fas fa-handshake"></i> Sale Closed</span>` : `<button class="btn btn-sm primary" onclick="event.stopPropagation();app.openMeetingOutcomeModal(${a.id})"><i class="fas fa-handshake"></i> Close Sale</button>`}
                         </div>
                         ${a.photo_urls && a.photo_urls.length > 0 ? `
                         <div class="meet-photos">
