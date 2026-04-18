@@ -36090,15 +36090,28 @@ const initImportDemoData = async () => {
     };
 
     // --- Dedup against full history ---
-    // Remove any row whose unique_key OR order_no already exists in history.
-    // Checking order_no as a fallback catches cases where region/product mapping
-    // differed between the original commit and the current import.
+    // Three-tier check: unique_key → order_no → agent+date+product+qty.
+    // The fallback tiers handle cases where region mapping changed or order_no
+    // was not stored in older history records.
     const eggDedupAgainstHistory = async (rows) => {
         try {
             const history = await AppDataStore.query('egg_processed_orders', {});
             const seenKeys = new Set((history || []).map(h => h.unique_key).filter(Boolean));
             const seenOrderNos = new Set((history || []).map(h => h.order_no).filter(Boolean));
-            return rows.filter(r => !seenKeys.has(r.unique_key) && !seenOrderNos.has(r.order_no));
+            const seenAgentLines = new Set(
+                (history || [])
+                    .filter(h => h.agent_name && h.order_date && h.product && h.quantity != null)
+                    .map(h => `${String(h.agent_name).trim().toUpperCase()}|${String(h.order_date).slice(0,10)}|${h.product}|${h.quantity}`)
+            );
+            return rows.filter(r => {
+                if (seenKeys.has(r.unique_key)) return false;
+                if (r.order_no && seenOrderNos.has(r.order_no)) return false;
+                if (r.agent_name && r.order_date_parsed) {
+                    const line = `${String(r.agent_name).trim().toUpperCase()}|${String(r.order_date_parsed).slice(0,10)}|${r.product}|${r.quantity}`;
+                    if (seenAgentLines.has(line)) return false;
+                }
+                return true;
+            });
         } catch (err) {
             console.error('egg: dedup failed, returning all rows', err);
             return rows;
