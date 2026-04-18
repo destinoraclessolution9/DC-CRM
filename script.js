@@ -35822,6 +35822,8 @@ const initImportDemoData = async () => {
         excludedKeys: new Set(),// unique_keys marked to push up to last week (exclude from current)
         excludedToUrgent: {},   // (legacy, unused in simplified flow)
         lastWeekTopUp: { GOLD: 0, KING: 0 },  // user-entered ad-hoc top-up quantities from last week
+        prevRunOrders: [],      // previous committed run's orders — shown as reference in Phase 2
+        prevRunMeta: null,      // previous run's egg_run_history record
         config: null,
         farmOrderText: '',
         channelBreakdownText: '',
@@ -36505,6 +36507,27 @@ JB 星期二到
         _eggState.normalizedRows = processed;
         _eggState.newRows = newRows;
 
+        // Fetch previous run's orders for the reference panel in Phase 2
+        try {
+            const runs = await AppDataStore.query('egg_run_history', {}) || [];
+            const currentWeekIso = eggFormatDateIso(_eggState.weekStartDate || eggGetCurrentMonday());
+            const prevRun = runs
+                .filter(r => r.week_start_date && r.week_start_date < currentWeekIso)
+                .sort((a, b) => (b.week_start_date || '').localeCompare(a.week_start_date || ''))[0];
+            if (prevRun) {
+                const prevOrders = await AppDataStore.query('egg_processed_orders', { run_id: prevRun.id }) || [];
+                prevOrders.sort((a, b) => (a.order_date || '').localeCompare(b.order_date || ''));
+                _eggState.prevRunOrders = prevOrders.filter(h => !h.excluded_reason);
+                _eggState.prevRunMeta = prevRun;
+            } else {
+                _eggState.prevRunOrders = [];
+                _eggState.prevRunMeta = null;
+            }
+        } catch (e) {
+            _eggState.prevRunOrders = [];
+            _eggState.prevRunMeta = null;
+        }
+
         // Simplified flow: no more urgent-order reconciliation. User just enters
         // last-week top-up amounts and ticks the rows that were placed last week.
         _eggState.urgentOrders = [];
@@ -36596,6 +36619,52 @@ JB 星期二到
                 </div>
                 <div id="egg-pushup-counter" style="margin-top:12px;font-size:13px;">${eggPushUpCounterHtml()}</div>
             </div>
+
+            ${(() => {
+                const prev = _eggState.prevRunOrders || [];
+                const meta = _eggState.prevRunMeta;
+                if (!meta) return '';
+                const weekLabel = meta.week_start_date ? eggFormatDateShort(new Date(meta.week_start_date + 'T00:00:00')) : '-';
+                const goldTotal = prev.filter(r => r.product === 'GOLD').reduce((s, r) => s + Number(r.quantity || 0), 0);
+                const kingTotal = prev.filter(r => r.product === 'KING').reduce((s, r) => s + Number(r.quantity || 0), 0);
+                const rows = prev.map(r => `
+                    <tr style="border-top:1px solid var(--gray-100);">
+                        <td style="padding:6px 8px;">${r.agent_name || '-'}</td>
+                        <td style="padding:6px 8px;font-size:12px;">${r.order_date ? eggFormatDateShort(new Date(r.order_date)) : '-'}</td>
+                        <td style="padding:6px 8px;font-family:monospace;font-size:12px;">${r.order_no || '-'}</td>
+                        <td style="padding:6px 8px;">${r.product || '-'}</td>
+                        <td style="padding:6px 8px;">${r.region || '-'}</td>
+                        <td style="padding:6px 8px;text-align:right;">${r.quantity}</td>
+                        <td style="padding:6px 8px;">${r.channel || '-'}</td>
+                    </tr>`).join('');
+                return `
+                <div style="background:white;border:1px solid var(--gray-200);border-radius:12px;margin-bottom:20px;">
+                    <div onclick="this.parentElement.querySelector('.egg-hist-body').style.display=this.parentElement.querySelector('.egg-hist-body').style.display==='none'?'block':'none';this.querySelector('.egg-hist-chevron').style.transform=this.parentElement.querySelector('.egg-hist-body').style.display==='none'?'rotate(0deg)':'rotate(180deg)';"
+                        style="display:flex;justify-content:space-between;align-items:center;padding:14px 20px;cursor:pointer;user-select:none;">
+                        <div>
+                            <strong>Last Week History — Week of ${weekLabel}</strong>
+                            <span style="margin-left:12px;font-size:12px;color:var(--gray-500);">${prev.length} orders &nbsp;•&nbsp; GOLD ${goldTotal} &nbsp;•&nbsp; KING ${kingTotal}</span>
+                        </div>
+                        <i class="fas fa-chevron-down egg-hist-chevron" style="transition:transform 0.2s;transform:rotate(180deg);color:var(--gray-400);"></i>
+                    </div>
+                    <div class="egg-hist-body" style="display:block;border-top:1px solid var(--gray-200);overflow-x:auto;">
+                        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                            <thead>
+                                <tr style="background:var(--gray-50);text-align:left;">
+                                    <th style="padding:6px 8px;">Agent</th>
+                                    <th style="padding:6px 8px;">Order Date</th>
+                                    <th style="padding:6px 8px;">Order No</th>
+                                    <th style="padding:6px 8px;">Product</th>
+                                    <th style="padding:6px 8px;">Region</th>
+                                    <th style="padding:6px 8px;text-align:right;">Qty</th>
+                                    <th style="padding:6px 8px;">Channel</th>
+                                </tr>
+                            </thead>
+                            <tbody>${rows}</tbody>
+                        </table>
+                    </div>
+                </div>`;
+            })()}
 
             <div style="background:white;padding:20px;border-radius:12px;border:1px solid var(--gray-200);">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
