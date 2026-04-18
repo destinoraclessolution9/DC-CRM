@@ -35204,8 +35204,8 @@ const initImportDemoData = async () => {
             if (!ranked.length) return '';
             const medals = ['🥇','🥈','🥉'];
             return `<div class="fude-section">
-                <h2>🏆 福气 Leaderboard</h2>
-                <div style="overflow-x:auto;"><table class="data-table"><thead><tr>
+                <div class="fude-sec-bar"><div class="fude-sec-bar-icon news">🏆</div><h2>福气 Leaderboard</h2></div>
+                <div class="fude-sec-body"><div style="overflow-x:auto;"><table class="data-table"><thead><tr>
                     <th>#</th><th>Name</th><th>福气 Points</th><th>Sharing Returns (RM)</th>
                 </tr></thead><tbody>
                     ${ranked.map((r, i) => `<tr>
@@ -35214,18 +35214,18 @@ const initImportDemoData = async () => {
                         <td>${r.pts}</td>
                         <td>${r.ret.toFixed(2)}</td>
                     </tr>`).join('')}
-                </tbody></table></div>
+                </tbody></table></div></div>
             </div>`;
         })() : '';
 
         // --- Admin: manage highlights table ---
         const adminHighlightsSection = isAdmin ? `
             <div class="fude-section">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
-                    <h2 style="margin:0;">⚙️ Manage Highlights &amp; Stories</h2>
+                <div class="fude-sec-bar" style="justify-content:space-between;">
+                    <div style="display:flex;align-items:center;gap:12px;"><div class="fude-sec-bar-icon news">⚙️</div><h2>Manage Highlights &amp; Stories</h2></div>
                     <button class="btn primary btn-sm" onclick="app.openHighlightModal()"><i class="fas fa-plus"></i> Add New</button>
                 </div>
-                <div style="overflow-x:auto;"><table class="data-table"><thead><tr>
+                <div class="fude-sec-body"><div style="overflow-x:auto;"><table class="data-table"><thead><tr>
                     <th>Title</th><th>Type</th><th>Status</th><th>Created</th><th>Actions</th>
                 </tr></thead><tbody>
                     ${highlights.length ? highlights.map(h => `<tr>
@@ -35238,17 +35238,17 @@ const initImportDemoData = async () => {
                             <button class="btn danger btn-sm" style="margin-left:4px;" onclick="event.stopPropagation();app.deleteHighlight(${h.id})"><i class="fas fa-trash"></i></button>
                         </td>
                     </tr>`).join('') : '<tr><td colspan="5" style="text-align:center;color:var(--gray-400);">No highlights yet.</td></tr>'}
-                </tbody></table></div>
+                </tbody></table></div></div>
             </div>` : '';
 
         // --- Admin: manage rewards table ---
         const adminRewardsSection = isAdmin ? `
             <div class="fude-section">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
-                    <h2 style="margin:0;">🎁 Manage Rewards &amp; 福气 Points</h2>
+                <div class="fude-sec-bar" style="justify-content:space-between;">
+                    <div style="display:flex;align-items:center;gap:12px;"><div class="fude-sec-bar-icon gem">🎁</div><h2>Manage Rewards &amp; 福气 Points</h2></div>
                     <button class="btn primary btn-sm" onclick="app.openRewardModal()"><i class="fas fa-plus"></i> Award Points</button>
                 </div>
-                <div style="overflow-x:auto;"><table class="data-table"><thead><tr>
+                <div class="fude-sec-body"><div style="overflow-x:auto;"><table class="data-table"><thead><tr>
                     <th>User</th><th>Action</th><th>福气 Pts</th><th>Sharing Return</th><th>Description</th><th>Date</th><th></th>
                 </tr></thead><tbody>
                     ${allRewards.length ? allRewards.map(r => {
@@ -35263,7 +35263,7 @@ const initImportDemoData = async () => {
                             <td><button class="btn danger btn-sm" onclick="event.stopPropagation();app.deleteReward(${r.id})"><i class="fas fa-trash"></i></button></td>
                         </tr>`;
                     }).join('') : '<tr><td colspan="7" style="text-align:center;color:var(--gray-400);">No rewards yet.</td></tr>'}
-                </tbody></table></div>
+                </tbody></table></div></div>
             </div>` : '';
 
         // --- Purchases section (L13 only) ---
@@ -35277,15 +35277,16 @@ const initImportDemoData = async () => {
                     <td>${fmtDate(p.purchase_date || p.created_at)}</td>
                   </tr>`).join('')
                 : '<tr><td colspan="4" style="text-align:center;color:var(--gray-400);">No purchases found.</td></tr>';
-            purchasesSection = `<div class="fude-section"><h2>🛍️ My Purchase History</h2>
-                <div style="overflow-x:auto;"><table class="data-table"><thead><tr>
+            purchasesSection = `<div class="fude-section">
+                <div class="fude-sec-bar"><div class="fude-sec-bar-icon story">🛍️</div><h2>My Purchase History</h2></div>
+                <div class="fude-sec-body"><div style="overflow-x:auto;"><table class="data-table"><thead><tr>
                     <th>Product / Package</th><th>Amount</th><th>Status</th><th>Date</th>
-                </tr></thead><tbody>${rows}</tbody></table></div></div>`;
+                </tr></thead><tbody>${rows}</tbody></table></div></div></div>`;
         }
 
         // --- My rewards table ---
         const rewardsHtml = myRewards.length === 0
-            ? '<p style="color:var(--gray-500,#6b7280);padding:12px 0;">No recommendations or rewards yet.</p>'
+            ? '<p style="color:var(--gray-500,#6b7280);margin:0;">No recommendations or rewards yet.</p>'
             : `<div style="overflow-x:auto;"><table class="data-table"><thead><tr>
                 <th>Action</th><th>福气 Points</th><th>Sharing Return (RM)</th><th>Description</th><th>Date</th>
                </tr></thead><tbody>
@@ -35301,15 +35302,21 @@ const initImportDemoData = async () => {
         // --- Render ---
         container.innerHTML = `
             <div class="fude-tab">
-                <h1 style="font-size:1.8rem;color:var(--primary,#8B0000);margin-bottom:24px;">福德</h1>
+                <div class="fude-page-header">
+                    <div class="fude-page-header-icon">🌸</div>
+                    <div>
+                        <h1>福德</h1>
+                        <p>福运相随 · Blessings &amp; Abundance</p>
+                    </div>
+                </div>
                 ${summaryBanner}
                 ${leaderboardSection}
                 ${adminHighlightsSection}
                 ${adminRewardsSection}
                 <div class="fude-section">
-                    <div class="fude-mag-header"><h2>📰 Highlights &amp; News</h2></div>
+                    <div class="fude-sec-bar"><div class="fude-sec-bar-icon news">📰</div><h2>Highlights &amp; News</h2></div>
                     ${publicNews.length === 0
-                        ? '<p style="color:var(--gray-500,#6b7280);">No highlights yet.</p>'
+                        ? '<div class="fude-sec-body"><p style="color:var(--gray-500,#6b7280);margin:0;">No highlights yet.</p></div>'
                         : (() => {
                             const [hero, ...rest] = publicNews;
                             const heroBg = hero.image_url
@@ -35324,15 +35331,15 @@ const initImportDemoData = async () => {
                     }
                 </div>
                 <div class="fude-section">
-                    <div class="fude-mag-header"><h2>🌟 Success Stories</h2></div>
+                    <div class="fude-sec-bar"><div class="fude-sec-bar-icon story">🌟</div><h2>Success Stories</h2></div>
                     ${successStories.length === 0
-                        ? '<p style="color:var(--gray-500,#6b7280);">No success stories yet.</p>'
-                        : `<div class="fude-stories-grid">${successStories.map(s => `<div class="fude-story-card">${s.image_url ? `<img class="fude-story-img" src="${s.image_url}" alt="" onerror="this.style.display='none'">` : ''}<div class="fude-story-body"><span class="fude-story-quote">"</span><h3>${s.title}</h3><p>${s.content || ''}</p></div></div>`).join('')}</div>`
+                        ? '<div class="fude-sec-body"><p style="color:var(--gray-500,#6b7280);margin:0;">No success stories yet.</p></div>'
+                        : `<div class="fude-stories-grid">${successStories.map((s, i) => `<div class="fude-story-card"><div class="fude-story-num">${i + 1}</div>${s.image_url ? `<img class="fude-story-img" src="${s.image_url}" alt="" onerror="this.style.display='none'">` : ''}<div class="fude-story-body"><h3>${s.title}</h3><p>${s.content || ''}</p></div></div>`).join('')}</div>`
                     }
                 </div>
                 ${recommendationTips.length ? `
                 <div class="fude-section">
-                    <div class="fude-mag-header"><h2>💡 Recommendation Tips</h2></div>
+                    <div class="fude-sec-bar"><div class="fude-sec-bar-icon tip">💡</div><h2>Recommendation Tips</h2></div>
                     <div class="fude-tips-stack">${recommendationTips.map(t => `
                         <div class="fude-tip-card">
                             <span class="fude-tip-icon">💡</span>
@@ -35345,8 +35352,8 @@ const initImportDemoData = async () => {
                 </div>` : ''}
                 ${purchasesSection}
                 <div class="fude-section">
-                    <h2>💎 My Recommendations &amp; Returns</h2>
-                    ${rewardsHtml}
+                    <div class="fude-sec-bar"><div class="fude-sec-bar-icon gem">💎</div><h2>My Recommendations &amp; Returns</h2></div>
+                    <div class="fude-sec-body">${rewardsHtml}</div>
                 </div>
             </div>
         `;

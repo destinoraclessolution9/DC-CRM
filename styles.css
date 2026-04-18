@@ -9110,61 +9110,98 @@ input:checked+.slider:before {
 
 /* ========== LEVEL 13/14: 福德 Tab ========== */
 .fude-tab {
-    padding: 24px;
-    max-width: 960px;
+    padding: 20px;
+    max-width: 900px;
     margin: 0 auto;
 }
-.fude-section {
-    background: white;
-    border-radius: 12px;
-    padding: 20px 24px;
-    margin-bottom: 24px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-}
-.fude-section h2 {
-    margin: 0 0 16px;
-    font-size: 1.1rem;
-    color: #374151;
-    border-bottom: 1px solid #f3f4f6;
-    padding-bottom: 10px;
-}
-.news-item, .story-item {
-    border-bottom: 1px solid #f3f4f6;
-    padding: 12px 0;
-}
-.news-item:last-child, .story-item:last-child {
-    border-bottom: none;
-    padding-bottom: 0;
-}
 
-/* --- Magazine section header --- */
-.fude-mag-header {
+/* --- Page header --- */
+.fude-page-header {
+    background: linear-gradient(135deg, #7f1d1d 0%, #991b1b 55%, #b91c1c 100%);
+    border-radius: 16px;
+    padding: 22px 26px;
+    margin-bottom: 20px;
     display: flex;
     align-items: center;
-    gap: 10px;
-    margin-bottom: 18px;
-    padding-bottom: 10px;
-    border-bottom: 3px solid #8B0000;
+    gap: 16px;
+    color: white;
 }
-.fude-mag-header h2 {
-    font-size: 0.95rem;
+.fude-page-header-icon { font-size: 2.2rem; flex-shrink: 0; }
+.fude-page-header h1 {
+    font-size: 1.75rem;
     font-weight: 800;
+    color: white;
+    margin: 0 0 3px;
+    letter-spacing: 0.04em;
+}
+.fude-page-header p {
+    font-size: 0.8rem;
+    color: rgba(255,255,255,0.62);
+    margin: 0;
+}
+
+/* --- Section card --- */
+.fude-section {
+    background: white;
+    border-radius: 14px;
+    margin-bottom: 18px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.07), 0 0 0 1px rgba(0,0,0,0.05);
+    overflow: hidden;
+}
+
+/* --- Section header bar --- */
+.fude-sec-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 13px 20px;
+    background: #fafafa;
+    border-bottom: 1px solid #f0f0f0;
+}
+.fude-sec-bar-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.95rem;
+    flex-shrink: 0;
+}
+.fude-sec-bar-icon.news  { background: #fee2e2; }
+.fude-sec-bar-icon.story { background: #fef3c7; }
+.fude-sec-bar-icon.tip   { background: #dbeafe; }
+.fude-sec-bar-icon.gem   { background: #d1fae5; }
+.fude-sec-bar h2 {
+    font-size: 0.97rem;
+    font-weight: 700;
     color: #111827;
     margin: 0;
-    text-transform: uppercase;
-    letter-spacing: 0.07em;
     border: none !important;
     padding: 0 !important;
 }
+.fude-sec-body { padding: 18px 20px 20px; }
+
+/* Legacy mag-header — hidden in new layout */
+.fude-mag-header { display: none; }
+.fude-section > h2 {
+    font-size: 0.97rem;
+    font-weight: 700;
+    color: #111827;
+    margin: 0;
+    padding: 13px 20px;
+    border-bottom: 1px solid #f0f0f0;
+    background: #fafafa;
+}
+.news-item, .story-item { border-bottom: 1px solid #f3f4f6; padding: 12px 0; }
+.news-item:last-child, .story-item:last-child { border-bottom: none; padding-bottom: 0; }
 
 /* --- Hero news card --- */
 .fude-hero-card {
-    border-radius: 12px;
     overflow: hidden;
-    margin-bottom: 14px;
-    background: #1a1a2e;
+    background: #111827;
     position: relative;
-    min-height: 240px;
+    min-height: 190px;
     display: flex;
     flex-direction: column;
     justify-content: flex-end;
@@ -9175,102 +9212,84 @@ input:checked+.slider:before {
     width: 100%;
     height: 100%;
     object-fit: cover;
-    opacity: 0.45;
+    opacity: 0.38;
     display: block;
 }
 .fude-hero-card-overlay {
     position: relative;
-    padding: 28px 24px 22px;
-    background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.3) 55%, transparent 100%);
+    padding: 22px 20px 18px;
+    background: linear-gradient(to top, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.25) 60%, transparent 100%);
 }
 .fude-hero-badge {
     display: inline-block;
     background: #8B0000;
     color: white;
-    font-size: 0.68rem;
+    font-size: 0.62rem;
     font-weight: 700;
     letter-spacing: 0.12em;
     text-transform: uppercase;
-    padding: 3px 10px;
+    padding: 3px 9px;
     border-radius: 3px;
-    margin-bottom: 10px;
+    margin-bottom: 8px;
 }
 .fude-hero-card h3 {
     color: #fff;
-    font-size: 1.35rem;
+    font-size: 1.15rem;
     font-weight: 700;
-    margin: 0 0 8px;
+    margin: 0 0 6px;
     line-height: 1.35;
 }
 .fude-hero-card p {
-    color: rgba(255,255,255,0.78);
-    font-size: 0.875rem;
-    margin: 0 0 10px;
+    color: rgba(255,255,255,0.72);
+    font-size: 0.84rem;
+    margin: 0 0 8px;
     display: -webkit-box;
-    -webkit-line-clamp: 2;
+    -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
     overflow: hidden;
-    line-height: 1.55;
+    line-height: 1.6;
 }
-.fude-hero-date {
-    color: rgba(255,255,255,0.5);
-    font-size: 0.72rem;
-    letter-spacing: 0.03em;
-}
+.fude-hero-date { color: rgba(255,255,255,0.4); font-size: 0.68rem; }
 
-/* --- News card grid --- */
+/* --- News grid --- */
 .fude-news-grid {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
-    gap: 14px;
+    gap: 1px;
+    background: #efefef;
+    border-top: 1px solid #efefef;
 }
-.fude-card {
-    background: white;
-    border-radius: 10px;
-    border: 1px solid #e5e7eb;
-    overflow: hidden;
-    transition: box-shadow 0.18s, transform 0.18s;
-}
-.fude-card:hover {
-    box-shadow: 0 6px 20px rgba(0,0,0,0.1);
-    transform: translateY(-2px);
-}
-.fude-card-img {
-    width: 100%;
-    height: 140px;
-    object-fit: cover;
-    display: block;
-}
+.fude-card { background: white; overflow: hidden; transition: background 0.15s; }
+.fude-card:hover { background: #fafafa; }
+.fude-card-img { width: 100%; height: 110px; object-fit: cover; display: block; }
 .fude-card-img-placeholder {
     width: 100%;
-    height: 140px;
-    background: linear-gradient(135deg, #f3f4f6, #e5e7eb);
+    height: 64px;
+    background: #f9fafb;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 2.2rem;
+    font-size: 1.5rem;
     color: #d1d5db;
 }
-.fude-card-body {
-    padding: 14px 16px 16px;
-}
+.fude-card-body { padding: 12px 14px 14px; }
 .fude-card-tag {
     display: inline-block;
     background: #fef3c7;
     color: #92400e;
-    font-size: 0.65rem;
+    font-size: 0.6rem;
     font-weight: 700;
     letter-spacing: 0.1em;
     text-transform: uppercase;
-    padding: 2px 8px;
+    padding: 2px 6px;
     border-radius: 3px;
-    margin-bottom: 7px;
+    margin-bottom: 5px;
 }
 .fude-card h3 {
-    font-size: 0.9rem;
+    font-size: 0.87rem;
     font-weight: 700;
     color: #111827;
-    margin: 0 0 6px;
+    margin: 0 0 4px;
     line-height: 1.4;
     display: -webkit-box;
     -webkit-line-clamp: 2;
@@ -9278,107 +9297,87 @@ input:checked+.slider:before {
     overflow: hidden;
 }
 .fude-card p {
-    font-size: 0.8rem;
+    font-size: 0.78rem;
     color: #6b7280;
-    margin: 0 0 8px;
+    margin: 0 0 5px;
     display: -webkit-box;
-    -webkit-line-clamp: 3;
+    -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
     line-height: 1.5;
 }
-.fude-card-date {
-    font-size: 0.7rem;
-    color: #9ca3af;
-}
+.fude-card-date { font-size: 0.67rem; color: #9ca3af; }
 
 /* --- Story cards --- */
-.fude-stories-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 14px;
-}
+.fude-stories-grid { display: flex; flex-direction: column; }
 .fude-story-card {
-    background: white;
-    border-radius: 10px;
-    border: 1px solid #e5e7eb;
-    border-left: 4px solid #f59e0b;
-    overflow: hidden;
-    transition: box-shadow 0.18s;
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+    padding: 16px 20px;
+    border-bottom: 1px solid #f3f4f6;
+    transition: background 0.15s;
 }
-.fude-story-card:hover {
-    box-shadow: 0 4px 16px rgba(0,0,0,0.09);
+.fude-story-card:last-child { border-bottom: none; }
+.fude-story-card:hover { background: #fffbeb; }
+.fude-story-num {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+    color: white;
+    font-size: 0.78rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    margin-top: 2px;
 }
 .fude-story-img {
-    width: 100%;
-    height: 160px;
+    width: 70px;
+    height: 70px;
     object-fit: cover;
-    display: block;
+    border-radius: 8px;
+    flex-shrink: 0;
 }
-.fude-story-body {
-    padding: 16px 18px 18px;
-}
-.fude-story-quote {
-    font-size: 3rem;
-    color: #fde68a;
-    line-height: 0.75;
-    margin-bottom: 8px;
-    font-family: Georgia, serif;
-    display: block;
-}
+.fude-story-body { flex: 1; min-width: 0; }
 .fude-story-card h3 {
     font-size: 0.93rem;
     font-weight: 700;
     color: #111827;
-    margin: 0 0 8px;
+    margin: 0 0 5px;
     line-height: 1.35;
 }
 .fude-story-card p {
-    font-size: 0.83rem;
+    font-size: 0.82rem;
     color: #4b5563;
     margin: 0;
     line-height: 1.65;
 }
 
 /* --- Tip cards --- */
-.fude-tips-stack {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-}
+.fude-tips-stack { display: flex; flex-direction: column; }
 .fude-tip-card {
-    background: #eff6ff;
-    border-radius: 10px;
-    border-left: 4px solid #3b82f6;
-    padding: 16px 20px;
     display: flex;
     gap: 14px;
     align-items: flex-start;
+    padding: 15px 20px;
+    border-bottom: 1px solid #f3f4f6;
 }
-.fude-tip-icon {
-    font-size: 1.4rem;
-    flex-shrink: 0;
-    line-height: 1.2;
-}
-.fude-tip-content h3 {
-    font-size: 0.93rem;
-    font-weight: 700;
-    color: #1e3a8a;
-    margin: 0 0 5px;
-}
-.fude-tip-content p {
-    font-size: 0.83rem;
-    color: #1e40af;
-    margin: 0;
-    line-height: 1.6;
-}
+.fude-tip-card:last-child { border-bottom: none; }
+.fude-tip-icon { font-size: 1.2rem; flex-shrink: 0; line-height: 1.2; margin-top: 1px; }
+.fude-tip-content h3 { font-size: 0.92rem; font-weight: 700; color: #1e3a8a; margin: 0 0 4px; }
+.fude-tip-content p { font-size: 0.82rem; color: #374151; margin: 0; line-height: 1.6; }
 
 /* Responsive fude */
 @media (max-width: 620px) {
-    .fude-news-grid,
-    .fude-stories-grid { grid-template-columns: 1fr; }
-    .fude-hero-card h3 { font-size: 1.1rem; }
-    .fude-hero-card-overlay { padding: 20px 16px 16px; }
+    .fude-news-grid { grid-template-columns: 1fr; }
+    .fude-hero-card h3 { font-size: 1rem; }
+    .fude-hero-card-overlay { padding: 18px 16px 14px; }
+    .fude-story-card { gap: 10px; }
+    .fude-sec-body { padding: 14px 16px 16px; }
+    .fude-page-header { padding: 18px 20px; }
 }
 
 /* ===== ACTION PLAN SECTION ===== */
