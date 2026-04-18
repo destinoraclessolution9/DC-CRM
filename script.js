@@ -36090,13 +36090,15 @@ const initImportDemoData = async () => {
     };
 
     // --- Dedup against full history ---
-    // After combining both files, remove any row whose unique_key already exists
-    // anywhere in egg_processed_orders (kept or excluded).
+    // Remove any row whose unique_key OR order_no already exists in history.
+    // Checking order_no as a fallback catches cases where region/product mapping
+    // differed between the original commit and the current import.
     const eggDedupAgainstHistory = async (rows) => {
         try {
             const history = await AppDataStore.query('egg_processed_orders', {});
-            const seen = new Set((history || []).map(h => h.unique_key));
-            return rows.filter(r => !seen.has(r.unique_key));
+            const seenKeys = new Set((history || []).map(h => h.unique_key).filter(Boolean));
+            const seenOrderNos = new Set((history || []).map(h => h.order_no).filter(Boolean));
+            return rows.filter(r => !seenKeys.has(r.unique_key) && !seenOrderNos.has(r.order_no));
         } catch (err) {
             console.error('egg: dedup failed, returning all rows', err);
             return rows;
