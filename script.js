@@ -12525,7 +12525,7 @@ function _wireLoginBtn() {
                         ${activity.activity_type === 'CPS' && activity.prospect_id
                             ? `<button class="act-action-btn act-btn-doc" onclick="app.uploadCPSForm(${activityId}, ${activity.prospect_id})"><span class="act-icon"><i class="fas fa-file-upload"></i></span><span class="act-label">Upload CPS</span></button>
                                <button class="act-action-btn act-btn-doc" onclick="app.uploadAPUForm(${activityId}, ${activity.prospect_id})"><span class="act-icon"><i class="fas fa-file-alt"></i></span><span class="act-label">APU</span></button>`
-                            : `<button class="act-action-btn act-btn-complete" onclick="(async () => { await app.markActivityComplete(${activityId}); })()"><span class="act-icon"><i class="fas fa-check-circle"></i></span><span class="act-label">Complete</span></button>`
+                            : ``
                         }
                         <button class="act-action-btn act-btn-edit" onclick="app.editActivityTiming(${activityId})"><span class="act-icon"><i class="fas fa-pen"></i></span><span class="act-label">Edit</span></button>
                         <button class="act-action-btn act-btn-outcome" onclick="(async () => { await app.openMeetingOutcomeModal(${activityId}); })()"><span class="act-icon"><i class="fas fa-clipboard-check"></i></span><span class="act-label">Outcome</span></button>
@@ -12969,11 +12969,6 @@ function _wireLoginBtn() {
                     <label>Reason</label>
                     <textarea id="mo-unable-reason" class="form-control" rows="2">${escapeHtml(activity.unable_reason || '')}</textarea>
                 </div>
-            </div>
-            <div class="form-group" style="margin-top:12px;">
-                <label class="checkbox-label">
-                    <input type="checkbox" id="mo-continue-follow-up" ${activity.continue_follow_up ? 'checked' : ''}> Continue Follow Up
-                </label>
             </div>
         `;
         UI.showModal('📝 Meeting Outcome', content, [
@@ -13736,11 +13731,6 @@ function _wireLoginBtn() {
                         </div>
                     </div>
 
-                    <div class="form-group">
-                        <label class="checkbox-label">
-                            <input type="checkbox" id="continue-follow-up"> Continue Follow Up
-                        </label>
-                    </div>
                 </div>
 
                 <div class="form-section" style="display:none">
