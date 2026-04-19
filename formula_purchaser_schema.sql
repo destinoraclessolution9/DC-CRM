@@ -223,6 +223,12 @@ END $$;
 
 -- ---------- WEEKLY AUTO-MIN-STOCK JOB ----------
 -- Recomputes auto_min_stock from last 90 days of POS sales.
+DO $$
+BEGIN
+    PERFORM cron.unschedule('fp_update_auto_min');
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
 SELECT cron.schedule(
     'fp_update_auto_min',
     '0 2 * * 0',
@@ -231,4 +237,4 @@ SELECT cron.schedule(
          WHERE sku_id = fp_sku_master.id
            AND transaction_date >= CURRENT_DATE - INTERVAL '90 days')
         / 90.0 * lead_time_days * safety_factor, 0))$$
-) ON CONFLICT DO NOTHING;
+);
