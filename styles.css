@@ -189,6 +189,12 @@ body {
     background: var(--gray-200);
 }
 
+.btn:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
 /* Modals */
 .modal-overlay {
     position: fixed;
