@@ -16859,9 +16859,6 @@ function _wireLoginBtn() {
             }
         }
 
-        // === Push notification fan-out (non-blocking, best-effort) ===
-        _notifyActivityCreated(savedActivity || activity).catch(() => {});
-
         // === Auto Scoring: Award points based on activity type ===
         try {
             await applyActivityScoring(activity);
@@ -17230,8 +17227,6 @@ function _wireLoginBtn() {
 
         UI.toast.success('Past record saved.');
 
-        // === Push notification fan-out (non-blocking, best-effort) ===
-        _notifyActivityCreated(savedPastRecord || activity).catch(() => {});
         UI.hideModal();
 
         const bodyEl = document.getElementById(`acc-body-activity-${prospectId}`);
@@ -34402,8 +34397,6 @@ const initImportDemoData = async () => {
             UI.hideModal();
             UI.toast.success(`${actionType === 'call' ? 'Call' : 'Meeting'} scheduled for ${personName} on ${actionDate}`);
 
-            // === Push notification fan-out (non-blocking, best-effort) ===
-            _notifyActivityCreated(savedBdayActivity || activity).catch(() => {});
         } else {
             // Create as a note/task
             await AppDataStore.create('notes', {
