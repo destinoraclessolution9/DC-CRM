@@ -9485,3 +9485,194 @@ input:checked+.slider:before {
     box-shadow: 0 4px 12px rgba(127,29,29,.25);
     transform: translateY(-1px);
 }
+
+
+/* ===== FUDE (福德) TAB STYLES ===== */
+.fude-tab {
+    padding: 20px;
+    max-width: 900px;
+    margin: 0 auto;
+}
+.fude-page-header {
+    background: linear-gradient(135deg, #7f1d1d 0%, #991b1b 55%, #b91c1c 100%);
+    border-radius: 16px;
+    padding: 22px 26px;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    color: white;
+}
+.fude-page-header-icon { font-size: 2.2rem; flex-shrink: 0; }
+.fude-page-header h1 {
+    font-size: 1.75rem;
+    font-weight: 800;
+    color: white;
+    margin: 0 0 3px;
+    letter-spacing: 0.04em;
+}
+.fude-page-header p {
+    font-size: 0.8rem;
+    color: rgba(255,255,255,0.62);
+    margin: 0;
+}
+.fude-section {
+    background: white;
+    border-radius: 14px;
+    margin-bottom: 18px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.07), 0 0 0 1px rgba(0,0,0,0.05);
+    overflow: hidden;
+}
+.fude-sec-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 13px 20px;
+    background: #fafafa;
+    border-bottom: 1px solid #f0f0f0;
+}
+.fude-sec-bar-icon {
+    width: 32px; height: 32px;
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.95rem; flex-shrink: 0;
+}
+.fude-sec-bar-icon.news  { background: #fee2e2; }
+.fude-sec-bar-icon.story { background: #fef3c7; }
+.fude-sec-bar-icon.tip   { background: #dbeafe; }
+.fude-sec-bar-icon.gem   { background: #d1fae5; }
+.fude-sec-bar h2 {
+    font-size: 0.97rem; font-weight: 700; color: #111827;
+    margin: 0; border: none !important; padding: 0 !important;
+}
+.fude-sec-body { padding: 18px 20px 20px; }
+
+/* Hero news card */
+.fude-hero-card {
+    overflow: hidden; background: #111827; position: relative;
+    min-height: 190px; display: flex; flex-direction: column; justify-content: flex-end;
+}
+.fude-hero-card-bg {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: cover; opacity: 0.38; display: block;
+}
+.fude-hero-card-overlay {
+    position: relative; padding: 22px 20px 18px;
+    background: linear-gradient(to top, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.25) 60%, transparent 100%);
+}
+.fude-hero-badge {
+    display: inline-block; background: #8B0000; color: white;
+    font-size: 0.62rem; font-weight: 700; letter-spacing: 0.12em;
+    text-transform: uppercase; padding: 3px 9px; border-radius: 3px; margin-bottom: 8px;
+}
+.fude-hero-card h3 { color: #fff; font-size: 1.15rem; font-weight: 700; margin: 0 0 6px; line-height: 1.35; }
+.fude-hero-card p {
+    color: rgba(255,255,255,0.72); font-size: 0.84rem; margin: 0 0 8px;
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+    overflow: hidden; line-height: 1.6;
+}
+.fude-hero-date { color: rgba(255,255,255,0.4); font-size: 0.68rem; }
+
+/* News grid */
+.fude-news-grid {
+    display: grid; grid-template-columns: repeat(2, 1fr);
+    gap: 1px; background: #efefef; border-top: 1px solid #efefef;
+}
+.fude-card { background: white; overflow: hidden; transition: background 0.15s; }
+.fude-card:hover { background: #fafafa; }
+.fude-card-img { width: 100%; height: 110px; object-fit: cover; display: block; }
+.fude-card-img-placeholder {
+    width: 100%; height: 64px; background: #f9fafb;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.5rem; color: #d1d5db;
+}
+.fude-card-body { padding: 12px 14px 14px; }
+.fude-card-tag {
+    display: inline-block; background: #fef3c7; color: #92400e;
+    font-size: 0.6rem; font-weight: 700; letter-spacing: 0.1em;
+    text-transform: uppercase; padding: 2px 6px; border-radius: 3px; margin-bottom: 5px;
+}
+.fude-card h3 {
+    font-size: 0.87rem; font-weight: 700; color: #111827; margin: 0 0 4px; line-height: 1.4;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.fude-card p {
+    font-size: 0.78rem; color: #6b7280; margin: 0 0 5px;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden; line-height: 1.5;
+}
+.fude-card-date { font-size: 0.67rem; color: #9ca3af; }
+
+/* Magazine Success Stories */
+.fude-mag-section { background: #f7f2e9; }
+.fude-mag-masthead {
+    display: flex; align-items: center; gap: 12px;
+    padding: 22px 20px 16px;
+    border-bottom: 2px solid #2d1a0e;
+    background: #f7f2e9;
+}
+.fude-mag-masthead-line { flex: 1; height: 2px; background: #2d1a0e; }
+.fude-mag-masthead-center { text-align: center; flex-shrink: 0; }
+.fude-mag-title {
+    font-size: 1.65rem; font-weight: 900; color: #1a0800;
+    line-height: 1.1; letter-spacing: 0.04em;
+}
+.fude-mag-subtitle {
+    font-size: 0.63rem; font-weight: 700; letter-spacing: 0.28em;
+    color: #6b3d1e; text-transform: uppercase; margin-top: 5px;
+}
+.fude-mag-story {
+    padding: 16px 20px;
+    border-bottom: 1px solid #d4c4a8;
+    background: #f7f2e9;
+}
+.fude-mag-story:last-child { border-bottom: none; }
+.fude-mag-story--first { background: #ede6d5; border-bottom: 2px solid #c4a882; }
+.fude-mag-story-header { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 10px; }
+.fude-mag-story-num {
+    width: 28px; height: 28px; border-radius: 50%;
+    background: #8B0000; color: white;
+    font-size: 0.78rem; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; margin-top: 2px;
+}
+.fude-mag-story--first .fude-mag-story-num { width: 32px; height: 32px; font-size: 0.85rem; }
+.fude-mag-story-title { font-size: 1.05rem; font-weight: 800; color: #1a0800; margin: 0; line-height: 1.35; }
+.fude-mag-story--first .fude-mag-story-title { font-size: 1.22rem; }
+.fude-mag-story-photo {
+    width: 100%; height: 190px; object-fit: cover;
+    border-radius: 6px; margin: 0 0 10px; display: block;
+}
+.fude-mag-story-text { font-size: 0.84rem; color: #3d2b1f; line-height: 1.8; margin: 0; }
+
+/* Magazine Tips callout */
+.fude-mag-tips-section { background: #fffbeb; border-left: 4px solid #f59e0b; }
+.fude-mag-tips-header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 14px 20px 12px;
+    background: #fef3c7; border-bottom: 1px solid #fde68a;
+}
+.fude-mag-tips-header h2 {
+    font-size: 0.95rem; font-weight: 800; color: #78350f;
+    margin: 0; border: none !important; padding: 0 !important;
+}
+.fude-mag-tip-badge {
+    width: 30px; height: 30px; background: #f59e0b; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.9rem; flex-shrink: 0;
+}
+.fude-mag-tip-item { padding: 14px 20px; border-bottom: 1px solid #fde68a; background: #fffbeb; }
+.fude-mag-tip-item:last-child { border-bottom: none; }
+.fude-mag-tip-item h3 { font-size: 0.92rem; font-weight: 800; color: #78350f; margin: 0 0 6px; line-height: 1.35; }
+.fude-mag-tip-item p { font-size: 0.83rem; color: #451a03; line-height: 1.78; margin: 0; }
+
+@media (max-width: 620px) {
+    .fude-news-grid { grid-template-columns: 1fr; }
+    .fude-hero-card h3 { font-size: 1rem; }
+    .fude-hero-card-overlay { padding: 18px 16px 14px; }
+    .fude-sec-body { padding: 14px 16px 16px; }
+    .fude-page-header { padding: 18px 20px; }
+    .fude-mag-title { font-size: 1.35rem; }
+    .fude-mag-story--first .fude-mag-story-title { font-size: 1.05rem; }
+    .fude-mag-story-photo { height: 160px; }
+}
