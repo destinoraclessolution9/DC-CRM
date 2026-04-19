@@ -19799,21 +19799,10 @@ function _wireLoginBtn() {
             const apuUrls = Array.isArray(prospect.apu_form_urls) ? prospect.apu_form_urls : [];
             container.innerHTML = `
                 <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
-                    <button class="btn secondary btn-sm" onclick="app.attachAppraisalForm(${prospect.id})"><i class="fas fa-file-image"></i> Upload Appraisal Form${appraisalCount ? ` (${appraisalCount})` : ''}</button>
+                    <button class="btn secondary btn-sm" onclick="app.attachAppraisalForm(${prospect.id})"><i class="fas fa-file-image"></i> Appraisal Form${appraisalCount ? ` (${appraisalCount})` : ''}</button>
+                    <button class="btn secondary btn-sm" onclick="app.uploadAPUForm(null, ${prospect.id})"><i class="fas fa-paperclip"></i> APU Form${apuUrls.length ? ` (${apuUrls.length})` : ''}</button>
                     <button class="btn primary btn-sm" onclick="app.openAddNameModal(${prospect.id})"><i class="fas fa-plus"></i> Add Name</button>
                 </div>
-                ${apuUrls.length > 0 ? `
-                <div style="background:var(--gray-50);border-radius:8px;padding:12px;margin-bottom:12px;">
-                    <div style="font-weight:600;font-size:14px;margin-bottom:8px;"><i class="fas fa-paperclip" style="color:var(--primary);margin-right:6px;"></i>APU (${apuUrls.length})</div>
-                    <div style="display:flex;flex-wrap:wrap;gap:8px;">
-                        ${apuUrls.map((url, i) => `
-                            <div style="position:relative;">
-                                <img src="${url}" style="height:80px;border-radius:6px;object-fit:cover;cursor:pointer;border:1px solid var(--gray-200);" onclick="window.open('${url}','_blank')">
-                                <button type="button" class="btn-icon" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:white;border-radius:50%;width:20px;height:20px;font-size:10px;padding:0;" title="Remove" onclick="event.stopPropagation();app.removeAPUForm(${prospect.id}, ${i})"><i class="fas fa-times"></i></button>
-                            </div>
-                        `).join('')}
-                    </div>
-                </div>` : ''}
                 ${names.length > 0 ? names.map(n => `
                     <div style="background:var(--gray-50);border-radius:8px;padding:12px;margin-bottom:8px;">
                         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
@@ -20591,18 +20580,11 @@ function _wireLoginBtn() {
                     : '<span style="color:var(--gray-400);font-size:12px;font-style:italic;">No products selected</span>';
 
                 const renderPhotoRow = (photos, phase) => {
-                    if (!photos.length) return `<p style="font-size:12px;color:var(--gray-400);font-style:italic;padding:8px;">No ${phase} photos yet</p>`;
-                    return `<div style="display:flex;flex-wrap:wrap;gap:10px;">
-                        ${photos.map((p, i) => `
-                            <div style="width:120px;border:1px solid var(--gray-200);border-radius:6px;overflow:hidden;background:#fff;">
-                                <div style="position:relative;">
-                                    <img src="${p.url}" style="width:100%;height:90px;object-fit:cover;cursor:pointer;" onclick="window.open('${p.url}','_blank')">
-                                    <button type="button" title="Remove" onclick="event.stopPropagation();app.removeFengShuiPhoto(${pid},${a.id},'${phase}',${i})" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:#fff;border:none;border-radius:50%;width:20px;height:20px;font-size:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;"><i class="fas fa-times"></i></button>
-                                </div>
-                                <input type="text" class="form-control" value="${escapeHtml(p.remarks || '')}" placeholder="Remark..." style="font-size:11px;height:26px;border:none;border-top:1px solid var(--gray-200);border-radius:0;" onchange="event.stopPropagation();app.updateFengShuiPhotoRemark(${pid},${a.id},'${phase}',${i},this.value)">
-                            </div>
-                        `).join('')}
-                    </div>`;
+                    const label = phase === 'before' ? 'before' : 'after';
+                    if (!photos.length) return `<p style="font-size:12px;color:var(--gray-400);font-style:italic;padding:8px;">No ${label} photos yet</p>`;
+                    return `<button class="btn btn-sm secondary" onclick="event.stopPropagation();app.openFengShuiPhotosModal(${pid},${a.id},'${phase}')" style="font-size:11px;margin-top:2px;">
+                        <i class="fas fa-images"></i> ${photos.length} ${label} photo${photos.length > 1 ? 's' : ''}
+                    </button>`;
                 };
 
                 const renderSiteReviews = () => {
@@ -20626,14 +20608,9 @@ function _wireLoginBtn() {
                                 </div>
                                 <textarea class="form-control" rows="2" placeholder="Site review key notes / remarks..." style="font-size:12px;margin-bottom:6px;" onchange="event.stopPropagation();app.updateFengShuiSiteReviewField(${pid},${a.id},${sr.id},'remarks',this.value)">${escapeHtml(sr.remarks || '')}</textarea>
                                 ${srPhotos.length > 0 ? `
-                                <div style="display:flex;flex-wrap:wrap;gap:6px;">
-                                    ${srPhotos.map((url, i) => `
-                                        <div style="position:relative;">
-                                            <img src="${url}" style="width:76px;height:76px;object-fit:cover;border-radius:4px;cursor:pointer;border:1px solid var(--gray-200);" onclick="window.open('${url}','_blank')">
-                                            <button type="button" title="Remove" onclick="event.stopPropagation();app.removeFengShuiSitePhoto(${pid},${a.id},${sr.id},${i})" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:9px;cursor:pointer;"><i class="fas fa-times"></i></button>
-                                        </div>
-                                    `).join('')}
-                                </div>
+                                <button class="btn btn-sm secondary" onclick="event.stopPropagation();app.openFengShuiSitePhotosModal(${pid},${a.id},${sr.id})" style="font-size:11px;margin-top:4px;">
+                                    <i class="fas fa-images"></i> ${srPhotos.length} photo${srPhotos.length > 1 ? 's' : ''}
+                                </button>
                                 ` : ''}
                             </div>`;
                         }).join('');
@@ -21824,6 +21801,56 @@ NOTIFY pgrst, 'reload schema';`;
         audits[idx][key] = arr;
         await _writeFengShuiAudits(prospectId, audits);
         // Silent save — no toast so it doesn't spam when typing across many photos
+    };
+
+    const openFengShuiPhotosModal = async (prospectId, auditId, phase) => {
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) return;
+        const audits = _readFengShuiAudits(prospect);
+        const audit = audits.find(a => a.id === auditId);
+        if (!audit) return;
+        const photos = Array.isArray(audit[`${phase}_photos`]) ? audit[`${phase}_photos`] : [];
+        const label = phase === 'before' ? 'Before' : 'After';
+        const content = photos.length === 0
+            ? `<p style="text-align:center;padding:20px;color:var(--gray-400);">No ${phase} photos yet</p>`
+            : `<div style="display:flex;flex-wrap:wrap;gap:10px;">
+                ${photos.map((p, i) => `
+                    <div style="width:120px;border:1px solid var(--gray-200);border-radius:6px;overflow:hidden;background:#fff;">
+                        <div style="position:relative;">
+                            <img src="${p.url}" style="width:100%;height:90px;object-fit:cover;cursor:pointer;" onclick="window.open('${p.url}','_blank')">
+                            <button type="button" title="Remove" onclick="event.stopPropagation();app.removeFengShuiPhoto(${prospectId},${auditId},'${phase}',${i});UI.hideModal();" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:#fff;border:none;border-radius:50%;width:20px;height:20px;font-size:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;"><i class="fas fa-times"></i></button>
+                        </div>
+                        <input type="text" class="form-control" value="${escapeHtml(p.remarks || '')}" placeholder="Remark..." style="font-size:11px;height:26px;border:none;border-top:1px solid var(--gray-200);border-radius:0;" onchange="event.stopPropagation();app.updateFengShuiPhotoRemark(${prospectId},${auditId},'${phase}',${i},this.value)">
+                    </div>
+                `).join('')}
+            </div>`;
+        UI.showModal(`${label} Photos (${photos.length})`, content, [
+            { label: 'Close', type: 'primary', action: 'UI.hideModal()' }
+        ]);
+    };
+
+    const openFengShuiSitePhotosModal = async (prospectId, auditId, srId) => {
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) return;
+        const audits = _readFengShuiAudits(prospect);
+        const audit = audits.find(a => a.id === auditId);
+        if (!audit) return;
+        const sr = (Array.isArray(audit.site_reviews) ? audit.site_reviews : []).find(s => s.id === srId);
+        if (!sr) return;
+        const photos = Array.isArray(sr.photos) ? sr.photos : [];
+        const content = photos.length === 0
+            ? `<p style="text-align:center;padding:20px;color:var(--gray-400);">No photos for this site review</p>`
+            : `<div style="display:flex;flex-wrap:wrap;gap:8px;">
+                ${photos.map((url, i) => `
+                    <div style="position:relative;">
+                        <img src="${url}" style="width:90px;height:90px;object-fit:cover;border-radius:4px;cursor:pointer;border:1px solid var(--gray-200);" onclick="window.open('${url}','_blank')">
+                        <button type="button" title="Remove" onclick="event.stopPropagation();app.removeFengShuiSitePhoto(${prospectId},${auditId},${srId},${i});UI.hideModal();" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:9px;cursor:pointer;"><i class="fas fa-times"></i></button>
+                    </div>
+                `).join('')}
+            </div>`;
+        UI.showModal(`Site Review Photos (${photos.length})`, content, [
+            { label: 'Close', type: 'primary', action: 'UI.hideModal()' }
+        ]);
     };
 
     const addFengShuiSiteReview = async (prospectId, auditId) => {
@@ -40153,6 +40180,8 @@ JB 星期二到
         uploadFengShuiPhotos,
         removeFengShuiPhoto,
         updateFengShuiPhotoRemark,
+        openFengShuiPhotosModal,
+        openFengShuiSitePhotosModal,
         addFengShuiSiteReview,
         updateFengShuiSiteReviewField,
         uploadFengShuiSitePhotos,
