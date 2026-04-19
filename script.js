@@ -7050,6 +7050,7 @@ function _wireLoginBtn() {
     const init = async () => {
     if (_initStarted) return; // prevent double-init (synchronous guard)
     _initStarted = true;
+    _wireLoginBtn(); // wire immediately — before any async ops so the button is never unresponsive
     await AppDataStore.init();
 
     try {
@@ -40296,6 +40297,7 @@ JB 星期二到
         toggleUserMenu,
         loginAs,
         logout,
+        _wireLoginBtn,
 
         // Helpers
         debounce,
