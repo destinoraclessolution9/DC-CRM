@@ -40783,6 +40783,7 @@ JB 星期二到
                 if (typeof renderTodayActivities === 'function') await renderTodayActivities();
                 break;
             case 'prospects':
+                if (_currentDetailView) break;
                 if (typeof showProspectsView === 'function') await showProspectsView(viewport);
                 break;
             case 'pipeline':
