@@ -13402,6 +13402,7 @@ function _wireLoginBtn() {
             updates.payment_method = mo.payment_method;
             updates.invoice_number = mo.invoice_number;
             updates.collection_date = mo.collection_date;
+            updates.order_date = mo.order_date;
             if (updates.payment_method === 'POP') {
                 updates.pop_monthly_amount = mo.pop_monthly;
                 updates.pop_tenure = mo.pop_tenure;
@@ -13447,6 +13448,7 @@ function _wireLoginBtn() {
                         pop_down_payment: paymentMethod === 'POP' ? (mo.pop_down    || '') : '',
                         invoice_number:  mo.invoice_number || '',
                         closing_date:    mo.collection_date || '',
+                        order_date:      mo.order_date || '',
                         closing_remarks: mo.closing_remarks ?? existingCR?.closing_remarks ?? '',
                         sales_idea:      mo.sales_idea      ?? existingCR?.sales_idea     ?? '',
                         plan_details:    mo.plan_details    ?? existingCR?.plan_details   ?? '',
@@ -14884,6 +14886,7 @@ function _wireLoginBtn() {
             sales_idea:      cr.sales_idea      || '',
             plan_details:    cr.plan_details    || '',
             success_story:   cr.success_story   || '',
+            order_date:      cr.order_date      || a.activity_date || '',
         };
 
         const linkBadge = a.prospect_id ? `
@@ -14972,9 +14975,15 @@ function _wireLoginBtn() {
                 </div>
                 <div id="${prefix}-closing-fields" style="display:${isClosingChecked ? 'block' : 'none'};padding-left:20px;">
                     ${customerInfoSection}
-                    <div class="form-group">
-                        <label>Product/Service Sold</label>
-                        <select id="${prefix}-solution-sold" class="form-control" ${disabled}>${productOptions}</select>
+                    <div class="form-row">
+                        <div class="form-group half">
+                            <label>Product/Service Sold</label>
+                            <select id="${prefix}-solution-sold" class="form-control" ${disabled}>${productOptions}</select>
+                        </div>
+                        <div class="form-group half">
+                            <label>Order Date</label>
+                            <input type="date" id="${prefix}-order-date" class="form-control" value="${escapeHtml(v.order_date)}" ${disabled}>
+                        </div>
                     </div>
                     <div class="form-row">
                         <div class="form-group half">
@@ -15062,6 +15071,7 @@ function _wireLoginBtn() {
             pop_down: read(`${prefix}-pop-down`),
             invoice_number: read(`${prefix}-invoice-number`),
             collection_date: read(`${prefix}-collection-date`),
+            order_date: read(`${prefix}-order-date`),
             closing_remarks: read(`${prefix}-remarks`),
             sales_idea: read(`${prefix}-sales-idea`),
             plan_details: read(`${prefix}-plan-details`),
