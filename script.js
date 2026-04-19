@@ -22113,18 +22113,22 @@ NOTIFY pgrst, 'reload schema';`;
     const _loadPurchasesHistory = async () => {
         try {
             const allProspects = await AppDataStore.getAll('prospects');
+            console.log('[PH] total prospects from getAll:', (allProspects||[]).length);
             const convertedIds = (allProspects || [])
                 .filter(p => p.status === 'converted' || p.conversion_status === 'approved')
                 .map(p => p.id);
+            console.log('[PH] convertedIds:', convertedIds);
             let data = [];
             if (convertedIds.length) {
                 const { data: rows, error } = await AppDataStore._readClient()
                     .from('prospects')
                     .select('id,full_name,responsible_agent_id,closing_records_history,closing_record,conversion_status')
                     .in('id', convertedIds);
+                console.log('[PH] .in() query result:', rows, 'error:', error);
                 if (error) throw error;
                 data = rows || [];
             }
+            console.log('[PH] data rows to process:', data.length);
             const allUsers = await AppDataStore.getAll('users');
             const agentMap = Object.fromEntries((allUsers||[]).map(u => [String(u.id), u.full_name || u.name || u.email || 'Unknown']));
             const rows = [];
