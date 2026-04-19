@@ -19717,7 +19717,7 @@ function _wireLoginBtn() {
         // cps_form_data blob, which is excluded from the default getAll light
         // select). All other tabs only need the light columns, so they use the
         // cheaper cached getById path.
-        const prospect = (tab === 'info')
+        const prospect = (tab === 'info' || tab === 'closing')
             ? await AppDataStore.getByIdFull('prospects', prospectId)
             : await AppDataStore.getById('prospects', prospectId);
         const container = containerOverride || document.getElementById('prospect-tab-content');
