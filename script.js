@@ -22115,7 +22115,7 @@ NOTIFY pgrst, 'reload schema';`;
             const { data, error } = await AppDataStore._readClient()
                 .from('prospects')
                 .select('id,full_name,responsible_agent_id,closing_records_history,closing_record,conversion_status')
-                .or('closing_records_history.not.is.null,conversion_status.eq.approved');
+                .or('status.eq.converted,conversion_status.eq.approved');
             if (error) throw error;
             const allUsers = await AppDataStore.getAll('users');
             const agentMap = Object.fromEntries((allUsers||[]).map(u => [String(u.id), u.full_name || u.name || u.email || 'Unknown']));
