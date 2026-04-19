@@ -22027,7 +22027,7 @@ NOTIFY pgrst, 'reload schema';`;
     };
 
     const saveClosingHistoryEntry = async (prospectId, index) => {
-        const prospect = await AppDataStore.getById('prospects', prospectId);
+        const prospect = await AppDataStore.getByIdFull('prospects', prospectId);
         const history = [...(Array.isArray(prospect.closing_records_history) ? prospect.closing_records_history : [])];
         if (index < 0 || index >= history.length) return UI.toast.error('Record not found');
         const pid = prospectId;
