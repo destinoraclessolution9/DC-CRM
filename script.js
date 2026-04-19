@@ -21974,6 +21974,20 @@ NOTIFY pgrst, 'reload schema';`;
         if (!data.product) return UI.toast.error('Product/service is required');
         if (!data.sale_amount) return UI.toast.error('Amount closed is required');
         if (!data.invoice_number) return UI.toast.error('Invoice number is required');
+        if (!data.invoice_file) {
+            UI.showModal(
+                '📎 Invoice Upload Required',
+                `<div style="padding:8px 0;">
+                    <p style="font-size:15px;color:var(--gray-700);margin-bottom:12px;">Please upload the <strong>purchase invoice</strong> before submitting for approval.</p>
+                    <div style="background:#fef9c3;border:1px solid #fcd34d;border-radius:8px;padding:12px;font-size:13px;color:#92400e;">
+                        <i class="fas fa-exclamation-triangle" style="margin-right:6px;"></i>
+                        The invoice is required as proof of purchase. Save a draft first, attach the invoice file, then submit.
+                    </div>
+                </div>`,
+                [{ label: 'OK, I\'ll Upload It', type: 'primary', action: 'UI.hideModal()' }]
+            );
+            return;
+        }
 
         const saleAmount = parseFloat(data.sale_amount) || 0;
         const isAlreadyConverted = prospect.status === 'converted' || prospect.conversion_status === 'approved';
