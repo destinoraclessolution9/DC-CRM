@@ -20261,9 +20261,9 @@ function _wireLoginBtn() {
                                     <div style="font-size:11px;font-weight:700;color:var(--gray-500);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">📦 Delivery Tracking</div>
                                     <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
                                         <select id="crh-status-${pid}-${hi}" class="form-control" style="flex:1;min-width:120px;height:30px;font-size:12px;">
-                                            <option value="pending" ${(!h.delivery_status||h.delivery_status==='pending')?'selected':''}>⏳ Pending Delivery</option>
-                                            <option value="delivered" ${h.delivery_status==='delivered'?'selected':''}>🚚 Delivered</option>
-                                            <option value="completed" ${h.delivery_status==='completed'?'selected':''}>✅ Completed</option>
+                                            <option value="pending" ${(!h.delivery_status||h.delivery_status==='pending')?'selected':''}>Pending Delivery</option>
+                                            <option value="delivered" ${h.delivery_status==='delivered'?'selected':''}>Delivered</option>
+                                            <option value="completed" ${h.delivery_status==='completed'?'selected':''}>Completed</option>
                                         </select>
                                         <label style="display:flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap;font-weight:600;color:${h.case_completed?'#166534':'var(--gray-600)'};">
                                             <input type="checkbox" id="crh-completed-${pid}-${hi}" ${h.case_completed?'checked':''} style="width:15px;height:15px;cursor:pointer;">
@@ -20422,9 +20422,9 @@ function _wireLoginBtn() {
                     <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:12px;margin-top:6px;">
                         <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
                             <select id="cr-active-status-${prospect.id}" class="form-control" style="flex:1;min-width:140px;height:32px;font-size:12px;">
-                                <option value="pending" ${(!d.delivery_status||d.delivery_status==='pending')?'selected':''}>⏳ Pending Delivery</option>
-                                <option value="delivered" ${d.delivery_status==='delivered'?'selected':''}>🚚 Delivered</option>
-                                <option value="completed" ${d.delivery_status==='completed'?'selected':''}>✅ Completed</option>
+                                <option value="pending" ${(!d.delivery_status||d.delivery_status==='pending')?'selected':''}>Pending Delivery</option>
+                                <option value="delivered" ${d.delivery_status==='delivered'?'selected':''}>Delivered</option>
+                                <option value="completed" ${d.delivery_status==='completed'?'selected':''}>Completed</option>
                             </select>
                             <label style="display:flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap;font-size:13px;font-weight:600;color:${d.case_completed?'#166534':'var(--gray-600)'};">
                                 <input type="checkbox" id="cr-active-completed-${prospect.id}" ${d.case_completed?'checked':''} style="width:15px;height:15px;cursor:pointer;">
@@ -22222,9 +22222,9 @@ NOTIFY pgrst, 'reload schema';`;
                 <td style="padding:8px 10px;font-size:12px;text-align:right;font-weight:600;white-space:nowrap;">RM ${r.amount.toLocaleString()}</td>
                 <td style="padding:8px 10px;">
                     <select id="ph-ds-${rk}" class="form-control" style="height:28px;font-size:11px;min-width:130px;">
-                        <option value="pending" ${r.deliveryStatus==='pending'?'selected':''}>⏳ Pending Delivery</option>
-                        <option value="delivered" ${r.deliveryStatus==='delivered'?'selected':''}>🚚 Delivered</option>
-                        <option value="completed" ${r.deliveryStatus==='completed'?'selected':''}>✅ Completed</option>
+                        <option value="pending" ${r.deliveryStatus==='pending'?'selected':''}>Pending Delivery</option>
+                        <option value="delivered" ${r.deliveryStatus==='delivered'?'selected':''}>Delivered</option>
+                        <option value="completed" ${r.deliveryStatus==='completed'?'selected':''}>Completed</option>
                     </select>
                 </td>
                 <td style="padding:8px 10px;">
@@ -22261,9 +22261,9 @@ NOTIFY pgrst, 'reload schema';`;
                     </select>
                     <select class="form-control" style="height:32px;font-size:12px;min-width:120px;" onchange="app.phSetFilter('delivery',this.value)">
                         <option value="all" ${f.delivery==='all'?'selected':''}>All Status</option>
-                        <option value="pending" ${f.delivery==='pending'?'selected':''}>⏳ Pending</option>
-                        <option value="delivered" ${f.delivery==='delivered'?'selected':''}>🚚 Delivered</option>
-                        <option value="completed" ${f.delivery==='completed'?'selected':''}>✅ Completed</option>
+                        <option value="pending" ${f.delivery==='pending'?'selected':''}>Pending</option>
+                        <option value="delivered" ${f.delivery==='delivered'?'selected':''}>Delivered</option>
+                        <option value="completed" ${f.delivery==='completed'?'selected':''}>Completed</option>
                     </select>
                     <input type="date" class="form-control" value="${f.from}" style="height:32px;font-size:12px;width:130px;" onchange="app.phSetFilter('from',this.value)">
                     <span style="font-size:12px;color:var(--gray-400);">–</span>
