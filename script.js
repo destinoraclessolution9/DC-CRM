@@ -6800,7 +6800,7 @@ In a production system, this would show the actual file contents.
         // Map Level 1-14 to visible nav IDs (suffix after 'nav-')
         const _l12 = ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'reports', 'documents', 'settings', 'fude', 'milestones'];
         const levelPermissions = {
-            1: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'import', 'integrations', 'settings', 'fude', 'milestones', 'custom_fields', 'egg-purchasing', 'standard-functions', 'formula-purchaser'],
+            1: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'purchases_history', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'import', 'integrations', 'settings', 'fude', 'milestones', 'custom_fields', 'egg-purchasing', 'standard-functions', 'formula-purchaser'],
             2: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'import', 'integrations', 'settings', 'fude', 'milestones', 'custom_fields'],
             3: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'performance', 'reports', 'protection', 'documents', 'settings', 'fude'],
             4: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'performance', 'reports', 'protection', 'documents', 'settings', 'fude'],
@@ -6839,7 +6839,8 @@ In a production system, this would show the actual file contents.
             'cases', 'documents', 'import', 'promotions', 'marketing-automation', 'marketing-lists',
             'performance', 'reports', 'risk', 'admin',
             'integrations', 'settings', 'milestones', 'fude',
-            'custom_fields', 'egg-purchasing', 'standard-functions', 'formula-purchaser'
+            'custom_fields', 'egg-purchasing', 'standard-functions', 'formula-purchaser',
+            'purchases_history'
         ];
 
         allNavIds.forEach(id => {
