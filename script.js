@@ -20006,7 +20006,7 @@ function _wireLoginBtn() {
             `;
         }
         else if (tab === 'potential') {
-            const MEETUP_TYPES = ['CPS','FTF','FSA','GR','XG','CALL','EMAIL','WHATSAPP'];
+            const MEETUP_TYPES = ['CPS','FTF','FSA','GR','XG','CALL','EMAIL','WHATSAPP','EVENT'];
             const allActivities = (await AppDataStore.getAll('activities')).filter(a => a.prospect_id == prospectId);
             const meetups = allActivities.filter(a => MEETUP_TYPES.includes(a.activity_type))
                 .sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
@@ -20042,7 +20042,10 @@ function _wireLoginBtn() {
                     <div>
                         <span class="badge ${(prospect.potential_level === 'High') ? 'success' : prospect.potential_level === 'Medium' ? 'warning' : prospect.potential_level === 'Low' ? 'secondary' : 'secondary'}" style="font-size:13px;">${prospect.potential_level || 'NOT SET'} POTENTIAL</span>
                     </div>
-                    <button class="btn secondary btn-sm" onclick="app.openEditPotentialModal(${prospect.id})"><i class="fas fa-edit"></i> Edit</button>
+                    <div style="display:flex;gap:6px;align-items:center;">
+                        <button class="btn secondary btn-sm" onclick="app.openLatestMeetupNotes(${prospect.id})"><i class="fas fa-edit"></i> Edit Notes</button>
+                        <button class="btn secondary btn-sm" onclick="app.openEditPotentialModal(${prospect.id})" title="Edit Forecast"><i class="fas fa-cog"></i></button>
+                    </div>
                 </div>
                 <div class="pv-row"><span class="pv-lbl">Close Prob.</span><span class="pv-val">${prospect.close_probability || 0}%</span></div>
                 <div class="progress-bar" style="margin-bottom:12px;">
@@ -34092,6 +34095,17 @@ const initImportDemoData = async () => {
     };
 
     // ========== FEATURE: PROSPECT POTENTIAL & OPPORTUNITIES ==========
+    const openLatestMeetupNotes = async (prospectId) => {
+        const allActivities = (await AppDataStore.getAll('activities'))
+            .filter(a => a.prospect_id == prospectId)
+            .sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date) || b.id - a.id);
+        if (allActivities.length === 0) {
+            UI.toast.error('No activities found. Log a meetup or event first.');
+            return;
+        }
+        await openPostMeetupNotesModal(allActivities[0].id, prospectId);
+    };
+
     const openEditPotentialModal = async (prospectId) => {
         const prospect = await AppDataStore.getById('prospects', prospectId);
         if (!prospect) return;
@@ -39199,6 +39213,7 @@ JB 星期二到
         autoExtendProtection,
 
         // Feature: Prospect Potential & Opportunities
+        openLatestMeetupNotes,
         openEditPotentialModal,
         savePotential,
 
