@@ -751,6 +751,25 @@ const appLogic = (() => {
             { value: 'event_category_id', label: 'Category', type: 'select', options: 'dynamic' },
             { value: 'location', label: 'Location', type: 'text' },
             { value: 'status', label: 'Status', type: 'select', options: ['upcoming', 'ongoing', 'completed', 'cancelled'] }
+        ],
+        products: [
+            { value: 'name', label: 'Name', type: 'text' },
+            { value: 'category', label: 'Category', type: 'text' },
+            { value: 'price', label: 'Price', type: 'number' },
+            { value: 'is_active', label: 'Status', type: 'select', options: ['true', 'false'] }
+        ],
+        bujishu: [
+            { value: 'name', label: 'Name', type: 'text' },
+            { value: 'category', label: 'Category', type: 'text' },
+            { value: 'price', label: 'Price', type: 'number' },
+            { value: 'is_active', label: 'Status', type: 'select', options: ['true', 'false'] }
+        ],
+        formula: [
+            { value: 'name', label: 'Name', type: 'text' },
+            { value: 'category', label: 'Category', type: 'text' },
+            { value: 'price', label: 'Price', type: 'number' },
+            { value: 'daily_dosage', label: 'Daily Dosage', type: 'number' },
+            { value: 'is_active', label: 'Status', type: 'select', options: ['true', 'false'] }
         ]
     };
 
@@ -805,6 +824,9 @@ const appLogic = (() => {
                             <option value="activities">Activities</option>
                             <option value="transactions">Transactions</option>
                             <option value="events">Events</option>
+                            <option value="products">Products</option>
+                            <option value="bujishu">Bujishu</option>
+                            <option value="formula">Formula</option>
                         </select>
                     </div>
 
@@ -939,10 +961,36 @@ const appLogic = (() => {
             case 'events':
                 basicHtml = renderEventFilters();
                 break;
+            case 'products':
+                basicHtml = renderProductFilters();
+                break;
+            case 'bujishu':
+                basicHtml = renderBujishuFilters();
+                break;
+            case 'formula':
+                basicHtml = renderFormulaFilters();
+                break;
         }
 
         container.innerHTML = basicHtml;
         if (extraContainer) extraContainer.innerHTML = extraHtml;
+
+        // Populate dynamic agent dropdowns
+        const agentSelects = [...container.querySelectorAll('select[id$="-agent"]'), ...container.querySelectorAll('select[id$="-responsible-agent"]')];
+        if (agentSelects.length > 0) {
+            try {
+                const allUsers = await AppDataStore.getAll('users');
+                const agents = allUsers.filter(u => isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'));
+                agentSelects.forEach(sel => {
+                    agents.forEach(a => {
+                        const opt = document.createElement('option');
+                        opt.value = a.id;
+                        opt.textContent = a.full_name;
+                        sel.appendChild(opt);
+                    });
+                });
+            } catch(e) { /* offline */ }
+        }
 
         // Update condition builder options
         renderConditionGroups();
@@ -976,6 +1024,12 @@ const appLogic = (() => {
                 <div class="filter-group">
                     <label>Agent Code</label>
                     <input type="text" id="filter-agent-code" class="form-control" placeholder="e.g., AGN-2026-001">
+                </div>
+            </div>
+            <div class="filter-row">
+                <div class="filter-group">
+                    <label>Email</label>
+                    <input type="text" id="filter-agent-email" class="form-control" placeholder="Email...">
                 </div>
             </div>
         `;
@@ -1030,7 +1084,51 @@ const appLogic = (() => {
                     <input type="number" id="filter-${type}-score-max" class="form-control" placeholder="Max score...">
                 </div>
             </div>
+            <div class="filter-row">
+                <div class="filter-group">
+                    <label>Status</label>
+                    <select id="filter-${type}-status" class="form-control">
+                        <option value="">All</option>
+                        ${isCustomer ? `
+                        <option value="active">Active</option>
+                        <option value="inactive">Inactive</option>
+                        ` : `
+                        <option value="active">Active</option>
+                        <option value="converted">Converted</option>
+                        <option value="lost">Lost</option>
+                        `}
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>Responsible Agent</label>
+                    <select id="filter-${type}-agent" class="form-control">
+                        <option value="">All Agents</option>
+                    </select>
+                </div>
+            </div>
             ${!isCustomer ? `
+            <div class="filter-row">
+                <div class="filter-group">
+                    <label>Pipeline Stage</label>
+                    <select id="filter-prospect-pipeline" class="form-control">
+                        <option value="">All Stages</option>
+                        <option value="new">New</option>
+                        <option value="contacted">Contacted</option>
+                        <option value="qualified">Qualified</option>
+                        <option value="proposal">Proposal</option>
+                        <option value="negotiation">Negotiation</option>
+                        <option value="closed_won">Closed Won</option>
+                        <option value="closed_lost">Closed Lost</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>Deal Value Range (RM)</label>
+                    <div style="display:flex; gap:8px;">
+                        <input type="number" id="filter-prospect-deal-min" class="form-control" placeholder="Min">
+                        <input type="number" id="filter-prospect-deal-max" class="form-control" placeholder="Max">
+                    </div>
+                </div>
+            </div>
             <div class="filter-row">
                 <div class="filter-group">
                     <label>Has Purchased</label>
@@ -1047,7 +1145,77 @@ const appLogic = (() => {
                     </select>
                 </div>
             </div>
-            ` : ''}
+            ` : `
+            <div class="filter-row">
+                <div class="filter-group">
+                    <label>Lifetime Value Min (RM)</label>
+                    <input type="number" id="filter-customer-ltv-min" class="form-control" placeholder="Min...">
+                </div>
+                <div class="filter-group">
+                    <label>Lifetime Value Max (RM)</label>
+                    <input type="number" id="filter-customer-ltv-max" class="form-control" placeholder="Max...">
+                </div>
+            </div>
+            `}
+            <div class="filter-row">
+                <div class="filter-group">
+                    <label>Gender</label>
+                    <select id="filter-${type}-gender" class="form-control">
+                        <option value="">All</option>
+                        <option value="Male">Male</option>
+                        <option value="Female">Female</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>Occupation</label>
+                    <input type="text" id="filter-${type}-occupation" class="form-control" placeholder="Occupation...">
+                </div>
+            </div>
+            <div class="filter-row">
+                <div class="filter-group">
+                    <label>Income Range</label>
+                    <select id="filter-${type}-income" class="form-control">
+                        <option value="">All</option>
+                        <option value="Below RM3,000">Below RM3,000</option>
+                        <option value="RM3,000 - RM5,000">RM3,000 - RM5,000</option>
+                        <option value="RM5,000 - RM10,000">RM5,000 - RM10,000</option>
+                        <option value="RM10,000 - RM20,000">RM10,000 - RM20,000</option>
+                        <option value="Above RM20,000">Above RM20,000</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>City</label>
+                    <input type="text" id="filter-${type}-city" class="form-control" placeholder="City...">
+                </div>
+            </div>
+            <div class="filter-row">
+                <div class="filter-group">
+                    <label>State</label>
+                    <select id="filter-${type}-state" class="form-control">
+                        <option value="">All States</option>
+                        <option value="Johor">Johor</option>
+                        <option value="Kedah">Kedah</option>
+                        <option value="Kelantan">Kelantan</option>
+                        <option value="Kuala Lumpur">Kuala Lumpur</option>
+                        <option value="Labuan">Labuan</option>
+                        <option value="Melaka">Melaka</option>
+                        <option value="Negeri Sembilan">Negeri Sembilan</option>
+                        <option value="Pahang">Pahang</option>
+                        <option value="Penang">Penang</option>
+                        <option value="Perak">Perak</option>
+                        <option value="Perlis">Perlis</option>
+                        <option value="Putrajaya">Putrajaya</option>
+                        <option value="Sabah">Sabah</option>
+                        <option value="Sarawak">Sarawak</option>
+                        <option value="Selangor">Selangor</option>
+                        <option value="Terengganu">Terengganu</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>Referred By</label>
+                    <input type="text" id="filter-${type}-referred" class="form-control" placeholder="Referrer name...">
+                </div>
+            </div>
             <div class="filter-row">
                 <div class="filter-group">
                     <label>Tags (Select multiple)</label>
@@ -1221,6 +1389,115 @@ const appLogic = (() => {
     };
 
 
+    const renderProductFilters = () => {
+        return `
+            <div class="filter-row">
+                <div class="filter-group">
+                    <label>Name</label>
+                    <input type="text" id="filter-product-name" class="form-control" placeholder="Product name...">
+                </div>
+                <div class="filter-group">
+                    <label>Category</label>
+                    <input type="text" id="filter-product-category" class="form-control" placeholder="Category...">
+                </div>
+            </div>
+            <div class="filter-row">
+                <div class="filter-group">
+                    <label>Min Price (RM)</label>
+                    <input type="number" id="filter-product-price-min" class="form-control" placeholder="Min...">
+                </div>
+                <div class="filter-group">
+                    <label>Max Price (RM)</label>
+                    <input type="number" id="filter-product-price-max" class="form-control" placeholder="Max...">
+                </div>
+            </div>
+            <div class="filter-row">
+                <div class="filter-group">
+                    <label>Status</label>
+                    <select id="filter-product-status" class="form-control">
+                        <option value="">All</option>
+                        <option value="active">Active</option>
+                        <option value="inactive">Inactive</option>
+                    </select>
+                </div>
+            </div>
+        `;
+    };
+
+    const renderBujishuFilters = () => {
+        return `
+            <div class="filter-row">
+                <div class="filter-group">
+                    <label>Name</label>
+                    <input type="text" id="filter-bujishu-name" class="form-control" placeholder="Bujishu name...">
+                </div>
+                <div class="filter-group">
+                    <label>Category</label>
+                    <input type="text" id="filter-bujishu-category" class="form-control" placeholder="Category...">
+                </div>
+            </div>
+            <div class="filter-row">
+                <div class="filter-group">
+                    <label>Min Price (RM)</label>
+                    <input type="number" id="filter-bujishu-price-min" class="form-control" placeholder="Min...">
+                </div>
+                <div class="filter-group">
+                    <label>Max Price (RM)</label>
+                    <input type="number" id="filter-bujishu-price-max" class="form-control" placeholder="Max...">
+                </div>
+            </div>
+            <div class="filter-row">
+                <div class="filter-group">
+                    <label>Status</label>
+                    <select id="filter-bujishu-status" class="form-control">
+                        <option value="">All</option>
+                        <option value="active">Active</option>
+                        <option value="inactive">Inactive</option>
+                    </select>
+                </div>
+            </div>
+        `;
+    };
+
+    const renderFormulaFilters = () => {
+        return `
+            <div class="filter-row">
+                <div class="filter-group">
+                    <label>Name</label>
+                    <input type="text" id="filter-formula-name" class="form-control" placeholder="Formula name...">
+                </div>
+                <div class="filter-group">
+                    <label>Category</label>
+                    <input type="text" id="filter-formula-category" class="form-control" placeholder="Category...">
+                </div>
+            </div>
+            <div class="filter-row">
+                <div class="filter-group">
+                    <label>Min Price (RM)</label>
+                    <input type="number" id="filter-formula-price-min" class="form-control" placeholder="Min...">
+                </div>
+                <div class="filter-group">
+                    <label>Max Price (RM)</label>
+                    <input type="number" id="filter-formula-price-max" class="form-control" placeholder="Max...">
+                </div>
+            </div>
+            <div class="filter-row">
+                <div class="filter-group">
+                    <label>Daily Dosage (max capsules/day)</label>
+                    <input type="number" id="filter-formula-dosage-max" class="form-control" placeholder="e.g. 4">
+                </div>
+                <div class="filter-group">
+                    <label>Status</label>
+                    <select id="filter-formula-status" class="form-control">
+                        <option value="">All</option>
+                        <option value="active">Active</option>
+                        <option value="inactive">Inactive</option>
+                    </select>
+                </div>
+            </div>
+        `;
+    };
+
     // Section 10.6: Condition Builder Logic
     const renderConditionGroups = () => {
         const container = document.getElementById('condition-groups');
@@ -1361,20 +1638,22 @@ const appLogic = (() => {
         };
 
         // Collect basic filters based on entity
-        const section = document.getElementById('filter-sections');
-        if (section) {
-            const inputs = section.querySelectorAll('input, select');
-            inputs.forEach(input => {
+        const prefix = 'filter-' + entity.slice(0, -1) + '-';
+        const collectInputs = (section) => {
+            if (!section) return;
+            section.querySelectorAll('input, select').forEach(input => {
                 if (input.multiple) {
                     const selected = Array.from(input.selectedOptions).map(opt => opt.value);
                     if (selected.length > 0) {
-                        filters.basic[input.id.replace('filter-' + entity.slice(0, -1) + '-', '')] = selected;
+                        filters.basic[input.id.replace(prefix, '')] = selected;
                     }
                 } else if (input.value) {
-                    filters.basic[input.id.replace('filter-' + entity.slice(0, -1) + '-', '')] = input.value;
+                    filters.basic[input.id.replace(prefix, '')] = input.value;
                 }
             });
-        }
+        };
+        collectInputs(document.getElementById('filter-sections'));
+        collectInputs(document.getElementById('extra-filter-sections'));
 
         return filters;
     };
@@ -1390,6 +1669,9 @@ const appLogic = (() => {
             case 'activities': results = await performActivitySearch(filters); break;
             case 'transactions': results = await performTransactionSearch(filters); break;
             case 'events': results = await performEventSearch(filters); break;
+            case 'products': results = await performProductSearch(filters); break;
+            case 'bujishu': results = await performBujishuSearch(filters); break;
+            case 'formula': results = await performFormulaSearch(filters); break;
         }
 
         _currentSearchResults = results;
@@ -1405,16 +1687,29 @@ const appLogic = (() => {
         const visibleAgentIds = await getVisibleUserIds(_currentUser);
         let items = visibleAgentIds === 'all' ? allAgentUsers : allAgentUsers.filter(u => visibleAgentIds.map(String).includes(String(u.id)));
 
-        // Basic filters
         if (filters.basic.name) {
-            const query = filters.basic.name.toLowerCase();
-            items = items.filter(i => i.full_name && i.full_name.toLowerCase().includes(query));
+            const q = filters.basic.name.toLowerCase();
+            items = items.filter(i => i.full_name && i.full_name.toLowerCase().includes(q));
         }
         if (filters.basic.team) {
             items = items.filter(i => i.team === filters.basic.team);
         }
-        if (filters.basic['agent-status']) {
-            items = items.filter(i => i.status === filters.basic['agent-status']);
+        if (filters.basic.status) {
+            items = items.filter(i => i.status === filters.basic.status);
+        }
+        if (filters.basic.code) {
+            const q = filters.basic.code.toLowerCase();
+            items = items.filter(i => i.agent_code && i.agent_code.toLowerCase().includes(q));
+        }
+        if (filters.basic.email) {
+            const q = filters.basic.email.toLowerCase();
+            items = items.filter(i => i.email && i.email.toLowerCase().includes(q));
+        }
+        if (filters.dateRange.from) {
+            items = items.filter(i => i.join_date && i.join_date >= filters.dateRange.from);
+        }
+        if (filters.dateRange.to) {
+            items = items.filter(i => i.join_date && i.join_date <= filters.dateRange.to);
         }
 
         return applyComplexConditions(items, filters.complex);
@@ -1423,16 +1718,62 @@ const appLogic = (() => {
     const performProspectSearch = async (filters) => {
         let items = await getVisibleProspects();
 
-        // Basic filters
         if (filters.basic.name) {
-            const query = filters.basic.name.toLowerCase();
-            items = items.filter(i => (i.full_name && i.full_name.toLowerCase().includes(query)) || (i.nickname && i.nickname.toLowerCase().includes(query)));
+            const q = filters.basic.name.toLowerCase();
+            items = items.filter(i => (i.full_name && i.full_name.toLowerCase().includes(q)) || (i.nickname && i.nickname.toLowerCase().includes(q)));
         }
         if (filters.basic.minggua) {
             items = items.filter(i => i.ming_gua === filters.basic.minggua);
         }
+        if (filters.basic.phone) {
+            const q = filters.basic.phone.toLowerCase();
+            items = items.filter(i => i.phone && i.phone.toLowerCase().includes(q));
+        }
+        if (filters.basic.email) {
+            const q = filters.basic.email.toLowerCase();
+            items = items.filter(i => i.email && i.email.toLowerCase().includes(q));
+        }
         if (filters.basic['score-min']) {
             items = items.filter(i => i.score >= parseInt(filters.basic['score-min']));
+        }
+        if (filters.basic['score-max']) {
+            items = items.filter(i => i.score <= parseInt(filters.basic['score-max']));
+        }
+        if (filters.basic.status) {
+            items = items.filter(i => i.status === filters.basic.status);
+        }
+        if (filters.basic.agent) {
+            items = items.filter(i => String(i.responsible_agent_id) === String(filters.basic.agent));
+        }
+        if (filters.basic.pipeline) {
+            items = items.filter(i => i.pipeline_stage === filters.basic.pipeline);
+        }
+        if (filters.basic['deal-min']) {
+            items = items.filter(i => parseFloat(i.deal_value) >= parseFloat(filters.basic['deal-min']));
+        }
+        if (filters.basic['deal-max']) {
+            items = items.filter(i => parseFloat(i.deal_value) <= parseFloat(filters.basic['deal-max']));
+        }
+        if (filters.basic.gender) {
+            items = items.filter(i => i.gender === filters.basic.gender);
+        }
+        if (filters.basic.occupation) {
+            const q = filters.basic.occupation.toLowerCase();
+            items = items.filter(i => i.occupation && i.occupation.toLowerCase().includes(q));
+        }
+        if (filters.basic.income) {
+            items = items.filter(i => i.income_range === filters.basic.income);
+        }
+        if (filters.basic.city) {
+            const q = filters.basic.city.toLowerCase();
+            items = items.filter(i => i.city && i.city.toLowerCase().includes(q));
+        }
+        if (filters.basic.state) {
+            items = items.filter(i => i.state === filters.basic.state);
+        }
+        if (filters.basic.referred) {
+            const q = filters.basic.referred.toLowerCase();
+            items = items.filter(i => i.referred_by && i.referred_by.toLowerCase().includes(q));
         }
         if (filters.basic['has-purchased']) {
             const product = filters.basic['has-purchased'];
@@ -1444,7 +1785,6 @@ const appLogic = (() => {
             const notPurchased = await Promise.all(items.map(i => hasProspectPurchasedProduct(i.id, product)));
             items = items.filter((_, idx) => !notPurchased[idx]);
         }
-
         if (filters.basic.keyword) {
             const kw = filters.basic.keyword.toLowerCase();
             items = items.filter(i =>
@@ -1452,6 +1792,8 @@ const appLogic = (() => {
                 (i.nickname && i.nickname.toLowerCase().includes(kw)) ||
                 (i.phone && i.phone.toLowerCase().includes(kw)) ||
                 (i.email && i.email.toLowerCase().includes(kw)) ||
+                (i.occupation && i.occupation.toLowerCase().includes(kw)) ||
+                (i.company_name && i.company_name.toLowerCase().includes(kw)) ||
                 (i.notes && i.notes.toLowerCase().includes(kw))
             );
         }
@@ -1470,16 +1812,17 @@ const appLogic = (() => {
         if (filters.basic['age-min'] || filters.basic['age-max']) {
             items = items.filter(i => {
                 if (!i.date_of_birth) return false;
-                const dob = new Date(i.date_of_birth);
-                const ageDifMs = Date.now() - dob.getTime();
-                const ageDate = new Date(ageDifMs);
-                const age = Math.abs(ageDate.getUTCFullYear() - 1970);
-
-                let valid = true;
-                if (filters.basic['age-min'] && age < parseInt(filters.basic['age-min'])) valid = false;
-                if (filters.basic['age-max'] && age > parseInt(filters.basic['age-max'])) valid = false;
-                return valid;
+                const age = Math.floor((Date.now() - new Date(i.date_of_birth).getTime()) / (365.25 * 24 * 60 * 60 * 1000));
+                if (filters.basic['age-min'] && age < parseInt(filters.basic['age-min'])) return false;
+                if (filters.basic['age-max'] && age > parseInt(filters.basic['age-max'])) return false;
+                return true;
             });
+        }
+        if (filters.dateRange.from) {
+            items = items.filter(i => i.cps_assignment_date && i.cps_assignment_date >= filters.dateRange.from);
+        }
+        if (filters.dateRange.to) {
+            items = items.filter(i => i.cps_assignment_date && i.cps_assignment_date <= filters.dateRange.to);
         }
 
         return applyComplexConditions(items, filters.complex);
@@ -1497,10 +1840,59 @@ const appLogic = (() => {
         let items = await getVisibleCustomers();
 
         if (filters.basic.name) {
-            const query = filters.basic.name.toLowerCase();
-            items = items.filter(i => (i.full_name && i.full_name.toLowerCase().includes(query)) || (i.nickname && i.nickname.toLowerCase().includes(query)));
+            const q = filters.basic.name.toLowerCase();
+            items = items.filter(i => (i.full_name && i.full_name.toLowerCase().includes(q)) || (i.nickname && i.nickname.toLowerCase().includes(q)));
         }
-
+        if (filters.basic.minggua) {
+            items = items.filter(i => i.ming_gua === filters.basic.minggua);
+        }
+        if (filters.basic.phone) {
+            const q = filters.basic.phone.toLowerCase();
+            items = items.filter(i => i.phone && i.phone.toLowerCase().includes(q));
+        }
+        if (filters.basic.email) {
+            const q = filters.basic.email.toLowerCase();
+            items = items.filter(i => i.email && i.email.toLowerCase().includes(q));
+        }
+        if (filters.basic['score-min']) {
+            items = items.filter(i => i.score >= parseInt(filters.basic['score-min']));
+        }
+        if (filters.basic['score-max']) {
+            items = items.filter(i => i.score <= parseInt(filters.basic['score-max']));
+        }
+        if (filters.basic.status) {
+            items = items.filter(i => i.status === filters.basic.status);
+        }
+        if (filters.basic.agent) {
+            items = items.filter(i => String(i.responsible_agent_id) === String(filters.basic.agent));
+        }
+        if (filters.basic['ltv-min']) {
+            items = items.filter(i => parseFloat(i.lifetime_value) >= parseFloat(filters.basic['ltv-min']));
+        }
+        if (filters.basic['ltv-max']) {
+            items = items.filter(i => parseFloat(i.lifetime_value) <= parseFloat(filters.basic['ltv-max']));
+        }
+        if (filters.basic.gender) {
+            items = items.filter(i => i.gender === filters.basic.gender);
+        }
+        if (filters.basic.occupation) {
+            const q = filters.basic.occupation.toLowerCase();
+            items = items.filter(i => i.occupation && i.occupation.toLowerCase().includes(q));
+        }
+        if (filters.basic.income) {
+            items = items.filter(i => i.income_range === filters.basic.income);
+        }
+        if (filters.basic.city) {
+            const q = filters.basic.city.toLowerCase();
+            items = items.filter(i => i.city && i.city.toLowerCase().includes(q));
+        }
+        if (filters.basic.state) {
+            items = items.filter(i => i.state === filters.basic.state);
+        }
+        if (filters.basic.referred) {
+            const q = filters.basic.referred.toLowerCase();
+            items = items.filter(i => i.referred_by && i.referred_by.toLowerCase().includes(q));
+        }
         if (filters.basic.keyword) {
             const kw = filters.basic.keyword.toLowerCase();
             items = items.filter(i =>
@@ -1508,6 +1900,8 @@ const appLogic = (() => {
                 (i.nickname && i.nickname.toLowerCase().includes(kw)) ||
                 (i.phone && i.phone.toLowerCase().includes(kw)) ||
                 (i.email && i.email.toLowerCase().includes(kw)) ||
+                (i.occupation && i.occupation.toLowerCase().includes(kw)) ||
+                (i.company_name && i.company_name.toLowerCase().includes(kw)) ||
                 (i.notes && i.notes.toLowerCase().includes(kw))
             );
         }
@@ -1526,16 +1920,17 @@ const appLogic = (() => {
         if (filters.basic['age-min'] || filters.basic['age-max']) {
             items = items.filter(i => {
                 if (!i.date_of_birth) return false;
-                const dob = new Date(i.date_of_birth);
-                const ageDifMs = Date.now() - dob.getTime();
-                const ageDate = new Date(ageDifMs);
-                const age = Math.abs(ageDate.getUTCFullYear() - 1970);
-
-                let valid = true;
-                if (filters.basic['age-min'] && age < parseInt(filters.basic['age-min'])) valid = false;
-                if (filters.basic['age-max'] && age > parseInt(filters.basic['age-max'])) valid = false;
-                return valid;
+                const age = Math.floor((Date.now() - new Date(i.date_of_birth).getTime()) / (365.25 * 24 * 60 * 60 * 1000));
+                if (filters.basic['age-min'] && age < parseInt(filters.basic['age-min'])) return false;
+                if (filters.basic['age-max'] && age > parseInt(filters.basic['age-max'])) return false;
+                return true;
             });
+        }
+        if (filters.dateRange.from) {
+            items = items.filter(i => i.customer_since && i.customer_since >= filters.dateRange.from);
+        }
+        if (filters.dateRange.to) {
+            items = items.filter(i => i.customer_since && i.customer_since <= filters.dateRange.to);
         }
 
         return applyComplexConditions(items, filters.complex);
@@ -1544,18 +1939,37 @@ const appLogic = (() => {
     const performActivitySearch = async (filters) => {
         let items = await getVisibleActivities();
 
+        // activity entity doesn't strip prefix cleanly, check both key forms
         const type = filters.basic['filter-activity-type'] || filters.basic.type;
         if (type) {
             items = items.filter(i => i.activity_type === type);
         }
-
-        const attendance = filters.basic['filter-activity-attendance'];
+        const title = filters.basic['filter-activity-title'] || filters.basic.title;
+        if (title) {
+            const q = title.toLowerCase();
+            items = items.filter(i => i.activity_title && i.activity_title.toLowerCase().includes(q));
+        }
+        const agentId = filters.basic['filter-activity-agent'] || filters.basic.agent;
+        if (agentId) {
+            items = items.filter(i => String(i.lead_agent_id) === String(agentId));
+        }
+        const status = filters.basic['filter-activity-status'] || filters.basic.status;
+        if (status) {
+            items = items.filter(i => i.status === status);
+        }
+        const attendance = filters.basic['filter-activity-attendance'] || filters.basic.attendance;
         if (attendance) {
             const allAttendees = await AppDataStore.getAll('event_attendees');
             items = items.filter(i => {
                 if (i.activity_type !== 'EVENT' || !i.event_id) return false;
                 return allAttendees.some(a => a.event_id === i.event_id && a.attendance_status === attendance);
             });
+        }
+        if (filters.dateRange.from) {
+            items = items.filter(i => i.activity_date && i.activity_date >= filters.dateRange.from);
+        }
+        if (filters.dateRange.to) {
+            items = items.filter(i => i.activity_date && i.activity_date <= filters.dateRange.to);
         }
 
         return applyComplexConditions(items, filters.complex);
@@ -1565,8 +1979,30 @@ const appLogic = (() => {
         let items = await AppDataStore.getAll('purchases');
 
         if (filters.basic.product) {
-            const query = filters.basic.product.toLowerCase();
-            items = items.filter(i => i.item && i.item.toLowerCase().includes(query));
+            const q = filters.basic.product.toLowerCase();
+            items = items.filter(i => i.item && i.item.toLowerCase().includes(q));
+        }
+        if (filters.basic.invoice) {
+            const q = filters.basic.invoice.toLowerCase();
+            items = items.filter(i => i.invoice && i.invoice.toLowerCase().includes(q));
+        }
+        if (filters.basic.payment) {
+            items = items.filter(i => i.payment_method === filters.basic.payment);
+        }
+        if (filters.basic.status) {
+            items = items.filter(i => i.status === filters.basic.status);
+        }
+        if (filters.basic['amount-min']) {
+            items = items.filter(i => parseFloat(i.amount) >= parseFloat(filters.basic['amount-min']));
+        }
+        if (filters.basic['amount-max']) {
+            items = items.filter(i => parseFloat(i.amount) <= parseFloat(filters.basic['amount-max']));
+        }
+        if (filters.dateRange.from) {
+            items = items.filter(i => i.date && i.date >= filters.dateRange.from);
+        }
+        if (filters.dateRange.to) {
+            items = items.filter(i => i.date && i.date <= filters.dateRange.to);
         }
 
         return applyComplexConditions(items, filters.complex);
@@ -1578,6 +2014,104 @@ const appLogic = (() => {
         if (filters.basic.title) {
             const query = filters.basic.title.toLowerCase();
             items = items.filter(i => i.event_title && i.event_title.toLowerCase().includes(query));
+        }
+        if (filters.basic.category) {
+            items = items.filter(i => String(i.event_category_id) === String(filters.basic.category));
+        }
+        if (filters.basic.location) {
+            const q = filters.basic.location.toLowerCase();
+            items = items.filter(i => i.location && i.location.toLowerCase().includes(q));
+        }
+        if (filters.basic.status) {
+            items = items.filter(i => i.status === filters.basic.status);
+        }
+        if (filters.dateRange.from) {
+            items = items.filter(i => i.event_date && i.event_date >= filters.dateRange.from);
+        }
+        if (filters.dateRange.to) {
+            items = items.filter(i => i.event_date && i.event_date <= filters.dateRange.to);
+        }
+        if (filters.basic.speaker) {
+            const q = filters.basic.speaker.toLowerCase();
+            items = items.filter(i => i.speaker && i.speaker.toLowerCase().includes(q));
+        }
+
+        return applyComplexConditions(items, filters.complex);
+    };
+
+    const performProductSearch = async (filters) => {
+        let items = await AppDataStore.getAll('products');
+
+        if (filters.basic.name) {
+            const q = filters.basic.name.toLowerCase();
+            items = items.filter(i => i.name && i.name.toLowerCase().includes(q));
+        }
+        if (filters.basic.category) {
+            const q = filters.basic.category.toLowerCase();
+            items = items.filter(i => i.category && i.category.toLowerCase().includes(q));
+        }
+        if (filters.basic['price-min']) {
+            items = items.filter(i => parseFloat(i.price) >= parseFloat(filters.basic['price-min']));
+        }
+        if (filters.basic['price-max']) {
+            items = items.filter(i => parseFloat(i.price) <= parseFloat(filters.basic['price-max']));
+        }
+        if (filters.basic.status) {
+            const active = filters.basic.status === 'active';
+            items = items.filter(i => (i.is_active !== false) === active);
+        }
+
+        return applyComplexConditions(items, filters.complex);
+    };
+
+    const performBujishuSearch = async (filters) => {
+        let items = await AppDataStore.getAll('bujishu');
+
+        if (filters.basic.name) {
+            const q = filters.basic.name.toLowerCase();
+            items = items.filter(i => i.name && i.name.toLowerCase().includes(q));
+        }
+        if (filters.basic.category) {
+            const q = filters.basic.category.toLowerCase();
+            items = items.filter(i => i.category && i.category.toLowerCase().includes(q));
+        }
+        if (filters.basic['price-min']) {
+            items = items.filter(i => parseFloat(i.price) >= parseFloat(filters.basic['price-min']));
+        }
+        if (filters.basic['price-max']) {
+            items = items.filter(i => parseFloat(i.price) <= parseFloat(filters.basic['price-max']));
+        }
+        if (filters.basic.status) {
+            const active = filters.basic.status === 'active';
+            items = items.filter(i => (i.is_active !== false) === active);
+        }
+
+        return applyComplexConditions(items, filters.complex);
+    };
+
+    const performFormulaSearch = async (filters) => {
+        let items = await AppDataStore.getAll('formula');
+
+        if (filters.basic.name) {
+            const q = filters.basic.name.toLowerCase();
+            items = items.filter(i => i.name && i.name.toLowerCase().includes(q));
+        }
+        if (filters.basic.category) {
+            const q = filters.basic.category.toLowerCase();
+            items = items.filter(i => i.category && i.category.toLowerCase().includes(q));
+        }
+        if (filters.basic['price-min']) {
+            items = items.filter(i => parseFloat(i.price) >= parseFloat(filters.basic['price-min']));
+        }
+        if (filters.basic['price-max']) {
+            items = items.filter(i => parseFloat(i.price) <= parseFloat(filters.basic['price-max']));
+        }
+        if (filters.basic['dosage-max']) {
+            items = items.filter(i => i.daily_dosage && parseFloat(i.daily_dosage) <= parseFloat(filters.basic['dosage-max']));
+        }
+        if (filters.basic.status) {
+            const active = filters.basic.status === 'active';
+            items = items.filter(i => (i.is_active !== false) === active);
         }
 
         return applyComplexConditions(items, filters.complex);
@@ -1647,14 +2181,23 @@ const appLogic = (() => {
             }
 
             let displayStatus = item.status || item.activity_type || item.team || 'Active';
-            if (_currentSearchEntity === 'prospects') displayStatus = 'Prospect';
+            if (_currentSearchEntity === 'prospects') displayStatus = item.status || 'Prospect';
             if (_currentSearchEntity === 'customers') displayStatus = 'Customer';
             if (item.status === 'converted' && _currentSearchEntity === 'prospects') displayStatus = 'Customer';
+            if (['products','bujishu','formula'].includes(_currentSearchEntity)) {
+                displayStatus = item.is_active === false ? 'Inactive' : 'Active';
+            }
+
+            const nameCol = item.full_name || item.activity_title || item.event_title || item.item || item.name || 'N/A';
+            const identifierCol = (() => {
+                if (['products','bujishu','formula'].includes(_currentSearchEntity)) return item.category ? `${item.category} — RM${item.price || '-'}` : `RM${item.price || '-'}`;
+                return item.phone || item.agent_code || item.invoice || item.location || 'N/A';
+            })();
 
             return `
                         <tr style="cursor: pointer;" onclick="app.viewEntityDetail('${_currentSearchEntity}', ${item.id})">
-                            <td><strong>${item.full_name || item.activity_title || item.event_title || item.item || 'N/A'}</strong></td>
-                            <td>${item.phone || item.agent_code || item.invoice || item.location || 'N/A'}</td>
+                            <td><strong>${nameCol}</strong></td>
+                            <td>${identifierCol}</td>
                             <td>${agentName}</td>
                             <td>${displayStatus}</td>
                             <td>
@@ -39454,6 +39997,24 @@ Object.assign(window.app, {
             case 'prospects': if (window.app.showProspectDetail) await window.app.showProspectDetail(id); break;
             case 'customers': if (window.app.showCustomerDetail) await window.app.showCustomerDetail(id); break;
             case 'agents': if (window.app.showAgentDetail) await window.app.showAgentDetail(id); break;
+            case 'products':
+            case 'bujishu':
+            case 'formula':
+                // Navigate to the Marketing > Lists section
+                if (window.app.navigateTo) await window.app.navigateTo('marketing');
+                UI.toast.info('Navigate to Marketing → Lists to manage ' + entity);
+                break;
+            case 'activities':
+                if (window.app.showActivityDetail) await window.app.showActivityDetail(id);
+                break;
+            case 'transactions':
+                if (window.app.showTransactionDetail) await window.app.showTransactionDetail(id);
+                else UI.toast.info('Transaction #' + id);
+                break;
+            case 'events':
+                if (window.app.showEventDetail) await window.app.showEventDetail(id);
+                else UI.toast.info('Event #' + id);
+                break;
             default: console.warn('Unknown entity type:', entity);
         }
     },
