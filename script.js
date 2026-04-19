@@ -22151,7 +22151,7 @@ NOTIFY pgrst, 'reload schema';`;
                         historyIndex: hi,
                     });
                 });
-                if (p.closing_record && p.conversion_status === 'approved') {
+                if (p.closing_record && p.conversion_status === 'approved' && (p.closing_record.sale_amount || p.closing_record.invoice_number)) {
                     const h = p.closing_record;
                     rows.push({
                         prospectId: p.id,
