@@ -136,6 +136,11 @@ const appLogic = (() => {
     // window passes, mutations and remote-driven revalidations refresh
     // the view as before.
     let _lastNavigatedAt = 0;
+    let _purchasesHistoryCache = null;
+    let _purchasesHistoryCacheTs = 0;
+    let _phFilter = { search: '', agent: 'all', delivery: 'all', from: '', to: '' };
+    let _phPage = 0;
+    const _PH_PAGE_SIZE = 50;
     const _SWR_REFRESH_GUARD_MS = 5000;
     // Tracks the open detail view so pull-to-refresh can re-open it instead of jumping to the list.
     let _currentDetailView = null; // { type: 'prospect'|'customer', id: number }
@@ -3673,6 +3678,7 @@ In a production system, this would show the actual file contents.
                 { view: 'milestones',           label: '增运九法',                     icon: 'fas fa-star' },
                 { view: 'fude',                 label: '福运相随',                     icon: 'fas fa-yin-yang' },
                 { view: 'cases',                label: 'Success Case Library',         icon: 'fas fa-book-open' },
+                { view: 'purchases_history',    label: 'Purchases History',            icon: 'fas fa-receipt' },
             ]
         },
         {
@@ -3709,7 +3715,7 @@ In a production system, this would show the actual file contents.
     const _getAllowedNavIds = () => {
         const _l12 = ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'reports', 'documents', 'settings', 'fude', 'milestones'];
         const perms = {
-            1: ['calendar','prospects','referrals','pipeline','promotions','marketing-automation','marketing-lists','cases','agents','performance','reports','risk','ai-insights','security','admin','protection','documents','import','integrations','settings','fude','milestones','lead_forms','surveys','contracts','custom_fields','booking_settings','egg-purchasing','formula-purchaser'],
+            1: ['calendar','prospects','referrals','pipeline','promotions','marketing-automation','marketing-lists','cases','purchases_history','agents','performance','reports','risk','ai-insights','security','admin','protection','documents','import','integrations','settings','fude','milestones','lead_forms','surveys','contracts','custom_fields','booking_settings','egg-purchasing','formula-purchaser'],
             2: ['calendar','prospects','referrals','pipeline','promotions','marketing-automation','marketing-lists','cases','agents','performance','reports','risk','ai-insights','security','admin','protection','documents','import','integrations','settings','fude','milestones','lead_forms','surveys','contracts','custom_fields','booking_settings'],
             3: ['calendar','prospects','referrals','pipeline','promotions','cases','performance','reports','protection','documents','settings','fude'],
             4: ['calendar','prospects','referrals','pipeline','promotions','cases','performance','reports','protection','documents','settings','fude'],
@@ -8737,6 +8743,9 @@ function _wireLoginBtn() {
             }
             _currentView = 'formula_purchaser';
             await showFormulaPurchaserView(viewport);
+        } else if (viewId === 'purchases_history') {
+            _currentView = 'purchases_history';
+            await showPurchasesHistoryView(viewport);
         } else {
             viewport.innerHTML = `
                 <div class="placeholder-view">
@@ -22089,6 +22098,239 @@ NOTIFY pgrst, 'reload schema';`;
         if (bodyEl) await switchProspectTab('closing', prospectId, null, bodyEl);
     };
 
+    // ========== PURCHASES HISTORY VIEW ==========
+
+    const showPurchasesHistoryView = async (viewport) => {
+        viewport.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:200px;color:var(--gray-400);"><i class="fas fa-spinner fa-spin" style="font-size:24px;"></i></div>`;
+        const now = Date.now();
+        if (!_purchasesHistoryCache || now - _purchasesHistoryCacheTs > 300_000) {
+            await _loadPurchasesHistory();
+        }
+        _renderPurchasesHistory(viewport);
+    };
+
+    const _loadPurchasesHistory = async () => {
+        try {
+            const { data, error } = await AppDataStore._readClient()
+                .from('prospects')
+                .select('id,full_name,responsible_agent_id,closing_records_history,closing_record,conversion_status')
+                .or('closing_records_history.not.is.null,conversion_status.eq.approved');
+            if (error) throw error;
+            const allUsers = await AppDataStore.getAll('users');
+            const agentMap = Object.fromEntries((allUsers||[]).map(u => [String(u.id), u.full_name || u.name || u.email || 'Unknown']));
+            const rows = [];
+            for (const p of (data || [])) {
+                const history = Array.isArray(p.closing_records_history) ? p.closing_records_history : [];
+                history.forEach((h, hi) => {
+                    rows.push({
+                        prospectId: p.id,
+                        customerName: p.full_name || '-',
+                        agentId: h.lead_agent_id || p.responsible_agent_id,
+                        agentName: agentMap[String(h.lead_agent_id || p.responsible_agent_id)] || '-',
+                        date: h.closing_date || (h.approved_at ? h.approved_at.split('T')[0] : ''),
+                        invoiceNo: h.invoice_number || '-',
+                        product: h.product || '-',
+                        amount: parseFloat(h.sale_amount) || 0,
+                        deliveryStatus: h.delivery_status || 'pending',
+                        remarks: h.delivery_remarks || '',
+                        caseCompleted: !!h.case_completed,
+                        isHistory: true,
+                        historyIndex: hi,
+                    });
+                });
+                if (p.closing_record && p.conversion_status === 'approved') {
+                    const h = p.closing_record;
+                    rows.push({
+                        prospectId: p.id,
+                        customerName: p.full_name || '-',
+                        agentId: h.lead_agent_id || p.responsible_agent_id,
+                        agentName: agentMap[String(h.lead_agent_id || p.responsible_agent_id)] || '-',
+                        date: h.closing_date || (h.approved_at ? h.approved_at.split('T')[0] : ''),
+                        invoiceNo: h.invoice_number || '-',
+                        product: h.product || '-',
+                        amount: parseFloat(h.sale_amount) || 0,
+                        deliveryStatus: h.delivery_status || 'pending',
+                        remarks: h.delivery_remarks || '',
+                        caseCompleted: !!h.case_completed,
+                        isHistory: false,
+                        historyIndex: -1,
+                    });
+                }
+            }
+            rows.sort((a, b) => {
+                if (!a.date && !b.date) return 0;
+                if (!a.date) return 1;
+                if (!b.date) return -1;
+                return b.date.localeCompare(a.date);
+            });
+            _purchasesHistoryCache = { rows, agentMap };
+            _purchasesHistoryCacheTs = Date.now();
+        } catch (e) {
+            console.error('Purchases history load error:', e);
+            _purchasesHistoryCache = { rows: [], agentMap: {} };
+            _purchasesHistoryCacheTs = Date.now();
+        }
+    };
+
+    const _renderPurchasesHistory = (viewport) => {
+        const { rows = [], agentMap = {} } = _purchasesHistoryCache || {};
+        const f = _phFilter;
+        const filtered = rows.filter(r => {
+            if (f.search) {
+                const q = f.search.toLowerCase();
+                if (!r.customerName.toLowerCase().includes(q) && !r.invoiceNo.toLowerCase().includes(q) && !r.product.toLowerCase().includes(q)) return false;
+            }
+            if (f.agent !== 'all' && String(r.agentId) !== f.agent) return false;
+            if (f.delivery !== 'all' && r.deliveryStatus !== f.delivery) return false;
+            if (f.from && r.date && r.date < f.from) return false;
+            if (f.to && r.date && r.date > f.to) return false;
+            return true;
+        });
+        const totalCount = filtered.length;
+        const totalAmt = filtered.reduce((s, r) => s + r.amount, 0);
+        const start = _phPage * _PH_PAGE_SIZE;
+        const pageRows = filtered.slice(start, start + _PH_PAGE_SIZE);
+        const totalPages = Math.ceil(totalCount / _PH_PAGE_SIZE);
+        const uniqueAgentIds = [...new Set(rows.map(r => r.agentId).filter(Boolean))];
+        const agentOptions = uniqueAgentIds.map(id => `<option value="${id}" ${f.agent===String(id)?'selected':''}>${escapeHtml(agentMap[String(id)]||String(id))}</option>`).join('');
+        const tableRows = pageRows.map((r, i) => {
+            const sn = start + i + 1;
+            const rk = `${r.prospectId}-${r.historyIndex}`;
+            const rowBg = r.caseCompleted ? 'background:#f0fdf4;' : '';
+            return `<tr style="border-bottom:1px solid #f3f4f6;${rowBg}">
+                <td style="padding:8px 10px;font-size:12px;color:var(--gray-400);text-align:center;">${sn}</td>
+                <td style="padding:8px 10px;font-size:12px;white-space:nowrap;">${r.date||'-'}</td>
+                <td style="padding:8px 10px;font-size:12px;white-space:nowrap;">${escapeHtml(r.agentName)}</td>
+                <td style="padding:8px 10px;font-size:12px;white-space:nowrap;">${escapeHtml(r.invoiceNo)}</td>
+                <td style="padding:8px 10px;font-size:12px;">
+                    <span style="color:var(--primary);cursor:pointer;text-decoration:underline;font-weight:500;" onclick="event.stopPropagation();app.showProspectDetail(${r.prospectId})">${escapeHtml(r.customerName)}</span>
+                </td>
+                <td style="padding:8px 10px;font-size:12px;">${escapeHtml(r.product)}</td>
+                <td style="padding:8px 10px;font-size:12px;text-align:right;font-weight:600;white-space:nowrap;">RM ${r.amount.toLocaleString()}</td>
+                <td style="padding:8px 10px;">
+                    <select id="ph-ds-${rk}" class="form-control" style="height:28px;font-size:11px;min-width:130px;">
+                        <option value="pending" ${r.deliveryStatus==='pending'?'selected':''}>⏳ Pending Delivery</option>
+                        <option value="delivered" ${r.deliveryStatus==='delivered'?'selected':''}>🚚 Delivered</option>
+                        <option value="completed" ${r.deliveryStatus==='completed'?'selected':''}>✅ Completed</option>
+                    </select>
+                </td>
+                <td style="padding:8px 10px;">
+                    <input id="ph-rem-${rk}" class="form-control" value="${escapeHtml(r.remarks)}" placeholder="Remarks..." style="height:28px;font-size:11px;min-width:150px;">
+                </td>
+                <td style="padding:8px 10px;text-align:center;">
+                    <input type="checkbox" id="ph-cc-${rk}" ${r.caseCompleted?'checked':''} style="width:16px;height:16px;cursor:pointer;">
+                </td>
+                <td style="padding:8px 10px;text-align:center;">
+                    <button class="btn primary btn-sm" style="height:28px;padding:0 12px;font-size:11px;" onclick="event.stopPropagation();app.savePurchasesHistoryRow(${r.prospectId},${r.historyIndex},${r.isHistory})"><i class="fas fa-save"></i></button>
+                </td>
+            </tr>`;
+        }).join('');
+        const pager = totalPages > 1 ? `
+            <div style="display:flex;align-items:center;justify-content:center;gap:12px;padding:16px;border-top:1px solid #e5e7eb;">
+                <button class="btn secondary btn-sm" ${_phPage===0?'disabled':''} onclick="app.phSetPage(${_phPage-1})"><i class="fas fa-chevron-left"></i> Prev</button>
+                <span style="font-size:13px;color:var(--gray-600);">Page ${_phPage+1} of ${totalPages}</span>
+                <button class="btn secondary btn-sm" ${_phPage>=totalPages-1?'disabled':''} onclick="app.phSetPage(${_phPage+1})">Next <i class="fas fa-chevron-right"></i></button>
+            </div>` : '';
+        viewport.innerHTML = `
+            <div style="padding:16px 20px 10px;background:#fff;border-bottom:1px solid #e5e7eb;position:sticky;top:0;z-index:10;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
+                    <div>
+                        <div style="font-size:18px;font-weight:700;color:var(--gray-800);">🧾 Purchases History</div>
+                        <div style="font-size:12px;color:var(--gray-400);margin-top:2px;">${totalCount} record${totalCount!==1?'s':''} · Total: <strong style="color:var(--gray-700);">RM ${totalAmt.toLocaleString()}</strong></div>
+                    </div>
+                    <button class="btn secondary btn-sm" onclick="app.refreshPurchasesHistory()"><i class="fas fa-sync-alt"></i> Refresh</button>
+                </div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                    <input class="form-control" placeholder="🔍 Customer / invoice / product" value="${escapeHtml(f.search)}" style="flex:1;min-width:180px;height:32px;font-size:12px;" oninput="app.phSetFilter('search',this.value)">
+                    <select class="form-control" style="height:32px;font-size:12px;min-width:130px;" onchange="app.phSetFilter('agent',this.value)">
+                        <option value="all" ${f.agent==='all'?'selected':''}>All Consultants</option>
+                        ${agentOptions}
+                    </select>
+                    <select class="form-control" style="height:32px;font-size:12px;min-width:120px;" onchange="app.phSetFilter('delivery',this.value)">
+                        <option value="all" ${f.delivery==='all'?'selected':''}>All Status</option>
+                        <option value="pending" ${f.delivery==='pending'?'selected':''}>⏳ Pending</option>
+                        <option value="delivered" ${f.delivery==='delivered'?'selected':''}>🚚 Delivered</option>
+                        <option value="completed" ${f.delivery==='completed'?'selected':''}>✅ Completed</option>
+                    </select>
+                    <input type="date" class="form-control" value="${f.from}" style="height:32px;font-size:12px;width:130px;" onchange="app.phSetFilter('from',this.value)">
+                    <span style="font-size:12px;color:var(--gray-400);">–</span>
+                    <input type="date" class="form-control" value="${f.to}" style="height:32px;font-size:12px;width:130px;" onchange="app.phSetFilter('to',this.value)">
+                </div>
+            </div>
+            <div style="overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;min-width:1000px;">
+                    <thead>
+                        <tr style="background:#f9fafb;border-bottom:2px solid #e5e7eb;">
+                            <th style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);text-align:center;white-space:nowrap;">SN</th>
+                            <th style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);white-space:nowrap;">Date</th>
+                            <th style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);white-space:nowrap;">Consultant</th>
+                            <th style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);white-space:nowrap;">Invoice No</th>
+                            <th style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);white-space:nowrap;">Customer Name</th>
+                            <th style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);white-space:nowrap;">Product / Service</th>
+                            <th style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);text-align:right;white-space:nowrap;">Amount (RM)</th>
+                            <th style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);white-space:nowrap;">Delivery Tracking</th>
+                            <th style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);white-space:nowrap;">Remarks</th>
+                            <th style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);text-align:center;white-space:nowrap;">Case Completed</th>
+                            <th style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);text-align:center;white-space:nowrap;">Save</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${tableRows || `<tr><td colspan="11" style="padding:48px;text-align:center;color:var(--gray-400);font-size:13px;"><i class="fas fa-receipt" style="font-size:36px;display:block;margin-bottom:10px;opacity:.4;"></i>No purchase records found</td></tr>`}
+                    </tbody>
+                </table>
+            </div>
+            ${pager}
+        `;
+    };
+
+    const phSetFilter = (key, val) => {
+        _phFilter[key] = val;
+        _phPage = 0;
+        const vp = document.getElementById('content-viewport');
+        if (vp) _renderPurchasesHistory(vp);
+    };
+
+    const phSetPage = (page) => {
+        _phPage = page;
+        const vp = document.getElementById('content-viewport');
+        if (vp) _renderPurchasesHistory(vp);
+    };
+
+    const refreshPurchasesHistory = async () => {
+        _purchasesHistoryCache = null;
+        _purchasesHistoryCacheTs = 0;
+        const vp = document.getElementById('content-viewport');
+        if (vp) await showPurchasesHistoryView(vp);
+    };
+
+    const savePurchasesHistoryRow = async (prospectId, historyIndex, isHistory) => {
+        const rk = `${prospectId}-${historyIndex}`;
+        const statusEl = document.getElementById(`ph-ds-${rk}`);
+        const remarksEl = document.getElementById(`ph-rem-${rk}`);
+        const completedEl = document.getElementById(`ph-cc-${rk}`);
+        const updates = {
+            delivery_status: statusEl?.value || 'pending',
+            delivery_remarks: remarksEl?.value || '',
+            case_completed: completedEl?.checked || false,
+        };
+        const prospect = await AppDataStore.getByIdFull('prospects', prospectId);
+        if (!prospect) return UI.toast.error('Prospect not found');
+        if (isHistory) {
+            const history = Array.isArray(prospect.closing_records_history) ? [...prospect.closing_records_history] : [];
+            if (historyIndex < 0 || historyIndex >= history.length) return UI.toast.error('Record not found');
+            history[historyIndex] = { ...history[historyIndex], ...updates };
+            await AppDataStore.update('prospects', prospectId, { closing_records_history: history });
+        } else {
+            if (!prospect.closing_record) return UI.toast.error('No active closing record');
+            await AppDataStore.update('prospects', prospectId, { closing_record: { ...prospect.closing_record, ...updates } });
+        }
+        if (_purchasesHistoryCache?.rows) {
+            const row = _purchasesHistoryCache.rows.find(r => r.prospectId == prospectId && r.historyIndex == historyIndex && r.isHistory === isHistory);
+            if (row) Object.assign(row, updates);
+        }
+        UI.toast.success('Saved');
+    };
+
     const approveClosingRecord = async (prospectId) => {
         const prospect = await AppDataStore.getById('prospects', prospectId);
         if (!prospect?.closing_record) return UI.toast.error('No closing record found');
@@ -22125,6 +22367,7 @@ NOTIFY pgrst, 'reload schema';`;
             // First conversion — reuse full-copy conversion
             await approveProspectConversion(prospectId);
         }
+        _purchasesHistoryCache = null;
         const bodyEl = document.getElementById(`acc-body-closing-${prospectId}`);
         if (bodyEl) await switchProspectTab('closing', prospectId, null, bodyEl);
     };
@@ -22823,6 +23066,7 @@ const openAddSolutionModal = async (prospectId) => {
             updatedFields.closing_record = null;
         }
         await AppDataStore.update('prospects', prospectId, updatedFields);
+        _purchasesHistoryCache = null;
 
         // Sync approval queue — mark matching new_customer entry as approved
         try {
@@ -40185,6 +40429,11 @@ JB 星期二到
         saveClosingHistoryEntry,
         saveClosingDeliveryStatus,
         rejectClosingRecord,
+        showPurchasesHistoryView,
+        savePurchasesHistoryRow,
+        phSetFilter,
+        phSetPage,
+        refreshPurchasesHistory,
         extendProtection,
         transferProspect,
         reassignProspect,
@@ -40825,6 +41074,9 @@ JB 星期二到
                 break;
             case 'egg_purchasing':
                 if (typeof showEggPurchasingView === 'function') await showEggPurchasingView(viewport);
+                break;
+            case 'purchases_history':
+                await showPurchasesHistoryView(viewport);
                 break;
             default:
                 // No specific refresh for this view
