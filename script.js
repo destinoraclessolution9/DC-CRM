@@ -3932,10 +3932,16 @@ In a production system, this would show the actual file contents.
         window.addEventListener('online', handleOnline);
         window.addEventListener('offline', handleOffline);
 
-        // Load saved queue
+        // Load saved queue, prune entries older than 7 days, cap at 50 items
         try {
             const saved = localStorage.getItem('offline_queue');
-            if (saved) _offlineQueue = JSON.parse(saved);
+            if (saved) {
+                const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+                _offlineQueue = JSON.parse(saved)
+                    .filter(item => new Date(item.timestamp).getTime() > cutoff)
+                    .slice(-50);
+                localStorage.setItem('offline_queue', JSON.stringify(_offlineQueue));
+            }
         } catch (e) { _offlineQueue = []; }
 
         updateOfflineIndicator();
@@ -6981,7 +6987,13 @@ function _wireLoginBtn() {
             // Save "remember me" preference before leaving login screen
             const _rememberChk = document.getElementById('rememberMe');
             if (_rememberChk && _rememberChk.checked) {
-                localStorage.setItem('remember_me', '1');
+                try {
+                    localStorage.setItem('remember_me', '1');
+                } catch (e) {
+                    // localStorage quota exceeded — clear stale offline queue and retry
+                    localStorage.removeItem('offline_queue');
+                    try { localStorage.setItem('remember_me', '1'); } catch (_) {}
+                }
             } else {
                 localStorage.removeItem('remember_me');
             }
