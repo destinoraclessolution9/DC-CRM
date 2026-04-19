@@ -20229,8 +20229,8 @@ function _wireLoginBtn() {
                 return `<span style="background:#fef9c3;color:#854d0e;border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600;"><i class="fas fa-clock"></i> Pending</span>`;
             };
             const historyHtml = crHistory.length ? `
-                <div style="margin-bottom:16px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
-                    <div style="background:#f0fdf4;padding:8px 12px;font-weight:600;font-size:13px;border-bottom:1px solid #e5e7eb;color:#166534;">
+                <div style="margin-bottom:16px;border:1px solid #e5e7eb;border-radius:8px;">
+                    <div style="background:#f0fdf4;padding:8px 12px;font-weight:600;font-size:13px;border-bottom:1px solid #e5e7eb;color:#166534;border-radius:8px 8px 0 0;">
                         <i class="fas fa-history"></i> Closing History (${crHistory.length} record${crHistory.length>1?'s':''})
                     </div>
                     ${crHistory.map((h, hi) => `
