@@ -154,7 +154,7 @@ class DataStore {
                     const factory = window._supabaseFactory || window.supabase;
                     if (typeof factory.createClient === 'function') {
                         this._srClient = factory.createClient(window.SUPABASE_URL, window.SUPABASE_SR, {
-                            auth: { persistSession: false, autoRefreshToken: false }
+                            auth: { persistSession: false, autoRefreshToken: false, storageKey: 'sb-sr-auth-token' }
                         });
                         console.log('DataStore: service-role client initialised (RLS bypassed for writes).');
                     }
