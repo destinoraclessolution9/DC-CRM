@@ -20327,9 +20327,15 @@ function _wireLoginBtn() {
                     <div class="form-group" style="margin-bottom:14px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Address</label><textarea id="cr-address" class="form-control" rows="2" placeholder="Full address">${d.address || [prospect.address, prospect.city, prospect.state, prospect.postal_code].filter(Boolean).join(', ') || ''}</textarea></div>
 
                     <div class="pv-sub">📝 Meeting Outcome</div>
-                    <div class="form-group" style="margin-bottom:10px;">
-                        <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Product/Service Sold</label>
-                        <select id="cr-product" class="form-control">${productOptions}</select>
+                    <div class="form-row" style="display:flex;gap:8px;margin-bottom:10px;">
+                        <div class="form-group" style="flex:1;">
+                            <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Product/Service Sold</label>
+                            <select id="cr-product" class="form-control">${productOptions}</select>
+                        </div>
+                        <div class="form-group" style="flex:1;">
+                            <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Order Date</label>
+                            <input id="cr-order-date" type="date" class="form-control" value="${d.order_date || ''}">
+                        </div>
                     </div>
                     <div class="form-row" style="display:flex;gap:8px;margin-bottom:10px;">
                         <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Amount Closed (RM)</label><input id="cr-amount" type="number" class="form-control" value="${d.sale_amount || ''}" placeholder="0.00"></div>
@@ -20395,6 +20401,7 @@ function _wireLoginBtn() {
                     <div class="pv-row"><span class="pv-lbl">Address</span><span class="pv-val">${d.address || '-'}</span></div>
                     <div class="pv-sub">Meeting Outcome</div>
                     <div class="pv-row"><span class="pv-lbl">Product/Service</span><span class="pv-val">${d.product || '-'}</span></div>
+                    <div class="pv-row"><span class="pv-lbl">Order Date</span><span class="pv-val">${d.order_date || '-'}</span></div>
                     <div class="pv-row"><span class="pv-lbl">Amount Closed</span><span class="pv-val">${d.sale_amount ? 'RM ' + parseFloat(d.sale_amount).toLocaleString() : '-'}</span></div>
                     <div class="pv-row"><span class="pv-lbl">Payment Method</span><span class="pv-val">${d.payment_method || '-'}</span></div>
                     ${d.payment_method === 'POP' ? `
@@ -20424,6 +20431,7 @@ function _wireLoginBtn() {
                     </div>
                     <div class="pv-sub">Last Closing</div>
                     <div class="pv-row"><span class="pv-lbl">Product/Service</span><span class="pv-val">${d.product || '-'}</span></div>
+                    <div class="pv-row"><span class="pv-lbl">Order Date</span><span class="pv-val">${d.order_date || '-'}</span></div>
                     <div class="pv-row"><span class="pv-lbl">Amount Closed</span><span class="pv-val">${d.sale_amount ? 'RM ' + parseFloat(d.sale_amount).toLocaleString() : '-'}</span></div>
                     <div class="pv-row"><span class="pv-lbl">Payment Method</span><span class="pv-val">${d.payment_method || '-'}</span></div>
                     ${d.payment_method === 'POP' ? `
@@ -21285,6 +21293,7 @@ NOTIFY pgrst, 'reload schema';`;
             invoice_number: document.getElementById('cr-invoice')?.value?.trim() || '',
             closing_remarks: document.getElementById('cr-remarks')?.value?.trim() || '',
             closing_date: document.getElementById('cr-close-date')?.value || '',
+            order_date: document.getElementById('cr-order-date')?.value || '',
             sales_idea: document.getElementById('cr-sales-idea')?.value?.trim() || '',
             plan_details: document.getElementById('cr-plan-details')?.value?.trim() || '',
             success_story: document.getElementById('cr-success-story')?.value?.trim() || '',
