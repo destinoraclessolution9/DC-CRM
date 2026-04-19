@@ -19835,6 +19835,20 @@ function _wireLoginBtn() {
         else if (tab === 'activity') {
             const MEETUP_TYPES = ['CPS','FTF','FSA','GR','XG','CALL','EMAIL','WHATSAPP'];
             const activities = (await AppDataStore.getAll('activities')).filter(a => a.prospect_id == prospectId && MEETUP_TYPES.includes(a.activity_type));
+
+            // Always fetch fresh photo_urls directly — the SWR localStorage cache
+            // serves stale activity rows (without photo_urls) so we can't rely on
+            // getAll() here. This is a tiny 2-column query filtered to one prospect.
+            const _sb = window.supabase || window.supabaseClient;
+            const photoMap = {};
+            if (_sb) {
+                try {
+                    const { data: _pd } = await _sb.from('activities').select('id,photo_urls').eq('prospect_id', prospectId);
+                    if (_pd) _pd.forEach(r => { if (r.photo_urls?.length) photoMap[r.id] = r.photo_urls; });
+                } catch (_) {}
+            }
+            activities.forEach(a => { if (photoMap[a.id]) a.photo_urls = photoMap[a.id]; });
+
             const sorted = activities.sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date) || b.id - a.id);
             container.innerHTML = `
                 <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:12px;">
