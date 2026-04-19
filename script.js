@@ -20397,6 +20397,30 @@ function _wireLoginBtn() {
                     ${d.plan_details ? `<div class="pv-row"><span class="pv-lbl">Plan Details</span><span class="pv-val">${d.plan_details}</span></div>` : ''}
                     ${d.success_story ? `<div class="pv-row"><span class="pv-lbl">Success Story</span><span class="pv-val">${d.success_story}</span></div>` : ''}
                     ` : ''}
+                    <div class="pv-sub" style="margin-top:14px;">📦 Service Delivery Status</div>
+                    <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:12px;margin-top:6px;">
+                        <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
+                            <select id="cr-active-status-${prospect.id}" class="form-control" style="flex:1;min-width:140px;height:32px;font-size:12px;">
+                                <option value="pending" ${(!d.delivery_status||d.delivery_status==='pending')?'selected':''}>⏳ Pending Delivery</option>
+                                <option value="delivered" ${d.delivery_status==='delivered'?'selected':''}>🚚 Delivered</option>
+                                <option value="completed" ${d.delivery_status==='completed'?'selected':''}>✅ Completed</option>
+                            </select>
+                            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap;font-size:13px;font-weight:600;color:${d.case_completed?'#166534':'var(--gray-600)'};">
+                                <input type="checkbox" id="cr-active-completed-${prospect.id}" ${d.case_completed?'checked':''} style="width:15px;height:15px;cursor:pointer;">
+                                Case Closed
+                            </label>
+                        </div>
+                        <div style="margin-bottom:10px;">
+                            <label style="font-size:11px;font-weight:600;color:var(--gray-500);display:block;margin-bottom:4px;">Delivery Proof / Photo Attachment</label>
+                            ${d.delivery_proof ? `<div style="margin-bottom:5px;"><a href="${d.delivery_proof}" target="_blank" style="color:var(--primary);font-size:12px;"><i class="fas fa-paperclip"></i> ${escapeHtml(d.delivery_proof_name||'View proof')}</a> <span style="color:var(--gray-400);font-size:11px;">(upload new to replace)</span></div>` : ''}
+                            <input type="file" id="cr-active-proof-${prospect.id}" accept="image/*,application/pdf" style="font-size:11px;width:100%;" onchange="(function(el){var f=el.files[0];if(!f)return;var r=new FileReader();r.onload=function(e){el.dataset.b64=e.target.result;el.dataset.fname=f.name;};r.readAsDataURL(f);})(this)">
+                        </div>
+                        <div style="margin-bottom:10px;">
+                            <label style="font-size:11px;font-weight:600;color:var(--gray-500);display:block;margin-bottom:4px;">Remarks</label>
+                            <textarea id="cr-active-remarks-${prospect.id}" class="form-control" rows="2" style="font-size:12px;" placeholder="Post-sale notes, delivery details, special requests...">${escapeHtml(d.delivery_remarks||'')}</textarea>
+                        </div>
+                        <button class="btn primary btn-sm" style="width:100%;height:32px;" onclick="event.stopPropagation();app.saveClosingDeliveryStatus(${prospect.id})"><i class="fas fa-save"></i> Save Delivery Status</button>
+                    </div>
                 `;
             }
         }
@@ -21950,6 +21974,30 @@ NOTIFY pgrst, 'reload schema';`;
         history[index] = { ...history[index], ...updates };
         await AppDataStore.update('prospects', prospectId, { closing_records_history: history });
         UI.toast.success('Delivery info saved');
+        const bodyEl = document.getElementById(`acc-body-closing-${prospectId}`);
+        if (bodyEl) await switchProspectTab('closing', prospectId, null, bodyEl);
+    };
+
+    const saveClosingDeliveryStatus = async (prospectId) => {
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect?.closing_record) return UI.toast.error('No active closing record found');
+        const statusEl = document.getElementById(`cr-active-status-${prospectId}`);
+        const completedEl = document.getElementById(`cr-active-completed-${prospectId}`);
+        const remarksEl = document.getElementById(`cr-active-remarks-${prospectId}`);
+        const proofEl = document.getElementById(`cr-active-proof-${prospectId}`);
+        const updates = {
+            delivery_status: statusEl?.value || prospect.closing_record.delivery_status || 'pending',
+            case_completed: completedEl?.checked ?? (prospect.closing_record.case_completed || false),
+            delivery_remarks: remarksEl?.value ?? (prospect.closing_record.delivery_remarks || '')
+        };
+        if (proofEl?.dataset.b64) {
+            updates.delivery_proof = proofEl.dataset.b64;
+            updates.delivery_proof_name = proofEl.dataset.fname || 'proof';
+        }
+        await AppDataStore.update('prospects', prospectId, {
+            closing_record: { ...prospect.closing_record, ...updates }
+        });
+        UI.toast.success('Delivery status saved');
         const bodyEl = document.getElementById(`acc-body-closing-${prospectId}`);
         if (bodyEl) await switchProspectTab('closing', prospectId, null, bodyEl);
     };
@@ -40061,6 +40109,7 @@ JB 星期二到
         approveClosingRecord,
         archiveAndNewClosingRecord,
         saveClosingHistoryEntry,
+        saveClosingDeliveryStatus,
         rejectClosingRecord,
         extendProtection,
         transferProspect,
