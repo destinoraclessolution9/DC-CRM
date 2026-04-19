@@ -22112,11 +22112,19 @@ NOTIFY pgrst, 'reload schema';`;
 
     const _loadPurchasesHistory = async () => {
         try {
-            const { data, error } = await AppDataStore._readClient()
-                .from('prospects')
-                .select('id,full_name,responsible_agent_id,closing_records_history,closing_record,conversion_status')
-                .or('status.eq.converted,conversion_status.eq.approved');
-            if (error) throw error;
+            const allProspects = await AppDataStore.getAll('prospects');
+            const convertedIds = (allProspects || [])
+                .filter(p => p.status === 'converted' || p.conversion_status === 'approved')
+                .map(p => p.id);
+            let data = [];
+            if (convertedIds.length) {
+                const { data: rows, error } = await AppDataStore._readClient()
+                    .from('prospects')
+                    .select('id,full_name,responsible_agent_id,closing_records_history,closing_record,conversion_status')
+                    .in('id', convertedIds);
+                if (error) throw error;
+                data = rows || [];
+            }
             const allUsers = await AppDataStore.getAll('users');
             const agentMap = Object.fromEntries((allUsers||[]).map(u => [String(u.id), u.full_name || u.name || u.email || 'Unknown']));
             const rows = [];
