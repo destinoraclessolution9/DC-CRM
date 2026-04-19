@@ -19878,7 +19878,9 @@ function _wireLoginBtn() {
                         </div>
                         ${a.photo_urls && a.photo_urls.length > 0 ? `
                         <div class="meet-photos">
-                            ${a.photo_urls.map(url => `<img src="${url}" onclick="window.open('${url}','_blank')" style="height:60px;border-radius:4px;cursor:pointer;object-fit:cover;">`).join('')}
+                            <button class="btn btn-sm secondary" onclick="event.stopPropagation();app.attachActivityPhoto(${a.id})" style="font-size:11px;margin-top:4px;">
+                                <i class="fas fa-images"></i> ${a.photo_urls.length} photo${a.photo_urls.length > 1 ? 's' : ''}
+                            </button>
                         </div>` : ''}
                     </div>
                 `).join('') : '<p style="text-align:center;padding:20px;color:var(--gray-400);">No meet up history recorded yet.</p>'}
