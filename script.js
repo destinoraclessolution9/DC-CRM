@@ -3693,20 +3693,21 @@ In a production system, this would show the actual file contents.
         {
             title: 'Tools',
             items: [
-                { view: 'protection',      label: 'Protection Monitor',  icon: 'fas fa-shield-alt' },
-                { view: 'integrations',    label: 'Integrations',        icon: 'fas fa-plug' },
+                { view: 'protection',         label: 'Protection Monitor',  icon: 'fas fa-shield-alt' },
+                { view: 'integrations',       label: 'Integrations',        icon: 'fas fa-plug' },
+                { view: 'formula_purchaser',  label: 'Formula Purchaser',   icon: 'fas fa-flask' },
             ]
         },
     ];
 
     // Map drawer view names → nav ID suffix (only where they differ)
-    const _drawerViewToNavId = { 'marketing_automation': 'marketing-automation' };
+    const _drawerViewToNavId = { 'marketing_automation': 'marketing-automation', 'formula_purchaser': 'formula-purchaser' };
 
     // Returns the set of allowed nav IDs for the current user (mirrors updateNavVisibility logic)
     const _getAllowedNavIds = () => {
         const _l12 = ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'reports', 'documents', 'settings', 'fude', 'milestones'];
         const perms = {
-            1: ['calendar','prospects','referrals','pipeline','promotions','marketing-automation','marketing-lists','cases','agents','performance','reports','risk','ai-insights','security','admin','protection','documents','import','integrations','settings','fude','milestones','lead_forms','surveys','contracts','custom_fields','booking_settings','egg-purchasing'],
+            1: ['calendar','prospects','referrals','pipeline','promotions','marketing-automation','marketing-lists','cases','agents','performance','reports','risk','ai-insights','security','admin','protection','documents','import','integrations','settings','fude','milestones','lead_forms','surveys','contracts','custom_fields','booking_settings','egg-purchasing','formula-purchaser'],
             2: ['calendar','prospects','referrals','pipeline','promotions','marketing-automation','marketing-lists','cases','agents','performance','reports','risk','ai-insights','security','admin','protection','documents','import','integrations','settings','fude','milestones','lead_forms','surveys','contracts','custom_fields','booking_settings'],
             3: ['calendar','prospects','referrals','pipeline','promotions','cases','performance','reports','protection','documents','settings','fude'],
             4: ['calendar','prospects','referrals','pipeline','promotions','cases','performance','reports','protection','documents','settings','fude'],
@@ -6785,7 +6786,7 @@ In a production system, this would show the actual file contents.
         // Map Level 1-14 to visible nav IDs (suffix after 'nav-')
         const _l12 = ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'reports', 'documents', 'settings', 'fude', 'milestones'];
         const levelPermissions = {
-            1: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'import', 'integrations', 'settings', 'fude', 'milestones', 'custom_fields', 'egg-purchasing', 'standard-functions'],
+            1: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'import', 'integrations', 'settings', 'fude', 'milestones', 'custom_fields', 'egg-purchasing', 'standard-functions', 'formula-purchaser'],
             2: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'import', 'integrations', 'settings', 'fude', 'milestones', 'custom_fields'],
             3: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'performance', 'reports', 'protection', 'documents', 'settings', 'fude'],
             4: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'performance', 'reports', 'protection', 'documents', 'settings', 'fude'],
@@ -6824,7 +6825,7 @@ In a production system, this would show the actual file contents.
             'cases', 'documents', 'import', 'promotions', 'marketing-automation', 'marketing-lists',
             'performance', 'reports', 'risk', 'admin',
             'integrations', 'settings', 'milestones', 'fude',
-            'custom_fields', 'egg-purchasing', 'standard-functions'
+            'custom_fields', 'egg-purchasing', 'standard-functions', 'formula-purchaser'
         ];
 
         allNavIds.forEach(id => {
@@ -8719,6 +8720,14 @@ function _wireLoginBtn() {
             }
             _currentView = 'standard_functions';
             await showStandardFunctionsView(viewport);
+        } else if (viewId === 'formula_purchaser') {
+            if (!isSystemAdmin(_currentUser)) {
+                UI.toast.error('Super Admin only');
+                await navigateTo('calendar');
+                return;
+            }
+            _currentView = 'formula_purchaser';
+            await showFormulaPurchaserView(viewport);
         } else {
             viewport.innerHTML = `
                 <div class="placeholder-view">
@@ -38324,6 +38333,1534 @@ JB 星期二到
 
     // ==================== /EGG PURCHASING ====================
 
+    // ==================== FORMULA PURCHASER ====================
+    // Stock replenishment & multi-outlet distribution system.
+    // Super Admin only. See formula_purchaser_schema.sql for backing tables.
+
+    const FP_ACTIVE_LOCATIONS = [
+        { name: 'Puchong warehouse',     type: 'warehouse',   pos_prefix: null,   is_oem: false },
+        { name: '001 Retail Puchong',    type: 'retail',      pos_prefix: 'FMLS', is_oem: false },
+        { name: '002 Retail Bay Avenue', type: 'retail',      pos_prefix: 'PGBL', is_oem: false },
+        { name: '003 Retail Pavilion 2', type: 'central_hub', pos_prefix: 'FMKL', is_oem: false },
+        { name: 'Factory OEM',           type: 'supplier',    pos_prefix: null,   is_oem: true  },
+    ];
+    // HTML-escape helper for safe DOM injection of vendor / product names
+    const fpEsc = (s) => String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    const FP_KEEP_TOKENS    = ['DC','FH','DEAL','1ANNIV','25MD','2025MD','COURSE'];
+    const FP_EXCLUDE_TOKENS = ['AGENT','FREE','TEST','DUMMY','RETAIL004'];
+    const FP_NAME_EXCLUDES  = ['dummy','test','promotion'];
+    const FP_DEFAULT_MIN    = 20;
+    const FP_TRANSFER_COOLDOWN_DAYS = 14;
+
+    let _fpState = {
+        currentTab: 'dashboard',
+        loaded: false,
+        useSupabase: false,
+        locations: [],
+        vendors: [],
+        skus: [],
+        stockBalance: [],
+        posTransactions: [],
+        refunds: [],
+        purchaseOrders: [],
+        poItems: [],
+        transferOrders: [],
+        transferItems: [],
+        exclusions: [],
+        orderReqs: [],
+        outletSettings: [],
+        lastReplenishment: [],
+        lastTransferRecs: [],
+    };
+
+    // ---------- Data Layer ----------
+    const fpSupaQuery = async (table) => {
+        try {
+            if (!window.AppDataStore || !AppDataStore.query) return null;
+            const rows = await AppDataStore.query(table, {});
+            return Array.isArray(rows) ? rows : null;
+        } catch (e) { return null; }
+    };
+
+    const fpSeedLocal = () => {
+        _fpState.locations = FP_ACTIVE_LOCATIONS.map((l, i) => ({
+            id: 'loc-' + i, name: l.name, type: l.type,
+            pos_prefix: l.pos_prefix, is_active: true, is_oem: l.is_oem
+        }));
+        _fpState.vendors = [];
+        _fpState.skus = [];
+        _fpState.stockBalance = [];
+        _fpState.posTransactions = [];
+        _fpState.refunds = [];
+        _fpState.purchaseOrders = [];
+        _fpState.poItems = [];
+        _fpState.transferOrders = [];
+        _fpState.transferItems = [];
+        _fpState.exclusions = [];
+        _fpState.orderReqs = [];
+        _fpState.outletSettings = [];
+    };
+
+    const fpLoadData = async (force = false) => {
+        if (_fpState.loaded && !force) return;
+        const tables = [
+            'fp_locations','fp_vendors','fp_sku_master','fp_stock_balance',
+            'fp_pos_transactions','fp_refunds','fp_purchase_orders','fp_po_items',
+            'fp_transfer_orders','fp_transfer_items','fp_product_exclusions',
+            'fp_order_requirements','fp_outlet_sku_settings'
+        ];
+        const results = await Promise.all(tables.map(fpSupaQuery));
+        const allOk = results.every(r => r !== null);
+        if (allOk) {
+            _fpState.useSupabase = true;
+            [_fpState.locations, _fpState.vendors, _fpState.skus, _fpState.stockBalance,
+             _fpState.posTransactions, _fpState.refunds, _fpState.purchaseOrders, _fpState.poItems,
+             _fpState.transferOrders, _fpState.transferItems, _fpState.exclusions,
+             _fpState.orderReqs, _fpState.outletSettings] = results;
+            // If Supabase is reachable but locations table is empty, seed in-memory defaults
+            if (!_fpState.locations.length) {
+                fpSeedLocal();
+                _fpState.useSupabase = false;
+            }
+        } else {
+            _fpState.useSupabase = false;
+            fpSeedLocal();
+        }
+        _fpState.loaded = true;
+    };
+
+    const fpSave = async (table, row) => {
+        if (_fpState.useSupabase && window.AppDataStore?.create) {
+            try { return await AppDataStore.create(table, row); } catch (e) { /* fall through */ }
+        }
+        if (!row.id) row.id = 'local-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
+        return row;
+    };
+
+    const fpUpdate = async (table, id, patch) => {
+        if (_fpState.useSupabase && window.AppDataStore?.update) {
+            try { return await AppDataStore.update(table, id, patch); } catch (e) {}
+        }
+        return { id, ...patch };
+    };
+
+    const fpDelete = async (table, id) => {
+        if (_fpState.useSupabase && window.AppDataStore?.delete) {
+            try { return await AppDataStore.delete(table, id); } catch (e) {}
+        }
+        return true;
+    };
+
+    // ---------- Business Logic Helpers ----------
+    const fpGetLocationByName = (name) => _fpState.locations.find(l => l.name === name);
+    const fpGetLocationById   = (id)   => _fpState.locations.find(l => l.id === id);
+    const fpGetSkuById        = (id)   => _fpState.skus.find(s => s.id === id);
+    const fpGetSkuByCode      = (code) => _fpState.skus.find(s => s.product_code === code);
+    const fpActiveLocations   = ()     => _fpState.locations.filter(l => l.is_active);
+    const fpRetailOutlets     = ()     => _fpState.locations.filter(l => l.is_active && (l.type === 'retail' || l.type === 'central_hub'));
+
+    const fpGetActualMinStock = (sku) => {
+        if (sku.actual_min_stock != null && sku.actual_min_stock > 0) return sku.actual_min_stock;
+        if (sku.auto_min_stock   != null && sku.auto_min_stock   > 0) return sku.auto_min_stock;
+        return FP_DEFAULT_MIN;
+    };
+
+    const fpGetTotalStock = (skuId) => {
+        return _fpState.stockBalance
+            .filter(sb => sb.sku_id === skuId)
+            .reduce((sum, sb) => sum + (parseInt(sb.physical_stock) || 0), 0);
+    };
+
+    const fpGetStockAtLocation = (skuId, locationId) => {
+        const sb = _fpState.stockBalance.find(s => s.sku_id === skuId && s.location_id === locationId);
+        return sb ? (parseInt(sb.physical_stock) || 0) : 0;
+    };
+
+    const fpGetActiveDeal = (skuId) => {
+        const today = new Date().toISOString().slice(0, 10);
+        return _fpState.orderReqs.find(r => {
+            if (r.sku_id !== skuId || r.is_active === false) return false;
+            const from = r.effective_from || '0000-01-01';
+            const to   = r.effective_to   || '9999-12-31';
+            return today >= from && today <= to;
+        });
+    };
+
+    const fpCalcRefundRate = (skuId, days = 90) => {
+        const cutoff = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+        const sales = _fpState.posTransactions
+            .filter(p => p.sku_id === skuId && p.transaction_date >= cutoff)
+            .reduce((s, p) => s + (parseInt(p.quantity_sold) || 0), 0);
+        const refs = _fpState.refunds
+            .filter(r => r.sku_id === skuId && r.refund_date >= cutoff)
+            .reduce((s, r) => s + (parseInt(r.quantity_refunded) || 0), 0);
+        return sales > 0 ? Math.min(refs / sales, 1) : 0;
+    };
+
+    const fpCalcWeeklyVelocity = (skuId, locationId, weeks = 4) => {
+        const cutoff = new Date(Date.now() - weeks * 7 * 86400000).toISOString().slice(0, 10);
+        const sold = _fpState.posTransactions
+            .filter(p => p.sku_id === skuId && p.location_id === locationId && p.transaction_date >= cutoff)
+            .reduce((s, p) => s + (parseInt(p.quantity_sold) || 0), 0);
+        return sold / weeks;
+    };
+
+    const fpIsExcluded = (productCode) => {
+        const code = (productCode || '').toUpperCase();
+        return _fpState.exclusions.some(e => {
+            if (e.is_active === false) return false;
+            const target = (e.product_code || '').toUpperCase();
+            switch (e.match_type) {
+                case 'starts_with': return code.startsWith(target);
+                case 'contains':    return code.includes(target);
+                case 'regex':       try { return new RegExp(e.product_code).test(productCode); } catch { return false; }
+                default:            return code === target;
+            }
+        });
+    };
+
+    // Returns array: { sku, totalStock, minStock, shortage, recommendedQty, freeQty, deal, refundRate }
+    const fpCalcReplenishmentNeeds = () => {
+        const out = [];
+        for (const sku of _fpState.skus) {
+            if (sku.is_active === false) continue;
+            if (fpIsExcluded(sku.product_code)) continue;
+            const total = fpGetTotalStock(sku.id);
+            const min   = fpGetActualMinStock(sku);
+            if (total >= min) continue;
+
+            const numOutlets = fpRetailOutlets().length || 1;
+            const max        = sku.max_stock_level || 200;
+            let baseNeeded   = (max * numOutlets) - total;
+            const reorderQty = sku.reorder_quantity || 50;
+
+            const deal = fpGetActiveDeal(sku.id);
+            let freeQty = 0;
+            let qty = Math.max(baseNeeded, reorderQty);
+
+            if (deal && deal.requirement_type === 'BUY_X_GET_Y_FREE' && deal.x_quantity > 0) {
+                qty = Math.ceil(qty / deal.x_quantity) * deal.x_quantity;
+                freeQty = Math.floor(qty / deal.x_quantity) * (deal.y_free || 0);
+            } else if (deal && deal.requirement_type === 'MIN_ORDER_QTY' && deal.min_order_qty > 0) {
+                qty = Math.max(qty, deal.min_order_qty);
+            }
+
+            const refundRate = fpCalcRefundRate(sku.id);
+            if (refundRate > 0.05) {
+                qty = Math.ceil(qty * (1 - refundRate));
+            }
+
+            out.push({
+                sku, totalStock: total, minStock: min,
+                shortage: min - total, recommendedQty: qty,
+                freeQty, deal, refundRate
+            });
+        }
+        return out.sort((a, b) => b.shortage - a.shortage);
+    };
+
+    // For each retail outlet: { outlet, sku, currentStock, outletMin, transferQty, hubStock }
+    const fpCalcTransferNeeds = () => {
+        const hub = _fpState.locations.find(l => l.type === 'central_hub' && l.is_active);
+        if (!hub) return [];
+        const today = new Date().toISOString().slice(0, 10);
+        const out = [];
+        for (const outlet of fpRetailOutlets()) {
+            if (outlet.id === hub.id) continue;
+            for (const sku of _fpState.skus) {
+                if (sku.is_active === false || fpIsExcluded(sku.product_code)) continue;
+                const velocity = fpCalcWeeklyVelocity(sku.id, outlet.id);
+                const setting  = _fpState.outletSettings.find(s => s.outlet_id === outlet.id && s.sku_id === sku.id);
+                const manualMin = setting?.manual_min_stock || 0;
+                const globalMin = fpGetActualMinStock(sku);
+                const outletMin = Math.max(velocity * 2, manualMin, globalMin);
+                const current   = fpGetStockAtLocation(sku.id, outlet.id);
+                if (current >= outletMin) continue;
+
+                if (setting?.last_transfer_date) {
+                    const daysSince = (Date.parse(today) - Date.parse(setting.last_transfer_date)) / 86400000;
+                    if (daysSince < FP_TRANSFER_COOLDOWN_DAYS) continue;
+                }
+
+                const targetQty = Math.ceil(outletMin * 1.5 - current);
+                const hubStock  = fpGetStockAtLocation(sku.id, hub.id);
+                const transferQty = Math.min(targetQty, hubStock);
+                if (transferQty <= 0) continue;
+                out.push({ outlet, sku, currentStock: current, outletMin, transferQty, hubStock, hub });
+            }
+        }
+        return out.sort((a, b) => (b.outletMin - b.currentStock) - (a.outletMin - a.currentStock));
+    };
+
+    // ---------- Main View ----------
+    const showFormulaPurchaserView = async (container) => {
+        _currentView = 'formula_purchaser';
+        if (!isSystemAdmin(_currentUser)) {
+            container.innerHTML = `<div class="placeholder-view"><h1>Access Denied</h1><p>Formula Purchaser is restricted to Super Admin only.</p></div>`;
+            return;
+        }
+
+        container.innerHTML = `
+            <div class="fp-view" style="padding:24px;">
+                <div class="fp-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px;">
+                    <div>
+                        <h1 style="margin:0;display:flex;align-items:center;gap:10px;">
+                            <i class="fas fa-flask" style="color:#0ea5e9;"></i> Formula Purchaser
+                        </h1>
+                        <div style="color:var(--gray-500);font-size:13px;margin-top:4px;">
+                            Stock replenishment, multi-outlet distribution & PO generation. Super Admin only.
+                        </div>
+                    </div>
+                    <div style="display:flex;gap:8px;">
+                        <div style="position:relative;">
+                            <button class="btn secondary" onclick="app.fpToggleImportMenu()">
+                                <i class="fas fa-file-import"></i> Import &#9662;
+                            </button>
+                            <div id="fp-import-menu" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;background:#fff;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);min-width:220px;z-index:100;">
+                                <div style="padding:8px 14px;cursor:pointer;border-bottom:1px solid var(--gray-100);" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background=''" onclick="app.fpImportStock()">
+                                    <i class="fas fa-boxes" style="width:18px;color:#0ea5e9;"></i> Stock Snapshot
+                                </div>
+                                <div style="padding:8px 14px;cursor:pointer;" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background=''" onclick="app.fpImportPos()">
+                                    <i class="fas fa-cash-register" style="width:18px;color:#10b981;"></i> POS Sales History
+                                </div>
+                            </div>
+                        </div>
+                        <button class="btn secondary" onclick="app.fpRefresh()">
+                            <i class="fas fa-sync-alt"></i> Refresh
+                        </button>
+                    </div>
+                </div>
+
+                <div class="fp-tabs" style="display:flex;gap:4px;border-bottom:2px solid var(--gray-200);margin-bottom:20px;flex-wrap:wrap;">
+                    ${[
+                        ['dashboard',  'fa-chart-line',     'Dashboard'],
+                        ['pos',        'fa-file-invoice',   'Purchase Orders'],
+                        ['transfers',  'fa-exchange-alt',   'Transfers'],
+                        ['stock',      'fa-warehouse',      'Stock Inquiry'],
+                        ['vendors',    'fa-truck',          'Vendors'],
+                        ['exclusions', 'fa-ban',            'Exclusions & Deals'],
+                    ].map(([k, ic, lbl]) => `
+                        <button class="fp-tab-btn ${_fpState.currentTab === k ? 'active' : ''}" data-tab="${k}" onclick="app.fpSwitchTab('${k}')"
+                            style="padding:12px 20px;background:none;border:none;border-bottom:3px solid ${_fpState.currentTab === k ? '#0ea5e9' : 'transparent'};font-weight:600;cursor:pointer;color:${_fpState.currentTab === k ? '#0ea5e9' : 'var(--gray-600)'};">
+                            <i class="fas ${ic}"></i> ${lbl}
+                        </button>
+                    `).join('')}
+                </div>
+
+                <div id="fp-tab-content"><div style="padding:40px;text-align:center;color:var(--gray-500);"><i class="fas fa-spinner fa-spin"></i> Loading...</div></div>
+            </div>
+        `;
+
+        await fpLoadData();
+        await fpSwitchTab(_fpState.currentTab || 'dashboard');
+    };
+
+    const fpToggleImportMenu = () => {
+        const m = document.getElementById('fp-import-menu');
+        if (m) m.style.display = m.style.display === 'none' ? 'block' : 'none';
+    };
+
+    const fpRefresh = async () => {
+        UI.toast.info('Reloading data...');
+        await fpLoadData(true);
+        await fpSwitchTab(_fpState.currentTab);
+        UI.toast.success('Data refreshed');
+    };
+
+    const fpSwitchTab = async (tab) => {
+        _fpState.currentTab = tab;
+        document.querySelectorAll('.fp-tab-btn').forEach(btn => {
+            const isActive = btn.getAttribute('data-tab') === tab;
+            btn.classList.toggle('active', isActive);
+            btn.style.borderBottomColor = isActive ? '#0ea5e9' : 'transparent';
+            btn.style.color = isActive ? '#0ea5e9' : 'var(--gray-600)';
+        });
+        const c = document.getElementById('fp-tab-content');
+        if (!c) return;
+        switch (tab) {
+            case 'dashboard':  return fpRenderDashboard(c);
+            case 'pos':        return fpRenderPurchaseOrders(c);
+            case 'transfers':  return fpRenderTransfers(c);
+            case 'stock':      return fpRenderStockInquiry(c);
+            case 'vendors':    return fpRenderVendors(c);
+            case 'exclusions': return fpRenderExclusionsDeals(c);
+        }
+    };
+
+    // ---------- Sub-tab: Dashboard ----------
+    const fpRenderDashboard = (c) => {
+        const totalSkus    = _fpState.skus.length;
+        const lowStock     = fpCalcReplenishmentNeeds();
+        const pendingPos   = _fpState.purchaseOrders.filter(p => p.status === 'draft' || p.status === 'submitted').length;
+        const pendingTrans = _fpState.transferOrders.filter(t => t.status === 'pending' || t.status === 'in_transit').length;
+        const negStock     = _fpState.stockBalance.filter(sb => (parseInt(sb.physical_stock) || 0) < 0);
+
+        const card = (label, value, color, icon) => `
+            <div style="flex:1;min-width:180px;background:#fff;padding:18px;border-radius:10px;border:1px solid var(--gray-200);box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+                <div style="display:flex;align-items:center;gap:10px;color:${color};font-size:14px;font-weight:600;margin-bottom:8px;">
+                    <i class="fas ${icon}"></i> ${label}
+                </div>
+                <div style="font-size:28px;font-weight:700;color:var(--gray-800);">${value}</div>
+            </div>
+        `;
+
+        c.innerHTML = `
+            <div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap;">
+                ${card('Total SKUs',         totalSkus,      '#0ea5e9', 'fa-boxes')}
+                ${card('Low Stock',          lowStock.length,'#ef4444', 'fa-exclamation-triangle')}
+                ${card('Pending POs',        pendingPos,     '#f59e0b', 'fa-file-invoice')}
+                ${card('Pending Transfers',  pendingTrans,   '#8b5cf6', 'fa-exchange-alt')}
+            </div>
+
+            ${negStock.length ? `
+                <div style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:12px 16px;border-radius:8px;margin-bottom:16px;">
+                    <i class="fas fa-exclamation-circle"></i>
+                    <strong>${negStock.length}</strong> stock row(s) have negative quantities. Review under Stock Inquiry.
+                </div>
+            ` : ''}
+
+            <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;">
+                <button class="btn primary" onclick="app.fpRunReplenishmentCheck()">
+                    <i class="fas fa-search-plus"></i> Run Replenishment Check
+                </button>
+                <button class="btn secondary" onclick="app.fpRunTransferCheck()">
+                    <i class="fas fa-search-plus"></i> Run Transfer Check
+                </button>
+            </div>
+
+            <div style="background:#fff;border:1px solid var(--gray-200);border-radius:10px;overflow:hidden;">
+                <div style="padding:14px 18px;border-bottom:1px solid var(--gray-200);font-weight:600;font-size:15px;display:flex;justify-content:space-between;align-items:center;">
+                    <span><i class="fas fa-list" style="color:#ef4444;"></i> Low Stock SKUs (${lowStock.length})</span>
+                    ${lowStock.length ? `<button class="btn primary" style="padding:6px 14px;font-size:13px;" onclick="app.fpProposePoFromLowStock()"><i class="fas fa-plus"></i> Propose PO from list</button>` : ''}
+                </div>
+                <div style="overflow-x:auto;max-height:520px;overflow-y:auto;">
+                    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                        <thead style="background:var(--gray-50);position:sticky;top:0;">
+                            <tr>
+                                <th style="padding:10px;text-align:left;">Code</th>
+                                <th style="padding:10px;text-align:left;">Name</th>
+                                <th style="padding:10px;text-align:right;">Total</th>
+                                <th style="padding:10px;text-align:right;">Min</th>
+                                <th style="padding:10px;text-align:right;">Short</th>
+                                <th style="padding:10px;text-align:right;">Recommended</th>
+                                <th style="padding:10px;text-align:left;">Deal / Refund</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${lowStock.length ? lowStock.slice(0, 200).map(r => `
+                                <tr style="border-top:1px solid var(--gray-100);">
+                                    <td style="padding:8px 10px;font-family:monospace;font-size:12px;">${fpEsc(r.sku.product_code)}</td>
+                                    <td style="padding:8px 10px;">${fpEsc((r.sku.product_name || '').slice(0, 60))}</td>
+                                    <td style="padding:8px 10px;text-align:right;${r.totalStock < 0 ? 'color:#dc2626;font-weight:700;' : ''}">${r.totalStock}</td>
+                                    <td style="padding:8px 10px;text-align:right;">${r.minStock}</td>
+                                    <td style="padding:8px 10px;text-align:right;color:#dc2626;font-weight:600;">${r.shortage}</td>
+                                    <td style="padding:8px 10px;text-align:right;font-weight:700;color:#0ea5e9;">${r.recommendedQty}${r.freeQty ? ` <span style="color:#10b981;">+${r.freeQty} free</span>` : ''}</td>
+                                    <td style="padding:8px 10px;font-size:11px;color:var(--gray-600);">${r.deal ? `<span style="background:#fef3c7;color:#92400e;padding:2px 6px;border-radius:4px;">Buy ${r.deal.x_quantity} get ${r.deal.y_free}</span>` : ''}${r.refundRate > 0.05 ? `<span style="background:#fee2e2;color:#991b1b;padding:2px 6px;border-radius:4px;margin-left:4px;">Refund ${(r.refundRate * 100).toFixed(0)}%</span>` : ''}</td>
+                                </tr>
+                            `).join('') : `
+                                <tr><td colspan="7" style="padding:40px;text-align:center;color:var(--gray-500);">All SKUs are above minimum stock. ${_fpState.skus.length === 0 ? 'Import stock data to begin.' : ''}</td></tr>
+                            `}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    };
+
+    const fpRunReplenishmentCheck = () => {
+        const recs = fpCalcReplenishmentNeeds();
+        _fpState.lastReplenishment = recs;
+        UI.toast.success(`Found ${recs.length} SKU(s) needing replenishment`);
+        fpRenderDashboard(document.getElementById('fp-tab-content'));
+    };
+
+    const fpRunTransferCheck = () => {
+        const recs = fpCalcTransferNeeds();
+        _fpState.lastTransferRecs = recs;
+        UI.toast.success(`Found ${recs.length} transfer recommendation(s)`);
+        _fpState.currentTab = 'transfers';
+        fpSwitchTab('transfers');
+    };
+
+    const fpProposePoFromLowStock = () => {
+        const recs = fpCalcReplenishmentNeeds();
+        if (!recs.length) { UI.toast.error('No SKUs need replenishment'); return; }
+        _fpState.lastReplenishment = recs;
+        fpOpenPoBuilder(recs);
+    };
+
+    // ---------- Sub-tab: Purchase Orders ----------
+    const fpRenderPurchaseOrders = (c) => {
+        const pos = [..._fpState.purchaseOrders].sort((a, b) =>
+            (b.created_at || '').localeCompare(a.created_at || ''));
+        const statusBadge = (s) => {
+            const colors = { draft: ['#f3f4f6','#374151'], submitted: ['#dbeafe','#1e40af'],
+                             received: ['#d1fae5','#065f46'], cancelled: ['#fee2e2','#991b1b'] };
+            const [bg, fg] = colors[s] || colors.draft;
+            return `<span style="background:${bg};color:${fg};padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600;text-transform:uppercase;">${s}</span>`;
+        };
+        c.innerHTML = `
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                <h2 style="margin:0;font-size:18px;">Purchase Orders</h2>
+                <button class="btn primary" onclick="app.fpProposePoFromLowStock()">
+                    <i class="fas fa-plus"></i> New PO from Low Stock
+                </button>
+            </div>
+            <div style="background:#fff;border:1px solid var(--gray-200);border-radius:10px;overflow:hidden;">
+                <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                    <thead style="background:var(--gray-50);">
+                        <tr>
+                            <th style="padding:10px;text-align:left;">PO #</th>
+                            <th style="padding:10px;text-align:left;">Vendor</th>
+                            <th style="padding:10px;text-align:left;">Branch</th>
+                            <th style="padding:10px;text-align:left;">Date</th>
+                            <th style="padding:10px;text-align:right;">Items</th>
+                            <th style="padding:10px;text-align:center;">Status</th>
+                            <th style="padding:10px;text-align:right;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${pos.length ? pos.map(p => {
+                            const vendor = _fpState.vendors.find(v => v.id === p.vendor_id)?.name || '—';
+                            const branch = _fpState.locations.find(l => l.id === p.branch_location_id)?.name || '—';
+                            const items  = _fpState.poItems.filter(i => i.po_id === p.id).length;
+                            return `
+                                <tr style="border-top:1px solid var(--gray-100);">
+                                    <td style="padding:8px 10px;font-family:monospace;font-weight:600;">${p.po_number}</td>
+                                    <td style="padding:8px 10px;">${vendor}</td>
+                                    <td style="padding:8px 10px;">${branch}</td>
+                                    <td style="padding:8px 10px;">${p.order_date || ''}</td>
+                                    <td style="padding:8px 10px;text-align:right;">${items}</td>
+                                    <td style="padding:8px 10px;text-align:center;">${statusBadge(p.status || 'draft')}</td>
+                                    <td style="padding:8px 10px;text-align:right;white-space:nowrap;">
+                                        <button class="btn secondary" style="padding:4px 10px;font-size:12px;" onclick="app.fpExportPoExcel('${p.id}')"><i class="fas fa-file-excel"></i> Excel</button>
+                                        ${p.status !== 'received' && p.status !== 'cancelled' ? `<button class="btn primary" style="padding:4px 10px;font-size:12px;" onclick="app.fpReceivePo('${p.id}')"><i class="fas fa-check"></i> Receive</button>` : ''}
+                                    </td>
+                                </tr>
+                            `;
+                        }).join('') : `
+                            <tr><td colspan="7" style="padding:40px;text-align:center;color:var(--gray-500);">No purchase orders yet. Click "New PO from Low Stock" to create one.</td></tr>
+                        `}
+                    </tbody>
+                </table>
+            </div>
+        `;
+    };
+
+    // ---------- PO Builder Modal ----------
+    const fpOpenPoBuilder = (recs) => {
+        if (!_fpState.vendors.filter(v => v.is_active !== false).length) {
+            UI.toast.error('Add a vendor first under the Vendors tab.');
+            _fpState.currentTab = 'vendors';
+            fpSwitchTab('vendors');
+            return;
+        }
+        const vendorOpts = _fpState.vendors.filter(v => v.is_active !== false)
+            .map(v => `<option value="${fpEsc(v.id)}">${fpEsc(v.name)}</option>`).join('');
+        const branchOpts = _fpState.locations.filter(l => l.is_active && !l.is_oem)
+            .map(l => `<option value="${fpEsc(l.id)}" ${l.name === '003 Retail Pavilion 2' ? 'selected' : ''}>${fpEsc(l.name)}</option>`).join('');
+        const today = new Date().toISOString().slice(0, 10);
+        const refNum = 'PO-' + new Date().getFullYear() + '-' + String(_fpState.purchaseOrders.length + 1).padStart(4, '0');
+
+        const itemsHtml = recs.map((r, i) => `
+            <tr data-row="${i}" style="border-top:1px solid var(--gray-100);">
+                <td style="padding:6px;text-align:center;">${i + 1}</td>
+                <td style="padding:6px;font-family:monospace;font-size:12px;">${fpEsc(r.sku.product_code)}</td>
+                <td style="padding:6px;font-size:12px;">${fpEsc((r.sku.product_name || '').slice(0, 50))}</td>
+                <td style="padding:6px;font-size:12px;">${fpEsc(r.sku.product_attribute || '')}</td>
+                <td style="padding:6px;text-align:center;">
+                    <input type="number" min="0" value="${r.recommendedQty}" data-sku="${r.sku.id}"
+                        class="fp-po-qty" style="width:70px;padding:4px;border:1px solid #d1d5db;border-radius:4px;text-align:right;">
+                </td>
+                <td style="padding:6px;text-align:right;">${r.totalStock}</td>
+                <td style="padding:6px;font-size:11px;">${r.deal ? `Buy ${r.deal.x_quantity} get ${r.deal.y_free} free` : ''}</td>
+                <td style="padding:6px;text-align:center;">
+                    <button onclick="this.closest('tr').remove()" style="background:none;border:none;color:#ef4444;cursor:pointer;"><i class="fas fa-times"></i></button>
+                </td>
+            </tr>
+        `).join('');
+
+        const content = `
+            <div style="max-height:75vh;overflow-y:auto;padding:4px;">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
+                    <div>
+                        <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Vendor *</label>
+                        <select id="fp-po-vendor" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;">
+                            ${vendorOpts}
+                        </select>
+                    </div>
+                    <div>
+                        <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Branch</label>
+                        <select id="fp-po-branch" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;">
+                            ${branchOpts}
+                        </select>
+                    </div>
+                    <div>
+                        <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Ref Number</label>
+                        <input id="fp-po-ref" value="${refNum}" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;">
+                    </div>
+                    <div>
+                        <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Date</label>
+                        <input id="fp-po-date" type="date" value="${today}" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;">
+                    </div>
+                </div>
+
+                <div style="background:#fff;border:1px solid var(--gray-200);border-radius:8px;overflow:hidden;">
+                    <table style="width:100%;border-collapse:collapse;font-size:13px;" id="fp-po-items-table">
+                        <thead style="background:var(--gray-50);">
+                            <tr>
+                                <th style="padding:8px;text-align:center;width:40px;">#</th>
+                                <th style="padding:8px;text-align:left;">Code</th>
+                                <th style="padding:8px;text-align:left;">Name</th>
+                                <th style="padding:8px;text-align:left;">Attr</th>
+                                <th style="padding:8px;text-align:center;">Qty</th>
+                                <th style="padding:8px;text-align:right;">Stock</th>
+                                <th style="padding:8px;text-align:left;">Remark</th>
+                                <th style="padding:8px;width:40px;"></th>
+                            </tr>
+                        </thead>
+                        <tbody>${itemsHtml}</tbody>
+                    </table>
+                </div>
+                <div style="margin-top:8px;font-size:12px;color:var(--gray-500);">
+                    ${recs.length} item(s). Items per PO sheet: 29. Multiple sheets will be auto-generated if needed.
+                </div>
+            </div>
+        `;
+
+        UI.showModal('Create Purchase Order', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save Draft & Download Excel', type: 'primary', action: '(async () => { await app.fpSavePoAndExport(); })()' },
+        ]);
+    };
+
+    const fpSavePoAndExport = async () => {
+        const vendorId = document.getElementById('fp-po-vendor').value;
+        const branchId = document.getElementById('fp-po-branch').value;
+        const refNum   = document.getElementById('fp-po-ref').value.trim();
+        const date     = document.getElementById('fp-po-date').value;
+
+        const rows = Array.from(document.querySelectorAll('#fp-po-items-table tbody tr'));
+        const items = rows.map(tr => {
+            const skuId = tr.querySelector('.fp-po-qty')?.dataset.sku;
+            const qty   = parseInt(tr.querySelector('.fp-po-qty')?.value) || 0;
+            return { sku_id: skuId, quantity_ordered: qty };
+        }).filter(i => i.sku_id && i.quantity_ordered > 0);
+
+        if (!items.length) { UI.toast.error('No items to order'); return; }
+
+        const po = await fpSave('fp_purchase_orders', {
+            po_number: refNum,
+            vendor_id: vendorId,
+            branch_location_id: branchId,
+            order_date: date,
+            status: 'draft',
+            created_by: _currentUser?.email || 'system',
+            created_at: new Date().toISOString(),
+        });
+        _fpState.purchaseOrders.push(po);
+
+        for (const it of items) {
+            const sku = fpGetSkuById(it.sku_id);
+            const row = await fpSave('fp_po_items', {
+                po_id: po.id, sku_id: it.sku_id,
+                quantity_ordered: it.quantity_ordered,
+                unit_cost: sku?.unit_cost || null,
+            });
+            _fpState.poItems.push(row);
+        }
+
+        UI.hideModal();
+        UI.toast.success('PO saved. Generating Excel...');
+        await fpExportPoExcel(po.id);
+    };
+
+    const fpReceivePo = async (poId) => {
+        if (!confirm('Mark PO as received and add stock to central hub?')) return;
+        const hub = _fpState.locations.find(l => l.type === 'central_hub' && l.is_active);
+        if (!hub) { UI.toast.error('No central hub configured'); return; }
+        const items = _fpState.poItems.filter(i => i.po_id === poId);
+        for (const it of items) {
+            const existing = _fpState.stockBalance.find(s => s.sku_id === it.sku_id && s.location_id === hub.id);
+            const totalQty = (it.quantity_ordered || 0) + (it.free_quantity || 0);
+            if (existing) {
+                existing.physical_stock = (parseInt(existing.physical_stock) || 0) + totalQty;
+                await fpUpdate('fp_stock_balance', existing.id, { physical_stock: existing.physical_stock });
+            } else {
+                const newRow = await fpSave('fp_stock_balance', {
+                    location_id: hub.id, sku_id: it.sku_id, physical_stock: totalQty,
+                });
+                _fpState.stockBalance.push(newRow);
+            }
+            it.quantity_received = it.quantity_ordered;
+            await fpUpdate('fp_po_items', it.id, { quantity_received: it.quantity_received });
+        }
+        const po = _fpState.purchaseOrders.find(p => p.id === poId);
+        if (po) { po.status = 'received'; await fpUpdate('fp_purchase_orders', poId, { status: 'received' }); }
+        UI.toast.success('PO received and stock updated');
+        fpRenderPurchaseOrders(document.getElementById('fp-tab-content'));
+    };
+
+    // ---------- PO Excel Export (template fill via ExcelJS) ----------
+    const fpExportPoExcel = async (poId) => {
+        if (typeof ExcelJS === 'undefined') {
+            UI.toast.error('ExcelJS library not loaded');
+            return;
+        }
+        const po = _fpState.purchaseOrders.find(p => p.id === poId);
+        if (!po) { UI.toast.error('PO not found'); return; }
+        const vendor = _fpState.vendors.find(v => v.id === po.vendor_id);
+        const branch = _fpState.locations.find(l => l.id === po.branch_location_id);
+        const items  = _fpState.poItems.filter(i => i.po_id === poId);
+
+        try {
+            const resp = await fetch('assets/po-template.xlsx');
+            if (!resp.ok) throw new Error('Template not found');
+            const buf = await resp.arrayBuffer();
+
+            const ROWS_PER_SHEET = 29;
+            const chunks = [];
+            for (let i = 0; i < items.length; i += ROWS_PER_SHEET) chunks.push(items.slice(i, i + ROWS_PER_SHEET));
+            if (!chunks.length) chunks.push([]);
+
+            const fillSheet = (ws, chunk, pageIdx, totalPages) => {
+                ws.getCell('A8').value  = vendor?.name || '';
+                ws.getCell('A9').value  = vendor?.address_line1 || '';
+                ws.getCell('A10').value = vendor?.address_line2 || '';
+                ws.getCell('A11').value = vendor?.address_line3 || '';
+                ws.getCell('A12').value = 'T:' + (vendor?.phone || '');
+                ws.getCell('A13').value = 'F:' + (vendor?.fax   || '');
+                ws.getCell('A14').value = 'E:' + (vendor?.email || '');
+                ws.getCell('G9').value  = po.po_number + (totalPages > 1 ? ` (${pageIdx + 1}/${totalPages})` : '');
+                ws.getCell('G10').value = po.order_date || '';
+                ws.getCell('G12').value = branch?.name || '';
+
+                chunk.forEach((it, idx) => {
+                    const sku = fpGetSkuById(it.sku_id);
+                    const r = 17 + idx;
+                    ws.getCell('A' + r).value = pageIdx * ROWS_PER_SHEET + idx + 1;
+                    ws.getCell('B' + r).value = sku?.product_code || '';
+                    ws.getCell('C' + r).value = sku?.product_name || '';
+                    ws.getCell('E' + r).value = sku?.product_attribute || '';
+                    ws.getCell('F' + r).value = it.quantity_ordered;
+                    ws.getCell('G' + r).value = fpGetTotalStock(it.sku_id);
+                    ws.getCell('H' + r).value = it.remark || '';
+                });
+            };
+
+            // Build the first workbook from the template; for pages 2+, load the
+            // template fresh and merge its (fully-styled) sheet into the workbook.
+            // ExcelJS lacks a deep sheet-clone API, so this is the cleanest way to
+            // keep every page identical to the master form (borders, merges, fills).
+            const wb = new ExcelJS.Workbook();
+            await wb.xlsx.load(buf);
+            const baseName = wb.worksheets[0].name;
+            fillSheet(wb.worksheets[0], chunks[0], 0, chunks.length);
+            wb.worksheets[0].name = chunks.length > 1 ? `${baseName} 1` : baseName;
+
+            for (let i = 1; i < chunks.length; i++) {
+                const subWb = new ExcelJS.Workbook();
+                await subWb.xlsx.load(buf);
+                const subWs = subWb.worksheets[0];
+                fillSheet(subWs, chunks[i], i, chunks.length);
+                // Serialize the secondary sheet's model and inject under a new name
+                const model = subWs.model;
+                model.name = `${baseName} ${i + 1}`;
+                wb.addWorksheet(model.name).model = model;
+            }
+
+            const out = await wb.xlsx.writeBuffer();
+            const blob = new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+            const url  = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = `PO-${po.po_number}-${po.order_date || 'draft'}.xlsx`;
+            document.body.appendChild(a); a.click();
+            setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+            UI.toast.success('PO Excel downloaded');
+        } catch (e) {
+            console.error('PO export failed', e);
+            UI.toast.error('PO export failed: ' + e.message);
+        }
+    };
+
+    // ---------- Sub-tab: Transfers ----------
+    const fpRenderTransfers = (c) => {
+        const recs = _fpState.lastTransferRecs.length ? _fpState.lastTransferRecs : fpCalcTransferNeeds();
+        _fpState.lastTransferRecs = recs;
+        const history = [..._fpState.transferOrders].sort((a, b) =>
+            (b.created_at || '').localeCompare(a.created_at || ''));
+        const statusBadge = (s) => {
+            const colors = { pending: ['#fef3c7','#92400e'], in_transit: ['#dbeafe','#1e40af'],
+                             completed: ['#d1fae5','#065f46'], cancelled: ['#fee2e2','#991b1b'] };
+            const [bg, fg] = colors[s] || colors.pending;
+            return `<span style="background:${bg};color:${fg};padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600;text-transform:uppercase;">${s.replace('_', ' ')}</span>`;
+        };
+        c.innerHTML = `
+            <h2 style="margin:0 0 14px;font-size:18px;">Recommended Transfers (${recs.length})</h2>
+            <div style="background:#fff;border:1px solid var(--gray-200);border-radius:10px;overflow:hidden;margin-bottom:24px;">
+                <div style="overflow-x:auto;max-height:400px;overflow-y:auto;">
+                    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                        <thead style="background:var(--gray-50);position:sticky;top:0;">
+                            <tr>
+                                <th style="padding:10px;text-align:left;">Outlet</th>
+                                <th style="padding:10px;text-align:left;">SKU</th>
+                                <th style="padding:10px;text-align:right;">Outlet Stock</th>
+                                <th style="padding:10px;text-align:right;">Outlet Min</th>
+                                <th style="padding:10px;text-align:right;">Hub Stock</th>
+                                <th style="padding:10px;text-align:right;">Transfer Qty</th>
+                                <th style="padding:10px;text-align:right;">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${recs.length ? recs.slice(0, 200).map((r, i) => `
+                                <tr style="border-top:1px solid var(--gray-100);">
+                                    <td style="padding:8px 10px;">${fpEsc(r.outlet.name)}</td>
+                                    <td style="padding:8px 10px;font-family:monospace;font-size:12px;">${fpEsc(r.sku.product_code)} <span style="color:var(--gray-500);font-family:initial;">— ${fpEsc((r.sku.product_name || '').slice(0, 30))}</span></td>
+                                    <td style="padding:8px 10px;text-align:right;">${r.currentStock}</td>
+                                    <td style="padding:8px 10px;text-align:right;">${r.outletMin.toFixed(0)}</td>
+                                    <td style="padding:8px 10px;text-align:right;">${r.hubStock}</td>
+                                    <td style="padding:8px 10px;text-align:right;font-weight:700;color:#0ea5e9;">${r.transferQty}</td>
+                                    <td style="padding:8px 10px;text-align:right;">
+                                        <button class="btn primary" style="padding:4px 10px;font-size:12px;" onclick="app.fpExecuteTransfer(${i})"><i class="fas fa-paper-plane"></i> Execute</button>
+                                    </td>
+                                </tr>
+                            `).join('') : `
+                                <tr><td colspan="7" style="padding:40px;text-align:center;color:var(--gray-500);">No transfers recommended.</td></tr>
+                            `}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <h2 style="margin:0 0 14px;font-size:18px;">Transfer History</h2>
+            <div style="background:#fff;border:1px solid var(--gray-200);border-radius:10px;overflow:hidden;">
+                <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                    <thead style="background:var(--gray-50);">
+                        <tr>
+                            <th style="padding:10px;text-align:left;">Date</th>
+                            <th style="padding:10px;text-align:left;">From</th>
+                            <th style="padding:10px;text-align:left;">To</th>
+                            <th style="padding:10px;text-align:right;">Items</th>
+                            <th style="padding:10px;text-align:center;">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${history.length ? history.map(t => {
+                            const items = _fpState.transferItems.filter(i => i.transfer_id === t.id).length;
+                            return `
+                                <tr style="border-top:1px solid var(--gray-100);">
+                                    <td style="padding:8px 10px;">${fpEsc(t.transfer_date || '')}</td>
+                                    <td style="padding:8px 10px;">${fpEsc(fpGetLocationById(t.from_location_id)?.name || '—')}</td>
+                                    <td style="padding:8px 10px;">${fpEsc(fpGetLocationById(t.to_location_id)?.name || '—')}</td>
+                                    <td style="padding:8px 10px;text-align:right;">${items}</td>
+                                    <td style="padding:8px 10px;text-align:center;">${statusBadge(t.status || 'pending')}</td>
+                                </tr>
+                            `;
+                        }).join('') : `<tr><td colspan="5" style="padding:30px;text-align:center;color:var(--gray-500);">No transfers yet.</td></tr>`}
+                    </tbody>
+                </table>
+            </div>
+        `;
+    };
+
+    const fpExecuteTransfer = async (idx) => {
+        const rec = _fpState.lastTransferRecs[idx];
+        if (!rec) return;
+        if (!confirm(`Transfer ${rec.transferQty} × ${rec.sku.product_code} from ${rec.hub.name} to ${rec.outlet.name}?`)) return;
+
+        const hubBal    = _fpState.stockBalance.find(s => s.sku_id === rec.sku.id && s.location_id === rec.hub.id);
+        const outletBal = _fpState.stockBalance.find(s => s.sku_id === rec.sku.id && s.location_id === rec.outlet.id);
+
+        if (hubBal) {
+            hubBal.physical_stock = (parseInt(hubBal.physical_stock) || 0) - rec.transferQty;
+            await fpUpdate('fp_stock_balance', hubBal.id, { physical_stock: hubBal.physical_stock });
+        }
+        if (outletBal) {
+            outletBal.physical_stock = (parseInt(outletBal.physical_stock) || 0) + rec.transferQty;
+            await fpUpdate('fp_stock_balance', outletBal.id, { physical_stock: outletBal.physical_stock });
+        } else {
+            const nb = await fpSave('fp_stock_balance', {
+                location_id: rec.outlet.id, sku_id: rec.sku.id, physical_stock: rec.transferQty
+            });
+            _fpState.stockBalance.push(nb);
+        }
+
+        const today = new Date().toISOString().slice(0, 10);
+        const order = await fpSave('fp_transfer_orders', {
+            from_location_id: rec.hub.id, to_location_id: rec.outlet.id,
+            transfer_date: today, status: 'completed',
+            created_at: new Date().toISOString(),
+        });
+        _fpState.transferOrders.push(order);
+        const item = await fpSave('fp_transfer_items', {
+            transfer_id: order.id, sku_id: rec.sku.id, quantity: rec.transferQty
+        });
+        _fpState.transferItems.push(item);
+
+        const setting = _fpState.outletSettings.find(s => s.outlet_id === rec.outlet.id && s.sku_id === rec.sku.id);
+        if (setting) {
+            setting.last_transfer_date = today;
+            await fpUpdate('fp_outlet_sku_settings', setting.id, { last_transfer_date: today });
+        } else {
+            const ns = await fpSave('fp_outlet_sku_settings', {
+                outlet_id: rec.outlet.id, sku_id: rec.sku.id, last_transfer_date: today
+            });
+            _fpState.outletSettings.push(ns);
+        }
+
+        _fpState.lastTransferRecs.splice(idx, 1);
+        UI.toast.success('Transfer completed');
+        fpRenderTransfers(document.getElementById('fp-tab-content'));
+    };
+
+    // ---------- Sub-tab: Stock Inquiry ----------
+    let _fpStockSearch = '';
+    const fpRenderStockInquiry = (c) => {
+        const q = (_fpStockSearch || '').toLowerCase();
+        const filtered = _fpState.skus.filter(s => {
+            if (!q) return true;
+            return (s.product_code || '').toLowerCase().includes(q) ||
+                   (s.product_name || '').toLowerCase().includes(q);
+        }).slice(0, 300);
+
+        const locs = fpActiveLocations();
+
+        c.innerHTML = `
+            <div style="display:flex;gap:8px;margin-bottom:14px;align-items:center;">
+                <input id="fp-stock-search" placeholder="Search by code or name..." value="${fpEsc(_fpStockSearch)}"
+                    oninput="app.fpStockSearchUpdate(this.value)"
+                    style="flex:1;padding:10px;border:1px solid #d1d5db;border-radius:6px;">
+                <span style="color:var(--gray-500);font-size:13px;">${filtered.length} of ${_fpState.skus.length}</span>
+            </div>
+
+            <div style="background:#fff;border:1px solid var(--gray-200);border-radius:10px;overflow:hidden;">
+                <div style="overflow-x:auto;max-height:600px;overflow-y:auto;">
+                    <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                        <thead style="background:var(--gray-50);position:sticky;top:0;">
+                            <tr>
+                                <th style="padding:10px;text-align:left;">Code</th>
+                                <th style="padding:10px;text-align:left;">Name</th>
+                                ${locs.map(l => `<th style="padding:10px;text-align:right;">${fpEsc(l.name.replace(/^00\d /, '').slice(0, 18))}</th>`).join('')}
+                                <th style="padding:10px;text-align:right;">Total</th>
+                                <th style="padding:10px;text-align:right;">Auto Min</th>
+                                <th style="padding:10px;text-align:right;">Actual Min</th>
+                                <th style="padding:10px;text-align:right;">Cost</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${filtered.length ? filtered.map(s => {
+                                const total = fpGetTotalStock(s.id);
+                                return `
+                                    <tr style="border-top:1px solid var(--gray-100);">
+                                        <td style="padding:6px 10px;font-family:monospace;">${fpEsc(s.product_code)}</td>
+                                        <td style="padding:6px 10px;">${fpEsc((s.product_name || '').slice(0, 50))}</td>
+                                        ${locs.map(l => {
+                                            const v = fpGetStockAtLocation(s.id, l.id);
+                                            return `<td style="padding:6px 10px;text-align:right;${v < 0 ? 'color:#dc2626;font-weight:700;' : ''}">${v}</td>`;
+                                        }).join('')}
+                                        <td style="padding:6px 10px;text-align:right;font-weight:600;${total < 0 ? 'color:#dc2626;' : ''}">${total}</td>
+                                        <td style="padding:6px 10px;text-align:right;color:var(--gray-500);">${s.auto_min_stock || 0}</td>
+                                        <td style="padding:6px 10px;text-align:right;">
+                                            <input type="number" min="0" value="${s.actual_min_stock ?? ''}" placeholder="auto"
+                                                onchange="app.fpSaveActualMin('${s.id}', this.value)"
+                                                style="width:60px;padding:3px;border:1px solid #d1d5db;border-radius:4px;text-align:right;">
+                                        </td>
+                                        <td style="padding:6px 10px;text-align:right;">
+                                            <input type="number" min="0" step="0.01" value="${s.unit_cost ?? ''}" placeholder="—"
+                                                onchange="app.fpSaveUnitCost('${s.id}', this.value)"
+                                                style="width:70px;padding:3px;border:1px solid #d1d5db;border-radius:4px;text-align:right;">
+                                        </td>
+                                    </tr>
+                                `;
+                            }).join('') : `<tr><td colspan="${locs.length + 6}" style="padding:40px;text-align:center;color:var(--gray-500);">No SKUs found. Import stock to begin.</td></tr>`}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    };
+
+    const fpStockSearchUpdate = (v) => {
+        _fpStockSearch = v;
+        // re-render but preserve focus
+        const c = document.getElementById('fp-tab-content');
+        const scroll = c.querySelector('div[style*="overflow-y:auto"]')?.scrollTop || 0;
+        fpRenderStockInquiry(c);
+        const inp = document.getElementById('fp-stock-search');
+        if (inp) { inp.focus(); inp.setSelectionRange(v.length, v.length); }
+        const sc = c.querySelector('div[style*="overflow-y:auto"]');
+        if (sc) sc.scrollTop = scroll;
+    };
+
+    const fpSaveActualMin = async (skuId, value) => {
+        const sku = fpGetSkuById(skuId);
+        if (!sku) return;
+        const v = value === '' ? null : parseInt(value);
+        sku.actual_min_stock = v;
+        await fpUpdate('fp_sku_master', skuId, { actual_min_stock: v });
+        UI.toast.success('Min stock saved');
+    };
+
+    const fpSaveUnitCost = async (skuId, value) => {
+        const sku = fpGetSkuById(skuId);
+        if (!sku) return;
+        const v = value === '' ? null : parseFloat(value);
+        sku.unit_cost = v;
+        await fpUpdate('fp_sku_master', skuId, { unit_cost: v });
+        UI.toast.success('Cost saved');
+    };
+
+    // ---------- Sub-tab: Vendors ----------
+    const fpRenderVendors = (c) => {
+        const vendors = _fpState.vendors;
+        c.innerHTML = `
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+                <h2 style="margin:0;font-size:18px;">Vendors</h2>
+                <button class="btn primary" onclick="app.fpOpenVendorModal()"><i class="fas fa-plus"></i> Add Vendor</button>
+            </div>
+            <div style="background:#fff;border:1px solid var(--gray-200);border-radius:10px;overflow:hidden;">
+                <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                    <thead style="background:var(--gray-50);">
+                        <tr>
+                            <th style="padding:10px;text-align:left;">Name</th>
+                            <th style="padding:10px;text-align:left;">Address</th>
+                            <th style="padding:10px;text-align:left;">Phone</th>
+                            <th style="padding:10px;text-align:left;">Email</th>
+                            <th style="padding:10px;text-align:center;">Active</th>
+                            <th style="padding:10px;text-align:right;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${vendors.length ? vendors.map(v => `
+                            <tr style="border-top:1px solid var(--gray-100);">
+                                <td style="padding:8px 10px;font-weight:600;">${fpEsc(v.name)}</td>
+                                <td style="padding:8px 10px;font-size:12px;">${fpEsc([v.address_line1, v.address_line2, v.address_line3].filter(Boolean).join(', '))}</td>
+                                <td style="padding:8px 10px;">${fpEsc(v.phone || '')}</td>
+                                <td style="padding:8px 10px;font-size:12px;">${fpEsc(v.email || '')}</td>
+                                <td style="padding:8px 10px;text-align:center;">${v.is_active === false ? '—' : '<i class="fas fa-check" style="color:#10b981;"></i>'}</td>
+                                <td style="padding:8px 10px;text-align:right;white-space:nowrap;">
+                                    <button class="btn secondary" style="padding:4px 10px;font-size:12px;" onclick="app.fpOpenVendorModal('${v.id}')"><i class="fas fa-edit"></i></button>
+                                    <button class="btn secondary" style="padding:4px 10px;font-size:12px;color:#dc2626;" onclick="app.fpDeleteVendor('${v.id}')"><i class="fas fa-trash"></i></button>
+                                </td>
+                            </tr>
+                        `).join('') : `<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--gray-500);">No vendors. Add your first supplier.</td></tr>`}
+                    </tbody>
+                </table>
+            </div>
+        `;
+    };
+
+    const fpOpenVendorModal = (vendorId) => {
+        const v = vendorId ? _fpState.vendors.find(x => x.id === vendorId) : {};
+        const fld = (id, label, val = '', type = 'text') => `
+            <div style="margin-bottom:10px;">
+                <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">${label}</label>
+                <input id="fp-vd-${id}" type="${type}" value="${(val || '').toString().replace(/"/g, '&quot;')}" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;">
+            </div>
+        `;
+        const content = `
+            <div style="max-height:70vh;overflow-y:auto;">
+                ${fld('name', 'Vendor Name *', v.name)}
+                ${fld('addr1', 'Address Line 1', v.address_line1)}
+                ${fld('addr2', 'Address Line 2', v.address_line2)}
+                ${fld('addr3', 'Address Line 3', v.address_line3)}
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                    ${fld('phone', 'Phone (T:)', v.phone)}
+                    ${fld('fax', 'Fax (F:)', v.fax)}
+                </div>
+                ${fld('email', 'Email (E:)', v.email)}
+            </div>
+        `;
+        UI.showModal(vendorId ? 'Edit Vendor' : 'Add Vendor', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save', type: 'primary', action: `(async () => { await app.fpSaveVendor(${vendorId ? `'${vendorId}'` : 'null'}); })()` },
+        ]);
+    };
+
+    const fpSaveVendor = async (vendorId) => {
+        const get = (id) => document.getElementById('fp-vd-' + id)?.value.trim() || '';
+        const name = get('name');
+        if (!name) { UI.toast.error('Name required'); return; }
+        const data = {
+            name, address_line1: get('addr1'), address_line2: get('addr2'), address_line3: get('addr3'),
+            phone: get('phone'), fax: get('fax'), email: get('email'), is_active: true,
+        };
+        if (vendorId) {
+            const v = _fpState.vendors.find(x => x.id === vendorId);
+            Object.assign(v, data);
+            await fpUpdate('fp_vendors', vendorId, data);
+        } else {
+            const v = await fpSave('fp_vendors', { ...data, created_at: new Date().toISOString() });
+            _fpState.vendors.push(v);
+        }
+        UI.hideModal();
+        UI.toast.success('Vendor saved');
+        fpRenderVendors(document.getElementById('fp-tab-content'));
+    };
+
+    const fpDeleteVendor = async (vendorId) => {
+        if (!confirm('Deactivate this vendor?')) return;
+        const v = _fpState.vendors.find(x => x.id === vendorId);
+        if (v) {
+            v.is_active = false;
+            await fpUpdate('fp_vendors', vendorId, { is_active: false });
+            fpRenderVendors(document.getElementById('fp-tab-content'));
+            UI.toast.success('Vendor deactivated');
+        }
+    };
+
+    // ---------- Sub-tab: Exclusions & Deals ----------
+    const fpRenderExclusionsDeals = (c) => {
+        const exs   = _fpState.exclusions;
+        const deals = _fpState.orderReqs;
+        c.innerHTML = `
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+                <h2 style="margin:0;font-size:18px;">Product Exclusions</h2>
+                <div style="display:flex;gap:8px;">
+                    <button class="btn secondary" onclick="app.fpExclusionBulkUpload()"><i class="fas fa-upload"></i> Bulk CSV</button>
+                    <button class="btn primary" onclick="app.fpOpenExclusionModal()"><i class="fas fa-plus"></i> Add Exclusion</button>
+                </div>
+            </div>
+            <div style="background:#fff;border:1px solid var(--gray-200);border-radius:10px;overflow:hidden;margin-bottom:24px;">
+                <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                    <thead style="background:var(--gray-50);">
+                        <tr>
+                            <th style="padding:10px;text-align:left;">Code/Pattern</th>
+                            <th style="padding:10px;text-align:left;">Match</th>
+                            <th style="padding:10px;text-align:left;">Reason</th>
+                            <th style="padding:10px;text-align:center;">Active</th>
+                            <th style="padding:10px;text-align:right;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${exs.length ? exs.map(e => `
+                            <tr style="border-top:1px solid var(--gray-100);">
+                                <td style="padding:8px 10px;font-family:monospace;">${fpEsc(e.product_code)}</td>
+                                <td style="padding:8px 10px;font-size:11px;background:none;"><span style="background:#e0f2fe;color:#075985;padding:2px 6px;border-radius:4px;">${fpEsc(e.match_type || 'exact')}</span></td>
+                                <td style="padding:8px 10px;font-size:12px;">${fpEsc(e.reason || '')}</td>
+                                <td style="padding:8px 10px;text-align:center;">
+                                    <input type="checkbox" ${e.is_active !== false ? 'checked' : ''} onchange="app.fpToggleExclusion('${e.id}', this.checked)">
+                                </td>
+                                <td style="padding:8px 10px;text-align:right;">
+                                    <button class="btn secondary" style="padding:4px 10px;font-size:12px;color:#dc2626;" onclick="app.fpDeleteExclusion('${e.id}')"><i class="fas fa-trash"></i></button>
+                                </td>
+                            </tr>
+                        `).join('') : `<tr><td colspan="5" style="padding:30px;text-align:center;color:var(--gray-500);">No exclusions.</td></tr>`}
+                    </tbody>
+                </table>
+            </div>
+
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+                <h2 style="margin:0;font-size:18px;">Order Requirements (Deals)</h2>
+                <button class="btn primary" onclick="app.fpOpenDealModal()"><i class="fas fa-plus"></i> Add Deal</button>
+            </div>
+            <div style="background:#fff;border:1px solid var(--gray-200);border-radius:10px;overflow:hidden;">
+                <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                    <thead style="background:var(--gray-50);">
+                        <tr>
+                            <th style="padding:10px;text-align:left;">SKU</th>
+                            <th style="padding:10px;text-align:left;">Type</th>
+                            <th style="padding:10px;text-align:right;">Buy</th>
+                            <th style="padding:10px;text-align:right;">Free</th>
+                            <th style="padding:10px;text-align:left;">Effective</th>
+                            <th style="padding:10px;text-align:right;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${deals.length ? deals.map(d => {
+                            const sku = fpGetSkuById(d.sku_id);
+                            return `
+                                <tr style="border-top:1px solid var(--gray-100);">
+                                    <td style="padding:8px 10px;font-family:monospace;font-size:12px;">${fpEsc(sku?.product_code || d.sku_id)}</td>
+                                    <td style="padding:8px 10px;font-size:11px;"><span style="background:#fef3c7;color:#92400e;padding:2px 6px;border-radius:4px;">${fpEsc(d.requirement_type)}</span></td>
+                                    <td style="padding:8px 10px;text-align:right;">${d.x_quantity || d.min_order_qty || ''}</td>
+                                    <td style="padding:8px 10px;text-align:right;color:#10b981;font-weight:600;">${d.y_free || ''}</td>
+                                    <td style="padding:8px 10px;font-size:11px;">${d.effective_from || ''} → ${d.effective_to || '∞'}</td>
+                                    <td style="padding:8px 10px;text-align:right;">
+                                        <button class="btn secondary" style="padding:4px 10px;font-size:12px;color:#dc2626;" onclick="app.fpDeleteDeal('${d.id}')"><i class="fas fa-trash"></i></button>
+                                    </td>
+                                </tr>
+                            `;
+                        }).join('') : `<tr><td colspan="6" style="padding:30px;text-align:center;color:var(--gray-500);">No deals.</td></tr>`}
+                    </tbody>
+                </table>
+            </div>
+        `;
+    };
+
+    const fpOpenExclusionModal = () => {
+        UI.showModal('Add Exclusion', `
+            <div>
+                <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Product Code or Pattern *</label>
+                <input id="fp-ex-code" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-bottom:10px;">
+                <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Match Type</label>
+                <select id="fp-ex-match" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-bottom:10px;">
+                    <option value="exact">Exact match</option>
+                    <option value="starts_with">Starts with</option>
+                    <option value="contains">Contains</option>
+                    <option value="regex">Regex</option>
+                </select>
+                <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Reason</label>
+                <input id="fp-ex-reason" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;">
+            </div>
+        `, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save', type: 'primary', action: '(async () => { await app.fpSaveExclusion(); })()' },
+        ]);
+    };
+
+    const fpSaveExclusion = async () => {
+        const code   = document.getElementById('fp-ex-code').value.trim();
+        const match  = document.getElementById('fp-ex-match').value;
+        const reason = document.getElementById('fp-ex-reason').value.trim();
+        if (!code) { UI.toast.error('Code required'); return; }
+        const e = await fpSave('fp_product_exclusions', {
+            product_code: code, match_type: match, reason, is_active: true,
+            created_by: _currentUser?.email || 'system', created_at: new Date().toISOString(),
+        });
+        _fpState.exclusions.push(e);
+        UI.hideModal();
+        UI.toast.success('Exclusion added');
+        fpRenderExclusionsDeals(document.getElementById('fp-tab-content'));
+    };
+
+    const fpToggleExclusion = async (id, active) => {
+        const e = _fpState.exclusions.find(x => x.id === id);
+        if (e) { e.is_active = active; await fpUpdate('fp_product_exclusions', id, { is_active: active }); }
+    };
+
+    const fpDeleteExclusion = async (id) => {
+        if (!confirm('Delete this exclusion?')) return;
+        await fpDelete('fp_product_exclusions', id);
+        _fpState.exclusions = _fpState.exclusions.filter(x => x.id !== id);
+        fpRenderExclusionsDeals(document.getElementById('fp-tab-content'));
+    };
+
+    const fpExclusionBulkUpload = () => {
+        const inp = document.createElement('input');
+        inp.type = 'file'; inp.accept = '.csv';
+        inp.onchange = async (e) => {
+            const file = e.target.files[0]; if (!file) return;
+            const text = await file.text();
+            if (typeof Papa === 'undefined') { UI.toast.error('CSV parser missing'); return; }
+            const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
+            let added = 0;
+            for (const row of parsed.data) {
+                const code = (row.product_code || row.Code || row.code || '').trim();
+                if (!code) continue;
+                const ex = await fpSave('fp_product_exclusions', {
+                    product_code: code,
+                    match_type: (row.match_type || 'exact').trim(),
+                    reason: (row.reason || '').trim(),
+                    is_active: true,
+                    created_by: _currentUser?.email || 'system',
+                    created_at: new Date().toISOString(),
+                });
+                _fpState.exclusions.push(ex);
+                added++;
+            }
+            UI.toast.success(`Imported ${added} exclusion(s)`);
+            fpRenderExclusionsDeals(document.getElementById('fp-tab-content'));
+        };
+        inp.click();
+    };
+
+    const fpOpenDealModal = () => {
+        const skuOpts = _fpState.skus.map(s => `<option value="${fpEsc(s.id)}">${fpEsc(s.product_code)} — ${fpEsc((s.product_name || '').slice(0, 40))}</option>`).join('');
+        UI.showModal('Add Order Requirement', `
+            <div>
+                <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">SKU *</label>
+                <select id="fp-dl-sku" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-bottom:10px;">${skuOpts}</select>
+                <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Type</label>
+                <select id="fp-dl-type" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-bottom:10px;">
+                    <option value="BUY_X_GET_Y_FREE">BUY X GET Y FREE</option>
+                    <option value="MIN_ORDER_QTY">MIN ORDER QTY</option>
+                </select>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                    <div><label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">X (or Min Qty)</label>
+                    <input id="fp-dl-x" type="number" min="1" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;"></div>
+                    <div><label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Y Free</label>
+                    <input id="fp-dl-y" type="number" min="0" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;"></div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px;">
+                    <div><label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">From</label>
+                    <input id="fp-dl-from" type="date" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;"></div>
+                    <div><label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">To</label>
+                    <input id="fp-dl-to" type="date" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;"></div>
+                </div>
+            </div>
+        `, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save', type: 'primary', action: '(async () => { await app.fpSaveDeal(); })()' },
+        ]);
+    };
+
+    const fpSaveDeal = async () => {
+        const skuId = document.getElementById('fp-dl-sku').value;
+        const type  = document.getElementById('fp-dl-type').value;
+        const x = parseInt(document.getElementById('fp-dl-x').value) || 0;
+        const y = parseInt(document.getElementById('fp-dl-y').value) || 0;
+        if (!skuId || !x) { UI.toast.error('SKU and X/min qty required'); return; }
+        const data = {
+            sku_id: skuId, requirement_type: type,
+            x_quantity: type === 'BUY_X_GET_Y_FREE' ? x : null,
+            y_free: type === 'BUY_X_GET_Y_FREE' ? y : null,
+            min_order_qty: type === 'MIN_ORDER_QTY' ? x : null,
+            effective_from: document.getElementById('fp-dl-from').value || null,
+            effective_to: document.getElementById('fp-dl-to').value || null,
+            is_active: true, created_at: new Date().toISOString(),
+        };
+        const d = await fpSave('fp_order_requirements', data);
+        _fpState.orderReqs.push(d);
+        UI.hideModal();
+        UI.toast.success('Deal saved');
+        fpRenderExclusionsDeals(document.getElementById('fp-tab-content'));
+    };
+
+    const fpDeleteDeal = async (id) => {
+        if (!confirm('Delete this deal?')) return;
+        await fpDelete('fp_order_requirements', id);
+        _fpState.orderReqs = _fpState.orderReqs.filter(x => x.id !== id);
+        fpRenderExclusionsDeals(document.getElementById('fp-tab-content'));
+    };
+
+    // ---------- Stock Excel Import ----------
+    const fpImportStock = () => {
+        document.getElementById('fp-import-menu').style.display = 'none';
+        const inp = document.createElement('input');
+        inp.type = 'file'; inp.accept = '.xlsx,.xls';
+        inp.onchange = async (e) => {
+            const file = e.target.files[0]; if (!file) return;
+            if (typeof XLSX === 'undefined') { UI.toast.error('XLSX library missing'); return; }
+            UI.toast.info('Reading file...');
+            const buf = await file.arrayBuffer();
+            const wb = XLSX.read(buf, { type: 'array' });
+            const ws = wb.Sheets[wb.SheetNames[0]];
+            const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+
+            const ACTIVE = new Set(['Puchong warehouse','001 Retail Puchong','002 Retail Bay Avenue','003 Retail Pavilion 2','Factory OEM']);
+            const NAME_RE = new RegExp('\\b(' + FP_NAME_EXCLUDES.join('|') + ')\\b', 'i');
+            let kept = 0, drops = { inactive_loc: 0, zero_zero: 0, excluded_code: 0, bad_name: 0, custom_excl: 0 };
+            const sample = { kept: [], drops: [] };
+
+            for (const row of rows) {
+                const loc   = (row.Location || row.location || '').trim();
+                const code  = (row['Product Code'] || row.code || '').toString().trim();
+                const name  = (row['Product Name'] || '').toString();
+                const phys  = parseInt(row['Physical Stock']) || 0;
+                let pos     = row['POS Completed']; pos = parseInt(pos) || 0; pos = Math.abs(pos);
+
+                if (!ACTIVE.has(loc))    { drops.inactive_loc++; continue; }
+                if (phys === 0 && pos === 0) { drops.zero_zero++; continue; }
+                const codeUp = code.toUpperCase();
+                const inKeep = FP_KEEP_TOKENS.some(t => codeUp.includes(t));
+                if (!inKeep) {
+                    if (FP_EXCLUDE_TOKENS.some(t => codeUp.includes(t))) { drops.excluded_code++; continue; }
+                    if (NAME_RE.test(name))                              { drops.bad_name++; continue; }
+                }
+                if (fpIsExcluded(code)) { drops.custom_excl++; continue; }
+                kept++;
+                if (sample.kept.length < 5) sample.kept.push({ loc, code, name: name.slice(0, 30), phys });
+                if (sample.drops.length < 5 && drops.inactive_loc < 1) sample.drops.push({ loc, code, name: name.slice(0, 30), phys });
+            }
+
+            const dropTotal = Object.values(drops).reduce((a, b) => a + b, 0);
+            const summary = `
+                <div style="font-size:14px;">
+                    <div style="display:flex;gap:12px;margin-bottom:14px;">
+                        <div style="flex:1;background:#d1fae5;color:#065f46;padding:14px;border-radius:8px;text-align:center;">
+                            <div style="font-size:28px;font-weight:700;">${kept}</div>
+                            <div style="font-size:12px;font-weight:600;">KEPT</div>
+                        </div>
+                        <div style="flex:1;background:#fee2e2;color:#991b1b;padding:14px;border-radius:8px;text-align:center;">
+                            <div style="font-size:28px;font-weight:700;">${dropTotal}</div>
+                            <div style="font-size:12px;font-weight:600;">DROPPED</div>
+                        </div>
+                    </div>
+                    <div style="background:var(--gray-50);padding:10px 14px;border-radius:8px;font-size:12px;line-height:1.7;">
+                        <strong>Drop reasons:</strong><br>
+                        Inactive location: ${drops.inactive_loc}<br>
+                        Zero stock + zero sales: ${drops.zero_zero}<br>
+                        Excluded code token: ${drops.excluded_code}<br>
+                        Bad name (dummy/test/promotion): ${drops.bad_name}<br>
+                        Matched custom exclusion: ${drops.custom_excl}
+                    </div>
+                    <p style="margin:14px 0 0;font-size:13px;">Proceed with import? This will upsert ${kept} stock rows.</p>
+                </div>
+            `;
+
+            _fpState._pendingStockRows = rows;
+            UI.showModal('Stock Import Preview', summary, [
+                { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+                { label: `Commit ${kept}`, type: 'primary', action: '(async () => { await app.fpCommitStockImport(); })()' },
+            ]);
+        };
+        inp.click();
+    };
+
+    const fpCommitStockImport = async () => {
+        const rows = _fpState._pendingStockRows;
+        _fpState._pendingStockRows = null;
+        if (!rows) { UI.hideModal(); return; }
+        UI.hideModal();
+        UI.toast.info('Committing import...');
+        const ACTIVE = new Set(['Puchong warehouse','001 Retail Puchong','002 Retail Bay Avenue','003 Retail Pavilion 2','Factory OEM']);
+        const NAME_RE = new RegExp('\\b(' + FP_NAME_EXCLUDES.join('|') + ')\\b', 'i');
+        let upserted = 0;
+        for (const row of rows) {
+            const loc   = (row.Location || '').trim();
+            const code  = (row['Product Code'] || '').toString().trim();
+            const name  = (row['Product Name'] || '').toString();
+            const attr  = (row['Product Attribute'] || '').toString();
+            const phys  = parseInt(row['Physical Stock']) || 0;
+            let pos = row['POS Completed']; pos = Math.abs(parseInt(pos) || 0);
+            if (!ACTIVE.has(loc) || (phys === 0 && pos === 0)) continue;
+            const codeUp = code.toUpperCase();
+            const inKeep = FP_KEEP_TOKENS.some(t => codeUp.includes(t));
+            if (!inKeep) {
+                if (FP_EXCLUDE_TOKENS.some(t => codeUp.includes(t))) continue;
+                if (NAME_RE.test(name)) continue;
+            }
+            if (fpIsExcluded(code)) continue;
+
+            let sku = fpGetSkuByCode(code);
+            if (!sku) {
+                sku = await fpSave('fp_sku_master', {
+                    product_code: code, product_name: name, product_attribute: attr,
+                    is_active: true, is_oem: loc === 'Factory OEM',
+                    last_updated: new Date().toISOString(),
+                });
+                _fpState.skus.push(sku);
+            }
+            const location = fpGetLocationByName(loc);
+            if (!location) continue;
+            let bal = _fpState.stockBalance.find(s => s.sku_id === sku.id && s.location_id === location.id);
+            if (bal) {
+                bal.physical_stock = phys;
+                bal.last_updated = new Date().toISOString();
+                await fpUpdate('fp_stock_balance', bal.id, { physical_stock: phys, last_updated: bal.last_updated });
+            } else {
+                bal = await fpSave('fp_stock_balance', {
+                    location_id: location.id, sku_id: sku.id, physical_stock: phys,
+                    last_updated: new Date().toISOString(),
+                });
+                _fpState.stockBalance.push(bal);
+            }
+            upserted++;
+        }
+        UI.toast.success(`Imported ${upserted} stock row(s)`);
+        await fpSwitchTab(_fpState.currentTab);
+    };
+
+    // ---------- POS Sales Import ----------
+    const fpImportPos = () => {
+        document.getElementById('fp-import-menu').style.display = 'none';
+        const inp = document.createElement('input');
+        inp.type = 'file'; inp.accept = '.xlsx,.xls';
+        inp.onchange = async (e) => {
+            const file = e.target.files[0]; if (!file) return;
+            if (typeof XLSX === 'undefined') { UI.toast.error('XLSX library missing'); return; }
+            UI.toast.info('Reading sales file...');
+            const buf = await file.arrayBuffer();
+            const wb = XLSX.read(buf, { type: 'array' });
+            const ws = wb.Sheets[wb.SheetNames[0]];
+            const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+
+            // Build prefix → location map from current locations
+            const prefixMap = {};
+            _fpState.locations.forEach(l => { if (l.pos_prefix) prefixMap[l.pos_prefix] = l; });
+
+            const parseDate = (s) => {
+                if (!s) return null;
+                if (s instanceof Date) return s.toISOString().slice(0, 10);
+                const str = s.toString().trim();
+                // DD/MM/YYYY
+                const m = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+                if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+                // ISO
+                if (/^\d{4}-\d{2}-\d{2}/.test(str)) return str.slice(0, 10);
+                return null;
+            };
+
+            let salesAdded = 0, refundsAdded = 0, skipped = 0;
+            const newSkus = new Set();
+            for (const row of rows) {
+                const purchase = (row['Purchase Number'] || '').toString().trim();
+                const date     = parseDate(row['Purchase Date']);
+                const code     = (row['Product Code'] || '').toString().trim();
+                const name     = (row['Name'] || '').toString();
+                const qty      = parseInt(row['Quantity']) || 0;
+                const price    = parseFloat(row['Unit Price']) || 0;
+                const subtotal = parseFloat(row['Subtotal Price']) || 0;
+
+                if (!purchase || !date || !code || qty === 0) { skipped++; continue; }
+
+                // Map outlet by prefix (PGBL/FMKL/FMLS). Trailing 'R' before dash flags a refund.
+                // Format: <LETTERS><DIGITS>[R]-YYYY-NNNNNN  (e.g. PGBL005-2026-000246, FMKL003R-2026-000002)
+                const prefMatch = purchase.match(/^([A-Z]+)(\d+)(R)?-/);
+                if (!prefMatch) { skipped++; continue; }
+                const isRefund = prefMatch[3] === 'R';
+                const prefix = prefMatch[1];
+                const location = prefixMap[prefix];
+                if (!location) { skipped++; continue; }
+
+                let sku = fpGetSkuByCode(code);
+                if (!sku) {
+                    sku = await fpSave('fp_sku_master', {
+                        product_code: code, product_name: name,
+                        unit_cost: null, is_active: true, is_oem: false,
+                        last_updated: new Date().toISOString(),
+                    });
+                    _fpState.skus.push(sku);
+                    newSkus.add(code);
+                }
+
+                if (isRefund) {
+                    const r = await fpSave('fp_refunds', {
+                        location_id: location.id, sku_id: sku.id,
+                        purchase_number: purchase, quantity_refunded: qty,
+                        unit_price: price, refund_date: date,
+                        created_at: new Date().toISOString(),
+                    });
+                    _fpState.refunds.push(r);
+                    refundsAdded++;
+                } else {
+                    const t = await fpSave('fp_pos_transactions', {
+                        location_id: location.id, sku_id: sku.id,
+                        purchase_number: purchase, quantity_sold: qty,
+                        unit_price: price, subtotal: subtotal, transaction_date: date,
+                        created_at: new Date().toISOString(),
+                    });
+                    _fpState.posTransactions.push(t);
+                    salesAdded++;
+                }
+            }
+
+            // Recompute auto_min_stock locally from imported sales
+            for (const sku of _fpState.skus) {
+                const cutoff = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
+                const sold = _fpState.posTransactions
+                    .filter(p => p.sku_id === sku.id && p.transaction_date >= cutoff)
+                    .reduce((s, p) => s + (parseInt(p.quantity_sold) || 0), 0);
+                const lead   = sku.lead_time_days || 7;
+                const safety = sku.safety_factor   || 1.5;
+                const auto = Math.ceil((sold / 90) * lead * safety);
+                if (auto !== sku.auto_min_stock) {
+                    sku.auto_min_stock = auto;
+                    await fpUpdate('fp_sku_master', sku.id, { auto_min_stock: auto });
+                }
+            }
+
+            UI.toast.success(`Imported ${salesAdded} sales, ${refundsAdded} refund(s). ${skipped} skipped. ${newSkus.size} new SKU(s) auto-created.`);
+            await fpSwitchTab(_fpState.currentTab);
+        };
+        inp.click();
+    };
+
+    // ==================== /FORMULA PURCHASER ====================
+
     return {
         init,
         navigateTo,
@@ -39063,6 +40600,45 @@ JB 星期二到
         // Tab 4 — Config
         eggSaveConfigFromTextarea,
         eggResetConfigToDefault,
+
+        // ========== FORMULA PURCHASER (Super Admin only) ==========
+        showFormulaPurchaserView,
+        fpSwitchTab,
+        fpRefresh,
+        fpToggleImportMenu,
+        // Dashboard
+        fpRunReplenishmentCheck,
+        fpRunTransferCheck,
+        fpProposePoFromLowStock,
+        // PO
+        fpSavePoAndExport,
+        fpReceivePo,
+        fpExportPoExcel,
+        // Transfers
+        fpExecuteTransfer,
+        // Stock Inquiry
+        fpStockSearchUpdate,
+        fpSaveActualMin,
+        fpSaveUnitCost,
+        // Vendors
+        fpOpenVendorModal,
+        fpSaveVendor,
+        fpDeleteVendor,
+        // Exclusions & Deals
+        fpOpenExclusionModal,
+        fpSaveExclusion,
+        fpToggleExclusion,
+        fpDeleteExclusion,
+        fpExclusionBulkUpload,
+        fpOpenDealModal,
+        fpSaveDeal,
+        fpDeleteDeal,
+        // Imports
+        fpImportStock,
+        fpCommitStockImport,
+        fpImportPos,
+        // Expose UI helper for inline modal actions
+        UI,
 
         // ========== GLOBAL DATA SYNCHRONIZATION ==========
        refreshCurrentView: async () => {   // ✅ now async
