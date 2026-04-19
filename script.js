@@ -137,6 +137,8 @@ const appLogic = (() => {
     // the view as before.
     let _lastNavigatedAt = 0;
     const _SWR_REFRESH_GUARD_MS = 5000;
+    // Tracks the open detail view so pull-to-refresh can re-open it instead of jumping to the list.
+    let _currentDetailView = null; // { type: 'prospect'|'customer', id: number }
 
     // ========== ROLE HELPERS ==========
     // Extract numeric level from a role string. "Level 10 Agent" -> 10, "Level 1 Super Admin" -> 1.
@@ -3900,8 +3902,14 @@ In a production system, this would show the actual file contents.
             const diff = e.changedTouches[0].clientY - startY;
             if (diff > 80) {
                 refreshEl.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i> Refreshing...';
-                // Navigate immediately — no artificial delay
-                await navigateTo(_currentView || 'calendar');
+                // If inside a prospect/customer profile, reload that profile — not the list.
+                if (_currentDetailView?.type === 'prospect') {
+                    await showProspectDetail(_currentDetailView.id);
+                } else if (_currentDetailView?.type === 'customer') {
+                    await showCustomerDetail(_currentDetailView.id);
+                } else {
+                    await navigateTo(_currentView || 'calendar');
+                }
                 refreshEl.classList.remove('show');
                 refreshEl.innerHTML = '<i class="fas fa-arrow-down"></i> Pull to refresh';
             } else {
@@ -8619,6 +8627,7 @@ function _wireLoginBtn() {
 
     const navigateTo = async (viewId) => {
         UI.hideModal();
+        _currentDetailView = null; // leaving any detail page — pull-to-refresh goes back to list
         // Stamp the navigation time so initSync can suppress the SWR
         // revalidation refresh that would otherwise blow away the DOM 1–3s
         // after the page paints (visible flash / lost scroll position).
@@ -18521,6 +18530,7 @@ function _wireLoginBtn() {
             await navigateTo('prospects');
             return;
         }
+        _currentDetailView = { type: 'customer', id: customerId };
 
         setTimeout(async () => {
             await addWhatsAppButtonToProfile('customer', customerId);
@@ -19462,6 +19472,7 @@ function _wireLoginBtn() {
             await navigateTo('prospects');
             return;
         }
+        _currentDetailView = { type: 'prospect', id: prospectId };
 
         const container = document.getElementById('content-viewport');
         if (!container) return;
