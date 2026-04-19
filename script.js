@@ -7034,6 +7034,10 @@ function _wireLoginBtn() {
                 const existing = document.getElementById('login-error-msg');
                 if (existing) existing.remove();
                 document.getElementById('loginBtn')?.insertAdjacentElement('afterend', resendMsg);
+            } else if (msg === 'Load failed' || msg.toLowerCase().includes('load failed') || msg.toLowerCase().includes('failed to fetch')) {
+                // Supabase client in broken lock state — reload to recover
+                btn.textContent = 'Reloading…';
+                setTimeout(() => window.location.reload(true), 800);
             } else {
                 alert('Login failed: ' + msg);
             }
