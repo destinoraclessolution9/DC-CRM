@@ -18129,7 +18129,7 @@ function _wireLoginBtn() {
             if (statusFilter) {
                 if (statusFilter === 'active' && protectionStatus !== 'normal') continue;
                 if (statusFilter === 'attention' && protectionStatus !== 'warning') continue;
-                if (statusFilter === 'reassign' && protectionStatus !== 'normal') continue;
+                if (statusFilter === 'reassign' && protectionStatus !== 'critical') continue;
                 if (statusFilter === 'critical' && protectionStatus !== 'critical') continue;
             }
             filtered.push(p);
