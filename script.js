@@ -36125,25 +36125,38 @@ const initImportDemoData = async () => {
                           })()
                     }
                 </div>
-                <div class="fude-section">
-                    <div class="fude-sec-bar"><div class="fude-sec-bar-icon story">🌟</div><h2>Success Stories</h2></div>
+                <div class="fude-section fude-mag-section">
+                    <div class="fude-mag-masthead">
+                        <div class="fude-mag-masthead-line"></div>
+                        <div class="fude-mag-masthead-center">
+                            <div class="fude-mag-title">成功案例分享</div>
+                            <div class="fude-mag-subtitle">SUCCESS&nbsp;&nbsp;STORY</div>
+                        </div>
+                        <div class="fude-mag-masthead-line"></div>
+                    </div>
                     ${successStories.length === 0
                         ? '<div class="fude-sec-body"><p style="color:var(--gray-500,#6b7280);margin:0;">No success stories yet.</p></div>'
-                        : `<div class="fude-stories-grid">${successStories.map((s, i) => `<div class="fude-story-card"><div class="fude-story-num">${i + 1}</div>${s.image_url ? `<img class="fude-story-img" src="${s.image_url}" alt="" onerror="this.style.display='none'">` : ''}<div class="fude-story-body"><h3>${s.title}</h3><p>${s.content || ''}</p></div></div>`).join('')}</div>`
+                        : successStories.map((s, i) => `<div class="fude-mag-story${i === 0 ? ' fude-mag-story--first' : ''}">
+                            <div class="fude-mag-story-header">
+                                <span class="fude-mag-story-num">${i + 1}</span>
+                                <h3 class="fude-mag-story-title">${s.title}</h3>
+                            </div>
+                            ${s.image_url ? `<img class="fude-mag-story-photo" src="${s.image_url}" alt="" onerror="this.style.display='none'">` : ''}
+                            ${s.content ? `<p class="fude-mag-story-text">${s.content}</p>` : ''}
+                        </div>`).join('')
                     }
                 </div>
                 ${recommendationTips.length ? `
-                <div class="fude-section">
-                    <div class="fude-sec-bar"><div class="fude-sec-bar-icon tip">💡</div><h2>Recommendation Tips</h2></div>
-                    <div class="fude-tips-stack">${recommendationTips.map(t => `
-                        <div class="fude-tip-card">
-                            <span class="fude-tip-icon">💡</span>
-                            <div class="fude-tip-content">
-                                <h3>${t.title}</h3>
-                                <p>${t.content || ''}</p>
-                            </div>
-                        </div>`).join('')}
+                <div class="fude-section fude-mag-tips-section">
+                    <div class="fude-mag-tips-header">
+                        <span class="fude-mag-tip-badge">💡</span>
+                        <h2>成功推荐技巧</h2>
                     </div>
+                    ${recommendationTips.map(t => `
+                        <div class="fude-mag-tip-item">
+                            <h3>${t.title}</h3>
+                            ${t.content ? `<p>${t.content}</p>` : ''}
+                        </div>`).join('')}
                 </div>` : ''}
                 ${purchasesSection}
                 <div class="fude-section">
