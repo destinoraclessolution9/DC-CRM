@@ -20893,6 +20893,28 @@ NOTIFY pgrst, 'reload schema';`;
         ]);
     };
 
+    // Compress image to max 1920px wide at 80% JPEG quality using canvas.
+    // Handles large mobile camera photos (often 5-15MB) before upload.
+    const compressImageFile = (file) => new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const img = new Image();
+            img.onload = () => {
+                const MAX_W = 1920;
+                let w = img.width, h = img.height;
+                if (w > MAX_W) { h = Math.round(h * MAX_W / w); w = MAX_W; }
+                const canvas = document.createElement('canvas');
+                canvas.width = w; canvas.height = h;
+                canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                canvas.toBlob((blob) => {
+                    resolve(new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' }));
+                }, 'image/jpeg', 0.8);
+            };
+            img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+    });
+
     const saveActivityPhoto = async (activityId) => {
         const input = document.getElementById('activity-photo-upload');
         const files = input?.files;
@@ -20906,15 +20928,18 @@ NOTIFY pgrst, 'reload schema';`;
         const sb = window.supabase || window.supabaseClient;
         if (!sb || !sb.storage) { UI.toast.error('Supabase not connected — cannot upload photos'); return; }
 
+        UI.toast.success('Uploading photo(s)…');
         try {
             for (const file of files) {
-                if (file.size > 5 * 1024 * 1024) {
-                    UI.toast.error(`"${file.name}" too large (max 5MB)`);
+                if (!file.type.startsWith('image/')) {
+                    UI.toast.error(`"${file.name}" is not an image`);
                     continue;
                 }
-                const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+                // Compress mobile camera photos before upload (handles 5-15MB phone images)
+                const compressed = await compressImageFile(file);
+                const safeName = compressed.name.replace(/[^a-zA-Z0-9._-]/g, '_');
                 const path = `activity_photos/${activityId}_${Date.now()}_${safeName}`;
-                const { error: upErr } = await sb.storage.from('attachments').upload(path, file, { upsert: false, contentType: file.type });
+                const { error: upErr } = await sb.storage.from('attachments').upload(path, compressed, { upsert: false, contentType: 'image/jpeg' });
                 if (upErr) { throw upErr; }
                 const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
                 if (urlData?.publicUrl) newUrls.push(urlData.publicUrl);
