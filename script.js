@@ -36825,7 +36825,7 @@ const initImportDemoData = async () => {
             const m = (currentUser.role || '').match(/Level\s+(\d+)/i);
             return m ? parseInt(m[1]) : 12;
         })();
-        const isAdmin   = userLevel <= 2 || (currentUser.email || '').toLowerCase() === 'mianformula@gmail.com';
+        const isAdmin   = userLevel <= 2 || ['mianformula@gmail.com', 'destinyoracles@gmail.com', 'shilynateh7689@gmail.com'].includes((currentUser.email || '').toLowerCase());
         const isL1314   = userLevel >= 13;
         const isCustomer = userLevel === 13;
 
