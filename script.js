@@ -36853,7 +36853,7 @@ const initImportDemoData = async () => {
 
         // --- Content filters ---
         const publicNews         = highlights.filter(h => h.type === 'highlight');
-        const successStories     = highlights.filter(h => h.type === 'success_story');
+        const successStories     = highlights.filter(h => h.type === 'success_story').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
         const recommendationTips = highlights.filter(h => h.type === 'recommendation_tip');
 
         // --- Totals & summary sync ---
