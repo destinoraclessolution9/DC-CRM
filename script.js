@@ -18715,6 +18715,15 @@ function _wireLoginBtn() {
                         <div class="acc-body" id="cust-acc-body-contracts-${customer.id}" style="display:none" data-loaded="false"></div>
                     </div>
 
+                    <!-- DC Closing Record -->
+                    <div class="acc-item" id="cust-acc-closing-${customer.id}">
+                        <div class="acc-hdr" onclick="app.toggleCustomerAccordion('closing',${customer.id},this.parentElement)">
+                            <span><i class="fas fa-handshake"></i> DC Closing Record</span>
+                            <i class="fas fa-chevron-down acc-chev"></i>
+                        </div>
+                        <div class="acc-body" id="cust-acc-body-closing-${customer.id}" style="display:none" data-loaded="false"></div>
+                    </div>
+
                     <!-- 10 Notes -->
                     <div class="acc-item" id="cust-acc-notes-${customer.id}">
                         <div class="acc-hdr" onclick="app.toggleCustomerAccordion('notes',${customer.id},this.parentElement)">
@@ -18883,6 +18892,9 @@ function _wireLoginBtn() {
         }
         else if (tab === 'contracts') {
             await renderCustomerContractsTab(customer, container.id);
+        }
+        else if (tab === 'closing') {
+            await renderCustomerClosingTab(customer, container);
         }
         else if (tab === 'notes') {
             const customerNotes = await AppDataStore.query('notes', { customer_id: customer.id });
@@ -20742,6 +20754,171 @@ function _wireLoginBtn() {
         }
     };
 
+    const _refreshCustClosingAfterProspectSave = async (prospectId) => {
+        const els = document.querySelectorAll('[id^="cust-acc-body-closing-"]');
+        for (const el of els) {
+            if (el.dataset.prospectId == prospectId) {
+                const custId = el.id.replace('cust-acc-body-closing-', '');
+                const cust = await AppDataStore.getById('customers', custId);
+                if (cust) await renderCustomerClosingTab(cust, el);
+            }
+        }
+    };
+
+    const renderCustomerClosingTab = async (customer, container) => {
+        if (!container) return;
+        const prospectId = customer.converted_from_prospect_id;
+        if (!prospectId) {
+            container.innerHTML = '<p style="text-align:center;padding:20px;color:var(--gray-400);font-size:13px;">No linked prospect — DC Closing Record not available for manually-added customers.</p>';
+            return;
+        }
+        container.dataset.prospectId = prospectId;
+        const prospect = await AppDataStore.getByIdFull('prospects', prospectId);
+        if (!prospect) {
+            container.innerHTML = '<p style="text-align:center;padding:20px;color:var(--gray-400);">Linked prospect not found.</p>';
+            return;
+        }
+
+        const cr = prospect.closing_record || null;
+        const status = cr?.status || 'draft';
+        const isManager = isSystemAdmin(_currentUser) || isMarketingManager(_currentUser);
+        const pid = prospect.id;
+
+        // Before 2025 Purchase Record
+        let pre2025 = [];
+        try {
+            const src = prospect.closing_record?.pre2025_purchases || prospect.pre2025_purchases;
+            pre2025 = Array.isArray(src) ? src : JSON.parse(src || '[]');
+        } catch(_) {}
+        const pre2025Rows = pre2025.length
+            ? pre2025.map((r, i) => `
+                <tr>
+                    <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;">${escapeHtml(r.product || '')}</td>
+                    <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;color:var(--gray-500);">${escapeHtml(r.notes || '-')}</td>
+                    <td style="padding:4px 8px;border-bottom:1px solid #f3f4f6;text-align:center;">
+                        ${r.attachment_data
+                            ? `<a href="${r.attachment_data}" target="_blank" title="${escapeHtml(r.attachment_name||'View attachment')}" style="color:var(--primary);margin-right:4px;"><i class="fas fa-paperclip"></i></a>`
+                            : `<label for="pre2025-att-${pid}-${i}" title="Attach file" style="cursor:pointer;color:var(--gray-400);margin-right:4px;"><i class="fas fa-paperclip"></i></label>`
+                        }
+                        <input type="file" id="pre2025-att-${pid}-${i}" style="display:none" accept="image/*,application/pdf" onchange="event.stopPropagation();app.addPrePurchaseAttachment(${pid},${i},this)">
+                    </td>
+                    <td style="padding:4px 8px;border-bottom:1px solid #f3f4f6;text-align:center;">
+                        <button class="btn-icon" style="color:var(--error);" onclick="event.stopPropagation();app.deletePrePurchaseRecord(${pid},${i})" title="Remove"><i class="fas fa-times"></i></button>
+                    </td>
+                </tr>`).join('')
+            : `<tr><td colspan="4" style="padding:10px;text-align:center;color:var(--gray-400);font-size:12px;font-style:italic;">No past records yet</td></tr>`;
+        const pre2025Html = `
+            <div style="margin-bottom:16px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
+                <div style="background:#fef9ec;padding:8px 12px;font-weight:600;font-size:13px;border-bottom:1px solid #e5e7eb;color:#78400b;">
+                    📋 Before 2025 Purchase Record
+                </div>
+                <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                    <thead><tr style="background:#fafafa;">
+                        <th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e5e7eb;font-weight:600;">Product / Service</th>
+                        <th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e5e7eb;font-weight:600;">Notes</th>
+                        <th style="padding:4px;width:36px;border-bottom:1px solid #e5e7eb;text-align:center;font-weight:600;font-size:11px;">File</th>
+                        <th style="padding:4px;width:36px;border-bottom:1px solid #e5e7eb;"></th>
+                    </tr></thead>
+                    <tbody id="pre2025-rows-${pid}">${pre2025Rows}</tbody>
+                </table>
+                <div style="padding:8px 10px;border-top:1px solid #e5e7eb;display:flex;gap:6px;align-items:center;">
+                    <input id="pre2025-product-${pid}" class="form-control" style="flex:1;height:32px;font-size:12px;" placeholder="Product / Service">
+                    <input id="pre2025-notes-${pid}" class="form-control" style="flex:1;height:32px;font-size:12px;" placeholder="Notes (optional)">
+                    <label for="pre2025-file-${pid}" title="Attach a file" style="cursor:pointer;height:32px;padding:0 10px;display:flex;align-items:center;border:1px solid #e5e7eb;border-radius:6px;background:#f9fafb;color:var(--gray-500);">
+                        <i class="fas fa-paperclip"></i>
+                    </label>
+                    <input id="pre2025-file-${pid}" type="file" style="display:none" accept="image/*,application/pdf">
+                    <button class="btn secondary btn-sm" onclick="event.stopPropagation();app.addPrePurchaseRow(${pid})" style="white-space:nowrap;height:32px;"><i class="fas fa-plus"></i> Add</button>
+                </div>
+            </div>`;
+
+        // Closing History
+        const crHistory = Array.isArray(prospect.closing_records_history) ? prospect.closing_records_history : [];
+        const _crBadge = (h) => {
+            if (h.case_completed) return `<span style="background:#dcfce7;color:#166534;border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600;"><i class="fas fa-check-circle"></i> Completed</span>`;
+            const s = h.delivery_status || 'pending';
+            if (s === 'delivered') return `<span style="background:#dbeafe;color:#1e40af;border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600;"><i class="fas fa-truck"></i> Delivered</span>`;
+            return `<span style="background:#fef9c3;color:#854d0e;border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600;"><i class="fas fa-clock"></i> Pending</span>`;
+        };
+        const historyHtml = crHistory.length ? `
+            <div style="margin-bottom:16px;border:1px solid #e5e7eb;border-radius:8px;">
+                <div style="background:#f0fdf4;padding:8px 12px;font-weight:600;font-size:13px;border-bottom:1px solid #e5e7eb;color:#166534;border-radius:8px 8px 0 0;">
+                    <i class="fas fa-history"></i> Closing History (${crHistory.length} record${crHistory.length>1?'s':''})
+                </div>
+                ${crHistory.map((h, hi) => `
+                    <details style="border-bottom:1px solid #f3f4f6;">
+                        <summary style="padding:8px 12px;cursor:pointer;font-size:13px;font-weight:600;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:8px;">
+                            <span style="flex:1;">#${hi+1} — ${escapeHtml(h.product||'N/A')} · RM ${h.sale_amount ? parseFloat(h.sale_amount).toLocaleString() : '0'}</span>
+                            ${_crBadge(h)}
+                            <span style="font-size:11px;color:var(--gray-400);font-weight:400;">${h.closing_date || (h.approved_at ? h.approved_at.split('T')[0] : '')}</span>
+                        </summary>
+                        <div style="padding:10px 12px;background:#fafafa;font-size:12px;border-top:1px solid #f3f4f6;">
+                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;margin-bottom:10px;">
+                                <div><span style="color:var(--gray-400);">Payment:</span> ${escapeHtml(h.payment_method||'-')}</div>
+                                <div><span style="color:var(--gray-400);">Invoice:</span> ${escapeHtml(h.invoice_number||'-')}</div>
+                                ${h.invoice_file ? `<div style="grid-column:1/-1;"><a href="${h.invoice_file}" target="_blank" style="color:var(--primary);"><i class="fas fa-paperclip"></i> ${escapeHtml(h.invoice_file_name||'View invoice')}</a></div>` : ''}
+                                ${h.closing_remarks ? `<div style="grid-column:1/-1;"><span style="color:var(--gray-400);">Sale Remarks:</span> ${escapeHtml(h.closing_remarks)}</div>` : ''}
+                            </div>
+                            <div style="border-top:1px solid #e5e7eb;padding-top:10px;">
+                                <div style="font-size:11px;font-weight:700;color:var(--gray-500);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">📦 Delivery Tracking</div>
+                                <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+                                    <select id="crh-status-${pid}-${hi}" class="form-control" style="flex:1;min-width:120px;font-size:12px;">
+                                        <option value="pending" ${(!h.delivery_status||h.delivery_status==='pending')?'selected':''}>Pending Delivery</option>
+                                        <option value="delivered" ${h.delivery_status==='delivered'?'selected':''}>Delivered</option>
+                                        <option value="completed" ${h.delivery_status==='completed'?'selected':''}>Completed</option>
+                                    </select>
+                                    <label style="display:flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap;font-weight:600;color:${h.case_completed?'#166534':'var(--gray-600)'};">
+                                        <input type="checkbox" id="crh-completed-${pid}-${hi}" ${h.case_completed?'checked':''} style="width:15px;height:15px;cursor:pointer;">
+                                        Case Completed
+                                    </label>
+                                </div>
+                                <div style="margin-bottom:8px;">
+                                    <label style="font-size:11px;font-weight:600;color:var(--gray-500);display:block;margin-bottom:4px;">Delivery Proof Attachment</label>
+                                    ${h.delivery_proof ? `<div style="margin-bottom:4px;"><a href="${h.delivery_proof}" target="_blank" style="color:var(--primary);font-size:12px;"><i class="fas fa-paperclip"></i> ${escapeHtml(h.delivery_proof_name||'View proof')}</a> <span style="color:var(--gray-400);font-size:11px;">(upload new to replace)</span></div>` : ''}
+                                    <input type="file" id="crh-proof-${pid}-${hi}" accept="image/*,application/pdf" style="font-size:11px;width:100%;" onchange="(function(el){var f=el.files[0];if(!f)return;var r=new FileReader();r.onload=function(e){el.dataset.b64=e.target.result;el.dataset.fname=f.name;};r.readAsDataURL(f);})(this)">
+                                </div>
+                                <div style="margin-bottom:8px;">
+                                    <label style="font-size:11px;font-weight:600;color:var(--gray-500);display:block;margin-bottom:4px;">Remarks</label>
+                                    <textarea id="crh-remarks-${pid}-${hi}" class="form-control" rows="2" style="font-size:12px;" placeholder="Post-sale notes, delivery details...">${escapeHtml(h.delivery_remarks||'')}</textarea>
+                                </div>
+                                <button class="btn primary btn-sm" style="width:100%;height:30px;" onclick="event.stopPropagation();app.saveClosingHistoryEntry(${pid},${hi})"><i class="fas fa-save"></i> Save</button>
+                            </div>
+                        </div>
+                    </details>`).join('')}
+            </div>` : '';
+
+        // Active closing record (submitted, awaiting approval)
+        let activeHtml = '';
+        if (cr && status === 'submitted') {
+            const d = cr;
+            if (isManager) {
+                const isConverted = prospect.status === 'converted' || prospect.conversion_status === 'approved';
+                activeHtml = `
+                    <div style="margin-bottom:10px;padding:8px 12px;border-radius:8px;background:#e3f2fd;border:1px solid #2196f3;color:#1565c0;font-size:13px;font-weight:600;">
+                        <i class="fas fa-clock"></i> Active submission pending approval
+                    </div>
+                    <div class="pv-sub">Meeting Outcome</div>
+                    <div class="pv-row"><span class="pv-lbl">Product/Service</span><span class="pv-val">${d.product || '-'}</span></div>
+                    <div class="pv-row"><span class="pv-lbl">Amount</span><span class="pv-val">${d.sale_amount ? 'RM ' + parseFloat(d.sale_amount).toLocaleString() : '-'}</span></div>
+                    <div class="pv-row"><span class="pv-lbl">Payment</span><span class="pv-val">${d.payment_method || '-'}</span></div>
+                    <div class="pv-row"><span class="pv-lbl">Invoice</span><span class="pv-val">${d.invoice_number || '-'}</span></div>
+                    <div class="pv-row"><span class="pv-lbl">Collection Date</span><span class="pv-val">${d.closing_date || '-'}</span></div>
+                    <div style="display:flex;gap:8px;margin-top:12px;">
+                        <button class="btn primary btn-sm" style="flex:1;" onclick="event.stopPropagation();app.approveClosingRecord(${pid})"><i class="fas fa-check"></i> ${isConverted ? 'Approve Sale' : 'Approve & Create Customer'}</button>
+                        <button class="btn danger btn-sm" style="flex:1;" onclick="event.stopPropagation();app.rejectClosingRecord(${pid})"><i class="fas fa-times"></i> Reject</button>
+                    </div>`;
+            } else {
+                activeHtml = `
+                    <div style="padding:8px 12px;border-radius:8px;background:#e3f2fd;border:1px solid #2196f3;color:#1565c0;font-size:13px;font-weight:600;margin-bottom:12px;">
+                        <i class="fas fa-clock"></i> Active closing record pending manager approval.
+                    </div>`;
+            }
+        }
+
+        container.innerHTML = pre2025Html + historyHtml + activeHtml ||
+            pre2025Html + '<p style="text-align:center;padding:16px;color:var(--gray-400);font-size:13px;">No closing records yet.</p>';
+    };
+
     // Accordion toggle — expand/collapse a prospect profile section.
     // Content is lazy-loaded on first open via switchProspectTab.
     const toggleAccordion = async (tab, prospectId, itemEl) => {
@@ -21330,6 +21507,7 @@ NOTIFY pgrst, 'reload schema';`;
             UI.toast.success('Record added');
             const bodyEl = document.getElementById(`acc-body-closing-${prospectId}`);
             if (bodyEl) await switchProspectTab('closing', prospectId, null, bodyEl);
+            await _refreshCustClosingAfterProspectSave(prospectId);
         };
 
         if (file) {
@@ -21362,6 +21540,7 @@ NOTIFY pgrst, 'reload schema';`;
             UI.toast.success('Attachment saved');
             const bodyEl = document.getElementById(`acc-body-closing-${prospectId}`);
             if (bodyEl) await switchProspectTab('closing', prospectId, null, bodyEl);
+            await _refreshCustClosingAfterProspectSave(prospectId);
         };
         reader.readAsDataURL(file);
     };
@@ -21381,6 +21560,7 @@ NOTIFY pgrst, 'reload schema';`;
         UI.toast.success('Record removed');
         const bodyEl = document.getElementById(`acc-body-closing-${prospectId}`);
         if (bodyEl) await switchProspectTab('closing', prospectId, null, bodyEl);
+        await _refreshCustClosingAfterProspectSave(prospectId);
     };
 
     // ── Bujishu / Formula Healthcare Product Purchase History ──
@@ -22110,6 +22290,7 @@ NOTIFY pgrst, 'reload schema';`;
         UI.toast.success('Delivery info saved');
         const bodyEl = document.getElementById(`acc-body-closing-${prospectId}`);
         if (bodyEl) await switchProspectTab('closing', prospectId, null, bodyEl);
+        await _refreshCustClosingAfterProspectSave(prospectId);
     };
 
     const saveClosingDeliveryStatus = async (prospectId) => {
