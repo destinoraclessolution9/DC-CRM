@@ -14943,8 +14943,8 @@ function _wireLoginBtn() {
                 <textarea id="${prefix}-remarks" class="form-control" rows="2" placeholder="e.g. Ring Size, Special Request..." ${disabled}>${escapeHtml(v.closing_remarks)}</textarea>
             </div>
             <div class="form-group">
-                <label>Upload Purchased Invoice</label>
-                <input id="${prefix}-invoice-file" type="file" class="form-control" accept="image/png,image/jpeg,application/pdf" ${disabled}>
+                <label>Upload Purchased Invoice <span style="font-size:11px;color:var(--gray-400);font-weight:normal;">(AI auto-fill on upload)</span></label>
+                <input id="${prefix}-invoice-file" type="file" class="form-control" accept="image/png,image/jpeg,application/pdf" ${disabled} onchange="if(!this.disabled)app.scanInvoiceWithAI(this,'${prefix}','mo')">
             </div>
         ` : '';
 
@@ -15082,6 +15082,212 @@ function _wireLoginBtn() {
             plan_details: read(`${prefix}-plan-details`),
             success_story: read(`${prefix}-success-story`),
         };
+    };
+
+    // OCR invoice scanner using Tesseract.js — no API key required, runs entirely in-browser.
+    // Lazy-loads Tesseract from CDN on first use. Supports Manual and Online Order Forms.
+    const scanInvoiceWithAI = async (inputEl, prefix, formContext) => {
+        const file = inputEl.files[0];
+        if (!file) return;
+
+        if (!file.type.startsWith('image/')) {
+            UI.toast.info('OCR scan supports image files (PNG/JPG) only. Please fill PDF fields manually.');
+            return;
+        }
+
+        const scanStatusId = `${prefix}-ai-scan-status`;
+        const existing = document.getElementById(scanStatusId);
+        if (existing) existing.remove();
+
+        const statusEl = document.createElement('div');
+        statusEl.id = scanStatusId;
+        statusEl.style.cssText = 'margin-top:6px;padding:7px 11px;border-radius:6px;font-size:12px;display:flex;align-items:center;gap:6px;background:#e3f2fd;color:#1565c0;';
+        statusEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Loading OCR engine...';
+        inputEl.parentElement.appendChild(statusEl);
+
+        try {
+            // Lazy-load Tesseract.js from CDN (downloaded once, cached by browser)
+            if (!window.Tesseract) {
+                await new Promise((resolve, reject) => {
+                    const s = document.createElement('script');
+                    s.src = 'https://unpkg.com/tesseract.js@4/dist/tesseract.min.js';
+                    s.onload = resolve;
+                    s.onerror = () => reject(new Error('Failed to load OCR library. Check your internet connection.'));
+                    document.head.appendChild(s);
+                });
+            }
+
+            statusEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Scanning invoice... 0%';
+
+            const { data: { text } } = await Tesseract.recognize(file, 'eng', {
+                logger: m => {
+                    if (m.status === 'recognizing text') {
+                        const pct = Math.round(m.progress * 100);
+                        statusEl.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Scanning invoice... ${pct}%`;
+                    }
+                }
+            });
+
+            statusEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Extracting fields...';
+
+            // --- Parse raw OCR text into structured fields ---
+            const normalizeDate = (str) => {
+                if (!str) return null;
+                const dmy = str.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/);
+                if (dmy) return `${dmy[3]}-${dmy[2].padStart(2,'0')}-${dmy[1].padStart(2,'0')}`;
+                if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+                try { const d = new Date(str); if (!isNaN(d)) return d.toISOString().split('T')[0]; } catch {}
+                return null;
+            };
+
+            const full = text.split('\n').map(l => l.trim()).filter(Boolean).join('\n');
+
+            // Find value after a label on the same line (handles both : and | separators)
+            const afterLabel = (patterns) => {
+                for (const pat of patterns) {
+                    const re = new RegExp(pat + '[:\\s|]+([^\\n]{2,80})', 'i');
+                    const m = full.match(re);
+                    if (m) { const v = m[1].replace(/[|]/g, '').trim(); if (v) return v; }
+                }
+                return null;
+            };
+
+            const extracted = {};
+
+            // IC number — strong pattern first
+            const icStrict = full.match(/\b(\d{6}-\d{2}-\d{4})\b/);
+            if (icStrict) {
+                extracted.ic_number = icStrict[1];
+            } else {
+                const ic12 = full.match(/\b(\d{12})\b/);
+                if (ic12) extracted.ic_number = ic12[1].replace(/(\d{6})(\d{2})(\d{4})/, '$1-$2-$3');
+                else extracted.ic_number = afterLabel(['ic\\s*(?:no\\.?|number)?','nric\\s*(?:no\\.?)?','no\\.?\\s*kp','no\\.?\\s*kad\\s*pengenalan','passport\\s*(?:no\\.?)?']);
+            }
+
+            // Phone
+            const phoneLabel = afterLabel(['tel(?:efon)?(?:\\s*no\\.?)?','phone(?:\\s*no\\.?)?','hp(?:\\s*no\\.?)?','no\\.?\\s*(?:tel|hp|phone)','handphone','mobile']);
+            if (phoneLabel) {
+                extracted.phone = phoneLabel.replace(/[^\d+\-\s]/g, '').trim() || null;
+            } else {
+                const phoneRaw = full.match(/(?:^|\s)((?:\+?60|0)[1-9]\d{7,9})(?:\s|$)/m);
+                if (phoneRaw) extracted.phone = phoneRaw[1].trim();
+            }
+
+            // Email
+            const emailMatch = full.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/);
+            extracted.email = emailMatch ? emailMatch[0] : null;
+
+            // Invoice number
+            const invLabel = afterLabel(['invoice\\s*(?:no\\.?|number)?','inv\\s*(?:no\\.?)?','receipt\\s*(?:no\\.?)?','no\\.?\\s*inv(?:oice)?','resit\\s*(?:no\\.?)?']);
+            if (invLabel) {
+                extracted.invoice_number = invLabel.replace(/[^\w\-\/]/g, '').trim() || null;
+            } else {
+                const invRaw = full.match(/\b(INV[-\s]?\d{3,4}[-\s]?\d{3,6})\b/i);
+                if (invRaw) extracted.invoice_number = invRaw[1].trim();
+            }
+
+            // Amount
+            const amtLabel = afterLabel(['total(?:\\s*amount)?','amount(?:\\s*(?:rm|paid|due))?','jumlah(?:\\s*(?:rm|keseluruhan))?','harga(?:\\s*(?:rm|jumlah))?','price(?:\\s*total)?']);
+            if (amtLabel) {
+                const amtNum = amtLabel.match(/[\d,]+\.?\d{0,2}/);
+                if (amtNum) extracted.amount = amtNum[0].replace(/,/g, '');
+            }
+            if (!extracted.amount) {
+                const rmRaw = full.match(/RM\s*([\d,]+\.?\d{0,2})/i);
+                if (rmRaw) extracted.amount = rmRaw[1].replace(/,/g, '');
+            }
+
+            // Date
+            const dateLabel = afterLabel(['(?:order|sales|purchase|transaction)?\\s*date','tarikh(?:\\s*(?:pesanan|jualan))?','date\\s*of\\s*(?:purchase|sale|order)']);
+            if (dateLabel) {
+                const dm = dateLabel.match(/\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{4}|\d{4}-\d{2}-\d{2}|\d{1,2}\s+\w+\s+\d{4}/);
+                if (dm) extracted.sales_date = normalizeDate(dm[0]);
+            }
+            if (!extracted.sales_date) {
+                const dateRaw = full.match(/\b(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\b/);
+                if (dateRaw) extracted.sales_date = normalizeDate(dateRaw[0]);
+            }
+
+            // Name
+            extracted.full_name = afterLabel(['(?:full\\s*)?name(?:\\s*of\\s*(?:customer|buyer|purchaser))?','nama(?:\\s*(?:penuh|pelanggan))?','customer\\s*name','buyer']);
+
+            // Address
+            extracted.address = afterLabel(['(?:full\\s*)?address','alamat(?:\\s*penuh)?','residential\\s*address','home\\s*address']);
+
+            // Occupation
+            extracted.occupation = afterLabel(['occupation','pekerjaan','profession','job(?:\\s*title)?','employment']);
+
+            // Agent name
+            extracted.agent_name = afterLabel(['agent(?:\\s*name)?','ejen(?:\\s*jualan)?','consultant(?:\\s*name)?','introducer(?:\\s*name)?','sales(?:\\s*(?:person|rep|agent))?','nama\\s*ejen']);
+
+            // Product
+            extracted.product = afterLabel(['product(?:\\s*(?:name|sold))?','produk','service(?:\\s*(?:name|sold))?','package(?:\\s*name)?','pakej','item(?:\\s*(?:name|sold))?']);
+
+            // --- Fill form fields ---
+            const highlight = (el) => {
+                if (!el) return;
+                el.style.background = '#e8f5e9';
+                setTimeout(() => { el.style.background = ''; }, 4000);
+            };
+            const setF = (id, value) => {
+                if (!value) return;
+                const el = document.getElementById(id);
+                if (!el) return;
+                el.value = value;
+                highlight(el);
+            };
+            const setSelect = (id, value) => {
+                if (!value) return;
+                const sel = document.getElementById(id);
+                if (!sel) return;
+                const v = value.toLowerCase();
+                const match = Array.from(sel.options).find(o => o.text.toLowerCase().includes(v) || v.includes(o.text.toLowerCase()));
+                if (match) { sel.value = match.value; highlight(sel); }
+            };
+            const appendRemarks = (id, occ, agent) => {
+                const extras = [];
+                if (occ) extras.push(`Occupation: ${occ}`);
+                if (agent) extras.push(`Agent: ${agent}`);
+                if (!extras.length) return;
+                const el = document.getElementById(id);
+                if (el && !el.value) { el.value = extras.join(' | '); highlight(el); }
+            };
+
+            if (formContext === 'cr') {
+                setF('cr-full-name', extracted.full_name);
+                setF('cr-ic', extracted.ic_number);
+                setF('cr-phone', extracted.phone);
+                setF('cr-address', extracted.address);
+                setF('cr-email', extracted.email);
+                setF('cr-invoice', extracted.invoice_number);
+                setF('cr-order-date', extracted.sales_date);
+                setF('cr-amount', extracted.amount);
+                setSelect('cr-product', extracted.product);
+                appendRemarks('cr-remarks', extracted.occupation, extracted.agent_name);
+            } else {
+                setF(`${prefix}-full-name`, extracted.full_name);
+                setF(`${prefix}-ic`, extracted.ic_number);
+                setF(`${prefix}-phone`, extracted.phone);
+                setF(`${prefix}-address`, extracted.address);
+                setF(`${prefix}-email`, extracted.email);
+                setF(`${prefix}-invoice-number`, extracted.invoice_number);
+                setF(`${prefix}-order-date`, extracted.sales_date);
+                setF(`${prefix}-amount-closed`, extracted.amount);
+                setSelect(`${prefix}-solution-sold`, extracted.product);
+                appendRemarks(`${prefix}-remarks`, extracted.occupation, extracted.agent_name);
+            }
+
+            const filled = Object.values(extracted).filter(v => v !== null && v !== undefined && v !== '').length;
+            statusEl.innerHTML = `<i class="fas fa-check-circle" style="color:#4caf50;"></i> OCR found ${filled} fields — highlighted in green. Please review and correct if needed.`;
+            statusEl.style.background = '#e8f5e9';
+            statusEl.style.color = '#1b5e20';
+
+        } catch (err) {
+            statusEl.innerHTML = `<i class="fas fa-exclamation-triangle" style="color:#f44336;"></i> Scan failed: ${escapeHtml(err.message)}`;
+            statusEl.style.background = '#ffebee';
+            statusEl.style.color = '#b71c1c';
+            console.error('[scanInvoiceWithAI]', err);
+        }
     };
 
     // Standard Functions page — Level 1 only. Shows a read-only preview of
@@ -20381,8 +20587,8 @@ function _wireLoginBtn() {
                     </div>
                     <div class="form-group" style="margin-bottom:10px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Remarks</label><textarea id="cr-remarks" class="form-control" rows="2" placeholder="e.g. Ring Size, Special Request...">${d.closing_remarks || ''}</textarea></div>
                     <div class="form-group" style="margin-bottom:14px;">
-                        <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Upload Purchased Invoice</label>
-                        <input id="cr-invoice-file" type="file" class="form-control" accept="image/png,image/jpeg,application/pdf">
+                        <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Upload Purchased Invoice <span style="font-size:11px;color:var(--gray-400);font-weight:normal;">(AI auto-fill on upload)</span></label>
+                        <input id="cr-invoice-file" type="file" class="form-control" accept="image/png,image/jpeg,application/pdf" onchange="app.scanInvoiceWithAI(this,'cr','cr')">
                         ${d.invoice_file ? `<div style="margin-top:6px;font-size:11px;color:var(--gray-500);"><i class="fas fa-paperclip"></i> Current: <a href="${d.invoice_file}" target="_blank" style="color:var(--primary);">${escapeHtml(d.invoice_file_name || 'view')}</a> <span style="color:var(--gray-400);">(choosing a new file will replace it)</span></div>` : ''}
                     </div>
 
@@ -40574,6 +40780,7 @@ JB 星期二到
         savePostMeetup,
         openMeetingOutcomeModal,
         saveMeetingOutcome,
+        scanInvoiceWithAI,
         openPostMeetupNotesModal,
         savePostMeetupNotes,
         editActivity,
