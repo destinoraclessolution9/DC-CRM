@@ -17054,7 +17054,9 @@ function _wireLoginBtn() {
 
             // Build WhatsApp modal — will be shown AFTER activity modal closes
             if (intakeRow?.prospect_phone) {
-                const phone   = intakeRow.prospect_phone.replace(/\D/g, '');
+                let phone = intakeRow.prospect_phone.replace(/\D/g, '');
+                if (phone.startsWith('0')) phone = '60' + phone.slice(1);
+                else if (!phone.startsWith('60') && phone.length <= 10) phone = '60' + phone;
                 const name    = intakeRow.prospect_name  || 'Pelanggan';
                 const date    = intakeRow.activity_date  || '';
                 const start   = (intakeRow.start_time    || '').slice(0, 5);
