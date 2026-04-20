@@ -15253,7 +15253,15 @@ function _wireLoginBtn() {
                 if (el && !el.value) { el.value = extras.join(' | '); highlight(el); }
             };
 
-            if (formContext === 'cr') {
+            if (formContext === 'pre2025') {
+                // prefix is the prospectId — fill the new-row inputs
+                setF(`pre2025-product-${prefix}`, extracted.product);
+                const noteParts = [];
+                if (extracted.amount) noteParts.push(`RM${extracted.amount}`);
+                if (extracted.sales_date) noteParts.push(extracted.sales_date);
+                if (extracted.invoice_number) noteParts.push(`Inv: ${extracted.invoice_number}`);
+                if (noteParts.length) setF(`pre2025-notes-${prefix}`, noteParts.join(' | '));
+            } else if (formContext === 'cr') {
                 setF('cr-full-name', extracted.full_name);
                 setF('cr-ic', extracted.ic_number);
                 setF('cr-phone', extracted.phone);
@@ -20465,10 +20473,10 @@ function _wireLoginBtn() {
                     <div style="padding:8px 10px;border-top:1px solid #e5e7eb;display:flex;gap:6px;align-items:center;">
                         <input id="pre2025-product-${pid}" class="form-control" style="flex:1;height:32px;font-size:12px;" placeholder="Product / Service">
                         <input id="pre2025-notes-${pid}" class="form-control" style="flex:1;height:32px;font-size:12px;" placeholder="Notes (optional)">
-                        <label for="pre2025-file-${pid}" title="Attach a file" style="cursor:pointer;height:32px;padding:0 10px;display:flex;align-items:center;border:1px solid #e5e7eb;border-radius:6px;background:#f9fafb;color:var(--gray-500);">
+                        <label for="pre2025-file-${pid}" title="Attach a file (AI will auto-read)" style="cursor:pointer;height:32px;padding:0 10px;display:flex;align-items:center;border:1px solid #e5e7eb;border-radius:6px;background:#f9fafb;color:var(--gray-500);">
                             <i class="fas fa-paperclip"></i>
                         </label>
-                        <input id="pre2025-file-${pid}" type="file" style="display:none" accept="image/*,application/pdf">
+                        <input id="pre2025-file-${pid}" type="file" style="display:none" accept="image/*,application/pdf" onchange="app.scanInvoiceWithAI(this,${pid},'pre2025')">
                         <button class="btn secondary btn-sm" onclick="event.stopPropagation();app.addPrePurchaseRow(${pid})" style="white-space:nowrap;height:32px;"><i class="fas fa-plus"></i> Add</button>
                     </div>
                 </div>`;
@@ -21030,10 +21038,10 @@ function _wireLoginBtn() {
                 <div style="padding:8px 10px;border-top:1px solid #e5e7eb;display:flex;gap:6px;align-items:center;">
                     <input id="pre2025-product-${pid}" class="form-control" style="flex:1;height:32px;font-size:12px;" placeholder="Product / Service">
                     <input id="pre2025-notes-${pid}" class="form-control" style="flex:1;height:32px;font-size:12px;" placeholder="Notes (optional)">
-                    <label for="pre2025-file-${pid}" title="Attach a file" style="cursor:pointer;height:32px;padding:0 10px;display:flex;align-items:center;border:1px solid #e5e7eb;border-radius:6px;background:#f9fafb;color:var(--gray-500);">
+                    <label for="pre2025-file-${pid}" title="Attach a file (AI will auto-read)" style="cursor:pointer;height:32px;padding:0 10px;display:flex;align-items:center;border:1px solid #e5e7eb;border-radius:6px;background:#f9fafb;color:var(--gray-500);">
                         <i class="fas fa-paperclip"></i>
                     </label>
-                    <input id="pre2025-file-${pid}" type="file" style="display:none" accept="image/*,application/pdf">
+                    <input id="pre2025-file-${pid}" type="file" style="display:none" accept="image/*,application/pdf" onchange="app.scanInvoiceWithAI(this,${pid},'pre2025')">
                     <button class="btn secondary btn-sm" onclick="event.stopPropagation();app.addPrePurchaseRow(${pid})" style="white-space:nowrap;height:32px;"><i class="fas fa-plus"></i> Add</button>
                 </div>
             </div>`;
@@ -21656,12 +21664,23 @@ NOTIFY pgrst, 'reload schema';`;
         let invoice_file = existingCr.invoice_file || null;
         let invoice_file_name = existingCr.invoice_file_name || null;
         if (file) {
-            invoice_file = await new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = e => resolve(e.target.result);
-                reader.onerror = () => reject(reader.error);
-                reader.readAsDataURL(file);
-            });
+            const sb = window.supabase || window.supabaseClient;
+            if (sb && sb.storage) {
+                const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+                const path = `invoices/${Date.now()}_${safeName}`;
+                const { error: upErr } = await sb.storage.from('attachments').upload(path, file, { upsert: false, contentType: file.type });
+                if (upErr) throw new Error('Invoice upload failed: ' + upErr.message);
+                const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
+                invoice_file = urlData?.publicUrl || null;
+            } else {
+                // Fallback to Base64 if storage unavailable
+                invoice_file = await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = e => resolve(e.target.result);
+                    reader.onerror = () => reject(reader.error);
+                    reader.readAsDataURL(file);
+                });
+            }
             invoice_file_name = file.name;
         }
 
@@ -21717,9 +21736,23 @@ NOTIFY pgrst, 'reload schema';`;
         };
 
         if (file) {
-            const reader = new FileReader();
-            reader.onload = async (e) => await saveRow(e.target.result, file.name);
-            reader.readAsDataURL(file);
+            const sb = window.supabase || window.supabaseClient;
+            if (sb && sb.storage) {
+                try {
+                    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+                    const path = `pre2025_purchases/${prospectId}_${Date.now()}_${safeName}`;
+                    const { error: upErr } = await sb.storage.from('attachments').upload(path, file, { upsert: false, contentType: file.type });
+                    if (upErr) throw upErr;
+                    const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
+                    await saveRow(urlData?.publicUrl || null, file.name);
+                } catch (err) {
+                    UI.toast.error('Attachment upload failed: ' + (err.message || 'Unknown error'));
+                }
+            } else {
+                const reader = new FileReader();
+                reader.onload = async (e) => await saveRow(e.target.result, file.name);
+                reader.readAsDataURL(file);
+            }
         } else {
             await saveRow(null, null);
         }
@@ -21728,8 +21761,8 @@ NOTIFY pgrst, 'reload schema';`;
     const addPrePurchaseAttachment = async (prospectId, index, fileInput) => {
         const file = fileInput?.files[0];
         if (!file) return;
-        const reader = new FileReader();
-        reader.onload = async (e) => {
+
+        const saveAttachment = async (attachmentData, attachmentName) => {
             const prospect = await AppDataStore.getById('prospects', prospectId);
             if (!prospect) return;
             let records = [];
@@ -21738,8 +21771,8 @@ NOTIFY pgrst, 'reload schema';`;
                 records = Array.isArray(src) ? [...src] : JSON.parse(src || '[]');
             } catch(_) {}
             if (records[index]) {
-                records[index].attachment_name = file.name;
-                records[index].attachment_data = e.target.result;
+                records[index].attachment_name = attachmentName;
+                records[index].attachment_data = attachmentData;
             }
             const cr = { ...(prospect.closing_record || {}), pre2025_purchases: records };
             await AppDataStore.update('prospects', prospectId, { closing_record: cr });
@@ -21748,7 +21781,24 @@ NOTIFY pgrst, 'reload schema';`;
             if (bodyEl) await switchProspectTab('closing', prospectId, null, bodyEl);
             await _refreshCustClosingAfterProspectSave(prospectId);
         };
-        reader.readAsDataURL(file);
+
+        const sb = window.supabase || window.supabaseClient;
+        if (sb && sb.storage) {
+            try {
+                const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+                const path = `pre2025_purchases/${prospectId}_${Date.now()}_${safeName}`;
+                const { error: upErr } = await sb.storage.from('attachments').upload(path, file, { upsert: false, contentType: file.type });
+                if (upErr) throw upErr;
+                const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
+                await saveAttachment(urlData?.publicUrl || null, file.name);
+            } catch (err) {
+                UI.toast.error('Attachment upload failed: ' + (err.message || 'Unknown error'));
+            }
+        } else {
+            const reader = new FileReader();
+            reader.onload = async (e) => await saveAttachment(e.target.result, file.name);
+            reader.readAsDataURL(file);
+        }
     };
 
     const deletePrePurchaseRecord = async (prospectId, index) => {
