@@ -1,6 +1,42 @@
 // Ensure app object exists globally - MUST BE FIRST LINE
 window.app = window.app || {};
 window.DataStore = window.AppDataStore; // Alias for backward compatibility
+
+// ==================== ON-DEMAND SCRIPT LOADER ====================
+// Loads a CDN script once and caches the promise so repeated calls are free.
+// Used to defer D3, Chart.js, ExcelJS, XLSX off the critical path (~1.5 MB).
+window._loadScriptOnce = window._loadScriptOnce || (() => {
+    const cache = new Map();
+    return (url) => {
+        if (cache.has(url)) return cache.get(url);
+        const p = new Promise((resolve, reject) => {
+            const s = document.createElement('script');
+            s.src = url;
+            s.async = true;
+            s.onload = () => resolve();
+            s.onerror = () => { cache.delete(url); reject(new Error(`Failed to load ${url}`)); };
+            document.head.appendChild(s);
+        });
+        cache.set(url, p);
+        return p;
+    };
+})();
+
+// Library-specific guards — each returns a promise that resolves once the
+// global symbol is available. Safe to await repeatedly.
+window._ensureChartJs = () => typeof Chart !== 'undefined'
+    ? Promise.resolve()
+    : window._loadScriptOnce('https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js');
+window._ensureD3 = () => typeof d3 !== 'undefined'
+    ? Promise.resolve()
+    : window._loadScriptOnce('https://cdn.jsdelivr.net/npm/d3@7');
+window._ensureExcelJs = () => typeof ExcelJS !== 'undefined'
+    ? Promise.resolve()
+    : window._loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js');
+window._ensureXlsx = () => typeof XLSX !== 'undefined'
+    ? Promise.resolve()
+    : window._loadScriptOnce('https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js');
+
 // Patch to prevent the "undefined .call" error and map missing .create to .add
 if (!window.AppDataStore._patched) {
     const originalCreate = window.AppDataStore.create || window.AppDataStore.add;
@@ -2641,13 +2677,21 @@ const appLogic = (() => {
     };
 
     const openShareModal = async (fileId) => {
-        const file = await AppDataStore.getById('documents', fileId);
-        const users = (await AppDataStore.getAll('users')).filter(u => u.id !== _currentUser?.id);
-        const shares = (await AppDataStore.getAll('document_shares')).filter(s => s.document_id === fileId);
-        const shareItems = await Promise.all(shares.map(async s => {
-            const user = await AppDataStore.getById('users', s.shared_with);
+        // Fetch everything we need in parallel. Previously this did 3 sequential
+        // awaits plus N getById('users', ...) inside the shares.map — now users
+        // are fetched once and re-used from a Map.
+        const [file, allUsers, allShares] = await Promise.all([
+            AppDataStore.getById('documents', fileId),
+            AppDataStore.getAll('users'),
+            AppDataStore.getAll('document_shares'),
+        ]);
+        const userMap = new Map((allUsers || []).map(u => [String(u.id), u]));
+        const users = (allUsers || []).filter(u => u.id !== _currentUser?.id);
+        const shares = (allShares || []).filter(s => s.document_id === fileId);
+        const shareItems = shares.map(s => {
+            const user = userMap.get(String(s.shared_with));
             return `<div class="share-item">${user?.full_name || 'Unknown'} (${s.permission}) <button onclick="app.removeShare(${s.id})">x</button></div>`;
-        }));
+        });
 
         const content = `
             <div class="share-modal">
@@ -7114,21 +7158,34 @@ function _wireLoginBtn() {
         document.getElementById('app-shell').style.display = 'block';
         updateUserDisplay();
         updateNavVisibility();
-        await expireOldOverrides();
 
-        // Initialize other modules
+        // Fire-and-forget the sync module initializers — they have no awaitable
+        // state the render path needs.
         initGoogleIntegration();
         initWhatsAppIntegration();
-        await initAIAnalytics();
+
+        // Run the two independent async preloads in parallel. Previously these
+        // ran sequentially in a waterfall (expire → initAIAnalytics), blocking
+        // navigateTo for ~2× the latency of either call.
+        const _preRenderWork = Promise.all([
+            expireOldOverrides().catch(e => console.warn('expireOldOverrides failed:', e)),
+            initAIAnalytics().catch(e => console.warn('initAIAnalytics failed:', e)),
+        ]);
 
         // L13 (Customer) and L14 (Referrer) land on 福德; everyone else on calendar
         const _initLevel = (() => {
             const m = (_currentUser?.role || '').match(/Level\s+(\d+)/i);
             return m ? parseInt(m[1]) : 0;
         })();
-        await navigateTo(_initLevel >= 13 ? 'fude' : 'calendar');
 
-        // Phase 14: Offline & mobile features
+        // Await pre-render work and kick off first render in parallel — both
+        // complete before we hand control back to the user.
+        await Promise.all([
+            _preRenderWork,
+            navigateTo(_initLevel >= 13 ? 'fude' : 'calendar'),
+        ]);
+
+        // Phase 14: Offline & mobile features (sync)
         initOfflineSupport();
         applyMobileClass();
 
@@ -7149,25 +7206,19 @@ function _wireLoginBtn() {
             }, 300);
         });
 
-        if (isMobile()) {
-            await renderMobileBottomNav();
-            initSwipeActions();
-            await initPullToRefresh();
-        }
-
-        if (typeof initMobileApp === 'function') {
-            await initMobileApp();
-        }
-
-        await ensureReferralFields();
-
-        // Phase 20: System Administration
-        if (typeof SystemHealth !== 'undefined' && typeof SystemHealth.init === 'function') {
-            await SystemHealth.init();
-        }
-        if (typeof ConfigManager !== 'undefined' && typeof ConfigManager.init === 'function') {
-            await ConfigManager.init();
-        }
+        // Fire all post-render init work in parallel as fire-and-forget — none
+        // of it blocks the user seeing the first screen. Each has its own
+        // error boundary so one failure can't cascade.
+        const _bgInit = [
+            (async () => { if (isMobile()) { await renderMobileBottomNav(); initSwipeActions(); await initPullToRefresh(); } })(),
+            (async () => { if (typeof initMobileApp === 'function') await initMobileApp(); })(),
+            ensureReferralFields(),
+            (async () => { if (typeof SystemHealth !== 'undefined' && typeof SystemHealth.init === 'function') await SystemHealth.init(); })(),
+            (async () => { if (typeof ConfigManager !== 'undefined' && typeof ConfigManager.init === 'function') await ConfigManager.init(); })(),
+            // Warm the XLSX cache for the import/export views so the first click feels snappy.
+            window._ensureXlsx().catch(() => {}),
+        ];
+        _bgInit.forEach(p => p && typeof p.catch === 'function' && p.catch(e => console.warn('bg init task failed:', e)));
 
         // Action Plan: schedule Monday reminders
         initActionPlanReminder();
@@ -9439,7 +9490,8 @@ function _wireLoginBtn() {
     const renderD3Tree = async (rootData) => {
         const container = document.getElementById('referral-tree-container');
         if (!container) return;
-        
+        await window._ensureD3();
+
         const svgElement = d3.select("#referral-tree-svg");
         svgElement.selectAll("*").remove();
         
@@ -17891,15 +17943,22 @@ function _wireLoginBtn() {
         const tbody = document.getElementById('approval-queue-body');
         if (!tbody) return;
 
-        const allEntries = await AppDataStore.getAll('approval_queue');
+        // Fetch all three tables in parallel. Previously these awaited
+        // sequentially and then the rendering loop did `await getAgentName()`
+        // per pending entry (one getById per row). Now we do 3 queries total.
+        const [allEntries, allProspects, allUsers] = await Promise.all([
+            AppDataStore.getAll('approval_queue'),
+            AppDataStore.getAll('prospects'),
+            AppDataStore.getAll('users'),
+        ]);
         // Hide stale info_update entries for prospects that were never converted
         // to customers — those should never have reached the queue (a previous
         // bug created them on every prospect edit). Approval gating only makes
         // sense once the prospect is a customer, so filter them out here too.
-        const allProspects = await AppDataStore.getAll('prospects');
         const convertedIds = new Set(
             (allProspects || []).filter(p => p?.status === 'converted').map(p => String(p.id))
         );
+        const userMap = new Map((allUsers || []).map(u => [String(u.id), u]));
         const pending = allEntries
             .filter(e => e.status === 'pending')
             .filter(e => e.approval_type !== 'info_update' || convertedIds.has(String(e.prospect_id)))
@@ -17915,7 +17974,7 @@ function _wireLoginBtn() {
 
         let html = '';
         for (const entry of pending) {
-            const agentName = await getAgentName(entry.submitted_by);
+            const agentName = userMap.get(String(entry.submitted_by))?.full_name || 'Unknown';
             const name = entry.snapshot_after?.full_name || '-';
             const typeConfig = {
                 new_customer: { label: 'New Customer', icon: 'fa-user-plus', bg: '#dbeafe', color: '#1e40af' },
@@ -18173,8 +18232,9 @@ function _wireLoginBtn() {
         await renderApprovalQueue();
     };
 
-    const _downloadSheet = (cols, rows, sheetName, filename, format) => {
+    const _downloadSheet = async (cols, rows, sheetName, filename, format) => {
         if (format === 'xlsx') {
+            await window._ensureXlsx();
             const ws = XLSX.utils.aoa_to_sheet([cols, ...rows]);
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, ws, sheetName);
@@ -18198,7 +18258,7 @@ function _wireLoginBtn() {
             if (!data.length) { UI.toast.error('No prospects to export'); return; }
             const cols = ['Full Name','Phone','Email','IC Number','Date of Birth','Occupation','Company','Income Range','Address','City','State','Postal Code','Ming Gua','Pipeline Stage','Deal Value (RM)','Score','Source','Status','Created At'];
             const rows = data.map(p => [p.full_name||'', p.phone||'', p.email||'', p.ic_number||'', p.date_of_birth||'', p.occupation||'', p.company_name||'', p.income_range||'', p.address||'', p.city||'', p.state||'', p.postal_code||'', p.ming_gua||'', p.pipeline_stage||'', p.deal_value||'', p.score||'', p.source||'', p.status||'', p.created_at?p.created_at.split('T')[0]:'']);
-            _downloadSheet(cols, rows, 'Prospects', filename, format);
+            await _downloadSheet(cols, rows, 'Prospects', filename, format);
             UI.toast.success(`Exported ${data.length} prospects`);
 
         } else if (type === 'prospects_activities') {
@@ -18210,6 +18270,7 @@ function _wireLoginBtn() {
             const prospectMap = Object.fromEntries(prospects.map(p => [p.id, p.full_name]));
             const aCols = ['Prospect Name','Date','Type','Title','Start Time','End Time','Status','Notes','Lead Agent ID'];
             const aRows = activities.map(a => [prospectMap[a.prospect_id]||'', a.activity_date||'', a.activity_type||'', a.activity_title||'', a.start_time||'', a.end_time||'', a.status||'', a.notes||'', a.lead_agent_id||'']);
+            await window._ensureXlsx();
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([pCols, ...pRows]), 'Prospects');
             XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([aCols, ...aRows]), 'Activities');
@@ -18221,7 +18282,7 @@ function _wireLoginBtn() {
             if (!data.length) { UI.toast.error('No customers to export'); return; }
             const cols = ['Full Name','Phone','Email','IC Number','Date of Birth','Address','City','State','Lifetime Value (RM)','Status','Customer Since','Created At'];
             const rows = data.map(c => [c.full_name||'', c.phone||'', c.email||'', c.ic_number||'', c.date_of_birth||'', c.address||'', c.city||'', c.state||'', c.lifetime_value||'', c.status||'', c.customer_since||'', c.created_at?c.created_at.split('T')[0]:'']);
-            _downloadSheet(cols, rows, 'Customers', filename, format);
+            await _downloadSheet(cols, rows, 'Customers', filename, format);
             UI.toast.success(`Exported ${data.length} customers`);
 
         } else if (type === 'agents') {
@@ -18230,7 +18291,7 @@ function _wireLoginBtn() {
             if (!data.length) { UI.toast.error('No agents to export'); return; }
             const cols = ['Full Name','Role','Agent Code','Phone','Email','IC Number','Team','Commission Rate (%)','License Start','License Expiry','Status','Join Date'];
             const rows = data.map(a => [a.full_name||'', a.role||'', a.agent_code||'', a.phone||'', a.email||'', a.ic_number||'', a.team||'', a.commission_rate||'', a.license_start||'', a.license_expiry||'', a.status||'', a.join_date||'']);
-            _downloadSheet(cols, rows, 'Agents', filename, format);
+            await _downloadSheet(cols, rows, 'Agents', filename, format);
             UI.toast.success(`Exported ${data.length} consultants/agents`);
 
         } else if (['products','events','promotions'].includes(type)) {
@@ -25022,23 +25083,23 @@ const renderCurrentAssignments = async (agentId) => {
             await wc.from('agent_targets').delete().eq('agent_id', agentId);
             await wc.from('agent_stats').delete().eq('agent_id', agentId);
             await AppDataStore.delete('users', agentId);
-            // Also remove from Supabase Auth via admin API
-            try {
-                if (agent?.email) {
-                    // Find auth user by email and delete
-                    const listResp = await fetch(`${window.SUPABASE_URL}/auth/v1/admin/users?email=${encodeURIComponent(agent.email)}`, {
-                        headers: { 'Authorization': `Bearer ${window.SUPABASE_SR}`, 'apikey': window.SUPABASE_SR }
+            // Remove from Supabase Auth via the `admin-auth-ops` Edge Function,
+            // which holds service_role as a server-side secret. If this step
+            // fails (e.g. function not deployed, caller not admin) the DB row
+            // is still gone — we just surface a warning so the admin can do a
+            // manual cleanup.
+            if (agent?.email) {
+                try {
+                    const { data: res, error } = await window.supabase.functions.invoke('admin-auth-ops', {
+                        body: { op: 'delete-auth-user', email: agent.email },
                     });
-                    const listData = await listResp.json();
-                    const authUser = listData?.users?.[0];
-                    if (authUser?.id) {
-                        await fetch(`${window.SUPABASE_URL}/auth/v1/admin/users/${authUser.id}`, {
-                            method: 'DELETE',
-                            headers: { 'Authorization': `Bearer ${window.SUPABASE_SR}`, 'apikey': window.SUPABASE_SR }
-                        });
+                    if (error || (res && res.ok === false)) {
+                        UI.toast.error('Agent deleted from CRM, but auth user cleanup failed: ' + (error?.message || res?.error || 'unknown'));
                     }
+                } catch (e) {
+                    UI.toast.error('Agent deleted from CRM, but auth user cleanup errored: ' + (e?.message || e));
                 }
-            } catch (_) {}
+            }
             UI.hideModal();
             UI.toast.success('Agent deleted successfully');
             await renderAgentsTable();
@@ -25113,15 +25174,24 @@ const deactivateAgent = async (agentId) => {
             async () => {
                 try {
                     await AppDataStore.update('users', agentId, { password: newPassword });
-                    try {
-                        if (agent.email && window.SUPABASE_SR) {
-                            await fetch(`${window.SUPABASE_URL}/auth/v1/admin/users/${agentId}`, {
-                                method: 'PUT',
-                                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window.SUPABASE_SR}`, 'apikey': window.SUPABASE_SR },
-                                body: JSON.stringify({ password: newPassword })
+                    // Update the Supabase Auth password via the admin-auth-ops
+                    // Edge Function. Without this, the DB's password column
+                    // changes but the actual login password does not — so
+                    // surface failures loudly rather than swallowing them.
+                    let authOk = false;
+                    if (agent.email) {
+                        try {
+                            const { data: res, error } = await window.supabase.functions.invoke('admin-auth-ops', {
+                                body: { op: 'reset-password', email: agent.email, new_password: newPassword },
                             });
+                            authOk = !error && res && res.ok !== false;
+                            if (!authOk) {
+                                UI.toast.error('Auth password update failed: ' + (error?.message || res?.error || 'unknown'));
+                            }
+                        } catch (e) {
+                            UI.toast.error('Auth password update errored: ' + (e?.message || e));
                         }
-                    } catch (_) {}
+                    }
                     UI.showModal('Password Reset', `
                         <p style="margin-bottom:12px;">New temporary password for <strong>${escapeHtml(agent.full_name)}</strong>:</p>
                         <div style="background:var(--gray-100);padding:12px 16px;border-radius:8px;font-family:monospace;font-size:18px;letter-spacing:2px;text-align:center;">${newPassword}</div>
@@ -26412,9 +26482,15 @@ const deactivateAgent = async (agentId) => {
     };
 
     const initActionPlanReminder = () => {
+        // Guard against duplicate intervals if init is called more than once.
+        if (window._actionPlanReminderInterval) return;
         // Only check once per day (not every hour) to reduce unnecessary DB load
         let _lastReminderDate = null;
-        setInterval(async () => {
+        let _reminderInFlight = false;
+        window._actionPlanReminderInterval = setInterval(async () => {
+            if (_reminderInFlight) return; // skip tick if previous run still pending
+            _reminderInFlight = true;
+            try {
             const now = new Date();
             const todayStr = now.toISOString().slice(0,10);
             // Skip if already ran today or not Monday
@@ -26440,6 +26516,9 @@ const deactivateAgent = async (agentId) => {
                     }
                 }
             } catch(e) { /* silent — offline or no data */ }
+            } finally {
+                _reminderInFlight = false;
+            }
         }, 4 * 60 * 60 * 1000); // check every 4 hours instead of every hour
     };
 
@@ -29065,6 +29144,7 @@ const renderAgentLeaderboard = async () => {
     const renderRevenueChart = async (filter, range) => {
         const ctx = document.getElementById('revenue-trend-chart');
         if (!ctx) return;
+        await window._ensureChartJs();
 
         if (_revenueChart) _revenueChart.destroy();
 
@@ -32877,6 +32957,7 @@ const simulateCampaignSending = async (campaignId) => {
     };
 
     const initMarketingCharts = async () => {
+        await window._ensureChartJs();
         const campaigns = (await AppDataStore.getAll('whatsapp_campaigns')).filter(c => c.status === 'completed' || c.status === 'active').slice(-5);
 
         // Message Volume Chart
@@ -33780,6 +33861,7 @@ const simulateCampaignSending = async (campaignId) => {
                 const parsed = Papa.parse(result, { header: false, skipEmptyLines: true });
                 allRows = parsed.data;
             } else {
+                await window._ensureXlsx();
                 const workbook = XLSX.read(result, { type: 'array' });
                 const sheet = workbook.Sheets[workbook.SheetNames[0]];
                 allRows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
@@ -34151,7 +34233,8 @@ const simulateCampaignSending = async (campaignId) => {
         UI.showModal('Download Import Templates', content, [{ label: 'Close', type: 'primary', action: 'UI.hideModal()' }]);
     };
 
-    const downloadTemplate = (type, format) => {
+    const downloadTemplate = async (type, format) => {
+        if (format === 'xlsx') await window._ensureXlsx();
         const headers = {
             prospects: ['Title','Full Name','Gender','Nationality','Phone','Email','IC Number','Date of Birth','Lunar Birth','Occupation','Company Name','Income Range','Address','City','State','Postal Code','Ming Gua','Referred By','Referral Relationship','Pipeline Stage','Expected Close Date','Deal Value (RM)'],
             customers: ['Full Name','Phone','Email','IC Number','Customer Since','Lifetime Value'],
@@ -34203,6 +34286,7 @@ const simulateCampaignSending = async (campaignId) => {
         }
         const filename = `${type}_export_${new Date().toISOString().split('T')[0]}`;
         if (format === 'xlsx') {
+            await window._ensureXlsx();
             const ws = XLSX.utils.aoa_to_sheet([cols, ...rows]);
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, ws, type);
@@ -34359,12 +34443,20 @@ const simulateCampaignSending = async (campaignId) => {
     };
 
     const renderReassignmentHistory = async () => {
-        const history = (await AppDataStore.getAll('reassignment_history')).sort((a, b) => new Date(b.reassignment_date) - new Date(a.reassignment_date));
+        // Fetch history + users in parallel, build a user map once. Previously
+        // this fired 3 * history.length getById calls — 300 roundtrips on a
+        // 100-row history. Now it's 2 queries total.
+        const [historyRaw, allUsers] = await Promise.all([
+            AppDataStore.getAll('reassignment_history'),
+            AppDataStore.getAll('users'),
+        ]);
+        const history = (historyRaw || []).sort((a, b) => new Date(b.reassignment_date) - new Date(a.reassignment_date));
         if (history.length === 0) return '<p style="padding:16px;color:var(--gray-500)">No reassignment history yet.</p>';
-        const getAgentNameById = async (id) => { const u = await AppDataStore.getById('users', id); return u?.full_name || `Agent #${id}`; };
-        
-        const rows = await Promise.all(history.map(async r => `<tr><td>${UI.formatDate(r.reassignment_date)}</td><td>#${r.prospect_id}</td><td>${await getAgentNameById(r.from_agent_id)}</td><td>${await getAgentNameById(r.to_agent_id)}</td><td>${r.reassignment_reason}</td><td>${await getAgentNameById(r.reassigned_by)}</td></tr>`));
-        
+        const userMap = new Map((allUsers || []).map(u => [String(u.id), u]));
+        const nameOf = (id) => userMap.get(String(id))?.full_name || `Agent #${id}`;
+
+        const rows = history.map(r => `<tr><td>${UI.formatDate(r.reassignment_date)}</td><td>#${r.prospect_id}</td><td>${nameOf(r.from_agent_id)}</td><td>${nameOf(r.to_agent_id)}</td><td>${r.reassignment_reason}</td><td>${nameOf(r.reassigned_by)}</td></tr>`);
+
         return `<table class="agent-performance-table"><thead><tr><th>Date</th><th>Prospect ID</th><th>From Agent</th><th>To Agent</th><th>Reason</th><th>By</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
     };
 
@@ -37663,6 +37755,7 @@ const initImportDemoData = async () => {
     };
 
     const eggParseXlsx = async (file) => {
+        await window._ensureXlsx();
         const buf = await eggReadFile(file);
         const wb = XLSX.read(buf, { type: 'array', cellDates: true });
         const sheet = wb.Sheets[wb.SheetNames[0]];
@@ -38615,8 +38708,9 @@ JB 星期二到
     // table (PG Wholesale → PG Online → KL Wholesale → KL Online), with a
     // section-header row + totals row between each group so it prints cleanly.
     // Pushed-up rows are already excluded from `keep`, matching the note in the UI.
-    const eggDownloadChannelBreakdownXlsx = () => {
+    const eggDownloadChannelBreakdownXlsx = async () => {
         try {
+            await window._ensureXlsx();
             const keep = (_eggState.newRows || []).filter(r => !_eggState.excludedKeys.has(r.unique_key));
             const headerCols = ['Section', 'Agent', 'Order Date', 'Order No', 'Product', 'Qty'];
             const aoa = [headerCols];
@@ -39883,8 +39977,10 @@ JB 星期二到
 
     // ---------- PO Excel Export (template fill via ExcelJS) ----------
     const fpExportPoExcel = async (poId) => {
-        if (typeof ExcelJS === 'undefined') {
-            UI.toast.error('ExcelJS library not loaded');
+        try {
+            await window._ensureExcelJs();
+        } catch (e) {
+            UI.toast.error('Could not load ExcelJS library');
             return;
         }
         const po = _fpState.purchaseOrders.find(p => p.id === poId);
@@ -40511,7 +40607,7 @@ JB 星期二到
         inp.type = 'file'; inp.accept = '.xlsx,.xls';
         inp.onchange = async (e) => {
             const file = e.target.files[0]; if (!file) return;
-            if (typeof XLSX === 'undefined') { UI.toast.error('XLSX library missing'); return; }
+            try { await window._ensureXlsx(); } catch { UI.toast.error('XLSX library failed to load'); return; }
             UI.toast.info('Reading file...');
             const buf = await file.arrayBuffer();
             const wb = XLSX.read(buf, { type: 'array' });
@@ -40639,7 +40735,7 @@ JB 星期二到
         inp.type = 'file'; inp.accept = '.xlsx,.xls';
         inp.onchange = async (e) => {
             const file = e.target.files[0]; if (!file) return;
-            if (typeof XLSX === 'undefined') { UI.toast.error('XLSX library missing'); return; }
+            try { await window._ensureXlsx(); } catch { UI.toast.error('XLSX library failed to load'); return; }
             UI.toast.info('Reading sales file...');
             const buf = await file.arrayBuffer();
             const wb = XLSX.read(buf, { type: 'array' });
@@ -41952,6 +42048,8 @@ const checkExpiredConsents = async () => {
 
 const scheduleRetentionJobs = async () => {
     if (typeof RetentionPolicy === 'undefined') return;
+    // Guard against stacking multiple daily intervals on re-init.
+    if (window._retentionInterval) return;
     const runRetention = async () => {
         let lastRun = null;
         try {
@@ -41976,7 +42074,7 @@ const scheduleRetentionJobs = async () => {
         }
     };
     await runRetention();
-    setInterval(runRetention, 24 * 60 * 60 * 1000);
+    window._retentionInterval = setInterval(runRetention, 24 * 60 * 60 * 1000);
 };
 
 const showSecurityDashboard = async () => {
@@ -42388,9 +42486,11 @@ const showPerformanceMonitor = async () => {
     if (view) {
         view.innerHTML = content;
         // Mock chart
-        setTimeout(() => {
+        setTimeout(async () => {
             const ctx = document.getElementById('performanceChart');
-            if (ctx && window.Chart) {
+            if (!ctx) return;
+            await window._ensureChartJs();
+            if (window.Chart) {
                 new Chart(ctx, {
                     type: 'line',
                     data: {

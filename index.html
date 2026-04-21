@@ -229,42 +229,60 @@
 
 
 <script>
-    // ⚠️  CRITICAL SECURITY TODO — SERVICE-ROLE KEY EXPOSED IN CLIENT CODE ⚠️
-    // `window.SUPABASE_SR` is the Supabase *service_role* JWT. Anyone who loads
-    // this HTML can read/write/delete every row in every table, bypassing RLS.
-    // This MUST be migrated to a backend proxy (edge function / server) that
-    // signs requests server-side. Until then, rotate the key in the Supabase
-    // dashboard IMMEDIATELY if this file has ever been served publicly.
+    // ──────────────────────────────────────────────────────────────────────
+    // Supabase client init (anon key + user auth session).
     //
-    // Interim mitigations:
-    //   1. Enable Row Level Security on every table in Supabase.
-    //   2. Write RLS policies that rely on `auth.uid()` and user role claims.
-    //   3. Switch `data.js` and all `fetch` calls to use the anon key below and
-    //      `supabase.auth.getSession()` instead of `SUPABASE_SR`.
-    //   4. Delete the `SUPABASE_SR` assignment once the migration is done.
+    // Security note (2026-04-21): the previous build embedded the
+    // `service_role` JWT in `window.SUPABASE_SR` so the client could bypass
+    // RLS. That key has been removed here; all queries now go through the
+    // anon key and the user's Supabase auth session. Row Level Security is
+    // enabled on every public table with an `authenticated` policy
+    // (`auth_full_access`) so logged-in users retain full read/write access
+    // to the CRM's shared data, while unauthenticated visitors only see the
+    // tables that explicitly grant `anon` access (surveys, lead forms,
+    // bookings, etc.).
+    //
+    // IMPORTANT: the old service_role key is now stale in the codebase but
+    // may still be valid on the Supabase project. Rotate it in the dashboard
+    // (Project Settings → API → "Reset service_role key") if this HTML was
+    // ever served publicly, so the exposed key can't be reused.
+    // ──────────────────────────────────────────────────────────────────────
     window.SUPABASE_URL = 'https://remuwhxvzkzjtgbzqjaa.supabase.co';
-    window.SUPABASE_SR  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJlbXV3aHh2emt6anRnYnpxamFhIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NDM2NzMwMywiZXhwIjoyMDg5OTQzMzAzfQ.ZLTYpmvxnpLVZGbPvMtd6Kk6TO9hmRuFyHLt1NJ14ec';
-    // Save the factory BEFORE replacing it so DataStore can create a service-role client.
+    // Keep the factory reference so push-notifications.js and other
+    // initialisers that need a second client (e.g. for a different auth
+    // scope) can still call `createClient`.
     window._supabaseFactory = window.supabase;
+    // Using the new-format publishable key (sb_publishable_*). The legacy
+    // anon/service_role JWTs have been disabled on this project as of
+    // 2026-04-21, so the old exposed service_role token is now inert.
     window.supabase = window.supabase.createClient(
         window.SUPABASE_URL,
-        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJlbXV3aHh2emt6anRnYnpxamFhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQzNjczMDMsImV4cCI6MjA4OTk0MzMwM30.L8yISXnOd1CxzyAbRyFLQXIYviyBrxQC_J19egNtUbs'
+        'sb_publishable_XVWyiw5j1lnEErQUTV4XWg_lQcCIAjX'
     );
 </script>
 
-    <!-- All local + CDN scripts deferred — browser parses HTML first, then executes in order -->
+    <!-- Critical scripts loaded eagerly (needed on login screen + app shell) -->
     <script defer src="lunar-calendar.min.js"></script>
-    <script defer src="https://cdn.jsdelivr.net/npm/d3@7"></script>
-    <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
-    <script defer src="data.js?v=20260419a"></script>
+    <script defer src="data.js?v=20260421b"></script>
     <script defer src="auth.js"></script>
     <script defer src="ui.js"></script>
-    <script defer src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
-    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
     <script defer src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
-    <script defer src="script.js?v=20260419a"></script>
+    <script defer src="script.js?v=20260421b"></script>
+
+    <!--
+      The following libraries are loaded on-demand via window._loadScriptOnce()
+      (see script.js) only when their features are used. This removes ~1.5 MB
+      of eager parse/exec on the login/calendar screens:
+        - d3@7                             → referral tree view
+        - chart.js@4.4.0                   → reports / dashboard charts
+        - exceljs@4.4.0                    → PO Excel export
+        - xlsx (sheetjs)                   → import/export views
+        - jspdf + jspdf-autotable          → (removed — no call sites in script.js)
+    -->
+    <!-- Preconnect so on-demand loads are faster when triggered -->
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+    <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
+    <link rel="preconnect" href="https://cdn.sheetjs.com" crossorigin>
 
 <!-- Properly commented out scripts -->
     <!-- <script src="offline-storage.js"></script> -->

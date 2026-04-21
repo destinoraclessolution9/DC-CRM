@@ -58,7 +58,10 @@ class DataStore {
         ];
         this.initialized = false;
         this._events = {};
-        this._srClient = null; // Service-role client (bypasses RLS for writes)
+        // NOTE: _srClient removed 2026-04-21. RLS is now enabled on every public
+        // table with an `authenticated` policy granting full access, so the anon
+        // client (with a live auth session) works for all queries. The
+        // service-role key is no longer sent to the browser.
 
         // ── In-memory cache ──────────────────────────────────────────────
         // Keyed by tableName → { data: [], ts: Date.now() }
@@ -143,22 +146,10 @@ class DataStore {
             if (!window.supabase) {
                 throw new Error('Supabase client not found.');
             }
-            // Build a service-role client for write operations (bypasses RLS).
-            // Falls back to the regular client if SUPABASE_SR is not set.
-            if (window.SUPABASE_URL && window.SUPABASE_SR && typeof window.supabase.constructor === 'function') {
-                try {
-                    // The global supabase object exposed by the CDN script is the factory namespace.
-                    // After supabase-client.js runs, window.supabase is already the *client* instance,
-                    // but the factory is gone.  We recreate it from the CDN global if available.
-                    const factory = window._supabaseFactory || window.supabase;
-                    if (typeof factory.createClient === 'function') {
-                        this._srClient = factory.createClient(window.SUPABASE_URL, window.SUPABASE_SR, {
-                            auth: { persistSession: false, autoRefreshToken: false, storageKey: 'sb-sr-auth-token' }
-                        });
-                        console.log('DataStore: service-role client initialised (RLS bypassed for writes).');
-                    }
-                } catch (_) {}
-            }
+            // Service-role client creation removed — RLS is now the source of
+            // authorisation. All queries go through window.supabase (anon key +
+            // auth session JWT). See the RLS migration note in index.html for
+            // the policy setup.
 
             const { error } = await window.supabase.from('users').select('*').limit(1);
             if (error) throw error;
@@ -181,28 +172,14 @@ class DataStore {
         }
     }
 
-    // Returns the service-role client if available, otherwise anon.
-    // Used for both reads and writes so Supabase RLS never blocks shared CRM data.
-    _writeClient() {
-        return this._srClient || window.supabase;
-    }
-
-    _readClient() {
-        // If _srClient already created, use it
-        if (this._srClient) return this._srClient;
-        // Try to build service-role client on the fly (bypasses RLS)
-        try {
-            const factory = window._supabaseFactory;
-            if (factory && typeof factory.createClient === 'function' && window.SUPABASE_URL && window.SUPABASE_SR) {
-                this._srClient = factory.createClient(window.SUPABASE_URL, window.SUPABASE_SR, {
-                    auth: { persistSession: false, autoRefreshToken: false }
-                });
-                return this._srClient;
-            }
-        } catch (_) {}
-        // Last resort: anon client (subject to RLS)
-        return window.supabase;
-    }
+    // All reads and writes go through the anon client now that RLS policies
+    // are in place. The auth session JWT is automatically attached by
+    // supabase-js, so `authenticated` policies see auth.uid() and auth.role()
+    // as expected. These methods stay as shims so the rest of the file doesn't
+    // have to change when we later introduce a different read/write client
+    // (e.g. a service-side proxy).
+    _writeClient() { return window.supabase; }
+    _readClient()  { return window.supabase; }
 
     _generateId() {
         return Date.now() + Math.floor(Math.random() * 1000);
@@ -448,6 +425,13 @@ class DataStore {
                 ({ data, error } = await this._readClient().from(tableName).select('*'));
             }
             if (error) throw error;
+            // Supabase caps getAll() implicitly at 1000 rows per request. If we
+            // ever hit that cap, some rows are being silently dropped — warn so
+            // the caller knows to migrate to queryAdvanced() with explicit
+            // pagination.
+            if (Array.isArray(data) && data.length === 1000) {
+                console.warn(`[DataStore] getAll('${tableName}') returned exactly 1000 rows — may be truncated by Supabase default limit. Consider queryAdvanced() with pagination.`);
+            }
             // Filter out tombstoned records before caching — prevents deleted items reappearing
             const tombstoneRaw = localStorage.getItem('fs_crm_tombstones');
             const tombstones = tombstoneRaw ? JSON.parse(tombstoneRaw) : {};
@@ -514,26 +498,10 @@ class DataStore {
             const tombstones = tombstoneRaw ? JSON.parse(tombstoneRaw) : {};
             const deletedIds = new Set(tombstones[tableName] || []);
             const stripDeleted = (rows) => rows.filter(r => !deletedIds.has(String(r.id)));
-            // Before localStorage fallback, try direct REST fetch with service-role key
-            // (bypasses RLS that may block non-admin users via the Supabase client).
-            // Use the light-select clause here too so we don't re-download 10 MB
-            // of cps_form_data via the fallback path.
-            if (window.SUPABASE_URL && window.SUPABASE_SR) {
-                try {
-                    const selectParam = encodeURIComponent(this._selectClauseForGetAll(tableName));
-                    const resp = await fetch(`${window.SUPABASE_URL}/rest/v1/${encodeURIComponent(tableName)}?select=${selectParam}`, {
-                        headers: { 'Authorization': `Bearer ${window.SUPABASE_SR}`, 'apikey': window.SUPABASE_SR }
-                    });
-                    if (resp.ok) {
-                        const data = await resp.json();
-                        if (data && data.length > 0) {
-                            const cleaned = stripDeleted(data);
-                            try { localStorage.setItem(`fs_crm_${tableName}`, JSON.stringify(cleaned)); } catch (_) {}
-                            return cleaned;
-                        }
-                    }
-                } catch (_) {}
-            }
+            // Service-role REST fallback removed. The primary Supabase client
+            // already carries the anon key + auth session JWT, and RLS policies
+            // are set up so authenticated users can read. Fall straight to the
+            // offline localStorage cache if the primary fetch failed.
             const local = localStorage.getItem(`fs_crm_${tableName}`);
             return local ? stripDeleted(JSON.parse(local)) : [];
         }
@@ -722,19 +690,8 @@ class DataStore {
             }
             return null;
         } catch (e) {
-            // Try direct REST fetch with service-role key before localStorage fallback
-            if (window.SUPABASE_URL && window.SUPABASE_SR) {
-                try {
-                    const resp = await fetch(`${window.SUPABASE_URL}/rest/v1/${encodeURIComponent(tableName)}?select=*&id=eq.${encodeURIComponent(id)}`, {
-                        headers: { 'Authorization': `Bearer ${window.SUPABASE_SR}`, 'apikey': window.SUPABASE_SR, 'Accept': 'application/vnd.pgrst.object+json' }
-                    });
-                    if (resp.ok) {
-                        const data = await resp.json();
-                        if (data && data.id) return data;
-                    }
-                } catch (_) {}
-            }
-            // Offline — search localStorage
+            // Service-role REST fallback removed — rely on localStorage cache
+            // if the primary Supabase query fails.
             const local = localStorage.getItem(`fs_crm_${tableName}`);
             if (local) {
                 const records = JSON.parse(local);
@@ -758,17 +715,6 @@ class DataStore {
             if (error) throw error;
             return data || null;
         } catch (e) {
-            if (window.SUPABASE_URL && window.SUPABASE_SR) {
-                try {
-                    const resp = await fetch(`${window.SUPABASE_URL}/rest/v1/${encodeURIComponent(tableName)}?select=*&id=eq.${encodeURIComponent(id)}`, {
-                        headers: { 'Authorization': `Bearer ${window.SUPABASE_SR}`, 'apikey': window.SUPABASE_SR, 'Accept': 'application/vnd.pgrst.object+json' }
-                    });
-                    if (resp.ok) {
-                        const data = await resp.json();
-                        if (data && data.id) return data;
-                    }
-                } catch (_) {}
-            }
             return null;
         }
     }
@@ -1058,22 +1004,7 @@ class DataStore {
             return data || [];
         } catch (e) {
             console.warn(`Offline: falling back for ${tableName} query`, e);
-            // Try direct REST fetch with service-role key before localStorage fallback
-            if (window.SUPABASE_URL && window.SUPABASE_SR) {
-                try {
-                    const params = new URLSearchParams({ select: '*' });
-                    for (const [key, value] of Object.entries(filters)) {
-                        if (value != null && value !== 'null' && value !== 'undefined') params.append(key, `eq.${value}`);
-                    }
-                    const resp = await fetch(`${window.SUPABASE_URL}/rest/v1/${encodeURIComponent(tableName)}?${params}`, {
-                        headers: { 'Authorization': `Bearer ${window.SUPABASE_SR}`, 'apikey': window.SUPABASE_SR }
-                    });
-                    if (resp.ok) {
-                        const data = await resp.json();
-                        if (data) return data;
-                    }
-                } catch (_) {}
-            }
+            // Service-role REST fallback removed — rely on localStorage cache.
             const local = localStorage.getItem(`fs_crm_${tableName}`);
             const all = local ? JSON.parse(local) : [];
             return all.filter(row => Object.entries(filters).every(([k, v]) => row[k] == v));

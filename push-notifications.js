@@ -34,12 +34,8 @@
             _writeClient = window.AppDataStore._writeClient();
             if (_writeClient) return _writeClient;
         }
-        // Fallback: create a service-role client directly
-        if (window._supabaseFactory && window.SUPABASE_URL && window.SUPABASE_SR) {
-            _writeClient = window._supabaseFactory.createClient(window.SUPABASE_URL, window.SUPABASE_SR);
-            return _writeClient;
-        }
-        // Last resort: anon client (will fail if RLS is enabled)
+        // Service-role fallback removed — anon client + auth session JWT is the
+        // supported path now that RLS policies grant `authenticated` full access.
         return (window.supabase && window.supabase.from) ? window.supabase : null;
     };
 
@@ -101,25 +97,16 @@
             last_seen_at: new Date().toISOString(),
         };
 
-        // Use direct PostgREST REST call (same pattern as the rest of the app).
-        const baseUrl = window.SUPABASE_URL;
-        const sr = window.SUPABASE_SR;
-        if (!baseUrl || !sr) throw new Error('no_supabase');
-
-        const resp = await fetch(`${baseUrl}/rest/v1/push_subscriptions`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'apikey': sr,
-                'Authorization': `Bearer ${sr}`,
-                'Prefer': 'resolution=merge-duplicates',
-            },
-            body: JSON.stringify(row),
-        });
-        if (!resp.ok) {
-            const errText = await resp.text().catch(() => resp.status);
-            console.error('[Push] DB upsert failed:', errText);
-            throw new Error('db_save_failed: ' + errText);
+        // Upsert via the Supabase JS client so the auth session JWT is attached
+        // automatically. RLS `authenticated` policy allows the insert.
+        const sb = getWriteClient();
+        if (!sb) throw new Error('no_supabase');
+        const { error } = await sb
+            .from('push_subscriptions')
+            .upsert(row, { onConflict: 'endpoint' });
+        if (error) {
+            console.error('[Push] DB upsert failed:', error.message);
+            throw new Error('db_save_failed: ' + error.message);
         }
 
         try { localStorage.setItem('push_enabled', '1'); } catch (_) {}
@@ -150,9 +137,16 @@
         if (!Array.isArray(targetUserIds) || targetUserIds.length === 0) return { ok: true, sent: 0 };
         try {
             const sb = getWriteClient();
-            // Use the ANON or service-role JWT that's already embedded in index.html.
-            // In production, should use the user's access token via supabase.auth.getSession()
-            const authKey = (sb && sb.supabaseKey) || window.SUPABASE_SR || '';
+            // Prefer the live user access token so the Edge Function can see
+            // `auth.uid()`. Fall back to the anon key (still a valid JWT for
+            // invoking Functions). Service-role is no longer sent to the
+            // browser.
+            let authKey = '';
+            try {
+                const { data: { session } } = await window.supabase.auth.getSession();
+                if (session && session.access_token) authKey = session.access_token;
+            } catch (_) {}
+            if (!authKey && sb && sb.supabaseKey) authKey = sb.supabaseKey;
             const res = await fetch(
                 `${window.SUPABASE_URL}/functions/v1/send-activity-push`,
                 {
