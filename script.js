@@ -25136,6 +25136,21 @@ const deactivateAgent = async (agentId) => {
 
     const assignProspectToAgent = async (prospectId, agentId) => {
         await AppDataStore.update('prospects', prospectId, { responsible_agent_id: agentId });
+
+        // Cascade agent change to all purchases and activities linked to this prospect
+        const [allPurchases, allActivities] = await Promise.all([
+            AppDataStore.getAll('purchases'),
+            AppDataStore.getAll('activities')
+        ]);
+        await Promise.all([
+            ...allPurchases
+                .filter(p => String(p.customer_id) === String(prospectId))
+                .map(p => AppDataStore.update('purchases', p.id, { agent_id: agentId })),
+            ...allActivities
+                .filter(a => String(a.prospect_id) === String(prospectId))
+                .map(a => AppDataStore.update('activities', a.id, { lead_agent_id: agentId }))
+        ]);
+
         UI.toast.success('Prospect reassigned');
         await app.showProspectDetail(prospectId);
     };
