@@ -28337,7 +28337,7 @@ const getNewCustomers = async (from, to) => {
 };
 
 const AGENT_MEETING_TYPES = ['EVENT', 'AGENT_MEETING'];
-const CLIENT_MEETING_TYPES = ['CPS', 'FTF', 'FSA'];
+const CLIENT_MEETING_TYPES = ['FTF', 'FSA'];
 
 const getTotalMeetings = async (from, to) => {
     const needUsers = _currentRoleFilter !== 'All' || _visibleUserIds !== 'all';
