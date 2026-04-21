@@ -39594,8 +39594,11 @@ JB 星期二到
                                 <div style="padding:8px 14px;cursor:pointer;border-bottom:1px solid var(--gray-100);" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background=''" onclick="app.fpImportStock()">
                                     <i class="fas fa-boxes" style="width:18px;color:#0ea5e9;"></i> Stock Snapshot
                                 </div>
-                                <div style="padding:8px 14px;cursor:pointer;" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background=''" onclick="app.fpImportPos()">
+                                <div style="padding:8px 14px;cursor:pointer;border-bottom:1px solid var(--gray-100);" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background=''" onclick="app.fpImportPos()">
                                     <i class="fas fa-cash-register" style="width:18px;color:#10b981;"></i> POS Sales History
+                                </div>
+                                <div style="padding:8px 14px;cursor:pointer;" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background=''" onclick="app.fpImportDelisted()">
+                                    <i class="fas fa-ban" style="width:18px;color:#dc2626;"></i> Delisted SKUs
                                 </div>
                             </div>
                         </div>
@@ -40617,30 +40620,38 @@ JB 星期二到
             const ACTIVE = new Set(['Puchong warehouse','001 Retail Puchong','002 Retail Bay Avenue','003 Retail Pavilion 2','Factory OEM']);
             const NAME_RE = new RegExp('\\b(' + FP_NAME_EXCLUDES.join('|') + ')\\b', 'i');
             let kept = 0, drops = { inactive_loc: 0, zero_zero: 0, excluded_code: 0, bad_name: 0, custom_excl: 0 };
-            const sample = { kept: [], drops: [] };
+            const droppedRows = [];
 
             for (const row of rows) {
                 const loc   = (row.Location || row.location || '').trim();
                 const code  = (row['Product Code'] || row.code || '').toString().trim();
                 const name  = (row['Product Name'] || '').toString();
+                const attr  = (row['Product Attribute'] || '').toString();
                 const phys  = parseInt(row['Physical Stock']) || 0;
                 let pos     = row['POS Completed']; pos = parseInt(pos) || 0; pos = Math.abs(pos);
 
-                if (!ACTIVE.has(loc))    { drops.inactive_loc++; continue; }
-                if (phys === 0 && pos === 0) { drops.zero_zero++; continue; }
+                const pushDrop = (reason) => droppedRows.push({
+                    Location: loc, 'Product Code': code, 'Product Name': name,
+                    'Product Attribute': attr, 'Physical Stock': phys, 'POS Completed': pos,
+                    'Drop Reason': reason,
+                });
+
+                if (!ACTIVE.has(loc))    { drops.inactive_loc++;  pushDrop('Inactive location'); continue; }
+                if (phys === 0 && pos === 0) { drops.zero_zero++; pushDrop('Zero stock + zero sales'); continue; }
                 const codeUp = code.toUpperCase();
                 const inKeep = FP_KEEP_TOKENS.some(t => codeUp.includes(t));
                 if (!inKeep) {
-                    if (FP_EXCLUDE_TOKENS.some(t => codeUp.includes(t))) { drops.excluded_code++; continue; }
-                    if (NAME_RE.test(name))                              { drops.bad_name++; continue; }
+                    if (FP_EXCLUDE_TOKENS.some(t => codeUp.includes(t))) { drops.excluded_code++; pushDrop('Excluded code token'); continue; }
+                    if (NAME_RE.test(name))                              { drops.bad_name++;      pushDrop('Bad name (dummy/test/promotion)'); continue; }
                 }
-                if (fpIsExcluded(code)) { drops.custom_excl++; continue; }
+                if (fpIsExcluded(code)) { drops.custom_excl++; pushDrop('Matched custom exclusion (delisted)'); continue; }
                 kept++;
-                if (sample.kept.length < 5) sample.kept.push({ loc, code, name: name.slice(0, 30), phys });
-                if (sample.drops.length < 5 && drops.inactive_loc < 1) sample.drops.push({ loc, code, name: name.slice(0, 30), phys });
             }
 
             const dropTotal = Object.values(drops).reduce((a, b) => a + b, 0);
+            _fpState._pendingStockRows = rows;
+            _fpState._pendingDroppedStockRows = droppedRows;
+
             const summary = `
                 <div style="font-size:14px;">
                     <div style="display:flex;gap:12px;margin-bottom:14px;">
@@ -40661,17 +40672,33 @@ JB 星期二到
                         Bad name (dummy/test/promotion): ${drops.bad_name}<br>
                         Matched custom exclusion: ${drops.custom_excl}
                     </div>
+                    ${dropTotal ? `
+                        <button class="btn secondary" onclick="app.fpDownloadDroppedStockRows()" style="width:100%;margin-top:12px;">
+                            <i class="fas fa-file-excel"></i> Download ${dropTotal} Dropped Row(s) as Excel
+                        </button>
+                    ` : ''}
                     <p style="margin:14px 0 0;font-size:13px;">Proceed with import? This will upsert ${kept} stock rows.</p>
                 </div>
             `;
 
-            _fpState._pendingStockRows = rows;
             UI.showModal('Stock Import Preview', summary, [
                 { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
                 { label: `Commit ${kept}`, type: 'primary', action: '(async () => { await app.fpCommitStockImport(); })()' },
             ]);
         };
         inp.click();
+    };
+
+    const fpDownloadDroppedStockRows = async () => {
+        const rows = _fpState._pendingDroppedStockRows;
+        if (!rows || !rows.length) { UI.toast.error('No dropped rows to download'); return; }
+        try { await window._ensureXlsx(); } catch { UI.toast.error('XLSX library failed to load'); return; }
+        const ws = XLSX.utils.json_to_sheet(rows);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Dropped Rows');
+        const date = new Date().toISOString().slice(0, 10);
+        XLSX.writeFile(wb, `fp_dropped_stock_${date}.xlsx`);
+        UI.toast.success(`Exported ${rows.length} dropped row(s)`);
     };
 
     const fpCommitStockImport = async () => {
@@ -40759,26 +40786,37 @@ JB 星期二到
             };
 
             let salesAdded = 0, refundsAdded = 0, skipped = 0;
+            const droppedRows = [];
             const newSkus = new Set();
             for (const row of rows) {
                 const purchase = (row['Purchase Number'] || '').toString().trim();
-                const date     = parseDate(row['Purchase Date']);
+                const rawDate  = row['Purchase Date'];
+                const date     = parseDate(rawDate);
                 const code     = (row['Product Code'] || '').toString().trim();
                 const name     = (row['Name'] || '').toString();
                 const qty      = parseInt(row['Quantity']) || 0;
                 const price    = parseFloat(row['Unit Price']) || 0;
                 const subtotal = parseFloat(row['Subtotal Price']) || 0;
 
-                if (!purchase || !date || !code || qty === 0) { skipped++; continue; }
+                const pushDrop = (reason) => droppedRows.push({
+                    'Purchase Number': purchase, 'Purchase Date': rawDate || '',
+                    'Product Code': code, 'Name': name, 'Quantity': qty,
+                    'Unit Price': price, 'Subtotal Price': subtotal,
+                    'Drop Reason': reason,
+                });
+
+                if (!purchase || !date || !code || qty === 0) { skipped++; pushDrop('Missing required fields (purchase#/date/code/qty)'); continue; }
 
                 // Map outlet by prefix (PGBL/FMKL/FMLS). Trailing 'R' before dash flags a refund.
                 // Format: <LETTERS><DIGITS>[R]-YYYY-NNNNNN  (e.g. PGBL005-2026-000246, FMKL003R-2026-000002)
                 const prefMatch = purchase.match(/^([A-Z]+)(\d+)(R)?-/);
-                if (!prefMatch) { skipped++; continue; }
+                if (!prefMatch) { skipped++; pushDrop('Unrecognized purchase number format'); continue; }
                 const isRefund = prefMatch[3] === 'R';
                 const prefix = prefMatch[1];
                 const location = prefixMap[prefix];
-                if (!location) { skipped++; continue; }
+                if (!location) { skipped++; pushDrop(`Location prefix '${prefix}' not mapped`); continue; }
+
+                if (fpIsExcluded(code)) { skipped++; pushDrop('Matched custom exclusion (delisted)'); continue; }
 
                 let sku = fpGetSkuByCode(code);
                 if (!sku) {
@@ -40827,10 +40865,149 @@ JB 星期二到
                 }
             }
 
+            _fpState._lastDroppedPosRows = droppedRows;
             UI.toast.success(`Imported ${salesAdded} sales, ${refundsAdded} refund(s). ${skipped} skipped. ${newSkus.size} new SKU(s) auto-created.`);
+            if (droppedRows.length) {
+                UI.showModal('POS Import Complete', `
+                    <div style="font-size:14px;">
+                        <p style="margin:0 0 10px;"><strong>${salesAdded}</strong> sales, <strong>${refundsAdded}</strong> refund(s) imported. <strong>${newSkus.size}</strong> new SKU(s) auto-created.</p>
+                        <p style="margin:0 0 10px;color:#991b1b;"><strong>${skipped}</strong> row(s) were skipped. Download them for review:</p>
+                        <button class="btn primary" onclick="app.fpDownloadDroppedPosRows()" style="width:100%;">
+                            <i class="fas fa-file-excel"></i> Download ${skipped} Dropped Row(s) as Excel
+                        </button>
+                    </div>
+                `, [{ label: 'Close', type: 'secondary', action: 'UI.hideModal()' }]);
+            }
             await fpSwitchTab(_fpState.currentTab);
         };
         inp.click();
+    };
+
+    const fpDownloadDroppedPosRows = async () => {
+        const rows = _fpState._lastDroppedPosRows;
+        if (!rows || !rows.length) { UI.toast.error('No dropped rows to download'); return; }
+        try { await window._ensureXlsx(); } catch { UI.toast.error('XLSX library failed to load'); return; }
+        const ws = XLSX.utils.json_to_sheet(rows);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Dropped Rows');
+        const date = new Date().toISOString().slice(0, 10);
+        XLSX.writeFile(wb, `fp_dropped_pos_${date}.xlsx`);
+        UI.toast.success(`Exported ${rows.length} dropped row(s)`);
+    };
+
+    // ---------- Delisted SKUs Import ----------
+    const fpImportDelisted = () => {
+        document.getElementById('fp-import-menu').style.display = 'none';
+        const inp = document.createElement('input');
+        inp.type = 'file'; inp.accept = '.xlsx,.xls,.csv';
+        inp.onchange = async (e) => {
+            const file = e.target.files[0]; if (!file) return;
+            try { await window._ensureXlsx(); } catch { UI.toast.error('XLSX library failed to load'); return; }
+            UI.toast.info('Reading delisted SKU file...');
+            const buf = await file.arrayBuffer();
+            const wb = XLSX.read(buf, { type: 'array' });
+            const ws = wb.Sheets[wb.SheetNames[0]];
+            const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+
+            const existingSet = new Set(
+                _fpState.exclusions
+                    .filter(e => (e.match_type || 'exact') === 'exact' && e.is_active !== false)
+                    .map(e => (e.product_code || '').toUpperCase().trim())
+            );
+
+            const candidates = [];
+            const alreadyExists = [];
+            let invalid = 0;
+            for (const row of rows) {
+                const code = (row['Product Code'] || row.code || row.Code || row.SKU || row.sku || '').toString().trim();
+                if (!code) { invalid++; continue; }
+                const name = (row['Product Name'] || row['Name'] || row.name || '').toString().trim();
+                const reason = (row['Reason'] || row.reason || '').toString().trim() || 'delisted';
+                if (existingSet.has(code.toUpperCase())) {
+                    alreadyExists.push({ code, name });
+                } else {
+                    candidates.push({ code, name, reason });
+                }
+            }
+
+            if (!candidates.length && !alreadyExists.length) {
+                UI.toast.error('No valid SKU codes found. Expected a column named "Product Code".');
+                return;
+            }
+
+            _fpState._pendingDelistedRows = candidates;
+
+            const previewRows = candidates.slice(0, 15).map(c =>
+                `<tr><td style="padding:4px 8px;font-family:monospace;">${fpEsc(c.code)}</td><td style="padding:4px 8px;font-size:12px;">${fpEsc(c.name.slice(0, 50))}</td></tr>`
+            ).join('');
+
+            const summary = `
+                <div style="font-size:14px;">
+                    <div style="display:flex;gap:12px;margin-bottom:14px;">
+                        <div style="flex:1;background:#fee2e2;color:#991b1b;padding:14px;border-radius:8px;text-align:center;">
+                            <div style="font-size:28px;font-weight:700;">${candidates.length}</div>
+                            <div style="font-size:11px;font-weight:600;">NEW DELISTED</div>
+                        </div>
+                        <div style="flex:1;background:#fef3c7;color:#92400e;padding:14px;border-radius:8px;text-align:center;">
+                            <div style="font-size:28px;font-weight:700;">${alreadyExists.length}</div>
+                            <div style="font-size:11px;font-weight:600;">ALREADY DELISTED</div>
+                        </div>
+                        <div style="flex:1;background:var(--gray-100);color:var(--gray-700);padding:14px;border-radius:8px;text-align:center;">
+                            <div style="font-size:28px;font-weight:700;">${invalid}</div>
+                            <div style="font-size:11px;font-weight:600;">INVALID (no code)</div>
+                        </div>
+                    </div>
+                    ${candidates.length ? `
+                        <div style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:8px;overflow:hidden;font-size:12px;max-height:260px;overflow-y:auto;">
+                            <table style="width:100%;border-collapse:collapse;">
+                                <thead style="background:var(--gray-100);position:sticky;top:0;">
+                                    <tr><th style="padding:6px 8px;text-align:left;">Code</th><th style="padding:6px 8px;text-align:left;">Name</th></tr>
+                                </thead>
+                                <tbody>${previewRows}</tbody>
+                            </table>
+                            ${candidates.length > 15 ? `<div style="padding:8px;text-align:center;color:var(--gray-500);font-size:11px;">… and ${candidates.length - 15} more</div>` : ''}
+                        </div>
+                    ` : ''}
+                    <p style="margin:14px 0 0;font-size:12px;color:var(--gray-600);">
+                        These SKUs will be saved as <strong>exact-match exclusions</strong> with reason "delisted". They will be hidden from Low Stock, POs, Transfers, and future imports.
+                    </p>
+                </div>
+            `;
+
+            UI.showModal('Delisted SKUs Import Preview', summary, [
+                { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+                ...(candidates.length ? [{ label: `Commit ${candidates.length}`, type: 'primary', action: '(async () => { await app.fpCommitDelistedImport(); })()' }] : []),
+            ]);
+        };
+        inp.click();
+    };
+
+    const fpCommitDelistedImport = async () => {
+        const candidates = _fpState._pendingDelistedRows;
+        _fpState._pendingDelistedRows = null;
+        if (!candidates || !candidates.length) { UI.hideModal(); return; }
+        UI.hideModal();
+        UI.toast.info(`Adding ${candidates.length} delisted SKU(s)...`);
+        let added = 0;
+        for (const c of candidates) {
+            const ex = await fpSave('fp_product_exclusions', {
+                product_code: c.code,
+                match_type: 'exact',
+                reason: c.name ? `delisted — ${c.name}` : 'delisted',
+                is_active: true,
+                created_by: _currentUser?.email || 'system',
+                created_at: new Date().toISOString(),
+            });
+            _fpState.exclusions.push(ex);
+            const sku = fpGetSkuByCode(c.code);
+            if (sku && sku.is_active !== false) {
+                sku.is_active = false;
+                await fpUpdate('fp_sku_master', sku.id, { is_active: false });
+            }
+            added++;
+        }
+        UI.toast.success(`${added} SKU(s) marked as delisted and saved.`);
+        await fpSwitchTab(_fpState.currentTab);
     };
 
     // ==================== /FORMULA PURCHASER ====================
@@ -41620,7 +41797,11 @@ JB 星期二到
         // Imports
         fpImportStock,
         fpCommitStockImport,
+        fpDownloadDroppedStockRows,
         fpImportPos,
+        fpDownloadDroppedPosRows,
+        fpImportDelisted,
+        fpCommitDelistedImport,
         // Expose UI helper for inline modal actions
         UI,
 
