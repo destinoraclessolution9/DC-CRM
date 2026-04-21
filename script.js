@@ -25137,15 +25137,15 @@ const deactivateAgent = async (agentId) => {
     const assignProspectToAgent = async (prospectId, agentId) => {
         await AppDataStore.update('prospects', prospectId, { responsible_agent_id: agentId });
 
-        // Cascade agent change to all purchases and activities linked to this prospect
-        const [allPurchases, allActivities] = await Promise.all([
-            AppDataStore.getAll('purchases'),
+        // Cascade agent change to the converted customer record and all linked activities
+        const [allCustomers, allActivities] = await Promise.all([
+            AppDataStore.getAll('customers'),
             AppDataStore.getAll('activities')
         ]);
         await Promise.all([
-            ...allPurchases
-                .filter(p => String(p.customer_id) === String(prospectId))
-                .map(p => AppDataStore.update('purchases', p.id, { agent_id: agentId })),
+            ...allCustomers
+                .filter(c => String(c.converted_from_prospect_id) === String(prospectId))
+                .map(c => AppDataStore.update('customers', c.id, { responsible_agent_id: agentId })),
             ...allActivities
                 .filter(a => String(a.prospect_id) === String(prospectId))
                 .map(a => AppDataStore.update('activities', a.id, { lead_agent_id: agentId }))
@@ -28208,127 +28208,93 @@ const getCPSCount = async (from, to) => {
     return count;
 };
   
-const getTotalSales = async (from, to) => {
+// Shared helper: resolves agent ID for a purchase via its linked customer
+const _getPurchaseAgentId = (p, customerMap) => (customerMap[p.customer_id] || {}).responsible_agent_id;
+
+const _getPurchaseBase = async () => {
     const needUsers = _currentRoleFilter !== 'All' || _visibleUserIds !== 'all';
-    const [purchases, users] = await Promise.all([
+    const [purchases, customers, users] = await Promise.all([
         AppDataStore.getAll('purchases'),
+        AppDataStore.getAll('customers'),
         needUsers ? AppDataStore.getAll('users') : Promise.resolve([])
     ]);
+    const customerMap = {};
+    customers.forEach(c => { customerMap[c.id] = c; });
     const userMap = {};
     users.forEach(u => { userMap[u.id] = u; });
+    return { purchases, customerMap, userMap };
+};
+
+const _passesPurchaseFilter = (p, agentId, userMap) => {
+    if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(agentId)) return false;
+    if (_currentRoleFilter !== 'All') {
+        const agent = userMap[agentId];
+        if (!agent || agent.role !== _currentRoleFilter) return false;
+    }
+    return true;
+};
+
+const getTotalSales = async (from, to) => {
+    const { purchases, customerMap, userMap } = await _getPurchaseBase();
     let total = 0;
     for (const p of purchases) {
         if (p.date < from || p.date > to || p.is_agent_package) continue;
-        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(p.agent_id)) continue;
-        if (_currentRoleFilter !== 'All') {
-            const agent = userMap[p.agent_id];
-            if (!agent || agent.role !== _currentRoleFilter) continue;
-        }
+        if (!_passesPurchaseFilter(p, _getPurchaseAgentId(p, customerMap), userMap)) continue;
         total += p.amount || 0;
     }
     return total;
 };
 
 const getPOPCaseCount = async (from, to) => {
-    const needUsers = _currentRoleFilter !== 'All' || _visibleUserIds !== 'all';
-    const [purchases, users] = await Promise.all([
-        AppDataStore.getAll('purchases'),
-        needUsers ? AppDataStore.getAll('users') : Promise.resolve([])
-    ]);
-    const userMap = {};
-    users.forEach(u => { userMap[u.id] = u; });
+    const { purchases, customerMap, userMap } = await _getPurchaseBase();
     let count = 0;
     for (const p of purchases) {
         if (p.payment_method !== 'POP' || p.date < from || p.date > to) continue;
-        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(p.agent_id)) continue;
-        if (_currentRoleFilter !== 'All') {
-            const agent = userMap[p.agent_id];
-            if (!agent || agent.role !== _currentRoleFilter) continue;
-        }
+        if (!_passesPurchaseFilter(p, _getPurchaseAgentId(p, customerMap), userMap)) continue;
         count++;
     }
     return count;
 };
 
 const getPOPSales = async (from, to) => {
-    const needUsers = _currentRoleFilter !== 'All' || _visibleUserIds !== 'all';
-    const [purchases, users] = await Promise.all([
-        AppDataStore.getAll('purchases'),
-        needUsers ? AppDataStore.getAll('users') : Promise.resolve([])
-    ]);
-    const userMap = {};
-    users.forEach(u => { userMap[u.id] = u; });
+    const { purchases, customerMap, userMap } = await _getPurchaseBase();
     let total = 0;
     for (const p of purchases) {
         if (p.payment_method !== 'POP' || p.date < from || p.date > to) continue;
-        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(p.agent_id)) continue;
-        if (_currentRoleFilter !== 'All') {
-            const agent = userMap[p.agent_id];
-            if (!agent || agent.role !== _currentRoleFilter) continue;
-        }
+        if (!_passesPurchaseFilter(p, _getPurchaseAgentId(p, customerMap), userMap)) continue;
         total += p.amount || 0;
     }
     return total;
 };
 
 const getEPPCaseCount = async (from, to) => {
-    const needUsers = _currentRoleFilter !== 'All' || _visibleUserIds !== 'all';
-    const [purchases, users] = await Promise.all([
-        AppDataStore.getAll('purchases'),
-        needUsers ? AppDataStore.getAll('users') : Promise.resolve([])
-    ]);
-    const userMap = {};
-    users.forEach(u => { userMap[u.id] = u; });
+    const { purchases, customerMap, userMap } = await _getPurchaseBase();
     let count = 0;
     for (const p of purchases) {
         if (p.payment_method !== 'EPP' || p.date < from || p.date > to) continue;
-        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(p.agent_id)) continue;
-        if (_currentRoleFilter !== 'All') {
-            const agent = userMap[p.agent_id];
-            if (!agent || agent.role !== _currentRoleFilter) continue;
-        }
+        if (!_passesPurchaseFilter(p, _getPurchaseAgentId(p, customerMap), userMap)) continue;
         count++;
     }
     return count;
 };
 
 const getEPPSales = async (from, to) => {
-    const needUsers = _currentRoleFilter !== 'All' || _visibleUserIds !== 'all';
-    const [purchases, users] = await Promise.all([
-        AppDataStore.getAll('purchases'),
-        needUsers ? AppDataStore.getAll('users') : Promise.resolve([])
-    ]);
-    const userMap = {};
-    users.forEach(u => { userMap[u.id] = u; });
+    const { purchases, customerMap, userMap } = await _getPurchaseBase();
     let total = 0;
     for (const p of purchases) {
         if (p.payment_method !== 'EPP' || p.date < from || p.date > to) continue;
-        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(p.agent_id)) continue;
-        if (_currentRoleFilter !== 'All') {
-            const agent = userMap[p.agent_id];
-            if (!agent || agent.role !== _currentRoleFilter) continue;
-        }
+        if (!_passesPurchaseFilter(p, _getPurchaseAgentId(p, customerMap), userMap)) continue;
         total += p.amount || 0;
     }
     return total;
 };
 
 const getEPPDetails = async (from, to) => {
-    const needUsers = _currentRoleFilter !== 'All' || _visibleUserIds !== 'all';
-    const [purchases, users] = await Promise.all([
-        AppDataStore.getAll('purchases'),
-        needUsers ? AppDataStore.getAll('users') : Promise.resolve([])
-    ]);
-    const userMap = {};
-    users.forEach(u => { userMap[u.id] = u; });
+    const { purchases, customerMap, userMap } = await _getPurchaseBase();
     const map = {};
     for (const p of purchases) {
         if (p.payment_method !== 'EPP' || p.date < from || p.date > to) continue;
-        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(p.agent_id)) continue;
-        if (_currentRoleFilter !== 'All') {
-            const agent = userMap[p.agent_id];
-            if (!agent || agent.role !== _currentRoleFilter) continue;
-        }
+        if (!_passesPurchaseFilter(p, _getPurchaseAgentId(p, customerMap), userMap)) continue;
         const bank = p.epp_bank || 'Unknown';
         const months = p.epp_months || '-';
         const key = `${bank}||${months}`;
