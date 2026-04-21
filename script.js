@@ -28458,14 +28458,13 @@ const buildTotalSalesDetails = async (from, to) => {
     let total = 0;
     for (const p of purchases) {
         if (p.date < from || p.date > to || p.is_agent_package) continue;
-        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(p.agent_id)) continue;
+        const agentId = custMap[p.customer_id]?.responsible_agent_id;
+        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(agentId)) continue;
         if (_currentRoleFilter !== 'All') {
-            const agent = userMap[p.agent_id];
+            const agent = userMap[agentId];
             if (!agent || agent.role !== _currentRoleFilter) continue;
         }
-        const agentName = userMap[p.agent_id]?.full_name
-            || userMap[custMap[p.customer_id]?.responsible_agent_id]?.full_name
-            || '—';
+        const agentName = userMap[agentId]?.full_name || '—';
         const custName = custMap[p.customer_id]?.full_name || '—';
         total += p.amount || 0;
         rows.push([p.date, agentName, custName, `RM ${(p.amount || 0).toLocaleString()}`, p.payment_method || '—', p.item || '—']);
@@ -28486,12 +28485,13 @@ const buildPOPDetails = async (from, to) => {
     let total = 0;
     for (const p of purchases) {
         if (p.payment_method !== 'POP' || p.date < from || p.date > to) continue;
-        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(p.agent_id)) continue;
+        const agentId = custMap[p.customer_id]?.responsible_agent_id;
+        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(agentId)) continue;
         if (_currentRoleFilter !== 'All') {
-            const agent = userMap[p.agent_id];
+            const agent = userMap[agentId];
             if (!agent || agent.role !== _currentRoleFilter) continue;
         }
-        const agentName = userMap[p.agent_id]?.full_name || '—';
+        const agentName = userMap[agentId]?.full_name || '—';
         const custName = custMap[p.customer_id]?.full_name || '—';
         total += p.amount || 0;
         rows.push([p.date, agentName, custName, `RM ${(p.amount || 0).toLocaleString()}`, p.pop_tenure ? `${p.pop_tenure} mo` : '—', p.item || '—']);
@@ -28513,12 +28513,13 @@ const buildEPPCasesDetails = async (from, to) => {
     let total = 0;
     for (const p of purchases) {
         if (p.payment_method !== 'EPP' || p.date < from || p.date > to) continue;
-        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(p.agent_id)) continue;
+        const agentId = custMap[p.customer_id]?.responsible_agent_id;
+        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(agentId)) continue;
         if (_currentRoleFilter !== 'All') {
-            const agent = userMap[p.agent_id];
+            const agent = userMap[agentId];
             if (!agent || agent.role !== _currentRoleFilter) continue;
         }
-        const agentName = userMap[p.agent_id]?.full_name || '—';
+        const agentName = userMap[agentId]?.full_name || '—';
         const custName = custMap[p.customer_id]?.full_name || '—';
         const bank = p.epp_bank || 'Unknown';
         const months = p.epp_months || '-';
