@@ -28384,19 +28384,36 @@ const getClientMeetings = async (from, to) => {
 };
 
 const getActivityHeadcount = async (from, to) => {
-    const [attendees, activities] = await Promise.all([
+    const [attendees, activities, prospects, customers] = await Promise.all([
         AppDataStore.getAll('event_attendees'),
-        AppDataStore.getAll('activities')
+        AppDataStore.getAll('activities'),
+        _visibleUserIds !== 'all' ? AppDataStore.getAll('prospects') : Promise.resolve([]),
+        _visibleUserIds !== 'all' ? AppDataStore.getAll('customers') : Promise.resolve([])
     ]);
     const actMap = {};
     activities.forEach(a => { actMap[a.id] = a; });
+    const prospMap = {};
+    prospects.forEach(p => { prospMap[p.id] = p; });
+    const custMap = {};
+    customers.forEach(c => { custMap[c.id] = c; });
     let count = 0;
     for (const att of attendees) {
         if (!att.attended && att.attendance_status !== 'Attended') continue;
         const act = actMap[att.activity_id];
         const date = act?.activity_date || '';
         if (date < from || date > to) continue;
-        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(act?.lead_agent_id)) continue;
+        if (_visibleUserIds !== 'all') {
+            const entityId = att.entity_id || att.attendee_id;
+            let agentId;
+            if (att.attendee_type === 'agent') {
+                agentId = entityId;
+            } else if (att.attendee_type === 'customer') {
+                agentId = custMap[entityId]?.responsible_agent_id;
+            } else {
+                agentId = prospMap[entityId]?.responsible_agent_id;
+            }
+            if (!_visibleUserIds.includes(agentId)) continue;
+        }
         count++;
     }
     return count;
@@ -28679,7 +28696,18 @@ const buildActivityHeadcountDetails = async (from, to) => {
         const act = actMap[att.activity_id];
         const date = act?.activity_date || '';
         if (date < from || date > to) continue;
-        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(act?.lead_agent_id)) continue;
+        if (_visibleUserIds !== 'all') {
+            const entityId = att.entity_id || att.attendee_id;
+            let agentId;
+            if (att.attendee_type === 'agent') {
+                agentId = entityId;
+            } else if (att.attendee_type === 'customer') {
+                agentId = custMap[entityId]?.responsible_agent_id;
+            } else {
+                agentId = prospMap[entityId]?.responsible_agent_id;
+            }
+            if (!_visibleUserIds.includes(agentId)) continue;
+        }
 
         const ev = eventMap[att.event_id];
         const eventTitle = ev?.event_title || ev?.title || `Event #${att.event_id}`;
