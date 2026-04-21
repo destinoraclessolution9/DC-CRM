@@ -28396,6 +28396,7 @@ const getActivityHeadcount = async (from, to) => {
         const act = actMap[att.activity_id];
         const date = act?.activity_date || '';
         if (date < from || date > to) continue;
+        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(act?.lead_agent_id)) continue;
         count++;
     }
     return count;
@@ -28678,6 +28679,7 @@ const buildActivityHeadcountDetails = async (from, to) => {
         const act = actMap[att.activity_id];
         const date = act?.activity_date || '';
         if (date < from || date > to) continue;
+        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(act?.lead_agent_id)) continue;
 
         const ev = eventMap[att.event_id];
         const eventTitle = ev?.event_title || ev?.title || `Event #${att.event_id}`;
