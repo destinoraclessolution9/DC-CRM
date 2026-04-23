@@ -486,28 +486,64 @@ create table if not exists document_tag_mappings (
 
 
 -- =============================================================================
--- SECTION 3: ENABLE ROW-LEVEL SECURITY + GRANT ACCESS
+-- SECTION 3: ENABLE ROW-LEVEL SECURITY + ROLE-SCOPED ACCESS
 -- =============================================================================
--- New tables need RLS policies matching the rest of the schema. Since the app
--- uses the service-role key for writes (bypasses RLS), we only need to ensure
--- reads via the anon role work. These policies grant unrestricted read/write
--- to match the existing CRM table behavior.
+-- Replaces the previous unrestricted "allow_all" policy with role-scoped
+-- policies that use current_user_level() from migrations/rls_helpers.sql.
+-- Policy matrix:
+--   SELECT  — any authenticated user (rows further scoped by app-level filters)
+--   INSERT  — any authenticated user (app records who they are)
+--   UPDATE  — only users at level <= 10 (managers and above)
+--   DELETE  — only users at level <= 2  (Super Admin / Marketing Manager)
+-- A separate admin-only policy handles the sensitive financial tables below.
 
 do $$
-declare t text;
+declare
+    t text;
+    admin_only_tables text[] := array['transactions','contracts','approval_queue'];
+    general_tables    text[] := array[
+        'user_preferences','special_programs','special_program_participants',
+        'booking_slots','booking_appointments','booking_pages',
+        'lead_forms','lead_submissions','surveys','survey_responses',
+        'custom_field_definitions','custom_field_values','portal_sessions',
+        'ai_predictions','document_tags','document_tag_mappings'
+    ];
 begin
-    for t in select unnest(array[
-        'transactions','contracts','approval_queue','user_preferences',
-        'special_programs','special_program_participants','booking_slots',
-        'booking_appointments','booking_pages','lead_forms','lead_submissions',
-        'surveys','survey_responses','custom_field_definitions',
-        'custom_field_values','portal_sessions','ai_predictions',
-        'document_tags','document_tag_mappings'
-    ])
-    loop
+    -- Admin-only tables: only level <= 2 sees or mutates financial records.
+    foreach t in array admin_only_tables loop
         execute format('alter table %I enable row level security', t);
         execute format('drop policy if exists "allow_all" on %I', t);
-        execute format('create policy "allow_all" on %I for all using (true) with check (true)', t);
+        execute format('drop policy if exists "admin_select" on %I', t);
+        execute format('drop policy if exists "admin_write"  on %I', t);
+        execute format(
+            'create policy "admin_select" on %I for select to authenticated
+               using (coalesce(current_user_level(), 99) <= 2)', t);
+        execute format(
+            'create policy "admin_write" on %I for all to authenticated
+               using  (coalesce(current_user_level(), 99) <= 2)
+               with check (coalesce(current_user_level(), 99) <= 2)', t);
+    end loop;
+
+    -- General tables: role-scoped CRUD.
+    foreach t in array general_tables loop
+        execute format('alter table %I enable row level security', t);
+        execute format('drop policy if exists "allow_all" on %I', t);
+        execute format('drop policy if exists "auth_select"  on %I', t);
+        execute format('drop policy if exists "auth_insert"  on %I', t);
+        execute format('drop policy if exists "mgr_update"   on %I', t);
+        execute format('drop policy if exists "admin_delete" on %I', t);
+
+        execute format(
+            'create policy "auth_select" on %I for select to authenticated using (true)', t);
+        execute format(
+            'create policy "auth_insert" on %I for insert to authenticated with check (true)', t);
+        execute format(
+            'create policy "mgr_update" on %I for update to authenticated
+               using  (coalesce(current_user_level(), 99) <= 10)
+               with check (coalesce(current_user_level(), 99) <= 10)', t);
+        execute format(
+            'create policy "admin_delete" on %I for delete to authenticated
+               using (coalesce(current_user_level(), 99) <= 2)', t);
     end loop;
 end $$;
 

@@ -71,7 +71,14 @@ window.UI = (() => {
             if (type === 'error') icon = 'exclamation-circle';
             if (type === 'warning') icon = 'exclamation-triangle';
 
-            toastEl.innerHTML = `<i class="fas fa-${icon}"></i> <span>${message}</span>`;
+            // Build DOM nodes — never innerHTML with user/error text (XSS).
+            const iconEl = document.createElement('i');
+            iconEl.className = `fas fa-${icon}`;
+            const span = document.createElement('span');
+            span.textContent = String(message ?? '');
+            toastEl.appendChild(iconEl);
+            toastEl.appendChild(document.createTextNode(' '));
+            toastEl.appendChild(span);
             container.appendChild(toastEl);
 
             setTimeout(() => {

@@ -201,41 +201,90 @@ const TOTPManager = {
     }
 };
 
-// SMS 2FA
+// SMS 2FA — server-side delivery, rate limited, constant-time compare.
 const SMS2FAManager = {
-    // Send verification code via SMS
-    sendCode: async (phoneNumber) => {
-        const code = Math.floor(100000 + Math.random() * 900000).toString();
+    // Rate limit: max 3 sends per phone per 10 minutes (exponential backoff
+    // between the 3rd failure and the next allowed attempt).
+    _sendAttempts: new Map(), // phone -> { count, firstAt, nextAllowedAt }
 
-        // Store code temporarily
-        sessionStorage.setItem('mfa_code', code);
-        sessionStorage.setItem('mfa_code_expires', String(Date.now() + 5 * 60 * 1000)); // 5 minutes
-
-        // In production, send via SMS gateway
-        console.log(`SMS code to ${phoneNumber}: ${code}`);
-
-        // For demo, show in UI
-        if (window.UI && window.UI.toast) {
-            UI.toast.info(`Your verification code is: ${code}`);
+    _rateOk(phone) {
+        const now = Date.now();
+        const windowMs = 10 * 60 * 1000;
+        const rec = SMS2FAManager._sendAttempts.get(phone);
+        if (!rec || now - rec.firstAt > windowMs) {
+            SMS2FAManager._sendAttempts.set(phone, { count: 1, firstAt: now, nextAllowedAt: 0 });
+            return true;
         }
-
+        if (now < rec.nextAllowedAt) return false;
+        rec.count += 1;
+        // After the 3rd attempt, lock until the window closes.
+        if (rec.count > 3) {
+            rec.nextAllowedAt = rec.firstAt + windowMs;
+            return false;
+        }
         return true;
     },
 
-    // Verify code
-    verifyCode: (code) => {
-        const storedCode = sessionStorage.getItem('mfa_code');
-        const expires = sessionStorage.getItem('mfa_code_expires');
+    // Constant-time string compare — defeats timing oracles on code verify.
+    _constantEq(a, b) {
+        const s1 = String(a ?? ''), s2 = String(b ?? '');
+        if (s1.length !== s2.length) return false;
+        let diff = 0;
+        for (let i = 0; i < s1.length; i++) diff |= s1.charCodeAt(i) ^ s2.charCodeAt(i);
+        return diff === 0;
+    },
 
-        if (!storedCode || !expires) return false;
+    // Send verification code via SMS. Dispatches to a server-side Edge Function
+    // so the plaintext code NEVER touches the client. Stores only an SHA-256
+    // hash in sessionStorage for verification.
+    sendCode: async (phoneNumber) => {
+        if (!SMS2FAManager._rateOk(phoneNumber)) {
+            if (window.UI?.toast) UI.toast.error('Too many attempts. Please wait 10 minutes.');
+            return false;
+        }
+
+        try {
+            // Server generates + delivers the code; returns a SHA-256 hash we store
+            // to verify against. If the Edge Function is not configured yet, this
+            // fails closed — NEVER fall back to client-side code generation.
+            const { data, error } = await window.supabase.functions.invoke('send-2fa-sms', {
+                body: { phone: phoneNumber }
+            });
+            if (error || !data?.hash) throw error || new Error('no_hash_returned');
+
+            sessionStorage.setItem('mfa_code_hash', data.hash);
+            sessionStorage.setItem('mfa_code_expires', String(Date.now() + 5 * 60 * 1000));
+            if (window.UI?.toast) UI.toast.info('Verification code sent via SMS.');
+            return true;
+        } catch (e) {
+            _safeAudit('warn', 'SECURITY', 'MFA_SMS_SEND_FAIL', { error: String(e?.message || e) });
+            if (window.UI?.toast) UI.toast.error('Could not send SMS code. Contact support.');
+            return false;
+        }
+    },
+
+    // Verify code — hash the submitted code and compare (constant-time) to the
+    // stored hash. No plaintext codes on the client.
+    verifyCode: async (code) => {
+        const storedHash = sessionStorage.getItem('mfa_code_hash');
+        const expires = sessionStorage.getItem('mfa_code_expires');
+        if (!storedHash || !expires) return false;
 
         if (Date.now() > parseInt(expires, 10)) {
-            sessionStorage.removeItem('mfa_code');
+            sessionStorage.removeItem('mfa_code_hash');
             sessionStorage.removeItem('mfa_code_expires');
             return false;
         }
 
-        return code === storedCode;
+        const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(code)));
+        const submittedHash = Array.from(new Uint8Array(buf))
+            .map(b => b.toString(16).padStart(2, '0')).join('');
+        const ok = SMS2FAManager._constantEq(submittedHash, storedHash);
+        if (ok) {
+            sessionStorage.removeItem('mfa_code_hash');
+            sessionStorage.removeItem('mfa_code_expires');
+        }
+        return ok;
     }
 };
 

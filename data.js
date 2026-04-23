@@ -66,8 +66,11 @@ class DataStore {
         // ── In-memory cache ──────────────────────────────────────────────
         // Keyed by tableName → { data: [], ts: Date.now() }
         // TTL: 30 s for mutable tables, 120 s for near-static ones.
+        // LRU cap: limit to _cacheMaxEntries entries so a long-running session
+        // that navigates through 100+ distinct entities can't grow unbounded.
         this._cache = new Map();
         this._cacheTTL = 300_000; // 5 min (was 30s — too aggressive for 500 concurrent users)
+        this._cacheMaxEntries = 64; // LRU eviction threshold
         this._staticTables = new Set([
             'users', 'roles', 'teams', 'event_categories', 'event_templates',
             'products', 'appointment_locations', 'venues', 'ai_models',
@@ -214,7 +217,14 @@ class DataStore {
     }
 
     _cacheSet(tableName, data) {
+        // LRU behavior: delete-then-set to move the key to the end of Map's
+        // insertion order, then evict the oldest if we're over the cap.
+        if (this._cache.has(tableName)) this._cache.delete(tableName);
         this._cache.set(tableName, { data, ts: Date.now() });
+        if (this._cache.size > this._cacheMaxEntries) {
+            const oldestKey = this._cache.keys().next().value;
+            if (oldestKey !== undefined) this._cache.delete(oldestKey);
+        }
     }
 
     // Invalidate cache for a table (and any table that depends on it)
@@ -402,6 +412,41 @@ class DataStore {
         return fetchPromise;
     }
 
+    // Paginated query — use this for ANY list view whose table may grow past
+    // 1000 rows (prospects, activities, audit_trail, etc.). Bypasses Supabase's
+    // implicit 1000-row cap by looping with explicit .range() windows until
+    // we get a short page. Honors an optional `filters` map: { column: value }
+    // for equality matching. Returns up to opts.max rows (default 50 000 —
+    // set a sane upper bound so a buggy caller can't exhaust memory).
+    async queryPaged(tableName, opts = {}) {
+        const pageSize = Math.max(1, Math.min(1000, opts.pageSize || 1000));
+        const max = Math.max(pageSize, Math.min(200000, opts.max || 50000));
+        const filters = opts.filters || {};
+        const orderBy = opts.orderBy || 'id';
+        const ascending = opts.ascending !== false;
+        const selectClause = opts.select || this._selectClauseForGetAll(tableName);
+
+        const out = [];
+        for (let offset = 0; offset < max; offset += pageSize) {
+            const end = Math.min(offset + pageSize - 1, max - 1);
+            let q = this._readClient()
+                .from(tableName)
+                .select(selectClause)
+                .order(orderBy, { ascending })
+                .range(offset, end);
+            for (const [col, val] of Object.entries(filters)) {
+                if (Array.isArray(val)) q = q.in(col, val);
+                else q = q.eq(col, val);
+            }
+            const { data, error } = await q;
+            if (error) throw error;
+            if (!data || data.length === 0) break;
+            out.push(...data);
+            if (data.length < pageSize) break; // last page
+        }
+        return out;
+    }
+
     // Fetch only rows where updated_at > sinceISO. Used by _swrRevalidate for
     // incremental (delta) sync so background revalidations download only changed
     // rows instead of the full table. Applies the same light-select as getAll.
@@ -436,12 +481,22 @@ class DataStore {
                 ({ data, error } = await this._readClient().from(tableName).select('*'));
             }
             if (error) throw error;
-            // Supabase caps getAll() implicitly at 1000 rows per request. If we
-            // ever hit that cap, some rows are being silently dropped — warn so
-            // the caller knows to migrate to queryAdvanced() with explicit
-            // pagination.
+            // Supabase caps getAll() implicitly at 1000 rows per request. When
+            // we hit that cap, auto-page through the rest so list views never
+            // silently show a truncated dataset. This is transparent to callers.
             if (Array.isArray(data) && data.length === 1000) {
-                console.warn(`[DataStore] getAll('${tableName}') returned exactly 1000 rows — may be truncated by Supabase default limit. Consider queryAdvanced() with pagination.`);
+                console.warn(`[DataStore] getAll('${tableName}') hit 1000-row cap — auto-paginating remainder`);
+                try {
+                    const rest = await this.queryPaged(tableName, {
+                        pageSize: 1000,
+                        max: 200000,
+                        select: selectClause,
+                        orderBy: 'id',
+                    });
+                    if (rest.length > data.length) data = rest;
+                } catch (e2) {
+                    console.warn(`[DataStore] auto-paginate failed for ${tableName}:`, e2?.message);
+                }
             }
             // Filter out tombstoned records before caching — prevents deleted items reappearing
             const tombstoneRaw = localStorage.getItem('fs_crm_tombstones');

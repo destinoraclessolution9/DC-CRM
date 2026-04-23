@@ -3977,26 +3977,34 @@ In a production system, this would show the actual file contents.
     };
 
     // ── Swipe gestures ───────────────────────────────────────
+    // Idempotent: repeated calls remove the previous handlers before
+    // re-attaching so we don't stack listeners on every view switch.
+    let _swipeHandlers = null;
     const initSwipeActions = () => {
+        if (_swipeHandlers) {
+            document.removeEventListener('touchstart', _swipeHandlers.start);
+            document.removeEventListener('touchend', _swipeHandlers.end);
+        }
         let startX = 0;
-        document.addEventListener('touchstart', (e) => { startX = e.touches[0].clientX; }, { passive: true });
-        document.addEventListener('touchend', (e) => {
+        const onStart = (e) => { startX = e.touches[0].clientX; };
+        const onEnd = (e) => {
             const diff = e.changedTouches[0].clientX - startX;
-            // Swipe right from left edge → open drawer
-            if (diff > 60 && startX < 30 && isMobile()) {
-                openMobileDrawer();
-            }
-            // Swipe left → close drawer if open
-            if (diff < -60 && isMobile()) {
-                closeMobileDrawer();
-            }
-        }, { passive: true });
+            if (diff > 60 && startX < 30 && isMobile()) openMobileDrawer();
+            if (diff < -60 && isMobile()) closeMobileDrawer();
+        };
+        document.addEventListener('touchstart', onStart, { passive: true });
+        document.addEventListener('touchend', onEnd, { passive: true });
+        _swipeHandlers = { start: onStart, end: onEnd };
     };
 
     // ── Pull-to-refresh (fixed) ──────────────────────────────
+    // Idempotent: tagged with data-ptr-attached so repeated init calls
+    // don't stack listeners on the same .content-viewport node.
     const initPullToRefresh = async () => {
         const content = document.querySelector('.content-viewport');
         if (!content) return;
+        if (content.dataset.ptrAttached === '1') return;
+        content.dataset.ptrAttached = '1';
 
         let startY = 0;
         const refreshEl = document.createElement('div');
@@ -7600,7 +7608,7 @@ function _wireLoginBtn() {
                     <div style="display:flex; align-items:center; gap:12px;">
                         <input type="text" value="${bookingUrl}" readonly style="flex:1; padding:8px 12px; border:1px solid var(--border); border-radius:6px; background:white; font-size:13px;">
                         <button class="btn secondary" onclick="app.openShareBookingLinkModal()"><i class="fas fa-share-alt"></i> Share</button>
-                        <a href="${bookingUrl}" target="_blank" class="btn secondary"><i class="fas fa-external-link-alt"></i> Preview</a>
+                        <a href="${bookingUrl}" target="_blank" rel="noopener noreferrer" class="btn secondary"><i class="fas fa-external-link-alt"></i> Preview</a>
                     </div>
                 </div>
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:24px;">
@@ -12491,8 +12499,8 @@ function _wireLoginBtn() {
         UI.showModal('⚠️ One-time Setup Required — Health Refill Reminders', `
             <p style="margin-bottom:12px;">The <strong>Health Product Refill Reminders</strong> feature needs a one-time database migration to be applied.</p>
             <ol style="font-size:13px;line-height:1.7;margin:0 0 12px 20px;padding:0;">
-                <li>Open your <a href="https://supabase.com/dashboard/project/remuwhxvzkzjtgbzqjaa/database/extensions" target="_blank" style="color:var(--primary);font-weight:600;">Supabase Extensions ↗</a> and enable <code>pg_cron</code>.</li>
-                <li>Open the <a href="https://supabase.com/dashboard/project/remuwhxvzkzjtgbzqjaa/sql/new" target="_blank" style="color:var(--primary);font-weight:600;">SQL Editor ↗</a>.</li>
+                <li>Open your <a href="https://supabase.com/dashboard/project/remuwhxvzkzjtgbzqjaa/database/extensions" target="_blank" rel="noopener noreferrer" style="color:var(--primary);font-weight:600;">Supabase Extensions ↗</a> and enable <code>pg_cron</code>.</li>
+                <li>Open the <a href="https://supabase.com/dashboard/project/remuwhxvzkzjtgbzqjaa/sql/new" target="_blank" rel="noopener noreferrer" style="color:var(--primary);font-weight:600;">SQL Editor ↗</a>.</li>
                 <li>Open the file <code>${migrationPath}</code> from the project folder and paste its contents.</li>
                 <li>Click <strong>Run</strong>.</li>
                 <li>Refresh this page.</li>
@@ -19754,7 +19762,7 @@ function _wireLoginBtn() {
                     <td><strong>${cr.product || '-'}</strong> <span style="font-size:11px;color:var(--gray-400);">(Conversion Sale)</span></td>
                     <td>RM ${amt.toLocaleString()}</td>
                     <td><span class="score-badge" style="font-size:11px;background:#dcfce7;color:#166534;">PAID</span></td>
-                    <td>${cr.invoice_file ? `<a href="${cr.invoice_file}" target="_blank" style="color:var(--primary);">View</a>` : '-'}</td>
+                    <td>${cr.invoice_file ? `<a href="${cr.invoice_file}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);">View</a>` : '-'}</td>
                     <td><span style="font-size:11px;color:var(--gray-400);">Locked</span></td>
                 </tr>`;
         })() : '';
@@ -20900,7 +20908,7 @@ function _wireLoginBtn() {
                         <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;color:var(--gray-500);">${escapeHtml(r.notes || '-')}</td>
                         <td style="padding:4px 8px;border-bottom:1px solid #f3f4f6;text-align:center;">
                             ${r.attachment_data
-                                ? `<a href="${r.attachment_data}" target="_blank" title="${escapeHtml(r.attachment_name||'View attachment')}" style="color:var(--primary);margin-right:4px;"><i class="fas fa-paperclip"></i></a>`
+                                ? `<a href="${r.attachment_data}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(r.attachment_name||'View attachment')}" style="color:var(--primary);margin-right:4px;"><i class="fas fa-paperclip"></i></a>`
                                 : `<label for="pre2025-att-${pid}-${i}" title="Attach file" style="cursor:pointer;color:var(--gray-400);margin-right:4px;"><i class="fas fa-paperclip"></i></label>`
                             }
                             <input type="file" id="pre2025-att-${pid}-${i}" style="display:none" accept="image/*,application/pdf" onchange="event.stopPropagation();app.addPrePurchaseAttachment(${pid},${i},this)">
@@ -20961,7 +20969,7 @@ function _wireLoginBtn() {
                                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;margin-bottom:10px;">
                                     <div><span style="color:var(--gray-400);">Payment:</span> ${escapeHtml(h.payment_method||'-')}</div>
                                     <div><span style="color:var(--gray-400);">Invoice:</span> ${escapeHtml(h.invoice_number||'-')}</div>
-                                    ${h.invoice_file ? `<div style="grid-column:1/-1;"><a href="${h.invoice_file}" target="_blank" style="color:var(--primary);"><i class="fas fa-paperclip"></i> ${escapeHtml(h.invoice_file_name||'View invoice')}</a></div>` : ''}
+                                    ${h.invoice_file ? `<div style="grid-column:1/-1;"><a href="${h.invoice_file}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);"><i class="fas fa-paperclip"></i> ${escapeHtml(h.invoice_file_name||'View invoice')}</a></div>` : ''}
                                     ${h.closing_remarks ? `<div style="grid-column:1/-1;"><span style="color:var(--gray-400);">Sale Remarks:</span> ${escapeHtml(h.closing_remarks)}</div>` : ''}
                                 </div>
                                 <div style="border-top:1px solid #e5e7eb;padding-top:10px;">
@@ -20979,7 +20987,7 @@ function _wireLoginBtn() {
                                     </div>
                                     <div style="margin-bottom:8px;">
                                         <label style="font-size:11px;font-weight:600;color:var(--gray-500);display:block;margin-bottom:4px;">Delivery Proof Attachment</label>
-                                        ${h.delivery_proof ? `<div style="margin-bottom:4px;"><a href="${h.delivery_proof}" target="_blank" style="color:var(--primary);font-size:12px;"><i class="fas fa-paperclip"></i> ${escapeHtml(h.delivery_proof_name||'View proof')}</a> <span style="color:var(--gray-400);font-size:11px;">(upload new to replace)</span></div>` : ''}
+                                        ${h.delivery_proof ? `<div style="margin-bottom:4px;"><a href="${h.delivery_proof}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);font-size:12px;"><i class="fas fa-paperclip"></i> ${escapeHtml(h.delivery_proof_name||'View proof')}</a> <span style="color:var(--gray-400);font-size:11px;">(upload new to replace)</span></div>` : ''}
                                         <input type="file" id="crh-proof-${pid}-${hi}" accept="image/*,application/pdf" style="font-size:11px;width:100%;" onchange="(function(el){var f=el.files[0];if(!f)return;var r=new FileReader();r.onload=function(e){el.dataset.b64=e.target.result;el.dataset.fname=f.name;};r.readAsDataURL(f);})(this)">
                                     </div>
                                     <div style="margin-bottom:8px;">
@@ -21051,7 +21059,7 @@ function _wireLoginBtn() {
                     <div class="form-group" style="margin-bottom:14px;">
                         <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Upload Purchased Invoice <span style="font-size:11px;color:var(--gray-400);font-weight:normal;">(AI auto-fill on upload)</span></label>
                         <input id="cr-invoice-file" type="file" class="form-control" accept="image/png,image/jpeg,application/pdf" onchange="app.scanInvoiceWithAI(this,'cr','cr')">
-                        ${d.invoice_file ? `<div style="margin-top:6px;font-size:11px;color:var(--gray-500);"><i class="fas fa-paperclip"></i> Current: <a href="${d.invoice_file}" target="_blank" style="color:var(--primary);">${escapeHtml(d.invoice_file_name || 'view')}</a> <span style="color:var(--gray-400);">(choosing a new file will replace it)</span></div>` : ''}
+                        ${d.invoice_file ? `<div style="margin-top:6px;font-size:11px;color:var(--gray-500);"><i class="fas fa-paperclip"></i> Current: <a href="${d.invoice_file}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);">${escapeHtml(d.invoice_file_name || 'view')}</a> <span style="color:var(--gray-400);">(choosing a new file will replace it)</span></div>` : ''}
                     </div>
 
                     <div class="pv-sub">📁 Case Study (Optional)</div>
@@ -21096,7 +21104,7 @@ function _wireLoginBtn() {
                     ` : ''}
                     <div class="pv-row"><span class="pv-lbl">Invoice No.</span><span class="pv-val">${d.invoice_number || '-'}</span></div>
                     <div class="pv-row"><span class="pv-lbl">Collection Date</span><span class="pv-val">${d.closing_date || '-'}</span></div>
-                    <div class="pv-row"><span class="pv-lbl">Invoice File</span><span class="pv-val">${d.invoice_file ? `<a href="${d.invoice_file}" target="_blank" style="color:var(--primary);"><i class="fas fa-paperclip"></i> ${escapeHtml(d.invoice_file_name || 'View')}</a>` : '-'}</span></div>
+                    <div class="pv-row"><span class="pv-lbl">Invoice File</span><span class="pv-val">${d.invoice_file ? `<a href="${d.invoice_file}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);"><i class="fas fa-paperclip"></i> ${escapeHtml(d.invoice_file_name || 'View')}</a>` : '-'}</span></div>
                     ${(d.sales_idea || d.plan_details || d.success_story) ? `
                     <div class="pv-sub">Case Study</div>
                     ${d.sales_idea ? `<div class="pv-row"><span class="pv-lbl">Sales Idea</span><span class="pv-val">${d.sales_idea}</span></div>` : ''}
@@ -21126,7 +21134,7 @@ function _wireLoginBtn() {
                     ` : ''}
                     <div class="pv-row"><span class="pv-lbl">Invoice No.</span><span class="pv-val">${d.invoice_number || '-'}</span></div>
                     <div class="pv-row"><span class="pv-lbl">Collection Date</span><span class="pv-val">${d.closing_date || '-'}</span></div>
-                    <div class="pv-row"><span class="pv-lbl">Invoice File</span><span class="pv-val">${d.invoice_file ? `<a href="${d.invoice_file}" target="_blank" style="color:var(--primary);"><i class="fas fa-paperclip"></i> ${escapeHtml(d.invoice_file_name || 'View')}</a>` : '-'}</span></div>
+                    <div class="pv-row"><span class="pv-lbl">Invoice File</span><span class="pv-val">${d.invoice_file ? `<a href="${d.invoice_file}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);"><i class="fas fa-paperclip"></i> ${escapeHtml(d.invoice_file_name || 'View')}</a>` : '-'}</span></div>
                     ${(d.sales_idea || d.plan_details || d.success_story) ? `
                     <div class="pv-sub">Case Study</div>
                     ${d.sales_idea ? `<div class="pv-row"><span class="pv-lbl">Sales Idea</span><span class="pv-val">${d.sales_idea}</span></div>` : ''}
@@ -21148,7 +21156,7 @@ function _wireLoginBtn() {
                         </div>
                         <div style="margin-bottom:10px;">
                             <label style="font-size:11px;font-weight:600;color:var(--gray-500);display:block;margin-bottom:4px;">Delivery Proof / Photo Attachment</label>
-                            ${d.delivery_proof ? `<div style="margin-bottom:5px;"><a href="${d.delivery_proof}" target="_blank" style="color:var(--primary);font-size:12px;"><i class="fas fa-paperclip"></i> ${escapeHtml(d.delivery_proof_name||'View proof')}</a> <span style="color:var(--gray-400);font-size:11px;">(upload new to replace)</span></div>` : ''}
+                            ${d.delivery_proof ? `<div style="margin-bottom:5px;"><a href="${d.delivery_proof}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);font-size:12px;"><i class="fas fa-paperclip"></i> ${escapeHtml(d.delivery_proof_name||'View proof')}</a> <span style="color:var(--gray-400);font-size:11px;">(upload new to replace)</span></div>` : ''}
                             <input type="file" id="cr-active-proof-${prospect.id}" accept="image/*,application/pdf" style="font-size:11px;width:100%;" onchange="(function(el){var f=el.files[0];if(!f)return;var r=new FileReader();r.onload=function(e){el.dataset.b64=e.target.result;el.dataset.fname=f.name;};r.readAsDataURL(f);})(this)">
                         </div>
                         <div style="margin-bottom:10px;">
@@ -21211,7 +21219,7 @@ function _wireLoginBtn() {
                         <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;color:var(--gray-500);">${escapeHtml(r.notes || '-')}</td>
                         <td style="padding:4px 8px;border-bottom:1px solid #f3f4f6;text-align:center;">
                             ${r.attachment_data
-                                ? `<a href="${r.attachment_data}" target="_blank" title="${escapeHtml(r.attachment_name||'View attachment')}" style="color:var(--primary);margin-right:4px;"><i class="fas fa-paperclip"></i></a>`
+                                ? `<a href="${r.attachment_data}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(r.attachment_name||'View attachment')}" style="color:var(--primary);margin-right:4px;"><i class="fas fa-paperclip"></i></a>`
                                 : `<label for="${tab}-att-${pid}-${i}" title="Attach file" style="cursor:pointer;color:var(--gray-400);margin-right:4px;"><i class="fas fa-paperclip"></i></label>`
                             }
                             <input type="file" id="${tab}-att-${pid}-${i}" style="display:none" accept="image/*,application/pdf" onchange="event.stopPropagation();app.addProductPurchaseAttachment(${pid},'${tab}',${i},this)">
@@ -21337,7 +21345,7 @@ function _wireLoginBtn() {
                 };
 
                 const fileLink = (url, name) => url
-                    ? `<a href="${url}" target="_blank" style="color:var(--primary);"><i class="fas fa-paperclip"></i> ${escapeHtml(name || 'View file')}</a>`
+                    ? `<a href="${url}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);"><i class="fas fa-paperclip"></i> ${escapeHtml(name || 'View file')}</a>`
                     : '<span style="color:var(--gray-400);font-style:italic;">Not uploaded</span>';
 
                 return `
@@ -21465,7 +21473,7 @@ function _wireLoginBtn() {
                     <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;color:var(--gray-500);">${escapeHtml(r.notes || '-')}</td>
                     <td style="padding:4px 8px;border-bottom:1px solid #f3f4f6;text-align:center;">
                         ${r.attachment_data
-                            ? `<a href="${r.attachment_data}" target="_blank" title="${escapeHtml(r.attachment_name||'View attachment')}" style="color:var(--primary);margin-right:4px;"><i class="fas fa-paperclip"></i></a>`
+                            ? `<a href="${r.attachment_data}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(r.attachment_name||'View attachment')}" style="color:var(--primary);margin-right:4px;"><i class="fas fa-paperclip"></i></a>`
                             : `<label for="pre2025-att-${pid}-${i}" title="Attach file" style="cursor:pointer;color:var(--gray-400);margin-right:4px;"><i class="fas fa-paperclip"></i></label>`
                         }
                         <input type="file" id="pre2025-att-${pid}-${i}" style="display:none" accept="image/*,application/pdf" onchange="event.stopPropagation();app.addPrePurchaseAttachment(${pid},${i},this)">
@@ -21524,7 +21532,7 @@ function _wireLoginBtn() {
                             <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;margin-bottom:10px;">
                                 <div><span style="color:var(--gray-400);">Payment:</span> ${escapeHtml(h.payment_method||'-')}</div>
                                 <div><span style="color:var(--gray-400);">Invoice:</span> ${escapeHtml(h.invoice_number||'-')}</div>
-                                ${h.invoice_file ? `<div style="grid-column:1/-1;"><a href="${h.invoice_file}" target="_blank" style="color:var(--primary);"><i class="fas fa-paperclip"></i> ${escapeHtml(h.invoice_file_name||'View invoice')}</a></div>` : ''}
+                                ${h.invoice_file ? `<div style="grid-column:1/-1;"><a href="${h.invoice_file}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);"><i class="fas fa-paperclip"></i> ${escapeHtml(h.invoice_file_name||'View invoice')}</a></div>` : ''}
                                 ${h.closing_remarks ? `<div style="grid-column:1/-1;"><span style="color:var(--gray-400);">Sale Remarks:</span> ${escapeHtml(h.closing_remarks)}</div>` : ''}
                             </div>
                             <div style="border-top:1px solid #e5e7eb;padding-top:10px;">
@@ -21542,7 +21550,7 @@ function _wireLoginBtn() {
                                 </div>
                                 <div style="margin-bottom:8px;">
                                     <label style="font-size:11px;font-weight:600;color:var(--gray-500);display:block;margin-bottom:4px;">Delivery Proof Attachment</label>
-                                    ${h.delivery_proof ? `<div style="margin-bottom:4px;"><a href="${h.delivery_proof}" target="_blank" style="color:var(--primary);font-size:12px;"><i class="fas fa-paperclip"></i> ${escapeHtml(h.delivery_proof_name||'View proof')}</a> <span style="color:var(--gray-400);font-size:11px;">(upload new to replace)</span></div>` : ''}
+                                    ${h.delivery_proof ? `<div style="margin-bottom:4px;"><a href="${h.delivery_proof}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);font-size:12px;"><i class="fas fa-paperclip"></i> ${escapeHtml(h.delivery_proof_name||'View proof')}</a> <span style="color:var(--gray-400);font-size:11px;">(upload new to replace)</span></div>` : ''}
                                     <input type="file" id="crh-proof-${pid}-${hi}" accept="image/*,application/pdf" style="font-size:11px;width:100%;" onchange="(function(el){var f=el.files[0];if(!f)return;var r=new FileReader();r.onload=function(e){el.dataset.b64=e.target.result;el.dataset.fname=f.name;};r.readAsDataURL(f);})(this)">
                                 </div>
                                 <div style="margin-bottom:8px;">
@@ -21751,7 +21759,7 @@ const deleteNote = async (prospectId, noteId) => {
 NOTIFY pgrst, 'reload schema';`;
         const escaped = migrationSQL.replace(/</g, '&lt;').replace(/>/g, '&gt;');
         UI.showModal('⚠️ One-time Database Setup Required', `
-            <p style="margin-bottom:12px;">The <strong>activities</strong> table is missing the <code>photo_urls</code> column needed to store meet-up photos so they sync across devices. Run this SQL once in your <a href="https://supabase.com/dashboard/project/remuwhxvzkzjtgbzqjaa/sql/new" target="_blank" style="color:var(--primary);font-weight:600;">Supabase SQL Editor ↗</a>:</p>
+            <p style="margin-bottom:12px;">The <strong>activities</strong> table is missing the <code>photo_urls</code> column needed to store meet-up photos so they sync across devices. Run this SQL once in your <a href="https://supabase.com/dashboard/project/remuwhxvzkzjtgbzqjaa/sql/new" target="_blank" rel="noopener noreferrer" style="color:var(--primary);font-weight:600;">Supabase SQL Editor ↗</a>:</p>
             <textarea class="form-control" rows="6" id="photo-migration-sql" style="font-family:monospace;font-size:12px;background:#1e1e1e;color:#d4d4d4;border:none;resize:none;width:100%;">${escaped}</textarea>
             <button class="btn secondary" style="margin-top:8px;" onclick="document.getElementById('photo-migration-sql').select();document.execCommand('copy');UI.toast.success('SQL copied to clipboard!')">
                 <i class="fas fa-copy"></i> Copy SQL
@@ -32438,7 +32446,7 @@ ALTER TABLE public.promotions
         // Both failed – show SQL to user
         const escaped = migrationSQL.replace(/</g, '&lt;').replace(/>/g, '&gt;');
         UI.showModal('⚠️ Database Migration Required', `
-            <p style="margin-bottom:12px;">The <strong>promotions</strong> table is missing columns needed to save full package data. Please run this SQL once in your <a href="https://supabase.com/dashboard/project/remuwhxvzkzjtgbzqjaa/sql/new" target="_blank" style="color:var(--primary);">Supabase SQL Editor ↗</a>:</p>
+            <p style="margin-bottom:12px;">The <strong>promotions</strong> table is missing columns needed to save full package data. Please run this SQL once in your <a href="https://supabase.com/dashboard/project/remuwhxvzkzjtgbzqjaa/sql/new" target="_blank" rel="noopener noreferrer" style="color:var(--primary);">Supabase SQL Editor ↗</a>:</p>
             <textarea class="form-control" rows="12" id="migration-sql-box" style="font-family:monospace;font-size:11px;background:#1e1e1e;color:#d4d4d4;border:none;resize:none;">${migrationSQL}</textarea>
             <button class="btn secondary" style="margin-top:8px;" onclick="document.getElementById('migration-sql-box').select();document.execCommand('copy');UI.toast.success('SQL copied!')">
                 <i class="fas fa-copy"></i> Copy SQL

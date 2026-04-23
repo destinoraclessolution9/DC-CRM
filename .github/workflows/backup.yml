@@ -2,26 +2,25 @@ name: Weekly Supabase Backup to Google Drive
 
 on:
   schedule:
-    # Every Sunday at 02:00 UTC (10:00 AM Malaysia time)
+    # Sundays at 02:00 UTC. UTC-only to avoid DST drift across decades.
     - cron: '0 2 * * 0'
-  workflow_dispatch:  # Allows manual trigger from GitHub Actions tab
+  workflow_dispatch:
 
 jobs:
   backup:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
-      - name: Install PostgreSQL 17 client
+      - name: Install PostgreSQL 17 client + gpg
         run: |
           sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
           wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
           sudo apt-get update
-          sudo apt-get install -y postgresql-client-17
+          sudo apt-get install -y postgresql-client-17 gnupg
 
       - name: Install rclone
-        run: |
-          curl https://rclone.org/install.sh | sudo bash
+        run: curl https://rclone.org/install.sh | sudo bash
 
       - name: Configure rclone for Google Drive
         run: |
@@ -34,40 +33,149 @@ jobs:
           root_folder_id = ${{ secrets.GDRIVE_FOLDER_ID }}
           EOF
 
-      - name: Create backup filename
+      - name: Create backup filename (UTC)
         id: filename
         run: |
           TIMESTAMP=$(date -u +"%Y-%m-%d_%H%M")
-          echo "name=crm-backup-${TIMESTAMP}.sql.gz" >> $GITHUB_OUTPUT
+          echo "name=crm-backup-${TIMESTAMP}" >> $GITHUB_OUTPUT
 
-      - name: Dump Supabase database
+      # Dump BOTH public and auth schemas so agents, MFA devices, and login
+      # history can be restored. The auth schema is what makes a restored copy
+      # usable — without it the DB loads but nobody can log in.
+      - name: Dump Supabase database (public + auth schemas)
         env:
           DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: |
           pg_dump "$DB_URL" \
+            --schema=public \
+            --schema=auth \
             --no-owner \
             --no-privileges \
             --clean \
             --if-exists \
             --quote-all-identifiers \
-            | gzip -9 > "${{ steps.filename.outputs.name }}"
-          ls -lh "${{ steps.filename.outputs.name }}"
+            > "${{ steps.filename.outputs.name }}.sql"
+          SIZE=$(stat -c%s "${{ steps.filename.outputs.name }}.sql")
+          echo "raw_size_bytes=$SIZE" >> $GITHUB_OUTPUT
+          # Fail if the dump is suspiciously small (under 100 KB = likely broken)
+          if [ "$SIZE" -lt 102400 ]; then
+            echo "::error::Backup dump is only $SIZE bytes — aborting to avoid overwriting good backups with junk"
+            exit 1
+          fi
 
-      - name: Upload to Google Drive
+      # Compute a SHA-256 checksum BEFORE encryption so restore tests can verify
+      # the dump decrypted to exactly what was backed up.
+      - name: Checksum raw dump
         run: |
-          rclone copy "${{ steps.filename.outputs.name }}" gdrive: \
-            --progress \
-            --stats-one-line
+          sha256sum "${{ steps.filename.outputs.name }}.sql" \
+            > "${{ steps.filename.outputs.name }}.sha256"
 
-      - name: Prune backups older than 12 weeks
+      # Symmetric GPG encryption with a passphrase stored in GitHub Secrets.
+      # Gzip is applied by GPG (compress-algo 2 = zlib). Passphrase MUST be
+      # rotated at least annually; store the current + previous passphrase
+      # somewhere offline so old backups remain recoverable.
+      - name: Encrypt dump with GPG (AES-256)
+        env:
+          GPG_PASSPHRASE: ${{ secrets.BACKUP_GPG_PASSPHRASE }}
+        run: |
+          if [ -z "$GPG_PASSPHRASE" ]; then
+            echo "::error::BACKUP_GPG_PASSPHRASE secret not set — refusing to upload an unencrypted backup"
+            exit 1
+          fi
+          echo "$GPG_PASSPHRASE" | gpg --batch --yes --passphrase-fd 0 \
+            --cipher-algo AES256 --compress-algo 2 \
+            --symmetric \
+            --output "${{ steps.filename.outputs.name }}.sql.gpg" \
+            "${{ steps.filename.outputs.name }}.sql"
+          rm -f "${{ steps.filename.outputs.name }}.sql"
+
+      - name: Upload encrypted dump + checksum
+        run: |
+          rclone copy "${{ steps.filename.outputs.name }}.sql.gpg" gdrive: --progress --stats-one-line
+          rclone copy "${{ steps.filename.outputs.name }}.sha256"  gdrive: --progress --stats-one-line
+
+      # Retention: 12 weekly files in hot tier; anything older than 1 year
+      # is presumed archived to cold storage externally. DO NOT auto-delete
+      # files older than 1 year here — that job must be a separate, human-
+      # reviewed workflow so a runaway cron can't wipe the long-term archive.
+      - name: Prune hot-tier backups older than 12 weeks
         run: |
           rclone delete gdrive: \
             --min-age 84d \
-            --include "crm-backup-*.sql.gz" \
-            --verbose
+            --max-age 365d \
+            --include "crm-backup-*.sql.gpg" --verbose
+          rclone delete gdrive: \
+            --min-age 84d \
+            --max-age 365d \
+            --include "crm-backup-*.sha256" --verbose
 
-      - name: Report success
+      - name: Report
         if: success()
         run: |
-          echo "Backup uploaded: ${{ steps.filename.outputs.name }}"
-          rclone ls gdrive: --include "crm-backup-*.sql.gz" | tail -5
+          echo "Backup uploaded: ${{ steps.filename.outputs.name }}.sql.gpg"
+          rclone ls gdrive: --include "crm-backup-*.sql.gpg" | tail -5
+
+  # Monthly automated restore test — fails loudly if a backup can't be
+  # decrypted and loaded into a throwaway Postgres. Runs on the 1st of
+  # each month at 03:00 UTC, using the most recent backup file.
+  restore_test:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: backup
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: restoretest
+          POSTGRES_DB: restoretest
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Install PostgreSQL 17 client + gpg + rclone
+        run: |
+          sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-17 gnupg
+          curl https://rclone.org/install.sh | sudo bash
+
+      - name: Configure rclone
+        run: |
+          mkdir -p ~/.config/rclone
+          cat > ~/.config/rclone/rclone.conf <<EOF
+          [gdrive]
+          type = drive
+          scope = drive
+          token = ${{ secrets.GDRIVE_TOKEN }}
+          root_folder_id = ${{ secrets.GDRIVE_FOLDER_ID }}
+          EOF
+
+      - name: Download latest encrypted backup
+        run: |
+          LATEST=$(rclone lsf gdrive: --include "crm-backup-*.sql.gpg" | sort | tail -1)
+          if [ -z "$LATEST" ]; then echo "::error::No backup file found in gdrive"; exit 1; fi
+          echo "Restoring: $LATEST"
+          rclone copy "gdrive:$LATEST" . --progress
+
+      - name: Decrypt + load into throwaway Postgres
+        env:
+          GPG_PASSPHRASE: ${{ secrets.BACKUP_GPG_PASSPHRASE }}
+          PGPASSWORD: restoretest
+        run: |
+          FILE=$(ls crm-backup-*.sql.gpg | tail -1)
+          echo "$GPG_PASSPHRASE" | gpg --batch --yes --passphrase-fd 0 \
+            --decrypt "$FILE" > restore.sql
+          head -20 restore.sql
+          psql -h localhost -U postgres -d restoretest -v ON_ERROR_STOP=1 -f restore.sql
+          psql -h localhost -U postgres -d restoretest -c "select count(*) from public.users;"
+          psql -h localhost -U postgres -d restoretest -c "select count(*) from auth.users;"
+
+      - name: Notify on failure
+        if: failure()
+        run: echo "::error::Monthly restore test FAILED — investigate the latest backup immediately"

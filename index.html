@@ -4,6 +4,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://unpkg.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com; font-src 'self' https://cdnjs.cloudflare.com https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.qrserver.com; frame-ancestors 'self'; base-uri 'self'; form-action 'self';">
+    <meta http-equiv="X-Content-Type-Options" content="nosniff">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
     <title>Feng Shui CRM V8.7 - Enterprise Edition</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -264,11 +267,11 @@
 
     <!-- Critical scripts loaded eagerly (needed on login screen + app shell) -->
     <script defer src="lunar-calendar.min.js"></script>
-    <script defer src="data.js?v=20260421b"></script>
-    <script defer src="auth.js"></script>
-    <script defer src="ui.js"></script>
-    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
-    <script defer src="script.js?v=20260421b"></script>
+    <script defer src="data.js?v=20260424a"></script>
+    <script defer src="auth.js?v=20260424a"></script>
+    <script defer src="ui.js?v=20260424a"></script>
+    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js" integrity="sha384-I7E8VVD/ismYTF4hNIPjVp/Zjvgyol6VbvzoEkA53cTO5Td10GIGnIS9RWZE5SdJ" crossorigin="anonymous"></script>
+    <script defer src="script.js?v=20260424a"></script>
 
     <!--
       The following libraries are loaded on-demand via window._loadScriptOnce()
