@@ -41422,6 +41422,15 @@ JB 星期二到
     const _stSystemStock = (sid) => _stLoad(`systemStock.${sid}`, []);
     const _stCounts = (sid) => _stLoad(`counts.${sid}`, []);
     const _stEsc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+    // Safe to embed inside onclick="app.fn('...')" — JS-escape first, then HTML-escape the
+    // attribute delimiters. Preserves `'` via `\'` so HTML→JS decoding works correctly.
+    const _stAttr = (s) => String(s ?? '')
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
     const _stNormKey = (loc, sku) => `${String(loc||'').trim().toLowerCase()}|${String(sku||'').trim().toUpperCase()}`;
 
     const showStockTakeView = async (container) => {
@@ -41513,11 +41522,11 @@ JB 星期二到
                                     <span style="padding:3px 10px;border-radius:10px;font-size:11px;font-weight:600;background:${s.status==='open'?'#dcfce7':'#f1f5f9'};color:${s.status==='open'?'#166534':'#475569'};">${s.status}</span>
                                 </td>
                                 <td style="padding:10px;text-align:right;white-space:nowrap;">
-                                    <button class="btn secondary small" onclick="app.stActivateSession('${_stEsc(s.id)}')">Activate</button>
+                                    <button class="btn secondary small" onclick="app.stActivateSession('${_stAttr(s.id)}')">Activate</button>
                                     ${s.status==='open'
-                                        ? `<button class="btn small" onclick="app.stCloseSession('${_stEsc(s.id)}')">Close</button>`
+                                        ? `<button class="btn small" onclick="app.stCloseSession('${_stAttr(s.id)}')">Close</button>`
                                         : ''}
-                                    <button class="btn small" style="color:#dc2626;" onclick="app.stDeleteSession('${_stEsc(s.id)}')">Delete</button>
+                                    <button class="btn small" style="color:#dc2626;" onclick="app.stDeleteSession('${_stAttr(s.id)}')">Delete</button>
                                 </td>
                             </tr>
                         `).join('')}
@@ -41687,19 +41696,53 @@ JB 星期二到
     };
 
     // ── Count tab ──────────────────────────────────────────
+    const _stRenderCountsList = (sid) => {
+        const all = _stCounts(sid);
+        const counts = all.slice().reverse().slice(0, 50);
+        return `
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+                <h3 style="margin:0;font-size:16px;">Recent Counts (${all.length} total)</h3>
+            </div>
+            <div style="max-height:500px;overflow:auto;margin-top:12px;">
+                ${counts.length === 0 ? `<div style="padding:30px;text-align:center;color:var(--gray-500);">No counts yet.</div>` : `
+                    <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                        <thead style="position:sticky;top:0;background:var(--gray-50);"><tr>
+                            <th style="padding:6px;text-align:left;">When</th>
+                            <th style="padding:6px;text-align:left;">Who</th>
+                            <th style="padding:6px;text-align:left;">Location</th>
+                            <th style="padding:6px;text-align:left;">Shelf</th>
+                            <th style="padding:6px;text-align:left;">SKU</th>
+                            <th style="padding:6px;text-align:right;">Qty</th>
+                            <th></th>
+                        </tr></thead>
+                        <tbody>${counts.map(c => `<tr style="border-top:1px solid var(--gray-100);">
+                            <td style="padding:6px;">${_stEsc((c.timestamp||'').slice(11,16))}</td>
+                            <td style="padding:6px;">${_stEsc(c.counter)}</td>
+                            <td style="padding:6px;">${_stEsc(c.location)}</td>
+                            <td style="padding:6px;color:var(--gray-500);">${_stEsc(c.shelf||'—')}</td>
+                            <td style="padding:6px;font-family:monospace;">${_stEsc(c.sku)}${c.recount ? ' <span style="background:#fef3c7;color:#92400e;padding:1px 4px;border-radius:3px;font-size:10px;">RC</span>' : ''}</td>
+                            <td style="padding:6px;text-align:right;">${c.qty}</td>
+                            <td style="padding:6px;text-align:right;"><button class="btn-link" style="color:#dc2626;border:none;background:none;cursor:pointer;" onclick="app.stDeleteCount('${c.id}')"><i class="fas fa-times"></i></button></td>
+                        </tr>`).join('')}</tbody>
+                    </table>
+                `}
+            </div>
+        `;
+    };
+
     const _stRenderCount = () => {
         const sid = _stState.sessionId;
         if (!sid) return `<div style="padding:40px;text-align:center;color:var(--gray-500);">Activate a session first.</div>`;
         const sess = _stSessions().find(s => s.id === sid);
         const locs = sess?.locations || [];
-        const counts = _stCounts(sid).slice().reverse().slice(0, 50);
+        const defaultCounter = _currentUser?.name || _currentUser?.email || '';
         return `
             <div style="display:grid;grid-template-columns:1fr 1.3fr;gap:16px;">
                 <div style="background:white;padding:16px;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
                     <h3 style="margin-top:0;font-size:16px;">Record Physical Count</h3>
                     <div class="form-group" style="margin-bottom:10px;">
                         <label>Counter Name</label>
-                        <input id="st-counter" type="text" value="${_stEsc(_currentUser?.name || _currentUser?.email || '')}" style="width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:6px;">
+                        <input id="st-counter" type="text" value="${_stEsc(defaultCounter)}" style="width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:6px;">
                     </div>
                     <div class="form-group" style="margin-bottom:10px;">
                         <label>Location</label>
@@ -41713,45 +41756,25 @@ JB 星期二到
                     </div>
                     <div class="form-group" style="margin-bottom:10px;">
                         <label>SKU</label>
-                        <input id="st-sku" type="text" placeholder="scan or type" onkeydown="if(event.key==='Enter'){document.getElementById('st-qty').focus();}" style="width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:6px;font-family:monospace;">
+                        <input id="st-sku" type="text" placeholder="scan or type" onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('st-qty').focus();}" style="width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:6px;font-family:monospace;">
                     </div>
                     <div class="form-group" style="margin-bottom:12px;">
                         <label>Counted Qty</label>
-                        <input id="st-qty" type="number" min="0" step="1" onkeydown="if(event.key==='Enter'){app.stAddCount();}" style="width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:6px;font-size:18px;">
+                        <input id="st-qty" type="number" min="0" step="1" onkeydown="if(event.key==='Enter'){event.preventDefault();app.stAddCount();}" style="width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:6px;font-size:18px;">
                     </div>
                     <button class="btn primary" style="width:100%;padding:12px;" onclick="app.stAddCount()"><i class="fas fa-plus"></i> Add Count</button>
                 </div>
-                <div style="background:white;padding:16px;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
-                    <div style="display:flex;justify-content:space-between;align-items:center;">
-                        <h3 style="margin:0;font-size:16px;">Recent Counts (${_stCounts(sid).length} total)</h3>
-                    </div>
-                    <div style="max-height:500px;overflow:auto;margin-top:12px;">
-                        ${counts.length === 0 ? `<div style="padding:30px;text-align:center;color:var(--gray-500);">No counts yet.</div>` : `
-                            <table style="width:100%;border-collapse:collapse;font-size:12px;">
-                                <thead style="position:sticky;top:0;background:var(--gray-50);"><tr>
-                                    <th style="padding:6px;text-align:left;">When</th>
-                                    <th style="padding:6px;text-align:left;">Who</th>
-                                    <th style="padding:6px;text-align:left;">Location</th>
-                                    <th style="padding:6px;text-align:left;">Shelf</th>
-                                    <th style="padding:6px;text-align:left;">SKU</th>
-                                    <th style="padding:6px;text-align:right;">Qty</th>
-                                    <th></th>
-                                </tr></thead>
-                                <tbody>${counts.map(c => `<tr style="border-top:1px solid var(--gray-100);">
-                                    <td style="padding:6px;">${_stEsc((c.timestamp||'').slice(11,16))}</td>
-                                    <td style="padding:6px;">${_stEsc(c.counter)}</td>
-                                    <td style="padding:6px;">${_stEsc(c.location)}</td>
-                                    <td style="padding:6px;color:var(--gray-500);">${_stEsc(c.shelf||'—')}</td>
-                                    <td style="padding:6px;font-family:monospace;">${_stEsc(c.sku)}${c.recount ? ' <span style="background:#fef3c7;color:#92400e;padding:1px 4px;border-radius:3px;font-size:10px;">RC</span>' : ''}</td>
-                                    <td style="padding:6px;text-align:right;">${c.qty}</td>
-                                    <td style="padding:6px;text-align:right;"><button class="btn-link" style="color:#dc2626;border:none;background:none;cursor:pointer;" onclick="app.stDeleteCount('${c.id}')"><i class="fas fa-times"></i></button></td>
-                                </tr>`).join('')}</tbody>
-                            </table>
-                        `}
-                    </div>
+                <div id="st-counts-panel" style="background:white;padding:16px;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                    ${_stRenderCountsList(sid)}
                 </div>
             </div>
         `;
+    };
+
+    const _stRefreshCountsList = () => {
+        const sid = _stState.sessionId;
+        const panel = document.getElementById('st-counts-panel');
+        if (sid && panel) panel.innerHTML = _stRenderCountsList(sid);
     };
 
     const stAddCount = () => {
@@ -41760,34 +41783,36 @@ JB 星期二到
         const counter = (document.getElementById('st-counter')?.value || '').trim();
         const location = (document.getElementById('st-loc')?.value || '').trim();
         const shelf = (document.getElementById('st-shelf')?.value || '').trim();
-        const sku = (document.getElementById('st-sku')?.value || '').trim();
+        const skuRaw = (document.getElementById('st-sku')?.value || '').trim();
         const qtyRaw = (document.getElementById('st-qty')?.value || '').trim();
         const qty = Number(qtyRaw);
         if (!counter) return UI.toast.error('Counter name required');
         if (!location) return UI.toast.error('Location required');
-        if (!sku) return UI.toast.error('SKU required');
+        if (!skuRaw) return UI.toast.error('SKU required');
         if (!qtyRaw || !isFinite(qty) || qty < 0) return UI.toast.error('Valid qty required');
         const counts = _stCounts(sid);
         counts.push({
             id: `c_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
             timestamp: new Date().toISOString(),
-            counter, location, shelf, sku: sku.toUpperCase(), qty,
+            counter, location, shelf, sku: skuRaw.toUpperCase(), qty,
         });
         _stSave(`counts.${sid}`, counts);
-        document.getElementById('st-sku').value = '';
-        document.getElementById('st-qty').value = '';
-        document.getElementById('st-shelf').value = '';
-        document.getElementById('st-sku').focus();
-        UI.toast.success(`+${qty} × ${sku}`);
-        // Refresh only the recent list side
-        stSwitchTab('count');
-        setTimeout(() => document.getElementById('st-sku')?.focus(), 50);
+        // Clear only the shelf/sku/qty; keep counter + location for rapid shelf-by-shelf entry
+        const skuEl = document.getElementById('st-sku');
+        const qtyEl = document.getElementById('st-qty');
+        const shelfEl = document.getElementById('st-shelf');
+        if (skuEl) skuEl.value = '';
+        if (qtyEl) qtyEl.value = '';
+        if (shelfEl) shelfEl.value = '';
+        _stRefreshCountsList();
+        UI.toast.success(`+${qty} × ${skuRaw.toUpperCase()}`);
+        setTimeout(() => document.getElementById('st-sku')?.focus(), 0);
     };
     const stDeleteCount = (id) => {
         const sid = _stState.sessionId;
         if (!sid) return;
         _stSave(`counts.${sid}`, _stCounts(sid).filter(c => c.id !== id));
-        stSwitchTab('count');
+        _stRefreshCountsList();
     };
 
     // ── Reconciliation ──────────────────────────────────────────
@@ -41911,7 +41936,7 @@ JB 星期二到
                                 <td style="padding:8px 10px;text-align:right;">${r.Physical_Total}</td>
                                 <td style="padding:8px 10px;text-align:right;">${r.System_Qty}</td>
                                 <td style="padding:8px 10px;text-align:right;color:${r.Variance>0?'#059669':'#dc2626'};font-weight:600;">${r.Variance>0?'+':''}${r.Variance}</td>
-                                <td style="padding:8px 10px;text-align:center;"><button class="btn small primary" onclick="app.stOpenRecount('${_stEsc(r.Location)}','${_stEsc(r.SKU)}')">Recount</button></td>
+                                <td style="padding:8px 10px;text-align:center;"><button class="btn small primary" onclick="app.stOpenRecount('${_stAttr(r.Location)}','${_stAttr(r.SKU)}')">Recount</button></td>
                             </tr>`).join('')}</tbody>
                         </table>
                     </div>
@@ -41930,7 +41955,7 @@ JB 星期二到
             <div style="background:#fef3c7;color:#92400e;padding:8px 12px;border-radius:6px;font-size:12px;">This replaces all prior counts for this SKU at this location.</div>
         `, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save Recount', type: 'primary', action: `(async () => { await app.stSaveRecount('${_stEsc(location)}','${_stEsc(sku)}'); })()` },
+            { label: 'Save Recount', type: 'primary', action: `(async () => { await app.stSaveRecount('${_stAttr(location)}','${_stAttr(sku)}'); })()` },
         ]);
     };
     const stSaveRecount = (location, sku) => {
