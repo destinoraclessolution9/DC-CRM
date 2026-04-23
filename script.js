@@ -10061,15 +10061,18 @@ function _wireLoginBtn() {
             resultsDiv.style.display = 'none';
             return;
         }
- 
-        const prospects = await AppDataStore.getAll('prospects');
-        const customers = await AppDataStore.getAll('customers');
-        const all = [
+
+        // Indexed server-side search — trigram GIN on prospects.full_name /
+        // nickname means this is fast even at 100K+ rows. Previously pulled
+        // BOTH full tables on every keystroke (debounce 250ms).
+        const [prospects, customers] = await Promise.all([
+            AppDataStore.searchProspects(query, { includeDormant: true, limit: 10 }),
+            AppDataStore.searchCustomers(query, { limit: 10 }),
+        ]);
+        const filtered = [
             ...prospects.map(p => ({ ...p, type: 'prospect' })),
-            ...customers.map(c => ({ ...c, type: 'customer' }))
-        ];
- 
-        const filtered = all.filter(p => p.full_name?.toLowerCase().includes(query.toLowerCase()) || p.nickname?.toLowerCase().includes(query.toLowerCase())).slice(0, 5);
+            ...customers.map(c => ({ ...c, type: 'customer' })),
+        ].slice(0, 5);
 
         if (filtered.length > 0) {
             resultsDiv.innerHTML = filtered.map(p => `
@@ -16416,17 +16419,22 @@ function _wireLoginBtn() {
                 return;
             }
 
-            const allProspects = (await AppDataStore.getAll('prospects')).filter(p => !p.status || p.status === 'active');
-            const allUsers = (await AppDataStore.getAll('users')).filter(u => {
-                const lvl = parseInt(u.role?.match(/Level\s+(\d+)/i)?.[1] || 0);
-                return lvl >= 3;
-            });
-
-            const matchedProspects = allProspects
-                .filter(p => (p.full_name && p.full_name.toLowerCase().includes(term)) || (p.nickname && p.nickname.toLowerCase().includes(term)))
+            // Indexed server-side prospect search (trigram GIN). users table
+            // is small (~dozens of rows) so a cached getAll + client filter
+            // is still the right call there.
+            const [matchedProspectsRaw, allUsers] = await Promise.all([
+                AppDataStore.searchProspects(term, { includeDormant: true, limit: 15 }),
+                AppDataStore.getAll('users'),
+            ]);
+            // Respect the original "active only" rule for prospects in this UI.
+            const matchedProspects = matchedProspectsRaw
+                .filter(p => !p.status || p.status === 'active')
                 .slice(0, 5);
             const matchedConsultants = allUsers
-                .filter(u => u.full_name && u.full_name.toLowerCase().includes(term))
+                .filter(u => {
+                    const lvl = parseInt(u.role?.match(/Level\s+(\d+)/i)?.[1] || 0);
+                    return lvl >= 3 && u.full_name && u.full_name.toLowerCase().includes(term);
+                })
                 .slice(0, 5);
 
             if (resultsDiv) {

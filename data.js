@@ -789,6 +789,7 @@ class DataStore {
                     all.push({ ...insertData, ...dataToInsert, ...data });
                     localStorage.setItem(key, JSON.stringify(all));
                 } catch (_) {}
+                this._writeAudit('insert', tableName, data.id || insertData.id, null, data);
                 this.invalidateCache(tableName);
                 this.emit('dataChanged', { action: 'add', table: tableName, record: data });
                 return data;
@@ -832,8 +833,86 @@ class DataStore {
         return dataToInsert;
     }
 
+    // ── Audit trail (fire-and-forget) ────────────────────────────────────
+    // Writes a row to audit_logs for every update/delete on business-critical
+    // tables. Non-blocking: a failure here (e.g. audit_logs unreachable, RLS
+    // deny) NEVER prevents the user's mutation from succeeding. The value is
+    // dispute resolution — "who changed this prospect's phone last Tuesday?"
+    //
+    // user_id is pulled from window._currentUser (set by script.js login
+    // flow). If absent (e.g. system-triggered write before login completes),
+    // the row is still logged with user_id = null.
+    _isAuditedTable(tableName) {
+        // Static set kept as a method-local cache so the class body stays in
+        // the same object-method style as the rest of the file.
+        if (!this.__auditedTables) {
+            this.__auditedTables = new Set([
+                'prospects', 'customers', 'activities', 'users',
+                'transactions', 'referrals', 'approval_queue',
+                'event_attendees', 'notes', 'assignments',
+            ]);
+        }
+        return this.__auditedTables.has(tableName);
+    }
+
+    _writeAudit(action, tableName, entityId, oldData, newData) {
+        if (!this._isAuditedTable(tableName)) return;
+        // Diff: only keep fields that actually changed to keep the log small.
+        // Large blobs (cps_form_data, photo_urls arrays) are already excluded
+        // by the light-select, so old/new here won't carry them either.
+        let oldSlim = null, newSlim = null;
+        if (action === 'update' && oldData && newData) {
+            oldSlim = {}; newSlim = {};
+            for (const k of Object.keys(newData)) {
+                if (k === 'updated_at') continue; // noise
+                const o = oldData[k], n = newData[k];
+                if (JSON.stringify(o) !== JSON.stringify(n)) {
+                    oldSlim[k] = o === undefined ? null : o;
+                    newSlim[k] = n === undefined ? null : n;
+                }
+            }
+            // If nothing changed, skip the audit row entirely.
+            if (Object.keys(newSlim).length === 0) return;
+        } else if (action === 'delete') {
+            oldSlim = oldData || null;
+            newSlim = null;
+        } else if (action === 'insert') {
+            oldSlim = null;
+            newSlim = newData || null;
+        }
+
+        const row = {
+            user_id: (window._currentUser?.id) || null,
+            action,
+            entity_type: tableName,
+            entity_id: entityId,
+            old_data: oldSlim,
+            new_data: newSlim,
+            user_agent: (navigator && navigator.userAgent) ? navigator.userAgent.slice(0, 255) : null,
+            created_at: new Date().toISOString(),
+        };
+        // Fire-and-forget — swallow errors, never block the caller.
+        this._writeClient().from('audit_logs').insert(row).then(
+            () => {},
+            (e) => console.debug('[audit] write failed (non-fatal):', e?.message)
+        );
+    }
+
     async update(tableName, id, updates) {
         let updateData = { ...updates };
+        // Capture pre-update snapshot for audit diff. Best-effort: if the
+        // row isn't in cache we skip the `old_data` side of the diff rather
+        // than round-trip for every update.
+        let _auditOldData = null;
+        if (this._isAuditedTable(tableName)) {
+            try {
+                const cached = this._cacheGet(tableName);
+                if (cached) {
+                    const existing = cached.find(r => String(r.id) === String(id));
+                    if (existing) _auditOldData = { ...existing };
+                }
+            } catch (_) {}
+        }
         for (let attempt = 0; attempt < 15; attempt++) {
             try {
                 const { data, error } = await this._writeClient()
@@ -850,6 +929,7 @@ class DataStore {
                     const full = { ...data, ...updates };
                     if (idx >= 0) { all[idx] = full; localStorage.setItem(key, JSON.stringify(all)); }
                 } catch (_) {}
+                this._writeAudit('update', tableName, id, _auditOldData, data);
                 this.invalidateCache(tableName);
                 this.emit('dataChanged', { action: 'update', table: tableName, record: data });
                 return data;
@@ -988,6 +1068,17 @@ class DataStore {
     }
 
     async delete(tableName, id) {
+        // Capture pre-delete snapshot for audit trail (best-effort from cache).
+        let _auditOldData = null;
+        if (this._isAuditedTable(tableName)) {
+            try {
+                const cached = this._cacheGet(tableName);
+                if (cached) {
+                    const existing = cached.find(r => String(r.id) === String(id));
+                    if (existing) _auditOldData = { ...existing };
+                }
+            } catch (_) {}
+        }
         // Hard delete: must succeed in Supabase first — no silent failures.
         // If Supabase rejects the delete, the error is thrown and localStorage is
         // left untouched so the record stays visible (no ghost-resurrection later).
@@ -996,6 +1087,8 @@ class DataStore {
             .delete()
             .eq('id', id);
         if (error) throw error;
+
+        this._writeAudit('delete', tableName, id, _auditOldData, null);
 
         // Supabase confirmed the delete — now clean up local cache
         try {
@@ -1334,6 +1427,79 @@ class DataStore {
             options.gte = { last_activity_date: cutoff };
         }
         const res = await this.queryAdvanced('prospects', options);
+        return res.data || [];
+    }
+
+    // ── Paginated full-table fetch ────────────────────────────────────────
+    // Supabase PostgREST caps a single `.select()` at 1000 rows. getAll()
+    // today silently truncates at that limit (with a console.warn). For any
+    // code path that genuinely needs EVERY row — reports, CSV exports, bulk
+    // operations — use this method instead. It transparently pages through
+    // 1000 rows at a time and merges the result.
+    //
+    // At 100K rows this is ~100 round trips; caller should confirm with the
+    // user before running (or ideally switch to a server-side report).
+    //
+    // Options: { pageSize=1000, maxRows=250000, orderBy='id', filters }
+    async getAllPaged(tableName, opts = {}) {
+        const {
+            pageSize = 1000,
+            maxRows = 250000, // hard ceiling to prevent runaway downloads
+            orderBy = 'id',
+            filters = {},
+        } = opts;
+        const selectClause = this._selectClauseForGetAll(tableName);
+        const all = [];
+        let offset = 0;
+        while (all.length < maxRows) {
+            let q = this._readClient()
+                .from(tableName)
+                .select(selectClause)
+                .order(orderBy, { ascending: true })
+                .range(offset, offset + pageSize - 1);
+            for (const [k, v] of Object.entries(filters)) {
+                if (v != null && v !== '') q = q.eq(k, v);
+            }
+            const { data, error } = await q;
+            if (error) {
+                console.error(`[getAllPaged] ${tableName} page at offset ${offset} failed:`, error);
+                break;
+            }
+            if (!data || data.length === 0) break;
+            all.push(...data);
+            if (data.length < pageSize) break; // last page
+            offset += pageSize;
+        }
+        if (all.length >= maxRows) {
+            console.warn(`[getAllPaged] hit maxRows=${maxRows} on ${tableName} — increase or move to a server-side report.`);
+        }
+        // Apply tombstone filter for consistency with getAll()
+        try {
+            const tRaw = localStorage.getItem('fs_crm_tombstones');
+            const tombstones = tRaw ? JSON.parse(tRaw) : {};
+            const deletedIds = new Set(tombstones[tableName] || []);
+            return all.filter(r => !deletedIds.has(String(r.id)));
+        } catch (_) {
+            return all;
+        }
+    }
+
+    // Server-side customer search — mirrors searchProspects(). Used by the
+    // referrer/autocomplete inputs that need to show prospects + customers
+    // without downloading both full tables on every keystroke. Uses
+    // idx_customers_phone for phone matches; full_name/nickname fall through
+    // to a seq scan today but will sit behind their own trigram index in
+    // a future round once the customers row count justifies it.
+    async searchCustomers(term, opts = {}) {
+        const { limit = 20 } = opts;
+        if (!term || !term.trim()) return [];
+        const options = {
+            search: term.trim(),
+            searchFields: ['full_name', 'nickname', 'phone', 'email'],
+            limit,
+            countMode: null,
+        };
+        const res = await this.queryAdvanced('customers', options);
         return res.data || [];
     }
 
