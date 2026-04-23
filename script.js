@@ -15656,8 +15656,8 @@ function _wireLoginBtn() {
                         <div class="form-group">
                             <label>Visibility</label>
                             <div class="radio-group" style="display:flex; gap:20px;">
-                                <label><input type="radio" name="event-visibility" value="closed" checked> Closed Event (Private)</label>
-                                <label><input type="radio" name="event-visibility" value="open"> Open Event (Public)</label>
+                                <label><input type="radio" name="event-visibility" value="closed"> Closed Event (Private)</label>
+                                <label><input type="radio" name="event-visibility" value="open" checked> Open Event (Public)</label>
                             </div>
                             <small class="help-text">Open events are visible to all agents. Closed events only to involved agents.</small>
                         </div>
