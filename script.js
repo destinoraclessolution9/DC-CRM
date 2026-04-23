@@ -61,9 +61,78 @@ if (!window.AppDataStore._patched) {
 // Add initialization flag
 window.app.ready = false;
 
-window.onerror = (msg, url, line) => {
-    console.error(`GLOBAL ERROR: ${msg} at ${url}:${line}`);
+// ============================================================================
+// Error reporting: window.onerror + unhandledrejection + Sentry (optional)
+// ============================================================================
+// At scale (100K+ prospects, many concurrent agents) silent failures are the
+// biggest observability gap. We do three things:
+//   1. Log to console (legacy behavior, kept for dev).
+//   2. Buffer the last 50 errors in localStorage so you can read them from
+//      DevTools even if the network is down and Sentry never flushed.
+//   3. Lazy-load Sentry from CDN if `window.SENTRY_DSN` is defined (set it in
+//      index.html or Supabase system_config). No DSN = no Sentry load — zero
+//      bytes downloaded, zero perf cost.
+// ----------------------------------------------------------------------------
+const ERROR_BUFFER_KEY = 'fs_crm_error_buffer';
+const ERROR_BUFFER_MAX = 50;
+
+function _bufferError(entry) {
+    try {
+        const buf = JSON.parse(localStorage.getItem(ERROR_BUFFER_KEY) || '[]');
+        buf.push({ ts: new Date().toISOString(), ...entry });
+        while (buf.length > ERROR_BUFFER_MAX) buf.shift();
+        localStorage.setItem(ERROR_BUFFER_KEY, JSON.stringify(buf));
+    } catch (_) { /* quota exceeded or SecurityError — best-effort only */ }
+}
+
+window.onerror = (msg, url, line, col, err) => {
+    console.error(`GLOBAL ERROR: ${msg} at ${url}:${line}:${col}`, err);
+    _bufferError({ kind: 'error', msg: String(msg), url, line, col, stack: err?.stack });
+    if (window.Sentry?.captureException && err) window.Sentry.captureException(err);
 };
+
+window.addEventListener('unhandledrejection', (e) => {
+    const reason = e.reason;
+    const msg = reason?.message || String(reason);
+    console.error('UNHANDLED REJECTION:', reason);
+    _bufferError({ kind: 'unhandledrejection', msg, stack: reason?.stack });
+    if (window.Sentry?.captureException) window.Sentry.captureException(reason);
+});
+
+// Lazy-load Sentry from CDN only if a DSN is configured. Deferred to
+// after-first-paint so it never blocks the initial render. To enable:
+//   1. Sign up at sentry.io, get a DSN.
+//   2. Add to index.html <head>: <script>window.SENTRY_DSN='https://...';</script>
+//   3. Reload — the browser SDK loads asynchronously and starts reporting.
+if (window.SENTRY_DSN) {
+    (function loadSentry() {
+        const s = document.createElement('script');
+        s.src = 'https://browser.sentry-cdn.com/7.112.2/bundle.tracing.min.js';
+        s.integrity = 'sha384-unset'; // set a real SRI hash if you pin a version
+        s.crossOrigin = 'anonymous';
+        s.onload = () => {
+            try {
+                window.Sentry.init({
+                    dsn: window.SENTRY_DSN,
+                    tracesSampleRate: 0.05,      // 5 % perf traces — keep quota low
+                    replaysSessionSampleRate: 0,  // no session replay by default
+                    environment: location.hostname === 'destinoraclessolution.com' ? 'prod' : 'staging',
+                    beforeSend(event) {
+                        // Drop events that look like extension noise (common source of spam)
+                        if (event.exception?.values?.[0]?.stacktrace?.frames?.some(
+                            f => /chrome-extension:|moz-extension:/.test(f.filename || ''))) return null;
+                        return event;
+                    },
+                });
+                console.log('[Sentry] initialized');
+            } catch (e) {
+                console.warn('[Sentry] init failed:', e);
+            }
+        };
+        s.onerror = () => console.warn('[Sentry] CDN load failed — errors still buffered to localStorage');
+        document.head.appendChild(s);
+    })();
+}
 
 // ==================== USER PREFERENCES (Supabase-backed, localStorage cache) ====================
 const UserPreferences = {
@@ -17626,6 +17695,10 @@ function _wireLoginBtn() {
                             <select id="filter-agent" onchange="app.filterProspects()">
                                 <option value="">All Agents</option>
                             </select>
+                            <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--text-secondary);cursor:pointer;user-select:none;" title="By default, prospects inactive for 500+ days are hidden. Type a name/phone in the search box to find them, or check this to load them all.">
+                                <input type="checkbox" id="filter-include-dormant" onchange="app.filterProspects()" style="margin:0;">
+                                Include dormant (500+ days)
+                            </label>
                             <button class="btn primary" onclick="app.filterProspects()">Apply Filters</button>
                         </div>
                     </div>
@@ -18307,11 +18380,39 @@ function _wireLoginBtn() {
         const tbody = document.getElementById('prospects-table-body');
         if (!tbody) return;
 
-        // ── Use getAll() with cache (5-min TTL, light-select, proven reliable) ──
-        // Then filter + paginate client-side. First load downloads ~100KB (no blobs),
-        // subsequent calls hit cache instantly.
-        const [allProspects, allActivities, allUsers] = await Promise.all([
-            AppDataStore.getAll('prospects'),
+        // ── Read UI filter values (search term drives the load strategy) ──
+        const searchQueryRaw = document.getElementById('prospect-search')?.value?.trim() || '';
+        const searchQuery = searchQueryRaw.toLowerCase();
+        const scoreFilter = document.getElementById('filter-score')?.value || '';
+        const guaFilter = document.getElementById('filter-gua')?.value || '';
+        const statusFilter = document.getElementById('filter-status')?.value || '';
+        const agentFilter = document.getElementById('filter-agent')?.value || '';
+        const includeDormantToggle = document.getElementById('filter-include-dormant')?.checked || false;
+
+        // ── Dormancy-aware load ────────────────────────────────────────────
+        // Ops rule (2026-04-23): prospects inactive for >500 days are NOT
+        // loaded by default. They remain searchable by phone/name/email — a
+        // non-empty search term routes through searchProspects() which uses
+        // the pg_trgm indexes and INCLUDES dormant records. Toggle the
+        // "Include dormant" checkbox to load them unconditionally.
+        //
+        // activities and users are still fetched for per-row rendering
+        // (protection status, agent name).
+        let allProspects;
+        if (searchQueryRaw) {
+            // Agent typed something → search everyone, dormant included.
+            allProspects = await AppDataStore.searchProspects(searchQueryRaw, {
+                includeDormant: true,
+                limit: 200,
+            });
+        } else {
+            // Normal list → active only.
+            allProspects = await AppDataStore.getActiveProspects({
+                includeDormant: includeDormantToggle,
+            });
+        }
+
+        const [allActivities, allUsers] = await Promise.all([
             AppDataStore.getAll('activities'),
             AppDataStore.getAll('users'),
         ]);
@@ -18328,13 +18429,6 @@ function _wireLoginBtn() {
                 prospects = allProspects.filter(p => visibleIds.includes(p.responsible_agent_id));
             }
         }
-
-        // ── Read UI filter values ──
-        const searchQuery = document.getElementById('prospect-search')?.value?.trim()?.toLowerCase() || '';
-        const scoreFilter = document.getElementById('filter-score')?.value || '';
-        const guaFilter = document.getElementById('filter-gua')?.value || '';
-        const statusFilter = document.getElementById('filter-status')?.value || '';
-        const agentFilter = document.getElementById('filter-agent')?.value || '';
 
         // ── Build activity index (O(1) lookups) ──
         const latestActivityByProspect = new Map();
@@ -18471,10 +18565,27 @@ function _wireLoginBtn() {
         }
 
         if (pageProspects.length === 0) {
-            html = '<tr><td colspan="8" style="text-align:center; padding:40px;">No prospects found. Click "Add Prospect" to create one.</td></tr>';
+            const hint = searchQueryRaw
+                ? `No prospects matched "<strong>${searchQueryRaw.replace(/</g, '&lt;')}</strong>". Dormant records were included in this search.`
+                : (includeDormantToggle
+                    ? 'No prospects found. Click "Add Prospect" to create one.'
+                    : 'No active prospects. Check "Include dormant" or type a name/phone to search older records.');
+            html = `<tr><td colspan="8" style="text-align:center; padding:40px;">${hint}</td></tr>`;
         }
 
         tbody.innerHTML = html;
+
+        // ── Dormancy info line ──
+        // Tells the user why some records might not be visible, and offers a
+        // one-click path to reveal them. Only shown on the "plain list" path
+        // (no search term, toggle off) — when searching or when the toggle is
+        // on, the dormant set is already being considered, so no nudge needed.
+        const dormantNote = (!searchQueryRaw && !includeDormantToggle)
+            ? `<span style="color:var(--text-secondary);font-size:12px;margin-left:12px;">
+                 <i class="fas fa-moon" style="opacity:0.6;"></i>
+                 Prospects inactive 500+ days are hidden. Search by name/phone to find them.
+               </span>`
+            : '';
 
         // ── Render pagination controls ──
         const totalPages = Math.ceil(totalCount / _prospectPageSize);
@@ -18486,7 +18597,7 @@ function _wireLoginBtn() {
             tbody.closest('.prospects-table-container')?.appendChild(paginationEl);
         }
         if (totalPages <= 1) {
-            paginationEl.innerHTML = `<span style="color:var(--text-secondary);font-size:13px;">${totalCount} prospect${totalCount !== 1 ? 's' : ''}</span>`;
+            paginationEl.innerHTML = `<span style="color:var(--text-secondary);font-size:13px;">${totalCount} prospect${totalCount !== 1 ? 's' : ''}</span>${dormantNote}`;
         } else {
             const currentPage = _prospectPage + 1;
             const from = pageStart + 1;
@@ -18497,6 +18608,7 @@ function _wireLoginBtn() {
             pgHtml += `<span style="font-weight:600;font-size:14px;">Page ${currentPage} of ${totalPages}</span>`;
             pgHtml += `<button class="btn secondary btn-sm" ${currentPage >= totalPages ? 'disabled' : ''} onclick="app.prospectPageNav('next')">Next <i class="fas fa-angle-right"></i></button>`;
             pgHtml += `<button class="btn secondary btn-sm" ${currentPage >= totalPages ? 'disabled' : ''} onclick="app.prospectPageNav('last')" title="Last page"><i class="fas fa-angle-double-right"></i></button>`;
+            pgHtml += dormantNote;
             paginationEl.innerHTML = pgHtml;
         }
     };

@@ -100,7 +100,7 @@ class DataStore {
             // Prospects: verified against actual DB schema 2026-04-16.
             // EXCLUDES cps_form_data (base64 PDF blob — causes 27 MB download).
             // Added: appraisal_form_urls, apu_form_urls, cps_interest, life_chart_type (new columns).
-            prospects: 'id,full_name,nickname,title,gender,nationality,phone,email,ic_number,date_of_birth,lunar_birth,ming_gua,element,occupation,company_name,income_range,address,city,state,postal_code,responsible_agent_id,cps_agent_id,cps_assignment_date,protection_deadline,pipeline_stage,deal_value,expected_close_date,status,referred_by,referred_by_id,referred_by_type,referral_relationship,cps_invitation_method,cps_invitation_details,cps_attachment,score,tags,notes,created_at,updated_at,cps_form_date,cps_form_name,closing_record,closing_records_history,conversion_status,conversion_requested_by,conversion_rejected_by,conversion_rejected_at,closed_at,closed_date,closing_date,potential_level,close_probability,is_own_business,business_name,business_industry,business_area,business_title_role,business_started,company_size,pre2025_purchases,original_source,source_id,source,lead_agent_id,appraisal_form_urls,apu_form_urls,cps_interest,manual_grade,feng_shui_audits,life_chart_type',
+            prospects: 'id,full_name,nickname,title,gender,nationality,phone,email,ic_number,date_of_birth,lunar_birth,ming_gua,element,occupation,company_name,income_range,address,city,state,postal_code,responsible_agent_id,cps_agent_id,cps_assignment_date,protection_deadline,pipeline_stage,deal_value,expected_close_date,status,referred_by,referred_by_id,referred_by_type,referral_relationship,cps_invitation_method,cps_invitation_details,cps_attachment,score,tags,notes,created_at,updated_at,cps_form_date,cps_form_name,closing_record,closing_records_history,conversion_status,conversion_requested_by,conversion_rejected_by,conversion_rejected_at,closed_at,closed_date,closing_date,potential_level,close_probability,is_own_business,business_name,business_industry,business_area,business_title_role,business_started,company_size,pre2025_purchases,original_source,source_id,source,lead_agent_id,appraisal_form_urls,apu_form_urls,cps_interest,manual_grade,feng_shui_audits,life_chart_type,last_activity_date',
             // Activities: verified against actual DB schema 2026-04-16.
             // Excludes: consultants (JSONB blob), payment detail columns,
             // long discussion_summary field — only needed in detail/edit view.
@@ -220,6 +220,17 @@ class DataStore {
     // Invalidate cache for a table (and any table that depends on it)
     invalidateCache(tableName) {
         this._cache.delete(tableName);
+        // Derived caches that must expire whenever their source table changes.
+        // `__prospects_active_{days}` is populated by getActiveProspects() and
+        // depends on prospects.last_activity_date, which is kept in sync by a
+        // DB trigger on activities — so a write to either table must evict it.
+        if (tableName === 'prospects' || tableName === 'activities') {
+            for (const k of this._cache.keys()) {
+                if (typeof k === 'string' && k.startsWith('__prospects_active_')) {
+                    this._cache.delete(k);
+                }
+            }
+        }
     }
 
     // Force-expire everything (e.g. after bulk import)
@@ -1216,6 +1227,114 @@ class DataStore {
         } catch (_) {}
         this.invalidateCache(tableName);
         this.emit('dataChanged', { action: 'deleteMany', table: tableName, ids });
+    }
+
+    // ── Dormancy-aware prospect fetch ─────────────────────────────────────
+    // Default rule (per ops requirement 2026-04-23): prospects whose
+    // `last_activity_date` is older than DORMANCY_DAYS (500) should NOT be
+    // loaded on first render. They stay in the DB, stay searchable by phone/
+    // name/email via searchProspects(), and their full profile is still
+    // fetched on demand via getById(). This avoids downloading tens of
+    // thousands of cold prospect rows on every page load at scale.
+    //
+    // Cache key is separate from 'prospects' so the active-only snapshot
+    // doesn't collide with the full getAll('prospects') cache (used by
+    // reports, referral trees, admin export, etc.).
+    async getActiveProspects(opts = {}) {
+        const {
+            includeDormant = false,
+            dormantDays = 500,
+            limit = 2000,
+            fresh = false,
+        } = opts;
+
+        // Opt-out: caller explicitly wants the full set (admin, reports, etc.)
+        if (includeDormant) return this.getAll('prospects', { fresh });
+
+        const cacheKey = `__prospects_active_${dormantDays}`;
+        if (!fresh) {
+            const cached = this._cacheGet(cacheKey);
+            if (cached) return cached;
+        }
+
+        const cutoff = new Date(Date.now() - dormantDays * 86400000)
+            .toISOString().slice(0, 10); // YYYY-MM-DD
+        const selectClause = this._selectClauseForGetAll('prospects');
+
+        try {
+            let { data, error } = await this._readClient()
+                .from('prospects')
+                .select(selectClause)
+                .gte('last_activity_date', cutoff)
+                .limit(limit);
+            // Retry with '*' if light-select column list has gone stale
+            if (error && selectClause !== '*') {
+                ({ data, error } = await this._readClient()
+                    .from('prospects')
+                    .select('*')
+                    .gte('last_activity_date', cutoff)
+                    .limit(limit));
+            }
+            if (error) throw error;
+            // Tombstone filter — keep parity with getAll()
+            const tombstoneRaw = localStorage.getItem('fs_crm_tombstones');
+            const tombstones = tombstoneRaw ? JSON.parse(tombstoneRaw) : {};
+            const deletedIds = new Set(tombstones['prospects'] || []);
+            const result = (data || []).filter(r => !deletedIds.has(String(r.id)));
+            if (result.length === limit) {
+                console.warn(`[DataStore] getActiveProspects hit limit ${limit} — raise it or paginate.`);
+            }
+            this._cacheSet(cacheKey, result);
+            return result;
+        } catch (e) {
+            console.warn('getActiveProspects failed, falling back to getAll + client filter', e);
+            const all = await this.getAll('prospects');
+            return all.filter(p => {
+                // Keep prospects with no last_activity_date (brand new rows) —
+                // the trigger seeds it on insert, but a row created offline
+                // might not have it set until sync completes.
+                if (!p.last_activity_date) return true;
+                return p.last_activity_date >= cutoff;
+            });
+        }
+    }
+
+    // Server-side search across phone / email / full_name / nickname.
+    // Always includes dormant records by default (that's the whole point of
+    // search — you type a name, you expect to find them even if they've been
+    // quiet for 2 years). Caller can pass { includeDormant:false } to
+    // restrict to active records only.
+    //
+    // Uses trigram GIN indexes under the hood (idx_prospects_full_name_trgm,
+    // idx_prospects_nickname_trgm) for fast %ILIKE% performance on large tables.
+    async searchProspects(term, opts = {}) {
+        const {
+            includeDormant = true,
+            dormantDays = 500,
+            limit = 100,
+        } = opts;
+
+        if (!term || !term.trim()) {
+            // Empty term → regular list behavior (active only unless opted in).
+            return this.getActiveProspects({ includeDormant, dormantDays });
+        }
+
+        const searchFields = ['full_name', 'nickname', 'phone', 'email'];
+        const options = {
+            search: term.trim(),
+            searchFields,
+            sort: 'last_activity_date',
+            sortDir: 'desc',
+            limit,
+            countMode: null, // skip count — just want rows
+        };
+        if (!includeDormant) {
+            const cutoff = new Date(Date.now() - dormantDays * 86400000)
+                .toISOString().slice(0, 10);
+            options.gte = { last_activity_date: cutoff };
+        }
+        const res = await this.queryAdvanced('prospects', options);
+        return res.data || [];
     }
 
     // Aliases used throughout script.js
