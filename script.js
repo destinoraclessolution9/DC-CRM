@@ -12463,9 +12463,14 @@ function _wireLoginBtn() {
             </div>
         `;
 
+        // wa.me/?text=... pre-fills the message after the user picks a contact,
+        // so pasting isn't even required. encodeURIComponent turns any ' into
+        // %27, so the URL is safe to wrap in single quotes inside the HTML
+        // onclick="..." attribute.
+        const waUrl = 'https://wa.me/?text=' + encodeURIComponent(body);
         UI.showModal('\u{1F4E4} WhatsApp Invite Ready', previewHtml, [
             { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
-            { label: '\uD83D\uDCF1 Open WhatsApp Web', type: 'primary', action: '(() => { window.open("https://web.whatsapp.com/", "_blank", "noopener"); UI.hideModal(); })()' }
+            { label: '\uD83D\uDCF1 Open WhatsApp Web', type: 'primary', action: `(() => { window.open('${waUrl}', '_blank', 'noopener'); UI.hideModal(); })()` }
         ]);
     };
 
