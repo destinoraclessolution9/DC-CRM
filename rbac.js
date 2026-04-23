@@ -81,6 +81,35 @@ const DefaultRoles = {
     }
 };
 
+// Safe audit wrapper — AuditLogger may not be loaded (audit-log.js is
+// included conditionally). Never throw; degrade silently.
+const _rbacAudit = (severity, category, action, detail) => {
+    try {
+        if (typeof AuditLogger !== 'undefined' && AuditLogger?.[severity]) {
+            AuditLogger[severity](category, action, detail);
+        }
+    } catch (_) { /* best-effort */ }
+};
+
+// Custom-role cache. hasPermission/canViewField are called frequently from
+// render paths, so we keep the sync interface by loading custom roles once
+// and refreshing after create/assign. Default roles always resolve synchronously.
+let _customRolesCache = null;
+const _refreshCustomRoles = async () => {
+    try {
+        _customRolesCache = (await AppDataStore.getAll('roles')) || [];
+    } catch (_) {
+        _customRolesCache = [];
+    }
+    return _customRolesCache;
+};
+
+// Kick off the initial load (best-effort; sync callers will see an empty
+// cache until it resolves, but will fall back to VIEWER for unknown roles)
+if (typeof AppDataStore !== 'undefined' && typeof AppDataStore.getAll === 'function') {
+    _refreshCustomRoles();
+}
+
 // Helper functions
 const getRole = (roleName) => {
     // Check default roles first
@@ -88,8 +117,8 @@ const getRole = (roleName) => {
         return DefaultRoles[roleName.toUpperCase()];
     }
 
-    // Check custom roles
-    const customRole = AppDataStore.getAll('roles').find(r => r.name === roleName);
+    // Check custom roles from cache (see _refreshCustomRoles)
+    const customRole = (_customRolesCache || []).find(r => r.name === roleName);
     return customRole || DefaultRoles.VIEWER;
 };
 
@@ -183,7 +212,7 @@ const PermissionManager = {
 // Role management
 const RoleManager = {
     // Create custom role
-    createRole: (name, permissions, fieldPermissions) => {
+    createRole: async (name, permissions, fieldPermissions) => {
         const role = {
             id: `role_${Date.now()}`,
             name: name,
@@ -194,25 +223,22 @@ const RoleManager = {
             created_by: window._currentUser?.id
         };
 
-        AppDataStore.create('roles', role);
+        await AppDataStore.create('roles', role);
+        await _refreshCustomRoles();
 
-        AuditLogger.info(
-            AuditCategory.PERMISSION,
-            AuditAction.ROLE_CHANGE,
-            {
-                action: 'create',
-                role_name: name,
-                permissions: permissions
-            }
-        );
+        _rbacAudit('info', 'PERMISSION', 'ROLE_CHANGE', {
+            action: 'create',
+            role_name: name,
+            permissions: permissions
+        });
 
         return role;
     },
 
     // Assign role to user
-    assignRole: (userId, roleId) => {
-        const user = AppDataStore.getById('users', userId);
-        const role = AppDataStore.getById('roles', roleId);
+    assignRole: async (userId, roleId) => {
+        const user = await AppDataStore.getById('users', userId);
+        const role = await AppDataStore.getById('roles', roleId);
 
         if (!user || !role) return false;
 
@@ -221,24 +247,20 @@ const RoleManager = {
         user.role_assigned_at = new Date().toISOString();
         user.role_assigned_by = window._currentUser?.id;
 
-        AppDataStore.update('users', userId, user);
+        await AppDataStore.update('users', userId, user);
 
-        AuditLogger.info(
-            AuditCategory.PERMISSION,
-            AuditAction.PERMISSION_GRANT,
-            {
-                user_id: userId,
-                username: user.username,
-                role: role.name
-            }
-        );
+        _rbacAudit('info', 'PERMISSION', 'PERMISSION_GRANT', {
+            user_id: userId,
+            username: user.username,
+            role: role.name
+        });
 
         return true;
     },
 
     // Get effective permissions for user
-    getUserPermissions: (userId) => {
-        const user = AppDataStore.getById('users', userId);
+    getUserPermissions: async (userId) => {
+        const user = await AppDataStore.getById('users', userId);
         if (!user) return null;
 
         const role = getRole(user.role);
@@ -250,7 +272,10 @@ const RoleManager = {
             field_permissions: role.field_permissions,
             is_admin: user.role === 'admin'
         };
-    }
+    },
+
+    // Expose cache refresh for external callers (e.g. after external role mutations)
+    refresh: _refreshCustomRoles
 };
 
 
@@ -262,16 +287,12 @@ const requirePermission = (resourceType, level = PermissionLevel.VIEW) => {
                 if (window.UI && window.UI.toast) {
                     UI.toast.error('You do not have permission to perform this action');
                 }
-                AuditLogger.warn(
-                    AuditCategory.SECURITY,
-                    'permission_denied',
-                    {
-                        user_id: window._currentUser?.id,
-                        resource_type: resourceType,
-                        required_level: level,
-                        action: action.name || 'anonymous function'
-                    }
-                );
+                _rbacAudit('warn', 'SECURITY', 'permission_denied', {
+                    user_id: window._currentUser?.id,
+                    resource_type: resourceType,
+                    required_level: level,
+                    action: action.name || 'anonymous function'
+                });
                 return null;
             }
 

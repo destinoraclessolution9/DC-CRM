@@ -64,7 +64,9 @@ const createSwipeableCard = (item, onLeftSwipe, onRightSwipe) => {
 
 // Pull-to-refresh component
 const initPullToRefresh = (onRefresh) => {
-    const container = document.querySelector('.main-content');
+    // Match the actual DOM: the main scroll container in index.html is
+    // .content-viewport, not the legacy .main-content class.
+    const container = document.querySelector('.content-viewport') || document.querySelector('.main-layout') || document.querySelector('.main-content');
     if (!container) return;
 
     let startY = 0;

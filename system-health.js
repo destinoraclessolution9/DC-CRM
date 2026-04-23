@@ -67,7 +67,8 @@ const SystemHealth = {
 
         try {
             // Test database connection
-            const testResult = AppDataStore.getAll('users').length >= 0;
+            const users = (await AppDataStore.getAll('users')) || [];
+            const testResult = users.length >= 0;
             const responseTime = performance.now() - start;
 
             return {
@@ -245,7 +246,7 @@ const SystemHealth = {
 
         try {
             // Check if AI models are loaded
-            const models = AppDataStore.getAll('ai_models');
+            const models = (await AppDataStore.getAll('ai_models')) || [];
             const hasActiveModels = models.some(m => m.is_active);
 
             return {
@@ -295,7 +296,7 @@ const SystemHealth = {
     },
 
     // Save health check result
-    saveHealthCheck: (overall, components) => {
+    saveHealthCheck: async (overall, components) => {
         const check = {
             id: `health_${Date.now()}`,
             timestamp: new Date().toISOString(),
@@ -304,20 +305,22 @@ const SystemHealth = {
             summary: overall.summary
         };
 
-        AppDataStore.create('health_checks', check);
+        await AppDataStore.create('health_checks', check);
 
         // Keep only last 1000 checks
-        const checks = AppDataStore.getAll('health_checks');
+        const checks = (await AppDataStore.getAll('health_checks')) || [];
         if (checks.length > 1000) {
             const toRemove = checks.slice(0, checks.length - 1000);
-            toRemove.forEach(c => AppDataStore.delete('health_checks', c.id));
+            for (const c of toRemove) {
+                await AppDataStore.delete('health_checks', c.id);
+            }
         }
 
         return check;
     },
 
     // Send health alert
-    sendHealthAlert: (status) => {
+    sendHealthAlert: async (status) => {
         const alert = {
             id: `alert_${Date.now()}`,
             type: 'health',
@@ -328,24 +331,26 @@ const SystemHealth = {
             acknowledged: false
         };
 
-        AppDataStore.create('system_alerts', alert);
+        await AppDataStore.create('system_alerts', alert);
 
-        // Notify admins
-        notifyAdmins('System Health Alert', alert.message, 'critical');
+        // Notify admins (guard — notifyAdmins may not be defined)
+        if (typeof notifyAdmins === 'function') {
+            notifyAdmins('System Health Alert', alert.message, 'critical');
+        }
 
-        // Log to audit
-        AuditLogger.critical(
-            AuditCategory.SYSTEM,
-            'health_alert',
-            status
-        );
+        // Log to audit (guarded)
+        try {
+            if (typeof AuditLogger !== 'undefined' && AuditLogger?.critical) {
+                AuditLogger.critical('SYSTEM', 'health_alert', status);
+            }
+        } catch (_) { /* best-effort */ }
     },
 
     // Get health history
-    getHealthHistory: (hours = 24) => {
+    getHealthHistory: async (hours = 24) => {
         const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000);
 
-        return AppDataStore.getAll('health_checks')
+        return ((await AppDataStore.getAll('health_checks')) || [])
             .filter(c => new Date(c.timestamp) >= cutoff)
             .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
     },

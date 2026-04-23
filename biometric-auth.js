@@ -1,19 +1,20 @@
 // ========== BIOMETRIC AUTHENTICATION ==========
 
-// Check if biometric auth is supported
+// Check if biometric auth API is present (synchronous feature-detect).
+// isUserVerifyingPlatformAuthenticatorAvailable() returns a Promise — don't
+// call it here; callers must use hasBiometricHardware() to actually await it.
 const isBiometricSupported = () => {
-    return window.PublicKeyCredential &&
-        PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable &&
-        PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+    return !!(window.PublicKeyCredential &&
+        typeof PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable === 'function');
 };
 
-// Check if device has biometric hardware
+// Check if device has biometric hardware (async — awaits the platform query)
 const hasBiometricHardware = async () => {
     if (!isBiometricSupported()) return false;
 
     try {
         const available = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
-        return available;
+        return available === true;
     } catch (error) {
         console.error('Error checking biometric hardware:', error);
         return false;
@@ -43,6 +44,12 @@ const registerBiometric = async (username, userId) => {
         // Convert base64 to ArrayBuffer
         options.challenge = base64ToArrayBuffer(options.challenge);
         options.user.id = base64ToArrayBuffer(options.user.id);
+
+        // Pin the relying party ID to the current origin's hostname so
+        // credentials registered here can't be silently accepted across
+        // domain moves (staging vs. prod).
+        options.rp = options.rp || {};
+        options.rp.id = window.location.hostname;
 
         // Create credential
         const credential = await navigator.credentials.create({
@@ -103,9 +110,12 @@ const authenticateWithBiometric = async () => {
 
         // Convert base64 to ArrayBuffer
         options.challenge = base64ToArrayBuffer(options.challenge);
-        options.allowCredentials.forEach(cred => {
+        (options.allowCredentials || []).forEach(cred => {
             cred.id = base64ToArrayBuffer(cred.id);
         });
+
+        // Pin RP ID to origin for symmetry with registration
+        options.rpId = window.location.hostname;
 
         // Get credential assertion
         const assertion = await navigator.credentials.get({

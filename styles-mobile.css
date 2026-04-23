@@ -228,14 +228,16 @@
     /* Hide desktop sidebar */
     .sidebar { display: none !important; }
 
-    /* Content area — leave space for bottom nav */
+    /* Content area — bottom padding accounts for iOS home-indicator only.
+       The 80px bottom-nav reservation was removed because `.mobile-bottom-nav`
+       is not rendered in index.html; reintroduce when the nav HTML is wired. */
     .content-viewport {
         padding: 12px 10px !important;
-        padding-bottom: 84px !important;
+        padding-bottom: calc(12px + env(safe-area-inset-bottom)) !important;
         overflow-y: auto;
         -webkit-overflow-scrolling: touch;
         height: auto !important;
-        min-height: calc(100dvh - 56px - 80px);
+        min-height: calc(100dvh - 56px);
     }
 }
 

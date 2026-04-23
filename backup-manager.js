@@ -17,6 +17,15 @@ const BackupType = {
     DATA: 'data'
 };
 
+// Safe audit wrapper — AuditLogger may not be loaded
+const _backupAudit = (severity, category, action, detail) => {
+    try {
+        if (typeof AuditLogger !== 'undefined' && AuditLogger?.[severity]) {
+            AuditLogger[severity](category, action, detail);
+        }
+    } catch (_) { /* best-effort */ }
+};
+
 // Backup Manager
 const BackupManager = {
     // Create backup
@@ -35,29 +44,29 @@ const BackupManager = {
             scheduled: options.scheduled || false,
             retention_days: options.retention_days || 30,
             expires_at: new Date(Date.now() + (options.retention_days || 30) * 24 * 60 * 60 * 1000).toISOString(),
-            include_tables: options.include_tables || Object.keys(TABLES),
+            include_tables: options.include_tables || (typeof TABLES !== 'undefined' ? Object.keys(TABLES) : []),
             exclude_tables: options.exclude_tables || [],
             compression: options.compression !== false,
             encrypted: options.encrypted !== false
         };
 
-        AppDataStore.create('backups', backup);
+        await AppDataStore.create('backups', backup);
 
-        // Start backup process
-        BackupManager.processBackup(backupId);
+        // Start backup process (fire-and-forget; callers that need completion should await processBackup directly)
+        BackupManager.processBackup(backupId).catch(err => console.error('[backup] background processing failed:', err));
 
         return backup;
     },
 
     // Process backup
     processBackup: async (backupId) => {
-        const backup = AppDataStore.getById('backups', backupId);
+        const backup = await AppDataStore.getById('backups', backupId);
         if (!backup) return null;
 
         // Update status
         backup.status = BackupStatus.IN_PROGRESS;
         backup.started_at = new Date().toISOString();
-        AppDataStore.update('backups', backupId, backup);
+        await AppDataStore.update('backups', backupId, backup);
 
         try {
             const backupData = {};
@@ -67,7 +76,7 @@ const BackupManager = {
             for (const table of backup.include_tables) {
                 if (backup.exclude_tables.includes(table)) continue;
 
-                const records = AppDataStore.getAll(table);
+                const records = (await AppDataStore.getAll(table)) || [];
                 backupData[table] = records;
                 totalRecords += records.length;
             }
@@ -78,7 +87,7 @@ const BackupManager = {
                 created_at: new Date().toISOString(),
                 tables: backup.include_tables,
                 record_counts: Object.fromEntries(
-                    Object.entries(backupData).map(([table, records]) => [table, records.length])
+                    Object.entries(backupData).map(([table, records]) => [table, Array.isArray(records) ? records.length : 0])
                 ),
                 created_by: backup.created_by
             };
@@ -94,9 +103,9 @@ const BackupManager = {
             }
 
             // Encrypt if enabled
-            if (backup.encrypted) {
+            if (backup.encrypted && typeof Encryption !== 'undefined' && typeof Encryption.encrypt === 'function' && typeof getEncryptionKey === 'function') {
                 const key = await getEncryptionKey();
-                backupJson = await Encryption.encrypt(backupJson, await Encryption.importKey(key));
+                backupJson = await Encryption.encrypt(backupJson, typeof Encryption.importKey === 'function' ? await Encryption.importKey(key) : key);
             }
 
             // Store backup data
@@ -108,21 +117,16 @@ const BackupManager = {
             backup.size = size;
             backup.records_backed_up = totalRecords;
             backup.file_location = `backup_${backupId}`;
-            AppDataStore.update('backups', backupId, backup);
+            await AppDataStore.update('backups', backupId, backup);
 
-            // Audit log
-            AuditLogger.info(
-                AuditCategory.BACKUP,
-                'backup_created',
-                {
-                    backup_id: backupId,
-                    size: size,
-                    records: totalRecords
-                }
-            );
+            _backupAudit('info', 'BACKUP', 'backup_created', {
+                backup_id: backupId,
+                size: size,
+                records: totalRecords
+            });
 
             // Cleanup old backups
-            BackupManager.cleanupOldBackups();
+            await BackupManager.cleanupOldBackups();
 
             return backup;
         } catch (error) {
@@ -131,16 +135,12 @@ const BackupManager = {
             backup.status = BackupStatus.FAILED;
             backup.error = error.message;
             backup.failed_at = new Date().toISOString();
-            AppDataStore.update('backups', backupId, backup);
+            await AppDataStore.update('backups', backupId, backup);
 
-            AuditLogger.error(
-                AuditCategory.BACKUP,
-                'backup_failed',
-                {
-                    backup_id: backupId,
-                    error: error.message
-                }
-            );
+            _backupAudit('error', 'BACKUP', 'backup_failed', {
+                backup_id: backupId,
+                error: error.message
+            });
 
             return null;
         }
@@ -148,13 +148,13 @@ const BackupManager = {
 
     // Restore from backup
     restoreBackup: async (backupId, options = {}) => {
-        const backup = AppDataStore.getById('backups', backupId);
+        const backup = await AppDataStore.getById('backups', backupId);
         if (!backup) return null;
 
         // Update status
         backup.restore_status = BackupStatus.RESTORING;
         backup.restore_started_at = new Date().toISOString();
-        AppDataStore.update('backups', backupId, backup);
+        await AppDataStore.update('backups', backupId, backup);
 
         try {
             // Get backup data
@@ -164,13 +164,13 @@ const BackupManager = {
             let backupData = backupJson;
 
             // Decrypt if encrypted
-            if (backup.encrypted) {
+            if (backup.encrypted && typeof Encryption !== 'undefined' && typeof Encryption.decrypt === 'function' && typeof getEncryptionKey === 'function') {
                 const key = await getEncryptionKey();
-                backupData = await Encryption.decrypt(backupData, await Encryption.importKey(key));
+                backupData = await Encryption.decrypt(backupData, typeof Encryption.importKey === 'function' ? await Encryption.importKey(key) : key);
             }
 
             // Decompress if compressed
-            if (backup.compression && backupData.startsWith('compressed_')) {
+            if (backup.compression && typeof backupData === 'string' && backupData.startsWith('compressed_')) {
                 backupData = backupData.substring(11);
             }
 
@@ -184,15 +184,15 @@ const BackupManager = {
                 if (data[table]) {
                     // Clear existing data if specified
                     if (options.clearExisting) {
-                        const existing = AppDataStore.getAll(table);
-                        existing.forEach(record => {
-                            AppDataStore.delete(table, record.id);
-                        });
+                        const existing = (await AppDataStore.getAll(table)) || [];
+                        for (const record of existing) {
+                            await AppDataStore.delete(table, record.id);
+                        }
                     }
 
                     // Restore records
                     for (const record of data[table]) {
-                        AppDataStore.create(table, record);
+                        await AppDataStore.create(table, record);
                     }
                 }
             }
@@ -201,19 +201,14 @@ const BackupManager = {
             backup.restore_status = BackupStatus.COMPLETED;
             backup.restore_completed_at = new Date().toISOString();
             backup.restored_by = _currentUser?.id;
-            AppDataStore.update('backups', backupId, backup);
+            await AppDataStore.update('backups', backupId, backup);
 
-            // Audit log
-            AuditLogger.critical(
-                AuditCategory.BACKUP,
-                'backup_restored',
-                {
-                    backup_id: backupId,
-                    tables: tablesToRestore
-                }
-            );
+            _backupAudit('critical', 'BACKUP', 'backup_restored', {
+                backup_id: backupId,
+                tables: tablesToRestore
+            });
 
-            UI.toast.success('Backup restored successfully');
+            if (window.UI && window.UI.toast) UI.toast.success('Backup restored successfully');
 
             return true;
         } catch (error) {
@@ -221,25 +216,21 @@ const BackupManager = {
 
             backup.restore_status = BackupStatus.FAILED;
             backup.restore_error = error.message;
-            AppDataStore.update('backups', backupId, backup);
+            await AppDataStore.update('backups', backupId, backup);
 
-            AuditLogger.error(
-                AuditCategory.BACKUP,
-                'restore_failed',
-                {
-                    backup_id: backupId,
-                    error: error.message
-                }
-            );
+            _backupAudit('error', 'BACKUP', 'restore_failed', {
+                backup_id: backupId,
+                error: error.message
+            });
 
-            UI.toast.error('Restore failed: ' + error.message);
+            if (window.UI && window.UI.toast) UI.toast.error('Restore failed: ' + error.message);
 
             return false;
         }
     },
 
     // Schedule automatic backup
-    scheduleBackup: (schedule) => {
+    scheduleBackup: async (schedule) => {
         const job = {
             id: `backup_job_${Date.now()}`,
             frequency: schedule.frequency, // 'daily', 'weekly', 'monthly'
@@ -255,7 +246,7 @@ const BackupManager = {
             created_by: _currentUser?.id
         };
 
-        AppDataStore.create('backup_schedules', job);
+        await AppDataStore.create('backup_schedules', job);
 
         return job;
     },
@@ -279,24 +270,24 @@ const BackupManager = {
     },
 
     // Cleanup old backups
-    cleanupOldBackups: () => {
-        const backups = AppDataStore.getAll('backups');
+    cleanupOldBackups: async () => {
+        const backups = (await AppDataStore.getAll('backups')) || [];
         const now = new Date();
 
-        backups.forEach(backup => {
+        for (const backup of backups) {
             if (backup.expires_at && new Date(backup.expires_at) < now) {
                 // Delete backup file
                 localStorage.removeItem(`backup_${backup.id}`);
 
                 // Delete record
-                AppDataStore.delete('backups', backup.id);
+                await AppDataStore.delete('backups', backup.id);
             }
-        });
+        }
     },
 
     // List all backups
-    listBackups: (filters = {}) => {
-        let backups = AppDataStore.getAll('backups').sort((a, b) =>
+    listBackups: async (filters = {}) => {
+        let backups = ((await AppDataStore.getAll('backups')) || []).sort((a, b) =>
             new Date(b.created_at) - new Date(a.created_at)
         );
 
@@ -320,8 +311,8 @@ const BackupManager = {
     },
 
     // Download backup
-    downloadBackup: (backupId) => {
-        const backup = AppDataStore.getById('backups', backupId);
+    downloadBackup: async (backupId) => {
+        const backup = await AppDataStore.getById('backups', backupId);
         if (!backup) return;
 
         const backupData = localStorage.getItem(`backup_${backupId}`);

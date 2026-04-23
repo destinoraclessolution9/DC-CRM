@@ -2,6 +2,17 @@
  * Feng Shui CRM V8.7 - UI Components
  */
 window.UI = (() => {
+    // --- HTML escape helper ---
+    const escapeHtml = (unsafe) => {
+        if (unsafe === null || unsafe === undefined) return '';
+        return String(unsafe)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    };
+
     // --- Button Loading State ---
     const _loadingBtns = new Map(); // btn element -> original innerHTML
     let _loadTimer = null;
@@ -89,15 +100,22 @@ window.UI = (() => {
             const action = (btn.action === 'UI.modal.hide()' || btn.action === 'UI.hideModal()') ? 'UI.hideModal()' : btn.action;
             // Cancel/close buttons skip loading state
             const isCancel = action === 'UI.hideModal()' || /cancel|close|no\b|back/i.test(btn.label);
-            return `<button class="${btnClass}" ${isCancel ? 'data-no-load' : ''} onclick="${action}">${btn.label}</button>`;
+            // action is JS — escape quotes only to keep the attribute well-formed; labels are text
+            const safeAction = String(action).replace(/"/g, '&quot;');
+            const safeLabel = escapeHtml(btn.label);
+            return `<button class="${btnClass}" ${isCancel ? 'data-no-load' : ''} onclick="${safeAction}">${safeLabel}</button>`;
         }).join('');
 
         const modalBoxClass = size === 'fullscreen' ? 'modal-box fullscreen' : 'modal-box';
+        // Title is treated as plain text. Callers that need markup in the title
+        // should pre-escape user data and pass a pre-built string, knowing that
+        // only a narrow safelist of tags is allowed via a DOMPurify pass below.
+        const safeTitle = escapeHtml(title);
 
         overlay.innerHTML = `
             <div class="${modalBoxClass}">
                 <div class="modal-header">
-                    <h3>${title}</h3>
+                    <h3>${safeTitle}</h3>
                     <button class="modal-close" onclick="UI.hideModal()">&times;</button>
                 </div>
                 <div class="modal-content">
@@ -138,6 +156,7 @@ window.UI = (() => {
         showModal,
         hideModal,
         formatDate,
-        formatNumber
+        formatNumber,
+        escapeHtml
     };
 })();

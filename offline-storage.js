@@ -16,24 +16,43 @@ const OFFLINE_STORES = {
     user_preferences: { keyPath: 'id' }
 };
 
-// Open IndexedDB connection
+// Open IndexedDB connection — cached singleton so callers share one handle.
+// Previously every method opened a new connection and never closed it, which
+// accumulated handles and could deadlock the browser's IndexedDB layer.
+let _dbPromise = null;
 const openOfflineDB = () => {
-    return new Promise((resolve, reject) => {
+    if (_dbPromise) return _dbPromise;
+    _dbPromise = new Promise((resolve, reject) => {
         const request = indexedDB.open(DB_NAME, DB_VERSION);
 
         request.onerror = (event) => {
             console.error('IndexedDB error:', event.target.error);
+            _dbPromise = null; // allow retry after failure
             reject(event.target.error);
+        };
+
+        request.onblocked = () => {
+            // A concurrent connection with an older version is blocking upgrade.
+            // Log so operators can close other tabs; don't reject forever.
+            console.warn('[offline-storage] IndexedDB open blocked by another connection');
         };
 
         request.onsuccess = (event) => {
             const db = event.target.result;
+            // If the browser or another tab closes the DB, invalidate the cache
+            // so the next call re-opens it cleanly.
+            db.onclose = () => { _dbPromise = null; };
+            db.onversionchange = () => {
+                // Another tab wants to upgrade the schema. Close this handle so
+                // the upgrade can proceed; cache will rebuild on next use.
+                try { db.close(); } catch (_) {}
+                _dbPromise = null;
+            };
             resolve(db);
         };
 
         request.onupgradeneeded = (event) => {
             const db = event.target.result;
-            const oldVersion = event.oldVersion;
 
             // Create object stores based on schema
             Object.keys(OFFLINE_STORES).forEach(storeName => {
@@ -51,6 +70,7 @@ const openOfflineDB = () => {
             });
         };
     });
+    return _dbPromise;
 };
 
 // Offline DataStore wrapper

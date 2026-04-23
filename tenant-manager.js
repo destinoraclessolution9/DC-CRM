@@ -17,6 +17,15 @@ const TenantPlan = {
     ENTERPRISE: 'enterprise'
 };
 
+// Safe audit wrapper — AuditLogger may not be loaded
+const _tenantAudit = (severity, category, action, detail) => {
+    try {
+        if (typeof AuditLogger !== 'undefined' && AuditLogger?.[severity]) {
+            AuditLogger[severity](category, action, detail);
+        }
+    } catch (_) { /* best-effort */ }
+};
+
 // Tenant Manager
 const TenantManager = {
     // Create new tenant
@@ -51,7 +60,7 @@ const TenantManager = {
         };
 
         // Create tenant record
-        AppDataStore.create('tenants', tenant);
+        await AppDataStore.create('tenants', tenant);
 
         // Provision tenant resources
         await TenantManager.provisionTenant(tenant.id);
@@ -59,23 +68,18 @@ const TenantManager = {
         // Create admin user for tenant
         await TenantManager.createTenantAdmin(tenant.id, tenantData.admin);
 
-        // Audit log
-        AuditLogger.info(
-            AuditCategory.TENANT,
-            'tenant_created',
-            {
-                tenant_id: tenant.id,
-                tenant_name: tenant.name,
-                plan: tenant.plan
-            }
-        );
+        _tenantAudit('info', 'TENANT', 'tenant_created', {
+            tenant_id: tenant.id,
+            tenant_name: tenant.name,
+            plan: tenant.plan
+        });
 
         return tenant;
     },
 
     // Provision tenant resources
     provisionTenant: async (tenantId) => {
-        const tenant = AppDataStore.getById('tenants', tenantId);
+        const tenant = await AppDataStore.getById('tenants', tenantId);
         if (!tenant) throw new Error('Tenant not found');
 
         // Create isolated storage
@@ -90,112 +94,97 @@ const TenantManager = {
         // Initialize tenant settings
         tenant.provisioned_at = new Date().toISOString();
         tenant.status = TenantStatus.ACTIVE;
-        AppDataStore.update('tenants', tenantId, tenant);
+        await AppDataStore.update('tenants', tenantId, tenant);
 
         return true;
     },
 
     // Get tenant by domain
-    getTenantByDomain: (domain) => {
-        return AppDataStore.getAll('tenants').find(t => t.domain === domain && t.status === TenantStatus.ACTIVE);
+    getTenantByDomain: async (domain) => {
+        const tenants = (await AppDataStore.getAll('tenants')) || [];
+        return tenants.find(t => t.domain === domain && t.status === TenantStatus.ACTIVE);
     },
 
     // Get tenant by ID
-    getTenant: (tenantId) => {
-        return AppDataStore.getById('tenants', tenantId);
+    getTenant: async (tenantId) => {
+        return await AppDataStore.getById('tenants', tenantId);
     },
 
     // Update tenant
-    updateTenant: (tenantId, updates) => {
-        const tenant = AppDataStore.getById('tenants', tenantId);
+    updateTenant: async (tenantId, updates) => {
+        const tenant = await AppDataStore.getById('tenants', tenantId);
         if (!tenant) return null;
 
         const updated = { ...tenant, ...updates, updated_at: new Date().toISOString() };
-        AppDataStore.update('tenants', tenantId, updated);
+        await AppDataStore.update('tenants', tenantId, updated);
 
-        AuditLogger.info(
-            AuditCategory.TENANT,
-            'tenant_updated',
-            {
-                tenant_id: tenantId,
-                updates: Object.keys(updates)
-            }
-        );
+        _tenantAudit('info', 'TENANT', 'tenant_updated', {
+            tenant_id: tenantId,
+            updates: Object.keys(updates)
+        });
 
         return updated;
     },
 
     // Suspend tenant
-    suspendTenant: (tenantId, reason) => {
-        const tenant = AppDataStore.getById('tenants', tenantId);
+    suspendTenant: async (tenantId, reason) => {
+        const tenant = await AppDataStore.getById('tenants', tenantId);
         if (!tenant) return null;
 
         tenant.status = TenantStatus.SUSPENDED;
         tenant.suspended_at = new Date().toISOString();
         tenant.suspension_reason = reason;
-        AppDataStore.update('tenants', tenantId, tenant);
+        await AppDataStore.update('tenants', tenantId, tenant);
 
         // Notify tenant users
         TenantManager.notifyTenantUsers(tenantId, 'suspension', { reason });
 
-        AuditLogger.critical(
-            AuditCategory.TENANT,
-            'tenant_suspended',
-            {
-                tenant_id: tenantId,
-                reason: reason
-            }
-        );
+        _tenantAudit('critical', 'TENANT', 'tenant_suspended', {
+            tenant_id: tenantId,
+            reason: reason
+        });
 
         return tenant;
     },
 
     // Activate tenant
-    activateTenant: (tenantId) => {
-        const tenant = AppDataStore.getById('tenants', tenantId);
+    activateTenant: async (tenantId) => {
+        const tenant = await AppDataStore.getById('tenants', tenantId);
         if (!tenant) return null;
 
         tenant.status = TenantStatus.ACTIVE;
         tenant.activated_at = new Date().toISOString();
-        AppDataStore.update('tenants', tenantId, tenant);
+        await AppDataStore.update('tenants', tenantId, tenant);
 
-        AuditLogger.info(
-            AuditCategory.TENANT,
-            'tenant_activated',
-            { tenant_id: tenantId }
-        );
+        _tenantAudit('info', 'TENANT', 'tenant_activated', { tenant_id: tenantId });
 
         return tenant;
     },
 
     // Delete tenant (with data purging)
     deleteTenant: async (tenantId, permanent = false) => {
-        const tenant = AppDataStore.getById('tenants', tenantId);
+        const tenant = await AppDataStore.getById('tenants', tenantId);
         if (!tenant) return null;
 
         if (permanent) {
             // Permanently delete all tenant data
             await TenantManager.purgeTenantData(tenantId);
-            AppDataStore.delete('tenants', tenantId);
+            await AppDataStore.delete('tenants', tenantId);
         } else {
             // Soft delete
             tenant.status = TenantStatus.EXPIRED;
             tenant.deleted_at = new Date().toISOString();
-            AppDataStore.update('tenants', tenantId, tenant);
+            await AppDataStore.update('tenants', tenantId, tenant);
         }
 
-        AuditLogger.critical(
-            AuditCategory.TENANT,
-            permanent ? 'tenant_permanently_deleted' : 'tenant_deleted',
-            { tenant_id: tenantId }
-        );
+        _tenantAudit('critical', 'TENANT', permanent ? 'tenant_permanently_deleted' : 'tenant_deleted', { tenant_id: tenantId });
 
         return true;
     },
 
     // List all tenants with filters
-    listTenants: (filters = {}) => {
-        let tenants = AppDataStore.getAll('tenants');
+    listTenants: async (filters = {}) => {
+        let tenants = (await AppDataStore.getAll('tenants')) || [];
 
         if (filters.status) {
             tenants = tenants.filter(t => t.status === filters.status);
@@ -217,15 +206,21 @@ const TenantManager = {
     },
 
     // Get tenant usage statistics
-    getTenantUsage: (tenantId) => {
-        const tenant = AppDataStore.getById('tenants', tenantId);
+    getTenantUsage: async (tenantId) => {
+        const tenant = await AppDataStore.getById('tenants', tenantId);
         if (!tenant) return null;
 
         // Get counts from various tables (would need tenant filtering in real implementation)
-        const users = AppDataStore.getAll('users').filter(u => u.tenant_id === tenantId);
-        const prospects = AppDataStore.getAll('prospects').filter(p => p.tenant_id === tenantId);
-        const customers = AppDataStore.getAll('customers').filter(c => c.tenant_id === tenantId);
-        const documents = AppDataStore.getAll('documents').filter(d => d.tenant_id === tenantId);
+        const [allUsers, allProspects, allCustomers, allDocuments] = await Promise.all([
+            AppDataStore.getAll('users'),
+            AppDataStore.getAll('prospects'),
+            AppDataStore.getAll('customers'),
+            AppDataStore.getAll('documents')
+        ]);
+        const users = (allUsers || []).filter(u => u.tenant_id === tenantId);
+        const prospects = (allProspects || []).filter(p => p.tenant_id === tenantId);
+        const customers = (allCustomers || []).filter(c => c.tenant_id === tenantId);
+        const documents = (allDocuments || []).filter(d => d.tenant_id === tenantId);
 
         // Calculate storage usage (simplified)
         const storageUsed = documents.reduce((sum, doc) => sum + (doc.size || 0), 0);
@@ -237,7 +232,7 @@ const TenantManager = {
             customers: customers.length,
             documents: documents.length,
             storage_used: storageUsed,
-            storage_percentage: (storageUsed / tenant.settings.max_storage) * 100,
+            storage_percentage: tenant.settings?.max_storage ? (storageUsed / tenant.settings.max_storage) * 100 : 0,
             last_active: users.length > 0 ?
                 Math.max(...users.map(u => new Date(u.last_login || 0))) : null,
             api_calls_today: Math.floor(Math.random() * 1000), // Mock data
@@ -246,18 +241,19 @@ const TenantManager = {
     },
 
     // Get all tenants usage summary
-    getAllTenantsUsage: () => {
-        const tenants = AppDataStore.getAll('tenants');
+    getAllTenantsUsage: async () => {
+        const tenants = (await AppDataStore.getAll('tenants')) || [];
         const usage = [];
 
-        tenants.forEach(tenant => {
+        for (const tenant of tenants) {
+            const tenantUsage = await TenantManager.getTenantUsage(tenant.id);
             usage.push({
-                ...TenantManager.getTenantUsage(tenant.id),
+                ...tenantUsage,
                 name: tenant.name,
                 plan: tenant.plan,
                 status: tenant.status
             });
-        });
+        }
 
         return usage;
     }
@@ -268,13 +264,13 @@ const TenantContext = {
     currentTenant: null,
 
     // Set current tenant from request/domain
-    setFromDomain: () => {
+    setFromDomain: async () => {
         const hostname = window.location.hostname;
 
         // For local development, use subdomain or default
         if (hostname === 'localhost' || hostname === '127.0.0.1') {
             const subdomain = localStorage.getItem('dev_tenant') || 'demo';
-            TenantContext.currentTenant = TenantManager.getTenantByDomain(`${subdomain}.localhost`);
+            TenantContext.currentTenant = await TenantManager.getTenantByDomain(`${subdomain}.localhost`);
             if (!TenantContext.currentTenant) {
                 // Use default demo tenant
                 TenantContext.currentTenant = {
@@ -292,8 +288,7 @@ const TenantContext = {
             // Extract subdomain
             const parts = hostname.split('.');
             if (parts.length > 2) {
-                const subdomain = parts[0];
-                TenantContext.currentTenant = TenantManager.getTenantByDomain(hostname);
+                TenantContext.currentTenant = await TenantManager.getTenantByDomain(hostname);
             }
         }
 

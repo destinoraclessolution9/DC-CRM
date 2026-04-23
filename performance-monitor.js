@@ -40,7 +40,7 @@ const PerformanceMonitor = {
             session_id: getSessionId()
         };
 
-        AppDataStore.create('performance_metrics', metric);
+        AppDataStore.create('performance_metrics', metric).catch(err => console.debug('[perf] metric write failed:', err?.message));
 
         // Keep in memory for quick access
         if (!PerformanceMetrics[name]) {
@@ -107,9 +107,9 @@ const PerformanceMonitor = {
     },
 
     // Get performance summary
-    getSummary: (minutes = 60) => {
+    getSummary: async (minutes = 60) => {
         const cutoff = new Date(Date.now() - minutes * 60 * 1000);
-        const metrics = AppDataStore.getAll('performance_metrics')
+        const metrics = ((await AppDataStore.getAll('performance_metrics')) || [])
             .filter(m => new Date(m.timestamp) >= cutoff);
 
         // Group by name
@@ -154,7 +154,7 @@ const PerformanceMonitor = {
                 value,
                 threshold,
                 timestamp: new Date().toISOString()
-            });
+            }).catch(err => console.debug('[perf] warning write failed:', err?.message));
 
             // Alert if very slow
             if (value > threshold * 2) {
@@ -164,9 +164,9 @@ const PerformanceMonitor = {
     },
 
     // Get performance warnings
-    getWarnings: (hours = 24) => {
+    getWarnings: async (hours = 24) => {
         const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000);
-        return AppDataStore.getAll('performance_warnings')
+        return ((await AppDataStore.getAll('performance_warnings')) || [])
             .filter(w => new Date(w.timestamp) >= cutoff)
             .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
     },

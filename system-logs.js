@@ -66,9 +66,10 @@ const SystemLogger = {
             SystemLogger.queue.shift();
         }
 
-        // Store in AppDataStore (with sampling for performance)
+        // Store in AppDataStore (with sampling for performance). Fire-and-forget
+        // with a catch so any rejection doesn't bubble out of the log call.
         if (level === LogLevel.ERROR || level === LogLevel.FATAL || Math.random() < 0.1) {
-            AppDataStore.create('system_logs', logEntry);
+            AppDataStore.create('system_logs', logEntry).catch(err => console.debug('[system-logs] write failed:', err?.message));
         }
 
         // Send critical logs to server

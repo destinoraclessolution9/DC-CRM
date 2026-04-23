@@ -74,6 +74,14 @@
         const reg = window._swRegistration || (await navigator.serviceWorker.ready);
         if (!reg) throw new Error('no_service_worker');
 
+        // Re-check permission right before subscribe to catch the case where it
+        // was revoked between the initial check and now (e.g. via OS/browser
+        // settings). pushManager.subscribe would throw a generic error here;
+        // explicit check produces a clearer failure path for the UI.
+        if (Notification.permission !== 'granted') {
+            throw new Error('permission_denied');
+        }
+
         let sub = await reg.pushManager.getSubscription();
         if (!sub) {
             sub = await reg.pushManager.subscribe({

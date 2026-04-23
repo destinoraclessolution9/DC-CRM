@@ -25,6 +25,15 @@ const ComplianceRegion = {
     NONE: 'none'
 };
 
+// Safe audit wrapper — AuditLogger may not be loaded
+const _complianceAudit = (severity, category, action, detail) => {
+    try {
+        if (typeof AuditLogger !== 'undefined' && AuditLogger?.[severity]) {
+            AuditLogger[severity](category, action, detail);
+        }
+    } catch (_) { /* best-effort */ }
+};
+
 // Consent management
 const ConsentManager = {
     // Record consent
@@ -41,10 +50,10 @@ const ConsentManager = {
             revoked_at: null
         };
 
-        AppDataStore.create('consent_records', consent);
+        await AppDataStore.create('consent_records', consent);
 
         // Update user's consent preferences
-        const user = AppDataStore.getById('users', userId);
+        const user = await AppDataStore.getById('users', userId);
         if (user) {
             user.consent_preferences = user.consent_preferences || {};
             user.consent_preferences[consentType] = {
@@ -52,26 +61,21 @@ const ConsentManager = {
                 granted_at: consent.timestamp,
                 expires_at: consent.expires_at
             };
-            AppDataStore.update('users', userId, user);
+            await AppDataStore.update('users', userId, user);
         }
 
-        // Audit log
-        AuditLogger.info(
-            AuditCategory.COMPLIANCE,
-            granted ? ConsentAction.GRANT : ConsentAction.REVOKE,
-            {
-                user_id: userId,
-                consent_type: consentType,
-                ip_address: consent.ip_address
-            }
-        );
+        _complianceAudit('info', 'COMPLIANCE', granted ? ConsentAction.GRANT : ConsentAction.REVOKE, {
+            user_id: userId,
+            consent_type: consentType,
+            ip_address: consent.ip_address
+        });
 
         return consent;
     },
 
     // Check if user has consent
-    hasConsent: (userId, consentType) => {
-        const user = AppDataStore.getById('users', userId);
+    hasConsent: async (userId, consentType) => {
+        const user = await AppDataStore.getById('users', userId);
         if (!user || !user.consent_preferences) return false;
 
         const consent = user.consent_preferences[consentType];
@@ -86,20 +90,20 @@ const ConsentManager = {
     },
 
     // Get consent history for user
-    getConsentHistory: (userId) => {
-        return AppDataStore.query('consent_records', { user_id: userId })
-            .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    getConsentHistory: async (userId) => {
+        const records = (await AppDataStore.query('consent_records', { user_id: userId })) || [];
+        return records.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
     },
 
     // Revoke consent
     revokeConsent: async (userId, consentType) => {
-        const user = AppDataStore.getById('users', userId);
+        const user = await AppDataStore.getById('users', userId);
         if (user && user.consent_preferences) {
             user.consent_preferences[consentType] = {
                 granted: false,
                 revoked_at: new Date().toISOString()
             };
-            AppDataStore.update('users', userId, user);
+            await AppDataStore.update('users', userId, user);
         }
 
         // Record revocation
@@ -110,7 +114,7 @@ const ConsentManager = {
             revoked_at: new Date().toISOString()
         };
 
-        AppDataStore.create('consent_revocations', revocation);
+        await AppDataStore.create('consent_revocations', revocation);
 
         return revocation;
     }
@@ -132,7 +136,7 @@ const DSARManager = {
             attachments: []
         };
 
-        AppDataStore.create('dsar_requests', request);
+        await AppDataStore.create('dsar_requests', request);
 
         // Notify compliance officer
         const notifyComplianceOfficer = (title, req) => console.log(title, req);
@@ -143,18 +147,29 @@ const DSARManager = {
 
     // Process access request - gather all user data
     processAccessRequest: async (requestId) => {
-        const request = AppDataStore.getById('dsar_requests', requestId);
+        const request = await AppDataStore.getById('dsar_requests', requestId);
         if (!request) return null;
 
+        const [profile, prospects, customers, activities, transactions, documents, consent_records, audit_logs_raw] = await Promise.all([
+            AppDataStore.getById('users', request.user_id),
+            AppDataStore.query('prospects', { created_by: request.user_id }),
+            AppDataStore.query('customers', { created_by: request.user_id }),
+            AppDataStore.query('activities', { user_id: request.user_id }),
+            AppDataStore.query('transactions', { user_id: request.user_id }),
+            AppDataStore.query('documents', { created_by: request.user_id }),
+            AppDataStore.query('consent_records', { user_id: request.user_id }),
+            AppDataStore.query('audit_logs', { user_id: request.user_id })
+        ]);
+
         const userData = {
-            profile: AppDataStore.getById('users', request.user_id),
-            prospects: AppDataStore.query('prospects', { created_by: request.user_id }),
-            customers: AppDataStore.query('customers', { created_by: request.user_id }),
-            activities: AppDataStore.query('activities', { user_id: request.user_id }),
-            transactions: AppDataStore.query('transactions', { user_id: request.user_id }),
-            documents: AppDataStore.query('documents', { created_by: request.user_id }),
-            consent_records: AppDataStore.query('consent_records', { user_id: request.user_id }),
-            audit_logs: AppDataStore.query('audit_logs', { user_id: request.user_id }).slice(0, 1000) // Limit for performance
+            profile,
+            prospects,
+            customers,
+            activities,
+            transactions,
+            documents,
+            consent_records,
+            audit_logs: (audit_logs_raw || []).slice(0, 1000) // Limit for performance
         };
 
         // Generate report
@@ -167,7 +182,7 @@ const DSARManager = {
 
         // Store report
         const reportId = `report_${Date.now()}`;
-        AppDataStore.create('dsar_reports', {
+        await AppDataStore.create('dsar_reports', {
             id: reportId,
             request_id: requestId,
             ...report
@@ -177,20 +192,20 @@ const DSARManager = {
         request.status = 'completed';
         request.completed_at = new Date().toISOString();
         request.report_id = reportId;
-        AppDataStore.update('dsar_requests', requestId, request);
+        await AppDataStore.update('dsar_requests', requestId, request);
 
         return reportId;
     },
 
     // Process erasure request (right to be forgotten)
     processErasureRequest: async (requestId) => {
-        const request = AppDataStore.getById('dsar_requests', requestId);
+        const request = await AppDataStore.getById('dsar_requests', requestId);
         if (!request) return null;
 
         const userId = request.user_id;
 
         // Anonymize or delete user data
-        const user = AppDataStore.getById('users', userId);
+        const user = await AppDataStore.getById('users', userId);
         if (user) {
             // Keep minimal record for legal purposes
             const anonymizedUser = {
@@ -203,14 +218,14 @@ const DSARManager = {
                 is_anonymized: true,
                 anonymized_at: new Date().toISOString()
             };
-            AppDataStore.update('users', userId, anonymizedUser);
+            await AppDataStore.update('users', userId, anonymizedUser);
         }
 
         // Delete or anonymize related records
         const tables = ['prospects', 'customers', 'activities', 'transactions'];
-        tables.forEach(table => {
-            const records = AppDataStore.query(table, { created_by: userId });
-            records.forEach(record => {
+        for (const table of tables) {
+            const records = (await AppDataStore.query(table, { created_by: userId })) || [];
+            for (const record of records) {
                 // For compliance, we might want to anonymize rather than delete
                 const anonymized = {
                     ...record,
@@ -219,25 +234,20 @@ const DSARManager = {
                     phone: null,
                     is_anonymized: true
                 };
-                AppDataStore.update(table, record.id, anonymized);
-            });
-        });
+                await AppDataStore.update(table, record.id, anonymized);
+            }
+        }
 
         // Update request
         request.status = 'completed';
         request.completed_at = new Date().toISOString();
         request.erasure_performed = true;
-        AppDataStore.update('dsar_requests', requestId, request);
+        await AppDataStore.update('dsar_requests', requestId, request);
 
-        // Audit log
-        AuditLogger.critical(
-            AuditCategory.COMPLIANCE,
-            'right_to_be_forgotten',
-            {
-                user_id: userId,
-                request_id: requestId
-            }
-        );
+        _complianceAudit('critical', 'COMPLIANCE', 'right_to_be_forgotten', {
+            user_id: userId,
+            request_id: requestId
+        });
 
         return request;
     }
@@ -285,7 +295,7 @@ const RetentionPolicy = {
 
         for (const [table, policy] of Object.entries(RetentionPolicy.policies)) {
             try {
-                const records = AppDataStore.getAll(table);
+                const records = (await AppDataStore.getAll(table)) || [];
                 const now = new Date();
 
                 for (const record of records) {
@@ -314,7 +324,7 @@ const RetentionPolicy = {
                                 results.archived++;
                                 break;
                             case 'delete':
-                                AppDataStore.delete(table, record.id);
+                                await AppDataStore.delete(table, record.id);
                                 results.deleted++;
                                 break;
                         }
@@ -326,7 +336,7 @@ const RetentionPolicy = {
         }
 
         // Log retention job
-        AppDataStore.create('retention_jobs', {
+        await AppDataStore.create('retention_jobs', {
             id: `retention_${Date.now()}`,
             executed_at: new Date().toISOString(),
             results: results
@@ -349,13 +359,13 @@ const RetentionPolicy = {
         anonymized.is_anonymized = true;
         anonymized.anonymized_at = new Date().toISOString();
 
-        AppDataStore.update(table, record.id, anonymized);
+        await AppDataStore.update(table, record.id, anonymized);
     },
 
     // Archive record
     archiveRecord: async (table, record) => {
         // Move to archive store
-        AppDataStore.create('archived_records', {
+        await AppDataStore.create('archived_records', {
             id: `archived_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
             original_table: table,
             original_id: record.id,

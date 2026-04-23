@@ -2759,14 +2759,14 @@ const appLogic = (() => {
         const shares = (allShares || []).filter(s => s.document_id === fileId);
         const shareItems = shares.map(s => {
             const user = userMap.get(String(s.shared_with));
-            return `<div class="share-item">${user?.full_name || 'Unknown'} (${s.permission}) <button onclick="app.removeShare(${s.id})">x</button></div>`;
+            return `<div class="share-item">${escapeHtml(user?.full_name || 'Unknown')} (${escapeHtml(s.permission)}) <button onclick="app.removeShare(${s.id})">x</button></div>`;
         });
 
         const content = `
             <div class="share-modal">
-                <h3>Share: ${file.filename}</h3>
+                <h3>Share: ${escapeHtml(file.filename)}</h3>
                 <div class="share-form">
-                    <select id="share-user" class="form-control"><option value="">Select User...</option>${users.map(u => `<option value="${u.id}">${u.full_name}</option>`).join('')}</select>
+                    <select id="share-user" class="form-control"><option value="">Select User...</option>${users.map(u => `<option value="${escapeHtml(u.id)}">${escapeHtml(u.full_name)}</option>`).join('')}</select>
                     <button class="btn primary" onclick="app.createShare(${fileId})">Add Share</button>
                 </div>
                 <div class="share-list">
@@ -3300,9 +3300,9 @@ In a production system, this would show the actual file contents.
             previewContent = `
                 <div class="generic-preview" style="text-align: center; padding: 40px;">
                     <i class="fas ${getFileIcon(filename)} fa-5x" style="color: var(--primary); opacity: 0.3;"></i>
-                    <h3 style="margin-top: 20px; font-size: 18px;">${filename}</h3>
+                    <h3 style="margin-top: 20px; font-size: 18px;">${escapeHtml(filename)}</h3>
                     <p style="color: var(--gray-500);">Size: ${(file.size > 1048576 ? (file.size / 1048576).toFixed(1) + " MB" : (file.size / 1024).toFixed(0) + " KB")}</p>
-                    <p style="color: var(--gray-500);">Type: ${file.mime_type || 'Unknown'}</p>
+                    <p style="color: var(--gray-500);">Type: ${escapeHtml(file.mime_type || 'Unknown')}</p>
                     <p style="color: var(--gray-500);">Created: ${new Date(file.created_at).toLocaleString()}</p>
                     <p style="color: #666; margin-top: 20px; font-style: italic;">Preview not available for this file type</p>
                 </div>
@@ -5189,7 +5189,7 @@ In a production system, this would show the actual file contents.
 
         const content = `
             <div class="send-whatsapp-modal">
-                <h3>Send WhatsApp to ${entity.full_name} (${entity.phone})</h3>
+                <h3>Send WhatsApp to ${escapeHtml(entity.full_name)} (${escapeHtml(entity.phone)})</h3>
                 <div class="message-type">
                     <label class="radio-label">
                         <input type="radio" name="msg-type" value="template" checked onchange="app.toggleMessageType()"> Use Template
@@ -5204,7 +5204,7 @@ In a production system, this would show the actual file contents.
                         <label>Template</label>
                         <select id="template-select" class="form-control" onchange="app.previewTemplate()">
                             <option value="">Select a template</option>
-                            ${templates.map(t => `<option value="${t.id}">${t.template_name}</option>`).join('')}
+                            ${templates.map(t => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.template_name)}</option>`).join('')}
                         </select>
                     </div>
                 </div>
@@ -7131,20 +7131,39 @@ function _wireLoginBtn() {
             console.error('Login error:', err);
             const msg = err.message || '';
             if (msg.toLowerCase().includes('email not confirmed')) {
-                const loginEmail = document.getElementById('loginEmail')?.value?.trim();
+                const loginEmail = document.getElementById('loginEmail')?.value?.trim() || '';
                 const resendMsg = document.createElement('div');
                 resendMsg.id = 'login-error-msg';
                 resendMsg.style.cssText = 'color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:12px 14px;margin-top:12px;font-size:13px;text-align:left;';
-                resendMsg.innerHTML = `<strong>Email not confirmed.</strong> The agent must click the confirmation link sent to <em>${loginEmail}</em> before logging in.<br><br>
-                    <button onclick="(async()=>{
-                        try {
-                            await window.supabase.auth.resend({type:'signup',email:'${loginEmail}'});
-                            this.textContent='Sent!'; this.disabled=true;
-                        } catch(e) { alert('Could not resend: '+e.message); }
-                    })()" style="margin-top:4px;padding:6px 12px;background:#991b1b;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;">
-                        Resend confirmation email
-                    </button>
-                    <span style="display:block;margin-top:10px;color:#6b7280;font-size:11px;">Or ask your admin to disable <em>Confirm email</em> in Supabase → Authentication → Providers → Email.</span>`;
+                // Build DOM programmatically — loginEmail is user input and must NOT be injected into innerHTML
+                resendMsg.textContent = '';
+                const headStrong = document.createElement('strong');
+                headStrong.textContent = 'Email not confirmed.';
+                resendMsg.appendChild(headStrong);
+                resendMsg.appendChild(document.createTextNode(' The agent must click the confirmation link sent to '));
+                const em = document.createElement('em');
+                em.textContent = loginEmail;
+                resendMsg.appendChild(em);
+                resendMsg.appendChild(document.createTextNode(' before logging in.'));
+                resendMsg.appendChild(document.createElement('br'));
+                resendMsg.appendChild(document.createElement('br'));
+                const resendBtn = document.createElement('button');
+                resendBtn.style.cssText = 'margin-top:4px;padding:6px 12px;background:#991b1b;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;';
+                resendBtn.textContent = 'Resend confirmation email';
+                resendBtn.addEventListener('click', async () => {
+                    try {
+                        await window.supabase.auth.resend({ type: 'signup', email: loginEmail });
+                        resendBtn.textContent = 'Sent!';
+                        resendBtn.disabled = true;
+                    } catch (e) {
+                        alert('Could not resend: ' + (e?.message || e));
+                    }
+                });
+                resendMsg.appendChild(resendBtn);
+                const hint = document.createElement('span');
+                hint.style.cssText = 'display:block;margin-top:10px;color:#6b7280;font-size:11px;';
+                hint.textContent = 'Or ask your admin to disable Confirm email in Supabase → Authentication → Providers → Email.';
+                resendMsg.appendChild(hint);
                 const existing = document.getElementById('login-error-msg');
                 if (existing) existing.remove();
                 document.getElementById('loginBtn')?.insertAdjacentElement('afterend', resendMsg);
@@ -10060,7 +10079,7 @@ function _wireLoginBtn() {
  
         UI.showModal("Add New Referral", content, [
             { label: "Cancel", type: "secondary", action: "UI.hideModal()" },
-            { label: "Create Referral", type: "primary", action: "await app.submitReferral()" }
+            { label: "Create Referral", type: "primary", action: "(async () => { await app.submitReferral(); })()" }
         ]);
     };
  
@@ -10448,19 +10467,19 @@ function _wireLoginBtn() {
             let prospectData = null;
             if (c.customer_id) {
                 const cust = await AppDataStore.getById('customers', c.customer_id);
-                entityName = cust ? `<i class="fas fa-user-check" title="Customer"></i> ${cust.full_name}` : 'Unknown Customer';
+                entityName = cust ? `<i class="fas fa-user-check" title="Customer"></i> ${escapeHtml(cust.full_name)}` : 'Unknown Customer';
                 entityLink = `app.showCustomerDetail(${c.customer_id})`;
             } else if (c.prospect_id) {
                 const pros = await AppDataStore.getById('prospects', c.prospect_id);
                 prospectData = pros || null;
-                entityName = pros ? `<i class="fas fa-user" title="Prospect"></i> ${pros.full_name}` : 'Unknown Prospect';
+                entityName = pros ? `<i class="fas fa-user" title="Prospect"></i> ${escapeHtml(pros.full_name)}` : 'Unknown Prospect';
                 entityLink = `app.showProspectDetail(${c.prospect_id})`;
             }
             const isOwner = c.created_by === currentUser?.id;
             const isAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || /manager|team_leader/i.test(currentUser?.role || '');
             const caseMappings = allTagMappings.filter(et => et.entity_type === 'case_study' && et.entity_id === c.id);
             const caseTags = caseMappings.map(m => allTags.find(t => t.id === m.tag_id)).filter(Boolean);
-            const tagBadges = caseTags.map(t => `<span class="badge" style="background:${t.color || '#e5e7eb'};color:#1f2937;margin-right:4px;font-size:11px;">${t.name}</span>`).join('');
+            const tagBadges = caseTags.map(t => `<span class="badge" style="background:${escapeHtml(t.color || '#e5e7eb')};color:#1f2937;margin-right:4px;font-size:11px;">${escapeHtml(t.name)}</span>`).join('');
             const ageText = prospectData?.date_of_birth
                 ? Math.floor((Date.now() - new Date(prospectData.date_of_birth)) / (365.25 * 24 * 60 * 60 * 1000)) + 'y'
                 : '-';
@@ -10493,14 +10512,14 @@ function _wireLoginBtn() {
                 <tr class="clickable" onclick="app.showCaseStudyDetail(${c.id})">
                     <td>
                         <div class="case-title">
-                            <strong>${c.title}</strong>
+                            <strong>${escapeHtml(c.title)}</strong>
                             ${c.is_public ? '<span class="badge badge-success ml-2">Public</span>' : ''}
                         </div>
                     </td>
                     <td><a href="#" onclick="event.stopPropagation(); ${entityLink}">${entityName}</a></td>
-                    <td>${c.product || '-'}</td>
+                    <td>${escapeHtml(c.product || '-')}</td>
                     <td>RM ${parseFloat(c.amount || 0).toLocaleString()}</td>
-                    <td>${c.closing_date || '-'}</td>
+                    <td>${escapeHtml(c.closing_date || '-')}</td>
                     <td>
                         ${tagBadges}
                         <button class="btn-icon" title="Add Tag" style="font-size:11px;" onclick="event.stopPropagation(); app.addTagToCase(${c.id})"><i class="fas fa-tag"></i></button>
@@ -18647,13 +18666,9 @@ function _wireLoginBtn() {
     };
 
     const deleteProspect = async (id) => {
-        // SECURITY TODO: the `canDelete` check above is client-side only and can
-        // be bypassed via DevTools (any agent could call `app.deleteProspect(id)`
-        // directly). The real fix is a Supabase RLS policy on `prospects` that
-        // restricts DELETE to level ≤ 5 users, e.g.
-        //   CREATE POLICY "prospects_delete_lead" ON prospects FOR DELETE
-        //     USING (auth.jwt() ->> 'role' IN ('super_admin','marketing_manager','manager','team_leader'));
-        // Until RLS is in place, treat this as UI-only gating.
+        // Server-side gate: Supabase RLS restrictive policy
+        // `prospects_delete_lead_only` rejects DELETEs from users with Level > 5.
+        // The client-side check below is still a UX/defence-in-depth layer.
         const userLvlMatch = _currentUser?.role?.match(/Level\s+(\d+)/i);
         const userLevel = userLvlMatch ? parseInt(userLvlMatch[1]) : 99;
         if (userLevel > 5) {
@@ -19470,10 +19485,10 @@ function _wireLoginBtn() {
                 ${customerNotes.length > 0 ? customerNotes.map(n => `
                     <div class="notes-item" style="margin-top:10px;">
                         <div class="notes-header">
-                            <span>${n.date} - ${n.author}${n.is_voice_note ? ' <i class="fas fa-microphone voice-note-icon" title="Voice note"></i>' : ''}</span>
+                            <span>${escapeHtml(n.date)} - ${escapeHtml(n.author)}${n.is_voice_note ? ' <i class="fas fa-microphone voice-note-icon" title="Voice note"></i>' : ''}</span>
                             <button class="btn-icon" onclick="app.deleteCustomerNote(${customer.id}, ${n.id})"><i class="fas fa-trash"></i></button>
                         </div>
-                        <div>"${n.text}"</div>
+                        <div>"${escapeHtml(n.text)}"</div>
                     </div>
                 `).join('') : '<p style="color:var(--gray-400); font-size:13px; margin-top:8px;">No notes yet.</p>'}
             </div>
@@ -24217,10 +24232,10 @@ const showAgentProfile = async (agentId) => {
             ? agentNotes.map(n => `
                 <div class="notes-item" style="margin-top:8px;">
                     <div class="notes-header">
-                        <span>${n.date} - ${n.author}${n.is_voice_note ? ' <i class="fas fa-microphone voice-note-icon" title="Voice note"></i>' : ''}</span>
+                        <span>${escapeHtml(n.date)} - ${escapeHtml(n.author)}${n.is_voice_note ? ' <i class="fas fa-microphone voice-note-icon" title="Voice note"></i>' : ''}</span>
                         <button class="btn-icon" onclick="app.deleteAgentNote(${agent.id}, ${n.id})"><i class="fas fa-trash"></i></button>
                     </div>
-                    <div>"${n.text}"</div>
+                    <div>"${escapeHtml(n.text)}"</div>
                 </div>
             `).join('')
             : '<p style="color:var(--gray-400); font-size:13px;">No notes yet.</p>';
@@ -24567,7 +24582,6 @@ const renderCurrentAssignments = async (agentId) => {
                     `;
         }).join('')
             }
-<button class="btn secondary btn-sm" onclick="app.todo('Bulk Reassign')">Bulk Reassign</button>
             </div>
     `;
     };
@@ -25461,6 +25475,11 @@ const renderCurrentAssignments = async (agentId) => {
     };
 
     const deleteAgent = async (agentId) => {
+        // Re-check role here: the delete path uses the service-role write client
+        // below (RLS bypassed), so client-side gating is the last line of defence.
+        if (!(isSystemAdmin(_currentUser) || isMarketingManager(_currentUser))) {
+            return UI.toast.error('You do not have permission to delete agents.');
+        }
         const agent = await AppDataStore.getById('users', agentId);
         if (!agent) return UI.toast.error('Agent not found');
         UI.showModal('Delete Agent', `
@@ -25475,6 +25494,11 @@ const renderCurrentAssignments = async (agentId) => {
     };
 
     const confirmDeleteAgent = async (agentId) => {
+        // Re-check role — this function uses the write client which bypasses RLS.
+        if (!(isSystemAdmin(_currentUser) || isMarketingManager(_currentUser))) {
+            UI.hideModal();
+            return UI.toast.error('You do not have permission to delete agents.');
+        }
         try {
             // Fetch agent BEFORE deleting so we have the email for auth deletion
             const agent = await AppDataStore.getById('users', agentId);
@@ -34292,7 +34316,7 @@ const simulateCampaignSending = async (campaignId) => {
             const fi = document.getElementById('file-info');
             if (fi) {
                 const sizeStr = file.size > 1048576 ? (file.size / 1048576).toFixed(1) + ' MB' : (file.size / 1024).toFixed(0) + ' KB';
-                fi.innerHTML = `<div class="file-info-card"><div><strong>File:</strong> ${file.name}</div><div><strong>Size:</strong> ${sizeStr}</div><div><strong>Rows detected:</strong> ${_importData.rows}</div><div><strong>Columns detected:</strong> ${_importData.headers.length}</div></div>`;
+                fi.innerHTML = `<div class="file-info-card"><div><strong>File:</strong> ${escapeHtml(file.name)}</div><div><strong>Size:</strong> ${escapeHtml(sizeStr)}</div><div><strong>Rows detected:</strong> ${_importData.rows}</div><div><strong>Columns detected:</strong> ${_importData.headers.length}</div></div>`;
                 fi.style.display = 'block';
             }
             const btn = document.getElementById('step1-next'); if (btn) btn.disabled = false;
@@ -35143,7 +35167,14 @@ const simulateCampaignSending = async (campaignId) => {
     };
 
     const configureAlerts = () => {
-        const config = JSON.parse(localStorage.getItem('fs_crm_alert_config') || '{}');
+        let config = {};
+        try {
+            config = JSON.parse(localStorage.getItem('fs_crm_alert_config') || '{}') || {};
+        } catch (_) {
+            // Corrupt localStorage payload — reset to defaults rather than crashing the alerts UI.
+            localStorage.removeItem('fs_crm_alert_config');
+            config = {};
+        }
         const warningDays = config.warningDays || 7;
         const criticalDays = config.criticalDays || 14;
         const autoReassign = config.autoReassign || false;
@@ -42558,7 +42589,6 @@ JB 星期二到
         openCreateTemplateModal,
         saveTemplate,
         refreshTemplatesTab,
-        previewTemplate,
         insertVariable,
         addButtonField,
         searchTemplates,
@@ -42999,7 +43029,6 @@ JB 星期二到
         scheduleCoachingSessions: () => UI.toast.info('Scheduling coaching sessions...'),
         generatePerformanceReport: () => UI.toast.info('Generating performance report...'),
         shareInsights: () => UI.toast.info('Sharing insights...'),
-        viewAgentDetails: (id) => UI.toast.info(`Viewing agent ${id}`),
         viewLeadDetails: (id) => app.showProspectDetail(id),
         executeAction: (action) => UI.toast.info(`Executing: ${action}`),
         openAttendeeOutcomeModal,
@@ -43138,7 +43167,6 @@ JB 星期二到
 
         // Auth exports
         login,
-        logout,
         populateLoginDropdown,
         updateNavVisibility,
         setRoleFilter,
@@ -43442,10 +43470,10 @@ Object.assign(window.app, {
     showSecurityDashboard,
     showAuditLogs,
     showComplianceCenter,
-    showTwoFactorSetup: typeof showTwoFactorSetup !== 'undefined' ? showTwoFactorSetup : () => { },
-    verifyAndEnable2FA: typeof verifyAndEnable2FA !== 'undefined' ? verifyAndEnable2FA : () => { },
-    showTwoFactorLogin: typeof showTwoFactorLogin !== 'undefined' ? showTwoFactorLogin : () => { },
-    verifyTwoFactorLogin: typeof verifyTwoFactorLogin !== 'undefined' ? verifyTwoFactorLogin : () => { }
+    showTwoFactorSetup: typeof showTwoFactorSetup !== 'undefined' ? showTwoFactorSetup : () => UI.toast.warning('Two-factor authentication is not enabled on this build.'),
+    verifyAndEnable2FA: typeof verifyAndEnable2FA !== 'undefined' ? verifyAndEnable2FA : () => UI.toast.warning('Two-factor authentication is not enabled on this build.'),
+    showTwoFactorLogin: typeof showTwoFactorLogin !== 'undefined' ? showTwoFactorLogin : () => UI.toast.warning('Two-factor authentication is not enabled on this build.'),
+    verifyTwoFactorLogin: typeof verifyTwoFactorLogin !== 'undefined' ? verifyTwoFactorLogin : () => UI.toast.warning('Two-factor authentication is not enabled on this build.')
 });
 
 // ========== PHASE 20: SYSTEM ADMINISTRATION & DEPLOYMENT ==========

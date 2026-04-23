@@ -69,7 +69,7 @@ const AuditLogger = {
             };
 
             // Store in AppDataStore
-            AppDataStore.create('audit_logs', auditEntry);
+            await AppDataStore.create('audit_logs', auditEntry);
 
             // Also send to server for permanent storage
             if (navigator.onLine) {
@@ -80,7 +80,7 @@ const AuditLogger = {
             }
 
             // Check for security incidents
-            checkSecurityIncident(auditEntry);
+            await checkSecurityIncident(auditEntry);
 
             return auditEntry;
         } catch (error) {
@@ -158,7 +158,7 @@ const AuditLogger = {
 
     // Search audit logs
     search: async (filters = {}) => {
-        let logs = AppDataStore.getAll('audit_logs');
+        let logs = (await AppDataStore.getAll('audit_logs')) || [];
 
         if (filters.startDate) {
             logs = logs.filter(log => log.timestamp >= filters.startDate);
@@ -203,7 +203,7 @@ const AuditLogger = {
         const cutoff = new Date();
         cutoff.setDate(cutoff.getDate() - days);
 
-        const logs = AppDataStore.getAll('audit_logs').filter(
+        const logs = ((await AppDataStore.getAll('audit_logs')) || []).filter(
             log => new Date(log.timestamp) >= cutoff
         );
 
@@ -271,15 +271,15 @@ const queueAuditForSync = (auditEntry) => {
 };
 
 // Security incident detection
-const checkSecurityIncident = (auditEntry) => {
+const checkSecurityIncident = async (auditEntry) => {
     const incidents = [];
 
     // Multiple failed logins
     if (auditEntry.action === AuditAction.LOGIN_FAILED) {
-        const recentFailures = AppDataStore.query('audit_logs', {
+        const recentFailures = ((await AppDataStore.query('audit_logs', {
             action: AuditAction.LOGIN_FAILED,
             username: auditEntry.username
-        }).filter(log => {
+        })) || []).filter(log => {
             const logTime = new Date(log.timestamp);
             const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
             return logTime > fiveMinAgo;
@@ -320,9 +320,9 @@ const checkSecurityIncident = (auditEntry) => {
         });
     }
 
-    // Store incidents
-    incidents.forEach(incident => {
-        AppDataStore.create('security_incidents', {
+    // Store incidents (use for...of so each create is awaited)
+    for (const incident of incidents) {
+        await AppDataStore.create('security_incidents', {
             id: `incident_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
             ...incident,
             status: 'new',
@@ -334,7 +334,7 @@ const checkSecurityIncident = (auditEntry) => {
         if (incident.severity === 'critical') {
             sendSecurityAlert(incident);
         }
-    });
+    }
 };
 
 const sendSecurityAlert = (incident) => {
