@@ -18881,17 +18881,26 @@ function _wireLoginBtn() {
             const normalize = str => str ? str.toLowerCase().replace(/\s+/g, '') : '';
             const normName = normalize(name);
 
-            // Parallel, bounded lookups: 2× limit-5 queries against indexed
-            // columns. Returns in <50 ms even on a 1M-row table.
-            const [prospectPhoneMatches, customerPhoneMatches, prospectIcMatches, customerIcMatches] = await Promise.all([
+            // Parallel, bounded lookups: 6× limit-5 queries against indexed
+            // columns (idx_prospects_phone, idx_prospects_ic_number,
+            // idx_prospects_email + customer twins). Returns in <50 ms even
+            // on a 1M-row table.
+            const [
+                prospectPhoneMatches, customerPhoneMatches,
+                prospectIcMatches, customerIcMatches,
+                prospectEmailMatches, customerEmailMatches,
+            ] = await Promise.all([
                 phone ? AppDataStore.queryAdvanced('prospects', { filters: { phone }, limit: 5, countMode: null }).then(r => r.data) : [],
                 phone ? AppDataStore.queryAdvanced('customers', { filters: { phone }, limit: 5, countMode: null }).then(r => r.data) : [],
                 ic ? AppDataStore.queryAdvanced('prospects', { filters: { ic_number: ic }, limit: 5, countMode: null }).then(r => r.data) : [],
                 ic ? AppDataStore.queryAdvanced('customers', { filters: { ic_number: ic }, limit: 5, countMode: null }).then(r => r.data) : [],
+                email ? AppDataStore.queryAdvanced('prospects', { filters: { email }, limit: 5, countMode: null }).then(r => r.data) : [],
+                email ? AppDataStore.queryAdvanced('customers', { filters: { email }, limit: 5, countMode: null }).then(r => r.data) : [],
             ]);
 
             const phoneMatches = [...(prospectPhoneMatches || []), ...(customerPhoneMatches || [])];
             const icMatches = [...(prospectIcMatches || []), ...(customerIcMatches || [])];
+            const emailMatches = [...(prospectEmailMatches || []), ...(customerEmailMatches || [])];
 
             // Hard block: same name + same phone, or same name + same IC.
             const hardDup = [...phoneMatches, ...icMatches].find(p => normalize(p.full_name) === normName);
@@ -18924,6 +18933,24 @@ function _wireLoginBtn() {
                 );
                 await showFieldError('prospect-phone', `Already used by ${names}${more}`);
                 return;
+            }
+
+            // Soft warn: email reused by a DIFFERENT person. Unlike phone,
+            // there's no hard unique index on email because ~3 legitimate
+            // couples in the existing DB share an address (e.g. spouses
+            // sharing one gmail). Let the agent confirm rather than block.
+            const emailSharedWith = emailMatches.filter(p =>
+                normalize(p.full_name) !== normName
+                && (p.email || '').toLowerCase() === email.toLowerCase()
+            );
+            if (email && emailSharedWith.length > 0) {
+                const names = emailSharedWith.slice(0, 3).map(p => p.full_name || '(unnamed)').join(', ');
+                const more = emailSharedWith.length > 3 ? ` and ${emailSharedWith.length - 3} more` : '';
+                const ok = confirm(
+                    `Email ${email} is already used by ${names}${more}.\n\n` +
+                    `This is OK for couples/families sharing an inbox. Click OK to continue, Cancel to review.`
+                );
+                if (!ok) return;
             }
         }
 
@@ -25084,7 +25111,7 @@ const renderCurrentAssignments = async (agentId) => {
                     enforced.
                 </p>
                 <button class="btn primary" onclick="(async()=>{ await app.showPhoneDupesModal(); })()">
-                    <i class="fas fa-search"></i> Review Phone Duplicates
+                    <i class="fas fa-search"></i> Review Contact Duplicates
                 </button>
             </div>
             ` : ''}
@@ -25129,36 +25156,46 @@ const renderCurrentAssignments = async (agentId) => {
         return dupes.sort((a, b) => b.group.length - a.group.length);
     };
 
-    const _renderPhoneDupesBody = (dupes, users) => {
-        if (!dupes || dupes.length === 0) {
-            return `
-                <div style="text-align:center; padding:32px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px;">
-                    <i class="fas fa-check-circle" style="color:#16a34a; font-size:28px;"></i>
-                    <p style="margin:12px 0 4px; font-size:15px; font-weight:600;">No phone duplicates</p>
-                    <p style="color:#166534; font-size:13px;">Safe to enforce a unique constraint on prospects.phone.</p>
-                </div>
-            `;
+    // Mirror for email — grouping is case-insensitive.
+    const _loadEmailDupes = async () => {
+        const rows = await AppDataStore.getActiveProspects({ includeDormant: true, limit: 50000 });
+        const byEmail = new Map();
+        for (const p of rows) {
+            const em = (p.email || '').trim().toLowerCase();
+            if (!em) continue;
+            if (!byEmail.has(em)) byEmail.set(em, []);
+            byEmail.get(em).push(p);
         }
+        const dupes = [];
+        for (const [email, group] of byEmail.entries()) {
+            if (group.length > 1) {
+                dupes.push({ email, group: group.sort((a, b) => String(a.id).localeCompare(String(b.id))) });
+            }
+        }
+        return dupes.sort((a, b) => b.group.length - a.group.length);
+    };
+
+    const _renderDupeGroup = (label, icon, color, keyField, items, users) => {
         const userById = new Map((users || []).map(u => [String(u.id), u]));
         const agentName = (id) => userById.get(String(id))?.full_name || '—';
-        let html = `
-            <p style="font-size:13px; color:var(--text-secondary); margin-bottom:16px;">
-                Found <strong>${dupes.length}</strong> phone number${dupes.length > 1 ? 's' : ''} shared by 2+ prospects.
-                Resolve each one before the unique constraint can be applied. Family members should get distinct
-                numbers (primary holder keeps the shared line, others set theirs to blank or a mobile).
-            </p>
-        `;
-        for (const { phone, group } of dupes) {
+        let html = '';
+        for (const item of items) {
+            const key = item[keyField];
+            const group = item.group;
             html += `
                 <div style="border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:12px; background:var(--surface);">
                     <div style="display:flex; align-items:center; gap:8px; margin-bottom:10px;">
-                        <i class="fas fa-phone" style="color:#d97706;"></i>
-                        <strong style="font-family:monospace; font-size:14px;">${escapeHtml(phone)}</strong>
+                        <i class="fas ${icon}" style="color:${color};"></i>
+                        <strong style="font-family:monospace; font-size:14px; word-break:break-all;">${escapeHtml(key)}</strong>
                         <span style="color:var(--text-secondary); font-size:12px;">(${group.length} prospects)</span>
                     </div>
             `;
+            const isEmailGroup = keyField === 'email';
             for (const p of group) {
                 const last = p.last_activity_date || '—';
+                // For email dupes the "clear" action clears email instead of phone.
+                const clearFn = isEmailGroup ? 'dedupeClearEmail' : 'dedupeClearPhone';
+                const clearLabel = isEmailGroup ? 'Clear email' : 'Clear phone';
                 html += `
                     <div style="display:flex; align-items:center; gap:8px; padding:8px; border-top:1px solid var(--border); flex-wrap:wrap;">
                         <div style="flex:1; min-width:200px;">
@@ -25167,11 +25204,11 @@ const renderCurrentAssignments = async (agentId) => {
                                 Agent: ${escapeHtml(agentName(p.responsible_agent_id))} · Last activity: ${last} · ID ${p.id}
                             </div>
                         </div>
-                        <button class="btn secondary btn-sm" onclick="app.dedupeEditPhone(${p.id})" title="Open profile to edit phone">
-                            <i class="fas fa-pen"></i> Edit phone
+                        <button class="btn secondary btn-sm" onclick="app.dedupeEditPhone(${p.id})" title="Open profile">
+                            <i class="fas fa-pen"></i> Edit
                         </button>
-                        <button class="btn secondary btn-sm" onclick="app.dedupeClearPhone(${p.id})" title="Clear this prospect's phone">
-                            <i class="fas fa-eraser"></i> Clear
+                        <button class="btn secondary btn-sm" onclick="app.${clearFn}(${p.id})" title="${clearLabel}">
+                            <i class="fas fa-eraser"></i> ${clearLabel}
                         </button>
                         <button class="btn secondary btn-sm" style="color:var(--red-500);" onclick="app.dedupeDeleteProspect(${p.id})" title="Hard-delete this prospect">
                             <i class="fas fa-trash"></i> Delete
@@ -25184,13 +25221,44 @@ const renderCurrentAssignments = async (agentId) => {
         return html;
     };
 
+    const _renderPhoneDupesBody = (phoneDupes, emailDupes, users) => {
+        const phoneCount = phoneDupes?.length || 0;
+        const emailCount = emailDupes?.length || 0;
+        if (phoneCount === 0 && emailCount === 0) {
+            return `
+                <div style="text-align:center; padding:32px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px;">
+                    <i class="fas fa-check-circle" style="color:#16a34a; font-size:28px;"></i>
+                    <p style="margin:12px 0 4px; font-size:15px; font-weight:600;">No contact duplicates</p>
+                    <p style="color:#166534; font-size:13px;">No shared phones or emails across prospects.</p>
+                </div>
+            `;
+        }
+        let html = `
+            <p style="font-size:13px; color:var(--text-secondary); margin-bottom:16px;">
+                <strong>${phoneCount}</strong> phone${phoneCount !== 1 ? 's' : ''} and
+                <strong>${emailCount}</strong> email${emailCount !== 1 ? 's' : ''} shared by 2+ prospects.
+                Phone sharing is hard-blocked at the DB level — resolve all phone dupes. Email
+                sharing is allowed (couples often share an inbox) but shown here for audit.
+            </p>
+        `;
+        if (phoneCount > 0) {
+            html += `<h5 style="margin:16px 0 8px; font-size:13px; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.05em;">Phone duplicates</h5>`;
+            html += _renderDupeGroup('phone', 'fa-phone', '#d97706', 'phone', phoneDupes, users);
+        }
+        if (emailCount > 0) {
+            html += `<h5 style="margin:16px 0 8px; font-size:13px; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.05em;">Email duplicates (shared inboxes — usually OK)</h5>`;
+            html += _renderDupeGroup('email', 'fa-envelope', '#2563eb', 'email', emailDupes, users);
+        }
+        return html;
+    };
+
     const showPhoneDupesModal = async () => {
         if (!isSystemAdmin(_currentUser)) {
             UI.toast.error('Super Admin only.');
             return;
         }
         UI.showModal(
-            'Phone Duplicates Review',
+            'Contact Duplicates Review',
             `<div id="phone-dupes-body" style="min-height:200px; max-height:60vh; overflow-y:auto;">
                 <div style="text-align:center; padding:32px; color:var(--text-secondary);">
                     <i class="fas fa-spinner fa-spin"></i> Scanning prospects…
@@ -25199,7 +25267,7 @@ const renderCurrentAssignments = async (agentId) => {
             [
                 { label: 'Refresh', type: 'secondary', action: '(async()=>{ await app.refreshPhoneDupes(); })()' },
                 { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
-                { label: 'Verify & prepare constraint', type: 'primary', action: '(async()=>{ await app.verifyAndPreparePhoneConstraint(); })()' },
+                { label: 'Verify phone constraint', type: 'primary', action: '(async()=>{ await app.verifyAndPreparePhoneConstraint(); })()' },
             ]
         );
         await refreshPhoneDupes();
@@ -25210,14 +25278,27 @@ const renderCurrentAssignments = async (agentId) => {
         if (!body) return;
         body.innerHTML = `<div style="text-align:center; padding:32px; color:var(--text-secondary);"><i class="fas fa-spinner fa-spin"></i> Scanning prospects…</div>`;
         try {
-            const [dupes, users] = await Promise.all([
+            const [phoneDupes, emailDupes, users] = await Promise.all([
                 _loadPhoneDupes(),
+                _loadEmailDupes(),
                 AppDataStore.getAll('users'),
             ]);
-            body.innerHTML = _renderPhoneDupesBody(dupes, users);
+            body.innerHTML = _renderPhoneDupesBody(phoneDupes, emailDupes, users);
         } catch (e) {
-            console.error('[phone-dupes]', e);
+            console.error('[contact-dupes]', e);
             body.innerHTML = `<div style="color:var(--red-500); padding:16px;">Error: ${escapeHtml(e.message || String(e))}</div>`;
+        }
+    };
+
+    const dedupeClearEmail = async (prospectId) => {
+        const ok = confirm(`Clear the email for prospect ${prospectId}?\n\nThe record stays; only the email field is nulled.`);
+        if (!ok) return;
+        try {
+            await AppDataStore.update('prospects', parseInt(prospectId), { email: null, updated_at: new Date().toISOString() });
+            UI.toast.success('Email cleared.');
+            await refreshPhoneDupes();
+        } catch (e) {
+            UI.toast.error('Failed to clear email: ' + (e.message || e));
         }
     };
 
@@ -42364,11 +42445,12 @@ JB 星期二到
         selfChangePassword,
         saveSelfPreferredName,
         showSettingsView,
-        // Phone-duplicate review (Super Admin)
+        // Contact-duplicate review (Super Admin)
         showPhoneDupesModal,
         refreshPhoneDupes,
         dedupeEditPhone,
         dedupeClearPhone,
+        dedupeClearEmail,
         dedupeDeleteProspect,
         verifyAndPreparePhoneConstraint,
         // Push notifications
