@@ -10313,55 +10313,30 @@ function _wireLoginBtn() {
                     <div class="section-icon"><i class="fas fa-handshake"></i></div>
                     <h2>CPS Invitation Cases</h2>
                     <span class="cases-section-desc">Prospects invited via CPS method</span>
+                    <span class="cases-count-pill" id="cases-count-cps">0</span>
                 </div>
-                <div class="table-container">
-                    <table class="crm-table">
-                        <thead>
-                            <tr>
-                                <th>Relation</th>
-                                <th>Occupation</th>
-                                <th>Age</th>
-                                <th>Gender</th>
-                                <th>Inv. Method</th>
-                                <th>Details</th>
-                                <th class="text-right">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="cases-list-body-cps">
-                        </tbody>
-                    </table>
-                    <div id="cases-empty-state-cps" style="display: none; padding: 24px; text-align: center; color: var(--gray-400);">
-                        <i class="fas fa-folder-open" style="font-size: 36px; margin-bottom: 12px;"></i>
-                        <p>No CPS invitation cases found.</p>
-                    </div>
+                <div class="case-card-grid" id="cases-list-cps"></div>
+                <div id="cases-empty-state-cps" class="cases-empty-state" style="display:none;">
+                    <div class="cases-empty-illus"><i class="fas fa-handshake"></i></div>
+                    <h3>No CPS invitation cases yet</h3>
+                    <p>Invite a prospect through CPS and they'll show up here as a case.</p>
                 </div>
 
                 <!-- Closed Cases Section -->
-                <div class="cases-section-hdr" style="margin-top:32px;">
+                <div class="cases-section-hdr" style="margin-top:40px;">
                     <div class="section-icon"><i class="fas fa-trophy"></i></div>
                     <h2>Closed Cases</h2>
                     <span class="cases-section-desc">Successfully closed deals &amp; stories</span>
+                    <span class="cases-count-pill" id="cases-count-closed">0</span>
                 </div>
-                <div class="table-container">
-                    <table class="crm-table">
-                        <thead>
-                            <tr>
-                                <th>Title</th>
-                                <th>Prospect / Customer</th>
-                                <th>Product</th>
-                                <th>Amount (RM)</th>
-                                <th>Closing Date</th>
-                                <th>Tags</th>
-                                <th class="text-right">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="cases-list-body-closed">
-                        </tbody>
-                    </table>
-                    <div id="cases-empty-state-closed" style="display: none; padding: 24px; text-align: center; color: var(--gray-400);">
-                        <i class="fas fa-folder-open" style="font-size: 36px; margin-bottom: 12px;"></i>
-                        <p>No closed cases found.</p>
-                    </div>
+                <div class="case-card-grid" id="cases-list-closed"></div>
+                <div id="cases-empty-state-closed" class="cases-empty-state" style="display:none;">
+                    <div class="cases-empty-illus"><i class="fas fa-trophy"></i></div>
+                    <h3>No closed cases yet</h3>
+                    <p>Document your first success story — include photos, the sales idea, and what worked.</p>
+                    <button class="btn primary" onclick="(async () => { await app.openCaseStudyModal(null, 'closed'); })()">
+                        <i class="fas fa-plus"></i> Add Closed Case
+                    </button>
                 </div>
             </div>
         `;
@@ -10406,14 +10381,17 @@ function _wireLoginBtn() {
     };
 
     const renderCasesList = async () => {
-        const tbodyCps = document.getElementById('cases-list-body-cps');
-        const tbodyClosed = document.getElementById('cases-list-body-closed');
+        const gridCps = document.getElementById('cases-list-cps');
+        const gridClosed = document.getElementById('cases-list-closed');
         const emptyCps = document.getElementById('cases-empty-state-cps');
         const emptyClosed = document.getElementById('cases-empty-state-closed');
-        if (!tbodyCps || !tbodyClosed) return;
+        const countCps = document.getElementById('cases-count-cps');
+        const countClosed = document.getElementById('cases-count-closed');
+        if (!gridCps || !gridClosed) return;
 
         const allCases = await AppDataStore.getAll('case_studies');
         const currentUser = _currentUser;
+        const allUsers = (await AppDataStore.getAll('users')) || [];
         const allTags = (await AppDataStore.getAll('tags')) || [];
         const allTagMappings = (await AppDataStore.getAll('entity_tags')) || [];
 
@@ -10461,96 +10439,187 @@ function _wireLoginBtn() {
             return cases;
         };
 
-        const buildRow = async (c, type) => {
-            let entityName = '-';
-            let entityLink = 'return false';
+        const genderEmoji = (g) => {
+            if (!g) return '';
+            const low = String(g).toLowerCase();
+            if (low.startsWith('m')) return '♂';
+            if (low.startsWith('f')) return '♀';
+            return '';
+        };
+
+        const productGradient = (product) => {
+            const palettes = [
+                'linear-gradient(135deg,#7a0018 0%,#c12b3c 100%)',
+                'linear-gradient(135deg,#0f766e 0%,#14b8a6 100%)',
+                'linear-gradient(135deg,#1e3a8a 0%,#3b82f6 100%)',
+                'linear-gradient(135deg,#92400e 0%,#f59e0b 100%)',
+                'linear-gradient(135deg,#6b21a8 0%,#a855f7 100%)',
+                'linear-gradient(135deg,#065f46 0%,#10b981 100%)',
+            ];
+            const key = String(product || 'case');
+            let hash = 0;
+            for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
+            return palettes[hash % palettes.length];
+        };
+
+        const buildCard = async (c, type) => {
+            let entityName = '';
+            let entityHref = '';
+            let entityIcon = '';
             let prospectData = null;
             if (c.customer_id) {
                 const cust = await AppDataStore.getById('customers', c.customer_id);
-                entityName = cust ? `<i class="fas fa-user-check" title="Customer"></i> ${escapeHtml(cust.full_name)}` : 'Unknown Customer';
-                entityLink = `app.showCustomerDetail(${c.customer_id})`;
+                if (cust) { entityName = cust.full_name; entityHref = `app.showCustomerDetail(${c.customer_id})`; entityIcon = 'fa-user-check'; }
             } else if (c.prospect_id) {
                 const pros = await AppDataStore.getById('prospects', c.prospect_id);
-                prospectData = pros || null;
-                entityName = pros ? `<i class="fas fa-user" title="Prospect"></i> ${escapeHtml(pros.full_name)}` : 'Unknown Prospect';
-                entityLink = `app.showProspectDetail(${c.prospect_id})`;
+                if (pros) { prospectData = pros; entityName = pros.full_name; entityHref = `app.showProspectDetail(${c.prospect_id})`; entityIcon = 'fa-user'; }
             }
+
             const isOwner = c.created_by === currentUser?.id;
             const isAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || /manager|team_leader/i.test(currentUser?.role || '');
+            const canEdit = isOwner || isAdmin;
+
+            const creator = allUsers.find(u => u.id === c.created_by);
+            const creatorName = creator ? (creator.full_name || creator.username || 'Agent') : 'System';
+            const creatorInitial = (creatorName[0] || '?').toUpperCase();
+
             const caseMappings = allTagMappings.filter(et => et.entity_type === 'case_study' && et.entity_id === c.id);
             const caseTags = caseMappings.map(m => allTags.find(t => t.id === m.tag_id)).filter(Boolean);
-            const tagBadges = caseTags.map(t => `<span class="badge" style="background:${escapeHtml(t.color || '#e5e7eb')};color:#1f2937;margin-right:4px;font-size:11px;">${escapeHtml(t.name)}</span>`).join('');
+            const tagBadges = caseTags.slice(0, 3).map(t =>
+                `<span class="case-tag-pill" style="background:${escapeHtml(t.color || '#e5e7eb')}22;color:${escapeHtml(t.color || '#374151')};border:1px solid ${escapeHtml(t.color || '#e5e7eb')}55;">${escapeHtml(t.name)}</span>`
+            ).join('');
+            const extraTagCount = caseTags.length > 3 ? `<span class="case-tag-pill case-tag-more">+${caseTags.length - 3}</span>` : '';
+
+            const photos = Array.isArray(c.photo_urls) ? c.photo_urls : [];
+            const coverPhoto = photos[0] || null;
+            const extraPhotoCount = photos.length > 1 ? photos.length - 1 : 0;
+
             const ageText = prospectData?.date_of_birth
                 ? Math.floor((Date.now() - new Date(prospectData.date_of_birth)) / (365.25 * 24 * 60 * 60 * 1000)) + 'y'
-                : '-';
-            const detailsPreview = c.cps_invitation_details
-                ? (c.cps_invitation_details.length > 80 ? c.cps_invitation_details.substring(0, 80) + '…' : c.cps_invitation_details)
-                : '-';
-            const actionButtons = `
-                <td class="text-right">
-                    <div class="actions">
-                        <button class="btn-icon" title="View" onclick="event.stopPropagation(); app.showCaseStudyDetail(${c.id})"><i class="fas fa-eye"></i></button>
-                        ${(isOwner || isAdmin) ? `
-                            <button class="btn-icon" title="Edit" onclick="event.stopPropagation(); app.openCaseStudyModal(${c.id})"><i class="fas fa-edit"></i></button>
-                            <button class="btn-icon text-danger" title="Delete" onclick="event.stopPropagation(); app.deleteCaseStudy(${c.id})"><i class="fas fa-trash"></i></button>
-                        ` : ''}
-                    </div>
-                </td>`;
+                : '';
+
+            const actions = `
+                <div class="case-card-actions" onclick="event.stopPropagation();">
+                    <button class="btn-icon" title="View" onclick="app.showCaseStudyDetail(${c.id})"><i class="fas fa-eye"></i></button>
+                    ${canEdit ? `
+                        <button class="btn-icon" title="Edit" onclick="app.openCaseStudyModal(${c.id})"><i class="fas fa-pen"></i></button>
+                        <button class="btn-icon text-danger" title="Delete" onclick="app.deleteCaseStudy(${c.id})"><i class="fas fa-trash"></i></button>
+                    ` : ''}
+                </div>`;
+
             if (type === 'cps') {
+                const title = (() => {
+                    if (entityName) return escapeHtml(entityName);
+                    if (c.title) return escapeHtml(c.title);
+                    return 'CPS Case';
+                })();
+                const subtitle = prospectData?.occupation ? escapeHtml(prospectData.occupation) : (prospectData?.referral_relationship ? 'Referred via ' + escapeHtml(prospectData.referral_relationship) : '');
+                const detailsPreview = c.cps_invitation_details
+                    ? (c.cps_invitation_details.length > 140 ? c.cps_invitation_details.substring(0, 140) + '…' : c.cps_invitation_details)
+                    : 'No invitation details recorded yet.';
+                const metaPills = [
+                    prospectData?.gender ? `<span class="case-meta-pill"><i class="fas fa-venus-mars"></i> ${escapeHtml(prospectData.gender)} ${genderEmoji(prospectData.gender)}</span>` : '',
+                    ageText ? `<span class="case-meta-pill"><i class="fas fa-birthday-cake"></i> ${ageText}</span>` : '',
+                    c.cps_invitation_method ? `<span class="case-meta-pill"><i class="fas fa-paper-plane"></i> ${escapeHtml(c.cps_invitation_method)}</span>` : '',
+                    prospectData?.referral_relationship ? `<span class="case-meta-pill"><i class="fas fa-people-arrows"></i> ${escapeHtml(prospectData.referral_relationship)}</span>` : '',
+                ].filter(Boolean).join('');
+
                 return `
-                <tr class="clickable" onclick="app.showCaseStudyDetail(${c.id})">
-                    <td>${prospectData?.referral_relationship || '-'}</td>
-                    <td>${prospectData?.occupation || '-'}</td>
-                    <td>${ageText}</td>
-                    <td>${prospectData?.gender || '-'}</td>
-                    <td>${c.cps_invitation_method || '-'}</td>
-                    <td style="max-width:200px;" title="${(c.cps_invitation_details || '').replace(/"/g, '&quot;')}">${detailsPreview}</td>
-                    ${actionButtons}
-                </tr>`;
-            }
-            return `
-                <tr class="clickable" onclick="app.showCaseStudyDetail(${c.id})">
-                    <td>
-                        <div class="case-title">
-                            <strong>${escapeHtml(c.title)}</strong>
-                            ${c.is_public ? '<span class="badge badge-success ml-2">Public</span>' : ''}
+                <div class="case-card" onclick="app.showCaseStudyDetail(${c.id})">
+                    <div class="case-card-cover" style="${coverPhoto ? `background-image:url('${escapeHtml(coverPhoto)}');` : `background:${productGradient(entityName || 'cps')};`}">
+                        ${!coverPhoto ? `<div class="case-card-cover-icon"><i class="fas fa-handshake"></i></div>` : ''}
+                        <div class="case-card-cover-badges">
+                            <span class="case-type-chip cps">CPS</span>
+                            ${c.is_public ? '<span class="case-type-chip public"><i class="fas fa-globe"></i> Public</span>' : ''}
                         </div>
-                    </td>
-                    <td><a href="#" onclick="event.stopPropagation(); ${entityLink}">${entityName}</a></td>
-                    <td>${escapeHtml(c.product || '-')}</td>
-                    <td>RM ${parseFloat(c.amount || 0).toLocaleString()}</td>
-                    <td>${escapeHtml(c.closing_date || '-')}</td>
-                    <td>
-                        ${tagBadges}
-                        <button class="btn-icon" title="Add Tag" style="font-size:11px;" onclick="event.stopPropagation(); app.addTagToCase(${c.id})"><i class="fas fa-tag"></i></button>
-                    </td>
-                    ${actionButtons}
-                </tr>
-            `;
+                        ${extraPhotoCount > 0 ? `<div class="case-card-photo-count"><i class="fas fa-images"></i> ${extraPhotoCount + 1}</div>` : ''}
+                    </div>
+                    <div class="case-card-body">
+                        <h3 class="case-card-title">${title}</h3>
+                        ${subtitle ? `<p class="case-card-subtitle">${subtitle}</p>` : ''}
+                        <div class="case-card-meta">${metaPills}</div>
+                        <p class="case-card-desc">${escapeHtml(detailsPreview)}</p>
+                        <div class="case-card-footer">
+                            <div class="case-card-agent" title="${escapeHtml(creatorName)}">
+                                <span class="case-avatar">${escapeHtml(creatorInitial)}</span>
+                                <span class="case-agent-name">${escapeHtml(creatorName)}</span>
+                            </div>
+                            <div class="case-card-tags">${tagBadges}${extraTagCount}</div>
+                        </div>
+                    </div>
+                    ${actions}
+                </div>`;
+            }
+
+            // Closed card
+            const amountStr = c.amount ? 'RM ' + parseFloat(c.amount).toLocaleString() : '';
+            const closedDate = c.closing_date ? new Date(c.closing_date).toLocaleDateString('en-MY', { year:'numeric', month:'short', day:'numeric' }) : '';
+            const storyPreview = (c.success_story || c.sales_idea || c.closing_details || '').trim();
+            const storyText = storyPreview
+                ? (storyPreview.length > 160 ? storyPreview.substring(0, 160) + '…' : storyPreview)
+                : 'Tap to read the full closing strategy and sales idea.';
+
+            return `
+                <div class="case-card closed" onclick="app.showCaseStudyDetail(${c.id})">
+                    <div class="case-card-cover" style="${coverPhoto ? `background-image:url('${escapeHtml(coverPhoto)}');` : `background:${productGradient(c.product)};`}">
+                        ${!coverPhoto ? `<div class="case-card-cover-icon"><i class="fas fa-trophy"></i></div>` : ''}
+                        <div class="case-card-cover-badges">
+                            <span class="case-type-chip closed">Closed</span>
+                            ${c.is_public ? '<span class="case-type-chip public"><i class="fas fa-globe"></i> Public</span>' : ''}
+                        </div>
+                        ${amountStr ? `<div class="case-card-amount">${escapeHtml(amountStr)}</div>` : ''}
+                        ${extraPhotoCount > 0 ? `<div class="case-card-photo-count"><i class="fas fa-images"></i> ${extraPhotoCount + 1}</div>` : ''}
+                    </div>
+                    <div class="case-card-body">
+                        <h3 class="case-card-title">${escapeHtml(c.title || 'Untitled Case')}</h3>
+                        <div class="case-card-meta">
+                            ${entityName ? `<span class="case-meta-pill"><i class="fas ${entityIcon}"></i> ${escapeHtml(entityName)}</span>` : ''}
+                            ${c.product ? `<span class="case-meta-pill"><i class="fas fa-box"></i> ${escapeHtml(c.product)}</span>` : ''}
+                            ${closedDate ? `<span class="case-meta-pill"><i class="fas fa-calendar-check"></i> ${escapeHtml(closedDate)}</span>` : ''}
+                        </div>
+                        <p class="case-card-desc">${escapeHtml(storyText)}</p>
+                        <div class="case-card-footer">
+                            <div class="case-card-agent" title="${escapeHtml(creatorName)}">
+                                <span class="case-avatar">${escapeHtml(creatorInitial)}</span>
+                                <span class="case-agent-name">${escapeHtml(creatorName)}</span>
+                            </div>
+                            <div class="case-card-tags">${tagBadges}${extraTagCount}</div>
+                        </div>
+                    </div>
+                    ${actions}
+                </div>`;
         };
 
         // CPS cases
         let cpsCases = allCases.filter(c => (c.case_type || 'cps') === 'cps');
         cpsCases = await applySharedFilters(cpsCases);
+        cpsCases.sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0));
+        if (countCps) countCps.textContent = cpsCases.length;
         if (cpsCases.length === 0) {
-            tbodyCps.innerHTML = '';
-            emptyCps.style.display = 'block';
+            gridCps.innerHTML = '';
+            gridCps.style.display = 'none';
+            emptyCps.style.display = 'flex';
         } else {
+            gridCps.style.display = '';
             emptyCps.style.display = 'none';
-            const rows = await Promise.all(cpsCases.map(c => buildRow(c, 'cps')));
-            tbodyCps.innerHTML = rows.join('');
+            const cards = await Promise.all(cpsCases.map(c => buildCard(c, 'cps')));
+            gridCps.innerHTML = cards.join('');
         }
 
         // Closed cases
         let closedCases = allCases.filter(c => (c.case_type || 'cps') === 'closed');
         closedCases = await applySharedFilters(closedCases);
+        closedCases.sort((a, b) => new Date(b.closing_date || b.updated_at || 0) - new Date(a.closing_date || a.updated_at || 0));
+        if (countClosed) countClosed.textContent = closedCases.length;
         if (closedCases.length === 0) {
-            tbodyClosed.innerHTML = '';
-            emptyClosed.style.display = 'block';
+            gridClosed.innerHTML = '';
+            gridClosed.style.display = 'none';
+            emptyClosed.style.display = 'flex';
         } else {
+            gridClosed.style.display = '';
             emptyClosed.style.display = 'none';
-            const rows = await Promise.all(closedCases.map(c => buildRow(c, 'closed')));
-            tbodyClosed.innerHTML = rows.join('');
+            const cards = await Promise.all(closedCases.map(c => buildCard(c, 'closed')));
+            gridClosed.innerHTML = cards.join('');
         }
     };
 
@@ -10590,8 +10659,23 @@ function _wireLoginBtn() {
 
         const typeLabel = (c.case_type || 'cps') === 'cps' ? 'CPS Invitation Case' : 'Closed Case';
 
+        const photos = Array.isArray(c.photo_urls) ? c.photo_urls : [];
+        const photoGalleryHtml = photos.length ? `
+            <div class="case-detail-gallery">
+                <div class="case-detail-gallery-main">
+                    <img src="${escapeHtml(photos[0])}" alt="Cover" onclick="window.open('${escapeHtml(photos[0])}','_blank')">
+                </div>
+                ${photos.length > 1 ? `
+                    <div class="case-detail-gallery-thumbs">
+                        ${photos.slice(1).map(p => `<img src="${escapeHtml(p)}" alt="Photo" onclick="window.open('${escapeHtml(p)}','_blank')">`).join('')}
+                    </div>
+                ` : ''}
+            </div>
+        ` : '';
+
         const contentHtml = `
             <div style="padding:0 4px;">
+                ${photoGalleryHtml}
                 <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px;color:var(--gray-500);font-size:13px;">
                     <span><i class="fas fa-tag"></i> ${typeLabel}</span>
                     ${isCpsCase ? (() => {
@@ -10727,10 +10811,14 @@ function _wireLoginBtn() {
         }
     };
 
-    const openCaseStudyModal = async (id = null) => {
+    let _casePendingPhotos = [];
+
+    const openCaseStudyModal = async (id = null, defaultType = null) => {
         const c = id ? await AppDataStore.getById('case_studies', id) : null;
         const title = id ? 'Edit Case' : 'New Case';
-        const caseType = c ? (c.case_type || 'cps') : _caseActiveTab;
+        const caseType = c ? (c.case_type || 'cps') : (defaultType || _caseActiveTab || 'cps');
+
+        _casePendingPhotos = c && Array.isArray(c.photo_urls) ? [...c.photo_urls] : [];
 
         let entityName = '';
         if (c) {
@@ -10793,6 +10881,19 @@ function _wireLoginBtn() {
                             <input type="checkbox" id="case-is-public" ${c && c.is_public ? 'checked' : ''}> Make this case public to other agents
                         </label>
                     </div>
+
+                    <div class="form-group">
+                        <label><i class="fas fa-camera"></i> Photos</label>
+                        <p class="help-text">Add event photos, testimonials, or product shots — the first photo becomes the cover.</p>
+                        <div class="case-photo-uploader">
+                            <div id="case-photo-gallery" class="case-photo-gallery"></div>
+                            <label class="case-photo-add" for="case-photo-input">
+                                <i class="fas fa-plus"></i>
+                                <span>Add Photo</span>
+                                <input type="file" id="case-photo-input" accept="image/*" multiple hidden onchange="app.uploadCasePhotos(event)">
+                            </label>
+                        </div>
+                    </div>
                 </div>
 
                 <div id="case-tab-cps" class="modal-tab-content">
@@ -10836,6 +10937,72 @@ function _wireLoginBtn() {
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
             { label: id ? 'Update Case' : 'Save Case', type: 'primary', action: `(async () => { await app.saveCaseStudy(${id || 'null'}); })()` }
         ]);
+
+        renderCasePhotoGallery();
+    };
+
+    const renderCasePhotoGallery = () => {
+        const gal = document.getElementById('case-photo-gallery');
+        if (!gal) return;
+        if (!_casePendingPhotos.length) {
+            gal.innerHTML = '<div class="case-photo-empty"><i class="fas fa-images"></i> No photos yet — add up to 12 to tell the story visually.</div>';
+            return;
+        }
+        gal.innerHTML = _casePendingPhotos.map((url, i) => `
+            <div class="case-photo-thumb" draggable="false">
+                <img src="${escapeHtml(url)}" alt="Case photo ${i + 1}" onclick="window.open('${escapeHtml(url)}','_blank')">
+                ${i === 0 ? '<span class="case-photo-badge">Cover</span>' : ''}
+                <button class="case-photo-remove" title="Remove" onclick="event.stopPropagation(); app.removeCasePhoto(${i})"><i class="fas fa-times"></i></button>
+            </div>
+        `).join('');
+    };
+
+    const uploadCasePhotos = async (event) => {
+        const files = Array.from(event.target?.files || []);
+        if (!files.length) return;
+        const sb = window.supabase || window.supabaseClient;
+        if (!sb || !sb.storage) { UI.toast.error('Supabase not connected — cannot upload photo'); return; }
+
+        const addBtn = document.querySelector('.case-photo-add');
+        const originalHtml = addBtn ? addBtn.innerHTML : '';
+        if (addBtn) addBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i><span>Uploading…</span>';
+
+        let uploaded = 0, failed = 0;
+        for (const file of files) {
+            if (!/^image\//.test(file.type)) { failed++; continue; }
+            if (file.size > 8 * 1024 * 1024) {
+                UI.toast.error(`"${file.name}" is larger than 8MB — skipped`);
+                failed++;
+                continue;
+            }
+            try {
+                const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+                const path = `case_photos/${_currentUser?.id || 'anon'}_${Date.now()}_${Math.random().toString(36).slice(2,8)}_${safeName}`;
+                const { error: upErr } = await sb.storage.from('attachments').upload(path, file, { upsert: false, contentType: file.type });
+                if (upErr) throw upErr;
+                const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
+                if (!urlData?.publicUrl) throw new Error('Could not resolve public URL');
+                _casePendingPhotos.push(urlData.publicUrl);
+                uploaded++;
+            } catch (err) {
+                console.error('Case photo upload failed:', err);
+                failed++;
+            }
+        }
+
+        if (addBtn) addBtn.innerHTML = originalHtml;
+        const input = document.getElementById('case-photo-input');
+        if (input) input.value = '';
+
+        if (uploaded) UI.toast.success(`${uploaded} photo${uploaded > 1 ? 's' : ''} uploaded`);
+        if (failed) UI.toast.error(`${failed} upload${failed > 1 ? 's' : ''} failed`);
+        renderCasePhotoGallery();
+    };
+
+    const removeCasePhoto = (index) => {
+        if (index < 0 || index >= _casePendingPhotos.length) return;
+        _casePendingPhotos.splice(index, 1);
+        renderCasePhotoGallery();
     };
 
     const switchModalTab = (e, tabId) => {
@@ -10906,6 +11073,7 @@ function _wireLoginBtn() {
             success_story: document.getElementById('case-success-story').value,
             key_success_factor: document.getElementById('case-key-success-factor').value,
             script: document.getElementById('case-script').value,
+            photo_urls: Array.isArray(_casePendingPhotos) ? _casePendingPhotos : [],
             updated_at: new Date().toISOString()
         };
 
@@ -42826,6 +42994,8 @@ JB 星期二到
         searchCaseEntities,
         selectCaseEntity,
         saveCaseStudy,
+        uploadCasePhotos,
+        removeCasePhoto,
 
         // Phase 14: Offline Support
         initOfflineSupport,
