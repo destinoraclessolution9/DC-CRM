@@ -3817,18 +3817,19 @@ In a production system, this would show the actual file contents.
                 { view: 'protection',         label: 'Protection Monitor',  icon: 'fas fa-shield-alt' },
                 { view: 'integrations',       label: 'Integrations',        icon: 'fas fa-plug' },
                 { view: 'formula_purchaser',  label: 'Formula Purchaser',   icon: 'fas fa-flask' },
+                { view: 'stock_take',         label: 'Stock Take',          icon: 'fas fa-boxes' },
             ]
         },
     ];
 
     // Map drawer view names → nav ID suffix (only where they differ)
-    const _drawerViewToNavId = { 'marketing_automation': 'marketing-automation', 'formula_purchaser': 'formula-purchaser' };
+    const _drawerViewToNavId = { 'marketing_automation': 'marketing-automation', 'formula_purchaser': 'formula-purchaser', 'stock_take': 'stock-take' };
 
     // Returns the set of allowed nav IDs for the current user (mirrors updateNavVisibility logic)
     const _getAllowedNavIds = () => {
         const _l12 = ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'reports', 'documents', 'settings', 'fude', 'milestones'];
         const perms = {
-            1: ['calendar','prospects','referrals','pipeline','promotions','marketing-automation','marketing-lists','cases','purchases_history','agents','performance','reports','risk','ai-insights','security','admin','protection','documents','import','integrations','settings','fude','milestones','lead_forms','surveys','contracts','custom_fields','booking_settings','egg-purchasing','formula-purchaser'],
+            1: ['calendar','prospects','referrals','pipeline','promotions','marketing-automation','marketing-lists','cases','purchases_history','agents','performance','reports','risk','ai-insights','security','admin','protection','documents','import','integrations','settings','fude','milestones','lead_forms','surveys','contracts','custom_fields','booking_settings','egg-purchasing','formula-purchaser','stock-take'],
             2: ['calendar','prospects','referrals','pipeline','promotions','marketing-automation','marketing-lists','cases','agents','performance','reports','risk','ai-insights','security','admin','protection','documents','import','integrations','settings','fude','milestones','lead_forms','surveys','contracts','custom_fields','booking_settings'],
             3: ['calendar','prospects','referrals','pipeline','promotions','cases','performance','reports','protection','documents','settings','fude'],
             4: ['calendar','prospects','referrals','pipeline','promotions','cases','performance','reports','protection','documents','settings','fude'],
@@ -6919,7 +6920,7 @@ In a production system, this would show the actual file contents.
         // Map Level 1-14 to visible nav IDs (suffix after 'nav-')
         const _l12 = ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'reports', 'documents', 'settings', 'fude', 'milestones'];
         const levelPermissions = {
-            1: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'purchases_history', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'import', 'integrations', 'settings', 'fude', 'milestones', 'custom_fields', 'egg-purchasing', 'standard-functions', 'formula-purchaser'],
+            1: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'purchases_history', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'import', 'integrations', 'settings', 'fude', 'milestones', 'custom_fields', 'egg-purchasing', 'standard-functions', 'formula-purchaser', 'stock-take'],
             2: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'import', 'integrations', 'settings', 'fude', 'milestones', 'custom_fields'],
             3: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'performance', 'reports', 'protection', 'documents', 'settings', 'fude'],
             4: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'performance', 'reports', 'protection', 'documents', 'settings', 'fude'],
@@ -6959,7 +6960,7 @@ In a production system, this would show the actual file contents.
             'performance', 'reports', 'risk', 'admin',
             'integrations', 'settings', 'milestones', 'fude',
             'custom_fields', 'egg-purchasing', 'standard-functions', 'formula-purchaser',
-            'purchases_history'
+            'purchases_history', 'stock-take'
         ];
 
         allNavIds.forEach(id => {
@@ -8884,6 +8885,14 @@ function _wireLoginBtn() {
         } else if (viewId === 'purchases_history') {
             _currentView = 'purchases_history';
             await showPurchasesHistoryView(viewport);
+        } else if (viewId === 'stock_take') {
+            if (!isSystemAdmin(_currentUser)) {
+                UI.toast.error('Super Admin only');
+                await navigateTo('calendar');
+                return;
+            }
+            _currentView = 'stock_take';
+            await showStockTakeView(viewport);
         } else {
             viewport.innerHTML = `
                 <div class="placeholder-view">
@@ -41185,6 +41194,599 @@ JB 星期二到
 
     // ==================== /FORMULA PURCHASER ====================
 
+    // ==================== STOCK TAKE (Super Admin, Level 1) ====================
+    // Shelf-by-shelf physical count reconciliation against imported system balances.
+    // Storage: localStorage (key prefix `stockTake.v1.*`) — Supabase tables can be
+    // added later without API changes (see _stLoad/_stSave).
+    const _stState = { tab: 'sessions', sessionId: null };
+    const _stKey = (k) => `stockTake.v1.${k}`;
+    const _stLoad = (k, fallback) => {
+        try { const v = localStorage.getItem(_stKey(k)); return v ? JSON.parse(v) : fallback; }
+        catch { return fallback; }
+    };
+    const _stSave = (k, v) => { try { localStorage.setItem(_stKey(k), JSON.stringify(v)); } catch {} };
+    const _stSessions = () => _stLoad('sessions', []);
+    const _stSystemStock = (sid) => _stLoad(`systemStock.${sid}`, []);
+    const _stCounts = (sid) => _stLoad(`counts.${sid}`, []);
+    const _stEsc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+    const _stNormKey = (loc, sku) => `${String(loc||'').trim().toLowerCase()}|${String(sku||'').trim().toUpperCase()}`;
+
+    const showStockTakeView = async (container) => {
+        _currentView = 'stock_take';
+        if (!_stState.sessionId) {
+            const list = _stSessions();
+            const active = list.find(s => s.status === 'open');
+            if (active) _stState.sessionId = active.id;
+        }
+        container.innerHTML = `
+            <div class="stock-take-view" style="padding:24px;max-width:1400px;margin:0 auto;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:12px;">
+                    <div>
+                        <h1 style="margin:0;font-size:24px;"><i class="fas fa-boxes"></i> Stock Take</h1>
+                        <div style="color:var(--gray-600);font-size:13px;margin-top:4px;">Shelf-by-shelf physical count reconciliation</div>
+                    </div>
+                    <div id="st-session-chip"></div>
+                </div>
+                <div class="st-tabs" style="display:flex;gap:4px;border-bottom:2px solid var(--gray-200);margin-bottom:16px;overflow-x:auto;">
+                    ${['sessions','import','count','reconcile','recount'].map(t => `
+                        <button class="st-tab-btn" data-tab="${t}" onclick="app.stSwitchTab('${t}')"
+                            style="padding:10px 16px;border:none;background:none;cursor:pointer;font-weight:600;white-space:nowrap;border-bottom:3px solid transparent;color:var(--gray-600);">
+                            ${({sessions:'Sessions',import:'Import System Stock',count:'Count',reconcile:'Reconciliation',recount:'Recount List'})[t]}
+                        </button>
+                    `).join('')}
+                </div>
+                <div id="st-tab-body"></div>
+            </div>
+        `;
+        await stSwitchTab(_stState.tab || 'sessions');
+    };
+
+    const stSwitchTab = async (tab) => {
+        _stState.tab = tab;
+        document.querySelectorAll('.st-tab-btn').forEach(b => {
+            const active = b.dataset.tab === tab;
+            b.style.color = active ? 'var(--primary)' : 'var(--gray-600)';
+            b.style.borderBottomColor = active ? 'var(--primary)' : 'transparent';
+        });
+        const chip = document.getElementById('st-session-chip');
+        if (chip) {
+            const sess = _stSessions().find(s => s.id === _stState.sessionId);
+            chip.innerHTML = sess
+                ? `<span style="padding:6px 12px;background:${sess.status==='open'?'#dcfce7':'#f1f5f9'};color:${sess.status==='open'?'#166534':'#475569'};border-radius:20px;font-size:12px;font-weight:600;">
+                    ${sess.status==='open'?'● ':''}${_stEsc(sess.id)} (${sess.status})</span>`
+                : `<span style="color:var(--gray-500);font-size:12px;">No active session</span>`;
+        }
+        const body = document.getElementById('st-tab-body');
+        if (!body) return;
+        if (tab === 'sessions') body.innerHTML = _stRenderSessions();
+        else if (tab === 'import') body.innerHTML = _stRenderImport();
+        else if (tab === 'count') body.innerHTML = _stRenderCount();
+        else if (tab === 'reconcile') body.innerHTML = _stRenderReconcile();
+        else if (tab === 'recount') body.innerHTML = _stRenderRecount();
+    };
+
+    // ── Sessions tab ──────────────────────────────────────────
+    const _stRenderSessions = () => {
+        const list = _stSessions().slice().sort((a,b) => (b.createdAt||'').localeCompare(a.createdAt||''));
+        return `
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                <h2 style="margin:0;font-size:18px;">Stock Take Sessions</h2>
+                <button class="btn primary" onclick="app.stNewSession()"><i class="fas fa-plus"></i> New Session</button>
+            </div>
+            ${list.length === 0 ? `
+                <div style="padding:40px;text-align:center;color:var(--gray-500);background:var(--gray-50);border-radius:8px;">
+                    No sessions yet. Click <strong>New Session</strong> to start.
+                </div>
+            ` : `
+                <table style="width:100%;border-collapse:collapse;background:white;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                    <thead style="background:var(--gray-50);"><tr>
+                        <th style="padding:10px;text-align:left;font-size:12px;">Session ID</th>
+                        <th style="padding:10px;text-align:left;font-size:12px;">Created</th>
+                        <th style="padding:10px;text-align:left;font-size:12px;">Locations</th>
+                        <th style="padding:10px;text-align:center;font-size:12px;">Counts</th>
+                        <th style="padding:10px;text-align:center;font-size:12px;">System SKUs</th>
+                        <th style="padding:10px;text-align:center;font-size:12px;">Status</th>
+                        <th style="padding:10px;text-align:right;font-size:12px;">Actions</th>
+                    </tr></thead>
+                    <tbody>
+                        ${list.map(s => `
+                            <tr style="border-top:1px solid var(--gray-100);">
+                                <td style="padding:10px;font-family:monospace;font-size:13px;">${_stEsc(s.id)}</td>
+                                <td style="padding:10px;font-size:13px;">${_stEsc((s.createdAt||'').slice(0,16).replace('T',' '))}</td>
+                                <td style="padding:10px;font-size:13px;">${_stEsc((s.locations||[]).join(', ') || '—')}</td>
+                                <td style="padding:10px;text-align:center;font-size:13px;">${_stCounts(s.id).length}</td>
+                                <td style="padding:10px;text-align:center;font-size:13px;">${_stSystemStock(s.id).length}</td>
+                                <td style="padding:10px;text-align:center;">
+                                    <span style="padding:3px 10px;border-radius:10px;font-size:11px;font-weight:600;background:${s.status==='open'?'#dcfce7':'#f1f5f9'};color:${s.status==='open'?'#166534':'#475569'};">${s.status}</span>
+                                </td>
+                                <td style="padding:10px;text-align:right;white-space:nowrap;">
+                                    <button class="btn secondary small" onclick="app.stActivateSession('${_stEsc(s.id)}')">Activate</button>
+                                    ${s.status==='open'
+                                        ? `<button class="btn small" onclick="app.stCloseSession('${_stEsc(s.id)}')">Close</button>`
+                                        : ''}
+                                    <button class="btn small" style="color:#dc2626;" onclick="app.stDeleteSession('${_stEsc(s.id)}')">Delete</button>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `}
+        `;
+    };
+
+    const stNewSession = () => {
+        UI.showModal('New Stock Take Session', `
+            <div class="form-group" style="margin-bottom:12px;">
+                <label>Session ID</label>
+                <input id="st-new-id" type="text" value="ST_${new Date().toISOString().slice(0,10).replace(/-/g,'')}" style="width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:6px;">
+            </div>
+            <div class="form-group">
+                <label>Locations (one per line)</label>
+                <textarea id="st-new-locs" rows="6" placeholder="Puchong warehouse&#10;001 Retail Puchong&#10;002 Retail Bay Avenue" style="width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:6px;font-family:inherit;"></textarea>
+            </div>
+        `, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Create', type: 'primary', action: '(async () => { await app.stSaveNewSession(); })()' },
+        ]);
+    };
+    const stSaveNewSession = () => {
+        const id = (document.getElementById('st-new-id')?.value || '').trim();
+        const locs = (document.getElementById('st-new-locs')?.value || '').split('\n').map(s => s.trim()).filter(Boolean);
+        if (!id) return UI.toast.error('Session ID required');
+        if (locs.length === 0) return UI.toast.error('Add at least one location');
+        const sessions = _stSessions();
+        if (sessions.some(s => s.id === id)) return UI.toast.error('Session ID already exists');
+        sessions.push({ id, locations: locs, createdAt: new Date().toISOString(), createdBy: _currentUser?.name || _currentUser?.email || 'admin', status: 'open' });
+        _stSave('sessions', sessions);
+        _stState.sessionId = id;
+        UI.hideModal();
+        UI.toast.success('Session created');
+        stSwitchTab('import');
+    };
+    const stActivateSession = (id) => { _stState.sessionId = id; UI.toast.success(`Activated ${id}`); stSwitchTab('count'); };
+    const stCloseSession = (id) => {
+        const sessions = _stSessions();
+        const s = sessions.find(x => x.id === id);
+        if (!s) return;
+        s.status = 'closed'; s.closedAt = new Date().toISOString();
+        _stSave('sessions', sessions);
+        UI.toast.success(`Session ${id} closed`);
+        stSwitchTab('sessions');
+    };
+    const stDeleteSession = (id) => {
+        if (!confirm(`Delete session ${id} and all its data?`)) return;
+        _stSave('sessions', _stSessions().filter(s => s.id !== id));
+        localStorage.removeItem(_stKey(`systemStock.${id}`));
+        localStorage.removeItem(_stKey(`counts.${id}`));
+        if (_stState.sessionId === id) _stState.sessionId = null;
+        UI.toast.success('Session deleted');
+        stSwitchTab('sessions');
+    };
+
+    // ── Import tab ──────────────────────────────────────────
+    const _stRenderImport = () => {
+        const sid = _stState.sessionId;
+        if (!sid) return `<div style="padding:40px;text-align:center;color:var(--gray-500);">Activate a session first.</div>`;
+        const stock = _stSystemStock(sid);
+        return `
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                <div style="background:white;padding:16px;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                    <h3 style="margin-top:0;font-size:16px;">Import System Stock</h3>
+                    <p style="color:var(--gray-600);font-size:13px;">Excel (.xlsx) or CSV with columns: <code>Location, SKU, System_Qty</code></p>
+                    <input type="file" id="st-file" accept=".xlsx,.xls,.csv" style="margin-bottom:8px;">
+                    <button class="btn primary" onclick="app.stImportFile()"><i class="fas fa-upload"></i> Import File</button>
+                    <hr style="margin:16px 0;border:none;border-top:1px solid var(--gray-200);">
+                    <h4 style="font-size:14px;">Or paste CSV</h4>
+                    <textarea id="st-paste" rows="6" placeholder="Location,SKU,System_Qty&#10;Puchong warehouse,ABC-001,120&#10;001 Retail Puchong,ABC-001,15" style="width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:6px;font-family:monospace;font-size:12px;"></textarea>
+                    <button class="btn secondary" onclick="app.stImportPaste()" style="margin-top:8px;"><i class="fas fa-paste"></i> Import Pasted</button>
+                </div>
+                <div style="background:white;padding:16px;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                    <div style="display:flex;justify-content:space-between;align-items:center;">
+                        <h3 style="margin:0;font-size:16px;">Current Balance (${stock.length})</h3>
+                        ${stock.length ? `<button class="btn small" style="color:#dc2626;" onclick="app.stClearSystemStock()">Clear</button>` : ''}
+                    </div>
+                    <div style="max-height:400px;overflow:auto;margin-top:12px;">
+                        ${stock.length === 0 ? `<div style="color:var(--gray-500);padding:20px;text-align:center;">No system stock imported yet.</div>` : `
+                            <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                                <thead style="position:sticky;top:0;background:var(--gray-50);"><tr>
+                                    <th style="padding:6px;text-align:left;">Location</th>
+                                    <th style="padding:6px;text-align:left;">SKU</th>
+                                    <th style="padding:6px;text-align:right;">Qty</th>
+                                </tr></thead>
+                                <tbody>${stock.slice(0,500).map(r => `<tr style="border-top:1px solid var(--gray-100);">
+                                    <td style="padding:6px;">${_stEsc(r.Location)}</td>
+                                    <td style="padding:6px;font-family:monospace;">${_stEsc(r.SKU)}</td>
+                                    <td style="padding:6px;text-align:right;">${r.System_Qty}</td>
+                                </tr>`).join('')}</tbody>
+                            </table>
+                            ${stock.length > 500 ? `<div style="padding:8px;text-align:center;color:var(--gray-500);font-size:11px;">Showing first 500 of ${stock.length}</div>` : ''}
+                        `}
+                    </div>
+                </div>
+            </div>
+        `;
+    };
+
+    const _stParseRows = (rows) => {
+        // Expects array of objects with keys Location, SKU, System_Qty (case-insensitive)
+        const out = [];
+        const seen = new Set();
+        const dupes = [];
+        for (const r of rows) {
+            const keys = Object.keys(r).reduce((m,k) => { m[k.toLowerCase().replace(/[\s_]/g,'')] = r[k]; return m; }, {});
+            const loc = String(keys.location ?? '').trim();
+            const sku = String(keys.sku ?? keys.productcode ?? '').trim();
+            const qty = Number(keys.systemqty ?? keys.qty ?? keys.quantity ?? 0);
+            if (!loc || !sku) continue;
+            const k = _stNormKey(loc, sku);
+            if (seen.has(k)) { dupes.push(`${loc} / ${sku}`); continue; }
+            seen.add(k);
+            out.push({ Location: loc, SKU: sku, System_Qty: isFinite(qty) ? qty : 0 });
+        }
+        return { rows: out, dupes };
+    };
+
+    const stImportFile = async () => {
+        const sid = _stState.sessionId;
+        if (!sid) return UI.toast.error('Activate a session first');
+        const input = document.getElementById('st-file');
+        const f = input?.files?.[0];
+        if (!f) return UI.toast.error('Choose a file first');
+        if (typeof window._ensureXlsx === 'function') await window._ensureXlsx();
+        if (typeof XLSX === 'undefined') return UI.toast.error('XLSX library not loaded');
+        const buf = await f.arrayBuffer();
+        const wb = XLSX.read(buf, { type: 'array' });
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+        const { rows: parsed, dupes } = _stParseRows(rows);
+        if (parsed.length === 0) return UI.toast.error('No valid rows found (need Location, SKU, System_Qty)');
+        _stSave(`systemStock.${sid}`, parsed);
+        UI.toast.success(`Imported ${parsed.length} rows${dupes.length ? ` (${dupes.length} dupes skipped)` : ''}`);
+        stSwitchTab('import');
+    };
+    const stImportPaste = () => {
+        const sid = _stState.sessionId;
+        if (!sid) return UI.toast.error('Activate a session first');
+        const raw = (document.getElementById('st-paste')?.value || '').trim();
+        if (!raw) return UI.toast.error('Paste CSV content first');
+        const lines = raw.split(/\r?\n/).filter(Boolean);
+        if (lines.length < 2) return UI.toast.error('Need header + at least one row');
+        const headers = lines[0].split(',').map(s => s.trim());
+        const rows = lines.slice(1).map(l => {
+            const cells = l.split(',');
+            const obj = {};
+            headers.forEach((h,i) => obj[h] = (cells[i] || '').trim());
+            return obj;
+        });
+        const { rows: parsed, dupes } = _stParseRows(rows);
+        if (parsed.length === 0) return UI.toast.error('No valid rows parsed');
+        _stSave(`systemStock.${sid}`, parsed);
+        UI.toast.success(`Imported ${parsed.length} rows${dupes.length ? ` (${dupes.length} dupes skipped)` : ''}`);
+        stSwitchTab('import');
+    };
+    const stClearSystemStock = () => {
+        const sid = _stState.sessionId;
+        if (!sid) return;
+        if (!confirm('Clear all imported system stock for this session?')) return;
+        localStorage.removeItem(_stKey(`systemStock.${sid}`));
+        UI.toast.success('Cleared');
+        stSwitchTab('import');
+    };
+
+    // ── Count tab ──────────────────────────────────────────
+    const _stRenderCount = () => {
+        const sid = _stState.sessionId;
+        if (!sid) return `<div style="padding:40px;text-align:center;color:var(--gray-500);">Activate a session first.</div>`;
+        const sess = _stSessions().find(s => s.id === sid);
+        const locs = sess?.locations || [];
+        const counts = _stCounts(sid).slice().reverse().slice(0, 50);
+        return `
+            <div style="display:grid;grid-template-columns:1fr 1.3fr;gap:16px;">
+                <div style="background:white;padding:16px;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                    <h3 style="margin-top:0;font-size:16px;">Record Physical Count</h3>
+                    <div class="form-group" style="margin-bottom:10px;">
+                        <label>Counter Name</label>
+                        <input id="st-counter" type="text" value="${_stEsc(_currentUser?.name || _currentUser?.email || '')}" style="width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:6px;">
+                    </div>
+                    <div class="form-group" style="margin-bottom:10px;">
+                        <label>Location</label>
+                        <select id="st-loc" style="width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:6px;">
+                            ${locs.map(l => `<option>${_stEsc(l)}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin-bottom:10px;">
+                        <label>Shelf / Zone <span style="color:var(--gray-500);font-weight:400;">(optional)</span></label>
+                        <input id="st-shelf" type="text" placeholder="e.g. A3-top" style="width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:6px;">
+                    </div>
+                    <div class="form-group" style="margin-bottom:10px;">
+                        <label>SKU</label>
+                        <input id="st-sku" type="text" placeholder="scan or type" onkeydown="if(event.key==='Enter'){document.getElementById('st-qty').focus();}" style="width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:6px;font-family:monospace;">
+                    </div>
+                    <div class="form-group" style="margin-bottom:12px;">
+                        <label>Counted Qty</label>
+                        <input id="st-qty" type="number" min="0" step="1" onkeydown="if(event.key==='Enter'){app.stAddCount();}" style="width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:6px;font-size:18px;">
+                    </div>
+                    <button class="btn primary" style="width:100%;padding:12px;" onclick="app.stAddCount()"><i class="fas fa-plus"></i> Add Count</button>
+                </div>
+                <div style="background:white;padding:16px;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                    <div style="display:flex;justify-content:space-between;align-items:center;">
+                        <h3 style="margin:0;font-size:16px;">Recent Counts (${_stCounts(sid).length} total)</h3>
+                    </div>
+                    <div style="max-height:500px;overflow:auto;margin-top:12px;">
+                        ${counts.length === 0 ? `<div style="padding:30px;text-align:center;color:var(--gray-500);">No counts yet.</div>` : `
+                            <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                                <thead style="position:sticky;top:0;background:var(--gray-50);"><tr>
+                                    <th style="padding:6px;text-align:left;">When</th>
+                                    <th style="padding:6px;text-align:left;">Who</th>
+                                    <th style="padding:6px;text-align:left;">Location</th>
+                                    <th style="padding:6px;text-align:left;">Shelf</th>
+                                    <th style="padding:6px;text-align:left;">SKU</th>
+                                    <th style="padding:6px;text-align:right;">Qty</th>
+                                    <th></th>
+                                </tr></thead>
+                                <tbody>${counts.map(c => `<tr style="border-top:1px solid var(--gray-100);">
+                                    <td style="padding:6px;">${_stEsc((c.timestamp||'').slice(11,16))}</td>
+                                    <td style="padding:6px;">${_stEsc(c.counter)}</td>
+                                    <td style="padding:6px;">${_stEsc(c.location)}</td>
+                                    <td style="padding:6px;color:var(--gray-500);">${_stEsc(c.shelf||'—')}</td>
+                                    <td style="padding:6px;font-family:monospace;">${_stEsc(c.sku)}${c.recount ? ' <span style="background:#fef3c7;color:#92400e;padding:1px 4px;border-radius:3px;font-size:10px;">RC</span>' : ''}</td>
+                                    <td style="padding:6px;text-align:right;">${c.qty}</td>
+                                    <td style="padding:6px;text-align:right;"><button class="btn-link" style="color:#dc2626;border:none;background:none;cursor:pointer;" onclick="app.stDeleteCount('${c.id}')"><i class="fas fa-times"></i></button></td>
+                                </tr>`).join('')}</tbody>
+                            </table>
+                        `}
+                    </div>
+                </div>
+            </div>
+        `;
+    };
+
+    const stAddCount = () => {
+        const sid = _stState.sessionId;
+        if (!sid) return UI.toast.error('Activate a session first');
+        const counter = (document.getElementById('st-counter')?.value || '').trim();
+        const location = (document.getElementById('st-loc')?.value || '').trim();
+        const shelf = (document.getElementById('st-shelf')?.value || '').trim();
+        const sku = (document.getElementById('st-sku')?.value || '').trim();
+        const qtyRaw = (document.getElementById('st-qty')?.value || '').trim();
+        const qty = Number(qtyRaw);
+        if (!counter) return UI.toast.error('Counter name required');
+        if (!location) return UI.toast.error('Location required');
+        if (!sku) return UI.toast.error('SKU required');
+        if (!qtyRaw || !isFinite(qty) || qty < 0) return UI.toast.error('Valid qty required');
+        const counts = _stCounts(sid);
+        counts.push({
+            id: `c_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
+            timestamp: new Date().toISOString(),
+            counter, location, shelf, sku: sku.toUpperCase(), qty,
+        });
+        _stSave(`counts.${sid}`, counts);
+        document.getElementById('st-sku').value = '';
+        document.getElementById('st-qty').value = '';
+        document.getElementById('st-shelf').value = '';
+        document.getElementById('st-sku').focus();
+        UI.toast.success(`+${qty} × ${sku}`);
+        // Refresh only the recent list side
+        stSwitchTab('count');
+        setTimeout(() => document.getElementById('st-sku')?.focus(), 50);
+    };
+    const stDeleteCount = (id) => {
+        const sid = _stState.sessionId;
+        if (!sid) return;
+        _stSave(`counts.${sid}`, _stCounts(sid).filter(c => c.id !== id));
+        stSwitchTab('count');
+    };
+
+    // ── Reconciliation ──────────────────────────────────────────
+    const _stReconcile = (sid) => {
+        const sys = _stSystemStock(sid);
+        const counts = _stCounts(sid);
+        const physMap = {};
+        for (const c of counts) {
+            const k = _stNormKey(c.location, c.sku);
+            physMap[k] = (physMap[k] || 0) + Number(c.qty || 0);
+        }
+        const result = [];
+        const sysKeys = new Set();
+        for (const r of sys) {
+            const k = _stNormKey(r.Location, r.SKU);
+            sysKeys.add(k);
+            const phys = physMap[k] || 0;
+            const variance = phys - Number(r.System_Qty || 0);
+            result.push({
+                Location: r.Location, SKU: r.SKU,
+                Physical_Total: phys, System_Qty: Number(r.System_Qty || 0),
+                Variance: variance, Status: variance === 0 ? 'Match' : 'Recount Required'
+            });
+        }
+        // Counted SKUs not in system (unexpected items)
+        for (const k of Object.keys(physMap)) {
+            if (sysKeys.has(k)) continue;
+            const sample = counts.find(c => _stNormKey(c.location, c.sku) === k);
+            result.push({
+                Location: sample?.location || '', SKU: sample?.sku || '',
+                Physical_Total: physMap[k], System_Qty: 0,
+                Variance: physMap[k], Status: 'Recount Required'
+            });
+        }
+        return result;
+    };
+
+    const _stRenderReconcile = () => {
+        const sid = _stState.sessionId;
+        if (!sid) return `<div style="padding:40px;text-align:center;color:var(--gray-500);">Activate a session first.</div>`;
+        const rows = _stReconcile(sid);
+        const matched = rows.filter(r => r.Status === 'Match').length;
+        const needRc = rows.length - matched;
+        return `
+            <div style="display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap;">
+                <div style="flex:1;min-width:160px;background:white;padding:14px;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                    <div style="color:var(--gray-600);font-size:12px;">Total SKUs</div>
+                    <div style="font-size:24px;font-weight:700;">${rows.length}</div>
+                </div>
+                <div style="flex:1;min-width:160px;background:#dcfce7;padding:14px;border-radius:8px;">
+                    <div style="color:#166534;font-size:12px;">Matched</div>
+                    <div style="font-size:24px;font-weight:700;color:#166534;">${matched}</div>
+                </div>
+                <div style="flex:1;min-width:160px;background:#fef2f2;padding:14px;border-radius:8px;">
+                    <div style="color:#991b1b;font-size:12px;">Recount Required</div>
+                    <div style="font-size:24px;font-weight:700;color:#991b1b;">${needRc}</div>
+                </div>
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <button class="btn secondary" onclick="app.stExportReconcile('csv')"><i class="fas fa-file-csv"></i> CSV</button>
+                    <button class="btn secondary" onclick="app.stExportReconcile('xlsx')"><i class="fas fa-file-excel"></i> XLSX</button>
+                    <button class="btn primary" onclick="app.stExportAdjustment()"><i class="fas fa-download"></i> Adjustment File</button>
+                </div>
+            </div>
+            <div style="background:white;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.05);overflow:auto;max-height:600px;">
+                <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                    <thead style="position:sticky;top:0;background:var(--gray-50);z-index:1;"><tr>
+                        <th style="padding:10px;text-align:left;">Location</th>
+                        <th style="padding:10px;text-align:left;">SKU</th>
+                        <th style="padding:10px;text-align:right;">Physical</th>
+                        <th style="padding:10px;text-align:right;">System</th>
+                        <th style="padding:10px;text-align:right;">Variance</th>
+                        <th style="padding:10px;text-align:center;">Status</th>
+                    </tr></thead>
+                    <tbody>${rows.map(r => `<tr style="border-top:1px solid var(--gray-100);">
+                        <td style="padding:8px 10px;">${_stEsc(r.Location)}</td>
+                        <td style="padding:8px 10px;font-family:monospace;">${_stEsc(r.SKU)}</td>
+                        <td style="padding:8px 10px;text-align:right;">${r.Physical_Total}</td>
+                        <td style="padding:8px 10px;text-align:right;">${r.System_Qty}</td>
+                        <td style="padding:8px 10px;text-align:right;color:${r.Variance===0?'inherit':(r.Variance>0?'#059669':'#dc2626')};font-weight:${r.Variance===0?400:600};">${r.Variance>0?'+':''}${r.Variance}</td>
+                        <td style="padding:8px 10px;text-align:center;">
+                            <span style="padding:3px 10px;border-radius:10px;font-size:11px;font-weight:600;background:${r.Status==='Match'?'#dcfce7':'#fee2e2'};color:${r.Status==='Match'?'#166534':'#991b1b'};">${r.Status}</span>
+                        </td>
+                    </tr>`).join('') || `<tr><td colspan="6" style="padding:30px;text-align:center;color:var(--gray-500);">No data — import system stock and record counts first.</td></tr>`}</tbody>
+                </table>
+            </div>
+        `;
+    };
+
+    // ── Recount list ──────────────────────────────────────────
+    const _stRenderRecount = () => {
+        const sid = _stState.sessionId;
+        if (!sid) return `<div style="padding:40px;text-align:center;color:var(--gray-500);">Activate a session first.</div>`;
+        const rows = _stReconcile(sid).filter(r => r.Status === 'Recount Required');
+        // Group by location
+        const byLoc = {};
+        for (const r of rows) { (byLoc[r.Location] = byLoc[r.Location] || []).push(r); }
+        return `
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                <h3 style="margin:0;font-size:16px;">Recount List — ${rows.length} SKU(s) across ${Object.keys(byLoc).length} location(s)</h3>
+                <div style="display:flex;gap:8px;">
+                    <button class="btn secondary" onclick="app.stExportRecount('csv')"><i class="fas fa-file-csv"></i> CSV</button>
+                    <button class="btn secondary" onclick="app.stExportRecount('xlsx')"><i class="fas fa-file-excel"></i> XLSX</button>
+                </div>
+            </div>
+            ${rows.length === 0 ? `<div style="padding:40px;text-align:center;color:var(--gray-500);background:#dcfce7;border-radius:8px;"><i class="fas fa-check-circle" style="font-size:24px;color:#166534;"></i><br><br>All SKUs matched. No recount needed.</div>` : `
+                ${Object.entries(byLoc).map(([loc, items]) => `
+                    <div style="background:white;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.05);margin-bottom:12px;overflow:hidden;">
+                        <div style="padding:10px 14px;background:var(--gray-50);font-weight:600;border-bottom:1px solid var(--gray-200);">
+                            <i class="fas fa-map-marker-alt"></i> ${_stEsc(loc)} <span style="color:var(--gray-500);font-weight:400;font-size:12px;">(${items.length})</span>
+                        </div>
+                        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                            <thead style="background:var(--gray-50);"><tr>
+                                <th style="padding:8px 10px;text-align:left;">SKU</th>
+                                <th style="padding:8px 10px;text-align:right;">Physical</th>
+                                <th style="padding:8px 10px;text-align:right;">System</th>
+                                <th style="padding:8px 10px;text-align:right;">Variance</th>
+                                <th style="padding:8px 10px;text-align:center;">Recount action</th>
+                            </tr></thead>
+                            <tbody>${items.map(r => `<tr style="border-top:1px solid var(--gray-100);">
+                                <td style="padding:8px 10px;font-family:monospace;">${_stEsc(r.SKU)}</td>
+                                <td style="padding:8px 10px;text-align:right;">${r.Physical_Total}</td>
+                                <td style="padding:8px 10px;text-align:right;">${r.System_Qty}</td>
+                                <td style="padding:8px 10px;text-align:right;color:${r.Variance>0?'#059669':'#dc2626'};font-weight:600;">${r.Variance>0?'+':''}${r.Variance}</td>
+                                <td style="padding:8px 10px;text-align:center;"><button class="btn small primary" onclick="app.stOpenRecount('${_stEsc(r.Location)}','${_stEsc(r.SKU)}')">Recount</button></td>
+                            </tr>`).join('')}</tbody>
+                        </table>
+                    </div>
+                `).join('')}
+            `}
+        `;
+    };
+
+    const stOpenRecount = (location, sku) => {
+        UI.showModal(`Recount: ${sku}`, `
+            <div style="margin-bottom:8px;color:var(--gray-600);font-size:13px;">Location: <strong>${_stEsc(location)}</strong></div>
+            <div class="form-group" style="margin-bottom:10px;">
+                <label>Total recounted qty (sum across all shelves)</label>
+                <input id="st-rc-qty" type="number" min="0" step="1" style="width:100%;padding:10px;border:1px solid var(--gray-300);border-radius:6px;font-size:18px;">
+            </div>
+            <div style="background:#fef3c7;color:#92400e;padding:8px 12px;border-radius:6px;font-size:12px;">This replaces all prior counts for this SKU at this location.</div>
+        `, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save Recount', type: 'primary', action: `(async () => { await app.stSaveRecount('${_stEsc(location)}','${_stEsc(sku)}'); })()` },
+        ]);
+    };
+    const stSaveRecount = (location, sku) => {
+        const sid = _stState.sessionId;
+        if (!sid) return;
+        const qtyRaw = (document.getElementById('st-rc-qty')?.value || '').trim();
+        const qty = Number(qtyRaw);
+        if (!qtyRaw || !isFinite(qty) || qty < 0) return UI.toast.error('Valid qty required');
+        const key = _stNormKey(location, sku);
+        const counts = _stCounts(sid).filter(c => _stNormKey(c.location, c.sku) !== key);
+        counts.push({
+            id: `c_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
+            timestamp: new Date().toISOString(),
+            counter: _currentUser?.name || _currentUser?.email || 'admin',
+            location, shelf: 'recount-total', sku: String(sku).toUpperCase(), qty, recount: true,
+        });
+        _stSave(`counts.${sid}`, counts);
+        UI.hideModal();
+        UI.toast.success('Recount saved');
+        stSwitchTab('recount');
+    };
+
+    // ── Exports ──────────────────────────────────────────
+    const _stDownload = (name, content, type) => {
+        const blob = new Blob([content], { type });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = name;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    };
+    const _stToCsv = (rows, headers) => {
+        const esc = v => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s; };
+        return [headers.join(','), ...rows.map(r => headers.map(h => esc(r[h])).join(','))].join('\n');
+    };
+    const _stToXlsx = async (rows, sheetName, filename) => {
+        if (typeof window._ensureXlsx === 'function') await window._ensureXlsx();
+        if (typeof XLSX === 'undefined') return UI.toast.error('XLSX library not loaded');
+        const ws = XLSX.utils.json_to_sheet(rows);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, sheetName);
+        XLSX.writeFile(wb, filename);
+    };
+    const stExportReconcile = async (fmt) => {
+        const sid = _stState.sessionId;
+        if (!sid) return;
+        const rows = _stReconcile(sid);
+        const headers = ['Location','SKU','Physical_Total','System_Qty','Variance','Status'];
+        if (fmt === 'csv') _stDownload(`reconciliation_${sid}.csv`, _stToCsv(rows, headers), 'text/csv');
+        else await _stToXlsx(rows, 'Reconciliation', `reconciliation_${sid}.xlsx`);
+    };
+    const stExportRecount = async (fmt) => {
+        const sid = _stState.sessionId;
+        if (!sid) return;
+        const rows = _stReconcile(sid).filter(r => r.Status === 'Recount Required')
+            .map(r => ({ ...r, Recount_Qty: '', Recount_Notes: '' }));
+        const headers = ['Location','SKU','Physical_Total','System_Qty','Variance','Recount_Qty','Recount_Notes'];
+        if (fmt === 'csv') _stDownload(`recount_list_${sid}.csv`, _stToCsv(rows, headers), 'text/csv');
+        else await _stToXlsx(rows, 'Recount', `recount_list_${sid}.xlsx`);
+    };
+    const stExportAdjustment = () => {
+        const sid = _stState.sessionId;
+        if (!sid) return;
+        const rows = _stReconcile(sid).map(r => ({ Location: r.Location, SKU: r.SKU, New_System_Qty: r.Physical_Total }));
+        _stDownload(`adjustment_${sid}.csv`, _stToCsv(rows, ['Location','SKU','New_System_Qty']), 'text/csv');
+    };
+
+    // ==================== /STOCK TAKE ====================
+
     return {
         init,
         navigateTo,
@@ -41893,6 +42495,25 @@ JB 星期二到
         contactAtRiskCustomer: (id) => UI.toast.info(`Contacting customer ${id}`),
         executeRiskActions: () => UI.toast.info('Executing selected actions...'),
         refreshPerformanceInsights: () => UI.toast.info('Refreshing insights...'),
+
+        // ========== STOCK TAKE (Super Admin only) ==========
+        showStockTakeView,
+        stSwitchTab,
+        stNewSession,
+        stSaveNewSession,
+        stActivateSession,
+        stCloseSession,
+        stDeleteSession,
+        stImportFile,
+        stImportPaste,
+        stClearSystemStock,
+        stAddCount,
+        stDeleteCount,
+        stOpenRecount,
+        stSaveRecount,
+        stExportReconcile,
+        stExportRecount,
+        stExportAdjustment,
 
         // ========== EGG PURCHASING (Super Admin only) ==========
         showEggPurchasingView,
