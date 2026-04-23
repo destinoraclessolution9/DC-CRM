@@ -41433,7 +41433,24 @@ JB 星期二到
         .replace(/"/g, '&quot;');
     const _stNormKey = (loc, sku) => `${String(loc||'').trim().toLowerCase()}|${String(sku||'').trim().toUpperCase()}`;
 
+    // Defense in depth: if showStockTakeView is called directly bypassing navigateTo,
+    // still gate on Super Admin.
+    const _stRequireAdmin = () => {
+        if (!isSystemAdmin(_currentUser)) { UI.toast.error('Super Admin only'); return false; }
+        return true;
+    };
+    // Reject mutating ops on a closed session so historical data stays immutable.
+    const _stRequireOpenSession = () => {
+        const sid = _stState.sessionId;
+        if (!sid) { UI.toast.error('Activate a session first'); return null; }
+        const sess = _stSessions().find(s => s.id === sid);
+        if (!sess) { UI.toast.error('Session not found'); return null; }
+        if (sess.status !== 'open') { UI.toast.error(`Session ${sid} is ${sess.status} — reopen or create a new one to edit`); return null; }
+        return sid;
+    };
+
     const showStockTakeView = async (container) => {
+        if (!_stRequireAdmin()) { await navigateTo('calendar'); return; }
         _currentView = 'stock_take';
         if (!_stState.sessionId) {
             const list = _stSessions();
@@ -41649,8 +41666,8 @@ JB 星期二到
     };
 
     const stImportFile = async () => {
-        const sid = _stState.sessionId;
-        if (!sid) return UI.toast.error('Activate a session first');
+        const sid = _stRequireOpenSession();
+        if (!sid) return;
         const input = document.getElementById('st-file');
         const f = input?.files?.[0];
         if (!f) return UI.toast.error('Choose a file first');
@@ -41667,8 +41684,8 @@ JB 星期二到
         stSwitchTab('import');
     };
     const stImportPaste = () => {
-        const sid = _stState.sessionId;
-        if (!sid) return UI.toast.error('Activate a session first');
+        const sid = _stRequireOpenSession();
+        if (!sid) return;
         const raw = (document.getElementById('st-paste')?.value || '').trim();
         if (!raw) return UI.toast.error('Paste CSV content first');
         const lines = raw.split(/\r?\n/).filter(Boolean);
@@ -41687,7 +41704,7 @@ JB 星期二到
         stSwitchTab('import');
     };
     const stClearSystemStock = () => {
-        const sid = _stState.sessionId;
+        const sid = _stRequireOpenSession();
         if (!sid) return;
         if (!confirm('Clear all imported system stock for this session?')) return;
         localStorage.removeItem(_stKey(`systemStock.${sid}`));
@@ -41778,8 +41795,8 @@ JB 星期二到
     };
 
     const stAddCount = () => {
-        const sid = _stState.sessionId;
-        if (!sid) return UI.toast.error('Activate a session first');
+        const sid = _stRequireOpenSession();
+        if (!sid) return;
         const counter = (document.getElementById('st-counter')?.value || '').trim();
         const location = (document.getElementById('st-loc')?.value || '').trim();
         const shelf = (document.getElementById('st-shelf')?.value || '').trim();
@@ -41797,19 +41814,18 @@ JB 星期二到
             counter, location, shelf, sku: skuRaw.toUpperCase(), qty,
         });
         _stSave(`counts.${sid}`, counts);
-        // Clear only the shelf/sku/qty; keep counter + location for rapid shelf-by-shelf entry
+        // Clear SKU + qty so the next scan starts clean; keep counter, location,
+        // and shelf (counter typically stays at the same shelf across SKUs).
         const skuEl = document.getElementById('st-sku');
         const qtyEl = document.getElementById('st-qty');
-        const shelfEl = document.getElementById('st-shelf');
         if (skuEl) skuEl.value = '';
         if (qtyEl) qtyEl.value = '';
-        if (shelfEl) shelfEl.value = '';
         _stRefreshCountsList();
         UI.toast.success(`+${qty} × ${skuRaw.toUpperCase()}`);
         setTimeout(() => document.getElementById('st-sku')?.focus(), 0);
     };
     const stDeleteCount = (id) => {
-        const sid = _stState.sessionId;
+        const sid = _stRequireOpenSession();
         if (!sid) return;
         _stSave(`counts.${sid}`, _stCounts(sid).filter(c => c.id !== id));
         _stRefreshCountsList();
@@ -41946,6 +41962,7 @@ JB 星期二到
     };
 
     const stOpenRecount = (location, sku) => {
+        if (!_stRequireOpenSession()) return;
         UI.showModal(`Recount: ${sku}`, `
             <div style="margin-bottom:8px;color:var(--gray-600);font-size:13px;">Location: <strong>${_stEsc(location)}</strong></div>
             <div class="form-group" style="margin-bottom:10px;">
@@ -41959,7 +41976,7 @@ JB 星期二到
         ]);
     };
     const stSaveRecount = (location, sku) => {
-        const sid = _stState.sessionId;
+        const sid = _stRequireOpenSession();
         if (!sid) return;
         const qtyRaw = (document.getElementById('st-rc-qty')?.value || '').trim();
         const qty = Number(qtyRaw);
