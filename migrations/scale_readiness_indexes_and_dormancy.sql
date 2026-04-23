@@ -168,7 +168,23 @@ CREATE INDEX IF NOT EXISTS idx_activities_lead_agent
     ON activities (lead_agent_id);
 
 -- ---------------------------------------------------------------------------
--- 6. Verify (will appear in the query result)
+-- 6. Dedupe-support indexes (added after soft-duplicate check was wired into
+--    saveProspect — same-phone/same-IC lookups must stay sub-100ms at scale)
+-- ---------------------------------------------------------------------------
+CREATE INDEX IF NOT EXISTS idx_prospects_ic_number
+    ON prospects (ic_number)
+    WHERE ic_number IS NOT NULL AND btrim(ic_number) <> '';
+
+CREATE INDEX IF NOT EXISTS idx_customers_phone
+    ON customers (phone)
+    WHERE phone IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_customers_ic_number
+    ON customers (ic_number)
+    WHERE ic_number IS NOT NULL AND btrim(ic_number) <> '';
+
+-- ---------------------------------------------------------------------------
+-- 7. Verify (will appear in the query result)
 -- ---------------------------------------------------------------------------
 SELECT
     'prospects' AS table_name,

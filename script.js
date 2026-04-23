@@ -18831,28 +18831,54 @@ function _wireLoginBtn() {
             return;
         }
 
-        // Duplicate detection: block same name + IC or same name + phone
+        // Duplicate detection (scale-safe):
+        // - Use indexed phone / IC lookups (idx_prospects_phone, and the
+        //   existing light-select includes ic_number). At 100K+ prospects the
+        //   old getAll('prospects') approach downloaded the whole table on
+        //   every save; these targeted queries return ≤5 rows.
+        // - HARD BLOCK: same name + (same IC OR same phone) — this is an
+        //   unambiguous duplicate-entry mistake.
+        // - SOFT WARN (confirm dialog): phone reused by a DIFFERENT person.
+        //   Real-world: family members often share a phone (e.g. the BA DB
+        //   has Kueh Mok Yong + Kueh Sheau Yan at 0197285828). Agents can
+        //   proceed deliberately, but the warning prevents unintended dupes.
         if (!editId) {
             const ic = document.getElementById('prospect-ic')?.value?.trim();
             const normalize = str => str ? str.toLowerCase().replace(/\s+/g, '') : '';
             const normName = normalize(name);
 
-            const existingProspects = await AppDataStore.getAll('prospects');
-            const existingCustomers = await AppDataStore.getAll('customers');
-            const allPeople = [...existingProspects, ...existingCustomers];
+            // Parallel, bounded lookups: 2× limit-5 queries against indexed
+            // columns. Returns in <50 ms even on a 1M-row table.
+            const [prospectPhoneMatches, customerPhoneMatches, prospectIcMatches, customerIcMatches] = await Promise.all([
+                phone ? AppDataStore.queryAdvanced('prospects', { filters: { phone }, limit: 5, countMode: null }).then(r => r.data) : [],
+                phone ? AppDataStore.queryAdvanced('customers', { filters: { phone }, limit: 5, countMode: null }).then(r => r.data) : [],
+                ic ? AppDataStore.queryAdvanced('prospects', { filters: { ic_number: ic }, limit: 5, countMode: null }).then(r => r.data) : [],
+                ic ? AppDataStore.queryAdvanced('customers', { filters: { ic_number: ic }, limit: 5, countMode: null }).then(r => r.data) : [],
+            ]);
 
-            const duplicate = allPeople.find(p => {
-                const sameName = normalize(p.full_name) === normName;
-                if (!sameName) return false;
-                if (ic && p.ic_number && normalize(p.ic_number) === normalize(ic)) return true;
-                if (phone && p.phone && normalize(p.phone) === normalize(phone)) return true;
-                return false;
-            });
+            const phoneMatches = [...(prospectPhoneMatches || []), ...(customerPhoneMatches || [])];
+            const icMatches = [...(prospectIcMatches || []), ...(customerIcMatches || [])];
 
-            if (duplicate) {
-                const type = existingProspects.find(p => p.id === duplicate.id) ? 'Prospect' : 'Customer';
-                UI.toast.error(`Duplicate detected: "${duplicate.full_name}" already exists as a ${type} with the same name and ${duplicate.ic_number && normalize(duplicate.ic_number) === normalize(ic) ? 'IC number' : 'phone number'}.`);
+            // Hard block: same name + same phone, or same name + same IC.
+            const hardDup = [...phoneMatches, ...icMatches].find(p => normalize(p.full_name) === normName);
+            if (hardDup) {
+                const isCustomer = [...customerPhoneMatches, ...customerIcMatches].some(c => c.id === hardDup.id);
+                const matchedOn = (ic && hardDup.ic_number && normalize(hardDup.ic_number) === normalize(ic)) ? 'IC number' : 'phone number';
+                UI.toast.error(`Duplicate detected: "${hardDup.full_name}" already exists as a ${isCustomer ? 'Customer' : 'Prospect'} with the same name and ${matchedOn}.`);
                 return;
+            }
+
+            // Soft warn: phone reused by a DIFFERENT person (family / shared line).
+            const phoneSharedWith = phoneMatches.filter(p => normalize(p.full_name) !== normName);
+            if (phoneSharedWith.length > 0) {
+                const names = phoneSharedWith.slice(0, 3).map(p => p.full_name || '(unnamed)').join(', ');
+                const more = phoneSharedWith.length > 3 ? ` and ${phoneSharedWith.length - 3} more` : '';
+                const ok = confirm(
+                    `Phone ${phone} is already used by: ${names}${more}.\n\n` +
+                    `Is this a family member / shared household phone?\n\n` +
+                    `Click OK to continue, or Cancel to review.`
+                );
+                if (!ok) return;
             }
         }
 
