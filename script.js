@@ -13678,37 +13678,22 @@ function _wireLoginBtn() {
     const savePostMeetupNotes = async (activityId, prospectId) => {
         const updates = collectPostMeetupNotesData('pmn');
 
-        // Write DIRECTLY via service-role REST so we can catch real errors.
-        // AppDataStore.update() silently falls back to localStorage on schema
-        // cache misses / RLS rejections and the user would see a success toast
-        // while Potential & Opportunities / Next Actions accordions stayed empty.
+        // Use the authenticated Supabase client so RLS applies and errors
+        // surface instead of silently falling back to localStorage.
+        const sb = window.supabase || window.supabaseClient;
         let writeOk = false;
-        if (window.SUPABASE_URL && window.SUPABASE_SR) {
+        if (sb) {
             try {
-                const resp = await fetch(
-                    `${window.SUPABASE_URL}/rest/v1/activities?id=eq.${encodeURIComponent(activityId)}`,
-                    {
-                        method: 'PATCH',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${window.SUPABASE_SR}`,
-                            'apikey': window.SUPABASE_SR,
-                            'Prefer': 'return=representation'
-                        },
-                        body: JSON.stringify(updates)
-                    }
-                );
-                if (resp.ok) {
-                    writeOk = true;
+                const { error } = await sb.from('activities').update(updates).eq('id', activityId);
+                if (error) {
+                    console.warn('savePostMeetupNotes update failed:', error);
                 } else {
-                    const errTxt = await resp.text();
-                    console.warn('savePostMeetupNotes PATCH failed:', resp.status, errTxt);
+                    writeOk = true;
                 }
             } catch (e) {
-                console.warn('savePostMeetupNotes PATCH threw:', e);
+                console.warn('savePostMeetupNotes threw:', e);
             }
         }
-        // Fallback to AppDataStore.update() if the direct REST path is unavailable
         if (!writeOk) {
             try {
                 await AppDataStore.update('activities', activityId, updates);
@@ -21325,13 +21310,37 @@ function _wireLoginBtn() {
         const text = document.getElementById('new-note-text')?.value?.trim();
         if (!text) return;
         const currentUser = await Auth.getCurrentUser();
+
+        // Auto-link to the most recent meet-up so the note surfaces under
+        // Meet Up History too — otherwise notes-tab entries get orphaned
+        // from the activity context the agent was actually referring to.
+        const MEETUP_TYPES = ['CPS','FTF','FSA','GR','XG','CALL','EMAIL','WHATSAPP'];
+        const latestActivity = (await AppDataStore.getAll('activities'))
+            .filter(a => a.prospect_id == prospectId && MEETUP_TYPES.includes(a.activity_type))
+            .sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date) || b.id - a.id)[0];
+
         await AppDataStore.create('notes', {
             id: Date.now(),
             prospect_id: prospectId,
+            activity_id: latestActivity?.id || null,
             text: text,
             author: currentUser?.full_name || 'Michelle Tan',
             date: new Date().toISOString().split('T')[0]
         });
+
+        // Mirror the text into the activity's summary so the Meet Up History
+        // card renders it (the card reads activity columns, not the notes table).
+        if (latestActivity) {
+            const existing = (latestActivity.summary || '').trim();
+            const appended = existing ? `${existing}\n${text}` : text;
+            try {
+                await AppDataStore.update('activities', latestActivity.id, { summary: appended });
+                AppDataStore.invalidateCache?.('activities');
+            } catch (e) {
+                console.warn('addNote: failed to mirror into activity summary:', e);
+            }
+        }
+
         document.getElementById('new-note-text').value = '';
         UI.toast.success('Note added');
         await switchProspectTab('notes', prospectId, null, document.getElementById(`acc-body-notes-${prospectId}`));
