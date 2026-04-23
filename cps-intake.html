@@ -159,7 +159,8 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 const SUPABASE_URL = 'https://remuwhxvzkzjtgbzqjaa.supabase.co';
-const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJlbXV3aHh2emt6anRnYnpxamFhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQzNjczMDMsImV4cCI6MjA4OTk0MzMwM30.L8yISXnOd1CxzyAbRyFLQXIYviyBrxQC_J19egNtUbs';
+// Publishable key — legacy JWT anon key was disabled on this project 2026-04-21.
+const SUPABASE_ANON = 'sb_publishable_XVWyiw5j1lnEErQUTV4XWg_lQcCIAjX';
 
 const params = new URLSearchParams(window.location.search);
 const token = params.get('token');
