@@ -662,6 +662,25 @@ class DataStore {
             return cachedTable.find(r => String(r.id) === String(id)) || null;
         }
 
+        // Tier 2 — stale-while-revalidate. When the in-memory cache has
+        // expired (TTL 2 min for static tables, 5 min otherwise), getAll
+        // already serves from localStorage + background-refreshes. getById
+        // used to skip that path and go straight to the network, so any
+        // screen making 3-4 serial getById calls after the in-memory cache
+        // expired took 8-12 s on mobile (e.g. the Activity Details modal).
+        // Mirror the getAll SWR behaviour here: serve the row from the
+        // localStorage snapshot instantly, prime the in-memory cache so
+        // sibling getById calls hit Tier 1, and kick off a background
+        // refresh. Fall through to the network only if the row isn't in
+        // the snapshot (newly created since last sync).
+        const stale = this._swrGetLocal(tableName);
+        if (stale && stale.length > 0) {
+            this._cacheSet(tableName, stale);
+            this._swrRevalidate(tableName).catch(() => {});
+            const found = stale.find(r => String(r.id) === String(id));
+            if (found) return found;
+        }
+
         try {
             const { data, error } = await this._readClient()
                 .from(tableName)

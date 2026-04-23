@@ -12923,14 +12923,18 @@ function _wireLoginBtn() {
         }
         if (!activity) { UI.toast.error('Activity not found'); return; }
 
-        const prospect = activity.prospect_id ? await AppDataStore.getById('prospects', activity.prospect_id) : null;
-        const customer = activity.customer_id ? await AppDataStore.getById('customers', activity.customer_id) : null;
+        // Parallelise the three independent lookups — prospect, customer and
+        // the linked marketing event are all keyed off fields we already have
+        // on `activity`, so there's no need to await them one after another.
+        // On cold cache this turns 3 × network round-trips into one.
+        const [prospect, customer, marketingEvent] = await Promise.all([
+            activity.prospect_id ? AppDataStore.getById('prospects', activity.prospect_id) : null,
+            activity.customer_id ? AppDataStore.getById('customers', activity.customer_id) : null,
+            (activity.activity_type === 'EVENT' && activity.event_id)
+                ? AppDataStore.getById('events', activity.event_id)
+                : null,
+        ]);
         const entityName = prospect?.full_name || customer?.full_name || 'Unknown';
-
-        // Fetch linked marketing event for description
-        const marketingEvent = (activity.activity_type === 'EVENT' && activity.event_id)
-            ? await AppDataStore.getById('events', activity.event_id)
-            : null;
 
         let attendeeHtml = '';
         const isAttendeeType = ['EVENT', 'AGENT_MEETING', 'AGENT_TRAINING'].includes(activity.activity_type);
@@ -13067,6 +13071,20 @@ function _wireLoginBtn() {
             attendeeHtml = prospectSection + agentSection;
         }
 
+        // Resolve consultant + lead agent names in parallel before we build
+        // the template. Previously these were awaited sequentially inside the
+        // template literal, forcing two serial network round-trips on cold
+        // cache. With SWR now backing getById, both resolve synchronously
+        // when the localStorage snapshot has the users; when it doesn't,
+        // Promise.all overlaps the two requests.
+        const _consultantId = prospect?.responsible_agent_id || customer?.responsible_agent_id;
+        const [_consultantName, _leadAgentName] = await Promise.all([
+            _consultantId ? getAgentName(_consultantId) : Promise.resolve(null),
+            activity.activity_type !== 'EVENT' && activity.lead_agent_id
+                ? getAgentName(activity.lead_agent_id)
+                : Promise.resolve(''),
+        ]);
+
         const content = `
             <div class="activity-details">
                 <div class="detail-section">
@@ -13096,21 +13114,16 @@ function _wireLoginBtn() {
                 ${isAttendeeType ? '' : `
                 <div class="detail-section">
                     <h4>Consultant</h4>
-                    ${await (async () => {
-                        const consultantId = prospect?.responsible_agent_id || customer?.responsible_agent_id;
-                        if (consultantId) {
-                            const consultantName = await getAgentName(consultantId);
-                            return `<div class="info-row"><span class="info-label">Consultant Name:</span> <span>✅ ${consultantName}</span></div>`;
-                        }
-                        return `<div class="info-row"><span class="info-label">Consultant Name:</span> <span>❌ Not Assigned</span></div>`;
-                    })()}
+                    ${_consultantId
+                        ? `<div class="info-row"><span class="info-label">Consultant Name:</span> <span>✅ ${_consultantName || 'Unknown'}</span></div>`
+                        : `<div class="info-row"><span class="info-label">Consultant Name:</span> <span>❌ Not Assigned</span></div>`}
                 </div>
                 `}
 
                 ${activity.activity_type !== 'EVENT' ? `
                 <div class="detail-section">
                     <h4>Agents</h4>
-                    <div class="info-row"><span class="info-label">Lead:</span> <span>${await getAgentName(activity.lead_agent_id)}</span></div>
+                    <div class="info-row"><span class="info-label">Lead:</span> <span>${_leadAgentName || 'Unknown'}</span></div>
                     ${activity.co_agents?.length ? `
                         <div class="info-row" style="flex-direction:column;align-items:flex-start;gap:6px;">
                             <span class="info-label">Co-Agents:</span>
