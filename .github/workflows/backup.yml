@@ -1,0 +1,73 @@
+name: Weekly Supabase Backup to Google Drive
+
+on:
+  schedule:
+    # Every Sunday at 02:00 UTC (10:00 AM Malaysia time)
+    - cron: '0 2 * * 0'
+  workflow_dispatch:  # Allows manual trigger from GitHub Actions tab
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Install PostgreSQL 17 client
+        run: |
+          sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-17
+
+      - name: Install rclone
+        run: |
+          curl https://rclone.org/install.sh | sudo bash
+
+      - name: Configure rclone for Google Drive
+        run: |
+          mkdir -p ~/.config/rclone
+          cat > ~/.config/rclone/rclone.conf <<EOF
+          [gdrive]
+          type = drive
+          scope = drive
+          token = ${{ secrets.GDRIVE_TOKEN }}
+          root_folder_id = ${{ secrets.GDRIVE_FOLDER_ID }}
+          EOF
+
+      - name: Create backup filename
+        id: filename
+        run: |
+          TIMESTAMP=$(date -u +"%Y-%m-%d_%H%M")
+          echo "name=crm-backup-${TIMESTAMP}.sql.gz" >> $GITHUB_OUTPUT
+
+      - name: Dump Supabase database
+        env:
+          DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          pg_dump "$DB_URL" \
+            --no-owner \
+            --no-privileges \
+            --clean \
+            --if-exists \
+            --quote-all-identifiers \
+            | gzip -9 > "${{ steps.filename.outputs.name }}"
+          ls -lh "${{ steps.filename.outputs.name }}"
+
+      - name: Upload to Google Drive
+        run: |
+          rclone copy "${{ steps.filename.outputs.name }}" gdrive: \
+            --progress \
+            --stats-one-line
+
+      - name: Prune backups older than 12 weeks
+        run: |
+          rclone delete gdrive: \
+            --min-age 84d \
+            --include "crm-backup-*.sql.gz" \
+            --verbose
+
+      - name: Report success
+        if: success()
+        run: |
+          echo "Backup uploaded: ${{ steps.filename.outputs.name }}"
+          rclone ls gdrive: --include "crm-backup-*.sql.gz" | tail -5
