@@ -18885,17 +18885,28 @@ function _wireLoginBtn() {
                 return;
             }
 
-            // Soft warn: phone reused by a DIFFERENT person (family / shared line).
+            // Hard block: phone reused by a DIFFERENT person. Every phone in
+            // prospects.phone is enforced unique at the DB level (see
+            // migrations/phone_unique_constraint.sql — idx_prospects_phone_unique,
+            // partial WHERE phone IS NOT NULL AND phone <> ''). Prior to that
+            // migration this was a soft confirm() warn; now the insert would
+            // fail with a 23505 from PostgREST, so we reject client-side with
+            // a clearer message and point the agent at the fix.
+            //
+            // Family / shared-household: the primary holder keeps the number,
+            // others leave phone blank (NULL is allowed to repeat) or enter a
+            // different mobile. Use the Data Quality → Phone Duplicates review
+            // (Settings page) to see who already owns a given number.
             const phoneSharedWith = phoneMatches.filter(p => normalize(p.full_name) !== normName);
             if (phoneSharedWith.length > 0) {
                 const names = phoneSharedWith.slice(0, 3).map(p => p.full_name || '(unnamed)').join(', ');
                 const more = phoneSharedWith.length > 3 ? ` and ${phoneSharedWith.length - 3} more` : '';
-                const ok = confirm(
-                    `Phone ${phone} is already used by: ${names}${more}.\n\n` +
-                    `Is this a family member / shared household phone?\n\n` +
-                    `Click OK to continue, or Cancel to review.`
+                UI.toast.error(
+                    `Phone ${phone} already used by ${names}${more}. ` +
+                    `Use a different number, leave it blank, or ask admin to clear the other record.`
                 );
-                if (!ok) return;
+                await showFieldError('prospect-phone', `Already used by ${names}${more}`);
+                return;
             }
         }
 
@@ -25035,10 +25046,212 @@ const renderCurrentAssignments = async (agentId) => {
                     </button>
                 </div>
             </div>
+
+            ${isSystemAdmin(_currentUser) ? `
+            <!-- ========== Data Quality (Super Admin only) ========== -->
+            <div class="performance-card" style="margin-top:24px;">
+                <h4><i class="fas fa-broom"></i> Data Quality</h4>
+                <p style="color:var(--gray-500); font-size:13px; margin:8px 0 12px;">
+                    Review prospects that share the same phone number. Family
+                    members often legitimately share a phone; obvious duplicates
+                    should be merged before a DB-level unique constraint is
+                    enforced.
+                </p>
+                <button class="btn primary" onclick="(async()=>{ await app.showPhoneDupesModal(); })()">
+                    <i class="fas fa-search"></i> Review Phone Duplicates
+                </button>
+            </div>
+            ` : ''}
         </div>`;
 
         // Populate status asynchronously
         setTimeout(() => refreshPushNotificationStatus(), 50);
+    };
+
+    // ========== Phone-duplicate review (Super Admin only) ==========
+    // Lists every phone held by 2+ prospects. Offers per-row actions:
+    //   • Edit phone   — open the prospect modal prefilled so the agent can
+    //                    give this person a distinct number.
+    //   • Clear phone  — NULL out this prospect's phone (keeps the record).
+    //   • Delete       — hard-delete the prospect (true duplicate records).
+    // When the count drops to zero the admin can request the unique-index
+    // migration via the footer button (Claude/DBA applies the DDL).
+    const _loadPhoneDupes = async () => {
+        // Use the indexed light-select query. At 100K+ rows the old
+        // getAll('prospects') approach would be unacceptable here; this groups
+        // on the server and returns only the dupe rows.
+        try {
+            const { data, error } = await window.supabase.rpc('_fs_phone_dupes').catch(() => ({ data: null, error: 'no-rpc' }));
+            if (data && !error) return data;
+        } catch (_) {}
+        // Fallback: pull phone list via PostgREST, group client-side. Uses the
+        // light-select cache if available so subsequent opens are instant.
+        const rows = await AppDataStore.getActiveProspects({ includeDormant: true, limit: 50000 });
+        const byPhone = new Map();
+        for (const p of rows) {
+            const ph = (p.phone || '').trim();
+            if (!ph) continue;
+            if (!byPhone.has(ph)) byPhone.set(ph, []);
+            byPhone.get(ph).push(p);
+        }
+        const dupes = [];
+        for (const [phone, group] of byPhone.entries()) {
+            if (group.length > 1) {
+                dupes.push({ phone, group: group.sort((a, b) => String(a.id).localeCompare(String(b.id))) });
+            }
+        }
+        return dupes.sort((a, b) => b.group.length - a.group.length);
+    };
+
+    const _renderPhoneDupesBody = (dupes, users) => {
+        if (!dupes || dupes.length === 0) {
+            return `
+                <div style="text-align:center; padding:32px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px;">
+                    <i class="fas fa-check-circle" style="color:#16a34a; font-size:28px;"></i>
+                    <p style="margin:12px 0 4px; font-size:15px; font-weight:600;">No phone duplicates</p>
+                    <p style="color:#166534; font-size:13px;">Safe to enforce a unique constraint on prospects.phone.</p>
+                </div>
+            `;
+        }
+        const userById = new Map((users || []).map(u => [String(u.id), u]));
+        const agentName = (id) => userById.get(String(id))?.full_name || '—';
+        let html = `
+            <p style="font-size:13px; color:var(--text-secondary); margin-bottom:16px;">
+                Found <strong>${dupes.length}</strong> phone number${dupes.length > 1 ? 's' : ''} shared by 2+ prospects.
+                Resolve each one before the unique constraint can be applied. Family members should get distinct
+                numbers (primary holder keeps the shared line, others set theirs to blank or a mobile).
+            </p>
+        `;
+        for (const { phone, group } of dupes) {
+            html += `
+                <div style="border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:12px; background:var(--surface);">
+                    <div style="display:flex; align-items:center; gap:8px; margin-bottom:10px;">
+                        <i class="fas fa-phone" style="color:#d97706;"></i>
+                        <strong style="font-family:monospace; font-size:14px;">${escapeHtml(phone)}</strong>
+                        <span style="color:var(--text-secondary); font-size:12px;">(${group.length} prospects)</span>
+                    </div>
+            `;
+            for (const p of group) {
+                const last = p.last_activity_date || '—';
+                html += `
+                    <div style="display:flex; align-items:center; gap:8px; padding:8px; border-top:1px solid var(--border); flex-wrap:wrap;">
+                        <div style="flex:1; min-width:200px;">
+                            <strong>${escapeHtml(p.full_name || '(no name)')}</strong>
+                            <div style="font-size:11px; color:var(--text-secondary);">
+                                Agent: ${escapeHtml(agentName(p.responsible_agent_id))} · Last activity: ${last} · ID ${p.id}
+                            </div>
+                        </div>
+                        <button class="btn secondary btn-sm" onclick="app.dedupeEditPhone(${p.id})" title="Open profile to edit phone">
+                            <i class="fas fa-pen"></i> Edit phone
+                        </button>
+                        <button class="btn secondary btn-sm" onclick="app.dedupeClearPhone(${p.id})" title="Clear this prospect's phone">
+                            <i class="fas fa-eraser"></i> Clear
+                        </button>
+                        <button class="btn secondary btn-sm" style="color:var(--red-500);" onclick="app.dedupeDeleteProspect(${p.id})" title="Hard-delete this prospect">
+                            <i class="fas fa-trash"></i> Delete
+                        </button>
+                    </div>
+                `;
+            }
+            html += `</div>`;
+        }
+        return html;
+    };
+
+    const showPhoneDupesModal = async () => {
+        if (!isSystemAdmin(_currentUser)) {
+            UI.toast.error('Super Admin only.');
+            return;
+        }
+        UI.showModal(
+            'Phone Duplicates Review',
+            `<div id="phone-dupes-body" style="min-height:200px; max-height:60vh; overflow-y:auto;">
+                <div style="text-align:center; padding:32px; color:var(--text-secondary);">
+                    <i class="fas fa-spinner fa-spin"></i> Scanning prospects…
+                </div>
+            </div>`,
+            [
+                { label: 'Refresh', type: 'secondary', action: '(async()=>{ await app.refreshPhoneDupes(); })()' },
+                { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
+                { label: 'Verify & prepare constraint', type: 'primary', action: '(async()=>{ await app.verifyAndPreparePhoneConstraint(); })()' },
+            ]
+        );
+        await refreshPhoneDupes();
+    };
+
+    const refreshPhoneDupes = async () => {
+        const body = document.getElementById('phone-dupes-body');
+        if (!body) return;
+        body.innerHTML = `<div style="text-align:center; padding:32px; color:var(--text-secondary);"><i class="fas fa-spinner fa-spin"></i> Scanning prospects…</div>`;
+        try {
+            const [dupes, users] = await Promise.all([
+                _loadPhoneDupes(),
+                AppDataStore.getAll('users'),
+            ]);
+            body.innerHTML = _renderPhoneDupesBody(dupes, users);
+        } catch (e) {
+            console.error('[phone-dupes]', e);
+            body.innerHTML = `<div style="color:var(--red-500); padding:16px;">Error: ${escapeHtml(e.message || String(e))}</div>`;
+        }
+    };
+
+    const dedupeEditPhone = async (prospectId) => {
+        UI.hideModal();
+        // Tiny delay so the close animation doesn't fight the next modal open.
+        setTimeout(() => openProspectModal(prospectId), 120);
+    };
+
+    const dedupeClearPhone = async (prospectId) => {
+        const ok = confirm(`Clear the phone number for prospect ${prospectId}?\n\nThe record stays; only the phone field is nulled.`);
+        if (!ok) return;
+        try {
+            await AppDataStore.update('prospects', parseInt(prospectId), { phone: null, updated_at: new Date().toISOString() });
+            UI.toast.success('Phone cleared.');
+            await refreshPhoneDupes();
+        } catch (e) {
+            UI.toast.error('Failed to clear phone: ' + (e.message || e));
+        }
+    };
+
+    const dedupeDeleteProspect = async (prospectId) => {
+        const ok = confirm(`PERMANENTLY DELETE prospect ${prospectId}?\n\nThis cannot be undone. Use this only for true duplicate records.`);
+        if (!ok) return;
+        try {
+            await AppDataStore.delete('prospects', parseInt(prospectId));
+            UI.toast.success('Prospect deleted.');
+            await refreshPhoneDupes();
+        } catch (e) {
+            UI.toast.error('Failed to delete: ' + (e.message || e));
+        }
+    };
+
+    const verifyAndPreparePhoneConstraint = async () => {
+        const body = document.getElementById('phone-dupes-body');
+        if (body) body.innerHTML = `<div style="text-align:center; padding:32px;"><i class="fas fa-spinner fa-spin"></i> Re-checking…</div>`;
+        const dupes = await _loadPhoneDupes();
+        if (dupes.length > 0) {
+            await refreshPhoneDupes();
+            UI.toast.error(`Still ${dupes.length} duplicate${dupes.length > 1 ? 's' : ''}. Resolve them first.`);
+            return;
+        }
+        if (body) {
+            body.innerHTML = `
+                <div style="text-align:center; padding:32px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px;">
+                    <i class="fas fa-check-circle" style="color:#16a34a; font-size:28px;"></i>
+                    <p style="margin:12px 0 4px; font-size:15px; font-weight:600;">No phone duplicates remaining.</p>
+                    <p style="color:#166534; font-size:13px; margin-bottom:12px;">
+                        Ready to apply the unique constraint. Ask the DBA (or Claude) to run:
+                    </p>
+                    <pre style="background:#fff; border:1px solid #bbf7d0; border-radius:6px; padding:12px; font-size:12px; text-align:left; white-space:pre-wrap; word-break:break-all;">CREATE UNIQUE INDEX CONCURRENTLY idx_prospects_phone_unique
+  ON prospects (phone)
+  WHERE phone IS NOT NULL AND phone <> '';</pre>
+                    <p style="color:var(--text-secondary); font-size:12px; margin-top:8px;">
+                        Migration file: <code>migrations/phone_unique_constraint.sql</code>
+                    </p>
+                </div>
+            `;
+        }
+        UI.toast.success('All clean — ready for the unique constraint.');
     };
 
     // ========== Push notification settings handlers ==========
@@ -42066,6 +42279,13 @@ JB 星期二到
         selfChangePassword,
         saveSelfPreferredName,
         showSettingsView,
+        // Phone-duplicate review (Super Admin)
+        showPhoneDupesModal,
+        refreshPhoneDupes,
+        dedupeEditPhone,
+        dedupeClearPhone,
+        dedupeDeleteProspect,
+        verifyAndPreparePhoneConstraint,
         // Push notifications
         refreshPushNotificationStatus,
         enablePushNotifications,
