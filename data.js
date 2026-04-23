@@ -1484,6 +1484,69 @@ class DataStore {
         }
     }
 
+    // ── Per-entity activity fetch (indexed) ───────────────────────────────
+    // Replaces the `getAll('activities').filter(a => a.prospect_id == id)`
+    // pattern that appears ~8 times in script.js (meet-up history, protection
+    // timer, latest-activity per prospect detail view, etc.). Each of those
+    // call sites downloaded the ENTIRE activities table — at 100K+ rows that
+    // was the single biggest N+1 blowup in the codebase.
+    //
+    // Uses idx_activities_prospect_date for a sub-10 ms lookup regardless of
+    // table size. Ordered by activity_date DESC so callers that need the
+    // "latest activity" can just read index 0.
+    async getActivitiesForProspect(prospectId, opts = {}) {
+        const { limit = 500, orderDir = 'desc' } = opts;
+        if (!prospectId) return [];
+        try {
+            const { data, error } = await this._readClient()
+                .from('activities')
+                .select(this._selectClauseForGetAll('activities'))
+                .eq('prospect_id', prospectId)
+                .order('activity_date', { ascending: orderDir === 'asc' })
+                .limit(limit);
+            if (error) throw error;
+            return data || [];
+        } catch (e) {
+            console.warn('getActivitiesForProspect fallback (cache):', e?.message);
+            const all = await this.getAll('activities');
+            return all
+                .filter(a => String(a.prospect_id) === String(prospectId))
+                .sort((a, b) => {
+                    const ad = a.activity_date || '';
+                    const bd = b.activity_date || '';
+                    return orderDir === 'asc' ? ad.localeCompare(bd) : bd.localeCompare(ad);
+                })
+                .slice(0, limit);
+        }
+    }
+
+    // Mirror for customers — uses idx_activities_customer_date.
+    async getActivitiesForCustomer(customerId, opts = {}) {
+        const { limit = 500, orderDir = 'desc' } = opts;
+        if (!customerId) return [];
+        try {
+            const { data, error } = await this._readClient()
+                .from('activities')
+                .select(this._selectClauseForGetAll('activities'))
+                .eq('customer_id', customerId)
+                .order('activity_date', { ascending: orderDir === 'asc' })
+                .limit(limit);
+            if (error) throw error;
+            return data || [];
+        } catch (e) {
+            console.warn('getActivitiesForCustomer fallback (cache):', e?.message);
+            const all = await this.getAll('activities');
+            return all
+                .filter(a => String(a.customer_id) === String(customerId))
+                .sort((a, b) => {
+                    const ad = a.activity_date || '';
+                    const bd = b.activity_date || '';
+                    return orderDir === 'asc' ? ad.localeCompare(bd) : bd.localeCompare(ad);
+                })
+                .slice(0, limit);
+        }
+    }
+
     // Server-side customer search — mirrors searchProspects(). Used by the
     // referrer/autocomplete inputs that need to show prospects + customers
     // without downloading both full tables on every keystroke. Uses

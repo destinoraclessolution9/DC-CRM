@@ -13451,8 +13451,10 @@ function _wireLoginBtn() {
     };
 
     const openPostMeetupModal = async (activityId, prospectId) => {
-        const prospect = (await AppDataStore.getById('prospects', prospectId))
-            || (await AppDataStore.getAll('prospects')).find(p => p.id == prospectId);
+        // getById already does a targeted Supabase select + cache fallback;
+        // scanning getAll() was a belt-and-braces extra that loaded the whole
+        // prospects table on every post-meetup open. Drop the fallback.
+        const prospect = await AppDataStore.getById('prospects', prospectId);
         const name = prospect?.full_name || 'Prospect';
         const notes = await AppDataStore.getAll('notes');
         const existing_outcome = notes.find(n => n.activity_id == activityId && n.note_type === 'outcome' && n.prospect_id == prospectId);
@@ -19877,10 +19879,19 @@ function _wireLoginBtn() {
     const renderCustomerActivityTab = async (customer, containerId = 'profile-tab-content') => {
         const container = document.getElementById(containerId);
         // Combine activities linked to this customer OR original prospect
-        const activities = (await AppDataStore.getAll('activities')).filter(a =>
-            a.customer_id == customer.id ||
-            (customer.converted_from_prospect_id && a.prospect_id == customer.converted_from_prospect_id)
-        ).sort((a, b) => new Date(b.date || b.created_at) - new Date(a.date || a.created_at));
+        // Indexed dual-query: idx_activities_customer_date + idx_activities_prospect_date.
+        // Previously scanned the full activities table; now bounded to the
+        // customer's own rows plus (if converted) the pre-conversion prospect rows.
+        const [custActs, prospActs] = await Promise.all([
+            AppDataStore.getActivitiesForCustomer(customer.id, { limit: 500 }),
+            customer.converted_from_prospect_id
+                ? AppDataStore.getActivitiesForProspect(customer.converted_from_prospect_id, { limit: 500 })
+                : Promise.resolve([]),
+        ]);
+        const seenIds = new Set();
+        const activities = [...custActs, ...prospActs]
+            .filter(a => { if (seenIds.has(a.id)) return false; seenIds.add(a.id); return true; })
+            .sort((a, b) => new Date(b.date || b.created_at) - new Date(a.date || a.created_at));
 
         container.innerHTML = `
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
@@ -19971,7 +19982,7 @@ function _wireLoginBtn() {
         // Previously also fetched proposed_solutions/notes/names, but those results
         // were never used here — each was an extra serial uncached Supabase round
         // trip that made opening a prospect feel laggy.
-        const activities = (await AppDataStore.getAll('activities')).filter(a => a.prospect_id == prospectId);
+        const activities = await AppDataStore.getActivitiesForProspect(prospectId, { limit: 500 });
 
         const daysLeft = calculateProtectionDays(prospect);
         const protectionStatus = getProtectionStatus(daysLeft);
@@ -20313,7 +20324,8 @@ function _wireLoginBtn() {
         }
         else if (tab === 'activity') {
             const MEETUP_TYPES = ['CPS','FTF','FSA','GR','XG','CALL','EMAIL','WHATSAPP'];
-            const activities = (await AppDataStore.getAll('activities')).filter(a => a.prospect_id == prospectId && MEETUP_TYPES.includes(a.activity_type));
+            const _prospectActs = await AppDataStore.getActivitiesForProspect(prospectId, { limit: 500 });
+            const activities = _prospectActs.filter(a => MEETUP_TYPES.includes(a.activity_type));
 
             // Always fetch fresh photo_urls directly — the SWR localStorage cache
             // serves stale activity rows (without photo_urls) so we can't rely on
@@ -20413,8 +20425,9 @@ function _wireLoginBtn() {
             const EVENT_TYPES = ['EVENT','AGENT_MEETING','AGENT_TRAINING','SITE'];
             // Pre-load valid event IDs so orphaned EVENT activities (whose event was deleted) are hidden
             const validEventIds = new Set((await AppDataStore.getAll('events')).map(e => String(e.id)));
-            const activityEvents = (await AppDataStore.getAll('activities')).filter(
-                a => a.prospect_id == prospectId && EVENT_TYPES.includes(a.activity_type)
+            const _eventActs = await AppDataStore.getActivitiesForProspect(prospectId, { limit: 500 });
+            const activityEvents = _eventActs.filter(
+                a => EVENT_TYPES.includes(a.activity_type)
                     && (a.activity_type !== 'EVENT' || !a.event_id || validEventIds.has(String(a.event_id)))
             ).sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
 
@@ -20478,9 +20491,8 @@ function _wireLoginBtn() {
                 : (prospect.created_at ? UI.formatDate(prospect.created_at) : '—');
             const deadlineStr = prospect.protection_deadline ? UI.formatDate(prospect.protection_deadline) : '—';
 
-            // Real last-contact based on this prospect's activities
-            const protActivities = (await AppDataStore.getAll('activities'))
-                .filter(a => String(a.prospect_id) === String(prospectId));
+            // Real last-contact based on this prospect's activities (indexed).
+            const protActivities = await AppDataStore.getActivitiesForProspect(prospectId, { limit: 500 });
             const lastAct = protActivities
                 .slice()
                 .sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date))[0];
@@ -20522,7 +20534,7 @@ function _wireLoginBtn() {
         }
         else if (tab === 'potential') {
             const MEETUP_TYPES = ['CPS','FTF','FSA','GR','XG','CALL','EMAIL','WHATSAPP','EVENT'];
-            const allActivities = (await AppDataStore.getAll('activities')).filter(a => a.prospect_id == prospectId);
+            const allActivities = await AppDataStore.getActivitiesForProspect(prospectId, { limit: 500 });
             const meetups = allActivities.filter(a => MEETUP_TYPES.includes(a.activity_type))
                 .sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
 
@@ -20603,7 +20615,7 @@ function _wireLoginBtn() {
             `;
         }
         else if (tab === 'nextactions') {
-            const activities = (await AppDataStore.getAll('activities')).filter(a => a.prospect_id == prospectId)
+            const activities = (await AppDataStore.getActivitiesForProspect(prospectId, { limit: 500 }))
                 .sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date) || b.id - a.id);
 
             // Collect action items: next_action field + note_next_steps field, deduplicated per activity
@@ -21481,9 +21493,9 @@ function _wireLoginBtn() {
         // Meet Up History too — otherwise notes-tab entries get orphaned
         // from the activity context the agent was actually referring to.
         const MEETUP_TYPES = ['CPS','FTF','FSA','GR','XG','CALL','EMAIL','WHATSAPP'];
-        const latestActivity = (await AppDataStore.getAll('activities'))
-            .filter(a => a.prospect_id == prospectId && MEETUP_TYPES.includes(a.activity_type))
-            .sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date) || b.id - a.id)[0];
+        // Indexed: returns this prospect's rows pre-sorted activity_date DESC.
+        const _latestActs = await AppDataStore.getActivitiesForProspect(prospectId, { limit: 100 });
+        const latestActivity = _latestActs.find(a => MEETUP_TYPES.includes(a.activity_type));
 
         await AppDataStore.create('notes', {
             id: Date.now(),
