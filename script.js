@@ -42250,6 +42250,35 @@ JB 星期二到
 
     // ==================== /STOCK TAKE ====================
 
+    // ==================== BUG AUDIT 2026-04-24: fill 3 missing function impls ====================
+    // Single-file delete — mirrors confirmDeleteSelected pattern (line ~3103)
+    const deleteFile = async (fileId) => {
+        if (!fileId) return;
+        UI.showModal('Delete File',
+            `<p>Are you sure you want to delete this file?</p><p class="text-error">This action cannot be undone.</p>`,
+            [
+                { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+                { label: 'Delete', type: 'primary', action: `(async () => { await app._confirmDeleteFile(${fileId}); })()` }
+            ]
+        );
+    };
+    const _confirmDeleteFile = async (fileId) => {
+        await AppDataStore.delete('documents', fileId);
+        UI.hideModal();
+        UI.toast.success('File deleted');
+        if (typeof loadFolderContents === 'function') await loadFolderContents();
+    };
+
+    // Route Last-Transactions modal profile-link to the right detail view
+    const showProfile = async (id, type) => {
+        if (!id) return;
+        if (type === 'prospect' && typeof showProspectDetail === 'function') return showProspectDetail(id);
+        if (typeof showCustomerDetail === 'function') return showCustomerDetail(id);
+    };
+
+    // Placeholder — export-data flow needs product scoping before full impl
+    const exportKPIDashboard = () => todo('Export KPI Dashboard');
+
     return {
         init,
         navigateTo,
@@ -43368,6 +43397,24 @@ JB 星期二到
         sendDescriptionInvite,
         dismissRefillReminder,
         viewRefillProspect,
+
+        // ==================== BUG AUDIT 2026-04-24: exports for inline onclick handlers ====================
+        // Functions that were defined in the IIFE but missing from this return block
+        // (caused silent no-ops when their buttons were clicked)
+        applyFilters,
+        clearFilters,
+        openTargetManagementModal,
+        printDashboard,
+        saveYearlyTargets,
+        showAgentDetail,
+        updateConditionOperator,
+        updateConditionValue,
+        updateGroupLogic,
+        // New impls filling dangling onclick references
+        deleteFile,
+        _confirmDeleteFile,
+        showProfile,
+        exportKPIDashboard,
 
     };
 
