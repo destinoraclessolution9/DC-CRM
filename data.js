@@ -1575,6 +1575,48 @@ class DataStore {
         }
     }
 
+    // Batched "latest activity per prospect" lookup.
+    //
+    // Replaces N parallel getActivitiesForProspect() calls (one per visible row
+    // on the list) with a single `.in('prospect_id', [...])` round-trip. The
+    // query is indexed (idx_activities_prospect_date) and ordered server-side;
+    // we walk the result once on the client, keeping the first occurrence per
+    // prospect_id (which is the most recent because of the DESC order).
+    //
+    // Returns a Map<prospectIdString, activityRow>. Prospects with no activity
+    // simply don't appear as keys.
+    async getLatestActivitiesForProspects(prospectIds) {
+        const ids = Array.from(new Set((prospectIds || []).filter(Boolean).map(String)));
+        const result = new Map();
+        if (ids.length === 0) return result;
+        try {
+            const { data, error } = await this._readClient()
+                .from('activities')
+                .select(this._selectClauseForGetAll('activities'))
+                .in('prospect_id', ids)
+                .order('activity_date', { ascending: false })
+                .limit(1000);
+            if (error) throw error;
+            for (const row of (data || [])) {
+                const key = String(row.prospect_id);
+                if (!result.has(key)) result.set(key, row);
+            }
+            return result;
+        } catch (e) {
+            console.warn('getLatestActivitiesForProspects fallback (cache):', e?.message);
+            const all = await this.getAll('activities');
+            const idSet = new Set(ids);
+            const sorted = all
+                .filter(a => a.prospect_id != null && idSet.has(String(a.prospect_id)))
+                .sort((a, b) => (b.activity_date || '').localeCompare(a.activity_date || ''));
+            for (const row of sorted) {
+                const key = String(row.prospect_id);
+                if (!result.has(key)) result.set(key, row);
+            }
+            return result;
+        }
+    }
+
     // Mirror for customers — uses idx_activities_customer_date.
     async getActivitiesForCustomer(customerId, opts = {}) {
         const { limit = 500, orderDir = 'desc' } = opts;

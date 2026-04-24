@@ -18672,18 +18672,15 @@ function _wireLoginBtn() {
         const pageStart = _prospectPage * _prospectPageSize;
         const pageProspects = filtered.slice(pageStart, pageStart + _prospectPageSize);
 
-        // ── Fetch latest activity for ONLY the visible page (indexed lookups) ──
-        // Replaces a full getAll('activities') that downloaded the entire table
-        // just to show one row per prospect. Each call uses idx_activities_prospect_date.
+        // ── Fetch latest activity for ONLY the visible page (ONE round trip) ──
+        // Single `.in(prospect_id, [...])` query served by idx_activities_prospect_date.
+        // Previous implementation fanned out N parallel getActivitiesForProspect()
+        // calls which made the list appear frozen on cold loads.
         if (pageProspects.length > 0) {
-            const perProspect = await Promise.all(
-                pageProspects.map(p => AppDataStore.getActivitiesForProspect(p.id, { limit: 1 }))
+            const latestMap = await AppDataStore.getLatestActivitiesForProspects(
+                pageProspects.map(p => p.id)
             );
-            pageProspects.forEach((p, i) => {
-                if (perProspect[i] && perProspect[i].length > 0) {
-                    latestActivityByProspect.set(String(p.id), perProspect[i][0]);
-                }
-            });
+            for (const [k, v] of latestMap) latestActivityByProspect.set(k, v);
         }
 
         let html = '';
