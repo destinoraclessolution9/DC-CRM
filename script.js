@@ -24398,6 +24398,8 @@ const showAgentProfile = async (agentId) => {
     }, 100);
 };
 
+const showAgentDetail = showAgentProfile;
+
   /*  const filterAgents = async () => await renderAgentsTable();
 
     const showAgentDetail = async (agentId) => {
