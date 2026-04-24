@@ -17054,13 +17054,21 @@ function _wireLoginBtn() {
         window._savingActivity = true;
 
         // Visually disable every Save button in open modals so the user sees the click landed.
+        // Note: UI.js's capture-phase click listener already disables the clicked button and
+        // swaps its innerHTML to '<spinner> <label>'. Our override just tightens the label to
+        // "Saving…" to make progress clearer. We do NOT capture innerHTML to restore later —
+        // the captured value would be the UI.js-altered spinner state, which would re-stick
+        // onto the button after toast/hideModal's _endAllBtnLoads cleaned it up (the bug that
+        // left Save Activity permanently spinning on iPhone after any validation error).
         const saveBtns = Array.from(document.querySelectorAll('.modal-overlay .modal-footer button.primary, .modal .modal-footer button.primary'));
-        const _origSaveLabels = saveBtns.map(b => ({ el: b, html: b.innerHTML, disabled: b.disabled }));
         saveBtns.forEach(b => { b.disabled = true; b.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving…'; });
 
         const _releaseSaveGuard = () => {
             window._savingActivity = false;
-            _origSaveLabels.forEach(o => { try { o.el.disabled = o.disabled; o.el.innerHTML = o.html; } catch (_) {} });
+            // Only re-enable; let UI.js's _endAllBtnLoads (fired by toast.error / toast.success
+            // / hideModal / the 10s safety net) own innerHTML restoration. Restoring a captured
+            // innerHTML here would overwrite the cleaned-up label and leave the button stuck.
+            saveBtns.forEach(b => { try { if (b.isConnected) b.disabled = false; } catch (_) {} });
         };
 
         try {
