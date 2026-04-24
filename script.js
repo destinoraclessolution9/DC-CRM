@@ -18649,10 +18649,10 @@ function _wireLoginBtn() {
             });
         }
 
-        const [allActivities, allUsers] = await Promise.all([
-            AppDataStore.getAll('activities'),
-            AppDataStore.getAll('users'),
-        ]);
+        // Only fetch users here — users is small. Activities is fetched per
+        // visible-page row below (indexed lookup) to avoid downloading the
+        // entire activities table just to show a last-activity column.
+        const allUsers = await AppDataStore.getAll('users');
 
         // ── Scope by role hierarchy ──
         let prospects;
@@ -18667,17 +18667,8 @@ function _wireLoginBtn() {
             }
         }
 
-        // ── Build activity index (O(1) lookups) ──
+        // Per-page latest-activity lookup; populated after pagination below.
         const latestActivityByProspect = new Map();
-        for (const a of allActivities) {
-            if (a.prospect_id == null) continue;
-            const key = String(a.prospect_id);
-            const current = latestActivityByProspect.get(key);
-            if (!current) { latestActivityByProspect.set(key, a); continue; }
-            const curKey = (current.activity_date || '') + '|' + (current.id || 0);
-            const newKey = (a.activity_date || '') + '|' + (a.id || 0);
-            if (newKey > curKey) latestActivityByProspect.set(key, a);
-        }
         const userById = new Map(allUsers.map(u => [String(u.id), u]));
 
         // ── Populate agent filter dropdown (agents visible to current user) ──
@@ -18711,10 +18702,8 @@ function _wireLoginBtn() {
                 valA = a.score || 0; valB = b.score || 0;
                 return _sortDirection === 'asc' ? valA - valB : valB - valA;
             } else if (_sortField === 'activity') {
-                const lastA = latestActivityByProspect.get(String(a.id));
-                const lastB = latestActivityByProspect.get(String(b.id));
-                valA = lastA ? lastA.activity_date : '0000-00-00';
-                valB = lastB ? lastB.activity_date : '0000-00-00';
+                valA = a.last_activity_date || '0000-00-00';
+                valB = b.last_activity_date || '0000-00-00';
                 return _sortDirection === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
             } else if (_sortField === 'protection') {
                 valA = calculateDaysLeft(a.protection_deadline);
@@ -18755,6 +18744,20 @@ function _wireLoginBtn() {
         const totalCount = filtered.length;
         const pageStart = _prospectPage * _prospectPageSize;
         const pageProspects = filtered.slice(pageStart, pageStart + _prospectPageSize);
+
+        // ── Fetch latest activity for ONLY the visible page (indexed lookups) ──
+        // Replaces a full getAll('activities') that downloaded the entire table
+        // just to show one row per prospect. Each call uses idx_activities_prospect_date.
+        if (pageProspects.length > 0) {
+            const perProspect = await Promise.all(
+                pageProspects.map(p => AppDataStore.getActivitiesForProspect(p.id, { limit: 1 }))
+            );
+            pageProspects.forEach((p, i) => {
+                if (perProspect[i] && perProspect[i].length > 0) {
+                    latestActivityByProspect.set(String(p.id), perProspect[i][0]);
+                }
+            });
+        }
 
         let html = '';
         for (const p of pageProspects) {
