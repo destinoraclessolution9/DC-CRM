@@ -25202,6 +25202,42 @@ const renderCurrentAssignments = async (agentId) => {
                         <i class="fas fa-paper-plane"></i> Send Test
                     </button>
                 </div>
+
+                <!-- Reminder timing preferences -->
+                <div style="margin-top:20px; border-top:1px solid var(--gray-200); padding-top:16px;">
+                    <h5 style="margin:0 0 4px; font-size:14px; font-weight:600;">Reminder Timing</h5>
+                    <p style="color:var(--gray-500); font-size:12px; margin:0 0 12px;">
+                        How far in advance do you want to be reminded? Choose one or more.
+                    </p>
+                    <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:12px;">
+                        <label style="display:flex; align-items:center; gap:8px; font-size:14px; cursor:pointer;">
+                            <input type="checkbox" id="reminder-1440" value="1440" onchange="app.onReminderCheckboxChange()">
+                            <span>1 day before</span>
+                        </label>
+                        <label style="display:flex; align-items:center; gap:8px; font-size:14px; cursor:pointer;">
+                            <input type="checkbox" id="reminder-60" value="60" onchange="app.onReminderCheckboxChange()">
+                            <span>1 hour before</span>
+                        </label>
+                        <label style="display:flex; align-items:center; gap:8px; font-size:14px; cursor:pointer;">
+                            <input type="checkbox" id="reminder-15" value="15" onchange="app.onReminderCheckboxChange()">
+                            <span>15 minutes before</span>
+                        </label>
+                        <label style="display:flex; align-items:center; gap:8px; font-size:14px; cursor:pointer;">
+                            <input type="checkbox" id="reminder-10" value="10" onchange="app.onReminderCheckboxChange()">
+                            <span>10 minutes before</span>
+                        </label>
+                    </div>
+                    <label style="display:flex; align-items:center; gap:8px; font-size:14px; cursor:pointer; margin-bottom:14px;">
+                        <input type="checkbox" id="reminder-daily-summary" onchange="app.onReminderCheckboxChange()">
+                        <span>Daily summary at 10:00 AM (today's events)</span>
+                    </label>
+                    <button id="notif-prefs-save-btn" class="btn primary" style="display:none;" onclick="(async()=>{ await app.saveNotificationPreferences(); })()">
+                        <i class="fas fa-save"></i> Save Reminder Preferences
+                    </button>
+                    <span id="notif-prefs-saved" style="display:none; color:var(--success); font-size:13px; margin-left:8px;">
+                        <i class="fas fa-check"></i> Saved
+                    </span>
+                </div>
             </div>
 
             ${isSystemAdmin(_currentUser) ? `
@@ -25504,6 +25540,8 @@ const renderCurrentAssignments = async (agentId) => {
         } catch (e) {
             supEl.textContent = 'Error: ' + (e.message || e);
         }
+        // Load reminder preferences into checkboxes
+        await loadNotificationPreferences();
     };
 
     const enablePushNotifications = async () => {
@@ -25561,6 +25599,58 @@ const renderCurrentAssignments = async (agentId) => {
         } catch (e) {
             UI.toast.error('Test failed: ' + (e.message || e));
         }
+    };
+
+    // ========== Notification reminder preferences ==========
+    const loadNotificationPreferences = async () => {
+        if (!_currentUser?.id) return;
+        try {
+            const { data } = await window.supabase
+                .from('notification_preferences')
+                .select('reminder_minutes,daily_summary')
+                .eq('user_id', _currentUser.id)
+                .maybeSingle();
+            const minutes = (data && data.reminder_minutes) ? data.reminder_minutes : [15];
+            const dailySummary = data ? !!data.daily_summary : true;
+            [1440, 60, 15, 10].forEach(m => {
+                const el = document.getElementById(`reminder-${m}`);
+                if (el) el.checked = minutes.includes(m);
+            });
+            const dsel = document.getElementById('reminder-daily-summary');
+            if (dsel) dsel.checked = dailySummary;
+        } catch (e) {
+            console.warn('[Prefs] load failed:', e);
+        }
+    };
+
+    const saveNotificationPreferences = async () => {
+        if (!_currentUser?.id) { UI.toast.error('Log in first'); return; }
+        const minutes = [1440, 60, 15, 10].filter(m => {
+            const el = document.getElementById(`reminder-${m}`);
+            return el && el.checked;
+        });
+        if (minutes.length === 0) { UI.toast.error('Please select at least one reminder time'); return; }
+        const dailySummary = !!(document.getElementById('reminder-daily-summary')?.checked);
+        try {
+            const { error } = await window.supabase
+                .from('notification_preferences')
+                .upsert({ user_id: _currentUser.id, reminder_minutes: minutes, daily_summary: dailySummary, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
+            if (error) throw error;
+            const saveBtn = document.getElementById('notif-prefs-save-btn');
+            const savedMsg = document.getElementById('notif-prefs-saved');
+            if (saveBtn) saveBtn.style.display = 'none';
+            if (savedMsg) { savedMsg.style.display = ''; setTimeout(() => { savedMsg.style.display = 'none'; }, 2500); }
+            UI.toast.success('Reminder preferences saved');
+        } catch (e) {
+            UI.toast.error('Failed to save: ' + (e.message || e));
+        }
+    };
+
+    const onReminderCheckboxChange = () => {
+        const saveBtn = document.getElementById('notif-prefs-save-btn');
+        const savedMsg = document.getElementById('notif-prefs-saved');
+        if (saveBtn) saveBtn.style.display = '';
+        if (savedMsg) savedMsg.style.display = 'none';
     };
 
     // Admin: reset another agent's password
@@ -42572,6 +42662,9 @@ JB 星期二到
         enablePushNotifications,
         disablePushNotifications,
         sendTestPushNotification,
+        loadNotificationPreferences,
+        saveNotificationPreferences,
+        onReminderCheckboxChange,
         // Expose current user id for push-notifications.js (outside the IIFE).
         // NOTE: Object.assign flattens getters to their value at call time (always null).
         // Use a plain function so the closure is preserved after assignment.
