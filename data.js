@@ -313,18 +313,16 @@ class DataStore {
                                 localStorage.setItem(`fs_crm_${tableName}_last_sync`, now);
                             } catch (_) {}
                         }, 0);
-                        console.log(`[SWR] ${tableName}: delta sync — ${delta.length} changed rows merged`);
+                        if (window.__FS_DEBUG_SWR) console.log(`[SWR] ${tableName}: delta sync — ${delta.length} changed rows merged`);
                         this.emit('dataChanged', { action: 'revalidate', table: tableName });
                     } else {
                         // No changes since last sync — just refresh the timestamp.
                         try { localStorage.setItem(`fs_crm_${tableName}_last_sync`, now); } catch (_) {}
-                        console.log(`[SWR] ${tableName}: delta sync — no changes`);
                     }
                     return; // Delta path succeeded — skip full fetch below.
                 } catch (_) {
                     // Delta fetch failed (e.g. table has no updated_at column,
                     // or network hiccup). Fall through to full fetch.
-                    console.warn(`[SWR] ${tableName}: delta sync failed, falling back to full fetch`);
                 }
             }
 
@@ -343,7 +341,7 @@ class DataStore {
                 // _getAllImpl already updated the in-memory cache with fresh
                 // data. Emitting dataChanged triggers refreshCurrentView in
                 // script.js for any view that depends on this table.
-                console.log(`[SWR] ${tableName}: full revalidated (changed ${prevSnapshot.length} → ${fresh.length}), refreshing view`);
+                if (window.__FS_DEBUG_SWR) console.log(`[SWR] ${tableName}: full revalidated (changed ${prevSnapshot.length} → ${fresh.length}), refreshing view`);
                 this.emit('dataChanged', { action: 'revalidate', table: tableName });
             }
         } catch (_) {
@@ -386,7 +384,7 @@ class DataStore {
                 // callers during the same render cycle reuse it instead of
                 // firing more background fetches.
                 this._cacheSet(tableName, stale);
-                console.log(`[SWR] ${tableName}: served ${stale.length} rows instantly from cache`);
+                if (window.__FS_DEBUG_SWR) console.log(`[SWR] ${tableName}: served ${stale.length} rows instantly from cache`);
                 // Fire-and-forget background refresh
                 this._swrRevalidate(tableName).catch(() => {});
                 return stale;
@@ -593,9 +591,7 @@ class DataStore {
                     const { error } = await this._writeClient()
                         .from(tableName)
                         .upsert(item.record);
-                    if (!error) {
-                        console.log(`DataStore: force-pushed queued item ${item.record.id} to ${tableName}`);
-                    } else {
+                    if (error) {
                         console.warn(`DataStore: force-push failed for ${item.record.id}: ${error.message}`);
                         stillPending.push(item);
                     }
@@ -647,7 +643,6 @@ class DataStore {
                     // Already pushed once before, but missing from server now → externally deleted
                     if (item.pushed) {
                         newTombstones.push(idStr);
-                        console.log(`DataStore: dropping ghost queue item ${idStr} for ${tableName} (externally deleted)`);
                         continue;
                     }
                     try {
@@ -659,7 +654,6 @@ class DataStore {
                         if (!uErr && inserted) {
                             merged.push(inserted);
                             serverIds.add(String(inserted.id));
-                            console.log(`DataStore: auto-synced local item ${item.record.id} to ${tableName}`);
                             // First push succeeded — flag as pushed so a later "missing from server"
                             // is treated as an external deletion, not a fresh sync attempt.
                             // We don't actually keep it in the queue (success path doesn't push to
@@ -1172,17 +1166,30 @@ class DataStore {
 
     async query(tableName, filters = {}) {
         try {
-            let q = this._readClient().from(tableName).select('*');
+            // Use the same light-select projection that getAll uses, so wide
+            // tables like prospects (27 MB cps_form_data blob) don't force
+            // equality-filtered lookups to pull the heavy BLOB on every call.
+            // Falls back to `*` if the column list is stale (PostgREST 400).
+            const selectClause = this._selectClauseForGetAll(tableName);
+            let q = this._readClient().from(tableName).select(selectClause);
             for (const [key, value] of Object.entries(filters)) {
                 if (value == null || value === 'null' || value === 'undefined') continue;
                 q = q.eq(key, value);
             }
-            const { data, error } = await q;
+            let { data, error } = await q;
+            if (error && selectClause !== '*') {
+                // Stale column list — retry with '*' (rare, after schema change)
+                let q2 = this._readClient().from(tableName).select('*');
+                for (const [key, value] of Object.entries(filters)) {
+                    if (value == null || value === 'null' || value === 'undefined') continue;
+                    q2 = q2.eq(key, value);
+                }
+                ({ data, error } = await q2);
+            }
             if (error) throw error;
             return data || [];
         } catch (e) {
             console.warn(`Offline: falling back for ${tableName} query`, e);
-            // Service-role REST fallback removed — rely on localStorage cache.
             const local = localStorage.getItem(`fs_crm_${tableName}`);
             const all = local ? JSON.parse(local) : [];
             return all.filter(row => Object.entries(filters).every(([k, v]) => row[k] == v));

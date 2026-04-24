@@ -2537,7 +2537,7 @@ const appLogic = (() => {
                             <div class="explorer-controls">
                                 <div class="search-filter-bar">
                                     <i class="fas fa-search"></i>
-                                    <input type="text" id="file-search" placeholder="Search files..." onkeyup="app.searchFiles(this.value)">
+                                    <input type="text" id="file-search" placeholder="Search files..." onkeyup="app.debounceCall('file-search', () => app.searchFiles(this.value), 220)">
                                     <select id="file-sort" class="form-control" onchange="app.sortFiles(this.value)">
                                         <option value="name">Sort by Name</option>
                                         <option value="date">Sort by Date</option>
@@ -2611,8 +2611,18 @@ const appLogic = (() => {
         const container = document.getElementById('breadcrumb');
         if (!container) return;
         const path = [];
-        let curr = _currentFolder ? await AppDataStore.getById('folders', _currentFolder) : null;
-        while (curr) { path.unshift(curr); curr = curr.parent_id ? await AppDataStore.getById('folders', curr.parent_id) : null; }
+        if (_currentFolder && _currentFolder !== 'recent' && _currentFolder !== 'all' && _currentFolder !== 'starred') {
+            // One cached getAll beats N sequential getById calls up the hierarchy
+            const allFolders = (await AppDataStore.getAll('folders')) || [];
+            const byId = new Map(allFolders.map(f => [String(f.id), f]));
+            let curr = byId.get(String(_currentFolder));
+            const seen = new Set();
+            while (curr && !seen.has(String(curr.id))) {
+                seen.add(String(curr.id));
+                path.unshift(curr);
+                curr = curr.parent_id ? byId.get(String(curr.parent_id)) : null;
+            }
+        }
 
         let html = '<span class="breadcrumb-item" onclick="app.navigateToFolder(null)">Root</span>';
         for (const f of path) { html += `<span class="breadcrumb-separator">/</span><span class="breadcrumb-item" onclick="app.navigateToFolder(${f.id})">${escapeHtml(f.name || '')}</span>`; }
@@ -2667,7 +2677,24 @@ const appLogic = (() => {
     const showAllFiles = async () => { await renderFileListView(await AppDataStore.getAll('documents')); _currentFolder = 'all'; await renderBreadcrumb(); };
     const showStarredFiles = async () => { await renderFileListView((await AppDataStore.getAll('documents')).filter(d => d.is_starred)); _currentFolder = 'starred'; await renderBreadcrumb(); };
 
-    const toggleStar = async (id) => { const f = await AppDataStore.getById('documents', id); await AppDataStore.update('documents', id, { is_starred: !f.is_starred }); await loadFolderContents(); };
+    const toggleStar = async (id) => {
+        // Optimistic: flip the star icon in-place immediately, persist + refresh in background.
+        const starBtn = document.querySelector(`[data-star-id="${id}"]`);
+        const f = await AppDataStore.getById('documents', id);
+        if (!f) return;
+        const next = !f.is_starred;
+        if (starBtn) starBtn.classList.toggle('active', next);
+        try {
+            await AppDataStore.update('documents', id, { is_starred: next });
+        } catch (e) {
+            if (starBtn) starBtn.classList.toggle('active', !next); // revert on failure
+            UI.toast.error('Could not update star');
+            return;
+        }
+        // Only re-render list if we're inside the starred view (item would leave/enter);
+        // otherwise the icon flip is already correct and a full reload is wasted work.
+        if (_currentFolder === 'starred') await loadFolderContents();
+    };
 
     const downloadFile = async (id) => {
         const file = await AppDataStore.getById('documents', id);
@@ -3405,10 +3432,18 @@ In a production system, this would show the actual file contents.
 
     const getFolderPath = async (folderId) => {
         if (!folderId) return 'Root';
+        // One cached getAll beats N sequential getById calls up the hierarchy
+        const allFolders = (await AppDataStore.getAll('folders')) || [];
+        const byId = new Map(allFolders.map(f => [String(f.id), f]));
         const path = [];
-        let current = await AppDataStore.getById('folders', folderId);
-        while (current) { path.unshift(current.name); current = current.parent_id ? await AppDataStore.getById('folders', current.parent_id) : null; }
-        return path.join(' / ');
+        let current = byId.get(String(folderId));
+        const seen = new Set();
+        while (current && !seen.has(String(current.id))) {
+            seen.add(String(current.id));
+            path.unshift(current.name);
+            current = current.parent_id ? byId.get(String(current.parent_id)) : null;
+        }
+        return path.join(' / ') || 'Root';
     };
 
     const editFileDescription = async (fileId) => {
@@ -5381,8 +5416,10 @@ In a production system, this would show the actual file contents.
         const allMessages = await AppDataStore.getAll('whatsapp_messages');
         const original = allMessages.find(m => m.id === messageId);
         if (!original) { UI.toast.error('Message not found'); return; }
-        const allProspects = await AppDataStore.getAll('prospects');
-        const allCustomers = await AppDataStore.getAll('customers');
+        const [allProspects, allCustomers] = await Promise.all([
+            AppDataStore.getAll('prospects'),
+            AppDataStore.getAll('customers'),
+        ]);
         const options = [
             ...allProspects.map(p => `<option value="prospect:${p.id}">${escapeHtml(p.full_name)} (Prospect)</option>`),
             ...allCustomers.map(c => `<option value="customer:${c.id}">${escapeHtml(c.full_name)} (Customer)</option>`)
@@ -9295,8 +9332,10 @@ function _wireLoginBtn() {
         }
 
         const visibleIds = await getVisibleUserIds(_currentUser);
-        const allProspects = await AppDataStore.getAll('prospects');
-        const allCustomers = await AppDataStore.getAll('customers');
+        const [allProspects, allCustomers] = await Promise.all([
+            AppDataStore.getAll('prospects'),
+            AppDataStore.getAll('customers'),
+        ]);
         const prospects = visibleIds === 'all'
             ? allProspects
             : allProspects.filter(p => visibleIds.map(String).includes(String(p.responsible_agent_id)));
@@ -10351,9 +10390,12 @@ function _wireLoginBtn() {
         await showCasesView(document.getElementById('content-viewport'));
     };
 
-    const handleCaseSearch = async (e) => {
-        _caseFilters.search = e.target.value;
-        await renderCasesList();
+    const handleCaseSearch = (e) => {
+        const val = e.target.value;
+        debounceCall('case-search', () => {
+            _caseFilters.search = val;
+            renderCasesList();
+        }, 220);
     };
 
     const handleCaseFilterChange = async () => {
@@ -10388,13 +10430,23 @@ function _wireLoginBtn() {
         const countClosed = document.getElementById('cases-count-closed');
         if (!gridCps || !gridClosed) return;
 
-        const allCases = await AppDataStore.getAll('case_studies');
+        // Fetch all six tables in parallel — used to be six sequential awaits
+        // (3-8s on cold cache). Prospects/customers are preloaded once and
+        // passed into buildCard/applySharedFilters so each card render doesn't
+        // fire its own getById (was N+1 per render).
         const currentUser = _currentUser;
-        const allUsers = (await AppDataStore.getAll('users')) || [];
-        const allTags = (await AppDataStore.getAll('tags')) || [];
-        const allTagMappings = (await AppDataStore.getAll('entity_tags')) || [];
+        const [allCases, allUsers, allTags, allTagMappings, allProspects, allCustomers] = await Promise.all([
+            AppDataStore.getAll('case_studies'),
+            AppDataStore.getAll('users'),
+            AppDataStore.getAll('tags'),
+            AppDataStore.getAll('entity_tags'),
+            AppDataStore.getAll('prospects'),
+            AppDataStore.getAll('customers'),
+        ]).then(r => r.map(x => x || []));
+        const prospectMap = new Map(allProspects.map(p => [String(p.id), p]));
+        const customerMap = new Map(allCustomers.map(c => [String(c.id), c]));
 
-        const applySharedFilters = async (cases) => {
+        const applySharedFilters = (cases) => {
             // Visibility / permission
             cases = cases.filter(c => {
                 const isOwner = c.created_by === currentUser?.id;
@@ -10414,23 +10466,21 @@ function _wireLoginBtn() {
                     .map(et => et.entity_id);
                 cases = cases.filter(c => caseIdsWithTag.includes(c.id));
             }
-            // Search
+            // Search — resolved against preloaded maps (was N+1 getById per case)
             if (_caseFilters.search) {
                 const q = _caseFilters.search.toLowerCase();
-                const filtered = [];
-                for (const c of cases) {
-                    let nameMatch = false;
+                cases = cases.filter(c => {
+                    if ((c.title || '').toLowerCase().includes(q)) return true;
                     if (c.prospect_id) {
-                        const p = await AppDataStore.getById('prospects', c.prospect_id);
-                        if (p?.full_name?.toLowerCase().includes(q)) nameMatch = true;
+                        const p = prospectMap.get(String(c.prospect_id));
+                        if (p?.full_name?.toLowerCase().includes(q)) return true;
                     }
                     if (c.customer_id) {
-                        const cust = await AppDataStore.getById('customers', c.customer_id);
-                        if (cust?.full_name?.toLowerCase().includes(q)) nameMatch = true;
+                        const cust = customerMap.get(String(c.customer_id));
+                        if (cust?.full_name?.toLowerCase().includes(q)) return true;
                     }
-                    if ((c.title || '').toLowerCase().includes(q) || nameMatch) filtered.push(c);
-                }
-                cases = filtered;
+                    return false;
+                });
             }
             if (_caseFilters.product !== 'all') cases = cases.filter(c => c.product === _caseFilters.product);
             if (_caseFilters.from) cases = cases.filter(c => c.closing_date >= _caseFilters.from);
@@ -10461,16 +10511,16 @@ function _wireLoginBtn() {
             return palettes[hash % palettes.length];
         };
 
-        const buildCard = async (c, type) => {
+        const buildCard = (c, type) => {
             let entityName = '';
             let entityHref = '';
             let entityIcon = '';
             let prospectData = null;
             if (c.customer_id) {
-                const cust = await AppDataStore.getById('customers', c.customer_id);
+                const cust = customerMap.get(String(c.customer_id));
                 if (cust) { entityName = cust.full_name; entityHref = `app.showCustomerDetail(${c.customer_id})`; entityIcon = 'fa-user-check'; }
             } else if (c.prospect_id) {
-                const pros = await AppDataStore.getById('prospects', c.prospect_id);
+                const pros = prospectMap.get(String(c.prospect_id));
                 if (pros) { prospectData = pros; entityName = pros.full_name; entityHref = `app.showProspectDetail(${c.prospect_id})`; entityIcon = 'fa-user'; }
             }
 
@@ -10589,9 +10639,9 @@ function _wireLoginBtn() {
                 </div>`;
         };
 
-        // CPS cases
+        // CPS cases — applySharedFilters + buildCard are now sync (preloaded maps)
         let cpsCases = allCases.filter(c => (c.case_type || 'cps') === 'cps');
-        cpsCases = await applySharedFilters(cpsCases);
+        cpsCases = applySharedFilters(cpsCases);
         cpsCases.sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0));
         if (countCps) countCps.textContent = cpsCases.length;
         if (cpsCases.length === 0) {
@@ -10601,13 +10651,12 @@ function _wireLoginBtn() {
         } else {
             gridCps.style.display = '';
             emptyCps.style.display = 'none';
-            const cards = await Promise.all(cpsCases.map(c => buildCard(c, 'cps')));
-            gridCps.innerHTML = cards.join('');
+            gridCps.innerHTML = cpsCases.map(c => buildCard(c, 'cps')).join('');
         }
 
         // Closed cases
         let closedCases = allCases.filter(c => (c.case_type || 'cps') === 'closed');
-        closedCases = await applySharedFilters(closedCases);
+        closedCases = applySharedFilters(closedCases);
         closedCases.sort((a, b) => new Date(b.closing_date || b.updated_at || 0) - new Date(a.closing_date || a.updated_at || 0));
         if (countClosed) countClosed.textContent = closedCases.length;
         if (closedCases.length === 0) {
@@ -10617,8 +10666,7 @@ function _wireLoginBtn() {
         } else {
             gridClosed.style.display = '';
             emptyClosed.style.display = 'none';
-            const cards = await Promise.all(closedCases.map(c => buildCard(c, 'closed')));
-            gridClosed.innerHTML = cards.join('');
+            gridClosed.innerHTML = closedCases.map(c => buildCard(c, 'closed')).join('');
         }
     };
 
@@ -10864,7 +10912,7 @@ function _wireLoginBtn() {
                         <div class="form-group half">
                             <label>Link Prospect/Customer</label>
                             <div class="search-select-container">
-                                <input type="text" id="case-entity-search" class="form-control" placeholder="Type name..." value="${entityName}" onkeyup="app.searchCaseEntities(this.value)">
+                                <input type="text" id="case-entity-search" class="form-control" placeholder="Type name..." value="${entityName}" onkeyup="app.debounceCall('case-entity-search', () => app.searchCaseEntities(this.value), 220)">
                                 <div id="case-entity-results" class="search-results-dropdown"></div>
                                 <input type="hidden" id="case-prospect-id" value="${c ? (c.prospect_id || '') : ''}">
                                 <input type="hidden" id="case-customer-id" value="${c ? (c.customer_id || '') : ''}">
@@ -11029,15 +11077,19 @@ function _wireLoginBtn() {
 
     const searchCaseEntities = async (query) => {
         const results = document.getElementById('case-entity-results');
+        if (!results) return;
         if (!query || query.length < 2) {
             results.style.display = 'none';
             return;
         }
 
-        const allP = await AppDataStore.getAll('prospects');
-        const prospects = (allP || []).filter(p => p.full_name?.toLowerCase().includes(query.toLowerCase()) || p.nickname?.toLowerCase().includes(query.toLowerCase()));
-        const allC = await AppDataStore.getAll('customers');
-        const customers = (allC || []).filter(c => c.full_name?.toLowerCase().includes(query.toLowerCase()) || c.nickname?.toLowerCase().includes(query.toLowerCase()));
+        const [allP, allC] = await Promise.all([
+            AppDataStore.getAll('prospects'),
+            AppDataStore.getAll('customers'),
+        ]);
+        const q = query.toLowerCase();
+        const prospects = (allP || []).filter(p => p.full_name?.toLowerCase().includes(q) || p.nickname?.toLowerCase().includes(q)).slice(0, 30);
+        const customers = (allC || []).filter(c => c.full_name?.toLowerCase().includes(q) || c.nickname?.toLowerCase().includes(q)).slice(0, 30);
 
         let html = '';
         if (prospects.length > 0) {
@@ -19382,16 +19434,21 @@ function _wireLoginBtn() {
         else if (tabName === 'referrals') await renderReferralsTab(customer);
         else if (tabName === 'contracts') await renderCustomerContractsTab(customer);
         else if (tabName === 'events') {
-            const registrations = (await AppDataStore.getAll('event_registrations')).filter(
+            const [allRegs, allEvents] = await Promise.all([
+                AppDataStore.getAll('event_registrations'),
+                AppDataStore.getAll('events'),
+            ]);
+            const registrations = (allRegs || []).filter(
                 r => r.attendee_type === 'customer' && r.attendee_id == customerId
             );
+            const eventsById = new Map((allEvents || []).map(e => [String(e.id), e]));
             let html = '<h4>Events Attended</h4>';
             if (registrations.length === 0) {
                 html += '<p>No events attended.</p>';
             } else {
                 html += '<table class="events-table"><thead><tr><th>Event</th><th>Date</th><th>Status</th><th>Points</th></tr></thead><tbody>';
                 for (const r of registrations) {
-                    const event = await AppDataStore.getById('events', r.event_id);
+                    const event = eventsById.get(String(r.event_id));
                     html += `<tr><td>${event?.title || 'Unknown'}</td><td>${r.event_date || '-'}</td><td>${r.attendance_status}</td><td>${r.points_awarded || 0}</td></tr>`;
                 }
                 html += '</tbody></table>';
@@ -19469,16 +19526,21 @@ function _wireLoginBtn() {
             await renderCustomerActivityTab(customer, container.id);
         }
         else if (tab === 'events') {
-            const registrations = (await AppDataStore.getAll('event_registrations')).filter(
+            const [allRegs, allEvents] = await Promise.all([
+                AppDataStore.getAll('event_registrations'),
+                AppDataStore.getAll('events'),
+            ]);
+            const registrations = (allRegs || []).filter(
                 r => r.attendee_type === 'customer' && r.attendee_id == customerId
             );
+            const eventsById = new Map((allEvents || []).map(e => [String(e.id), e]));
             if (registrations.length === 0) {
                 container.innerHTML = '<p style="text-align:center;padding:20px;color:var(--gray-400);">No events attended yet.</p>';
             } else {
                 let totalPts = 0;
                 let rows = '';
                 for (const r of registrations) {
-                    const event = await AppDataStore.getById('events', r.event_id);
+                    const event = eventsById.get(String(r.event_id));
                     const pts = r.points_awarded || 0;
                     totalPts += pts;
                     rows += `<div class="pv-row"><span class="pv-lbl">${r.event_date || '-'}</span><span class="pv-val" style="display:flex;justify-content:space-between;">${event?.title || 'Unknown'} <span style="color:var(--success);font-weight:600;flex-shrink:0;">+${pts} pts</span></span></div>`;
@@ -20594,15 +20656,20 @@ function _wireLoginBtn() {
         }
         else if (tab === 'events') {
             const EVENT_TYPES = ['EVENT','AGENT_MEETING','AGENT_TRAINING','SITE'];
-            // Pre-load valid event IDs so orphaned EVENT activities (whose event was deleted) are hidden
-            const validEventIds = new Set((await AppDataStore.getAll('events')).map(e => String(e.id)));
-            const _eventActs = await AppDataStore.getActivitiesForProspect(prospectId, { limit: 500 });
+            // Fetch events + registrations + per-prospect activities in parallel
+            const [allEvents, allRegs, _eventActs] = await Promise.all([
+                AppDataStore.getAll('events'),
+                AppDataStore.getAll('event_registrations'),
+                AppDataStore.getActivitiesForProspect(prospectId, { limit: 500 }),
+            ]);
+            const eventsById = new Map((allEvents || []).map(e => [String(e.id), e]));
+            const validEventIds = new Set(eventsById.keys());
             const activityEvents = _eventActs.filter(
                 a => EVENT_TYPES.includes(a.activity_type)
                     && (a.activity_type !== 'EVENT' || !a.event_id || validEventIds.has(String(a.event_id)))
             ).sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
 
-            const registrations = (await AppDataStore.getAll('event_registrations')).filter(
+            const registrations = (allRegs || []).filter(
                 r => r.attendee_type === 'prospect' && r.attendee_id == prospectId
             );
 
@@ -20635,7 +20702,7 @@ function _wireLoginBtn() {
                     html += `<div class="pv-sub" style="margin-top:8px;">Event Registrations</div>`;
                     html += '<div style="overflow-x:auto;"><table class="events-table" style="width:100%;"><thead><tr><th>Event</th><th>Date</th><th>Status</th><th>Pts</th></tr></thead><tbody>';
                     for (const r of registrations) {
-                        const ev = await AppDataStore.getById('events', r.event_id);
+                        const ev = eventsById.get(String(r.event_id));
                         html += `<tr><td>${ev?.event_title || ev?.title || 'Unknown'}</td><td>${r.event_date || '-'}</td><td>${r.attendance_status}</td><td>${r.points_awarded || 0}</td></tr>`;
                     }
                     html += '</tbody></table></div>';
@@ -28142,21 +28209,18 @@ const deactivateAgent = async (agentId) => {
 
     const renderManualPriority = async () => {
     const userId = _currentUser?.id || 5;
-    const potentialRecords = await AppDataStore.query('my_potential_list', { user_id: userId });
-    
-    // Filter asynchronously using a for loop
-    const filtered = [];
-    for (const rec of potentialRecords) {
-        const p = await AppDataStore.getById('prospects', rec.prospect_id);
-        if (p && p.status !== 'converted' && p.status !== 'lost') {
-            filtered.push(rec);
-        }
-    }
-    
-    // Sort by priority_order
+    const [potentialRecords, allProspects] = await Promise.all([
+        AppDataStore.query('my_potential_list', { user_id: userId }),
+        AppDataStore.getAll('prospects'),
+    ]);
+    const prospectsById = new Map((allProspects || []).map(p => [String(p.id), p]));
+
+    const filtered = potentialRecords.filter(rec => {
+        const p = prospectsById.get(String(rec.prospect_id));
+        return p && p.status !== 'converted' && p.status !== 'lost';
+    });
+
     filtered.sort((a, b) => a.priority_order - b.priority_order);
-    
-    // The existing code just calls refreshPipeline()
     await refreshPipeline();
 };
 
@@ -28252,7 +28316,10 @@ const deactivateAgent = async (agentId) => {
             return allActs.some(a => a.prospect_id === p.id);
         });
 
-        // Build archive rows grouped by month
+        // Build archive rows grouped by month — reuse the already-fetched allProspects
+        // as a Map to avoid N+1 sequential getById on each archive row.
+        const prospectsById = new Map((allProspects || []).map(p => [String(p.id), p]));
+
         const archiveByMonth = {};
         for (const arc of archiveItems) {
             if (!archiveByMonth[arc.month]) archiveByMonth[arc.month] = [];
@@ -28266,7 +28333,7 @@ const deactivateAgent = async (agentId) => {
             const monthLabel = new Date(month + '-01').toLocaleString('default', { month: 'long', year: 'numeric' });
             let rows = '';
             for (const arc of items) {
-                const p = await AppDataStore.getById('prospects', arc.prospect_id);
+                const p = prospectsById.get(String(arc.prospect_id));
                 const pName = p ? escapeHtml(p.name || p.full_name || '') : 'Unknown';
                 const inCurrent = currentFocusIds.has(arc.prospect_id);
                 rows += `<tr style="border-bottom:1px solid #F3F4F6;">
@@ -28850,9 +28917,11 @@ container.innerHTML = `
     };
 
     const getActivityAttendanceDetails = async (from, to) => {
-        const events = await AppDataStore.getAll('events');
-        const registrations = await AppDataStore.getAll('event_registrations');
-        const activities = await AppDataStore.getAll('activities');
+        const [events, registrations, activities] = await Promise.all([
+            AppDataStore.getAll('events'),
+            AppDataStore.getAll('event_registrations'),
+            AppDataStore.getAll('activities'),
+        ]);
         const result = [];
         for (const ev of events) {
             const regs = registrations.filter(r => r.event_id === ev.id && r.event_date >= from && r.event_date <= to);
@@ -28911,8 +28980,10 @@ container.innerHTML = `
 
     const getHeadcountByEventType = async (from, to) => {
         const eventTypes = ['Monthly Talk', 'Weekly Talk', 'Huiji', 'Museum', 'Study Group', 'Customer Interaction'];
-        const events = await AppDataStore.getAll('events');
-        const registrations = await AppDataStore.getAll('event_registrations');
+        const [events, registrations] = await Promise.all([
+            AppDataStore.getAll('events'),
+            AppDataStore.getAll('event_registrations'),
+        ]);
         const result = {};
         for (const type of eventTypes) result[type] = { prospects: 0, agents: 0, total: 0 };
         for (const ev of events) {
@@ -32695,19 +32766,26 @@ ALTER TABLE public.promotions
         }
     }
 
-    // Build table rows asynchronously
+    // Preload customers + prospects once (was N+1 sequential getById in the loop)
+    const [allCustomers, allProspects] = await Promise.all([
+        AppDataStore.getAll('customers'),
+        AppDataStore.getAll('prospects'),
+    ]);
+    const customersById = new Map((allCustomers || []).map(c => [String(c.id), c]));
+    const prospectsById = new Map((allProspects || []).map(p => [String(p.id), p]));
+
     const rows = [];
     for (const p of purchases) {
-        let customer = await AppDataStore.getById('customers', p.customer_id);
+        let customer = customersById.get(String(p.customer_id));
         let customerType = 'customer';
         if (!customer) {
-            customer = await AppDataStore.getById('prospects', p.customer_id);
+            customer = prospectsById.get(String(p.customer_id));
             customerType = 'prospect';
         }
-        
+
         const customerName = customer ? (customer.full_name || customer.name) : 'Deleted Member';
         const customerId = customer ? customer.id : null;
-        const profileLink = customerId 
+        const profileLink = customerId
             ? `<a href="#" onclick="UI.hideModal(); app.showProfile(${customerId}, '${customerType}'); return false;">${escapeHtml(customerName)}</a>`
             : escapeHtml(customerName);
         
@@ -34084,12 +34162,17 @@ const simulateCampaignSending = async (campaignId) => {
     };
 
     const exportCampaignReport = async (campaignId) => {
-        const campaign = await AppDataStore.getById('whatsapp_campaigns', campaignId);
-        const messages = (await AppDataStore.getAll('campaign_messages')).filter(m => m.campaign_id === campaignId);
+        const [campaign, allMessages, allProspects] = await Promise.all([
+            AppDataStore.getById('whatsapp_campaigns', campaignId),
+            AppDataStore.getAll('campaign_messages'),
+            AppDataStore.getAll('prospects'),
+        ]);
+        const messages = (allMessages || []).filter(m => m.campaign_id === campaignId);
+        const prospectsById = new Map((allProspects || []).map(p => [String(p.id), p]));
 
         let csv = "Recipient,Phone,Status,SentAt,DeliveredAt,OpenedAt,RepliedAt\n";
         for (const m of messages) {
-            const p = await AppDataStore.getById('prospects', m.prospect_id);
+            const p = prospectsById.get(String(m.prospect_id));
             csv += `"${p?.full_name || 'Unknown'}", "${p?.phone || ''}", ${m.status}, "${m.sent_at || ''}", "${m.delivered_at || ''}", "${m.opened_at || ''}", "${m.replied_at || ''}"\n`;
         }
 
@@ -35286,15 +35369,19 @@ const simulateCampaignSending = async (campaignId) => {
     };
 
     const openReassignModal = async (prospectId) => {
-        const prospect = await AppDataStore.getById('prospects', prospectId);
+        const [prospect, allActivities, allUsers, allProspectsForCap] = await Promise.all([
+            AppDataStore.getById('prospects', prospectId),
+            AppDataStore.getAll('activities'),
+            AppDataStore.getAll('users'),
+            AppDataStore.getAll('prospects'),
+        ]);
         if (!prospect) { UI.toast.error('Prospect not found'); return; }
-        const currentAgent = prospect.responsible_agent_id ? await AppDataStore.getById('users', prospect.responsible_agent_id) : null;
-        const allActivities = await AppDataStore.getAll('activities');
+        const currentAgent = prospect.responsible_agent_id
+            ? allUsers.find(u => String(u.id) === String(prospect.responsible_agent_id)) || null
+            : null;
         const pActs = allActivities.filter(a => String(a.prospect_id) === String(prospectId)).sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
         const lastAct = pActs[0];
         const daysSince = lastAct ? Math.floor((Date.now() - new Date(lastAct.activity_date)) / (1000 * 60 * 60 * 24)) : 999;
-        const allUsers = await AppDataStore.getAll('users');
-        const allProspectsForCap = await AppDataStore.getAll('prospects');
         const activeAgents = allUsers.filter(u => {
             const lvl = _getUserLevel(u);
             return lvl >= 3 && lvl <= 11 && u.status !== 'deleted' && u.id !== prospect.responsible_agent_id;
@@ -35407,11 +35494,13 @@ const simulateCampaignSending = async (campaignId) => {
     };
 
     const bulkReassign = async (agentId) => {
-        const agent = await AppDataStore.getById('users', agentId);
+        const [agent, allProspects, allActivities, allUsers] = await Promise.all([
+            AppDataStore.getById('users', agentId),
+            AppDataStore.getAll('prospects'),
+            AppDataStore.getAll('activities'),
+            AppDataStore.getAll('users'),
+        ]);
         if (!agent) { UI.toast.error('Agent not found'); return; }
-        const allProspects = await AppDataStore.getAll('prospects');
-        const allActivities = await AppDataStore.getAll('activities');
-        const allUsers = await AppDataStore.getAll('users');
         const now = new Date();
         const agentProspects = allProspects.filter(p => String(p.responsible_agent_id) === String(agentId));
         const inactiveProspects = agentProspects.filter(p => {
@@ -35523,9 +35612,11 @@ const simulateCampaignSending = async (campaignId) => {
 
     const exportFollowupReport = async () => {
         try {
-            const prospects = await AppDataStore.getAll('prospects');
-            const agents = await AppDataStore.getAll('users');
-            const activities = await AppDataStore.getAll('activities');
+            const [prospects, agents, activities] = await Promise.all([
+                AppDataStore.getAll('prospects'),
+                AppDataStore.getAll('users'),
+                AppDataStore.getAll('activities'),
+            ]);
             const agentMap = Object.fromEntries(agents.map(a => [a.id, a.full_name]));
             const now = new Date();
             const rows = prospects.map(p => {
