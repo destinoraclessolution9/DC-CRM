@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 
 <head>
     <meta charset="UTF-8">
@@ -13,8 +13,18 @@
     <link rel="icon" href="favicon.ico" type="image/x-icon">
     <link rel="stylesheet" href="styles-fixed.css">
     <link rel="stylesheet" href="styles-mobile.css">
+    <link rel="stylesheet" href="styles-theme.css?v=20260424a">
     <link rel="manifest" href="manifest.json">
-    <meta name="theme-color" content="#2563eb">
+    <meta name="theme-color" content="#800020">
+    <script>
+        // Restore persisted theme before paint to avoid flash
+        (function() {
+            try {
+                const saved = localStorage.getItem('docs-theme') || 'light';
+                document.documentElement.setAttribute('data-theme', saved);
+            } catch (e) {}
+        })();
+    </script>
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="FS CRM">
@@ -193,17 +203,63 @@
             </ul>
 
             <div class="bar-right">
+                <div class="live-status" id="live-status" title="Connection status">
+                    <span class="dot"></span>
+                    <span id="live-status-label">LIVE</span>
+                </div>
+                <button class="theme-toggle" id="theme-toggle" title="Toggle theme (Ctrl+Shift+L)" aria-label="Toggle theme">
+                    <i class="fas fa-moon" id="theme-toggle-icon"></i>
+                </button>
+                <button class="theme-toggle" id="cmdk-trigger" title="Command palette (Ctrl+K)" aria-label="Open command palette">
+                    <i class="fas fa-search"></i>
+                </button>
                 <div class="notif-bell">
                     <i class="fas fa-bell"></i>
                     <span class="badget">0</span>
                 </div>
                 <div class="user-info" id="current-user-display">
                     <span id="user-name-label">Guest</span>
-                    <img id="user-avatar" src="https://ui-avatars.com/api/?name=Guest&background=8B0000&color=fff"
+                    <img id="user-avatar" src="https://ui-avatars.com/api/?name=Guest&background=800020&color=fff"
                         alt="Avatar">
                 </div>
             </div>
         </nav>
+
+        <!-- Mobile bottom nav (visible <768px) -->
+        <nav class="mobile-bottom-nav" id="mobile-bottom-nav">
+            <a class="mobile-bottom-nav-item active" data-view="calendar" href="#" onclick="event.preventDefault(); app.navigateTo && app.navigateTo('calendar');">
+                <i class="fas fa-calendar"></i><span>Calendar</span>
+            </a>
+            <a class="mobile-bottom-nav-item" data-view="prospects" href="#" onclick="event.preventDefault(); app.navigateTo && app.navigateTo('prospects');">
+                <i class="fas fa-users"></i><span>Customers</span>
+            </a>
+            <a class="mobile-bottom-nav-item" data-view="pipeline" href="#" onclick="event.preventDefault(); app.navigateTo && app.navigateTo('pipeline');">
+                <i class="fas fa-chart-line"></i><span>Pipeline</span>
+            </a>
+            <a class="mobile-bottom-nav-item" data-view="reports" href="#" onclick="event.preventDefault(); app.navigateTo && app.navigateTo('reports');">
+                <i class="fas fa-chart-pie"></i><span>Reports</span>
+            </a>
+            <a class="mobile-bottom-nav-item" id="mobile-more" href="#" onclick="event.preventDefault(); app.openMobileDrawer && app.openMobileDrawer();">
+                <i class="fas fa-bars"></i><span>More</span>
+            </a>
+        </nav>
+
+        <!-- Command palette (Ctrl+K) -->
+        <div class="cmdk-overlay" id="cmdk-overlay" onclick="if(event.target===this){this.classList.remove('active');}">
+            <div class="cmdk-panel" role="dialog" aria-label="Command palette">
+                <div class="cmdk-input-row">
+                    <i class="fas fa-search"></i>
+                    <input type="text" class="cmdk-input" id="cmdk-input" placeholder="Search views, customers, agents, actions..." autocomplete="off">
+                    <span class="cmdk-kbd">ESC</span>
+                </div>
+                <div class="cmdk-results" id="cmdk-results"></div>
+                <div class="cmdk-footer">
+                    <span><span class="cmdk-kbd">↑</span> <span class="cmdk-kbd">↓</span> navigate</span>
+                    <span><span class="cmdk-kbd">↵</span> open</span>
+                    <span>Oracle Console</span>
+                </div>
+            </div>
+        </div>
 
         <div class="main-layout">
             <!-- Fixed Sidebar -->
@@ -407,6 +463,236 @@
             window._installPromptEvent = e;
             console.log('[PWA] Install prompt available');
         });
+
+        // ========== Oracle Console: Theme toggle ==========
+        (function () {
+            function applyTheme(theme) {
+                document.documentElement.setAttribute('data-theme', theme);
+                try { localStorage.setItem('docs-theme', theme); } catch (e) {}
+                const icon = document.getElementById('theme-toggle-icon');
+                if (icon) icon.className = theme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
+                const meta = document.querySelector('meta[name="theme-color"]');
+                if (meta) meta.setAttribute('content', theme === 'dark' ? '#14090C' : '#800020');
+            }
+            function toggleTheme() {
+                const current = document.documentElement.getAttribute('data-theme') || 'light';
+                applyTheme(current === 'dark' ? 'light' : 'dark');
+            }
+            document.addEventListener('DOMContentLoaded', () => {
+                applyTheme(localStorage.getItem('docs-theme') || 'light');
+                const btn = document.getElementById('theme-toggle');
+                if (btn) btn.addEventListener('click', toggleTheme);
+            });
+            document.addEventListener('keydown', (e) => {
+                if (e.ctrlKey && e.shiftKey && (e.key === 'L' || e.key === 'l')) {
+                    e.preventDefault();
+                    toggleTheme();
+                }
+            });
+            window._toggleTheme = toggleTheme;
+        })();
+
+        // ========== Oracle Console: Command palette (Ctrl+K) ==========
+        (function () {
+            const COMMANDS = [
+                { section: 'Navigate', label: 'Calendar',                          icon: 'fa-calendar',         view: 'calendar' },
+                { section: 'Navigate', label: 'Prospect / Customer',               icon: 'fa-users',            view: 'prospects' },
+                { section: 'Navigate', label: 'Referral Relationship',             icon: 'fa-share-nodes',      view: 'referrals' },
+                { section: 'Navigate', label: 'Potential Pipeline',                icon: 'fa-chart-line',       view: 'pipeline' },
+                { section: 'Navigate', label: 'Monthly Promotion',                 icon: 'fa-bullhorn',         view: 'promotions' },
+                { section: 'Navigate', label: 'Marketing Automation',              icon: 'fa-robot',            view: 'marketing_automation' },
+                { section: 'Navigate', label: 'Success Case Library',              icon: 'fa-book-open',        view: 'cases' },
+                { section: 'Navigate', label: 'Consultant',                        icon: 'fa-user-tie',         view: 'agents' },
+                { section: 'Navigate', label: 'Ranking Performance',               icon: 'fa-trophy',           view: 'performance' },
+                { section: 'Navigate', label: 'Reporting KPI',                     icon: 'fa-chart-pie',        view: 'reports' },
+                { section: 'Navigate', label: 'Consultant Attrition Risk',        icon: 'fa-triangle-exclamation', view: 'risk' },
+                { section: 'Navigate', label: 'Document Management',               icon: 'fa-folder-open',      view: 'documents' },
+                { section: 'Navigate', label: 'Import / Export',                   icon: 'fa-file-import',      view: 'import' },
+                { section: 'Navigate', label: 'Custom Fields',                     icon: 'fa-list-check',       view: 'custom_fields' },
+                { section: 'Navigate', label: 'Integrations',                      icon: 'fa-plug',             view: 'integrations' },
+                { section: 'Navigate', label: 'Setting - Account',                 icon: 'fa-gear',             view: 'settings' },
+                { section: 'Navigate', label: 'Protection Monitoring',             icon: 'fa-shield-halved',    view: 'protection' },
+                { section: 'Action',   label: 'Toggle Light / Dark Theme',         icon: 'fa-circle-half-stroke', action: () => window._toggleTheme && window._toggleTheme(), meta: 'Ctrl+Shift+L' },
+                { section: 'Action',   label: 'Logout',                            icon: 'fa-right-from-bracket', action: () => window.app && window.app.logout && window.app.logout() },
+            ];
+
+            let activeIdx = 0;
+            let filtered = [];
+
+            function open() {
+                document.getElementById('cmdk-overlay').classList.add('active');
+                const input = document.getElementById('cmdk-input');
+                input.value = '';
+                render('');
+                setTimeout(() => input.focus(), 30);
+            }
+            function close() {
+                document.getElementById('cmdk-overlay').classList.remove('active');
+            }
+            function score(label, q) {
+                if (!q) return 1;
+                const l = label.toLowerCase();
+                const qq = q.toLowerCase();
+                if (l.startsWith(qq)) return 100;
+                if (l.includes(qq))   return 50;
+                let i = 0, j = 0;
+                while (i < l.length && j < qq.length) {
+                    if (l[i] === qq[j]) j++;
+                    i++;
+                }
+                return j === qq.length ? 10 : 0;
+            }
+            function render(q) {
+                filtered = COMMANDS
+                    .map(c => ({ c, s: score(c.label, q) }))
+                    .filter(x => x.s > 0)
+                    .sort((a, b) => b.s - a.s)
+                    .map(x => x.c);
+                activeIdx = 0;
+                const root = document.getElementById('cmdk-results');
+                if (!filtered.length) {
+                    root.innerHTML = '<div class="cmdk-empty">No matches. Try another query.</div>';
+                    return;
+                }
+                let html = '';
+                let lastSection = '';
+                filtered.forEach((c, i) => {
+                    if (c.section !== lastSection) {
+                        html += `<div class="cmdk-section">${c.section}</div>`;
+                        lastSection = c.section;
+                    }
+                    html += `<div class="cmdk-item ${i === activeIdx ? 'active' : ''}" data-idx="${i}">
+                        <span class="cmdk-icon"><i class="fas ${c.icon}"></i></span>
+                        <span>${c.label}</span>
+                        ${c.meta ? `<span class="cmdk-meta">${c.meta}</span>` : ''}
+                    </div>`;
+                });
+                root.innerHTML = html;
+                root.querySelectorAll('.cmdk-item').forEach(el => {
+                    el.addEventListener('mouseenter', () => {
+                        activeIdx = parseInt(el.dataset.idx, 10);
+                        updateActive();
+                    });
+                    el.addEventListener('click', () => execute(filtered[parseInt(el.dataset.idx, 10)]));
+                });
+            }
+            function updateActive() {
+                document.querySelectorAll('.cmdk-item').forEach((el, i) => {
+                    el.classList.toggle('active', i === activeIdx);
+                });
+                const active = document.querySelector('.cmdk-item.active');
+                if (active) active.scrollIntoView({ block: 'nearest' });
+            }
+            function execute(cmd) {
+                if (!cmd) return;
+                close();
+                if (cmd.view && window.app && window.app.navigateTo) window.app.navigateTo(cmd.view);
+                else if (cmd.action) cmd.action();
+            }
+
+            document.addEventListener('keydown', (e) => {
+                const isCmdK = (e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K');
+                if (isCmdK) { e.preventDefault(); open(); return; }
+                const overlay = document.getElementById('cmdk-overlay');
+                if (!overlay || !overlay.classList.contains('active')) return;
+                if (e.key === 'Escape')      { e.preventDefault(); close(); }
+                else if (e.key === 'ArrowDown') { e.preventDefault(); if (filtered.length) { activeIdx = (activeIdx + 1) % filtered.length; updateActive(); } }
+                else if (e.key === 'ArrowUp')   { e.preventDefault(); if (filtered.length) { activeIdx = (activeIdx - 1 + filtered.length) % filtered.length; updateActive(); } }
+                else if (e.key === 'Enter')     { e.preventDefault(); execute(filtered[activeIdx]); }
+            });
+            document.addEventListener('DOMContentLoaded', () => {
+                const input = document.getElementById('cmdk-input');
+                if (input) input.addEventListener('input', e => render(e.target.value));
+                const trigger = document.getElementById('cmdk-trigger');
+                if (trigger) trigger.addEventListener('click', open);
+            });
+        })();
+
+        // ========== Oracle Console: Live status (online/offline) ==========
+        (function () {
+            function update() {
+                const el = document.getElementById('live-status');
+                const lbl = document.getElementById('live-status-label');
+                if (!el || !lbl) return;
+                if (navigator.onLine) {
+                    el.classList.remove('offline');
+                    lbl.textContent = 'LIVE';
+                } else {
+                    el.classList.add('offline');
+                    lbl.textContent = 'OFFLINE';
+                }
+            }
+            window.addEventListener('online', update);
+            window.addEventListener('offline', update);
+            document.addEventListener('DOMContentLoaded', update);
+        })();
+
+        // ========== Oracle Console: Mobile bottom nav active sync ==========
+        (function () {
+            function sync() {
+                const view = (window.app && window.app._currentView) || 'calendar';
+                document.querySelectorAll('.mobile-bottom-nav-item[data-view]').forEach(el => {
+                    el.classList.toggle('active', el.dataset.view === view);
+                });
+            }
+            // Hook navigateTo to sync after navigation
+            const tryHook = () => {
+                if (!window.app || !window.app.navigateTo || window.app._navHooked) return;
+                const original = window.app.navigateTo.bind(window.app);
+                window.app.navigateTo = function (v) {
+                    const r = original(v);
+                    window.app._currentView = v;
+                    sync();
+                    return r;
+                };
+                window.app._navHooked = true;
+            };
+            document.addEventListener('DOMContentLoaded', () => {
+                let tries = 0;
+                const id = setInterval(() => {
+                    tryHook();
+                    if (window.app && window.app._navHooked) { clearInterval(id); sync(); }
+                    if (++tries > 40) clearInterval(id);
+                }, 250);
+            });
+        })();
+
+        // ========== Oracle Console: Chart.js dark-theme defaults ==========
+        (function () {
+            function applyChartDefaults() {
+                if (typeof window.Chart === 'undefined') return false;
+                const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+                const text   = isDark ? '#C7B19A' : '#6B4226';
+                const grid   = isDark ? 'rgba(255,200,200,0.06)' : 'rgba(139,0,32,0.08)';
+                const accent = isDark ? '#E94560' : '#800020';
+                Chart.defaults.color = text;
+                Chart.defaults.borderColor = grid;
+                Chart.defaults.font.family = "'Inter', sans-serif";
+                if (Chart.defaults.scale) {
+                    Chart.defaults.scale.grid = Chart.defaults.scale.grid || {};
+                    Chart.defaults.scale.grid.color = grid;
+                }
+                Chart.defaults.plugins = Chart.defaults.plugins || {};
+                Chart.defaults.plugins.legend = Chart.defaults.plugins.legend || {};
+                Chart.defaults.plugins.legend.labels = Chart.defaults.plugins.legend.labels || {};
+                Chart.defaults.plugins.legend.labels.color = text;
+                Chart.defaults.plugins.tooltip = Chart.defaults.plugins.tooltip || {};
+                Chart.defaults.plugins.tooltip.backgroundColor = isDark ? 'rgba(30,17,21,0.95)' : 'rgba(255,255,255,0.98)';
+                Chart.defaults.plugins.tooltip.titleColor = text;
+                Chart.defaults.plugins.tooltip.bodyColor = text;
+                Chart.defaults.plugins.tooltip.borderColor = accent;
+                Chart.defaults.plugins.tooltip.borderWidth = 1;
+                Chart.defaults.plugins.tooltip.padding = 10;
+                Chart.defaults.plugins.tooltip.cornerRadius = 8;
+                window._chartThemeApplied = true;
+                return true;
+            }
+            // Try repeatedly — Chart.js is loaded on-demand
+            const id = setInterval(() => { if (applyChartDefaults()) clearInterval(id); }, 500);
+            // Re-apply on theme change
+            const obs = new MutationObserver(() => { if (window.Chart) applyChartDefaults(); });
+            obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+        })();
     </script>
 </body>
 
