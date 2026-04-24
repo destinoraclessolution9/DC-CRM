@@ -7812,19 +7812,7 @@ function _wireLoginBtn() {
     // which opens Quick Add Activity (CPS) pre-filled; agent adds referrer+relation to confirm.
 
     const openShareCpsIntakeLinkModal = async () => {
-        // Fetch venues (same pattern as openActivityModal)
-        let venueData = [];
-        if (window.SUPABASE_URL && window.SUPABASE_SR) {
-            try {
-                const resp = await fetch(`${window.SUPABASE_URL}/rest/v1/venues?select=*`, {
-                    headers: { 'Authorization': `Bearer ${window.SUPABASE_SR}`, 'apikey': window.SUPABASE_SR }
-                });
-                if (resp.ok) venueData = await resp.json();
-            } catch (_) {}
-        }
-        if (!venueData || venueData.length === 0) {
-            venueData = await AppDataStore.getAll('venues').catch(() => []);
-        }
+        const venueData = await AppDataStore.getAll('venues').catch(() => []);
         const venueOptions = (venueData || [])
             .sort((a, b) => (a.sequence || 0) - (b.sequence || 0))
             .map(v => `<option value="${v.id}" data-name="${(v.name || '').replace(/"/g, '&quot;')}" data-address="${(v.address || v.location || '').replace(/"/g, '&quot;')}" data-waze="${(v.waze_link || '').replace(/"/g, '&quot;')}">${v.name} | ${v.location || ''}</option>`)
@@ -13528,19 +13516,7 @@ function _wireLoginBtn() {
         const all = await AppDataStore.getAll('activities');
         const activity = (await AppDataStore.getById('activities', activityId)) || all.find(a => a.id == activityId);
         if (!activity) return;
-        // Always fetch venues via direct REST with service-role key (bypasses RLS for all users)
-        let venues = [];
-        if (window.SUPABASE_URL && window.SUPABASE_SR) {
-            try {
-                const resp = await fetch(`${window.SUPABASE_URL}/rest/v1/venues?select=*`, {
-                    headers: { 'Authorization': `Bearer ${window.SUPABASE_SR}`, 'apikey': window.SUPABASE_SR }
-                });
-                if (resp.ok) venues = await resp.json();
-            } catch (_) {}
-        }
-        if (!venues || venues.length === 0) {
-            venues = await AppDataStore.getAll('venues');
-        }
+        const venues = await AppDataStore.getAll('venues').catch(() => []);
         const venueRequiredTypes = ['CPS','FTF','EVENT','GR','XG'];
         const venueRequired = venueRequiredTypes.includes(activity.activity_type);
         // Pre-populate co-agent state from this activity so the shared add/edit helpers
@@ -14277,19 +14253,7 @@ function _wireLoginBtn() {
         window._cpsDuplicateConfirmed = false;
 
         // Pre-fetch lookup data BEFORE building the template (safer than await inside template literals)
-        // Always fetch venues via direct REST with service-role key (bypasses RLS for all users)
-        let _venueData = [];
-        if (window.SUPABASE_URL && window.SUPABASE_SR) {
-            try {
-                const resp = await fetch(`${window.SUPABASE_URL}/rest/v1/venues?select=*`, {
-                    headers: { 'Authorization': `Bearer ${window.SUPABASE_SR}`, 'apikey': window.SUPABASE_SR }
-                });
-                if (resp.ok) _venueData = await resp.json();
-            } catch (_) {}
-        }
-        if (!_venueData || _venueData.length === 0) {
-            _venueData = await AppDataStore.getAll('venues');
-        }
+        const _venueData = await AppDataStore.getAll('venues').catch(() => []);
         const _venueOptions = (_venueData || [])
             .sort((a, b) => (a.sequence || 0) - (b.sequence || 0))
             .map(v => `<option value="${v.name} | ${v.location}">${v.name} | ${v.location}</option>`)
@@ -16152,49 +16116,12 @@ function _wireLoginBtn() {
             newType = checked ? (solarOn ? 'both' : 'lunar') : (solarOn ? 'solar' : null);
         }
 
-        // Write DIRECTLY via service-role REST instead of AppDataStore.update().
-        // AppDataStore.update() silently falls back to localStorage on any error
-        // (schema cache miss, RLS rejection, network blip) and returns without
-        // throwing — so the toast would show "updated" while the server value
-        // was never touched, and the next profile re-render would show the
-        // checkbox reverting to its previous state ("tick doesn't flow over").
-        // A direct PATCH with the service-role key bypasses RLS entirely and
-        // surfaces real errors to the user.
         let writeOk = false;
-        if (window.SUPABASE_URL && window.SUPABASE_SR) {
-            try {
-                const resp = await fetch(
-                    `${window.SUPABASE_URL}/rest/v1/prospects?id=eq.${encodeURIComponent(prospectId)}`,
-                    {
-                        method: 'PATCH',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${window.SUPABASE_SR}`,
-                            'apikey': window.SUPABASE_SR,
-                            'Prefer': 'return=representation'
-                        },
-                        body: JSON.stringify({ life_chart_type: newType })
-                    }
-                );
-                if (resp.ok) {
-                    writeOk = true;
-                } else {
-                    const errTxt = await resp.text();
-                    console.warn('toggleLifeChartType PATCH failed:', resp.status, errTxt);
-                }
-            } catch (e) {
-                console.warn('toggleLifeChartType PATCH threw:', e);
-            }
-        }
-
-        // Fallback path: use AppDataStore.update() if the direct PATCH was unavailable.
-        if (!writeOk) {
-            try {
-                await AppDataStore.update('prospects', prospectId, { life_chart_type: newType });
-                writeOk = true;
-            } catch (e) {
-                console.warn('AppDataStore.update fallback failed:', e);
-            }
+        try {
+            await AppDataStore.update('prospects', prospectId, { life_chart_type: newType });
+            writeOk = true;
+        } catch (e) {
+            console.warn('life_chart_type update failed:', e);
         }
 
         if (!writeOk) {
@@ -25042,38 +24969,18 @@ const renderCurrentAssignments = async (agentId) => {
             };
             await AppDataStore.create('users', newAgent);
 
-            // Create Supabase Auth account via admin API (no session disruption)
+            // Create Supabase Auth account via the admin-auth-ops Edge Function,
+            // which holds service_role as a server-side secret. If it already
+            // exists, the function updates the password instead.
             try {
-                const SR = window.SUPABASE_SR;
-                const BASE = window.SUPABASE_URL;
-                const createResp = await fetch(`${BASE}/auth/v1/admin/users`, {
-                    method: 'POST',
-                    headers: { 'Authorization': `Bearer ${SR}`, 'apikey': SR, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ email: fields.email, password: initialPassword, email_confirm: true, user_metadata: { full_name: name } })
+                const { data: res, error } = await window.supabase.functions.invoke('admin-auth-ops', {
+                    body: { op: 'create-user', email: fields.email, password: initialPassword, full_name: name },
                 });
-                const createData = await createResp.json();
-                if (!createResp.ok) {
-                    // If user already exists, update their password to the new temp password
-                    const alreadyExists = createData.message?.toLowerCase().includes('already') || createData.msg?.toLowerCase().includes('already');
-                    if (alreadyExists) {
-                        const listResp = await fetch(`${BASE}/auth/v1/admin/users?per_page=1000`, {
-                            headers: { 'Authorization': `Bearer ${SR}`, 'apikey': SR }
-                        });
-                        const listData = await listResp.json();
-                        const existingUser = listData?.users?.find(u => u.email === fields.email);
-                        if (existingUser?.id) {
-                            await fetch(`${BASE}/auth/v1/admin/users/${existingUser.id}`, {
-                                method: 'PUT',
-                                headers: { 'Authorization': `Bearer ${SR}`, 'apikey': SR, 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ password: initialPassword, email_confirm: true })
-                            });
-                        }
-                    } else {
-                        console.warn('Auth account creation warning:', createData.message || createData.msg);
-                    }
+                if (error || (res && res.ok === false)) {
+                    console.warn('Auth account creation warning:', error?.message || res?.error || 'unknown');
                 }
             } catch (authErr) {
-                console.warn('Supabase Auth account creation skipped (offline?):', authErr.message);
+                console.warn('Supabase Auth account creation skipped:', authErr?.message || authErr);
             }
 
             UI.hideModal();
@@ -25720,37 +25627,18 @@ const renderCurrentAssignments = async (agentId) => {
             await AppDataStore.update('users', agentId, { password: tempPwd, force_password_change: true });
 
             // Update Supabase Auth (create account if missing, update password if exists)
+            // via the admin-auth-ops Edge Function (holds service_role as a secret).
             let authUpdated = false;
             try {
-                const SR = window.SUPABASE_SR, BASE = window.SUPABASE_URL;
-                if (SR && BASE && agent.email) {
-                    // Try to find existing auth user by email
-                    const listResp = await fetch(`${BASE}/auth/v1/admin/users?per_page=1000`, {
-                        headers: { 'Authorization': `Bearer ${SR}`, 'apikey': SR }
+                if (agent.email) {
+                    const { data: res, error } = await window.supabase.functions.invoke('admin-auth-ops', {
+                        body: { op: 'reset-password', email: agent.email, new_password: tempPwd },
                     });
-                    const listData = await listResp.json();
-                    const existing = listData?.users?.find(u => u.email === agent.email);
-
-                    if (existing?.id) {
-                        // Update existing auth user password
-                        const upResp = await fetch(`${BASE}/auth/v1/admin/users/${existing.id}`, {
-                            method: 'PUT',
-                            headers: { 'Authorization': `Bearer ${SR}`, 'apikey': SR, 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ password: tempPwd, email_confirm: true })
-                        });
-                        authUpdated = upResp.ok;
-                    } else {
-                        // Create new Supabase Auth account
-                        const crResp = await fetch(`${BASE}/auth/v1/admin/users`, {
-                            method: 'POST',
-                            headers: { 'Authorization': `Bearer ${SR}`, 'apikey': SR, 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ email: agent.email, password: tempPwd, email_confirm: true })
-                        });
-                        authUpdated = crResp.ok;
-                    }
+                    authUpdated = !error && res && res.ok !== false;
+                    if (!authUpdated) console.warn('Supabase Auth update failed:', error?.message || res?.error || 'unknown');
                 }
             } catch (authErr) {
-                console.warn('Supabase Auth update failed:', authErr.message);
+                console.warn('Supabase Auth update failed:', authErr?.message || authErr);
             }
 
             UI.hideModal();
@@ -25771,8 +25659,8 @@ const renderCurrentAssignments = async (agentId) => {
     };
 
     const deleteAgent = async (agentId) => {
-        // Re-check role here: the delete path uses the service-role write client
-        // below (RLS bypassed), so client-side gating is the last line of defence.
+        // Re-check role here. RLS policies also gate writes, but client-side
+        // gating gives a cleaner error and avoids wasting a round trip.
         if (!(isSystemAdmin(_currentUser) || isMarketingManager(_currentUser))) {
             return UI.toast.error('You do not have permission to delete agents.');
         }
@@ -25790,7 +25678,6 @@ const renderCurrentAssignments = async (agentId) => {
     };
 
     const confirmDeleteAgent = async (agentId) => {
-        // Re-check role — this function uses the write client which bypasses RLS.
         if (!(isSystemAdmin(_currentUser) || isMarketingManager(_currentUser))) {
             UI.hideModal();
             return UI.toast.error('You do not have permission to delete agents.');
@@ -25798,7 +25685,8 @@ const renderCurrentAssignments = async (agentId) => {
         try {
             // Fetch agent BEFORE deleting so we have the email for auth deletion
             const agent = await AppDataStore.getById('users', agentId);
-            // Use the service-role write client (bypasses RLS) to clear FK references.
+            // FK cleanup runs with the caller's JWT; RLS policies must allow
+            // admin-level updates/deletes on these tables (see rls_replace_allow_all_*.sql).
             const wc = AppDataStore._writeClient();
             // Clear reporting_to references pointing to this agent
             await wc.from('users').update({ reporting_to: null }).eq('reporting_to', agentId);
@@ -32461,28 +32349,9 @@ ALTER TABLE public.promotions
   ADD COLUMN IF NOT EXISTS details        TEXT,
   ADD COLUMN IF NOT EXISTS delivery_lead_time TEXT;`.trim();
 
-        // Try via Supabase rpc('sql') – works if the function exists
-        try {
-            const client = AppDataStore._srClient || window.supabase;
-            const { error } = await client.rpc('sql', { query: migrationSQL });
-            if (!error) { return true; }
-        } catch (_) {}
-
-        // Try via direct fetch with service-role key
-        try {
-            const resp = await fetch(`${window.SUPABASE_URL}/rest/v1/rpc/sql`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'apikey': window.SUPABASE_SR,
-                    'Authorization': `Bearer ${window.SUPABASE_SR}`
-                },
-                body: JSON.stringify({ query: migrationSQL })
-            });
-            if (resp.ok) { return true; }
-        } catch (_) {}
-
-        // Both failed – show SQL to user
+        // No client-side RPC path exists: DDL cannot run via PostgREST with the
+        // anon key, and the service-role key is no longer embedded. Surface the
+        // SQL to an admin to run in the Supabase dashboard.
         const escaped = migrationSQL.replace(/</g, '&lt;').replace(/>/g, '&gt;');
         UI.showModal('⚠️ Database Migration Required', `
             <p style="margin-bottom:12px;">The <strong>promotions</strong> table is missing columns needed to save full package data. Please run this SQL once in your <a href="https://supabase.com/dashboard/project/remuwhxvzkzjtgbzqjaa/sql/new" target="_blank" rel="noopener noreferrer" style="color:var(--primary);">Supabase SQL Editor ↗</a>:</p>
