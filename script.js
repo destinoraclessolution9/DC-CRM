@@ -10794,10 +10794,25 @@ function _wireLoginBtn() {
     const deleteCaseStudy = async (id) => {
         if (confirm("Are you sure you want to delete this case? This action cannot be undone.")) {
             try {
+                // Read row first so we know which photos to clean up from Storage.
+                const c = await AppDataStore.getById('case_studies', id).catch(() => null);
+                const photoUrls = c && Array.isArray(c.photo_urls) ? c.photo_urls : [];
+
                 const tags = await AppDataStore.getAll('entity_tags').catch(() => []);
                 for (const t of tags.filter(t => t.entity_type === 'case_study' && String(t.entity_id) === String(id)))
                     await AppDataStore.delete('entity_tags', t.id);
                 await AppDataStore.delete('case_studies', id);
+
+                // Cascade-delete the photo objects from the `attachments`
+                // bucket so we don't leak orphaned files. Best-effort —
+                // failures here don't roll back the row deletion.
+                if (photoUrls.length && AppDataStore.deleteAttachmentByPath && AppDataStore.extractAttachmentPath) {
+                    for (const url of photoUrls) {
+                        const path = AppDataStore.extractAttachmentPath(url);
+                        if (path) await AppDataStore.deleteAttachmentByPath(path);
+                    }
+                }
+
                 UI.toast.success("Case deleted.");
                 await renderCasesList();
             } catch (err) {
@@ -25333,7 +25348,19 @@ const renderCurrentAssignments = async (agentId) => {
     };
 
     // Mirror for email — grouping is case-insensitive.
+    // Prefers server-side RPC `_fs_email_dupes` (added 2026-04-24), falls
+    // back to a client-side scan if the RPC isn't available yet (so the
+    // feature still works pre-migration).
     const _loadEmailDupes = async () => {
+        try {
+            const { data, error } = await window.supabase.rpc('_fs_email_dupes').catch(() => ({ data: null, error: 'no-rpc' }));
+            if (data && !error) {
+                return data.map(row => ({
+                    email: row.email,
+                    group: Array.isArray(row.group_json) ? row.group_json : (row.group_json || [])
+                }));
+            }
+        } catch (_) {}
         const rows = await AppDataStore.getActiveProspects({ includeDormant: true, limit: 50000 });
         const byEmail = new Map();
         for (const p of rows) {

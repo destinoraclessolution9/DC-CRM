@@ -163,9 +163,18 @@ const TOTPManager = {
         user.mfa_method = TwoFactorMethod.TOTP;
         user.mfa_enabled_at = new Date().toISOString();
 
-        // Generate backup codes before the first write so we save them atomically
+        // Generate backup codes — return plaintext to the user (one-time
+        // display) but persist only SHA-256 hashes with per-code random salt.
+        // This way a DB read never yields a usable backup code.
         const backupCodes = TOTPManager.generateBackupCodes();
-        user.mfa_backup_codes = backupCodes;
+        user.mfa_backup_codes = await Promise.all(
+            backupCodes.map(async code => {
+                const salt = Array.from(crypto.getRandomValues(new Uint8Array(16)),
+                    b => b.toString(16).padStart(2, '0')).join('');
+                const hash = await TOTPManager.hashBackupCode(code, salt);
+                return { hash, salt, used: false };
+            })
+        );
         await AppDataStore.update('users', userId, user);
 
         _safeAudit('info', 'SECURITY', 'MFA_ENABLE', { user_id: userId, method: TwoFactorMethod.TOTP });
@@ -173,7 +182,8 @@ const TOTPManager = {
         return { success: true, backupCodes };
     },
 
-    // Generate backup codes
+    // Generate backup codes (plaintext) — caller is responsible for hashing
+    // before persistence and showing the plaintext to the user only once.
     generateBackupCodes: (count = 10) => {
         const codes = [];
         for (let i = 0; i < count; i++) {
@@ -182,6 +192,40 @@ const TOTPManager = {
             codes.push(Array.from(raw, b => b.toString(16).padStart(2, '0')).join('').toUpperCase());
         }
         return codes;
+    },
+
+    // SHA-256(code + salt). Returns hex.
+    hashBackupCode: async (code, salt) => {
+        const enc = new TextEncoder().encode(code + ':' + salt);
+        const buf = await crypto.subtle.digest('SHA-256', enc);
+        return Array.from(new Uint8Array(buf), b => b.toString(16).padStart(2, '0')).join('');
+    },
+
+    // Constant-time backup-code check. Marks the matching slot as used so a
+    // code can never be replayed. Returns true on success.
+    consumeBackupCode: async (userId, code) => {
+        const user = await AppDataStore.getById('users', userId);
+        if (!user || !Array.isArray(user.mfa_backup_codes)) return false;
+        const normalized = (code || '').trim().toUpperCase();
+        let matchedIdx = -1;
+        // Walk every slot to keep timing flat
+        for (let i = 0; i < user.mfa_backup_codes.length; i++) {
+            const slot = user.mfa_backup_codes[i];
+            if (!slot || slot.used || !slot.hash || !slot.salt) continue;
+            const h = await TOTPManager.hashBackupCode(normalized, slot.salt);
+            // Constant-time string compare
+            let diff = h.length ^ slot.hash.length;
+            for (let k = 0; k < Math.max(h.length, slot.hash.length); k++) {
+                diff |= (h.charCodeAt(k) || 0) ^ (slot.hash.charCodeAt(k) || 0);
+            }
+            if (diff === 0 && matchedIdx === -1) matchedIdx = i;
+        }
+        if (matchedIdx === -1) return false;
+        user.mfa_backup_codes[matchedIdx].used = true;
+        user.mfa_backup_codes[matchedIdx].used_at = new Date().toISOString();
+        await AppDataStore.update('users', userId, user);
+        _safeAudit('warn', 'SECURITY', 'MFA_BACKUP_CODE_USED', { user_id: userId, slot: matchedIdx });
+        return true;
     },
 
     // Disable MFA

@@ -1624,6 +1624,55 @@ class DataStore {
     // Aliases used throughout script.js
     async getById(tableName, id) { return this.get(tableName, id); }
     async create(tableName, record) { return this.add(tableName, record); }
+
+    // ===== Storage helpers =====
+    // Returns a short-lived signed URL for an object in the `attachments`
+    // bucket. Use this for new code paths so callers persist the storage
+    // *path* (not a permanent public URL) and re-sign at render time.
+    // ttlSeconds defaults to 1 hour. Returns null if Supabase isn't ready
+    // or the path is empty.
+    async getSignedAttachmentUrl(objectPath, ttlSeconds = 3600) {
+        if (!objectPath || typeof objectPath !== 'string') return null;
+        const sb = window.supabase;
+        if (!sb || !sb.storage) return null;
+        try {
+            const { data, error } = await sb.storage
+                .from('attachments')
+                .createSignedUrl(objectPath, ttlSeconds);
+            if (error) {
+                console.warn('[storage] signed URL failed for', objectPath, error.message);
+                return null;
+            }
+            return data?.signedUrl || null;
+        } catch (e) {
+            console.warn('[storage] signed URL exception for', objectPath, e?.message);
+            return null;
+        }
+    }
+
+    // Delete a single object from the `attachments` bucket. Returns true on
+    // success. Used by case-study deletion etc. to avoid orphaned files.
+    async deleteAttachmentByPath(objectPath) {
+        if (!objectPath || typeof objectPath !== 'string') return false;
+        const sb = window.supabase;
+        if (!sb || !sb.storage) return false;
+        try {
+            const { error } = await sb.storage.from('attachments').remove([objectPath]);
+            if (error) console.warn('[storage] delete failed for', objectPath, error.message);
+            return !error;
+        } catch (e) {
+            console.warn('[storage] delete exception for', objectPath, e?.message);
+            return false;
+        }
+    }
+
+    // Given a public URL produced by `getPublicUrl`, extract the object path
+    // inside the bucket. Returns null if the URL doesn't match.
+    extractAttachmentPath(publicUrl) {
+        if (!publicUrl || typeof publicUrl !== 'string') return null;
+        const m = publicUrl.match(/\/storage\/v1\/object\/public\/attachments\/(.+?)(?:\?|$)/);
+        return m ? decodeURIComponent(m[1]) : null;
+    }
 }
 
 // Create and protect the global instance

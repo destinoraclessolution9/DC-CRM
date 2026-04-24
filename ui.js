@@ -13,6 +13,34 @@ window.UI = (() => {
             .replace(/'/g, '&#039;');
     };
 
+    // Escape a value to be embedded inside a single-quoted JS string within
+    // an HTML attribute, e.g. onclick="app.foo('${escJsAttr(name)}')".
+    // Handles backslash, quotes, newlines, < (HTML parser end-of-script
+    // confusion), and non-printables. Numeric IDs should still use
+    // requireNumericId() for defense in depth.
+    const escJsAttr = (unsafe) => {
+        if (unsafe === null || unsafe === undefined) return '';
+        return String(unsafe)
+            .replace(/\\/g, '\\\\')
+            .replace(/'/g,  "\\'")
+            .replace(/"/g,  '&quot;')
+            .replace(/\r/g, '\\r')
+            .replace(/\n/g, '\\n')
+            .replace(/</g,  '\\x3c')
+            .replace(/>/g,  '\\x3e')
+            .replace(/&/g,  '&amp;');
+    };
+
+    // Validates that a value can safely be interpolated as a numeric literal
+    // in an onclick attribute (e.g. onclick="app.foo(${requireNumericId(id)})").
+    // Throws if the value isn't a finite integer string. Use this on every
+    // *Id field that comes from a row/record before embedding.
+    const requireNumericId = (v) => {
+        if (typeof v === 'number' && Number.isFinite(v) && Number.isInteger(v)) return v;
+        if (typeof v === 'string' && /^-?\d{1,18}$/.test(v)) return v;
+        throw new Error('requireNumericId: refusing to embed non-numeric value: ' + String(v).slice(0, 64));
+    };
+
     // --- Button Loading State ---
     const _loadingBtns = new Map(); // btn element -> original innerHTML
     let _loadTimer = null;
@@ -164,6 +192,8 @@ window.UI = (() => {
         hideModal,
         formatDate,
         formatNumber,
-        escapeHtml
+        escapeHtml,
+        escJsAttr,
+        requireNumericId
     };
 })();

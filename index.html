@@ -52,7 +52,7 @@
         </div>
     </div>
     <!-- Mobile Side Drawer -->
-    <div class="mobile-drawer-overlay" id="mobile-drawer-overlay" onclick="app.closeMobileDrawer()"></div>
+    <div class="mobile-drawer-overlay" id="mobile-drawer-overlay" onclick="window.app && window.app.closeMobileDrawer && window.app.closeMobileDrawer()"></div>
     <nav class="mobile-drawer" id="mobile-drawer">
         <div class="mobile-drawer-header">
             <i class="fas fa-dharmachakra"></i>
@@ -357,7 +357,7 @@
     <!-- <script src="audit-log.js"></script> -->
     <!-- <script src="compliance.js"></script> -->
     <!-- <script src="rbac.js"></script> -->
-    <!-- <script src="two-factor.js"></script> -->
+    <script defer src="two-factor.js?v=20260424b"></script>
 
     <!-- Phase 20: System Administration Scripts -->
     <!-- <script src="tenant-manager.js"></script> -->
@@ -424,8 +424,9 @@
                 });
             }
 
-            // Initialize app if ready
-            if (window.app && window.app.init) {
+            // Initialize app if ready (single-fire — guard against load-event re-entry)
+            if (window.app && window.app.init && !window.__appInitCalled) {
+                window.__appInitCalled = true;
                 window.app.init();
             }
 
@@ -441,7 +442,8 @@
 
         // Fallback if scripts load after DOM
         window.addEventListener('load', function () {
-            if (window.app && window.app.init && !window.app.initialized) {
+            if (window.app && window.app.init && !window.__appInitCalled && !window.app.initialized) {
+                window.__appInitCalled = true;
                 window.app.init();
             }
         });
@@ -683,22 +685,9 @@
                 });
             }
 
-            // M4 — Filter-sheet toggle button (prepended before .prospect-filters / .customer-filters / .filter-bar)
-            function setupFilterTriggers() {
-                if (!isMobile()) return;
-                document.querySelectorAll('.prospect-filters, .customer-filters, .filter-bar').forEach(bar => {
-                    if (bar.dataset.mobileTriggerReady) return;
-                    bar.dataset.mobileTriggerReady = '1';
-                    const btn = document.createElement('button');
-                    btn.type = 'button';
-                    btn.className = 'mobile-filter-trigger';
-                    btn.innerHTML = '<i class="fas fa-sliders"></i> Filters';
-                    btn.addEventListener('click', () => {
-                        bar.classList.toggle('mobile-expanded');
-                    });
-                    bar.parentNode.insertBefore(btn, bar);
-                });
-            }
+            // M4 — script.js already injects its own "Filters" toggle button
+            // inside .filter-bar (e.g. line ~17878), so no JS injection is
+            // needed here. Mobile CSS in styles-mobile-v2.css handles layout.
 
             // M2 — Calendar: add "+N more" chip when a cell has >2 appointments
             function addCalendarMoreIndicators() {
@@ -715,37 +704,11 @@
                 });
             }
 
-            // M3 — Pipeline: render scroll-position dots for stage carousel
-            function setupPipelineDots() {
-                if (!isMobile()) return;
-                document.querySelectorAll('.pipeline-container').forEach(container => {
-                    if (container.dataset.dotsReady) return;
-                    container.dataset.dotsReady = '1';
-                    const dots = document.createElement('div');
-                    dots.className = 'pipeline-scroll-dots';
-                    const render = () => {
-                        const cols = container.children;
-                        dots.innerHTML = '';
-                        if (cols.length <= 1) return;
-                        Array.from(cols).forEach((_, i) => {
-                            const d = document.createElement('span');
-                            d.className = 'dot';
-                            dots.appendChild(d);
-                        });
-                        update();
-                    };
-                    const update = () => {
-                        const cols = container.children;
-                        if (!cols.length) return;
-                        const colWidth = cols[0].getBoundingClientRect().width + 12;
-                        const idx = Math.round(container.scrollLeft / colWidth);
-                        Array.from(dots.children).forEach((d, i) => d.classList.toggle('active', i === idx));
-                    };
-                    container.parentNode.insertBefore(dots, container.nextSibling);
-                    container.addEventListener('scroll', update, { passive: true });
-                    render();
-                });
-            }
+            // M3 — Pipeline view in script.js (~line 26697) is two wide tables
+            // inside `.pipeline-dual-view`, not a kanban. CSS in
+            // styles-mobile-v2.css handles horizontal scroll + sticky col 1.
+            // No JS scroll-dots needed.
+            function setupPipelineDots() { /* no-op (kept for resize callback) */ }
 
             // M9 — Referral tree: add fullscreen toggle
             function setupTreeFullscreen() {
@@ -798,7 +761,6 @@
             // Run all on load + on DOM mutation + on resize
             function runAll() {
                 autoCardTables();
-                setupFilterTriggers();
                 addCalendarMoreIndicators();
                 setupPipelineDots();
                 setupTreeFullscreen();

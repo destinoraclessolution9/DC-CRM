@@ -273,47 +273,34 @@
 }
 
 /* =======================================================================
-   M3 — Pipeline: horizontal snap-carousel
+   M3 — Pipeline mobile: tighten the wide tables inside .pipeline-dual-view
+   The actual layout in script.js (~line 26697) is wide tables, not kanban,
+   so we focus on horizontal scroll polish + readable spacing.
    ======================================================================= */
 @media (max-width: 768px) {
-    /* Override styles-mobile.css rule that stacks columns vertically */
-    .pipeline-container {
-        grid-template-columns: unset !important;
-        display: flex !important;
-        flex-direction: row !important;
-        gap: 12px;
-        overflow-x: auto;
-        scroll-snap-type: x mandatory;
-        -webkit-overflow-scrolling: touch;
-        scroll-padding: 12px;
-        padding: 4px 12px 8px !important;
+    .pipeline-dual-view {
         margin: 0 -10px;
     }
-    .pipeline-column,
-    .pipeline-stage,
-    .pipeline-container > div {
-        flex: 0 0 88%;
-        scroll-snap-align: start;
-        min-width: 0;
-        background: var(--bg-surface);
-        border: 1px solid var(--border-soft);
-        border-radius: var(--radius-lg);
-        padding: 12px !important;
-        box-shadow: var(--shadow-sm);
+    .pipeline-dual-view > div[style*="overflow-x"] {
+        -webkit-overflow-scrolling: touch;
+        scroll-snap-type: x proximity;
     }
-    .pipeline-column .stage-header,
-    .pipeline-stage .stage-header,
-    .pipeline-container > div > h3:first-child {
+    .pipeline-dual-view table {
+        min-width: 760px !important;
+        font-size: 12px !important;
+    }
+    .pipeline-dual-view table th,
+    .pipeline-dual-view table td {
+        padding: 8px 6px !important;
+    }
+    /* Sticky first column for context while scrolling sideways */
+    .pipeline-dual-view table th:first-child,
+    .pipeline-dual-view table td:first-child {
         position: sticky;
-        top: 0;
+        left: 0;
         background: var(--bg-surface);
-        padding: 4px 0 8px;
-        font-size: 13px;
-        font-weight: 700;
-        color: var(--accent);
-        font-family: var(--font-display);
-        border-bottom: 1px solid var(--border-soft);
-        margin-bottom: 10px;
+        z-index: 2;
+        box-shadow: 1px 0 0 var(--border-soft);
     }
     .pipeline-card {
         background: var(--bg-elevated);
@@ -323,75 +310,44 @@
         margin-bottom: 8px;
         font-size: 12px;
     }
-
-    /* Scroll progress dots */
-    .pipeline-scroll-dots {
-        display: flex;
-        justify-content: center;
-        gap: 6px;
-        padding: 8px 0 0;
-    }
-    .pipeline-scroll-dots .dot {
-        width: 6px; height: 6px; border-radius: 50%;
-        background: var(--border-strong);
-        transition: all 0.2s;
-    }
-    .pipeline-scroll-dots .dot.active {
-        background: var(--accent);
-        width: 22px;
-        border-radius: 3px;
-    }
 }
 
 /* =======================================================================
-   M4 — Prospects / Customers filter sheet + card polish
+   M4 — Prospects / Customers: polish the existing .filter-bar
+   (script.js already has its own "Filters" toggle button — no JS injection
+   needed; we just style the bar so it lays out cleanly when expanded.)
    ======================================================================= */
 @media (max-width: 768px) {
-    /* Filter bar: visible only when expanded */
-    .prospect-filters,
-    .customer-filters,
     .filter-bar {
-        display: none !important;
-    }
-    .prospect-filters.mobile-expanded,
-    .customer-filters.mobile-expanded,
-    .filter-bar.mobile-expanded {
-        display: flex !important;
-        flex-direction: column !important;
-        gap: 8px !important;
         background: var(--bg-surface);
         border: 1px solid var(--border-soft);
         border-radius: var(--radius-lg);
-        padding: 12px !important;
+        padding: 10px !important;
         margin-bottom: 10px;
-        box-shadow: var(--shadow-md);
+        box-shadow: var(--shadow-sm);
     }
-
-    .mobile-filter-trigger {
-        display: inline-flex !important;
-        align-items: center;
-        gap: 6px;
-        padding: 8px 14px;
-        background: var(--bg-elevated);
-        border: 1px solid var(--border-soft);
-        border-radius: 999px;
+    .filter-bar .filter-group {
+        flex: 1 1 100%;
+        min-width: 0;
+    }
+    .filter-bar .filter-group select,
+    .filter-bar .filter-group input {
+        width: 100%;
+    }
+    .filter-bar .search-group {
+        position: relative;
+        flex: 1;
+    }
+    .filter-bar .search-group input {
+        padding-left: 36px !important;
+    }
+    .filter-bar .search-group i.fa-search {
+        position: absolute;
+        left: 12px; top: 50%;
+        transform: translateY(-50%);
+        color: var(--text-muted);
         font-size: 13px;
-        font-weight: 600;
-        color: var(--text-secondary);
-        cursor: pointer;
-        margin-bottom: 10px;
-    }
-    .mobile-filter-trigger.has-active {
-        background: var(--accent);
-        color: #fff;
-        border-color: var(--accent);
-    }
-    .mobile-filter-trigger .badge {
-        background: rgba(255,255,255,0.25);
-        padding: 1px 7px;
-        border-radius: 999px;
-        font-size: 11px;
-        font-family: var(--font-mono);
+        pointer-events: none;
     }
 
     /* Prospect/customer card prettier */
@@ -410,13 +366,12 @@
         border-radius: var(--radius-lg) 0 0 var(--radius-lg);
     }
 
-    /* Desktop search input full-width & prominent */
+    /* Search input full-width & prominent */
     #prospect-search,
     #customer-search,
     #agent-search {
         width: 100% !important;
-        padding: 12px 14px 12px 38px !important;
-        background-image: none;
+        padding: 12px 14px !important;
         border: 1px solid var(--border-soft);
         border-radius: 999px;
         background: var(--bg-elevated);
@@ -571,13 +526,15 @@
         background: linear-gradient(135deg, #CD7F32, #8B5A2B) !important;
     }
 
-    /* Risk score: use first numeric cell as gauge */
+    /* Risk score: solid colored badge on the score cell.
+       Color comes from a class set by JS (.risk-low / .risk-mid / .risk-high)
+       OR fallback to the accent. Avoid conic-gradient + calc-in-color-stop
+       which is unsupported across browsers. */
     .risk-table tbody tr {
         padding-left: 70px !important;
         position: relative;
         min-height: 70px;
     }
-    .risk-table tbody tr > td.risk-score-cell,
     .risk-table tbody tr > td[data-label*="Score" i],
     .risk-table tbody tr > td[data-label*="Risk" i] {
         position: absolute !important;
@@ -594,10 +551,15 @@
         font-size: 16px !important;
         padding: 0 !important;
         color: #fff !important;
-        background: conic-gradient(var(--danger) calc(var(--risk, 60) * 1%), var(--bg-elevated) 0);
+        background: var(--accent) !important;
         border: none !important;
+        box-shadow: var(--shadow-sm);
     }
-    .risk-table tbody tr > td.risk-score-cell::before { display: none !important; }
+    .risk-table tbody tr > td.risk-low      { background: var(--success) !important; }
+    .risk-table tbody tr > td.risk-mid      { background: var(--warning) !important; }
+    .risk-table tbody tr > td.risk-high     { background: var(--danger) !important; }
+    .risk-table tbody tr > td[data-label*="Score" i]::before,
+    .risk-table tbody tr > td[data-label*="Risk" i]::before { display: none !important; }
 }
 
 /* =======================================================================
@@ -712,17 +674,11 @@
    M10 — Success Case Library + Import wizard
    ======================================================================= */
 @media (max-width: 768px) {
-    /* Case Library grid: 1 column on <400px, 2 on 400-768px */
-    .case-library-grid,
-    .success-cases-grid {
+    /* Case Library grid: 1 column on <400px (rule below for 400-768px is
+       split out of nested @media to keep Safari <16 / Firefox <117 happy). */
+    .case-card-grid {
         grid-template-columns: 1fr !important;
         gap: 12px !important;
-    }
-    @media (min-width: 400px) {
-        .case-library-grid,
-        .success-cases-grid {
-            grid-template-columns: repeat(2, 1fr) !important;
-        }
     }
     .case-card {
         border-radius: var(--radius-lg) !important;
@@ -787,6 +743,13 @@
     }
     .column-mapping-row select {
         width: 100% !important;
+    }
+}
+
+/* Flattened (was nested @media) — 2-col case grid on 400-768px */
+@media (min-width: 400px) and (max-width: 768px) {
+    .case-card-grid {
+        grid-template-columns: repeat(2, 1fr) !important;
     }
 }
 
