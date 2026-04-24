@@ -4281,7 +4281,7 @@ In a production system, this would show the actual file contents.
 
             try {
                 const activities = await AppDataStore.getAll('activities');
-                const syncLog = this.getSyncLog();
+                const syncLog = await this.getSyncLog();
 
                 let synced = 0, created = 0, updated = 0, deleted = 0;
 
@@ -28803,6 +28803,24 @@ container.innerHTML = `
                 <div id="kpi-target-comparison-section" style="margin-top:24px;">
                     <!-- Loaded by refreshKPIDashboard -->
                 </div>
+
+                <!-- Case Counts by Product -->
+                <div class="kpi-card" style="margin-top:24px;">
+                    <h3 class="kpi-card-title">Cases by Product Category</h3>
+                    <div id="cases-count-table"><!-- Loaded by refreshKPIDashboard --></div>
+                </div>
+
+                <!-- Headcount by Event Type -->
+                <div class="kpi-card" style="margin-top:16px;">
+                    <h3 class="kpi-card-title">Headcount by Event Type</h3>
+                    <div id="headcount-table"><!-- Loaded by refreshKPIDashboard --></div>
+                </div>
+
+                <!-- Activity Attendance Breakdown -->
+                <div class="kpi-card" style="margin-top:16px;">
+                    <h3 class="kpi-card-title">Activity Attendance Breakdown</h3>
+                    <div id="activity-attendance-details"><!-- Loaded by refreshKPIDashboard --></div>
+                </div>
             </div>
 `;
 
@@ -28829,6 +28847,121 @@ container.innerHTML = `
         _customDateTo = to;
         _currentTimeFilter = 'custom';
         await refreshKPIDashboard();
+    };
+
+    const getActivityAttendanceDetails = async (from, to) => {
+        const events = await AppDataStore.getAll('events');
+        const registrations = await AppDataStore.getAll('event_registrations');
+        const activities = await AppDataStore.getAll('activities');
+        const result = [];
+        for (const ev of events) {
+            const regs = registrations.filter(r => r.event_id === ev.id && r.event_date >= from && r.event_date <= to);
+            if (regs.length === 0) continue;
+            let prospectCount = 0, agentCount = 0;
+            for (const r of regs) {
+                if (r.attendee_type === 'prospect' || r.attendee_type === 'customer') prospectCount++;
+                if (r.attendee_type === 'agent') agentCount++;
+            }
+            result.push({ title: ev.title, prospectCount, agentCount, total: regs.length });
+        }
+        const standaloneActivities = activities.filter(a =>
+            a.activity_date >= from && a.activity_date <= to &&
+            !a.event_id && a.co_agents && a.co_agents.length > 0
+        );
+        for (const a of standaloneActivities) {
+            const agentCount = a.co_agents?.length || 0;
+            result.push({
+                title: `${a.activity_type} - ${a.activity_title || 'Meeting'}`,
+                prospectCount: a.prospect_id ? 1 : 0,
+                agentCount,
+                total: agentCount + (a.prospect_id ? 1 : 0)
+            });
+        }
+        return result;
+    };
+
+    const getCaseCountsByProduct = async (from, to) => {
+        const purchases = await AppDataStore.getAll('purchases');
+        const categories = {
+            'FengShui': 0, 'Flexi FengShui': 0, 'Simplified Feng Shui': 0,
+            'Power Ring': 0, 'Calligraphy': 0, 'Adornment': 0,
+            'Royal Woodwork': 0, 'Courses': 0, 'Book': 0
+        };
+        const keywordMap = {
+            'FengShui': ['feng shui', 'fengshui'],
+            'Flexi FengShui': ['flexi', 'flexible feng shui'],
+            'Simplified Feng Shui': ['simplified', 'simple feng shui'],
+            'Power Ring': ['power ring', 'pr4', 'pr3', 'pr5'],
+            'Calligraphy': ['calligraphy'],
+            'Adornment': ['adornment', 'decoration'],
+            'Royal Woodwork': ['royal woodwork', 'woodwork'],
+            'Courses': ['course', 'workshop', 'seminar'],
+            'Book': ['book', 'publication']
+        };
+        for (const p of purchases) {
+            if (p.date < from || p.date > to) continue;
+            if (_currentAgentFilter !== 'all' && p.agent_id != _currentAgentFilter) continue;
+            const itemLower = (p.item || '').toLowerCase();
+            for (const [cat, keywords] of Object.entries(keywordMap)) {
+                if (keywords.some(kw => itemLower.includes(kw))) { categories[cat]++; break; }
+            }
+        }
+        return categories;
+    };
+
+    const getHeadcountByEventType = async (from, to) => {
+        const eventTypes = ['Monthly Talk', 'Weekly Talk', 'Huiji', 'Museum', 'Study Group', 'Customer Interaction'];
+        const events = await AppDataStore.getAll('events');
+        const registrations = await AppDataStore.getAll('event_registrations');
+        const result = {};
+        for (const type of eventTypes) result[type] = { prospects: 0, agents: 0, total: 0 };
+        for (const ev of events) {
+            const matchedType = eventTypes.find(t => ev.title.toLowerCase().includes(t.toLowerCase()) || ev.category === t);
+            if (!matchedType) continue;
+            const regs = registrations.filter(r =>
+                r.event_id === ev.id && r.event_date >= from && r.event_date <= to && r.attendance_status === 'Attended'
+            );
+            for (const r of regs) {
+                if (r.attendee_type === 'prospect' || r.attendee_type === 'customer') { result[matchedType].prospects++; result[matchedType].total++; }
+                else if (r.attendee_type === 'agent') { result[matchedType].agents++; result[matchedType].total++; }
+            }
+        }
+        return result;
+    };
+
+    const renderCaseCountsTable = async () => {
+        const container = document.getElementById('cases-count-table');
+        if (!container) return;
+        const ranges = getDateRanges(_currentTimeFilter, _customDateFrom, _customDateTo);
+        const counts = await getCaseCountsByProduct(ranges.current.from, ranges.current.to);
+        const rows = Object.entries(counts).filter(([, cnt]) => cnt > 0);
+        if (rows.length === 0) { container.innerHTML = '<p style="padding:16px;color:var(--gray-500)">No cases in this period.</p>'; return; }
+        let html = `<table class="data-table"><thead><tr><th>Product Category</th><th>Case Count</th></tr></thead><tbody>`;
+        for (const [cat, cnt] of rows) html += `<tr><td>${cat}</td><td>${cnt}</td></tr>`;
+        container.innerHTML = html + `</tbody></table>`;
+    };
+
+    const renderHeadcountTable = async () => {
+        const container = document.getElementById('headcount-table');
+        if (!container) return;
+        const ranges = getDateRanges(_currentTimeFilter, _customDateFrom, _customDateTo);
+        const headcounts = await getHeadcountByEventType(ranges.current.from, ranges.current.to);
+        const rows = Object.entries(headcounts).filter(([, d]) => d.total > 0);
+        if (rows.length === 0) { container.innerHTML = '<p style="padding:16px;color:var(--gray-500)">No event attendance in this period.</p>'; return; }
+        let html = `<table class="data-table"><thead><tr><th>Event Type</th><th>Prospects</th><th>Agents</th><th>Total</th></tr></thead><tbody>`;
+        for (const [type, d] of rows) html += `<tr><td>${type}</td><td>${d.prospects}</td><td>${d.agents}</td><td>${d.total}</td></tr>`;
+        container.innerHTML = html + `</tbody></table>`;
+    };
+
+    const renderActivityAttendanceDetails = async () => {
+        const container = document.getElementById('activity-attendance-details');
+        if (!container) return;
+        const ranges = getDateRanges(_currentTimeFilter, _customDateFrom, _customDateTo);
+        const details = await getActivityAttendanceDetails(ranges.current.from, ranges.current.to);
+        if (details.length === 0) { container.innerHTML = '<p style="padding:16px;color:var(--gray-500)">No attendance data for this period.</p>'; return; }
+        let html = `<table class="data-table"><thead><tr><th>Topic / Activity</th><th>Prospects</th><th>Agents</th><th>Total</th></tr></thead><tbody>`;
+        for (const d of details) html += `<tr><td>${escapeHtml(d.title)}</td><td>${d.prospectCount}</td><td>${d.agentCount}</td><td>${d.total}</td></tr>`;
+        container.innerHTML = html + `</tbody></table>`;
     };
 
     const refreshKPIDashboard = async () => {
@@ -28864,6 +28997,9 @@ container.innerHTML = `
             renderPerformanceTable(),
             renderAgentLeaderboard(),
             renderRevenueChart(_currentTimeFilter, ranges.current),
+            renderCaseCountsTable(),
+            renderHeadcountTable(),
+            renderActivityAttendanceDetails(),
             // Hierarchical target comparison runs in the same parallel batch.
             // Wrapped so a render failure doesn't reject the whole Promise.all.
             (async () => {
