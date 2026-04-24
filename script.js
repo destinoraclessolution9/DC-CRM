@@ -42269,7 +42269,15 @@ JB 星期二到
     };
 
     // ── Reconciliation ──────────────────────────────────────────
-    const _stReconcile = (sid) => {
+    // Variance tolerance in absolute units. |variance| <= threshold counts as Match.
+    // Unexpected SKUs (not in system) always require recount regardless of threshold —
+    // an item appearing that shouldn't exist is a data integrity issue, not noise.
+    const _stGetThreshold = () => {
+        const n = Number(_stLoad('varianceThreshold', 0));
+        return isFinite(n) && n >= 0 ? Math.floor(n) : 0;
+    };
+    const _stReconcile = (sid, threshold) => {
+        const tol = Math.max(0, Number(threshold) || 0);
         const sys = _stSystemStock(sid);
         const counts = _stCounts(sid);
         const physMap = {};
@@ -42287,10 +42295,10 @@ JB 星期二到
             result.push({
                 Location: r.Location, SKU: r.SKU,
                 Physical_Total: phys, System_Qty: Number(r.System_Qty || 0),
-                Variance: variance, Status: variance === 0 ? 'Match' : 'Recount Required'
+                Variance: variance, Status: Math.abs(variance) <= tol ? 'Match' : 'Recount Required'
             });
         }
-        // Counted SKUs not in system (unexpected items)
+        // Counted SKUs not in system (unexpected items) — always flagged, tolerance N/A
         for (const k of Object.keys(physMap)) {
             if (sysKeys.has(k)) continue;
             const sample = counts.find(c => _stNormKey(c.location, c.sku) === k);
@@ -42302,28 +42310,49 @@ JB 星期二到
         }
         return result;
     };
+    const stSetThreshold = () => {
+        const el = document.getElementById('st-threshold');
+        const n = Math.max(0, Math.floor(Number(el?.value || 0)) || 0);
+        _stSave('varianceThreshold', n);
+        UI.toast.success(n === 0 ? 'Strict mode — any variance flagged' : `Tolerance set to ±${n} units`);
+        stSwitchTab('reconcile');
+    };
 
     const _stRenderReconcile = () => {
         const sid = _stState.sessionId;
         if (!sid) return `<div style="padding:40px;text-align:center;color:var(--gray-500);">Activate a session first.</div>`;
-        const rows = _stReconcile(sid);
+        const threshold = _stGetThreshold();
+        const rows = _stReconcile(sid, threshold);
         const matched = rows.filter(r => r.Status === 'Match').length;
         const needRc = rows.length - matched;
+        const accuracy = rows.length ? (matched / rows.length * 100) : 0;
+        const accColor = rows.length === 0 ? '#64748b' : accuracy >= 98 ? '#166534' : accuracy >= 95 ? '#92400e' : '#991b1b';
+        const accBg    = rows.length === 0 ? '#f1f5f9' : accuracy >= 98 ? '#dcfce7' : accuracy >= 95 ? '#fef3c7' : '#fee2e2';
         return `
             <div style="display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap;">
-                <div style="flex:1;min-width:160px;background:white;padding:14px;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                <div style="flex:1;min-width:140px;background:white;padding:14px;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
                     <div style="color:var(--gray-600);font-size:12px;">Total SKUs</div>
                     <div style="font-size:24px;font-weight:700;">${rows.length}</div>
                 </div>
-                <div style="flex:1;min-width:160px;background:#dcfce7;padding:14px;border-radius:8px;">
+                <div style="flex:1;min-width:140px;background:#dcfce7;padding:14px;border-radius:8px;">
                     <div style="color:#166534;font-size:12px;">Matched</div>
                     <div style="font-size:24px;font-weight:700;color:#166534;">${matched}</div>
                 </div>
-                <div style="flex:1;min-width:160px;background:#fef2f2;padding:14px;border-radius:8px;">
+                <div style="flex:1;min-width:140px;background:#fef2f2;padding:14px;border-radius:8px;">
                     <div style="color:#991b1b;font-size:12px;">Recount Required</div>
                     <div style="font-size:24px;font-weight:700;color:#991b1b;">${needRc}</div>
                 </div>
-                <div style="display:flex;gap:8px;align-items:center;">
+                <div style="flex:1;min-width:140px;background:${accBg};padding:14px;border-radius:8px;" title="Industry target: ≥98% for A-items">
+                    <div style="color:${accColor};font-size:12px;">Inventory Accuracy</div>
+                    <div style="font-size:24px;font-weight:700;color:${accColor};">${rows.length ? accuracy.toFixed(1) + '%' : '—'}</div>
+                </div>
+            </div>
+            <div style="display:flex;gap:12px;align-items:center;margin-bottom:12px;flex-wrap:wrap;background:white;padding:10px 14px;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                <label style="font-size:13px;color:var(--gray-700);font-weight:600;"><i class="fas fa-sliders-h"></i> Tolerance (± units):</label>
+                <input id="st-threshold" type="number" min="0" step="1" value="${threshold}" onkeydown="if(event.key==='Enter'){event.preventDefault();app.stSetThreshold();}" style="width:80px;padding:6px 8px;border:1px solid var(--gray-300);border-radius:6px;">
+                <button class="btn small primary" onclick="app.stSetThreshold()">Apply</button>
+                <span style="color:var(--gray-500);font-size:12px;">${threshold === 0 ? 'Strict — any variance requires recount.' : `SKUs within ±${threshold} of system qty count as Match.`}</span>
+                <div style="margin-left:auto;display:flex;gap:8px;">
                     <button class="btn secondary" onclick="app.stExportReconcile('csv')"><i class="fas fa-file-csv"></i> CSV</button>
                     <button class="btn secondary" onclick="app.stExportReconcile('xlsx')"><i class="fas fa-file-excel"></i> XLSX</button>
                     <button class="btn primary" onclick="app.stExportAdjustment()"><i class="fas fa-download"></i> Adjustment File</button>
@@ -42358,7 +42387,7 @@ JB 星期二到
     const _stRenderRecount = () => {
         const sid = _stState.sessionId;
         if (!sid) return `<div style="padding:40px;text-align:center;color:var(--gray-500);">Activate a session first.</div>`;
-        const rows = _stReconcile(sid).filter(r => r.Status === 'Recount Required');
+        const rows = _stReconcile(sid, _stGetThreshold()).filter(r => r.Status === 'Recount Required');
         // Group by location
         const byLoc = {};
         for (const r of rows) { (byLoc[r.Location] = byLoc[r.Location] || []).push(r); }
@@ -42456,7 +42485,7 @@ JB 星期二到
     const stExportReconcile = async (fmt) => {
         const sid = _stState.sessionId;
         if (!sid) return;
-        const rows = _stReconcile(sid);
+        const rows = _stReconcile(sid, _stGetThreshold());
         const headers = ['Location','SKU','Physical_Total','System_Qty','Variance','Status'];
         if (fmt === 'csv') _stDownload(`reconciliation_${sid}.csv`, _stToCsv(rows, headers), 'text/csv');
         else await _stToXlsx(rows, 'Reconciliation', `reconciliation_${sid}.xlsx`);
@@ -42464,7 +42493,7 @@ JB 星期二到
     const stExportRecount = async (fmt) => {
         const sid = _stState.sessionId;
         if (!sid) return;
-        const rows = _stReconcile(sid).filter(r => r.Status === 'Recount Required')
+        const rows = _stReconcile(sid, _stGetThreshold()).filter(r => r.Status === 'Recount Required')
             .map(r => ({ ...r, Recount_Qty: '', Recount_Notes: '' }));
         const headers = ['Location','SKU','Physical_Total','System_Qty','Variance','Recount_Qty','Recount_Notes'];
         if (fmt === 'csv') _stDownload(`recount_list_${sid}.csv`, _stToCsv(rows, headers), 'text/csv');
@@ -42473,7 +42502,11 @@ JB 星期二到
     const stExportAdjustment = () => {
         const sid = _stState.sessionId;
         if (!sid) return;
-        const rows = _stReconcile(sid).map(r => ({ Location: r.Location, SKU: r.SKU, New_System_Qty: r.Physical_Total }));
+        // Only write adjustments for rows that fall outside tolerance — matched rows
+        // don't need system updates.
+        const rows = _stReconcile(sid, _stGetThreshold())
+            .filter(r => r.Status === 'Recount Required')
+            .map(r => ({ Location: r.Location, SKU: r.SKU, New_System_Qty: r.Physical_Total }));
         _stDownload(`adjustment_${sid}.csv`, _stToCsv(rows, ['Location','SKU','New_System_Qty']), 'text/csv');
     };
 
@@ -43247,6 +43280,7 @@ JB 星期二到
         stExportReconcile,
         stExportRecount,
         stExportAdjustment,
+        stSetThreshold,
 
         // ========== EGG PURCHASING (Super Admin only) ==========
         showEggPurchasingView,
