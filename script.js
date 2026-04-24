@@ -13225,7 +13225,13 @@ function _wireLoginBtn() {
             // the same date. Each agent who joins an event creates their own activity row, but
             // they should all see the same registered attendees. We scope by event_date so a
             // recurring event still keeps each session's attendees separate.
-            const allActivities = await AppDataStore.getAll('activities');
+            const [allActivities, allAttendees, prospects, customers, users] = await Promise.all([
+                AppDataStore.getAll('activities'),
+                AppDataStore.getAll('event_attendees'),
+                AppDataStore.getAll('prospects'),
+                AppDataStore.getAll('customers'),
+                AppDataStore.getAll('users'),
+            ]);
             const sameSessionActivityIds = new Set(
                 allActivities
                     .filter(a => String(a.event_id) === String(activity.event_id)
@@ -13233,11 +13239,6 @@ function _wireLoginBtn() {
                     .map(a => String(a.id))
             );
             sameSessionActivityIds.add(String(activity.id));
-
-            const allAttendees = await AppDataStore.getAll('event_attendees');
-            const prospects = await AppDataStore.getAll('prospects');
-            const customers = await AppDataStore.getAll('customers');
-            const users = await AppDataStore.getAll('users');
             // Include users so agent attendees (AGENT_MEETING / AGENT_TRAINING) resolve their names
             const all = [...prospects, ...customers, ...users];
 
@@ -13261,7 +13262,7 @@ function _wireLoginBtn() {
                 const entityId = att.entity_id || att.attendee_id;
                 const person = all.find(p => String(p.id) === String(entityId));
                 const name = person?.full_name || att.entity_name || '';
-                const agent = await AppDataStore.getById('users', att.added_by_agent_id);
+                const agent = users.find(u => String(u.id) === String(att.added_by_agent_id));
                 const agentName = agent?.full_name || att.added_by_name || 'Unknown';
                 const attendedChecked = (att.attended || att.attendance_status === 'Attended') ? 'checked' : '';
                 const unattendedChecked = att.attendance_status === 'No Show' ? 'checked' : '';
@@ -13297,13 +13298,11 @@ function _wireLoginBtn() {
                 const entityId = att.entity_id || att.attendee_id;
                 const person = all.find(p => String(p.id) === String(entityId));
                 const name = person?.full_name || att.entity_name || '';
-                const addedBy = await AppDataStore.getById('users', att.added_by_agent_id);
+                const addedBy = users.find(u => String(u.id) === String(att.added_by_agent_id));
                 const addedByName = addedBy?.full_name || att.added_by_name || 'Unknown';
                 const attendedChecked = (att.attended || att.attendance_status === 'Attended') ? 'checked' : '';
                 const unattendedChecked = att.attendance_status === 'No Show' ? 'checked' : '';
-                const nameDisplay = entityId
-                    ? `<strong style="cursor:pointer;color:var(--primary);text-decoration:underline;" onclick="event.stopPropagation();app.showAgentProfile('${entityId}')">${name}</strong>`
-                    : `<strong>${name}</strong>`;
+                const nameDisplay = `<strong>${name}</strong>`;
                 const roleLabel = person?.role || 'consultant';
                 return `
                     <div class="info-row" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #eee; padding-bottom:8px; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
