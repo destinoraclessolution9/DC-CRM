@@ -43,11 +43,11 @@ do $$
 declare p record;
 begin
     for p in
-        select polname from pg_policies
+        select policyname from pg_policies
         where schemaname = 'storage' and tablename = 'objects'
-          and (polname like '%attachments%' or polname in ('Public Access', 'Allow public uploads'))
+          and (policyname like '%attachments%' or policyname in ('Public Access', 'Allow public uploads'))
     loop
-        execute format('drop policy if exists %I on storage.objects', p.polname);
+        execute format('drop policy if exists %I on storage.objects', p.policyname);
     end loop;
 end $$;
 
