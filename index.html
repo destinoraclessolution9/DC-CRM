@@ -758,6 +758,33 @@
                 });
             }
 
+            // Resolve [data-attach-src] (img tags) and [data-attach-bg]
+            // (any element using a CSS background-image) into signed URLs.
+            // Idempotent — marks elements with data-attach-resolved="1" so
+            // we never re-sign.
+            async function resolveAttachmentImages(root) {
+                if (!window.AppDataStore || !AppDataStore.resolveAttachmentSrc) return;
+                const scope = root || document;
+                const imgs = Array.from(scope.querySelectorAll('img[data-attach-src]:not([data-attach-resolved])'));
+                const bgs  = Array.from(scope.querySelectorAll('[data-attach-bg]:not([data-attach-resolved])'));
+                if (!imgs.length && !bgs.length) return;
+                [...imgs, ...bgs].forEach(el => el.setAttribute('data-attach-resolved', '1'));
+                const work = [
+                    ...imgs.map(async img => {
+                        const v = img.getAttribute('data-attach-src');
+                        const url = await AppDataStore.resolveAttachmentSrc(v).catch(() => null);
+                        if (url) img.src = url;
+                        else img.style.display = 'none';
+                    }),
+                    ...bgs.map(async el => {
+                        const v = el.getAttribute('data-attach-bg');
+                        const url = await AppDataStore.resolveAttachmentSrc(v).catch(() => null);
+                        if (url) el.style.backgroundImage = `url('${url.replace(/'/g, "\\'")}')`;
+                    })
+                ];
+                await Promise.all(work);
+            }
+
             // Run all on load + on DOM mutation + on resize
             function runAll() {
                 autoCardTables();
@@ -765,6 +792,7 @@
                 setupPipelineDots();
                 setupTreeFullscreen();
                 augmentDrawer();
+                resolveAttachmentImages();
             }
 
             document.addEventListener('DOMContentLoaded', runAll);
@@ -800,7 +828,20 @@
             }
 
             window._mobileEnhance = runAll;
+            window._resolveAttachmentImages = resolveAttachmentImages;
         })();
+
+        // Click helper: open an attachment (URL or path) in a new tab,
+        // signing on demand if needed. Used by photo-zoom click handlers.
+        window._openAttachment = async function (src) {
+            try {
+                if (window.AppDataStore && AppDataStore.resolveAttachmentSrc) {
+                    const url = await AppDataStore.resolveAttachmentSrc(src);
+                    if (url) { window.open(url, '_blank', 'noopener'); return; }
+                }
+            } catch (_) {}
+            if (src) window.open(src, '_blank', 'noopener');
+        };
 
         // ========== Oracle Console: Chart.js dark-theme defaults ==========
         (function () {

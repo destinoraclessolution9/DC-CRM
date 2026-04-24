@@ -1650,6 +1650,51 @@ class DataStore {
         }
     }
 
+    // Batch-sign multiple paths in a single Supabase call. Returns an array
+    // matching the input order (null for failures). Much cheaper than N
+    // sequential createSignedUrl calls when rendering a photo grid.
+    async getSignedAttachmentUrls(objectPaths, ttlSeconds = 3600) {
+        if (!Array.isArray(objectPaths) || objectPaths.length === 0) return [];
+        const sb = window.supabase;
+        if (!sb || !sb.storage) return objectPaths.map(() => null);
+        try {
+            const { data, error } = await sb.storage
+                .from('attachments')
+                .createSignedUrls(objectPaths, ttlSeconds);
+            if (error) {
+                console.warn('[storage] batch signed URL failed', error.message);
+                return objectPaths.map(() => null);
+            }
+            return (data || []).map(r => r?.signedUrl || null);
+        } catch (e) {
+            console.warn('[storage] batch signed URL exception', e?.message);
+            return objectPaths.map(() => null);
+        }
+    }
+
+    // Accepts either a stored value (a public URL, an object path, or any
+    // other URL) and returns a renderable URL:
+    //   * external URL (not in attachments bucket) — returned as-is
+    //   * public URL pointing to attachments — extracted path → signed URL
+    //   * bare path                            — signed URL
+    // Caches resolutions for ~50 minutes (signed URLs are valid 60 min).
+    // Use this from render code; pair with a DOM auto-resolver for img tags.
+    async resolveAttachmentSrc(value, ttlSeconds = 3600) {
+        if (!value || typeof value !== 'string') return null;
+        // External URL not in our bucket — return as-is.
+        if (/^https?:\/\//i.test(value) && !value.includes('/attachments/')) {
+            return value;
+        }
+        const path = this.extractAttachmentPath(value) || value;
+        // Cache lookups so a re-render of the same page doesn't re-sign.
+        const cache = this._signedUrlCache || (this._signedUrlCache = new Map());
+        const cached = cache.get(path);
+        if (cached && cached.exp > Date.now()) return cached.url;
+        const url = await this.getSignedAttachmentUrl(path, ttlSeconds);
+        if (url) cache.set(path, { url, exp: Date.now() + (ttlSeconds - 600) * 1000 });
+        return url;
+    }
+
     // Delete a single object from the `attachments` bucket. Returns true on
     // success. Used by case-study deletion etc. to avoid orphaned files.
     async deleteAttachmentByPath(objectPath) {

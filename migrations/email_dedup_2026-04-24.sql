@@ -62,10 +62,8 @@ group by lower(btrim(email))
 having count(*) > 1;
 
 -- ----- Partial unique index (case-insensitive) ------------------------------
--- Run this ONLY after the verify above returns zero rows.
--- CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_prospects_email_unique
---     ON prospects (lower(btrim(email)))
---     WHERE email IS NOT NULL AND btrim(email) <> '';
---
--- Uncomment when ready. Left commented because applying it on a DB with
--- existing duplicates fails the whole statement (23505).
+-- APPLIED 2026-04-24 after resolving 3 dupes (kept older record's email,
+-- nulled newer in each pair: ids 1776006767328, 1776167735074, 1776513729654).
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_prospects_email_unique
+    ON prospects (lower(btrim(email)))
+    WHERE email IS NOT NULL AND btrim(email) <> '';

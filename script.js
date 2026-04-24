@@ -10534,7 +10534,7 @@ function _wireLoginBtn() {
 
                 return `
                 <div class="case-card" onclick="app.showCaseStudyDetail(${c.id})">
-                    <div class="case-card-cover" style="${coverPhoto ? `background-image:url('${escapeHtml(coverPhoto)}');` : `background:${productGradient(entityName || 'cps')};`}">
+                    <div class="case-card-cover" ${coverPhoto ? `data-attach-bg="${escapeHtml(coverPhoto)}"` : ''} style="${coverPhoto ? '' : `background:${productGradient(entityName || 'cps')};`}">
                         ${!coverPhoto ? `<div class="case-card-cover-icon"><i class="fas fa-handshake"></i></div>` : ''}
                         <div class="case-card-cover-badges">
                             <span class="case-type-chip cps">CPS</span>
@@ -10569,7 +10569,7 @@ function _wireLoginBtn() {
 
             return `
                 <div class="case-card closed" onclick="app.showCaseStudyDetail(${c.id})">
-                    <div class="case-card-cover" style="${coverPhoto ? `background-image:url('${escapeHtml(coverPhoto)}');` : `background:${productGradient(c.product)};`}">
+                    <div class="case-card-cover" ${coverPhoto ? `data-attach-bg="${escapeHtml(coverPhoto)}"` : ''} style="${coverPhoto ? '' : `background:${productGradient(c.product)};`}">
                         ${!coverPhoto ? `<div class="case-card-cover-icon"><i class="fas fa-trophy"></i></div>` : ''}
                         <div class="case-card-cover-badges">
                             <span class="case-type-chip closed">Closed</span>
@@ -10671,11 +10671,11 @@ function _wireLoginBtn() {
         const photoGalleryHtml = photos.length ? `
             <div class="case-detail-gallery">
                 <div class="case-detail-gallery-main">
-                    <img src="${escapeHtml(photos[0])}" alt="Cover" onclick="window.open('${escapeHtml(photos[0])}','_blank')">
+                    <img data-attach-src="${escapeHtml(photos[0])}" alt="Cover" onclick="window._openAttachment('${escapeHtml(photos[0])}')">
                 </div>
                 ${photos.length > 1 ? `
                     <div class="case-detail-gallery-thumbs">
-                        ${photos.slice(1).map(p => `<img src="${escapeHtml(p)}" alt="Photo" onclick="window.open('${escapeHtml(p)}','_blank')">`).join('')}
+                        ${photos.slice(1).map(p => `<img data-attach-src="${escapeHtml(p)}" alt="Photo" onclick="window._openAttachment('${escapeHtml(p)}')">`).join('')}
                     </div>
                 ` : ''}
             </div>
@@ -10973,7 +10973,7 @@ function _wireLoginBtn() {
         }
         gal.innerHTML = _casePendingPhotos.map((url, i) => `
             <div class="case-photo-thumb" draggable="false">
-                <img src="${escapeHtml(url)}" alt="Case photo ${i + 1}" onclick="window.open('${escapeHtml(url)}','_blank')">
+                <img data-attach-src="${escapeHtml(url)}" alt="Case photo ${i + 1}" onclick="window._openAttachment('${escapeHtml(url)}')">
                 ${i === 0 ? '<span class="case-photo-badge">Cover</span>' : ''}
                 <button class="case-photo-remove" title="Remove" onclick="event.stopPropagation(); app.removeCasePhoto(${i})"><i class="fas fa-times"></i></button>
             </div>
@@ -11806,7 +11806,7 @@ function _wireLoginBtn() {
                         }
                         const waUrl = `https://wa.me/${waPhone}?text=${encodeURIComponent(waMessage)}`;
                         const thumbHtml = d.attachment_url
-                            ? `<img src="${d.attachment_url}" alt="Attachment" style="width:48px; height:48px; border-radius:6px; object-fit:cover; cursor:pointer; border:1px solid var(--gray-200); flex-shrink:0;" onclick="event.stopPropagation(); window.open('${d.attachment_url}', '_blank');" title="Click to view full image">`
+                            ? `<img data-attach-src="${escapeHtml(d.attachment_url)}" alt="Attachment" style="width:48px; height:48px; border-radius:6px; object-fit:cover; cursor:pointer; border:1px solid var(--gray-200); flex-shrink:0;" onclick="event.stopPropagation(); window._openAttachment('${escapeHtml(d.attachment_url)}');" title="Click to view full image">`
                             : '';
                         return `
                         <div id="followup-row-${d.id}" style="display:flex; align-items:flex-start; gap:12px; padding:12px; background:var(--gray-50,#f9fafb); border-radius:8px; border-left:4px solid #3b82f6; transition: opacity 0.4s ease, max-height 0.4s ease;">
@@ -20197,8 +20197,9 @@ function _wireLoginBtn() {
         const overlay = document.createElement('div');
         overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;z-index:9999;cursor:zoom-out;';
         overlay.onclick = () => overlay.remove();
-        overlay.innerHTML = `<img src="${url}" style="max-width:90vw;max-height:90vh;object-fit:contain;border-radius:8px;box-shadow:0 8px 32px rgba(0,0,0,.5);" onclick="event.stopPropagation()">`;
+        overlay.innerHTML = `<img data-attach-src="${escapeHtml(url)}" style="max-width:90vw;max-height:90vh;object-fit:contain;border-radius:8px;box-shadow:0 8px 32px rgba(0,0,0,.5);" onclick="event.stopPropagation()">`;
         document.body.appendChild(overlay);
+        if (window._resolveAttachmentImages) window._resolveAttachmentImages(overlay);
     };
 
     const showProspectDetail = async (prospectId) => {
@@ -20300,7 +20301,7 @@ function _wireLoginBtn() {
                             <button title="Edit" onclick="app.editProspect(${prospect.id})" style="width:24px;height:24px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--gray-500);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fas fa-edit"></i></button><button title="Convert to Customer" onclick="app.convertToCustomer(${prospect.id})" style="width:24px;height:24px;border-radius:50%;border:none;background:var(--primary);color:#fff;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'"><i class="fas fa-user-check"></i></button><button title="Meet-Up History" onclick="app.openMeetupHistoryModal(${prospect.id})" style="width:24px;height:24px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--primary);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fas fa-history"></i></button><button title="Save to Phone Contacts" onclick="app.downloadProspectVCard(${prospect.id})" style="width:24px;height:24px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--success);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fas fa-address-book"></i></button>
                         </div>
                     </div>
-                    ${cpsPhoto ? `<img src="${cpsPhoto.url}" onclick="event.stopPropagation();app.zoomCpsPhoto('${cpsPhoto.url}')" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:2px solid var(--gray-200);cursor:zoom-in;flex-shrink:0;margin-top:4px;" title="CPS Photo — click to enlarge">` : ''}
+                    ${cpsPhoto ? `<img data-attach-src="${cpsPhoto.url}" onclick="event.stopPropagation();app.zoomCpsPhoto('${cpsPhoto.url}')" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:2px solid var(--gray-200);cursor:zoom-in;flex-shrink:0;margin-top:4px;" title="CPS Photo — click to enlarge">` : ''}
                 </div>
 
                     <div class="acc-container" id="acc-container-${prospect.id}">
@@ -21824,7 +21825,7 @@ NOTIFY pgrst, 'reload schema';`;
                 <div style="display:flex;flex-wrap:wrap;gap:8px;max-height:180px;overflow:auto;padding:6px;border:1px solid var(--gray-200);border-radius:6px;">
                     ${existing.map((url, i) => `
                         <div style="position:relative;">
-                            <img src="${url}" style="height:70px;border-radius:4px;object-fit:cover;cursor:pointer;" onclick="window.open('${url}','_blank')">
+                            <img data-attach-src="${url}" style="height:70px;border-radius:4px;object-fit:cover;cursor:pointer;" onclick="window._openAttachment('${url}')">
                             <button type="button" class="btn-icon" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:white;border-radius:50%;width:20px;height:20px;font-size:10px;padding:0;" title="Remove" onclick="app.removeActivityPhoto(${activityId}, ${i})"><i class="fas fa-times"></i></button>
                         </div>
                     `).join('')}
@@ -21943,7 +21944,7 @@ NOTIFY pgrst, 'reload schema';`;
                 <div style="display:flex;flex-wrap:wrap;gap:8px;max-height:180px;overflow:auto;padding:6px;border:1px solid var(--gray-200);border-radius:6px;">
                     ${existing.map((url, i) => `
                         <div style="position:relative;">
-                            <img src="${url}" style="height:70px;border-radius:4px;object-fit:cover;cursor:pointer;" onclick="window.open('${url}','_blank')">
+                            <img data-attach-src="${url}" style="height:70px;border-radius:4px;object-fit:cover;cursor:pointer;" onclick="window._openAttachment('${url}')">
                             <button type="button" class="btn-icon" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:white;border-radius:50%;width:20px;height:20px;font-size:10px;padding:0;" title="Remove" onclick="app.removeAppraisalForm(${prospectId}, ${i})"><i class="fas fa-times"></i></button>
                         </div>
                     `).join('')}
@@ -22035,7 +22036,7 @@ NOTIFY pgrst, 'reload schema';`;
                 <div style="display:flex;flex-wrap:wrap;gap:8px;max-height:180px;overflow:auto;padding:6px;border:1px solid var(--gray-200);border-radius:6px;">
                     ${existing.map((url, i) => `
                         <div style="position:relative;">
-                            <img src="${url}" style="height:70px;border-radius:4px;object-fit:cover;cursor:pointer;" onclick="window.open('${url}','_blank')">
+                            <img data-attach-src="${url}" style="height:70px;border-radius:4px;object-fit:cover;cursor:pointer;" onclick="window._openAttachment('${url}')">
                             <button type="button" class="btn-icon" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:white;border-radius:50%;width:20px;height:20px;font-size:10px;padding:0;" title="Remove" onclick="app.removeAPUForm(${prospectId}, ${i})"><i class="fas fa-times"></i></button>
                         </div>
                     `).join('')}
@@ -22803,7 +22804,7 @@ NOTIFY pgrst, 'reload schema';`;
                 ${photos.map((p, i) => `
                     <div style="width:120px;border:1px solid var(--gray-200);border-radius:6px;overflow:hidden;background:#fff;">
                         <div style="position:relative;">
-                            <img src="${p.url}" style="width:100%;height:90px;object-fit:cover;cursor:pointer;" onclick="window.open('${p.url}','_blank')">
+                            <img data-attach-src="${p.url}" style="width:100%;height:90px;object-fit:cover;cursor:pointer;" onclick="window._openAttachment('${p.url}')">
                             <button type="button" title="Remove" onclick="event.stopPropagation();app.removeFengShuiPhoto(${prospectId},${auditId},'${phase}',${i});UI.hideModal();" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:#fff;border:none;border-radius:50%;width:20px;height:20px;font-size:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;"><i class="fas fa-times"></i></button>
                         </div>
                         <input type="text" class="form-control" value="${escapeHtml(p.remarks || '')}" placeholder="Remark..." style="font-size:11px;height:26px;border:none;border-top:1px solid var(--gray-200);border-radius:0;" onchange="event.stopPropagation();app.updateFengShuiPhotoRemark(${prospectId},${auditId},'${phase}',${i},this.value)">
@@ -22829,7 +22830,7 @@ NOTIFY pgrst, 'reload schema';`;
             : `<div style="display:flex;flex-wrap:wrap;gap:8px;">
                 ${photos.map((url, i) => `
                     <div style="position:relative;">
-                        <img src="${url}" style="width:90px;height:90px;object-fit:cover;border-radius:4px;cursor:pointer;border:1px solid var(--gray-200);" onclick="window.open('${url}','_blank')">
+                        <img data-attach-src="${url}" style="width:90px;height:90px;object-fit:cover;border-radius:4px;cursor:pointer;border:1px solid var(--gray-200);" onclick="window._openAttachment('${url}')">
                         <button type="button" title="Remove" onclick="event.stopPropagation();app.removeFengShuiSitePhoto(${prospectId},${auditId},${srId},${i});UI.hideModal();" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:9px;cursor:pointer;"><i class="fas fa-times"></i></button>
                     </div>
                 `).join('')}
