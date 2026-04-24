@@ -2272,6 +2272,8 @@ const appLogic = (() => {
         const start = (_currentPage - 1) * _pageSize;
         const pageItems = _currentSearchResults.slice(start, start + _pageSize);
 
+        const _searchUserMap = new Map((await AppDataStore.getAll('users')).map(u => [String(u.id), u.full_name]));
+
         let html = `
             <h3>Search Results (${_totalResults} found)</h3>
             <table class="search-results-table table-hover">
@@ -2285,12 +2287,9 @@ const appLogic = (() => {
                     </tr>
                 </thead>
                 <tbody>
-                    ${(await Promise.all(pageItems.map(async item => {
-            let agentName = '-';
-            if (item.lead_agent_id || item.responsible_agent_id) {
-                const agent = await AppDataStore.getById('users', item.lead_agent_id || item.responsible_agent_id);
-                if (agent) agentName = agent.full_name;
-            }
+                    ${pageItems.map(item => {
+            const agentId = item.lead_agent_id || item.responsible_agent_id;
+            const agentName = agentId ? (_searchUserMap.get(String(agentId)) || '-') : '-';
 
             let displayStatus = item.status || item.activity_type || item.team || 'Active';
             if (_currentSearchEntity === 'prospects') displayStatus = item.status || 'Prospect';
@@ -2319,7 +2318,7 @@ const appLogic = (() => {
                             </td>
                         </tr>
                         `;
-        }))).join('')}
+        }).join('')}
                 </tbody>
             </table>
         `;
@@ -2474,7 +2473,7 @@ const appLogic = (() => {
 
     const exportResults = (format) => {
         if (_currentSearchResults.length === 0) {
-            UI.toast.warninging('No results to export');
+            UI.toast.warning('No results to export');
             return;
         }
 
@@ -2572,18 +2571,18 @@ const appLogic = (() => {
         await loadFolderContents();
     };
 
-    const renderFolderTree = async (parentId = null, level = 0, container = null) => {
+    const renderFolderTree = async (parentId = null, level = 0, container = null, _cachedFolders = null) => {
         const treeContainer = container || document.getElementById('folder-tree');
         if (!treeContainer) return;
         if (parentId === null) treeContainer.innerHTML = '';
 
-        const allFolders = await AppDataStore.getAll('folders');
+        const allFolders = _cachedFolders || await AppDataStore.getAll('folders');
         const folders = allFolders
             .filter(f => f.parent_id === parentId)
             .sort((a, b) => a.name.localeCompare(b.name));
 
         for (const folder of folders) {
-            const hasChildren = (await AppDataStore.getAll('folders')).some(f => f.parent_id === folder.id);
+            const hasChildren = allFolders.some(f => f.parent_id === folder.id);
             const isActive = _currentFolder === folder.id;
 
             const div = document.createElement('div');
@@ -2604,7 +2603,7 @@ const appLogic = (() => {
                 </div>
             `;
             treeContainer.appendChild(div);
-            if (hasChildren) await renderFolderTree(folder.id, level + 1, treeContainer);
+            if (hasChildren) await renderFolderTree(folder.id, level + 1, treeContainer, allFolders);
         }
     };
 
@@ -2652,8 +2651,9 @@ const appLogic = (() => {
     };
 
     const deleteFolder = async (id) => {
-        const hasSub =(await AppDataStore.getAll('folders')).some(f => f.parent_id === id);
-        const hasFiles = (await AppDataStore.getAll('documents')).some(d => d.folder_id === id);
+        const [allFoldersForDel, allDocsForDel] = await Promise.all([AppDataStore.getAll('folders'), AppDataStore.getAll('documents')]);
+        const hasSub = allFoldersForDel.some(f => f.parent_id === id);
+        const hasFiles = allDocsForDel.some(d => d.folder_id === id);
         if (hasSub || hasFiles) return UI.toast.error('Cannot delete: Folder is not empty');
         UI.showModal('Delete Folder', '<p>Are you sure?</p>', [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Delete', type: 'primary', action: `(async () => { await app.confirmDeleteFolder(${id}); })()` }]);
     };
@@ -2692,27 +2692,32 @@ const appLogic = (() => {
     };
 
     const showVersionHistory = async (fileId) => {
-        const file = await AppDataStore.getById('documents', fileId);
-        const versions = (await AppDataStore.getAll('document_versions')).filter(v => v.document_id === fileId).sort((a, b) => b.version_number - a.version_number);
+        const [file, allVersions, allUsersForVer] = await Promise.all([
+            AppDataStore.getById('documents', fileId),
+            AppDataStore.getAll('document_versions'),
+            AppDataStore.getAll('users')
+        ]);
+        const versions = allVersions.filter(v => v.document_id === fileId).sort((a, b) => b.version_number - a.version_number);
+        const verUserMap = new Map(allUsersForVer.map(u => [String(u.id), u.full_name]));
         const content = `
             <div class="version-history">
                 <div class="version-header"><h3>Version History: ${file.filename}</h3><p>Current: v${file.current_version || 1}</p></div>
                 <table class="version-table">
                     <thead><tr><th>Version</th><th>Date</th><th>Size</th><th>By</th><th>Notes</th><th>Actions</th></tr></thead>
                     <tbody>
-                        ${(await Promise.all(versions.map(async v => `
+                        ${versions.map(v => `
                             <tr class="${v.version_number === file.current_version ? 'current-version' : ''}">
                                 <td>v${v.version_number}</td>
                                 <td>${new Date(v.created_at).toLocaleString()}</td>
                                 <td>${formatFileSize(v.size)}</td>
-                                <td>${(await AppDataStore.getById('users', v.created_by))?.full_name || 'System'}</td>
+                                <td>${verUserMap.get(String(v.created_by)) || 'System'}</td>
                                 <td>${v.change_note || '-'}</td>
                                 <td>
                                     <button class="btn-icon" onclick="app.downloadVersion(${v.id})"><i class="fas fa-download"></i></button>
                                     <button class="btn-icon" onclick="app.restoreVersion(${v.id})"><i class="fas fa-undo"></i></button>
                                 </td>
                             </tr>
-                        `))).join('')}
+                        `).join('')}
                     </tbody>
                 </table>
                 ${versions.length >= 2 ? `<div class="compare-row"><button class="btn secondary" onclick="app.showCompareTool(${fileId})">Compare Versions</button></div>` : ''}
@@ -4078,7 +4083,7 @@ In a production system, this would show the actual file contents.
 
     const handleOffline = () => {
         _isOnline = false;
-        UI.toast.warninging('You are offline – changes will be queued');
+        UI.toast.warning('You are offline – changes will be queued');
         updateOfflineIndicator();
     };
 
@@ -4135,7 +4140,7 @@ In a production system, this would show the actual file contents.
         updateOfflineIndicator();
 
         if (fail === 0) UI.toast.success(`Synced ${success} offline actions`);
-        else UI.toast.warninging(`Synced ${success}, failed ${fail} `);
+        else UI.toast.warning(`Synced ${success}, failed ${fail} `);
     };
 
     const offlineCreate = async (tableName, data) => {
@@ -4851,9 +4856,7 @@ In a production system, this would show the actual file contents.
         const userId = _currentUser?.id || 1;
         const myLogs = await AppDataStore.getAll('sync_history');
         const mine = myLogs.filter(h => h.user_id === userId);
-        for (const h of mine) {
-            await AppDataStore.delete('sync_history', h.id).catch(() => {});
-        }
+        await Promise.all(mine.map(h => AppDataStore.delete('sync_history', h.id).catch(() => {})));
         UI.toast.success('Sync history cleared');
         await viewSyncHistory();
     };
@@ -16551,7 +16554,7 @@ function _wireLoginBtn() {
             if (lunarDate) {
                 lunarField.value = lunarDate;
             } else {
-                UI.toast.warninging("Lunar conversion not available for this date.");
+                UI.toast.warning("Lunar conversion not available for this date.");
                 lunarField.value = '';
             }
         }
@@ -16877,7 +16880,7 @@ function _wireLoginBtn() {
 
     const addCoAgent = (id, name) => {
         if (_selectedCoAgents.length >= 5) {
-            UI.toast.warninging('Max 5 co-agents allowed');
+            UI.toast.warning('Max 5 co-agents allowed');
             return;
         }
         if (_selectedCoAgents.find(a => a.id === id)) return;
@@ -27141,7 +27144,7 @@ const deactivateAgent = async (agentId) => {
             UI.toast.success('🎉 All items completed this week! Great job!');
         } else {
             const pendingNames = pendingItems.map(i => i.event_name).join(', ');
-            UI.toast.warninging(`⚠️ Pending: ${pendingNames}. Please update your progress.`);
+            UI.toast.warning(`⚠️ Pending: ${pendingNames}. Please update your progress.`);
         }
     };
 
