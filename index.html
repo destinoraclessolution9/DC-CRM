@@ -12,9 +12,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="icon" href="favicon.ico" type="image/x-icon">
     <link rel="stylesheet" href="styles-fixed.css">
-    <link rel="stylesheet" href="styles-mobile.css">
+    <link rel="stylesheet" href="styles-mobile.css?v=20260424b">
     <link rel="stylesheet" href="styles-theme.css?v=20260424a">
-    <link rel="stylesheet" href="styles-mobile-v2.css?v=20260424a">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#800020">
     <script>
@@ -424,17 +423,28 @@
                 });
             }
 
-            // Initialize app if ready (single-fire — guard against load-event re-entry)
-            if (window.app && window.app.init && !window.__appInitCalled) {
-                window.__appInitCalled = true;
-                window.app.init();
-            }
+            // Initialize app with retry in case app object isn't fully ready yet
+            let __initAttempts = 0;
+            const __tryInit = async () => {
+                if (window.__appInitCalled || window.app?.initialized) return;
+                if (window.app && window.app.init) {
+                    window.__appInitCalled = true;
+                    try { await window.app.init(); }
+                    catch (e) {
+                        console.warn('[init] app.init() failed, retrying...', e);
+                        window.__appInitCalled = false;
+                        if (++__initAttempts < 5) setTimeout(__tryInit, 500);
+                    }
+                } else if (++__initAttempts < 10) {
+                    setTimeout(__tryInit, 200);
+                }
+            };
+            __tryInit();
 
             // Fallback: ensure login button always has a handler
             setTimeout(() => {
                 const loginBtn = document.getElementById('loginBtn');
                 if (loginBtn && window.app && window.app._wireLoginBtn && !loginBtn._supabaseSetup) {
-                    console.log('Fallback: wiring login button');
                     window.app._wireLoginBtn();
                 }
             }, 1500);
@@ -442,9 +452,9 @@
 
         // Fallback if scripts load after DOM
         window.addEventListener('load', function () {
-            if (window.app && window.app.init && !window.__appInitCalled && !window.app.initialized) {
+            if (window.app && window.app.init && !window.__appInitCalled && !window.app?.initialized) {
                 window.__appInitCalled = true;
-                window.app.init();
+                window.app.init().catch(e => console.warn('[init fallback]', e));
             }
         });
 
