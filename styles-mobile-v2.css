@@ -1,0 +1,846 @@
+/* ============================================================
+   FENG SHUI CRM — Mobile v2 (Oracle Console refinements)
+   M1–M10 page-by-page mobile fixes. Loads AFTER styles-mobile.css
+   and styles-theme.css so it wins all cascading conflicts.
+   ============================================================ */
+
+/* =======================================================================
+   M1 — Cross-cutting mobile fixes
+   ======================================================================= */
+@media (max-width: 768px) {
+
+    /* --- Hide non-essential top-bar extras (moved to drawer) --- */
+    .top-bar .live-status,
+    .top-bar .theme-toggle,
+    .top-bar #cmdk-trigger {
+        display: none !important;
+    }
+
+    /* --- Compact user-info to avatar-only (hide name label) --- */
+    .top-bar .user-info {
+        padding: 2px !important;
+        border-radius: 999px !important;
+        background: transparent !important;
+        border-color: transparent !important;
+    }
+    .top-bar .user-info:hover {
+        box-shadow: none;
+    }
+    .top-bar .user-info #user-name-label {
+        display: none !important;
+    }
+    .top-bar .user-info img {
+        width: 36px !important;
+        height: 36px !important;
+        border: 2px solid var(--accent) !important;
+        border-radius: 50% !important;
+    }
+
+    /* --- Bring brand icon back, subtle --- */
+    .top-bar .brand {
+        margin-right: auto;
+    }
+    .top-bar .brand i {
+        font-size: 22px;
+    }
+
+    /* --- Tighter top-bar gaps on phone --- */
+    .top-bar .bar-right {
+        gap: 8px !important;
+    }
+
+    /* --- Mobile sub-header: shows below top-bar on every view --- */
+    .mobile-subheader {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 12px;
+        background: var(--bg-glass);
+        backdrop-filter: blur(12px) saturate(140%);
+        -webkit-backdrop-filter: blur(12px) saturate(140%);
+        border-bottom: 1px solid var(--border-soft);
+        position: sticky;
+        top: 56px;
+        z-index: 150;
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text-primary);
+        min-height: 44px;
+    }
+    .mobile-subheader .back-btn {
+        width: 32px; height: 32px;
+        border: none;
+        background: var(--bg-elevated);
+        color: var(--accent);
+        border-radius: 8px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+    }
+    .mobile-subheader .title {
+        flex: 1;
+        font-family: var(--font-display);
+        font-size: 15px;
+        font-weight: 600;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .mobile-subheader .actions {
+        display: flex;
+        gap: 6px;
+    }
+    .mobile-subheader .actions button {
+        width: 36px; height: 36px;
+        border-radius: 8px;
+        border: 1px solid var(--border-soft);
+        background: var(--bg-elevated);
+        color: var(--text-secondary);
+        cursor: pointer;
+    }
+    .mobile-subheader .actions button:hover,
+    .mobile-subheader .actions button.active {
+        color: var(--accent);
+        border-color: var(--accent);
+    }
+
+    /* --- Modal sheet-handle reconciliation (fix conflict with styles-mobile.css padding:0) --- */
+    .modal-box {
+        padding-top: 8px !important;
+    }
+    .modal-box::before {
+        content: "";
+        display: block;
+        width: 40px; height: 4px;
+        margin: 0 auto 10px;
+        border-radius: 2px;
+        background: var(--border-strong);
+        flex-shrink: 0;
+    }
+    /* Footer: primary action prominent on top, secondary below */
+    .modal-footer {
+        padding: 12px 16px calc(12px + env(safe-area-inset-bottom)) 16px !important;
+        gap: 8px !important;
+        background: var(--bg-elevated);
+    }
+    .modal-footer .btn.primary {
+        order: -1;
+    }
+
+    /* --- Bottom nav tighter on small devices --- */
+    .mobile-bottom-nav {
+        height: 60px !important;
+    }
+    .mobile-bottom-nav-item {
+        font-size: 9.5px !important;
+        gap: 2px !important;
+    }
+    .mobile-bottom-nav-item i {
+        font-size: 17px !important;
+    }
+    .mobile-bottom-nav-item span {
+        max-width: 100%;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    /* Content viewport accounts for bottom nav + safe-area */
+    .content-viewport {
+        padding-bottom: calc(72px + env(safe-area-inset-bottom)) !important;
+    }
+
+    /* Bottom nav visibility follows .app-shell (natural parent). No extra rule needed. */
+
+    /* --- Universal long-text truncation for card cells --- */
+    .mobile-card-table tbody td,
+    .prospects-table td,
+    .customers-table td,
+    .agents-table td,
+    .imports-table td,
+    .events-table td,
+    .leaderboard-table-v2 td,
+    .history-table td,
+    .risk-table td,
+    .performance-table td,
+    .predictions-table td,
+    .leads-table td,
+    .factors-table td,
+    .breakdown-table td,
+    .crm-table td,
+    .version-table td,
+    .file-table td,
+    .data-table td {
+        min-width: 0;
+        overflow: hidden;
+    }
+    .mobile-card-table tbody td > *,
+    .mobile-clip {
+        min-width: 0;
+        max-width: 100%;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    /* --- Image safety net: no image breaks the viewport --- */
+    img {
+        max-width: 100%;
+        height: auto;
+    }
+
+    /* --- Global prevent horizontal overflow --- */
+    html, body {
+        max-width: 100vw;
+        overflow-x: hidden;
+    }
+
+    /* --- Card section polish --- */
+    .card, .card-section, .panel {
+        border-radius: var(--radius-lg) !important;
+        padding: 14px !important;
+    }
+}
+
+/* =======================================================================
+   M2 — Calendar
+   ======================================================================= */
+@media (max-width: 768px) {
+    /* Sticky mini-toolbar */
+    .calendar-header-toolbar {
+        position: sticky;
+        top: 56px;
+        z-index: 140;
+        padding: 10px !important;
+    }
+
+    /* Month cells: more breathing room, bigger date */
+    .calendar-grid-main {
+        grid-auto-rows: minmax(58px, auto) !important;
+    }
+    .calendar-cell {
+        padding: 4px !important;
+    }
+    .calendar-cell .date-num {
+        font-size: 12px !important;
+        font-weight: 600;
+    }
+
+    /* Only show up to 2 appointment pills + "N more" indicator */
+    .calendar-cell .calendar-appointment:nth-of-type(n+3),
+    .calendar-cell .grid-act-item:nth-of-type(n+3) {
+        display: none !important;
+    }
+    .calendar-cell .more-events-indicator {
+        display: block !important;
+        font-size: 9px !important;
+        color: var(--accent);
+        font-weight: 700;
+        margin-top: 1px;
+    }
+
+    /* Today highlight */
+    .calendar-cell.today {
+        background: linear-gradient(135deg, rgba(200,16,46,0.12), rgba(201,169,97,0.10)) !important;
+        box-shadow: inset 0 0 0 2px var(--accent) !important;
+        border-radius: 6px;
+    }
+    .calendar-cell.today .date-num {
+        color: var(--accent);
+        font-weight: 800;
+    }
+
+    /* Appointments inside cells: slightly larger/readable */
+    .calendar-appointment {
+        padding: 2px 4px !important;
+        font-size: 10px !important;
+        border-radius: 3px;
+    }
+    .appointment-time { font-size: 10px !important; }
+
+    /* Swipe hint bar (optional) */
+    .calendar-swipe-hint {
+        display: block;
+        text-align: center;
+        font-size: 10px;
+        color: var(--text-muted);
+        font-family: var(--font-mono);
+        padding: 4px 0;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+    }
+}
+
+/* =======================================================================
+   M3 — Pipeline: horizontal snap-carousel
+   ======================================================================= */
+@media (max-width: 768px) {
+    /* Override styles-mobile.css rule that stacks columns vertically */
+    .pipeline-container {
+        grid-template-columns: unset !important;
+        display: flex !important;
+        flex-direction: row !important;
+        gap: 12px;
+        overflow-x: auto;
+        scroll-snap-type: x mandatory;
+        -webkit-overflow-scrolling: touch;
+        scroll-padding: 12px;
+        padding: 4px 12px 8px !important;
+        margin: 0 -10px;
+    }
+    .pipeline-column,
+    .pipeline-stage,
+    .pipeline-container > div {
+        flex: 0 0 88%;
+        scroll-snap-align: start;
+        min-width: 0;
+        background: var(--bg-surface);
+        border: 1px solid var(--border-soft);
+        border-radius: var(--radius-lg);
+        padding: 12px !important;
+        box-shadow: var(--shadow-sm);
+    }
+    .pipeline-column .stage-header,
+    .pipeline-stage .stage-header,
+    .pipeline-container > div > h3:first-child {
+        position: sticky;
+        top: 0;
+        background: var(--bg-surface);
+        padding: 4px 0 8px;
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--accent);
+        font-family: var(--font-display);
+        border-bottom: 1px solid var(--border-soft);
+        margin-bottom: 10px;
+    }
+    .pipeline-card {
+        background: var(--bg-elevated);
+        border: 1px solid var(--border-soft);
+        border-radius: var(--radius-md);
+        padding: 10px !important;
+        margin-bottom: 8px;
+        font-size: 12px;
+    }
+
+    /* Scroll progress dots */
+    .pipeline-scroll-dots {
+        display: flex;
+        justify-content: center;
+        gap: 6px;
+        padding: 8px 0 0;
+    }
+    .pipeline-scroll-dots .dot {
+        width: 6px; height: 6px; border-radius: 50%;
+        background: var(--border-strong);
+        transition: all 0.2s;
+    }
+    .pipeline-scroll-dots .dot.active {
+        background: var(--accent);
+        width: 22px;
+        border-radius: 3px;
+    }
+}
+
+/* =======================================================================
+   M4 — Prospects / Customers filter sheet + card polish
+   ======================================================================= */
+@media (max-width: 768px) {
+    /* Filter bar: visible only when expanded */
+    .prospect-filters,
+    .customer-filters,
+    .filter-bar {
+        display: none !important;
+    }
+    .prospect-filters.mobile-expanded,
+    .customer-filters.mobile-expanded,
+    .filter-bar.mobile-expanded {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 8px !important;
+        background: var(--bg-surface);
+        border: 1px solid var(--border-soft);
+        border-radius: var(--radius-lg);
+        padding: 12px !important;
+        margin-bottom: 10px;
+        box-shadow: var(--shadow-md);
+    }
+
+    .mobile-filter-trigger {
+        display: inline-flex !important;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 14px;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border-soft);
+        border-radius: 999px;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text-secondary);
+        cursor: pointer;
+        margin-bottom: 10px;
+    }
+    .mobile-filter-trigger.has-active {
+        background: var(--accent);
+        color: #fff;
+        border-color: var(--accent);
+    }
+    .mobile-filter-trigger .badge {
+        background: rgba(255,255,255,0.25);
+        padding: 1px 7px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-family: var(--font-mono);
+    }
+
+    /* Prospect/customer card prettier */
+    .prospects-table tr,
+    .customers-table tr {
+        padding: 14px 14px 10px !important;
+        position: relative;
+    }
+    .prospects-table tr::before,
+    .customers-table tr::before {
+        content: "";
+        position: absolute;
+        left: 0; top: 0; bottom: 0;
+        width: 3px;
+        background: var(--accent-grad);
+        border-radius: var(--radius-lg) 0 0 var(--radius-lg);
+    }
+
+    /* Desktop search input full-width & prominent */
+    #prospect-search,
+    #customer-search,
+    #agent-search {
+        width: 100% !important;
+        padding: 12px 14px 12px 38px !important;
+        background-image: none;
+        border: 1px solid var(--border-soft);
+        border-radius: 999px;
+        background: var(--bg-elevated);
+    }
+}
+
+/* =======================================================================
+   M5 — KPI tiles + chart mobile compaction
+   ======================================================================= */
+@media (max-width: 768px) {
+    .kpi-tile,
+    .stat-card,
+    .metric-card {
+        padding: 12px 14px !important;
+        border-radius: var(--radius-md) !important;
+    }
+    .kpi-label,
+    .stat-label,
+    .metric-label {
+        font-size: 10px !important;
+        margin-bottom: 4px !important;
+    }
+    .kpi-value,
+    .stat-value,
+    .metric-value,
+    .stat-number {
+        font-size: 22px !important;
+        line-height: 1.1 !important;
+    }
+
+    /* Chart wrapper safety */
+    .chart-wrap,
+    .chart-container,
+    [class*="chart-"][class*="-container"] {
+        max-width: 100%;
+        overflow: hidden;
+        border-radius: var(--radius-lg);
+        background: var(--bg-surface);
+        border: 1px solid var(--border-soft);
+        padding: 12px;
+        margin-bottom: 12px;
+    }
+    .chart-wrap canvas,
+    .chart-container canvas,
+    canvas[id*="chart"],
+    canvas[id*="Chart"] {
+        max-width: 100% !important;
+        height: auto !important;
+    }
+}
+
+/* =======================================================================
+   M6 — Generic table-to-card (auto-applied via JS helper)
+   ======================================================================= */
+@media (max-width: 768px) {
+    .data-table.auto-card,
+    table.auto-card {
+        display: block !important;
+        border: none !important;
+        background: transparent !important;
+    }
+    .data-table.auto-card thead,
+    table.auto-card thead { display: none !important; }
+
+    .data-table.auto-card tbody,
+    table.auto-card tbody { display: block !important; }
+
+    .data-table.auto-card tbody tr,
+    table.auto-card tbody tr {
+        display: block !important;
+        background: var(--bg-surface) !important;
+        border: 1px solid var(--border-soft) !important;
+        border-radius: var(--radius-lg) !important;
+        padding: 12px 14px !important;
+        margin-bottom: 10px !important;
+        box-shadow: var(--shadow-sm) !important;
+    }
+    .data-table.auto-card tbody td,
+    table.auto-card tbody td {
+        display: flex !important;
+        justify-content: space-between !important;
+        align-items: center !important;
+        gap: 10px !important;
+        padding: 6px 0 !important;
+        border: none !important;
+        border-bottom: 1px solid var(--border-soft) !important;
+        font-size: 13px !important;
+        min-height: 32px;
+    }
+    .data-table.auto-card tbody td:last-child,
+    table.auto-card tbody td:last-child {
+        border-bottom: none !important;
+        padding-top: 10px !important;
+        justify-content: flex-end !important;
+    }
+    .data-table.auto-card tbody td::before,
+    table.auto-card tbody td::before {
+        content: attr(data-label);
+        font-size: 10px;
+        font-weight: 700;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        font-family: var(--font-mono);
+        flex-shrink: 0;
+    }
+    .data-table.auto-card tbody td:last-child::before,
+    table.auto-card tbody td:last-child::before {
+        display: none !important;
+    }
+}
+
+/* =======================================================================
+   M7 — Performance leaderboard + Risk gauge cards
+   ======================================================================= */
+@media (max-width: 768px) {
+    /* Leaderboard: first td becomes big rank badge */
+    .leaderboard-table-v2 tbody tr {
+        position: relative;
+        padding-left: 70px !important;
+        min-height: 70px;
+    }
+    .leaderboard-table-v2 tbody tr > td:first-child {
+        position: absolute !important;
+        left: 10px; top: 50%;
+        transform: translateY(-50%);
+        width: 48px !important;
+        height: 48px !important;
+        border-radius: 12px !important;
+        background: var(--accent-grad) !important;
+        color: #fff !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        font-family: var(--font-display) !important;
+        font-weight: 700 !important;
+        font-size: 20px !important;
+        padding: 0 !important;
+        border: none !important;
+        box-shadow: var(--shadow-md);
+    }
+    .leaderboard-table-v2 tbody tr > td:first-child::before { display: none !important; }
+    /* Top 3 gradients */
+    .leaderboard-table-v2 tbody tr:nth-child(1) > td:first-child {
+        background: linear-gradient(135deg, #FFD700, #C9A961) !important;
+    }
+    .leaderboard-table-v2 tbody tr:nth-child(2) > td:first-child {
+        background: linear-gradient(135deg, #E5E5E5, #9EA0A2) !important;
+        color: #333 !important;
+    }
+    .leaderboard-table-v2 tbody tr:nth-child(3) > td:first-child {
+        background: linear-gradient(135deg, #CD7F32, #8B5A2B) !important;
+    }
+
+    /* Risk score: use first numeric cell as gauge */
+    .risk-table tbody tr {
+        padding-left: 70px !important;
+        position: relative;
+        min-height: 70px;
+    }
+    .risk-table tbody tr > td.risk-score-cell,
+    .risk-table tbody tr > td[data-label*="Score" i],
+    .risk-table tbody tr > td[data-label*="Risk" i] {
+        position: absolute !important;
+        left: 10px; top: 50%;
+        transform: translateY(-50%);
+        width: 48px !important;
+        height: 48px !important;
+        border-radius: 50% !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        font-family: var(--font-display) !important;
+        font-weight: 700 !important;
+        font-size: 16px !important;
+        padding: 0 !important;
+        color: #fff !important;
+        background: conic-gradient(var(--danger) calc(var(--risk, 60) * 1%), var(--bg-elevated) 0);
+        border: none !important;
+    }
+    .risk-table tbody tr > td.risk-score-cell::before { display: none !important; }
+}
+
+/* =======================================================================
+   M8 — DMS folder chips + file card polish
+   ======================================================================= */
+@media (max-width: 768px) {
+    .mobile-folder-chips {
+        display: flex !important;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        gap: 8px;
+        padding: 8px 12px;
+        background: var(--bg-surface);
+        border-bottom: 1px solid var(--border-soft);
+        position: sticky;
+        top: 56px;
+        z-index: 130;
+        scrollbar-width: none;
+    }
+    .mobile-folder-chips::-webkit-scrollbar { display: none; }
+    .mobile-folder-chip {
+        flex-shrink: 0;
+        padding: 6px 12px;
+        border-radius: 999px;
+        border: 1px solid var(--border-soft);
+        background: var(--bg-elevated);
+        color: var(--text-secondary);
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        white-space: nowrap;
+    }
+    .mobile-folder-chip.active {
+        background: var(--accent-grad);
+        color: #fff;
+        border-color: transparent;
+        box-shadow: var(--shadow-glow);
+    }
+
+    /* File card */
+    .file-table tbody tr {
+        padding: 12px 14px !important;
+        display: flex !important;
+        align-items: center !important;
+        gap: 12px !important;
+    }
+    .file-table tbody tr > td {
+        padding: 0 !important;
+        border: none !important;
+        min-height: auto !important;
+    }
+    .file-table tbody tr > td:not(:first-child):not(:last-child) {
+        display: none !important;
+    }
+    /* Make the first td (name) take all space */
+    .file-table tbody tr > td:first-child {
+        flex: 1 !important;
+        font-weight: 600 !important;
+        justify-content: flex-start !important;
+    }
+}
+
+/* =======================================================================
+   M9 — Referral tree mobile
+   ======================================================================= */
+@media (max-width: 768px) {
+    .tree-card,
+    .referral-tree-container {
+        max-width: 100vw;
+        overflow: hidden;
+        position: relative;
+    }
+    .tree-card svg,
+    .referral-tree-container svg {
+        max-width: 100%;
+        height: auto;
+    }
+    .tree-fullscreen-btn {
+        display: inline-flex !important;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 14px;
+        background: var(--accent-grad);
+        color: #fff;
+        border: none;
+        border-radius: 999px;
+        font-weight: 600;
+        font-size: 13px;
+        cursor: pointer;
+        margin: 8px auto;
+        box-shadow: var(--shadow-glow);
+    }
+
+    /* When fullscreen mode toggled */
+    .tree-card.fullscreen,
+    .referral-tree-container.fullscreen {
+        position: fixed !important;
+        inset: 0 !important;
+        z-index: 2000 !important;
+        background: var(--bg-app) !important;
+        overflow: auto !important;
+        padding: 56px 12px 12px !important;
+    }
+    .tree-card.fullscreen svg,
+    .referral-tree-container.fullscreen svg {
+        max-width: unset;
+        min-width: 800px;
+    }
+}
+
+/* =======================================================================
+   M10 — Success Case Library + Import wizard
+   ======================================================================= */
+@media (max-width: 768px) {
+    /* Case Library grid: 1 column on <400px, 2 on 400-768px */
+    .case-library-grid,
+    .success-cases-grid {
+        grid-template-columns: 1fr !important;
+        gap: 12px !important;
+    }
+    @media (min-width: 400px) {
+        .case-library-grid,
+        .success-cases-grid {
+            grid-template-columns: repeat(2, 1fr) !important;
+        }
+    }
+    .case-card {
+        border-radius: var(--radius-lg) !important;
+        overflow: hidden;
+    }
+    .case-card-image,
+    .case-card img {
+        aspect-ratio: 16/9;
+        width: 100%;
+        object-fit: cover;
+    }
+    .case-card-title {
+        font-size: 14px !important;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+    .case-card-description {
+        font-size: 12px !important;
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        color: var(--text-secondary);
+    }
+
+    /* Import wizard polish */
+    .wizard-steps {
+        position: sticky;
+        top: 56px;
+        background: var(--bg-surface);
+        padding: 8px !important;
+        border-bottom: 1px solid var(--border-soft);
+        z-index: 120;
+        gap: 4px !important;
+    }
+    .wizard-step {
+        font-size: 10px !important;
+        padding: 6px 4px !important;
+    }
+    .wizard-step.active {
+        background: var(--accent-grad);
+        color: #fff;
+        border-radius: 6px;
+    }
+    /* Column mapping: source → target per row */
+    .column-mapping-row {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 6px !important;
+        background: var(--bg-surface);
+        border: 1px solid var(--border-soft);
+        border-radius: var(--radius-md);
+        padding: 10px !important;
+        margin-bottom: 8px;
+    }
+    .column-mapping-row .source-label {
+        font-weight: 700;
+        color: var(--accent);
+        font-size: 12px;
+    }
+    .column-mapping-row select {
+        width: 100% !important;
+    }
+}
+
+/* =======================================================================
+   Extra — Command palette on mobile
+   ======================================================================= */
+@media (max-width: 480px) {
+    .cmdk-overlay {
+        padding-top: 6vh !important;
+    }
+    .cmdk-panel {
+        width: calc(100vw - 16px) !important;
+    }
+    .cmdk-footer {
+        display: none !important;
+    }
+    .cmdk-item {
+        padding: 14px 12px !important;
+        font-size: 14px;
+    }
+    .cmdk-input {
+        font-size: 16px; /* Prevent iOS zoom */
+    }
+}
+
+/* =======================================================================
+   Extra — Drawer polish (add theme toggle + cmdk at top)
+   ======================================================================= */
+@media (max-width: 768px) {
+    .mobile-drawer-quick-actions {
+        display: flex;
+        gap: 8px;
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--border-soft);
+        background: var(--bg-elevated);
+    }
+    .mobile-drawer-quick-actions button {
+        flex: 1;
+        min-height: 40px;
+        border-radius: 10px;
+        border: 1px solid var(--border-soft);
+        background: var(--bg-surface);
+        color: var(--text-secondary);
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        transition: all 0.2s;
+    }
+    .mobile-drawer-quick-actions button:hover {
+        color: var(--accent);
+        border-color: var(--accent);
+    }
+}

@@ -14,6 +14,7 @@
     <link rel="stylesheet" href="styles-fixed.css">
     <link rel="stylesheet" href="styles-mobile.css">
     <link rel="stylesheet" href="styles-theme.css?v=20260424a">
+    <link rel="stylesheet" href="styles-mobile-v2.css?v=20260424a">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#800020">
     <script>
@@ -655,6 +656,188 @@
                     if (++tries > 40) clearInterval(id);
                 }, 250);
             });
+        })();
+
+        // ========== Oracle Console: Mobile enhancements (M1–M10 helpers) ==========
+        (function () {
+            const isMobile = () => window.matchMedia('(max-width: 768px)').matches;
+
+            // M6 — Auto-card any table that lacks a specific card conversion.
+            // Reads <thead> labels and injects data-label on <td>s so CSS can render the card.
+            function autoCardTables(root) {
+                if (!isMobile()) return;
+                const scope = root || document;
+                const tables = scope.querySelectorAll('table:not(.no-card-mode):not(.auto-card-applied)');
+                tables.forEach(t => {
+                    if (t.closest('.modal-content')) return; // let modals own their layout
+                    const headers = Array.from(t.querySelectorAll('thead th')).map(th => th.textContent.trim());
+                    if (!headers.length) return;
+                    t.classList.add('auto-card', 'auto-card-applied');
+                    t.querySelectorAll('tbody tr').forEach(tr => {
+                        Array.from(tr.children).forEach((td, i) => {
+                            if (!td.getAttribute('data-label') && headers[i]) {
+                                td.setAttribute('data-label', headers[i]);
+                            }
+                        });
+                    });
+                });
+            }
+
+            // M4 — Filter-sheet toggle button (prepended before .prospect-filters / .customer-filters / .filter-bar)
+            function setupFilterTriggers() {
+                if (!isMobile()) return;
+                document.querySelectorAll('.prospect-filters, .customer-filters, .filter-bar').forEach(bar => {
+                    if (bar.dataset.mobileTriggerReady) return;
+                    bar.dataset.mobileTriggerReady = '1';
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = 'mobile-filter-trigger';
+                    btn.innerHTML = '<i class="fas fa-sliders"></i> Filters';
+                    btn.addEventListener('click', () => {
+                        bar.classList.toggle('mobile-expanded');
+                    });
+                    bar.parentNode.insertBefore(btn, bar);
+                });
+            }
+
+            // M2 — Calendar: add "+N more" chip when a cell has >2 appointments
+            function addCalendarMoreIndicators() {
+                if (!isMobile()) return;
+                document.querySelectorAll('.calendar-cell').forEach(cell => {
+                    cell.querySelectorAll('.more-events-indicator').forEach(e => e.remove());
+                    const pills = cell.querySelectorAll('.calendar-appointment, .grid-act-item');
+                    if (pills.length > 2) {
+                        const more = document.createElement('div');
+                        more.className = 'more-events-indicator';
+                        more.textContent = '+' + (pills.length - 2) + ' more';
+                        cell.appendChild(more);
+                    }
+                });
+            }
+
+            // M3 — Pipeline: render scroll-position dots for stage carousel
+            function setupPipelineDots() {
+                if (!isMobile()) return;
+                document.querySelectorAll('.pipeline-container').forEach(container => {
+                    if (container.dataset.dotsReady) return;
+                    container.dataset.dotsReady = '1';
+                    const dots = document.createElement('div');
+                    dots.className = 'pipeline-scroll-dots';
+                    const render = () => {
+                        const cols = container.children;
+                        dots.innerHTML = '';
+                        if (cols.length <= 1) return;
+                        Array.from(cols).forEach((_, i) => {
+                            const d = document.createElement('span');
+                            d.className = 'dot';
+                            dots.appendChild(d);
+                        });
+                        update();
+                    };
+                    const update = () => {
+                        const cols = container.children;
+                        if (!cols.length) return;
+                        const colWidth = cols[0].getBoundingClientRect().width + 12;
+                        const idx = Math.round(container.scrollLeft / colWidth);
+                        Array.from(dots.children).forEach((d, i) => d.classList.toggle('active', i === idx));
+                    };
+                    container.parentNode.insertBefore(dots, container.nextSibling);
+                    container.addEventListener('scroll', update, { passive: true });
+                    render();
+                });
+            }
+
+            // M9 — Referral tree: add fullscreen toggle
+            function setupTreeFullscreen() {
+                if (!isMobile()) return;
+                document.querySelectorAll('.tree-card, .referral-tree-container').forEach(card => {
+                    if (card.dataset.fsReady) return;
+                    card.dataset.fsReady = '1';
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = 'tree-fullscreen-btn';
+                    btn.innerHTML = '<i class="fas fa-expand"></i> View fullscreen';
+                    btn.addEventListener('click', () => {
+                        card.classList.toggle('fullscreen');
+                        btn.innerHTML = card.classList.contains('fullscreen')
+                            ? '<i class="fas fa-compress"></i> Exit fullscreen'
+                            : '<i class="fas fa-expand"></i> View fullscreen';
+                    });
+                    card.insertBefore(btn, card.firstChild);
+                });
+            }
+
+            // Drawer: inject theme-toggle + cmdk quick-actions row at top of drawer body.
+            // Re-inject whenever renderMobileDrawer wipes the body, but never duplicate.
+            function augmentDrawer() {
+                const body = document.getElementById('mobile-drawer-body');
+                if (!body) return;
+                if (body.querySelector('.mobile-drawer-quick-actions')) return;
+                const row = document.createElement('div');
+                row.className = 'mobile-drawer-quick-actions';
+                row.innerHTML = `
+                    <button type="button" id="drawer-theme-toggle">
+                        <i class="fas fa-moon"></i> Theme
+                    </button>
+                    <button type="button" id="drawer-cmdk-trigger">
+                        <i class="fas fa-search"></i> Search
+                    </button>
+                `;
+                body.insertBefore(row, body.firstChild);
+                row.querySelector('#drawer-theme-toggle').addEventListener('click', () => {
+                    window._toggleTheme && window._toggleTheme();
+                });
+                row.querySelector('#drawer-cmdk-trigger').addEventListener('click', () => {
+                    if (window.app && window.app.closeMobileDrawer) window.app.closeMobileDrawer();
+                    const t = document.getElementById('cmdk-trigger');
+                    if (t) t.click();
+                    else document.getElementById('cmdk-overlay')?.classList.add('active');
+                });
+            }
+
+            // Run all on load + on DOM mutation + on resize
+            function runAll() {
+                autoCardTables();
+                setupFilterTriggers();
+                addCalendarMoreIndicators();
+                setupPipelineDots();
+                setupTreeFullscreen();
+                augmentDrawer();
+            }
+
+            document.addEventListener('DOMContentLoaded', runAll);
+            window.addEventListener('resize', () => {
+                // Reset card state on desktop; re-run on mobile re-entry
+                if (!isMobile()) {
+                    document.querySelectorAll('table.auto-card-applied').forEach(t => {
+                        t.classList.remove('auto-card');
+                    });
+                } else {
+                    document.querySelectorAll('table.auto-card-applied').forEach(t => {
+                        t.classList.add('auto-card');
+                    });
+                }
+                runAll();
+            });
+
+            // Re-run on content-viewport changes
+            const viewport = document.getElementById('content-viewport');
+            if (viewport) {
+                const obs = new MutationObserver(() => {
+                    // Debounce
+                    clearTimeout(window._mobileEnhanceTimer);
+                    window._mobileEnhanceTimer = setTimeout(runAll, 80);
+                });
+                obs.observe(viewport, { childList: true, subtree: true });
+            }
+            // And when drawer opens (drawer body populated by renderMobileDrawer)
+            const drawer = document.getElementById('mobile-drawer');
+            if (drawer) {
+                const obs2 = new MutationObserver(() => augmentDrawer());
+                obs2.observe(drawer, { childList: true, subtree: true });
+            }
+
+            window._mobileEnhance = runAll;
         })();
 
         // ========== Oracle Console: Chart.js dark-theme defaults ==========
