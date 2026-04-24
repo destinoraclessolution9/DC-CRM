@@ -734,7 +734,7 @@ body {
     font-weight: 600;
     color: var(--gray-500);
     cursor: pointer;
-    transition: all 0.2s;
+    transition: background-color 0.2s, color 0.2s, border-color 0.2s, box-shadow 0.2s, opacity 0.2s, transform 0.2s;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -1933,7 +1933,7 @@ body {
     padding: 16px;
     margin-bottom: 12px;
     cursor: move;
-    transition: all 0.2s;
+    transition: background-color 0.2s, color 0.2s, border-color 0.2s, box-shadow 0.2s, opacity 0.2s, transform 0.2s;
     border-left-width: 4px;
     border-left-style: solid;
 }
@@ -3788,7 +3788,7 @@ body {
     border-radius: 20px;
     font-size: 12px;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: background-color 0.2s, color 0.2s, border-color 0.2s, box-shadow 0.2s, opacity 0.2s, transform 0.2s;
 }
 
 .preset-btn:hover {
@@ -4179,7 +4179,7 @@ body {
     margin-bottom: 2px;
     border-radius: 6px;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: background-color 0.2s, color 0.2s, border-color 0.2s, box-shadow 0.2s, opacity 0.2s, transform 0.2s;
 }
 
 .folder-item:hover {
@@ -4431,7 +4431,7 @@ body {
     border: 1px solid var(--gray-200);
     border-radius: 8px;
     padding: 16px;
-    transition: all 0.2s;
+    transition: background-color 0.2s, color 0.2s, border-color 0.2s, box-shadow 0.2s, opacity 0.2s, transform 0.2s;
     position: relative;
 }
 
@@ -4502,7 +4502,7 @@ body {
     padding: 40px;
     text-align: center;
     background: var(--gray-50);
-    transition: all 0.2s;
+    transition: background-color 0.2s, color 0.2s, border-color 0.2s, box-shadow 0.2s, opacity 0.2s, transform 0.2s;
     margin-bottom: 20px;
 }
 
@@ -5505,7 +5505,7 @@ body {
     padding: 16px;
     box-shadow: var(--shadow-md);
     cursor: pointer;
-    transition: all 0.2s;
+    transition: background-color 0.2s, color 0.2s, border-color 0.2s, box-shadow 0.2s, opacity 0.2s, transform 0.2s;
 }
 
 .mobile-card:active {
@@ -5618,7 +5618,7 @@ body {
 .mic-container i {
     font-size: 64px;
     color: var(--primary);
-    transition: all 0.3s;
+    transition: background-color 0.3s, color 0.3s, border-color 0.3s, box-shadow 0.3s, opacity 0.3s, transform 0.3s;
 }
 
 .mic-container i.recording {
@@ -5837,7 +5837,7 @@ body {
     font-size: 12px;
     font-weight: 600;
     color: var(--gray-700);
-    transition: all 0.2s;
+    transition: background-color 0.2s, color 0.2s, border-color 0.2s, box-shadow 0.2s, opacity 0.2s, transform 0.2s;
 }
 
 .mobile-menu-item i {
@@ -6151,7 +6151,7 @@ body {
     display: flex;
     gap: 16px;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: background-color 0.2s, color 0.2s, border-color 0.2s, box-shadow 0.2s, opacity 0.2s, transform 0.2s;
 }
 
 .integration-card:hover {
@@ -6563,7 +6563,7 @@ body {
     box-shadow: var(--shadow-sm);
     border: 1px solid var(--gray-200);
     cursor: pointer;
-    transition: all 0.2s;
+    transition: background-color 0.2s, color 0.2s, border-color 0.2s, box-shadow 0.2s, opacity 0.2s, transform 0.2s;
     position: relative;
     overflow: hidden;
 }
@@ -7244,7 +7244,7 @@ body {
     color: var(--gray-500);
     font-size: 12px;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: background-color 0.2s, color 0.2s, border-color 0.2s, box-shadow 0.2s, opacity 0.2s, transform 0.2s;
     flex: 1;
 }
 
@@ -7326,7 +7326,7 @@ body {
     padding: 16px;
     color: var(--gray-500);
     font-size: 14px;
-    transition: all 0.3s;
+    transition: background-color 0.3s, color 0.3s, border-color 0.3s, box-shadow 0.3s, opacity 0.3s, transform 0.3s;
 }
 
 @media (max-width: 768px) {
@@ -7411,7 +7411,7 @@ body {
     z-index: 2000;
     visibility: hidden;
     opacity: 0;
-    transition: all 0.3s ease;
+    transition: opacity 0.3s ease, visibility 0.3s ease;
 }
 
 .action-sheet.visible {
@@ -7531,7 +7531,7 @@ body {
     z-index: 2000;
     visibility: hidden;
     opacity: 0;
-    transition: all 0.3s ease;
+    transition: opacity 0.3s ease, visibility 0.3s ease;
 }
 
 .bottom-sheet.visible {
@@ -7596,7 +7596,7 @@ body {
     justify-content: center;
     gap: 8px;
     margin-top: 16px;
-    transition: all 0.3s;
+    transition: background-color 0.3s, color 0.3s, border-color 0.3s, box-shadow 0.3s, opacity 0.3s, transform 0.3s;
 }
 
 .biometric-login-btn i {
@@ -8404,7 +8404,7 @@ input:checked+.slider:before {
     cursor: pointer;
     white-space: nowrap;
     color: var(--gray-600);
-    transition: all 0.15s;
+    transition: background-color 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s, opacity 0.15s, transform 0.15s;
 }
 .cases-filter-btn:hover,
 .cases-filter-btn.active {
@@ -8892,7 +8892,7 @@ input:checked+.slider:before {
     color: var(--gray-500);
     font-size: 11.5px;
     gap: 4px;
-    transition: all 0.15s;
+    transition: background-color 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s, opacity 0.15s, transform 0.15s;
 }
 .case-photo-add:hover {
     border-color: var(--primary-400, #9b2335);

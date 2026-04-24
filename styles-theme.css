@@ -236,7 +236,7 @@ h1, h2, h3, h4 {
     border-radius: 10px;
     color: var(--text-secondary);
     cursor: pointer;
-    transition: all 0.2s var(--ease);
+    transition: background-color 0.2s var(--ease), color 0.2s var(--ease), border-color 0.2s var(--ease), box-shadow 0.2s var(--ease), opacity 0.2s var(--ease), transform 0.2s var(--ease);
 }
 
 .notif-bell:hover {
@@ -267,7 +267,7 @@ h1, h2, h3, h4 {
     border-radius: 999px;
     border: 1px solid var(--border-soft);
     background: var(--bg-elevated);
-    transition: all 0.2s var(--ease);
+    transition: background-color 0.2s var(--ease), color 0.2s var(--ease), border-color 0.2s var(--ease), box-shadow 0.2s var(--ease), opacity 0.2s var(--ease), transform 0.2s var(--ease);
 }
 
 .user-info:hover {
@@ -302,7 +302,7 @@ h1, h2, h3, h4 {
     background: var(--bg-elevated);
     color: var(--text-secondary);
     border: 1px solid var(--border-soft);
-    transition: all 0.2s var(--ease);
+    transition: background-color 0.2s var(--ease), color 0.2s var(--ease), border-color 0.2s var(--ease), box-shadow 0.2s var(--ease), opacity 0.2s var(--ease), transform 0.2s var(--ease);
 }
 
 .search-trigger:hover {
@@ -325,7 +325,7 @@ h1, h2, h3, h4 {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.2s var(--ease);
+    transition: background-color 0.2s var(--ease), color 0.2s var(--ease), border-color 0.2s var(--ease), box-shadow 0.2s var(--ease), opacity 0.2s var(--ease), transform 0.2s var(--ease);
     font-size: 14px;
 }
 
@@ -378,7 +378,7 @@ h1, h2, h3, h4 {
     font-family: var(--font-body);
     font-weight: 600;
     letter-spacing: 0.005em;
-    transition: all 0.18s var(--ease);
+    transition: background-color 0.18s var(--ease), color 0.18s var(--ease), border-color 0.18s var(--ease), box-shadow 0.18s var(--ease), opacity 0.18s var(--ease), transform 0.18s var(--ease);
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -473,7 +473,7 @@ h1, h2, h3, h4 {
     width: 32px; height: 32px;
     display: inline-flex; align-items: center; justify-content: center;
     border-radius: 8px;
-    transition: all 0.18s var(--ease);
+    transition: background-color 0.18s var(--ease), color 0.18s var(--ease), border-color 0.18s var(--ease), box-shadow 0.18s var(--ease), opacity 0.18s var(--ease), transform 0.18s var(--ease);
     color: var(--text-muted);
 }
 
@@ -514,7 +514,7 @@ textarea {
     color: var(--text-primary);
     border: 1px solid var(--border-soft);
     border-radius: var(--radius-md);
-    transition: all 0.18s var(--ease);
+    transition: background-color 0.18s var(--ease), color 0.18s var(--ease), border-color 0.18s var(--ease), box-shadow 0.18s var(--ease), opacity 0.18s var(--ease), transform 0.18s var(--ease);
 }
 
 .form-control:focus,
@@ -578,7 +578,7 @@ table td.num, table td.id, .mono { font-family: var(--font-mono); }
     padding: 20px 22px;
     box-shadow: var(--shadow-sm);
     overflow: hidden;
-    transition: all 0.25s var(--ease);
+    transition: background-color 0.25s var(--ease), color 0.25s var(--ease), border-color 0.25s var(--ease), box-shadow 0.25s var(--ease), opacity 0.25s var(--ease), transform 0.25s var(--ease);
 }
 
 .kpi-tile::before,

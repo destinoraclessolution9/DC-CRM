@@ -23443,17 +23443,12 @@ NOTIFY pgrst, 'reload schema';`;
         let packageId = null;
         const allPackages = await AppDataStore.getAll('promotion_packages');
         
+const allProductsForPkg = await AppDataStore.getAll('products');
+const productNameMap = new Map(allProductsForPkg.map(pr => [pr.id, pr.name]));
 let matchingPkg = null;
 for (const p of allPackages) {
     if (!p.is_active) continue;
-    let found = false;
-    for (const pid of p.product_ids) {
-        const prod = await AppDataStore.getById('products', pid);
-        if (prod && prod.name === item) {
-            found = true;
-            break;
-        }
-    }
+    const found = (p.product_ids || []).some(pid => productNameMap.get(pid) === item);
     if (found) {
         matchingPkg = p;
         break;
@@ -30862,12 +30857,11 @@ const exportKPIReport = async (format) => {
             return true;
         });
 
-        // Pre-load product names for each promotion
+        // Pre-load all products once then resolve names locally
+        const _allProducts = await AppDataStore.getAll('products');
+        const _productMap = new Map(_allProducts.map(pr => [pr.id, pr.name]));
         const promoCards = await Promise.all(promotions.map(async p => {
-            const productNames = await Promise.all((p.product_ids || []).map(async id => {
-                const prod = await AppDataStore.getById('products', id);
-                return prod ? prod.name : null;
-            }));
+            const productNames = (p.product_ids || []).map(id => _productMap.get(id) || null);
             const validProductNames = productNames.filter(Boolean);
 
             // Discount display
@@ -31512,7 +31506,11 @@ const exportKPIReport = async (format) => {
     };
 
     const renderPackagesTab = async () => {
-        const packages = await AppDataStore.getAll('promotions');
+        const [packages, allProds] = await Promise.all([
+            AppDataStore.getAll('promotions'),
+            AppDataStore.getAll('products')
+        ]);
+        const pkgProductMap = new Map(allProds.map(pr => [pr.id, pr.name]));
         const today = new Date(); today.setHours(0,0,0,0);
 
         const isExpired = p => p.end_date && (() => { const e = new Date(p.end_date); e.setHours(0,0,0,0); return e < today; })();
@@ -31520,8 +31518,8 @@ const exportKPIReport = async (format) => {
         const activeList   = packages.filter(p => !isExpired(p)).sort((a,b) => new Date(b.created_at||0) - new Date(a.created_at||0));
         const expiredList  = packages.filter(p =>  isExpired(p)).sort((a,b) => new Date(b.end_date||0)   - new Date(a.end_date||0));
 
-        const activeRows  = (await Promise.all(activeList.map(p  => renderPackageRow(p, false)))).join('');
-        const expiredRows = (await Promise.all(expiredList.map(p => renderPackageRow(p, true)))).join('');
+        const activeRows  = (await Promise.all(activeList.map(p  => renderPackageRow(p, false, pkgProductMap)))).join('');
+        const expiredRows = (await Promise.all(expiredList.map(p => renderPackageRow(p, true,  pkgProductMap)))).join('');
 
         const divider = expiredList.length > 0 ? `
             <tr>
@@ -31585,11 +31583,13 @@ const exportKPIReport = async (format) => {
         `;
     };
 
-    const renderPackageRow = async (p, isExpiredGroup = false) => {
-        const productNamesList = await Promise.all((p.product_ids || []).map(async id => {
-            const prod = await AppDataStore.getById('products', id);
-            return prod ? prod.name : 'Unknown Product';
-        }));
+    const renderPackageRow = async (p, isExpiredGroup = false, productMap = null) => {
+        const productNamesList = productMap
+            ? (p.product_ids || []).map(id => productMap.get(id) || 'Unknown Product')
+            : await Promise.all((p.product_ids || []).map(async id => {
+                const prod = await AppDataStore.getById('products', id);
+                return prod ? prod.name : 'Unknown Product';
+            }));
         const productNames     = productNamesList.join(', ');
         const shortProducts    = productNames.length > 38 ? productNames.substring(0, 35) + '…' : productNames;
 
@@ -31656,7 +31656,11 @@ const exportKPIReport = async (format) => {
         const statusFilter = document.getElementById('package-status-filter')?.value || 'all';
         const today        = new Date(); today.setHours(0,0,0,0);
 
-        const packages = await AppDataStore.getAll('promotions');
+        const [packages, filterProds] = await Promise.all([
+            AppDataStore.getAll('promotions'),
+            AppDataStore.getAll('products')
+        ]);
+        const filterProductMap = new Map(filterProds.map(pr => [pr.id, pr.name]));
 
         const getStatusKey = (p) => {
             if (p.end_date) { const e = new Date(p.end_date); e.setHours(0,0,0,0); if (e < today) return 'expired'; }
@@ -31664,22 +31668,20 @@ const exportKPIReport = async (format) => {
             return p.is_active ? 'active' : 'inactive';
         };
 
-        const filteredResults = await Promise.all(packages.map(async p => {
-            const products      = await Promise.all((p.product_ids || []).map(id => AppDataStore.getById('products', id)));
+        const filtered = packages.filter(p => {
+            const productNames = (p.product_ids || []).map(id => filterProductMap.get(id) || '');
             const matchesSearch = (p.package_name || p.name || '').toLowerCase().includes(search) ||
-                products.some(prod => prod && (prod.name || '').toLowerCase().includes(search));
+                productNames.some(n => n.toLowerCase().includes(search));
             const matchesStatus = statusFilter === 'all' || getStatusKey(p) === statusFilter;
             return matchesSearch && matchesStatus;
-        }));
-
-        const filtered = packages.filter((_, i) => filteredResults[i]);
+        });
 
         const isExpired = p => p.end_date && (() => { const e = new Date(p.end_date); e.setHours(0,0,0,0); return e < today; })();
         const activeList  = filtered.filter(p => !isExpired(p)).sort((a,b) => new Date(b.created_at||0) - new Date(a.created_at||0));
         const expiredList = filtered.filter(p =>  isExpired(p)).sort((a,b) => new Date(b.end_date||0)   - new Date(a.end_date||0));
 
-        const activeRows  = (await Promise.all(activeList.map(p  => renderPackageRow(p, false)))).join('');
-        const expiredRows = (await Promise.all(expiredList.map(p => renderPackageRow(p, true)))).join('');
+        const activeRows  = (await Promise.all(activeList.map(p  => renderPackageRow(p, false, filterProductMap)))).join('');
+        const expiredRows = (await Promise.all(expiredList.map(p => renderPackageRow(p, true,  filterProductMap)))).join('');
         const divider     = expiredList.length > 0
             ? '<tr><td colspan="9" style="padding:7px 14px;background:#f7f7f7;color:#999;font-size:11px;text-align:center;letter-spacing:1.5px;font-weight:700;border-bottom:1px solid var(--gray-200);">── EXPIRED PROMOTIONS ──</td></tr>'
             : '';

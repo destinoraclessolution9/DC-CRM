@@ -816,7 +816,7 @@
                 const obs = new MutationObserver(() => {
                     // Debounce
                     clearTimeout(window._mobileEnhanceTimer);
-                    window._mobileEnhanceTimer = setTimeout(runAll, 80);
+                    window._mobileEnhanceTimer = setTimeout(runAll, 250);
                 });
                 obs.observe(viewport, { childList: true, subtree: true });
             }
