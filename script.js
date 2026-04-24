@@ -13227,7 +13227,7 @@ function _wireLoginBtn() {
             // recurring event still keeps each session's attendees separate.
             const [allActivities, allAttendees, prospects, customers, users] = await Promise.all([
                 AppDataStore.getAll('activities'),
-                AppDataStore.getAll('event_attendees'),
+                AppDataStore.getAll('event_attendees', { fresh: true }),
                 AppDataStore.getAll('prospects'),
                 AppDataStore.getAll('customers'),
                 AppDataStore.getAll('users'),
