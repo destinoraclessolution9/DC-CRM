@@ -2615,7 +2615,7 @@ const appLogic = (() => {
         while (curr) { path.unshift(curr); curr = curr.parent_id ? await AppDataStore.getById('folders', curr.parent_id) : null; }
 
         let html = '<span class="breadcrumb-item" onclick="app.navigateToFolder(null)">Root</span>';
-        for (const f of path) { html += `<span class="breadcrumb-separator">/</span><span class="breadcrumb-item" onclick="app.navigateToFolder(${f.id})">${f.name}</span>`; }
+        for (const f of path) { html += `<span class="breadcrumb-separator">/</span><span class="breadcrumb-item" onclick="app.navigateToFolder(${f.id})">${escapeHtml(f.name || '')}</span>`; }
         container.innerHTML = html;
     };
 
