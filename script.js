@@ -18190,8 +18190,15 @@ function _wireLoginBtn() {
                     <td data-label="Customer Since">${c.customer_since || '—'}</td>
                     <td data-label="Ming Gua">${c.ming_gua || '—'}</td>
                     <td data-label="Agent" onclick="event.stopPropagation()">${canReassignCust
-                        ? `<select class="form-control" style="padding:2px 6px;font-size:12px;min-width:120px;border:1px solid var(--border);border-radius:4px;background:var(--surface);cursor:pointer;" onchange="app.quickReassign(${c.id}, this.value)" title="Reassign agent">${activeAgentsCust.map(a => `<option value="${a.id}" ${String(a.id) === String(c.responsible_agent_id || c.agent_id) ? 'selected' : ''}>${a.full_name || 'Agent'}</option>`).join('')}</select>`
-                        : agentName}</td>
+                        ? `<select class="form-control" style="padding:2px 6px;font-size:12px;min-width:120px;border:1px solid var(--border);border-radius:4px;background:var(--surface);cursor:pointer;" onchange="app.quickReassign(${c.id}, this.value)" title="Reassign agent">${(() => {
+                            const cid = (c.responsible_agent_id || c.agent_id) ? String(c.responsible_agent_id || c.agent_id) : '';
+                            if (!cid) return '<option value="" selected>— Unassigned —</option>';
+                            if (activeAgentsCust.some(a => String(a.id) === cid)) return '';
+                            const u = userById.get(cid);
+                            const label = u && u.full_name ? escapeHtml(u.full_name) : '— Unassigned —';
+                            return `<option value="${u ? escapeHtml(cid) : ''}" selected>${label}</option>`;
+                        })()}${activeAgentsCust.map(a => `<option value="${a.id}" ${String(a.id) === String(c.responsible_agent_id || c.agent_id) ? 'selected' : ''}>${escapeHtml(a.full_name || 'Agent')}</option>`).join('')}</select>`
+                        : escapeHtml(agentName)}</td>
                     <td data-label="Health">${renderQuickHealthBadge(c)}</td>
                     <td data-label="Status"><span class="score-badge score-A+">${(c.status || 'active').toUpperCase()}</span></td>
                     <td onclick="event.stopPropagation()">
@@ -18830,8 +18837,19 @@ function _wireLoginBtn() {
                 <tr onclick="app.showProspectDetail(${p.id})">
                     <td data-label="Name"><strong>${p.full_name || '(No Name)'}</strong></td>
                     <td data-label="Agent" onclick="event.stopPropagation()">${canReassign
-                        ? `<select class="form-control" style="padding:2px 6px;font-size:12px;min-width:120px;border:1px solid var(--border);border-radius:4px;background:var(--surface);cursor:pointer;" onchange="app.quickReassign(${p.id}, this.value)" title="Reassign agent">${!p.responsible_agent_id ? '<option value="" selected>— Unassigned —</option>' : ''}${activeAgents.map(a => `<option value="${a.id}" ${String(a.id) === String(p.responsible_agent_id) ? 'selected' : ''}>${a.full_name || 'Agent'}</option>`).join('')}</select>`
-                        : agentName}</td>
+                        ? `<select class="form-control" style="padding:2px 6px;font-size:12px;min-width:120px;border:1px solid var(--border);border-radius:4px;background:var(--surface);cursor:pointer;" onchange="app.quickReassign(${p.id}, this.value)" title="Reassign agent">${(() => {
+                            // If the assigned agent isn't in the reassignable list (admin/lead, deleted,
+                            // or orphan id), browsers fall back to displaying the FIRST <option>, making
+                            // the prospect appear assigned to whoever sorts first. Render the real owner
+                            // as a selected placeholder so the dropdown reflects stored state.
+                            const cid = p.responsible_agent_id ? String(p.responsible_agent_id) : '';
+                            if (!cid) return '<option value="" selected>— Unassigned —</option>';
+                            if (activeAgents.some(a => String(a.id) === cid)) return '';
+                            const u = userById.get(cid);
+                            const label = u && u.full_name ? escapeHtml(u.full_name) : '— Unassigned —';
+                            return `<option value="${u ? escapeHtml(cid) : ''}" selected>${label}</option>`;
+                        })()}${activeAgents.map(a => `<option value="${a.id}" ${String(a.id) === String(p.responsible_agent_id) ? 'selected' : ''}>${escapeHtml(a.full_name || 'Agent')}</option>`).join('')}</select>`
+                        : escapeHtml(agentName)}</td>
                     <td data-label="Score">
                         <span class="score-badge score-${grade.replace('+', '-plus')}">${p.score || 0} (${grade})</span>
                     </td>
