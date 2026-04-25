@@ -11600,9 +11600,9 @@ function _wireLoginBtn() {
         if (!prospect) return;
         prospect._type = 'prospect';
 
-        // Extract latest APU photo URL (most recent upload)
-        const urls = Array.isArray(prospect.apu_form_urls) ? prospect.apu_form_urls : [];
-        const latestPhotoUrl = urls.length ? urls[urls.length - 1] : '';
+        // Extract latest APU photo URL from prospect_attachments table
+        const apuRows = await AppDataStore.query('prospect_attachments', { prospect_id: prospectId, attachment_type: 'apu_form' });
+        const latestPhotoUrl = apuRows.length ? apuRows[apuRows.length - 1].file_url : '';
 
         for (const tpl of triggers) {
             executeSimpleTrigger(tpl, prospect, { photo_url: latestPhotoUrl }).catch(e => console.warn(`APU trigger ${tpl.trigger_type} failed:`, e));
@@ -11610,7 +11610,7 @@ function _wireLoginBtn() {
     };
 
     // One-time bulk: create APU follow-up drafts for all prospects who already have
-    // apu_form_urls but never got the trigger (uploaded before auto-trigger was added).
+    // APU attachments in prospect_attachments but never got the trigger.
     // Assigns each draft to the prospect's own responsible_agent_id, not the admin running this.
     const bulkDispatchApuReminders = async () => {
         UI.toast.success('Scanning prospects with APU photos…');
@@ -11629,13 +11629,20 @@ function _wireLoginBtn() {
                 AppDataStore.getAll('follow_up_drafts').catch(() => [])
             ]);
 
-            const withApu = allProspects.filter(p => Array.isArray(p.apu_form_urls) && p.apu_form_urls.length > 0);
+            const allApuAttachments = await AppDataStore.getAll('prospect_attachments').then(rows => rows.filter(r => r.attachment_type === 'apu_form')).catch(() => []);
+            const apuByProspect = {};
+            for (const row of allApuAttachments) {
+                if (!apuByProspect[row.prospect_id]) apuByProspect[row.prospect_id] = [];
+                apuByProspect[row.prospect_id].push(row.file_url);
+            }
+            const withApu = allProspects.filter(p => apuByProspect[p.id]?.length > 0);
             if (!withApu.length) { UI.toast.error('No prospects with APU photos found.'); return; }
 
             let created = 0, skipped = 0;
 
             for (const p of withApu) {
-                const latestPhotoUrl = p.apu_form_urls[p.apu_form_urls.length - 1];
+                const urls = apuByProspect[p.id];
+                const latestPhotoUrl = urls[urls.length - 1];
                 for (const tpl of triggers) {
                     const dup = allDrafts.find(d =>
                         d.prospect_id == p.id &&
@@ -20623,9 +20630,12 @@ function _wireLoginBtn() {
             `;
         }
         else if (tab === 'names') {
-            const names = await AppDataStore.query('names', { prospect_id: prospectId });
-            const appraisalCount = Array.isArray(prospect.appraisal_form_urls) ? prospect.appraisal_form_urls.length : 0;
-            const apuUrls = Array.isArray(prospect.apu_form_urls) ? prospect.apu_form_urls : [];
+            const [names, allAttachments] = await Promise.all([
+                AppDataStore.query('names', { prospect_id: prospectId }),
+                AppDataStore.query('prospect_attachments', { prospect_id: prospectId })
+            ]);
+            const appraisalCount = allAttachments.filter(a => a.attachment_type === 'appraisal_form').length;
+            const apuUrls = allAttachments.filter(a => a.attachment_type === 'apu_form').map(a => a.file_url);
             container.innerHTML = `
                 <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
                     <button class="btn secondary btn-sm" onclick="app.attachAppraisalForm(${prospect.id})"><i class="fas fa-file-image"></i> Appraisal Form${appraisalCount ? ` (${appraisalCount})` : ''}</button>
@@ -22016,13 +22026,9 @@ NOTIFY pgrst, 'reload schema';`;
         }
     };
 
-    // Appraisal Form upload — stores one or more photo URLs on prospects.appraisal_form_urls (jsonb).
-    // Uses the same 'attachments' bucket as meet-up photos; files go under appraisal_forms/ prefix.
+    // Appraisal Form upload — stores file rows in prospect_attachments (attachment_type='appraisal_form').
     const attachAppraisalForm = async (prospectId) => {
-        const prospect = await AppDataStore.getById('prospects', prospectId);
-        if (!prospect) { UI.toast.error('Prospect not found'); return; }
-
-        const existing = Array.isArray(prospect.appraisal_form_urls) ? prospect.appraisal_form_urls : [];
+        const existing = await AppDataStore.query('prospect_attachments', { prospect_id: prospectId, attachment_type: 'appraisal_form' });
         const content = `
             <div class="form-group">
                 <label>Select one or more photos</label>
@@ -22033,10 +22039,10 @@ NOTIFY pgrst, 'reload schema';`;
             <div class="form-group">
                 <label>Existing Appraisal Forms (${existing.length})</label>
                 <div style="display:flex;flex-wrap:wrap;gap:8px;max-height:180px;overflow:auto;padding:6px;border:1px solid var(--gray-200);border-radius:6px;">
-                    ${existing.map((url, i) => `
+                    ${existing.map(row => `
                         <div style="position:relative;">
-                            <img loading="lazy" decoding="async" data-attach-src="${url}" style="height:70px;border-radius:4px;object-fit:cover;cursor:pointer;" onclick="window._openAttachment('${url}')">
-                            <button type="button" class="btn-icon" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:white;border-radius:50%;width:20px;height:20px;font-size:10px;padding:0;" title="Remove" onclick="app.removeAppraisalForm(${prospectId}, ${i})"><i class="fas fa-times"></i></button>
+                            <img loading="lazy" decoding="async" data-attach-src="${row.file_url}" style="height:70px;border-radius:4px;object-fit:cover;cursor:pointer;" onclick="window._openAttachment('${row.file_url}')">
+                            <button type="button" class="btn-icon" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:white;border-radius:50%;width:20px;height:20px;font-size:10px;padding:0;" title="Remove" onclick="app.removeAppraisalForm(${prospectId}, ${row.id})"><i class="fas fa-times"></i></button>
                         </div>
                     `).join('')}
                 </div>
@@ -22053,68 +22059,53 @@ NOTIFY pgrst, 'reload schema';`;
         const files = input?.files;
         if (!files || files.length === 0) { UI.toast.error('Please select at least one photo'); return; }
 
-        const prospect = await AppDataStore.getById('prospects', prospectId);
-        if (!prospect) { UI.toast.error('Prospect not found'); return; }
-        const existing = Array.isArray(prospect.appraisal_form_urls) ? prospect.appraisal_form_urls : [];
-        const newUrls = [];
-
         const sb = window.supabase || window.supabaseClient;
         if (!sb || !sb.storage) { UI.toast.error('Supabase not connected — cannot upload photos'); return; }
 
         try {
+            let uploaded = 0;
             for (const file of files) {
-                if (file.size > 5 * 1024 * 1024) {
-                    UI.toast.error(`"${file.name}" too large (max 5MB)`);
-                    continue;
-                }
+                if (file.size > 5 * 1024 * 1024) { UI.toast.error(`"${file.name}" too large (max 5MB)`); continue; }
                 const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
                 const path = `appraisal_forms/${prospectId}_${Date.now()}_${safeName}`;
                 const { error: upErr } = await sb.storage.from('attachments').upload(path, file, { upsert: false, contentType: file.type });
                 if (upErr) { throw upErr; }
                 const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
-                if (urlData?.publicUrl) newUrls.push(urlData.publicUrl);
+                if (urlData?.publicUrl) {
+                    await AppDataStore.create('prospect_attachments', {
+                        prospect_id: prospectId,
+                        attachment_type: 'appraisal_form',
+                        file_url: urlData.publicUrl,
+                        filename: safeName
+                    });
+                    uploaded++;
+                }
             }
 
-            if (newUrls.length === 0) { UI.toast.error('No photos were uploaded'); return; }
-
-            const updated = [...existing, ...newUrls];
-            await AppDataStore.update('prospects', prospectId, { appraisal_form_urls: updated });
+            if (uploaded === 0) { UI.toast.error('No photos were uploaded'); return; }
 
             UI.hideModal();
-            UI.toast.success(`${newUrls.length} appraisal form photo(s) uploaded`);
+            UI.toast.success(`${uploaded} appraisal form photo(s) uploaded`);
 
             const bodyEl = document.getElementById(`acc-body-names-${prospectId}`);
-            if (bodyEl) {
-                await switchProspectTab('names', prospectId, null, bodyEl);
-            }
+            if (bodyEl) await switchProspectTab('names', prospectId, null, bodyEl);
         } catch (err) {
             console.error('Appraisal form upload failed:', err);
             UI.toast.error('Upload failed: ' + (err.message || 'Unknown error'));
         }
     };
 
-    const removeAppraisalForm = async (prospectId, index) => {
-        const prospect = await AppDataStore.getById('prospects', prospectId);
-        if (!prospect) return;
-        const existing = Array.isArray(prospect.appraisal_form_urls) ? [...prospect.appraisal_form_urls] : [];
-        if (index < 0 || index >= existing.length) return;
-        existing.splice(index, 1);
-        await AppDataStore.update('prospects', prospectId, { appraisal_form_urls: existing });
+    const removeAppraisalForm = async (prospectId, attachmentId) => {
+        await AppDataStore.delete('prospect_attachments', attachmentId);
         UI.hideModal();
         UI.toast.success('Appraisal form photo removed');
         const bodyEl = document.getElementById(`acc-body-names-${prospectId}`);
-        if (bodyEl) {
-            await switchProspectTab('names', prospectId, null, bodyEl);
-        }
+        if (bodyEl) await switchProspectTab('names', prospectId, null, bodyEl);
     };
 
-    // APU Form upload — stores photo URLs on prospects.apu_form_urls (jsonb).
-    // Uses the same 'attachments' bucket; files go under apu_forms/ prefix.
+    // APU Form upload — stores file rows in prospect_attachments (attachment_type='apu_form').
     const uploadAPUForm = async (activityId, prospectId) => {
-        const prospect = await AppDataStore.getById('prospects', prospectId);
-        if (!prospect) { UI.toast.error('Prospect not found'); return; }
-
-        const existing = Array.isArray(prospect.apu_form_urls) ? prospect.apu_form_urls : [];
+        const existing = await AppDataStore.query('prospect_attachments', { prospect_id: prospectId, attachment_type: 'apu_form' });
         const content = `
             <div class="form-group">
                 <label>Attach or take a photo of APU</label>
@@ -22125,10 +22116,10 @@ NOTIFY pgrst, 'reload schema';`;
             <div class="form-group">
                 <label>Existing APU Files (${existing.length})</label>
                 <div style="display:flex;flex-wrap:wrap;gap:8px;max-height:180px;overflow:auto;padding:6px;border:1px solid var(--gray-200);border-radius:6px;">
-                    ${existing.map((url, i) => `
+                    ${existing.map(row => `
                         <div style="position:relative;">
-                            <img loading="lazy" decoding="async" data-attach-src="${url}" style="height:70px;border-radius:4px;object-fit:cover;cursor:pointer;" onclick="window._openAttachment('${url}')">
-                            <button type="button" class="btn-icon" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:white;border-radius:50%;width:20px;height:20px;font-size:10px;padding:0;" title="Remove" onclick="app.removeAPUForm(${prospectId}, ${i})"><i class="fas fa-times"></i></button>
+                            <img loading="lazy" decoding="async" data-attach-src="${row.file_url}" style="height:70px;border-radius:4px;object-fit:cover;cursor:pointer;" onclick="window._openAttachment('${row.file_url}')">
+                            <button type="button" class="btn-icon" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:white;border-radius:50%;width:20px;height:20px;font-size:10px;padding:0;" title="Remove" onclick="app.removeAPUForm(${prospectId}, ${row.id})"><i class="fas fa-times"></i></button>
                         </div>
                     `).join('')}
                 </div>
@@ -22146,10 +22137,6 @@ NOTIFY pgrst, 'reload schema';`;
         if (!file) { UI.toast.error('Please select a photo'); return; }
         if (file.size > 5 * 1024 * 1024) { UI.toast.error('File too large (max 5MB)'); return; }
 
-        const prospect = await AppDataStore.getById('prospects', prospectId);
-        if (!prospect) { UI.toast.error('Prospect not found'); return; }
-        const existing = Array.isArray(prospect.apu_form_urls) ? prospect.apu_form_urls : [];
-
         const sb = window.supabase || window.supabaseClient;
         if (!sb || !sb.storage) { UI.toast.error('Supabase not connected — cannot upload photo'); return; }
 
@@ -22161,38 +22148,32 @@ NOTIFY pgrst, 'reload schema';`;
             const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
             if (!urlData?.publicUrl) { UI.toast.error('Upload succeeded but could not get URL'); return; }
 
-            const updated = [...existing, urlData.publicUrl];
-            await AppDataStore.update('prospects', prospectId, { apu_form_urls: updated });
+            await AppDataStore.create('prospect_attachments', {
+                prospect_id: prospectId,
+                attachment_type: 'apu_form',
+                file_url: urlData.publicUrl,
+                filename: safeName
+            });
 
             UI.hideModal();
             UI.toast.success('APU photo uploaded');
 
-            // Trigger follow-up: APU appointment reminder
             dispatchOnApuPhotoTriggers(prospectId).catch(e => console.warn('APU follow-up triggers failed:', e));
 
             const bodyEl = document.getElementById(`acc-body-names-${prospectId}`);
-            if (bodyEl) {
-                await switchProspectTab('names', prospectId, null, bodyEl);
-            }
+            if (bodyEl) await switchProspectTab('names', prospectId, null, bodyEl);
         } catch (err) {
             console.error('APU upload failed:', err);
             UI.toast.error('Upload failed: ' + (err.message || 'Unknown error'));
         }
     };
 
-    const removeAPUForm = async (prospectId, index) => {
-        const prospect = await AppDataStore.getById('prospects', prospectId);
-        if (!prospect) return;
-        const existing = Array.isArray(prospect.apu_form_urls) ? [...prospect.apu_form_urls] : [];
-        if (index < 0 || index >= existing.length) return;
-        existing.splice(index, 1);
-        await AppDataStore.update('prospects', prospectId, { apu_form_urls: existing });
+    const removeAPUForm = async (prospectId, attachmentId) => {
+        await AppDataStore.delete('prospect_attachments', attachmentId);
         UI.hideModal();
         UI.toast.success('APU photo removed');
         const bodyEl = document.getElementById(`acc-body-names-${prospectId}`);
-        if (bodyEl) {
-            await switchProspectTab('names', prospectId, null, bodyEl);
-        }
+        if (bodyEl) await switchProspectTab('names', prospectId, null, bodyEl);
     };
 
     const recordSalesClosure = (prospectId, activityId) => {
