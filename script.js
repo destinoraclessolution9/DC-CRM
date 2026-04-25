@@ -39295,9 +39295,9 @@ JB 星期二到
                 </thead>
                 <tbody>
                 ${[...newRows].sort((a, b) => {
-                    const ta = a.order_date_parsed ? a.order_date_parsed.getTime() : Infinity;
-                    const tb = b.order_date_parsed ? b.order_date_parsed.getTime() : Infinity;
-                    if (ta !== tb) return ta - tb;
+                    const da = a.order_date_parsed || '￿';
+                    const db = b.order_date_parsed || '￿';
+                    if (da !== db) return da < db ? -1 : 1;
                     return (a.order_no || '').localeCompare(b.order_no || '');
                 }).map(r => {
                     const pushed = _eggState.excludedKeys.has(r.unique_key);
