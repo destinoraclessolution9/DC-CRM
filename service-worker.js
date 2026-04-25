@@ -58,8 +58,10 @@ function staleWhileRevalidate(event, cacheName) {
                         cache.put(event.request, resp.clone()).catch(() => {});
                     }
                     return resp;
-                }).catch(() => cached);
+                }).catch(() => cached || new Response('', { status: 504, statusText: 'Offline and not cached' }));
                 // Return cache immediately if we have it; otherwise wait on network.
+                // If both fail, networkFetch resolves to a 504 (never undefined,
+                // which would break respondWith).
                 return cached || networkFetch;
             })
         )

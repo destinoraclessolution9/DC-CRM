@@ -9576,51 +9576,11 @@ function _wireLoginBtn() {
         return walk(rootId, rootType, 0);
     };
 
-    const getProspectColour = async (prospectId) => {
-        const prospect = await AppDataStore.getById('prospects', prospectId);
-        if (!prospect) return "#cbd5e1"; // Gray default
-
-        const pid = String(prospectId);
-        const allActivities = await AppDataStore.getAll('activities');
-        const hasCPS = allActivities.some(a => a.activity_type === 'CPS' && String(a.prospect_id) === pid);
-        const unableToServe = allActivities.some(a => a.unable_to_serve && String(a.prospect_id) === pid);
-
-        const hasActivityDate = !!prospect.last_activity_date;
-        const daysSinceActivity = hasActivityDate
-            ? (Date.now() - new Date(prospect.last_activity_date).getTime()) / 86400000
-            : 0;
-
-        // Unable to serve → Slate Gray
-        if (unableToServe) return '#94a3b8';
-        // CPS + 180 days no activity → Slate Gray (only when date is known)
-        if (hasCPS && hasActivityDate && daysSinceActivity > 180) return '#94a3b8';
-        // CPS + 45 days no activity → Yellow (only when date is known)
-        if (hasCPS && hasActivityDate && daysSinceActivity > 45) return '#eab308';
-        // High chance of closing → Red
-        if ((prospect.close_probability || 0) >= 60) return '#ef4444';
-        // Referred more than 5 people → Orange
-        const allReferrals = await AppDataStore.getAll('referrals');
-        if (allReferrals.filter(r => String(r.referrer_id) === pid).length > 5) return '#f59e0b';
-        // Attended events more than 5 times → Indigo
-        const allAttendees = await AppDataStore.getAll('event_attendees');
-        const attended = allAttendees.filter(ea => (ea.attended || ea.attendance_status === 'Attended') && ea.attendee_type !== 'agent' && String(ea.entity_id || ea.attendee_id) === pid);
-        if (attended.length > 5) return '#6366f1';
-        // Has CPS → Green
-        if (hasCPS) return '#10b981';
-        // Default — no CPS
-        return '#ffffff';
-    };
-
-    const getCustomerBadge = async (customerId) => {
-        const customer = await AppDataStore.getById('customers', customerId);
-        if (!customer) return null;
-        
-        // Logic for Hot/Cool badges
-        const purchases = (await AppDataStore.getAll('purchases')).filter(p => p.customer_id == customerId);
-        if (purchases.length > 3) return { icon: "🔥", color: "#ef4444" }; // Hot
-        if (customer.conversion_amount > 5000) return { icon: "💰", color: "#f59e0b" }; // VIP
-        return null;
-    };
+    // getProspectColour and getCustomerBadge removed — both were defined but
+    // never called. The tree's color logic is handled inline in buildTreeData
+    // via cached lookup maps (CPS, referral count, attendance) at lines
+    // ~9418–9440, which is O(1) per node instead of these helpers'
+    // O(allActivities + allReferrals + allAttendees) per node.
 
     const renderD3Tree = async (rootData) => {
         const container = document.getElementById('referral-tree-container');
@@ -9823,12 +9783,59 @@ function _wireLoginBtn() {
 
     // ========== TREE SIDEBAR & NAVIGATION ==========
 
-    // Walk up referrals table to build ancestor chain (max 15 levels)
+    // Walk up referrals to build ancestor chain (max 15 levels).
+    //
+    // Fast path: a 2026-04 migration added the `path_ids` + `path_types`
+    // arrays on the referrals table, kept in sync by an INSERT/UPDATE
+    // trigger. When present, the chain is one indexed lookup instead of
+    // 15 sequential getById calls.
+    //
+    // Fallback path: walk via the cached referrals table — used if the
+    // migration hasn't run yet or if the row pre-dates the trigger and
+    // hasn't been touched since.
     const getAncestorPath = async (id) => {
+        const MAX_DEPTH = 15;
+        const targetId = String(id);
+
+        try {
+            const { data: row, error } = await window.supabase
+                .from('referrals')
+                .select('path_ids, path_types')
+                .eq('referred_prospect_id', id)
+                .limit(1)
+                .maybeSingle();
+            if (!error && row && Array.isArray(row.path_ids) && row.path_ids.length) {
+                // Resolve names with two batched queries (prospects + customers)
+                // instead of one getById per ancestor.
+                const ids = row.path_ids;
+                const types = row.path_types || ids.map(() => 'prospect');
+                const prospectIds = ids.filter((_, i) => (types[i] || 'prospect') !== 'customer');
+                const customerIds = ids.filter((_, i) => (types[i] || 'prospect') === 'customer');
+                const [pRows, cRows] = await Promise.all([
+                    prospectIds.length
+                        ? window.supabase.from('prospects').select('id, full_name').in('id', prospectIds).then(r => r.data || [])
+                        : Promise.resolve([]),
+                    customerIds.length
+                        ? window.supabase.from('customers').select('id, full_name').in('id', customerIds).then(r => r.data || [])
+                        : Promise.resolve([]),
+                ]);
+                const nameById = new Map();
+                for (const p of pRows) nameById.set(`prospect:${p.id}`, p.full_name);
+                for (const c of cRows) nameById.set(`customer:${c.id}`, c.full_name);
+                const path = ids.map((rid, i) => {
+                    const t = types[i] || 'prospect';
+                    return { id: rid, type: t, name: nameById.get(`${t}:${rid}`) || '' };
+                }).filter(n => n.name);
+                if (path.length) return path;
+            }
+        } catch (_) {
+            // Fall through to legacy walk on any error.
+        }
+
+        // Legacy walk — used when path_ids isn't populated for this row.
         const referrals = await AppDataStore.getAll('referrals');
         const path = [];
-        let currentId = String(id);
-        const MAX_DEPTH = 15;
+        let currentId = targetId;
         const visited = new Set();
 
         for (let depth = 0; depth < MAX_DEPTH; depth++) {
@@ -18552,22 +18559,74 @@ function _wireLoginBtn() {
         }
     };
 
+    // _confirmLargeExport — guards exports that would download too much data
+    // into the browser and risk an OOM tab crash. At 30k+ prospects with
+    // activities, the in-memory XLSX builder needs ~3× the row size in heap.
+    // Returns true if the user accepts (or the size is below the warn
+    // threshold), false if they cancel.
+    const EXPORT_WARN_THRESHOLD = 5000;
+    const EXPORT_HARD_LIMIT = 50000;
+    const _confirmLargeExport = async (rowCount, label) => {
+        if (rowCount > EXPORT_HARD_LIMIT) {
+            UI.toast.error(`Export blocked: ${rowCount} ${label} exceeds the ${EXPORT_HARD_LIMIT.toLocaleString()} hard limit. Use a server-side report or filter the list first.`);
+            return false;
+        }
+        if (rowCount > EXPORT_WARN_THRESHOLD) {
+            const ok = confirm(
+                `You are about to export ${rowCount.toLocaleString()} ${label}.\n\n` +
+                `Large exports keep the entire dataset in browser memory ` +
+                `while the spreadsheet is built — this may take 30–60 ` +
+                `seconds and can crash the tab on a low-memory device.\n\n` +
+                `Continue?`
+            );
+            if (!ok) UI.toast.success('Export cancelled');
+            return ok;
+        }
+        return true;
+    };
+
+    // _getAllProspectsForExport — uses getAllPaged so we genuinely get
+    // every row, not the silently-truncated 1000-row first page that
+    // getAll() returns. Then applies the same role-scope filter as
+    // getVisibleProspects() so non-admins only export what they can see.
+    const _getAllProspectsForExport = async () => {
+        const all = await AppDataStore.getAllPaged('prospects', { pageSize: 1000 });
+        if (!_currentUser) return [];
+        if (isSystemAdmin(_currentUser)) return all;
+        const visibleIds = await getVisibleUserIds(_currentUser);
+        if (visibleIds === 'all') return all;
+        const visible = new Set(visibleIds.map(String));
+        return all.filter(p => visible.has(String(p.responsible_agent_id)));
+    };
+
+    const _getAllActivitiesForExport = async () => {
+        const all = await AppDataStore.getAllPaged('activities', { pageSize: 1000 });
+        if (!_currentUser) return [];
+        if (isSystemAdmin(_currentUser)) return all;
+        const allUsersForVis = await AppDataStore.getAll('users');
+        const canView = await buildActivityVisibilityChecker(allUsersForVis);
+        return all.filter(canView);
+    };
+
     const exportData = async (type, format) => {
         const today = new Date().toISOString().split('T')[0];
         const filename = `${type}_export_${today}`;
 
         if (type === 'prospects') {
-            const data = await getVisibleProspects();
+            const data = await _getAllProspectsForExport();
             if (!data.length) { UI.toast.error('No prospects to export'); return; }
+            if (!(await _confirmLargeExport(data.length, 'prospects'))) return;
             const cols = ['Full Name','Phone','Email','IC Number','Date of Birth','Occupation','Company','Income Range','Address','City','State','Postal Code','Ming Gua','Pipeline Stage','Deal Value (RM)','Score','Source','Status','Created At'];
             const rows = data.map(p => [p.full_name||'', p.phone||'', p.email||'', p.ic_number||'', p.date_of_birth||'', p.occupation||'', p.company_name||'', p.income_range||'', p.address||'', p.city||'', p.state||'', p.postal_code||'', p.ming_gua||'', p.pipeline_stage||'', p.deal_value||'', p.score||'', p.source||'', p.status||'', p.created_at?p.created_at.split('T')[0]:'']);
             await _downloadSheet(cols, rows, 'Prospects', filename, format);
             UI.toast.success(`Exported ${data.length} prospects`);
 
         } else if (type === 'prospects_activities') {
-            const prospects = await getVisibleProspects();
+            const prospects = await _getAllProspectsForExport();
             if (!prospects.length) { UI.toast.error('No prospects to export'); return; }
-            const activities = await getVisibleActivities();
+            const activities = await _getAllActivitiesForExport();
+            const total = prospects.length + activities.length;
+            if (!(await _confirmLargeExport(total, 'prospects+activities rows'))) return;
             const pCols = ['Full Name','Phone','Email','IC Number','Date of Birth','Occupation','Company','Income Range','Address','City','State','Postal Code','Ming Gua','Pipeline Stage','Deal Value (RM)','Score','Source','Status','Created At'];
             const pRows = prospects.map(p => [p.full_name||'', p.phone||'', p.email||'', p.ic_number||'', p.date_of_birth||'', p.occupation||'', p.company_name||'', p.income_range||'', p.address||'', p.city||'', p.state||'', p.postal_code||'', p.ming_gua||'', p.pipeline_stage||'', p.deal_value||'', p.score||'', p.source||'', p.status||'', p.created_at?p.created_at.split('T')[0]:'']);
             const prospectMap = Object.fromEntries(prospects.map(p => [p.id, p.full_name]));
@@ -18581,8 +18640,17 @@ function _wireLoginBtn() {
             UI.toast.success(`Exported ${prospects.length} prospects and ${activities.length} activities`);
 
         } else if (type === 'customers') {
-            const data = await getVisibleCustomers();
+            const all = await AppDataStore.getAllPaged('customers', { pageSize: 1000 });
+            const data = isSystemAdmin(_currentUser)
+                ? all
+                : await (async () => {
+                    const visIds = await getVisibleUserIds(_currentUser);
+                    if (visIds === 'all') return all;
+                    const vis = new Set(visIds.map(String));
+                    return all.filter(c => vis.has(String(c.responsible_agent_id)) || vis.has(String(c.agent_id)));
+                })();
             if (!data.length) { UI.toast.error('No customers to export'); return; }
+            if (!(await _confirmLargeExport(data.length, 'customers'))) return;
             const cols = ['Full Name','Phone','Email','IC Number','Date of Birth','Address','City','State','Lifetime Value (RM)','Status','Customer Since','Created At'];
             const rows = data.map(c => [c.full_name||'', c.phone||'', c.email||'', c.ic_number||'', c.date_of_birth||'', c.address||'', c.city||'', c.state||'', c.lifetime_value||'', c.status||'', c.customer_since||'', c.created_at?c.created_at.split('T')[0]:'']);
             await _downloadSheet(cols, rows, 'Customers', filename, format);
@@ -29136,11 +29204,64 @@ container.innerHTML = `
         };
     };
 
+    // RPC fast-path: 3 server-side aggregations replace 11 of the 13 KPI
+    // round-trips. Returns null on any error so the caller falls back to
+    // the original per-function path. This means the dashboard works
+    // identically whether the kpi_*_summary functions exist or not, so
+    // we can ship the JS independently of the DB migration.
+    const _tryKpiRPCs = async (from, to) => {
+        if (!window.supabase || !window.supabase.rpc) return null;
+        try {
+            const agentIds = (_visibleUserIds === 'all' || !Array.isArray(_visibleUserIds))
+                ? null
+                : _visibleUserIds.map(v => Number(v)).filter(n => Number.isFinite(n));
+            const role = (!_currentRoleFilter || _currentRoleFilter === 'All') ? null : _currentRoleFilter;
+            const params = { p_from: from, p_to: to, p_agent_ids: agentIds, p_role: role };
+            const [a, p, u] = await Promise.all([
+                window.supabase.rpc('kpi_activity_summary', params),
+                window.supabase.rpc('kpi_purchase_summary', params),
+                window.supabase.rpc('kpi_user_summary',     params),
+            ]);
+            if (a.error || p.error || u.error) return null;
+            const ad = a.data || {}, pd = p.data || {}, ud = u.data || {};
+            return {
+                cpsCount:        Number(ad.cps_count)       || 0,
+                totalSales:      Number(pd.total_sales)     || 0,
+                popCaseCount:    Number(pd.pop_count)       || 0,
+                popSales:        Number(pd.pop_sales)       || 0,
+                eppCaseCount:    Number(pd.epp_count)       || 0,
+                eppSales:        Number(pd.epp_sales)       || 0,
+                newAgents:       Number(ud.new_agents)      || 0,
+                newCustomers:    Number(ud.new_customers)   || 0,
+                totalMeetings:   Number(ad.total_meetings)  || 0,
+                clientMeetings:  Number(ad.client_meetings) || 0,
+                eppDetails:      Array.isArray(pd.epp_details) ? pd.epp_details : [],
+            };
+        } catch (_) {
+            return null;
+        }
+    };
+
     const calculateKPIs = async (from, to) => {
+        // activityHeadcount and conversionRate involve joins through
+        // event_attendees → activities → prospects/customers and
+        // prospects → customers respectively, with role-scope filtering
+        // that's awkward to express in a single RPC. Keep them client-side
+        // for now (they're cached by AppDataStore so the cost is bounded).
+        const [activityHeadcount, conversionRate] = await Promise.all([
+            getActivityHeadcount(from, to),
+            getConversionRate(from, to),
+        ]);
+
+        // Fast path: try server-side aggregates first.
+        const fast = await _tryKpiRPCs(from, to);
+        if (fast) return { ...fast, activityHeadcount, conversionRate };
+
+        // Fallback: original 11-call client-side path.
         const [
             cpsCount, totalSales, popCaseCount, popSales,
             eppCaseCount, eppSales, newAgents, newCustomers,
-            totalMeetings, clientMeetings, activityHeadcount, conversionRate, eppDetails
+            totalMeetings, clientMeetings, eppDetails
         ] = await Promise.all([
             getCPSCount(from, to),
             getTotalSales(from, to),
@@ -29152,9 +29273,7 @@ container.innerHTML = `
             getNewCustomers(from, to),
             getTotalMeetings(from, to),
             getClientMeetings(from, to),
-            getActivityHeadcount(from, to),
-            getConversionRate(from, to),
-            getEPPDetails(from, to)
+            getEPPDetails(from, to),
         ]);
         return {
             cpsCount, totalSales, popCaseCount, popSales,
