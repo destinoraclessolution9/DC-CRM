@@ -100,10 +100,13 @@ class DataStore {
         // also re-downloads the 9.7 MB blob, defeating the point. So keep this
         // list authoritative.
         this._lightSelects = {
-            // Prospects: verified against actual DB schema 2026-04-16.
+            // Prospects: verified against actual DB schema 2026-04-25.
             // EXCLUDES cps_form_data (base64 PDF blob — causes 27 MB download).
-            // Added: appraisal_form_urls, apu_form_urls, cps_interest, life_chart_type (new columns).
-            prospects: 'id,full_name,nickname,title,gender,nationality,phone,email,ic_number,date_of_birth,lunar_birth,ming_gua,element,occupation,company_name,income_range,address,city,state,postal_code,responsible_agent_id,cps_agent_id,cps_assignment_date,protection_deadline,pipeline_stage,deal_value,expected_close_date,status,referred_by,referred_by_id,referred_by_type,referral_relationship,cps_invitation_method,cps_invitation_details,cps_attachment,score,tags,notes,created_at,updated_at,cps_form_date,cps_form_name,closing_record,closing_records_history,conversion_status,conversion_requested_by,conversion_rejected_by,conversion_rejected_at,closed_at,closed_date,closing_date,potential_level,close_probability,is_own_business,business_name,business_industry,business_area,business_title_role,business_started,company_size,pre2025_purchases,original_source,source_id,source,lead_agent_id,appraisal_form_urls,apu_form_urls,cps_interest,manual_grade,feng_shui_audits,life_chart_type,last_activity_date',
+            // life_chart_type was listed but never made it into the live
+            // schema — removed 2026-04-25 after a stale-column 400 caused
+            // exportData to silently return zero rows. The new fallback in
+            // getAllPaged retries with '*' if this list goes stale again.
+            prospects: 'id,full_name,nickname,title,gender,nationality,phone,email,ic_number,date_of_birth,lunar_birth,ming_gua,element,occupation,company_name,income_range,address,city,state,postal_code,responsible_agent_id,cps_agent_id,cps_assignment_date,protection_deadline,pipeline_stage,deal_value,expected_close_date,status,referred_by,referred_by_id,referred_by_type,referral_relationship,cps_invitation_method,cps_invitation_details,cps_attachment,score,tags,notes,created_at,updated_at,cps_form_date,cps_form_name,closing_record,closing_records_history,conversion_status,conversion_requested_by,conversion_rejected_by,conversion_rejected_at,closed_at,closed_date,closing_date,potential_level,close_probability,is_own_business,business_name,business_industry,business_area,business_title_role,business_started,company_size,pre2025_purchases,original_source,source_id,source,lead_agent_id,appraisal_form_urls,apu_form_urls,cps_interest,manual_grade,feng_shui_audits,last_activity_date',
             // Activities: verified against actual DB schema 2026-04-16.
             // Excludes: consultants (JSONB blob), payment detail columns,
             // long discussion_summary field — only needed in detail/edit view.
@@ -1510,9 +1513,17 @@ class DataStore {
             orderBy = 'id',
             filters = {},
         } = opts;
-        const selectClause = this._selectClauseForGetAll(tableName);
+        // Light select (skips heavy BLOB columns). Falls back to '*' on the
+        // first page if the column list has gone stale (PostgREST 400 with
+        // "column X does not exist") — same fallback pattern as
+        // getActiveProspects(). This matters for export paths that hit
+        // getAllPaged: without it the column-not-found error returned
+        // 0 rows silently and the export aborted with "No prospects to
+        // export".
+        let selectClause = this._selectClauseForGetAll(tableName);
         const all = [];
         let offset = 0;
+        let staleClauseRetried = false;
         while (all.length < maxRows) {
             let q = this._readClient()
                 .from(tableName)
@@ -1524,6 +1535,16 @@ class DataStore {
             }
             const { data, error } = await q;
             if (error) {
+                // Stale light-select fallback: retry the same page with
+                // `*` once. Only triggers on the very first page so we
+                // don't ping-pong on every page if the schema changed
+                // mid-fetch.
+                if (!staleClauseRetried && offset === 0 && selectClause !== '*') {
+                    staleClauseRetried = true;
+                    selectClause = '*';
+                    console.warn(`[getAllPaged] ${tableName} light select stale, retrying with *:`, error.message);
+                    continue;
+                }
                 console.error(`[getAllPaged] ${tableName} page at offset ${offset} failed:`, error);
                 break;
             }
