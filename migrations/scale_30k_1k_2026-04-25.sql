@@ -111,7 +111,11 @@ AS $$
               )
               AND (
                   (p_role IS NOT NULL AND p_role <> 'All')
-                  OR u.role ~ 'Level[[:space:]]*([3-9]|1[0-4])'
+                  -- isAgent semantics in script.js: Level 3 through Level
+                  -- 12 inclusive. The trailing ([^0-9]|$) anchor stops
+                  -- "Level 13"/"Level 14" from matching the "Level 1"
+                  -- prefix via the [3-9] alternation.
+                  OR u.role ~ 'Level[[:space:]]*([3-9]|1[0-2])([^0-9]|$)'
               )
         ),
         'new_customers', (
