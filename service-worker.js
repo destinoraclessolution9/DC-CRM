@@ -1,8 +1,15 @@
-// Service Worker — offline caching + push notifications
-const CACHE_NAME = 'crm-cache-v8';
+// Service Worker — FB/IG-inspired stale-while-revalidate caching + push notifications.
+//
+// Philosophy: paint immediately from cache, refresh in the background.
+// Same approach Instagram uses for the feed: show cached content first,
+// then quietly replace with fresh data when it arrives. Repeat visits feel
+// instant because we never block on the network for assets we already have.
+const CACHE_NAME = 'crm-cache-v9';
+const RUNTIME_CACHE = 'crm-runtime-v9';
 
-// Minimal precache. We skip heavy files (script.js is 18k lines) to
-// avoid breaking install if any single asset 404s.
+// Minimal precache. We skip heavy files (script.js is 2.5 MB) to avoid
+// breaking install if any single asset 404s — runtime cache picks them up
+// on first hit instead.
 const PRECACHE_ASSETS = [
     './',
     './index.html',
@@ -11,8 +18,6 @@ const PRECACHE_ASSETS = [
     './icons/icon-512x512.png'
 ];
 
-// Install event — cache core assets. Use individual adds so a single
-// missing file does not reject the whole install.
 self.addEventListener('install', event => {
     event.waitUntil(
         caches.open(CACHE_NAME)
@@ -25,15 +30,15 @@ self.addEventListener('install', event => {
     );
 });
 
-// Activate event - clean up old caches
 self.addEventListener('activate', event => {
     event.waitUntil(
         caches.keys().then(cacheNames => {
             return Promise.all(
                 cacheNames.filter(cacheName => {
-                    return cacheName.startsWith('crm-cache-') && cacheName !== CACHE_NAME;
+                    return (cacheName.startsWith('crm-cache-') && cacheName !== CACHE_NAME)
+                        || (cacheName.startsWith('crm-runtime-') && cacheName !== RUNTIME_CACHE);
                 }).map(cacheName => {
-                    console.log('Deleting old cache:', cacheName);
+                    console.log('[SW] Deleting old cache:', cacheName);
                     return caches.delete(cacheName);
                 })
             );
@@ -41,43 +46,66 @@ self.addEventListener('activate', event => {
     );
 });
 
-// Fetch event — network-first for HTML + API, cache-first for static assets.
+// staleWhileRevalidate — serve cache instantly, then update from network in background.
+// This is the heart of FB/IG's perceived-instant feel: the cached response is what
+// you see, the fresh one becomes what you see *next time*.
+function staleWhileRevalidate(event, cacheName) {
+    event.respondWith(
+        caches.open(cacheName).then(cache =>
+            cache.match(event.request).then(cached => {
+                const networkFetch = fetch(event.request).then(resp => {
+                    if (resp && resp.status === 200 && resp.type === 'basic') {
+                        cache.put(event.request, resp.clone()).catch(() => {});
+                    }
+                    return resp;
+                }).catch(() => cached);
+                // Return cache immediately if we have it; otherwise wait on network.
+                return cached || networkFetch;
+            })
+        )
+    );
+}
+
+// networkFirst — for HTML shell so users get fresh code on each visit;
+// falls back to cache when offline.
+function networkFirst(event, cacheName) {
+    event.respondWith(
+        fetch(event.request).then(resp => {
+            const clone = resp.clone();
+            caches.open(cacheName).then(c => c.put(event.request, clone)).catch(() => {});
+            return resp;
+        }).catch(() => caches.match(event.request).then(cached =>
+            cached || new Response('', { status: 504, statusText: 'Offline and not cached' })
+        ))
+    );
+}
+
 self.addEventListener('fetch', event => {
     const req = event.request;
-
-    // Only handle GET
     if (req.method !== 'GET') return;
-
-    // Skip Supabase and other cross-origin API traffic entirely
     if (!req.url.startsWith(self.location.origin)) return;
 
-    // Network-first for HTML & JS (always get latest code); cache-first for static assets.
-    // All cache.put / cache.match calls are wrapped in .catch so a storage-quota
-    // failure (or other caches API error) never throws out of respondWith and
-    // takes down the fetch handler.
-    const isCodeAsset = req.url.endsWith('.html') || req.url.endsWith('.js') || req.url.endsWith('/');
-    if (isCodeAsset) {
-        event.respondWith(
-            fetch(req).then(resp => {
-                const clone = resp.clone();
-                caches.open(CACHE_NAME)
-                    .then(c => c.put(req, clone))
-                    .catch(err => console.warn('[SW] cache.put failed (non-fatal):', err));
-                return resp;
-            }).catch(() => caches.match(req).catch(() => new Response('', { status: 504, statusText: 'Offline and not cached' })))
-        );
-    } else {
-        event.respondWith(
-            caches.match(req)
-                .then(cached => cached || fetch(req).catch(() => cached))
-                .catch(() => fetch(req))
-        );
+    const url = new URL(req.url);
+    const path = url.pathname;
+    const isHTML = path.endsWith('.html') || path.endsWith('/');
+    const isJS = path.endsWith('.js');
+    const isCSS = path.endsWith('.css');
+    const isImg = /\.(png|jpe?g|gif|webp|svg|ico)$/i.test(path);
+    const isFont = /\.(woff2?|ttf|eot)$/i.test(path);
+
+    if (isHTML) {
+        // HTML shell: always try network first so users get latest code on reload.
+        networkFirst(event, CACHE_NAME);
+    } else if (isJS || isCSS || isImg || isFont) {
+        // Static assets: stale-while-revalidate for instant repeat loads.
+        // Cache-busting query strings (?v=20260425) ensure new versions get picked up.
+        staleWhileRevalidate(event, RUNTIME_CACHE);
     }
+    // Otherwise: let the browser handle it normally (Supabase, etc.).
 });
 
 // ========== PUSH NOTIFICATIONS ==========
 
-// Push event — fired by the push service when a notification is pushed to this device.
 self.addEventListener('push', event => {
     let payload = {};
     try {
@@ -101,7 +129,6 @@ self.addEventListener('push', event => {
     event.waitUntil(self.registration.showNotification(title, options));
 });
 
-// Notification click — focus an existing tab or open a new one and route to the target URL.
 self.addEventListener('notificationclick', event => {
     event.notification.close();
     const targetUrl = (event.notification.data && event.notification.data.url) || './index.html';
@@ -121,7 +148,6 @@ self.addEventListener('notificationclick', event => {
     );
 });
 
-// Allow page to trigger an immediate activate (used after new SW install)
 self.addEventListener('message', event => {
     if (event.data && event.data.type === 'SKIP_WAITING') {
         self.skipWaiting();

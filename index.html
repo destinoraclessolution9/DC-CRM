@@ -8,10 +8,39 @@
     <meta http-equiv="X-Content-Type-Options" content="nosniff">
     <meta name="referrer" content="strict-origin-when-cross-origin">
     <title>Feng Shui CRM V8.7 - Enterprise Edition</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- ===== FB/IG-style perceived-perf hints =====
+         Open the network connections to origins we'll need ASAP, in parallel
+         with the HTML parse — the actual asset requests then start with
+         DNS+TLS already warm. This is what cuts the first paint from
+         "wait, then fetch, then paint" to "fetch and paint together". -->
+    <link rel="preconnect" href="https://remuwhxvzkzjtgbzqjaa.supabase.co" crossorigin>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+    <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
+    <link rel="dns-prefetch" href="https://cdn.sheetjs.com">
+    <link rel="dns-prefetch" href="https://unpkg.com">
+
+    <!-- Preload the largest single asset so the browser starts fetching
+         it before the parser reaches the <script> tag near </body>.
+         script.js is ~2.5 MB so getting it in flight ASAP is the single
+         biggest perceived-load win on first visit. -->
+    <link rel="preload" href="script.js?v=20260425perf" as="script">
+    <link rel="preload" href="data.js?v=20260425perf" as="script">
+    <link rel="preload" href="styles-fixed.css" as="style">
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" media="print" onload="this.media='all'; this.onload=null;">
+    <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"></noscript>
+    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" onload="this.onload=null; this.rel='stylesheet';">
+    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"></noscript>
     <link rel="icon" href="favicon.ico" type="image/x-icon">
     <link rel="stylesheet" href="styles-fixed.css">
+    <!-- styles-mobile.css contains top-level (non-@media) rules that hide
+         the mobile drawer overlay on ALL viewports. Gating it by media
+         query would expose those rules only to mobile and the drawer
+         overlay would default to display:block on desktop, covering the
+         page. Keep it unconditional. -->
     <link rel="stylesheet" href="styles-mobile.css?v=20260424b">
     <link rel="stylesheet" href="styles-theme.css?v=20260424a">
     <link rel="manifest" href="manifest.json">
@@ -25,6 +54,49 @@
             } catch (e) {}
         })();
     </script>
+
+    <!-- Skeleton CSS inlined so the shimmer paints on first frame, even
+         before styles-fixed.css arrives. FB/IG philosophy: the user must
+         see a structured placeholder *immediately* so the app feels alive
+         while the 2.5 MB script.js parses in the background. -->
+    <style id="boot-skeleton-css">
+        @keyframes crm-shimmer {
+            0%   { background-position: -468px 0; }
+            100% { background-position: 468px 0; }
+        }
+        .skeleton-block {
+            background: linear-gradient(90deg, rgba(0,0,0,0.06) 0%, rgba(0,0,0,0.12) 20%, rgba(0,0,0,0.06) 40%, rgba(0,0,0,0.06) 100%);
+            background-size: 800px 100%;
+            animation: crm-shimmer 1.4s linear infinite;
+            border-radius: 6px;
+            display: block;
+        }
+        [data-theme="dark"] .skeleton-block {
+            background: linear-gradient(90deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.10) 20%, rgba(255,255,255,0.04) 40%, rgba(255,255,255,0.04) 100%);
+            background-size: 800px 100%;
+        }
+        .skeleton-card {
+            padding: 16px;
+            border-radius: 8px;
+            background: var(--surface, #fff);
+            border: 1px solid rgba(0,0,0,0.06);
+            margin-bottom: 12px;
+        }
+        [data-theme="dark"] .skeleton-card {
+            background: rgba(255,255,255,0.03);
+            border-color: rgba(255,255,255,0.06);
+        }
+        .skeleton-grid {
+            display: grid;
+            gap: 16px;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            padding: 24px;
+        }
+        .skeleton-row {
+            height: 14px;
+            margin: 8px 0;
+        }
+    </style>
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="FS CRM">
@@ -61,7 +133,7 @@
             <!-- Populated by app.renderMobileDrawer() -->
         </div>
         <div class="mobile-drawer-footer" id="mobile-drawer-footer">
-            <img id="drawer-user-avatar" src="https://ui-avatars.com/api/?name=Guest&background=8B0000&color=fff" alt="Avatar">
+            <img id="drawer-user-avatar" src="https://ui-avatars.com/api/?name=Guest&background=8B0000&color=fff" alt="Avatar" loading="lazy" decoding="async">
             <div class="mobile-drawer-footer-info">
                 <div class="mobile-drawer-footer-name" id="drawer-user-name">Guest</div>
                 <div class="mobile-drawer-footer-role" id="drawer-user-role">—</div>
@@ -220,7 +292,7 @@
                 <div class="user-info" id="current-user-display">
                     <span id="user-name-label">Guest</span>
                     <img id="user-avatar" src="https://ui-avatars.com/api/?name=Guest&background=800020&color=fff"
-                        alt="Avatar">
+                        alt="Avatar" decoding="async" fetchpriority="high">
                 </div>
             </div>
         </nav>
@@ -276,9 +348,35 @@
 
             <!-- Content Area -->
             <main class="content-viewport" id="content-viewport">
-                <div class="placeholder-view">
-                    <h1>Loading Application...</h1>
-                    <p>Please wait.</p>
+                <!-- FB/IG-style skeleton: structured placeholder painted
+                     instantly so the user sees the app shape before any
+                     real data arrives. The router replaces this on first
+                     view render. -->
+                <div class="skeleton-grid" id="boot-skeleton-grid" aria-hidden="true">
+                    <div class="skeleton-card">
+                        <span class="skeleton-block" style="height:18px; width:55%;"></span>
+                        <span class="skeleton-block skeleton-row"></span>
+                        <span class="skeleton-block skeleton-row" style="width:80%;"></span>
+                        <span class="skeleton-block skeleton-row" style="width:60%;"></span>
+                    </div>
+                    <div class="skeleton-card">
+                        <span class="skeleton-block" style="height:18px; width:40%;"></span>
+                        <span class="skeleton-block skeleton-row"></span>
+                        <span class="skeleton-block skeleton-row" style="width:90%;"></span>
+                        <span class="skeleton-block skeleton-row" style="width:70%;"></span>
+                    </div>
+                    <div class="skeleton-card">
+                        <span class="skeleton-block" style="height:18px; width:50%;"></span>
+                        <span class="skeleton-block skeleton-row"></span>
+                        <span class="skeleton-block skeleton-row" style="width:85%;"></span>
+                        <span class="skeleton-block skeleton-row" style="width:65%;"></span>
+                    </div>
+                    <div class="skeleton-card">
+                        <span class="skeleton-block" style="height:18px; width:45%;"></span>
+                        <span class="skeleton-block skeleton-row"></span>
+                        <span class="skeleton-block skeleton-row" style="width:75%;"></span>
+                        <span class="skeleton-block skeleton-row" style="width:55%;"></span>
+                    </div>
                 </div>
             </main>
         </div>
@@ -339,10 +437,9 @@
         - xlsx (sheetjs)                   → import/export views
         - jspdf + jspdf-autotable          → (removed — no call sites in script.js)
     -->
-    <!-- Preconnect so on-demand loads are faster when triggered -->
-    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
-    <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
-    <link rel="preconnect" href="https://cdn.sheetjs.com" crossorigin>
+    <!-- Preconnects for these CDNs are now hoisted into <head> top so they
+         start in parallel with the HTML parse (see top of file). -->
+
 
 <!-- Properly commented out scripts -->
     <!-- <script src="offline-storage.js"></script> -->

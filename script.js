@@ -3303,7 +3303,7 @@ const appLogic = (() => {
         if (isImageFile(filename)) {
             previewContent = `
                 <div class="image-preview" style="text-align: center;">
-                    <img src="${file.data || 'https://via.placeholder.com/800x600?text=Image+Preview'}" 
+                    <img loading="lazy" decoding="async" src="${file.data || 'https://via.placeholder.com/800x600?text=Image+Preview'}" 
                          alt="${filename}" style="max-width: 100%; max-height: 70vh; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
                 </div>
             `;
@@ -8609,7 +8609,7 @@ function _wireLoginBtn() {
                     <div>
                         <p style="font-weight:500; margin-bottom:8px;">Signature:</p>
                         <div style="border:1px solid var(--gray-200); border-radius:8px; padding:8px; background:#fafafa;">
-                            <img src="${c.signature_data_url}" style="max-width:100%; height:auto; max-height:150px;">
+                            <img loading="lazy" decoding="async" src="${c.signature_data_url}" style="max-width:100%; height:auto; max-height:150px;">
                         </div>
                     </div>
                 ` : ''}
@@ -10719,11 +10719,11 @@ function _wireLoginBtn() {
         const photoGalleryHtml = photos.length ? `
             <div class="case-detail-gallery">
                 <div class="case-detail-gallery-main">
-                    <img data-attach-src="${escapeHtml(photos[0])}" alt="Cover" onclick="window._openAttachment('${escapeHtml(photos[0])}')">
+                    <img loading="lazy" decoding="async" data-attach-src="${escapeHtml(photos[0])}" alt="Cover" onclick="window._openAttachment('${escapeHtml(photos[0])}')">
                 </div>
                 ${photos.length > 1 ? `
                     <div class="case-detail-gallery-thumbs">
-                        ${photos.slice(1).map(p => `<img data-attach-src="${escapeHtml(p)}" alt="Photo" onclick="window._openAttachment('${escapeHtml(p)}')">`).join('')}
+                        ${photos.slice(1).map(p => `<img loading="lazy" decoding="async" data-attach-src="${escapeHtml(p)}" alt="Photo" onclick="window._openAttachment('${escapeHtml(p)}')">`).join('')}
                     </div>
                 ` : ''}
             </div>
@@ -11021,7 +11021,7 @@ function _wireLoginBtn() {
         }
         gal.innerHTML = _casePendingPhotos.map((url, i) => `
             <div class="case-photo-thumb" draggable="false">
-                <img data-attach-src="${escapeHtml(url)}" alt="Case photo ${i + 1}" onclick="window._openAttachment('${escapeHtml(url)}')">
+                <img loading="lazy" decoding="async" data-attach-src="${escapeHtml(url)}" alt="Case photo ${i + 1}" onclick="window._openAttachment('${escapeHtml(url)}')">
                 ${i === 0 ? '<span class="case-photo-badge">Cover</span>' : ''}
                 <button class="case-photo-remove" title="Remove" onclick="event.stopPropagation(); app.removeCasePhoto(${i})"><i class="fas fa-times"></i></button>
             </div>
@@ -11858,7 +11858,7 @@ function _wireLoginBtn() {
                         }
                         const waUrl = `https://wa.me/${waPhone}?text=${encodeURIComponent(waMessage)}`;
                         const thumbHtml = d.attachment_url
-                            ? `<img data-attach-src="${escapeHtml(d.attachment_url)}" alt="Attachment" style="width:48px; height:48px; border-radius:6px; object-fit:cover; cursor:pointer; border:1px solid var(--gray-200); flex-shrink:0;" onclick="event.stopPropagation(); window._openAttachment('${escapeHtml(d.attachment_url)}');" title="Click to view full image">`
+                            ? `<img loading="lazy" decoding="async" data-attach-src="${escapeHtml(d.attachment_url)}" alt="Attachment" style="width:48px; height:48px; border-radius:6px; object-fit:cover; cursor:pointer; border:1px solid var(--gray-200); flex-shrink:0;" onclick="event.stopPropagation(); window._openAttachment('${escapeHtml(d.attachment_url)}');" title="Click to view full image">`
                             : '';
                         return `
                         <div id="followup-row-${d.id}" style="display:flex; align-items:flex-start; gap:12px; padding:12px; background:var(--gray-50,#f9fafb); border-radius:8px; border-left:4px solid #3b82f6; transition: opacity 0.4s ease, max-height 0.4s ease;">
@@ -16813,7 +16813,7 @@ function _wireLoginBtn() {
     const selectProspectReferrer = (id, name, type) => {
         _selectedProspectReferrer = { id, name, type };
         const infoDiv = document.getElementById('prospect-referrer-info');
-        // SECURITY: escape user-controlled name/type to prevent XSS (e.g. "<img onerror=...>")
+        // SECURITY: escape user-controlled name/type to prevent XSS (e.g. "<img loading="lazy" decoding="async" onerror=...>")
         if (infoDiv) infoDiv.innerHTML = `<div class="selected-entity-badge"><span>${escapeHtml(type)}: <strong>${escapeHtml(name)}</strong></span><button class="btn btn-sm secondary" onclick="app.clearProspectReferrer()">Clear</button></div>`;
         const results = document.getElementById('prospect-referrer-results');
         if (results) results.style.display = 'none';
@@ -20197,7 +20197,7 @@ function _wireLoginBtn() {
         const overlay = document.createElement('div');
         overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;z-index:9999;cursor:zoom-out;';
         overlay.onclick = () => overlay.remove();
-        overlay.innerHTML = `<img data-attach-src="${escapeHtml(url)}" style="max-width:90vw;max-height:90vh;object-fit:contain;border-radius:8px;box-shadow:0 8px 32px rgba(0,0,0,.5);" onclick="event.stopPropagation()">`;
+        overlay.innerHTML = `<img loading="lazy" decoding="async" data-attach-src="${escapeHtml(url)}" style="max-width:90vw;max-height:90vh;object-fit:contain;border-radius:8px;box-shadow:0 8px 32px rgba(0,0,0,.5);" onclick="event.stopPropagation()">`;
         document.body.appendChild(overlay);
         if (window._resolveAttachmentImages) window._resolveAttachmentImages(overlay);
     };
@@ -20301,7 +20301,7 @@ function _wireLoginBtn() {
                             <button title="Edit" onclick="app.editProspect(${prospect.id})" style="width:24px;height:24px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--gray-500);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fas fa-edit"></i></button><button title="Convert to Customer" onclick="app.convertToCustomer(${prospect.id})" style="width:24px;height:24px;border-radius:50%;border:none;background:var(--primary);color:#fff;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'"><i class="fas fa-user-check"></i></button><button title="Meet-Up History" onclick="app.openMeetupHistoryModal(${prospect.id})" style="width:24px;height:24px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--primary);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fas fa-history"></i></button><button title="Save to Phone Contacts" onclick="app.downloadProspectVCard(${prospect.id})" style="width:24px;height:24px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--success);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fas fa-address-book"></i></button>
                         </div>
                     </div>
-                    ${cpsPhoto ? `<img data-attach-src="${cpsPhoto.url}" onclick="event.stopPropagation();app.zoomCpsPhoto('${cpsPhoto.url}')" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:2px solid var(--gray-200);cursor:zoom-in;flex-shrink:0;margin-top:4px;" title="CPS Photo — click to enlarge">` : ''}
+                    ${cpsPhoto ? `<img loading="lazy" decoding="async" data-attach-src="${cpsPhoto.url}" onclick="event.stopPropagation();app.zoomCpsPhoto('${cpsPhoto.url}')" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:2px solid var(--gray-200);cursor:zoom-in;flex-shrink:0;margin-top:4px;" title="CPS Photo — click to enlarge">` : ''}
                 </div>
 
                     <div class="acc-container" id="acc-container-${prospect.id}">
@@ -20468,7 +20468,7 @@ function _wireLoginBtn() {
                 <div class="pv-row"><span class="pv-lbl">File</span><span class="pv-val">${prospect.cps_form_name || 'CPS Form'}</span></div>
                 ${prospect.cps_form_data.startsWith('data:image') ? `
                     <div style="margin-top:10px;text-align:center;">
-                        <img src="${prospect.cps_form_data}" alt="CPS Form" style="max-width:100%;max-height:280px;border-radius:8px;border:1px solid var(--border);cursor:pointer;" onclick="window.open(this.src,'_blank')">
+                        <img loading="lazy" decoding="async" src="${prospect.cps_form_data}" alt="CPS Form" style="max-width:100%;max-height:280px;border-radius:8px;border:1px solid var(--border);cursor:pointer;" onclick="window.open(this.src,'_blank')">
                         <div style="font-size:11px;color:var(--gray-400);margin-top:4px;">Tap to view full size</div>
                     </div>
                 ` : `
@@ -21830,7 +21830,7 @@ NOTIFY pgrst, 'reload schema';`;
                 <div style="display:flex;flex-wrap:wrap;gap:8px;max-height:180px;overflow:auto;padding:6px;border:1px solid var(--gray-200);border-radius:6px;">
                     ${existing.map((url, i) => `
                         <div style="position:relative;">
-                            <img data-attach-src="${url}" style="height:70px;border-radius:4px;object-fit:cover;cursor:pointer;" onclick="window._openAttachment('${url}')">
+                            <img loading="lazy" decoding="async" data-attach-src="${url}" style="height:70px;border-radius:4px;object-fit:cover;cursor:pointer;" onclick="window._openAttachment('${url}')">
                             <button type="button" class="btn-icon" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:white;border-radius:50%;width:20px;height:20px;font-size:10px;padding:0;" title="Remove" onclick="app.removeActivityPhoto(${activityId}, ${i})"><i class="fas fa-times"></i></button>
                         </div>
                     `).join('')}
@@ -21949,7 +21949,7 @@ NOTIFY pgrst, 'reload schema';`;
                 <div style="display:flex;flex-wrap:wrap;gap:8px;max-height:180px;overflow:auto;padding:6px;border:1px solid var(--gray-200);border-radius:6px;">
                     ${existing.map((url, i) => `
                         <div style="position:relative;">
-                            <img data-attach-src="${url}" style="height:70px;border-radius:4px;object-fit:cover;cursor:pointer;" onclick="window._openAttachment('${url}')">
+                            <img loading="lazy" decoding="async" data-attach-src="${url}" style="height:70px;border-radius:4px;object-fit:cover;cursor:pointer;" onclick="window._openAttachment('${url}')">
                             <button type="button" class="btn-icon" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:white;border-radius:50%;width:20px;height:20px;font-size:10px;padding:0;" title="Remove" onclick="app.removeAppraisalForm(${prospectId}, ${i})"><i class="fas fa-times"></i></button>
                         </div>
                     `).join('')}
@@ -22041,7 +22041,7 @@ NOTIFY pgrst, 'reload schema';`;
                 <div style="display:flex;flex-wrap:wrap;gap:8px;max-height:180px;overflow:auto;padding:6px;border:1px solid var(--gray-200);border-radius:6px;">
                     ${existing.map((url, i) => `
                         <div style="position:relative;">
-                            <img data-attach-src="${url}" style="height:70px;border-radius:4px;object-fit:cover;cursor:pointer;" onclick="window._openAttachment('${url}')">
+                            <img loading="lazy" decoding="async" data-attach-src="${url}" style="height:70px;border-radius:4px;object-fit:cover;cursor:pointer;" onclick="window._openAttachment('${url}')">
                             <button type="button" class="btn-icon" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:white;border-radius:50%;width:20px;height:20px;font-size:10px;padding:0;" title="Remove" onclick="app.removeAPUForm(${prospectId}, ${i})"><i class="fas fa-times"></i></button>
                         </div>
                     `).join('')}
@@ -22809,7 +22809,7 @@ NOTIFY pgrst, 'reload schema';`;
                 ${photos.map((p, i) => `
                     <div style="width:120px;border:1px solid var(--gray-200);border-radius:6px;overflow:hidden;background:#fff;">
                         <div style="position:relative;">
-                            <img data-attach-src="${p.url}" style="width:100%;height:90px;object-fit:cover;cursor:pointer;" onclick="window._openAttachment('${p.url}')">
+                            <img loading="lazy" decoding="async" data-attach-src="${p.url}" style="width:100%;height:90px;object-fit:cover;cursor:pointer;" onclick="window._openAttachment('${p.url}')">
                             <button type="button" title="Remove" onclick="event.stopPropagation();app.removeFengShuiPhoto(${prospectId},${auditId},'${phase}',${i});UI.hideModal();" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:#fff;border:none;border-radius:50%;width:20px;height:20px;font-size:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;"><i class="fas fa-times"></i></button>
                         </div>
                         <input type="text" class="form-control" value="${escapeHtml(p.remarks || '')}" placeholder="Remark..." style="font-size:11px;height:26px;border:none;border-top:1px solid var(--gray-200);border-radius:0;" onchange="event.stopPropagation();app.updateFengShuiPhotoRemark(${prospectId},${auditId},'${phase}',${i},this.value)">
@@ -22835,7 +22835,7 @@ NOTIFY pgrst, 'reload schema';`;
             : `<div style="display:flex;flex-wrap:wrap;gap:8px;">
                 ${photos.map((url, i) => `
                     <div style="position:relative;">
-                        <img data-attach-src="${url}" style="width:90px;height:90px;object-fit:cover;border-radius:4px;cursor:pointer;border:1px solid var(--gray-200);" onclick="window._openAttachment('${url}')">
+                        <img loading="lazy" decoding="async" data-attach-src="${url}" style="width:90px;height:90px;object-fit:cover;border-radius:4px;cursor:pointer;border:1px solid var(--gray-200);" onclick="window._openAttachment('${url}')">
                         <button type="button" title="Remove" onclick="event.stopPropagation();app.removeFengShuiSitePhoto(${prospectId},${auditId},${srId},${i});UI.hideModal();" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:9px;cursor:pointer;"><i class="fas fa-times"></i></button>
                     </div>
                 `).join('')}
@@ -37810,7 +37810,7 @@ const initImportDemoData = async () => {
                                 const on = !!nineStatuses[def.key];
                                 return `
                                     <div class="nine-method-card ${on ? 'attended' : ''}">
-                                        <div class="mc-icon"><img src="${def.icon}" alt=""></div>
+                                        <div class="mc-icon"><img loading="lazy" decoding="async" src="${def.icon}" alt=""></div>
                                         ${adminBtn(def.key, on)}
                                     </div>
                                 `;
@@ -37824,7 +37824,7 @@ const initImportDemoData = async () => {
                                     const on = !!pillarStatuses[def.key];
                                     return `
                                         <div class="four-pillar-card ${on ? 'owned' : ''}">
-                                            <div class="pc-icon"><img src="${def.icon}" alt=""></div>
+                                            <div class="pc-icon"><img loading="lazy" decoding="async" src="${def.icon}" alt=""></div>
                                             <div class="pc-label">${def.label}</div>
                                             ${adminBtnPillar(def.key, on)}
                                         </div>
@@ -38040,11 +38040,11 @@ const initImportDemoData = async () => {
                         : (() => {
                             const [hero, ...rest] = publicNews;
                             const heroBg = hero.image_url
-                                ? `<img class="fude-hero-card-bg" src="${hero.image_url}" alt="" onerror="this.style.display='none'">`
+                                ? `<img loading="lazy" decoding="async" class="fude-hero-card-bg" src="${hero.image_url}" alt="" onerror="this.style.display='none'">`
                                 : '';
                             const heroCard = `<div class="fude-hero-card">${heroBg}<div class="fude-hero-card-overlay"><span class="fude-hero-badge">Latest</span><h3>${hero.title}</h3>${hero.content ? `<p>${hero.content}</p>` : ''}<span class="fude-hero-date">${fmtDate(hero.created_at)}</span></div></div>`;
                             const grid = rest.length
-                                ? `<div class="fude-news-grid">${rest.map(n => `<div class="fude-card">${n.image_url ? `<img class="fude-card-img" src="${n.image_url}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="fude-card-img-placeholder" style="display:none;">📰</div>` : `<div class="fude-card-img-placeholder">📰</div>`}<div class="fude-card-body"><span class="fude-card-tag">News</span><h3>${n.title}</h3>${n.content ? `<p>${n.content}</p>` : ''}<div class="fude-card-date">${fmtDate(n.created_at)}</div></div></div>`).join('')}</div>`
+                                ? `<div class="fude-news-grid">${rest.map(n => `<div class="fude-card">${n.image_url ? `<img loading="lazy" decoding="async" class="fude-card-img" src="${n.image_url}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="fude-card-img-placeholder" style="display:none;">📰</div>` : `<div class="fude-card-img-placeholder">📰</div>`}<div class="fude-card-body"><span class="fude-card-tag">News</span><h3>${n.title}</h3>${n.content ? `<p>${n.content}</p>` : ''}<div class="fude-card-date">${fmtDate(n.created_at)}</div></div></div>`).join('')}</div>`
                                 : '';
                             return heroCard + grid;
                           })()
@@ -38066,7 +38066,7 @@ const initImportDemoData = async () => {
                                 <span class="fude-mag-story-num">${i + 1}</span>
                                 <h3 class="fude-mag-story-title">${s.title}</h3>
                             </div>
-                            ${s.image_url ? `<img class="fude-mag-story-photo" src="${s.image_url}" alt="" onerror="this.style.display='none'">` : ''}
+                            ${s.image_url ? `<img loading="lazy" decoding="async" class="fude-mag-story-photo" src="${s.image_url}" alt="" onerror="this.style.display='none'">` : ''}
                             ${s.content ? `<p class="fude-mag-story-text">${s.content}</p>` : ''}
                         </div>`).join('')
                     }
@@ -38127,14 +38127,14 @@ const initImportDemoData = async () => {
                                 }
                             ">
                         </label>
-                        <img id="highlight-image-preview" style="width:100%;max-height:140px;object-fit:cover;border-radius:8px;display:none;" onerror="this.style.display='none'">
+                        <img loading="lazy" decoding="async" id="highlight-image-preview" style="width:100%;max-height:140px;object-fit:cover;border-radius:8px;display:none;" onerror="this.style.display='none'">
                         <div style="display:flex;align-items:center;gap:8px;color:var(--gray-400,#9ca3af);font-size:13px;"><span style="flex:1;height:1px;background:currentColor;opacity:.4;"></span>or paste a URL<span style="flex:1;height:1px;background:currentColor;opacity:.4;"></span></div>
                         <input type="url" id="highlight-image-url" class="form-control" value="${h?.image_url || ''}" placeholder="https://example.com/photo.jpg" oninput="
                             const prev = document.getElementById('highlight-url-preview');
                             if (this.value) { prev.src = this.value; prev.style.display='block'; document.getElementById('highlight-image-file').value=''; document.getElementById('highlight-image-preview').style.display='none'; }
                             else { prev.style.display='none'; }
                         ">
-                        <img id="highlight-url-preview" src="${h?.image_url || ''}" style="width:100%;max-height:140px;object-fit:cover;border-radius:8px;${h?.image_url ? '' : 'display:none;'}" onerror="this.style.display='none'">
+                        <img loading="lazy" decoding="async" id="highlight-url-preview" src="${h?.image_url || ''}" style="width:100%;max-height:140px;object-fit:cover;border-radius:8px;${h?.image_url ? '' : 'display:none;'}" onerror="this.style.display='none'">
                     </div>
                 </div>
                 <div class="form-group">

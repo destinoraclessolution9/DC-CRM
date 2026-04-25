@@ -356,7 +356,7 @@ const showTwoFactorSetup = () => {
                         <h4>Scan QR Code</h4>
                         <div class="qr-code">
                             <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(secret.qrCode)}"
-                                 alt="QR Code">
+                                 alt="QR Code" loading="lazy" decoding="async">
                         </div>
                         <p>Or enter this key manually: <code>${esc(secret.secret)}</code></p>
                     </div>
