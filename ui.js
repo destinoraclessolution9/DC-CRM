@@ -161,6 +161,7 @@ window.UI = (() => {
         `;
 
         overlay.classList.add('active');
+        if (window._resolveAttachmentImages) window._resolveAttachmentImages(overlay);
     };
 
     const hideModal = () => {
