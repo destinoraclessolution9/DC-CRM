@@ -39362,11 +39362,17 @@ JB 星期二到
             ${(() => {
                 const prev = _eggState.prevRunOrders || [];
                 const meta = _eggState.prevRunMeta;
-                if (!meta) return '';
-                const weekLabel = meta.week_start_date ? eggFormatDateShort(new Date(meta.week_start_date + 'T00:00:00')) : '-';
+                const hasMeta = !!meta;
+                const weekLabel = (hasMeta && meta.week_start_date) ? eggFormatDateShort(new Date(meta.week_start_date + 'T00:00:00')) : '';
                 const goldTotal = prev.filter(r => r.product === 'GOLD').reduce((s, r) => s + Number(r.quantity || 0), 0);
                 const kingTotal = prev.filter(r => r.product === 'KING').reduce((s, r) => s + Number(r.quantity || 0), 0);
-                const rows = prev.map(r => `
+                const sortedPrev = [...prev].sort((a, b) => {
+                    const da = a.order_date || '';
+                    const db = b.order_date || '';
+                    if (da !== db) return da.localeCompare(db);
+                    return (a.order_no || '').localeCompare(b.order_no || '');
+                });
+                const rows = sortedPrev.map(r => `
                     <tr style="border-top:1px solid var(--gray-100);">
                         <td style="padding:6px 8px;">${r.agent_name || '-'}</td>
                         <td style="padding:6px 8px;font-size:12px;">${r.order_date ? eggFormatDateShort(new Date(r.order_date)) : '-'}</td>
@@ -39376,18 +39382,12 @@ JB 星期二到
                         <td style="padding:6px 8px;text-align:right;">${r.quantity}</td>
                         <td style="padding:6px 8px;">${r.channel || '-'}</td>
                     </tr>`).join('');
-                return `
-                <div style="background:white;border:1px solid var(--gray-200);border-radius:12px;margin-bottom:20px;">
-                    <div onclick="this.parentElement.querySelector('.egg-hist-body').style.display=this.parentElement.querySelector('.egg-hist-body').style.display==='none'?'block':'none';this.querySelector('.egg-hist-chevron').style.transform=this.parentElement.querySelector('.egg-hist-body').style.display==='none'?'rotate(0deg)':'rotate(180deg)';"
-                        style="display:flex;justify-content:space-between;align-items:center;padding:14px 20px;cursor:pointer;user-select:none;">
-                        <div>
-                            <strong>Last Week History — Week of ${weekLabel}</strong>
-                            <span style="margin-left:12px;font-size:12px;color:var(--gray-500);">${prev.length} orders &nbsp;•&nbsp; GOLD ${goldTotal} &nbsp;•&nbsp; KING ${kingTotal}</span>
-                        </div>
-                        <i class="fas fa-chevron-down egg-hist-chevron" style="transition:transform 0.2s;transform:rotate(180deg);color:var(--gray-400);"></i>
-                    </div>
-                    <div class="egg-hist-body" style="display:block;border-top:1px solid var(--gray-200);overflow-x:auto;">
-                        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                const titleText = hasMeta ? `Last Week's Orders — Week of ${weekLabel}` : `Last Week's Orders`;
+                const headerSubtitle = hasMeta
+                    ? `${prev.length} orders &nbsp;•&nbsp; GOLD ${goldTotal} &nbsp;•&nbsp; KING ${kingTotal}`
+                    : `No previous run found — this is your first reconcile.`;
+                const bodyContent = (hasMeta && prev.length > 0)
+                    ? `<table style="width:100%;border-collapse:collapse;font-size:13px;">
                             <thead>
                                 <tr style="background:var(--gray-50);text-align:left;">
                                     <th style="padding:6px 8px;">Agent</th>
@@ -39400,7 +39400,22 @@ JB 星期二到
                                 </tr>
                             </thead>
                             <tbody>${rows}</tbody>
-                        </table>
+                        </table>`
+                    : `<div style="padding:16px;text-align:center;color:var(--gray-500);font-size:13px;">
+                            Once you commit your first weekly run, last week's orders will appear here for reference.
+                        </div>`;
+                return `
+                <div style="background:white;border:1px solid var(--gray-200);border-radius:12px;margin-bottom:20px;">
+                    <div onclick="this.parentElement.querySelector('.egg-hist-body').style.display=this.parentElement.querySelector('.egg-hist-body').style.display==='none'?'block':'none';this.querySelector('.egg-hist-chevron').style.transform=this.parentElement.querySelector('.egg-hist-body').style.display==='none'?'rotate(0deg)':'rotate(180deg)';"
+                        style="display:flex;justify-content:space-between;align-items:center;padding:14px 20px;cursor:pointer;user-select:none;">
+                        <div>
+                            <strong>${titleText}</strong>
+                            <span style="margin-left:12px;font-size:12px;color:var(--gray-500);">${headerSubtitle}</span>
+                        </div>
+                        <i class="fas fa-chevron-down egg-hist-chevron" style="transition:transform 0.2s;transform:rotate(180deg);color:var(--gray-400);"></i>
+                    </div>
+                    <div class="egg-hist-body" style="display:block;border-top:1px solid var(--gray-200);overflow-x:auto;">
+                        ${bodyContent}
                     </div>
                 </div>`;
             })()}
