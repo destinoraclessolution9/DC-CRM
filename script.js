@@ -10226,6 +10226,15 @@ function _wireLoginBtn() {
         const notes = (notesArr || []).filter(n => n.entity_type === type && n.entity_id == id);
         const latest = notes.sort((a,b) => new Date(b.created_at) - new Date(a.created_at))[0];
 
+        // Map referral-tree node type to the right profile opener.
+        // Tree nodes are 'user' (agent), 'prospect', or 'customer' — the agent
+        // profile uses showAgentProfile, not a non-existent showUserDetail.
+        const profileCall = type === 'user'
+            ? `app.showAgentProfile(${id})`
+            : type === 'customer'
+                ? `app.showCustomerDetail(${id})`
+                : `app.showProspectDetail(${id})`;
+
         const content = `
             <div style="padding:10px">
                 <h4>Latest Memo/Note</h4>
@@ -10235,7 +10244,7 @@ function _wireLoginBtn() {
                         ${latest ? 'Written by ' + ((await AppDataStore.getById('users', latest.created_by))?.full_name || 'Admin') + ' on ' + UI.formatDate(latest.created_at) : ''}
                     </div>
                 </div>
-                <button class="btn secondary btn-block" onclick="UI.hideModal(); app.show${type.charAt(0).toUpperCase() + type.slice(1)}Detail(${id})">View Full Profile</button>
+                <button class="btn secondary btn-block" onclick="UI.hideModal(); ${profileCall}">View Full Profile</button>
             </div>
         `;
         UI.showModal("Memo Details", content);
