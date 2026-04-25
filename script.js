@@ -39294,7 +39294,12 @@ JB 星期二到
                     </tr>
                 </thead>
                 <tbody>
-                ${newRows.map(r => {
+                ${[...newRows].sort((a, b) => {
+                    const ta = a.order_date_parsed ? a.order_date_parsed.getTime() : Infinity;
+                    const tb = b.order_date_parsed ? b.order_date_parsed.getTime() : Infinity;
+                    if (ta !== tb) return ta - tb;
+                    return (a.order_no || '').localeCompare(b.order_no || '');
+                }).map(r => {
                     const pushed = _eggState.excludedKeys.has(r.unique_key);
                     const checked = pushed ? 'checked' : '';
                     const rowStyle = pushed ? 'background:#fef2f2;' : '';
