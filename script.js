@@ -42097,6 +42097,19 @@ JB 星期二到
     const _stSessions = () => _stLoad('sessions', []);
     const _stSystemStock = (sid) => _stLoad(`systemStock.${sid}`, []);
     const _stCounts = (sid) => _stLoad(`counts.${sid}`, []);
+    // Global delisted-SKU list — shared across sessions, never auto-purged. Excluded SKUs
+    // are filtered out of every count list, reconciliation row, and summary report.
+    const _stExclusions = () => _stLoad('exclusions', []);
+    const _stSaveExclusions = (rows) => _stSave('exclusions', rows);
+    const _stExclusionSet = () => new Set(_stExclusions().map(e => String(e.sku||'').trim().toUpperCase()));
+    const _stIsExcluded = (sku) => _stExclusionSet().has(String(sku||'').trim().toUpperCase());
+    // Per-session bulk physical upload (Excel). Coexists with QR per-shelf counts;
+    // QR scans for the same SKU override the bulk number in the SKU-level reconcile view.
+    const _stBulkData = (sid) => _stLoad(`bulkUpload.${sid}`, { rows: [], file: '', uploadedAt: '', uploadedBy: '' });
+    const _stSaveBulkData = (sid, data) => _stSave(`bulkUpload.${sid}`, data);
+    // Variance reasons captured during summary review (per-session, keyed by SKU).
+    const _stReasons = (sid) => _stLoad(`varianceReasons.${sid}`, {});
+    const _stSaveReasons = (sid, reasons) => _stSave(`varianceReasons.${sid}`, reasons);
     const _stEsc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
     // Safe to embed inside onclick="app.fn('...')" — JS-escape first, then HTML-escape the
     // attribute delimiters. Preserves `'` via `\'` so HTML→JS decoding works correctly.
@@ -42143,10 +42156,10 @@ JB 星期二到
                     <div id="st-session-chip"></div>
                 </div>
                 <div class="st-tabs" style="display:flex;gap:4px;border-bottom:2px solid var(--gray-200);margin-bottom:16px;overflow-x:auto;">
-                    ${['sessions','import','count','reconcile','recount'].map(t => `
+                    ${['sessions','import','exclusions','count','bulk','reconcile','recount','summary'].map(t => `
                         <button class="st-tab-btn" data-tab="${t}" onclick="app.stSwitchTab('${t}')"
                             style="padding:10px 16px;border:none;background:none;cursor:pointer;font-weight:600;white-space:nowrap;border-bottom:3px solid transparent;color:var(--gray-600);">
-                            ${({sessions:'Sessions',import:'Import System Stock',count:'Count',reconcile:'Reconciliation',recount:'Recount List'})[t]}
+                            ${({sessions:'Sessions',import:'System Stock',exclusions:'Exclusions',count:'Per-shelf Count',bulk:'Bulk Physical',reconcile:'Reconciliation',recount:'Recount',summary:'Final Summary'})[t]}
                         </button>
                     `).join('')}
                 </div>
@@ -42175,9 +42188,12 @@ JB 星期二到
         if (!body) return;
         if (tab === 'sessions') body.innerHTML = _stRenderSessions();
         else if (tab === 'import') body.innerHTML = _stRenderImport();
+        else if (tab === 'exclusions') body.innerHTML = _stRenderExclusions();
         else if (tab === 'count') body.innerHTML = _stRenderCount();
+        else if (tab === 'bulk') body.innerHTML = _stRenderBulk();
         else if (tab === 'reconcile') body.innerHTML = _stRenderReconcile();
         else if (tab === 'recount') body.innerHTML = _stRenderRecount();
+        else if (tab === 'summary') body.innerHTML = _stRenderSummary();
     };
 
     // ── Sessions tab ──────────────────────────────────────────
@@ -42198,19 +42214,32 @@ JB 星期二到
                         <th style="padding:10px;text-align:left;font-size:12px;">Session ID</th>
                         <th style="padding:10px;text-align:left;font-size:12px;">Created</th>
                         <th style="padding:10px;text-align:left;font-size:12px;">Locations</th>
-                        <th style="padding:10px;text-align:center;font-size:12px;">Counts</th>
+                        <th style="padding:10px;text-align:center;font-size:12px;">QR Counts</th>
                         <th style="padding:10px;text-align:center;font-size:12px;">System SKUs</th>
+                        <th style="padding:10px;text-align:center;font-size:12px;">Bulk Rows</th>
+                        <th style="padding:10px;text-align:center;font-size:12px;">Method</th>
                         <th style="padding:10px;text-align:center;font-size:12px;">Status</th>
                         <th style="padding:10px;text-align:right;font-size:12px;">Actions</th>
                     </tr></thead>
                     <tbody>
-                        ${list.map(s => `
+                        ${list.map(s => {
+                            const method = _stSessionMethod(s.id);
+                            const partial = _stPartialInfo(s.id);
+                            const bulkN = (_stBulkData(s.id).rows || []).length;
+                            const methodLabel = ({ qr_only:'QR', excel_import:'Excel', mixed:'Mixed', none:'—' })[method];
+                            const methodColor = method === 'none' ? '#94a3b8' : method === 'mixed' ? '#7c3aed' : method === 'excel_import' ? '#0891b2' : '#0ea5e9';
+                            return `
                             <tr style="border-top:1px solid var(--gray-100);">
                                 <td style="padding:10px;font-family:monospace;font-size:13px;">${_stEsc(s.id)}</td>
                                 <td style="padding:10px;font-size:13px;">${_stEsc((s.createdAt||'').slice(0,16).replace('T',' '))}</td>
                                 <td style="padding:10px;font-size:13px;">${_stEsc((s.locations||[]).join(', ') || '—')}</td>
                                 <td style="padding:10px;text-align:center;font-size:13px;">${_stCounts(s.id).length}</td>
                                 <td style="padding:10px;text-align:center;font-size:13px;">${_stSystemStock(s.id).length}</td>
+                                <td style="padding:10px;text-align:center;font-size:13px;">${bulkN}</td>
+                                <td style="padding:10px;text-align:center;font-size:11px;">
+                                    <span style="color:${methodColor};font-weight:600;">${methodLabel}</span>
+                                    ${partial.partial && method !== 'none' ? `<div style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:8px;font-size:10px;margin-top:2px;display:inline-block;">PARTIAL</div>` : ''}
+                                </td>
                                 <td style="padding:10px;text-align:center;">
                                     <span style="padding:3px 10px;border-radius:10px;font-size:11px;font-weight:600;background:${s.status==='open'?'#dcfce7':'#f1f5f9'};color:${s.status==='open'?'#166534':'#475569'};">${s.status}</span>
                                 </td>
@@ -42222,7 +42251,7 @@ JB 星期二到
                                     <button class="btn small" style="color:#dc2626;" onclick="app.stDeleteSession('${_stAttr(s.id)}')">Delete</button>
                                 </td>
                             </tr>
-                        `).join('')}
+                        `;}).join('')}
                     </tbody>
                 </table>
             `}
@@ -42273,6 +42302,8 @@ JB 星期二到
         _stSave('sessions', _stSessions().filter(s => s.id !== id));
         localStorage.removeItem(_stKey(`systemStock.${id}`));
         localStorage.removeItem(_stKey(`counts.${id}`));
+        localStorage.removeItem(_stKey(`bulkUpload.${id}`));
+        localStorage.removeItem(_stKey(`varianceReasons.${id}`));
         if (_stState.sessionId === id) _stState.sessionId = null;
         UI.toast.success('Session deleted');
         stSwitchTab('sessions');
@@ -42483,6 +42514,7 @@ JB 星期二到
         if (!location) return UI.toast.error('Location required');
         if (!skuRaw) return UI.toast.error('SKU required');
         if (!qtyRaw || !isFinite(qty) || qty < 0) return UI.toast.error('Valid qty required');
+        if (_stIsExcluded(skuRaw)) return UI.toast.error(`${skuRaw.toUpperCase()} is on the exclusion list — counts are blocked. Remove from Exclusions tab if you want to count it.`);
         const counts = _stCounts(sid);
         counts.push({
             id: `c_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
@@ -42519,14 +42551,17 @@ JB 星期二到
         const tol = Math.max(0, Number(threshold) || 0);
         const sys = _stSystemStock(sid);
         const counts = _stCounts(sid);
+        const exSet = _stExclusionSet();
         const physMap = {};
         for (const c of counts) {
+            if (exSet.has(String(c.sku||'').trim().toUpperCase())) continue;
             const k = _stNormKey(c.location, c.sku);
             physMap[k] = (physMap[k] || 0) + Number(c.qty || 0);
         }
         const result = [];
         const sysKeys = new Set();
         for (const r of sys) {
+            if (exSet.has(String(r.SKU||'').trim().toUpperCase())) continue;
             const k = _stNormKey(r.Location, r.SKU);
             sysKeys.add(k);
             const phys = physMap[k] || 0;
@@ -42548,6 +42583,118 @@ JB 星期二到
             });
         }
         return result;
+    };
+
+    // Cross-shelf SKU-level reconciliation. Aggregates system qty + QR + bulk-upload
+    // physical across all shelves for each SKU. QR overrides Bulk for the same SKU
+    // (FR-B17: "the system treats the last action (QR shelf count) as the most
+    // up-to-date"). Excluded SKUs are ignored. Returns sorted with non-Match first.
+    const _stReconcileBySku = (sid, threshold) => {
+        const tol = Math.max(0, Number(threshold) || 0);
+        const sys = _stSystemStock(sid);
+        const counts = _stCounts(sid);
+        const bulk = (_stBulkData(sid).rows || []);
+        const exSet = _stExclusionSet();
+
+        const sysBySku = {};
+        const sysShelves = {};
+        for (const r of sys) {
+            const sku = String(r.SKU||'').trim().toUpperCase();
+            if (exSet.has(sku)) continue;
+            sysBySku[sku] = (sysBySku[sku] || 0) + Number(r.System_Qty || 0);
+            (sysShelves[sku] = sysShelves[sku] || []).push({ Location: r.Location, Qty: Number(r.System_Qty||0) });
+        }
+        const qrBySku = {};
+        for (const c of counts) {
+            const sku = String(c.sku||'').trim().toUpperCase();
+            if (exSet.has(sku)) continue;
+            qrBySku[sku] = (qrBySku[sku] || 0) + Number(c.qty || 0);
+        }
+        const bulkBySku = {};
+        for (const r of bulk) {
+            const sku = String(r.SKU||'').trim().toUpperCase();
+            if (exSet.has(sku)) continue;
+            bulkBySku[sku] = (bulkBySku[sku] || 0) + Number(r.Physical_Qty || 0);
+        }
+
+        const allSkus = new Set([
+            ...Object.keys(sysBySku),
+            ...Object.keys(qrBySku),
+            ...Object.keys(bulkBySku),
+        ]);
+        const result = [];
+        for (const sku of allSkus) {
+            const sysQty = sysBySku[sku] || 0;
+            const qrQty = qrBySku[sku] || 0;
+            const bulkQty = bulkBySku[sku] || 0;
+            const hasQr = qrBySku[sku] !== undefined;
+            const hasBulk = bulkBySku[sku] !== undefined;
+            const hasSys = sysBySku[sku] !== undefined;
+            const physUsed = hasQr ? qrQty : (hasBulk ? bulkQty : 0);
+            const variance = physUsed - sysQty;
+            const source = hasQr && hasBulk ? 'qr+bulk' : hasQr ? 'qr' : hasBulk ? 'bulk' : 'none';
+            let status;
+            if (!hasSys && (hasQr || hasBulk)) status = 'Unregistered';
+            else if (source === 'none') status = 'Not Counted';
+            else status = Math.abs(variance) <= tol ? 'Match' : 'Recount Required';
+            result.push({
+                SKU: sku,
+                System_Qty: sysQty,
+                QR_Qty: qrQty,
+                Bulk_Qty: bulkQty,
+                Physical_Used: physUsed,
+                Variance: variance,
+                Source: source,
+                Status: status,
+                ShelfCount: (sysShelves[sku]||[]).length,
+                Shelves: sysShelves[sku] || [],
+            });
+        }
+        const order = { 'Recount Required': 0, 'Unregistered': 1, 'Not Counted': 2, 'Match': 3 };
+        return result.sort((a,b) => (order[a.Status] - order[b.Status]) || a.SKU.localeCompare(b.SKU));
+    };
+
+    // Auto-derive session method from the data present.
+    const _stSessionMethod = (sid) => {
+        const hasQr = _stCounts(sid).length > 0;
+        const hasBulk = ((_stBulkData(sid).rows) || []).length > 0;
+        if (hasQr && hasBulk) return 'mixed';
+        if (hasQr) return 'qr_only';
+        if (hasBulk) return 'excel_import';
+        return 'none';
+    };
+
+    // Auto-derive partial-stock-take info: a session is "partial" if any non-excluded
+    // location+SKU in System Stock has neither a QR scan nor a bulk-upload entry for
+    // that SKU. Also returns which locations have zero QR coverage.
+    const _stPartialInfo = (sid) => {
+        const sys = _stSystemStock(sid);
+        const counts = _stCounts(sid);
+        const bulk = (_stBulkData(sid).rows || []);
+        const exSet = _stExclusionSet();
+        const qrLocSku = new Set();
+        const qrLocations = new Set();
+        for (const c of counts) {
+            qrLocSku.add(_stNormKey(c.location, c.sku));
+            qrLocations.add(String(c.location||'').trim().toLowerCase());
+        }
+        const bulkSkus = new Set(bulk.map(r => String(r.SKU||'').trim().toUpperCase()));
+        const sysLocs = new Set();
+        const sysLocLabel = {};
+        let uncovered = 0, covered = 0;
+        for (const r of sys) {
+            const sku = String(r.SKU||'').trim().toUpperCase();
+            if (exSet.has(sku)) continue;
+            const locKey = String(r.Location||'').trim().toLowerCase();
+            sysLocs.add(locKey);
+            sysLocLabel[locKey] = r.Location;
+            const k = _stNormKey(r.Location, r.SKU);
+            if (qrLocSku.has(k) || bulkSkus.has(sku)) covered++;
+            else uncovered++;
+        }
+        const uncountedLocations = [...sysLocs].filter(l => !qrLocations.has(l)).map(l => sysLocLabel[l] || l);
+        const countedLocations = [...qrLocations];
+        return { partial: uncovered > 0, covered, uncovered, uncountedLocations, countedLocations };
     };
     const stSetThreshold = () => {
         const el = document.getElementById('st-threshold');
@@ -42747,6 +42894,418 @@ JB 星期二到
             .filter(r => r.Status === 'Recount Required')
             .map(r => ({ Location: r.Location, SKU: r.SKU, New_System_Qty: r.Physical_Total }));
         _stDownload(`adjustment_${sid}.csv`, _stToCsv(rows, ['Location','SKU','New_System_Qty']), 'text/csv');
+    };
+
+    // ── Exclusions tab ──────────────────────────────────────────
+    const _stRenderExclusions = () => {
+        const list = _stExclusions();
+        return `
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                <div style="background:white;padding:16px;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                    <h3 style="margin-top:0;font-size:16px;"><i class="fas fa-ban"></i> Exclusion List (Delisted SKUs)</h3>
+                    <p style="color:var(--gray-600);font-size:13px;">Excluded SKUs are ignored everywhere — System Stock, QR counts, Bulk uploads, Reconciliation, Summary.</p>
+                    <div class="form-group" style="margin-bottom:8px;">
+                        <label>SKU</label>
+                        <input id="st-ex-sku" type="text" placeholder="e.g. ABC-001"
+                            onkeydown="if(event.key==='Enter'){event.preventDefault();app.stAddExclusion();}"
+                            style="width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:6px;font-family:monospace;text-transform:uppercase;">
+                    </div>
+                    <div class="form-group" style="margin-bottom:8px;">
+                        <label>Reason <span style="color:var(--gray-500);font-weight:400;">(optional)</span></label>
+                        <input id="st-ex-reason" type="text" placeholder="e.g. Delisted 2026-04-01" style="width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:6px;">
+                    </div>
+                    <button class="btn primary" onclick="app.stAddExclusion()" style="margin-bottom:12px;"><i class="fas fa-plus"></i> Add</button>
+                    <hr style="margin:16px 0;border:none;border-top:1px solid var(--gray-200);">
+                    <h4 style="font-size:14px;margin-bottom:6px;">Bulk import (CSV / XLSX)</h4>
+                    <p style="color:var(--gray-600);font-size:12px;">Single column <code>Product Code</code> or <code>SKU</code>. Optional <code>Reason</code> column.</p>
+                    <input type="file" id="st-ex-file" accept=".xlsx,.xls,.csv" style="margin-bottom:8px;">
+                    <button class="btn secondary" onclick="app.stImportExclusions()"><i class="fas fa-upload"></i> Import</button>
+                </div>
+                <div style="background:white;padding:16px;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                    <div style="display:flex;justify-content:space-between;align-items:center;">
+                        <h3 style="margin:0;font-size:16px;">Excluded SKUs (${list.length})</h3>
+                        ${list.length ? `<div style="display:flex;gap:6px;"><button class="btn small" onclick="app.stExportExclusions()"><i class="fas fa-download"></i> Export</button><button class="btn small" style="color:#dc2626;" onclick="app.stClearExclusions()">Clear All</button></div>` : ''}
+                    </div>
+                    <div style="max-height:480px;overflow:auto;margin-top:12px;">
+                        ${list.length === 0 ? `<div style="color:var(--gray-500);padding:24px;text-align:center;">No exclusions yet.</div>` : `
+                            <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                                <thead style="position:sticky;top:0;background:var(--gray-50);"><tr>
+                                    <th style="padding:6px;text-align:left;">SKU</th>
+                                    <th style="padding:6px;text-align:left;">Reason</th>
+                                    <th style="padding:6px;text-align:left;">Added</th>
+                                    <th style="padding:6px;"></th>
+                                </tr></thead>
+                                <tbody>${list.slice().sort((a,b) => (b.addedAt||'').localeCompare(a.addedAt||'')).map(e => `
+                                    <tr style="border-top:1px solid var(--gray-100);">
+                                        <td style="padding:6px;font-family:monospace;">${_stEsc(e.sku)}</td>
+                                        <td style="padding:6px;color:var(--gray-600);">${_stEsc(e.reason||'')}</td>
+                                        <td style="padding:6px;color:var(--gray-500);font-size:11px;">${_stEsc((e.addedAt||'').slice(0,10))} · ${_stEsc(e.addedBy||'')}</td>
+                                        <td style="padding:6px;text-align:right;"><button class="btn-link" style="border:none;background:none;cursor:pointer;color:#dc2626;" onclick="app.stRemoveExclusion('${_stAttr(e.sku)}')"><i class="fas fa-times"></i></button></td>
+                                    </tr>
+                                `).join('')}</tbody>
+                            </table>
+                        `}
+                    </div>
+                </div>
+            </div>
+        `;
+    };
+
+    const stAddExclusion = () => {
+        const sku = (document.getElementById('st-ex-sku')?.value || '').trim().toUpperCase();
+        const reason = (document.getElementById('st-ex-reason')?.value || '').trim();
+        if (!sku) return UI.toast.error('SKU required');
+        const list = _stExclusions();
+        if (list.some(e => String(e.sku).toUpperCase() === sku)) return UI.toast.error('Already excluded');
+        list.push({ sku, reason, addedBy: _currentUser?.name || _currentUser?.email || 'admin', addedAt: new Date().toISOString() });
+        _stSaveExclusions(list);
+        UI.toast.success(`Excluded ${sku}`);
+        stSwitchTab('exclusions');
+    };
+    const stRemoveExclusion = (sku) => {
+        _stSaveExclusions(_stExclusions().filter(e => String(e.sku).toUpperCase() !== String(sku).toUpperCase()));
+        UI.toast.success('Removed');
+        stSwitchTab('exclusions');
+    };
+    const stClearExclusions = () => {
+        if (!confirm('Clear all exclusions? This affects every session.')) return;
+        _stSaveExclusions([]);
+        UI.toast.success('All exclusions cleared');
+        stSwitchTab('exclusions');
+    };
+    const stImportExclusions = async () => {
+        const input = document.getElementById('st-ex-file');
+        const f = input?.files?.[0];
+        if (!f) return UI.toast.error('Choose a file first');
+        if (typeof window._ensureXlsx === 'function') await window._ensureXlsx();
+        if (typeof XLSX === 'undefined') return UI.toast.error('XLSX library not loaded');
+        const buf = await f.arrayBuffer();
+        const wb = XLSX.read(buf, { type: 'array' });
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+        const list = _stExclusions();
+        const seen = new Set(list.map(e => String(e.sku).toUpperCase()));
+        let added = 0;
+        for (const r of rows) {
+            const keys = Object.keys(r).reduce((m,k) => { m[k.toLowerCase().replace(/[\s_]/g,'')] = r[k]; return m; }, {});
+            const sku = String(keys.sku ?? keys.productcode ?? keys.itemcode ?? '').trim().toUpperCase();
+            const reason = String(keys.reason ?? '').trim();
+            if (!sku || seen.has(sku)) continue;
+            seen.add(sku);
+            list.push({ sku, reason, addedBy: _currentUser?.name || _currentUser?.email || 'admin', addedAt: new Date().toISOString() });
+            added++;
+        }
+        _stSaveExclusions(list);
+        UI.toast.success(`Added ${added} exclusion(s)`);
+        stSwitchTab('exclusions');
+    };
+    const stExportExclusions = () => {
+        const rows = _stExclusions();
+        const headers = ['sku','reason','addedBy','addedAt'];
+        _stDownload('exclusion_list.csv', _stToCsv(rows, headers), 'text/csv');
+    };
+
+    // ── Bulk Physical Upload tab ──────────────────────────────────────────
+    // Handles wide variety of column header spellings — the example workbook
+    // (formula-warehouse-20260425.xlsx) uses "Product Code" and "Physical Stock".
+    const _stParseBulkRows = (rows) => {
+        const out = [];
+        const seen = new Set();
+        const dupes = [];
+        for (const r of rows) {
+            const keys = Object.keys(r).reduce((m,k) => { m[k.toLowerCase().replace(/[\s_]/g,'')] = r[k]; return m; }, {});
+            const sku = String(keys.sku ?? keys.productcode ?? keys.itemcode ?? keys.code ?? '').trim();
+            const qty = Number(
+                keys.physicalstock ?? keys.physical ?? keys.physicalqty ??
+                keys.qty ?? keys.quantity ?? keys.count ?? keys.actual ?? 0
+            );
+            const loc = String(keys.location ?? keys.warehouse ?? keys.store ?? '').trim();
+            if (!sku) continue;
+            const k = sku.toUpperCase() + '|' + (loc.toLowerCase());
+            if (seen.has(k)) { dupes.push(sku); continue; }
+            seen.add(k);
+            out.push({ SKU: sku.toUpperCase(), Physical_Qty: isFinite(qty) ? qty : 0, Location: loc });
+        }
+        return { rows: out, dupes };
+    };
+
+    const _stRenderBulk = () => {
+        const sid = _stState.sessionId;
+        if (!sid) return `<div style="padding:40px;text-align:center;color:var(--gray-500);">Activate a session first.</div>`;
+        const data = _stBulkData(sid);
+        const exSet = _stExclusionSet();
+        const rows = data.rows || [];
+        const excludedCount = rows.filter(r => exSet.has(r.SKU)).length;
+        return `
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                <div style="background:white;padding:16px;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                    <h3 style="margin-top:0;font-size:16px;"><i class="fas fa-file-excel"></i> Upload Physical Count Excel</h3>
+                    <p style="color:var(--gray-600);font-size:13px;">
+                        Excel/CSV with columns: <code>Product Code</code> (or <code>SKU</code>), <code>Physical Stock</code> (or <code>Qty</code>), <code>Location</code> (optional).
+                        Up to 10,000 rows.
+                    </p>
+                    <input type="file" id="st-bulk-file" accept=".xlsx,.xls,.csv" style="margin-bottom:8px;">
+                    <button class="btn primary" onclick="app.stBulkUploadFile()"><i class="fas fa-upload"></i> Upload</button>
+                    <hr style="margin:16px 0;border:none;border-top:1px solid var(--gray-200);">
+                    <h4 style="font-size:14px;">Or paste CSV</h4>
+                    <textarea id="st-bulk-paste" rows="6" placeholder="Product Code,Physical Stock&#10;FMLTS006,0&#10;QVABOX0037,7" style="width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:6px;font-family:monospace;font-size:12px;"></textarea>
+                    <button class="btn secondary" onclick="app.stBulkUploadPaste()" style="margin-top:8px;"><i class="fas fa-paste"></i> Import Pasted</button>
+                </div>
+                <div style="background:white;padding:16px;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                    <div style="display:flex;justify-content:space-between;align-items:center;">
+                        <h3 style="margin:0;font-size:16px;">Uploaded Physical Counts (${rows.length})</h3>
+                        ${rows.length ? `<button class="btn small" style="color:#dc2626;" onclick="app.stClearBulk()">Clear</button>` : ''}
+                    </div>
+                    ${data.file ? `<div style="font-size:11px;color:var(--gray-500);margin-top:4px;">From: ${_stEsc(data.file)} · ${_stEsc((data.uploadedAt||'').slice(0,16).replace('T',' '))} · ${_stEsc(data.uploadedBy||'')}</div>` : ''}
+                    ${excludedCount > 0 ? `<div style="margin-top:8px;background:#fef3c7;color:#92400e;padding:6px 10px;border-radius:6px;font-size:12px;"><i class="fas fa-info-circle"></i> ${excludedCount} row(s) match excluded SKUs and will be ignored.</div>` : ''}
+                    <div style="max-height:420px;overflow:auto;margin-top:12px;">
+                        ${rows.length === 0 ? `<div style="color:var(--gray-500);padding:20px;text-align:center;">No bulk physical counts uploaded yet.</div>` : `
+                            <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                                <thead style="position:sticky;top:0;background:var(--gray-50);"><tr>
+                                    <th style="padding:6px;text-align:left;">SKU</th>
+                                    <th style="padding:6px;text-align:left;">Location</th>
+                                    <th style="padding:6px;text-align:right;">Physical</th>
+                                </tr></thead>
+                                <tbody>${rows.slice(0,500).map(r => {
+                                    const ex = exSet.has(r.SKU);
+                                    return `<tr style="border-top:1px solid var(--gray-100);${ex?'background:#fef2f2;color:#991b1b;':''}">
+                                        <td style="padding:6px;font-family:monospace;">${_stEsc(r.SKU)}${ex?' <span style="background:#fee2e2;color:#991b1b;padding:1px 4px;border-radius:3px;font-size:10px;">EXCLUDED</span>':''}</td>
+                                        <td style="padding:6px;">${_stEsc(r.Location||'—')}</td>
+                                        <td style="padding:6px;text-align:right;">${r.Physical_Qty}</td>
+                                    </tr>`;
+                                }).join('')}</tbody>
+                            </table>
+                            ${rows.length > 500 ? `<div style="padding:8px;text-align:center;color:var(--gray-500);font-size:11px;">Showing first 500 of ${rows.length}</div>` : ''}
+                        `}
+                    </div>
+                </div>
+            </div>
+            ${rows.length > 0 ? `
+                <div style="background:#dbeafe;color:#1e40af;padding:12px 16px;border-radius:8px;margin-top:12px;font-size:13px;">
+                    <i class="fas fa-info-circle"></i> Bulk numbers are compared against the <strong>sum</strong> of System Stock across every shelf for each SKU.
+                    Open <strong>Final Summary</strong> to see SKU-level variances. QR scans for the same SKU automatically override the bulk number.
+                </div>
+            ` : ''}
+        `;
+    };
+
+    const stBulkUploadFile = async () => {
+        const sid = _stRequireOpenSession();
+        if (!sid) return;
+        const input = document.getElementById('st-bulk-file');
+        const f = input?.files?.[0];
+        if (!f) return UI.toast.error('Choose a file first');
+        if (typeof window._ensureXlsx === 'function') await window._ensureXlsx();
+        if (typeof XLSX === 'undefined') return UI.toast.error('XLSX library not loaded');
+        const buf = await f.arrayBuffer();
+        const wb = XLSX.read(buf, { type: 'array' });
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+        if (rows.length > 10000) return UI.toast.error('Max 10,000 rows supported');
+        const { rows: parsed, dupes } = _stParseBulkRows(rows);
+        if (parsed.length === 0) return UI.toast.error('No valid rows found (need SKU + Physical Stock)');
+        _stSaveBulkData(sid, {
+            rows: parsed,
+            file: f.name,
+            uploadedAt: new Date().toISOString(),
+            uploadedBy: _currentUser?.name || _currentUser?.email || 'admin',
+        });
+        UI.toast.success(`Uploaded ${parsed.length} rows${dupes.length ? ` (${dupes.length} dupes skipped)` : ''}`);
+        stSwitchTab('bulk');
+    };
+    const stBulkUploadPaste = () => {
+        const sid = _stRequireOpenSession();
+        if (!sid) return;
+        const raw = (document.getElementById('st-bulk-paste')?.value || '').trim();
+        if (!raw) return UI.toast.error('Paste CSV content first');
+        const lines = raw.split(/\r?\n/).filter(Boolean);
+        if (lines.length < 2) return UI.toast.error('Need header + at least one row');
+        const headers = lines[0].split(',').map(s => s.trim());
+        const rows = lines.slice(1).map(l => {
+            const cells = l.split(',');
+            const obj = {};
+            headers.forEach((h,i) => obj[h] = (cells[i]||'').trim());
+            return obj;
+        });
+        const { rows: parsed, dupes } = _stParseBulkRows(rows);
+        if (parsed.length === 0) return UI.toast.error('No valid rows parsed');
+        _stSaveBulkData(sid, {
+            rows: parsed,
+            file: 'pasted',
+            uploadedAt: new Date().toISOString(),
+            uploadedBy: _currentUser?.name || _currentUser?.email || 'admin',
+        });
+        UI.toast.success(`Uploaded ${parsed.length} rows${dupes.length ? ` (${dupes.length} dupes skipped)` : ''}`);
+        stSwitchTab('bulk');
+    };
+    const stClearBulk = () => {
+        const sid = _stRequireOpenSession();
+        if (!sid) return;
+        if (!confirm('Clear bulk physical counts for this session?')) return;
+        _stSaveBulkData(sid, { rows: [], file: '', uploadedAt: '', uploadedBy: '' });
+        UI.toast.success('Cleared');
+        stSwitchTab('bulk');
+    };
+
+    // ── Final Summary tab ──────────────────────────────────────────
+    const _stRenderSummary = () => {
+        const sid = _stState.sessionId;
+        if (!sid) return `<div style="padding:40px;text-align:center;color:var(--gray-500);">Activate a session first.</div>`;
+        const sess = _stSessions().find(s => s.id === sid);
+        const threshold = _stGetThreshold();
+        const bySku = _stReconcileBySku(sid, threshold);
+        const partial = _stPartialInfo(sid);
+        const method = _stSessionMethod(sid);
+        const reasons = _stReasons(sid);
+        const exList = _stExclusions();
+        const bulkData = _stBulkData(sid);
+
+        const matched = bySku.filter(r => r.Status === 'Match').length;
+        const recountReq = bySku.filter(r => r.Status === 'Recount Required').length;
+        const notCounted = bySku.filter(r => r.Status === 'Not Counted').length;
+        const unregistered = bySku.filter(r => r.Status === 'Unregistered').length;
+
+        const methodLabel = ({ qr_only:'QR scans only', excel_import:'Excel bulk import only', mixed:'Mixed (QR + Excel)', none:'No counts yet' })[method];
+        const methodColor = method === 'none' ? '#94a3b8' : method === 'mixed' ? '#7c3aed' : '#0ea5e9';
+
+        return `
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+                <h2 style="margin:0;font-size:18px;"><i class="fas fa-clipboard-check"></i> Final Stock Take Summary</h2>
+                <div style="display:flex;gap:8px;">
+                    <button class="btn secondary" onclick="app.stExportSummary('csv')"><i class="fas fa-file-csv"></i> CSV</button>
+                    <button class="btn secondary" onclick="app.stExportSummary('xlsx')"><i class="fas fa-file-excel"></i> XLSX</button>
+                    <button class="btn primary" onclick="window.print()"><i class="fas fa-print"></i> Print</button>
+                </div>
+            </div>
+
+            <div style="background:white;padding:16px;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.05);margin-bottom:12px;">
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;">
+                    <div><div style="color:var(--gray-500);font-size:11px;text-transform:uppercase;">Session</div><div style="font-weight:600;font-family:monospace;">${_stEsc(sid)}</div></div>
+                    <div><div style="color:var(--gray-500);font-size:11px;text-transform:uppercase;">Counter</div><div style="font-weight:600;">${_stEsc(sess?.createdBy||'—')}</div></div>
+                    <div><div style="color:var(--gray-500);font-size:11px;text-transform:uppercase;">Created</div><div style="font-weight:600;">${_stEsc((sess?.createdAt||'').slice(0,16).replace('T',' '))}</div></div>
+                    <div><div style="color:var(--gray-500);font-size:11px;text-transform:uppercase;">Status</div><div><span style="padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;background:${sess?.status==='open'?'#dcfce7':'#f1f5f9'};color:${sess?.status==='open'?'#166534':'#475569'};">${_stEsc(sess?.status||'—')}</span></div></div>
+                    <div><div style="color:var(--gray-500);font-size:11px;text-transform:uppercase;">Method</div><div style="font-weight:600;color:${methodColor};">${methodLabel}</div></div>
+                    <div><div style="color:var(--gray-500);font-size:11px;text-transform:uppercase;">Coverage</div><div style="font-weight:600;color:${partial.partial?'#92400e':'#166534'};">${partial.partial ? `<i class="fas fa-exclamation-triangle"></i> Partial — ${partial.uncovered} SKU(s) uncovered` : `<i class="fas fa-check-circle"></i> Full — all SKUs covered`}</div></div>
+                    <div><div style="color:var(--gray-500);font-size:11px;text-transform:uppercase;">Tolerance</div><div style="font-weight:600;">${threshold === 0 ? 'Strict (any variance)' : `±${threshold} units`}</div></div>
+                    <div><div style="color:var(--gray-500);font-size:11px;text-transform:uppercase;">Exclusions applied</div><div style="font-weight:600;">${exList.length} SKU(s)</div></div>
+                    ${bulkData.file ? `<div><div style="color:var(--gray-500);font-size:11px;text-transform:uppercase;">Bulk file</div><div style="font-weight:600;font-size:12px;">${_stEsc(bulkData.file)}</div></div>` : ''}
+                    ${partial.countedLocations.length ? `<div style="grid-column:1 / -1;"><div style="color:var(--gray-500);font-size:11px;text-transform:uppercase;">Locations counted by QR</div><div style="font-weight:600;font-size:12px;">${_stEsc(partial.countedLocations.join(', '))}</div></div>` : ''}
+                    ${partial.uncountedLocations.length ? `<div style="grid-column:1 / -1;"><div style="color:#92400e;font-size:11px;text-transform:uppercase;">Locations NOT counted by QR</div><div style="font-weight:600;font-size:12px;color:#92400e;">${_stEsc(partial.uncountedLocations.join(', '))}</div></div>` : ''}
+                </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:12px;">
+                <div style="background:white;padding:14px;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                    <div style="color:var(--gray-600);font-size:12px;">Total SKUs</div>
+                    <div style="font-size:24px;font-weight:700;">${bySku.length}</div>
+                </div>
+                <div style="background:#dcfce7;padding:14px;border-radius:8px;">
+                    <div style="color:#166534;font-size:12px;">Matched</div>
+                    <div style="font-size:24px;font-weight:700;color:#166534;">${matched}</div>
+                </div>
+                <div style="background:#fee2e2;padding:14px;border-radius:8px;">
+                    <div style="color:#991b1b;font-size:12px;">Variance</div>
+                    <div style="font-size:24px;font-weight:700;color:#991b1b;">${recountReq}</div>
+                </div>
+                <div style="background:#fef3c7;padding:14px;border-radius:8px;">
+                    <div style="color:#92400e;font-size:12px;">Unregistered</div>
+                    <div style="font-size:24px;font-weight:700;color:#92400e;">${unregistered}</div>
+                </div>
+                <div style="background:#f1f5f9;padding:14px;border-radius:8px;">
+                    <div style="color:#475569;font-size:12px;">Not Counted</div>
+                    <div style="font-size:24px;font-weight:700;color:#475569;">${notCounted}</div>
+                </div>
+            </div>
+
+            ${partial.partial ? `
+                <div style="background:#fef3c7;color:#92400e;padding:12px 16px;border-radius:8px;margin-bottom:12px;font-size:13px;">
+                    <strong><i class="fas fa-exclamation-triangle"></i> Partial Stock Take</strong> —
+                    ${partial.uncovered} SKU(s) had no QR scan and no bulk-upload entry.
+                    Uncounted SKUs keep their previous expected quantities.
+                </div>
+            ` : ''}
+
+            <div style="background:white;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.05);overflow:auto;max-height:520px;">
+                <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                    <thead style="position:sticky;top:0;background:var(--gray-50);z-index:1;"><tr>
+                        <th style="padding:10px;text-align:left;">SKU</th>
+                        <th style="padding:10px;text-align:right;" title="Sum across all shelves">System Total</th>
+                        <th style="padding:10px;text-align:right;" title="Sum of QR scans">QR</th>
+                        <th style="padding:10px;text-align:right;" title="From bulk Excel upload">Bulk</th>
+                        <th style="padding:10px;text-align:right;" title="QR overrides Bulk if any QR scan exists for that SKU">Physical Used</th>
+                        <th style="padding:10px;text-align:right;">Variance</th>
+                        <th style="padding:10px;text-align:center;">Source</th>
+                        <th style="padding:10px;text-align:center;">Status</th>
+                        <th style="padding:10px;text-align:left;">Reason</th>
+                    </tr></thead>
+                    <tbody>${bySku.map(r => `<tr style="border-top:1px solid var(--gray-100);">
+                        <td style="padding:8px 10px;font-family:monospace;">${_stEsc(r.SKU)}${r.ShelfCount > 1 ? ` <span style="background:#dbeafe;color:#1e40af;padding:1px 5px;border-radius:3px;font-size:10px;cursor:help;" title="On ${r.ShelfCount} shelves: ${(r.Shelves||[]).map(s => _stEsc(s.Location) + '=' + s.Qty).join(', ')}">×${r.ShelfCount}</span>` : ''}</td>
+                        <td style="padding:8px 10px;text-align:right;">${r.System_Qty}</td>
+                        <td style="padding:8px 10px;text-align:right;color:${r.QR_Qty?'#0ea5e9':'#94a3b8'};">${r.QR_Qty || '—'}</td>
+                        <td style="padding:8px 10px;text-align:right;color:${r.Bulk_Qty?'#0ea5e9':'#94a3b8'};">${r.Bulk_Qty || '—'}</td>
+                        <td style="padding:8px 10px;text-align:right;font-weight:600;">${r.Physical_Used}</td>
+                        <td style="padding:8px 10px;text-align:right;color:${r.Variance===0?'inherit':(r.Variance>0?'#059669':'#dc2626')};font-weight:${r.Variance===0?400:600};">${r.Variance>0?'+':''}${r.Variance}</td>
+                        <td style="padding:8px 10px;text-align:center;font-size:11px;color:var(--gray-600);">${_stEsc(r.Source)}</td>
+                        <td style="padding:8px 10px;text-align:center;">
+                            <span style="padding:3px 8px;border-radius:10px;font-size:11px;font-weight:600;background:${
+                                r.Status==='Match'?'#dcfce7':
+                                r.Status==='Unregistered'?'#fef3c7':
+                                r.Status==='Not Counted'?'#f1f5f9':'#fee2e2'
+                            };color:${
+                                r.Status==='Match'?'#166534':
+                                r.Status==='Unregistered'?'#92400e':
+                                r.Status==='Not Counted'?'#475569':'#991b1b'
+                            };">${r.Status}</span>
+                        </td>
+                        <td style="padding:6px 10px;">
+                            ${r.Status === 'Recount Required' || r.Status === 'Unregistered' ? `
+                                <input type="text" value="${_stEsc(reasons[r.SKU]||'')}" placeholder="reason..."
+                                    onblur="app.stSetReason('${_stAttr(r.SKU)}', this.value)"
+                                    style="width:100%;padding:4px 6px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px;">
+                            ` : ''}
+                        </td>
+                    </tr>`).join('') || `<tr><td colspan="9" style="padding:30px;text-align:center;color:var(--gray-500);">No data — import System Stock or upload Bulk Physical first.</td></tr>`}</tbody>
+                </table>
+            </div>
+        `;
+    };
+
+    const stSetReason = (sku, val) => {
+        const sid = _stState.sessionId;
+        if (!sid) return;
+        const reasons = _stReasons(sid);
+        const trimmed = (val||'').trim();
+        if (trimmed) reasons[sku] = trimmed; else delete reasons[sku];
+        _stSaveReasons(sid, reasons);
+    };
+
+    const stExportSummary = async (fmt) => {
+        const sid = _stState.sessionId;
+        if (!sid) return;
+        const sess = _stSessions().find(s => s.id === sid);
+        const partial = _stPartialInfo(sid);
+        const method = _stSessionMethod(sid);
+        const reasons = _stReasons(sid);
+        const rows = _stReconcileBySku(sid, _stGetThreshold()).map(r => ({
+            Session: sid,
+            Counter: sess?.createdBy || '',
+            Method: method,
+            Partial: partial.partial ? 'YES' : 'NO',
+            Uncounted_Locations: partial.uncountedLocations.join('; '),
+            SKU: r.SKU,
+            On_Shelves: r.ShelfCount,
+            System_Total: r.System_Qty,
+            QR_Qty: r.QR_Qty,
+            Bulk_Qty: r.Bulk_Qty,
+            Physical_Used: r.Physical_Used,
+            Variance: r.Variance,
+            Source: r.Source,
+            Status: r.Status,
+            Reason: reasons[r.SKU] || '',
+        }));
+        const headers = ['Session','Counter','Method','Partial','Uncounted_Locations','SKU','On_Shelves','System_Total','QR_Qty','Bulk_Qty','Physical_Used','Variance','Source','Status','Reason'];
+        if (fmt === 'csv') _stDownload(`summary_${sid}.csv`, _stToCsv(rows, headers), 'text/csv');
+        else await _stToXlsx(rows, 'Summary', `summary_${sid}.xlsx`);
     };
 
     // ==================== /STOCK TAKE ====================
@@ -43520,6 +44079,17 @@ JB 星期二到
         stExportRecount,
         stExportAdjustment,
         stSetThreshold,
+        // v2 — exclusions, bulk physical upload, summary
+        stAddExclusion,
+        stRemoveExclusion,
+        stClearExclusions,
+        stImportExclusions,
+        stExportExclusions,
+        stBulkUploadFile,
+        stBulkUploadPaste,
+        stClearBulk,
+        stExportSummary,
+        stSetReason,
 
         // ========== EGG PURCHASING (Super Admin only) ==========
         showEggPurchasingView,
