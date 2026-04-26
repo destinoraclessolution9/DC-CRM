@@ -22116,7 +22116,15 @@ function _wireLoginBtn() {
                                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;margin-bottom:10px;">
                                     <div><span style="color:var(--gray-400);">Payment:</span> ${escapeHtml(h.payment_method||'-')}</div>
                                     <div><span style="color:var(--gray-400);">Invoice:</span> ${escapeHtml(h.invoice_number||'-')}</div>
-                                    ${h.invoice_file ? `<div style="grid-column:1/-1;"><a href="${h.invoice_file}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);"><i class="fas fa-paperclip"></i> ${escapeHtml(h.invoice_file_name||'View invoice')}</a></div>` : ''}
+                                    <div style="grid-column:1/-1;">
+                                        ${h.invoice_file
+                                            ? `<a href="${h.invoice_file}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);"><i class="fas fa-paperclip"></i> ${escapeHtml(h.invoice_file_name||'View invoice')}</a>`
+                                            : `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:11px;background:#fffbeb;border:1px dashed #f59e0b;border-radius:6px;padding:6px 8px;">
+                                                <span style="color:#92400e;"><i class="fas fa-exclamation-triangle"></i> No invoice attached.</span>
+                                                <input type="file" id="crh-inv-${pid}-${hi}" accept="image/*,application/pdf" style="font-size:11px;flex:1;min-width:140px;">
+                                                <button class="btn secondary btn-sm" style="padding:2px 8px;font-size:11px;height:24px;" onclick="event.stopPropagation();app.uploadHistoryInvoice(${pid},${hi})"><i class="fas fa-upload"></i> Upload</button>
+                                              </div>`}
+                                    </div>
                                     ${h.closing_remarks ? `<div style="grid-column:1/-1;"><span style="color:var(--gray-400);">Sale Remarks:</span> ${escapeHtml(h.closing_remarks)}</div>` : ''}
                                 </div>
                                 <div style="border-top:1px solid #e5e7eb;padding-top:10px;">
@@ -22679,7 +22687,15 @@ function _wireLoginBtn() {
                             <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;margin-bottom:10px;">
                                 <div><span style="color:var(--gray-400);">Payment:</span> ${escapeHtml(h.payment_method||'-')}</div>
                                 <div><span style="color:var(--gray-400);">Invoice:</span> ${escapeHtml(h.invoice_number||'-')}</div>
-                                ${h.invoice_file ? `<div style="grid-column:1/-1;"><a href="${h.invoice_file}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);"><i class="fas fa-paperclip"></i> ${escapeHtml(h.invoice_file_name||'View invoice')}</a></div>` : ''}
+                                <div style="grid-column:1/-1;">
+                                    ${h.invoice_file
+                                        ? `<a href="${h.invoice_file}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);"><i class="fas fa-paperclip"></i> ${escapeHtml(h.invoice_file_name||'View invoice')}</a>`
+                                        : `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:11px;background:#fffbeb;border:1px dashed #f59e0b;border-radius:6px;padding:6px 8px;">
+                                            <span style="color:#92400e;"><i class="fas fa-exclamation-triangle"></i> No invoice attached.</span>
+                                            <input type="file" id="crh-inv-${pid}-${hi}" accept="image/*,application/pdf" style="font-size:11px;flex:1;min-width:140px;">
+                                            <button class="btn secondary btn-sm" style="padding:2px 8px;font-size:11px;height:24px;" onclick="event.stopPropagation();app.uploadHistoryInvoice(${pid},${hi})"><i class="fas fa-upload"></i> Upload</button>
+                                          </div>`}
+                                </div>
                                 ${h.closing_remarks ? `<div style="grid-column:1/-1;"><span style="color:var(--gray-400);">Sale Remarks:</span> ${escapeHtml(h.closing_remarks)}</div>` : ''}
                             </div>
                             <div style="border-top:1px solid #e5e7eb;padding-top:10px;">
@@ -24180,6 +24196,68 @@ NOTIFY pgrst, 'reload schema';`;
         }
         const bodyEl = document.getElementById(`acc-body-closing-${prospectId}`);
         if (bodyEl) await switchProspectTab('closing', prospectId, null, bodyEl);
+    };
+
+    // Attach an invoice file to an archived history record. Used by the
+    // "Upload" button rendered when a history entry has no invoice_file —
+    // happens when the original close didn't capture a URL (e.g. storage
+    // upload failed silently, or the record was archived before invoice_file
+    // was tracked). Tries Supabase storage first, falls back to base64 data
+    // URL so the file still survives offline / RLS-blocked sessions.
+    const uploadHistoryInvoice = async (prospectId, historyIndex) => {
+        const fileInput = document.getElementById(`crh-inv-${prospectId}-${historyIndex}`);
+        const file = fileInput?.files?.[0];
+        if (!file) return UI.toast.error('Please choose a file first');
+
+        const prospect = await AppDataStore.getByIdFull
+            ? await AppDataStore.getByIdFull('prospects', prospectId)
+            : await AppDataStore.getById('prospects', prospectId);
+        const history = [...(Array.isArray(prospect?.closing_records_history) ? prospect.closing_records_history : [])];
+        if (historyIndex < 0 || historyIndex >= history.length) return UI.toast.error('Record not found');
+
+        let invoice_file = null;
+        const invoice_file_name = file.name;
+        try {
+            const sb = window.supabase || window.supabaseClient;
+            if (sb && sb.storage) {
+                const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+                const path = `invoices/${Date.now()}_${safeName}`;
+                const { error: upErr } = await sb.storage
+                    .from('attachments')
+                    .upload(path, file, { upsert: false, contentType: file.type });
+                if (upErr) throw upErr;
+                const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
+                invoice_file = urlData?.publicUrl || null;
+            }
+            if (!invoice_file) {
+                invoice_file = await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = e => resolve(e.target.result);
+                    reader.onerror = () => reject(reader.error);
+                    reader.readAsDataURL(file);
+                });
+            }
+        } catch (e) {
+            console.warn('uploadHistoryInvoice: storage upload failed:', e);
+            try {
+                invoice_file = await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = e2 => resolve(e2.target.result);
+                    reader.onerror = () => reject(reader.error);
+                    reader.readAsDataURL(file);
+                });
+            } catch (e2) {
+                UI.toast.error('Upload failed: ' + (e.message || e));
+                return;
+            }
+        }
+
+        history[historyIndex] = { ...history[historyIndex], invoice_file, invoice_file_name };
+        await AppDataStore.update('prospects', prospectId, { closing_records_history: history });
+        UI.toast.success('Invoice attached');
+        const bodyEl = document.getElementById(`acc-body-closing-${prospectId}`);
+        if (bodyEl) await switchProspectTab('closing', prospectId, null, bodyEl);
+        await _refreshCustClosingAfterProspectSave(prospectId);
     };
 
     const saveClosingHistoryEntry = async (prospectId, index) => {
@@ -44751,6 +44829,7 @@ JB 星期二到
         approveClosingRecord,
         archiveAndNewClosingRecord,
         saveClosingHistoryEntry,
+        uploadHistoryInvoice,
         saveClosingDeliveryStatus,
         rejectClosingRecord,
         showPurchasesHistoryView,
