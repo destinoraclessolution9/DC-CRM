@@ -21428,9 +21428,16 @@ function _wireLoginBtn() {
                                 </div>
                                 <button class="btn btn-sm secondary" style="font-size:12px;padding:4px 8px;" onclick="event.stopPropagation();app.viewActivityDetails(${a.id})">Details</button>
                             </div>
-                            ${a.summary || a.note_key_points ? `<div class="meet-section"><div class="meet-lbl">Notes</div><div class="meet-txt">${a.summary || a.note_key_points}</div></div>` : ''}
+                            ${a.summary || a.note_key_points ? `<div class="meet-section"><div class="meet-lbl">Key Points</div><div class="meet-txt">${a.summary || a.note_key_points}</div></div>` : ''}
+                            ${a.note_needs ? `<div class="meet-section"><div class="meet-lbl">Needs</div><div class="meet-txt">${a.note_needs}</div></div>` : ''}
+                            ${a.note_pain_points ? `<div class="meet-section"><div class="meet-lbl">Pain Points</div><div class="meet-txt">${a.note_pain_points}</div></div>` : ''}
+                            ${a.opportunity_potential ? `<div class="meet-section"><div class="meet-lbl">Opportunity / Potential</div><div class="meet-txt">${a.opportunity_potential}</div></div>` : ''}
+                            ${a.next_action ? `<div class="meet-section"><div class="meet-lbl">Next Action</div><div class="meet-txt" style="color:var(--primary);font-weight:500;">${a.next_action}</div></div>` : ''}
                             ${a.location_address ? `<div class="meet-section"><div class="meet-lbl">Location</div><div class="meet-txt">${a.location_address}</div></div>` : ''}
-                            ${a.score_value ? `<div style="margin-bottom:4px;"><span class="badge success" style="font-size:11px;">+${a.score_value} pts</span></div>` : ''}
+                            ${a.score_value ? `<div style="margin-bottom:6px;"><span class="badge success" style="font-size:11px;">+${a.score_value} pts</span></div>` : ''}
+                            <div class="meet-actions">
+                                <button class="btn btn-sm secondary" onclick="event.stopPropagation();app.openPostMeetupNotesModal(${a.id}, ${prospect.id})"><i class="fas fa-sticky-note"></i> Post Event Notes</button>
+                            </div>
                         </div>
                     `;
                 }
