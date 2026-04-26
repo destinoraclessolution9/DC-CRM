@@ -247,6 +247,20 @@ const appLogic = (() => {
     let _phPage = 0;
     const _PH_PAGE_SIZE = 50;
     const _SWR_REFRESH_GUARD_MS = 5000;
+    // Lookup tables that are read every time the activity modal opens.
+    // Caching them session-wide is the difference between an instant tap-to-open
+    // and a 1-3s freeze on mobile, where the modal awaits both fetches before it
+    // can even render. 2-minute TTL keeps post-edit staleness bounded.
+    let _venuesCache = null;
+    let _venuesCacheTs = 0;
+    let _productsCache = null;
+    let _productsCacheTs = 0;
+    const _LOOKUP_CACHE_TTL_MS = 2 * 60 * 1000;
+    // Monotonic token: only the most recent renderCalendar commits to the DOM.
+    // Without this, rapid prev/next taps spawn racing renders whose results
+    // arrive out of order — the slower fetch arriving second clobbers the
+    // newer view and the calendar appears to "jump back".
+    let _renderCalendarToken = 0;
     // Tracks the open detail view so pull-to-refresh can re-open it instead of jumping to the list.
     let _currentDetailView = null; // { type: 'prospect'|'customer', id: number }
 
@@ -12659,7 +12673,23 @@ function _wireLoginBtn() {
         }
     };
 
+    const _getVenuesCached = async () => {
+        const now = Date.now();
+        if (_venuesCache && (now - _venuesCacheTs) < _LOOKUP_CACHE_TTL_MS) return _venuesCache;
+        _venuesCache = await AppDataStore.getAll('venues').catch(() => []);
+        _venuesCacheTs = Date.now();
+        return _venuesCache;
+    };
+    const _getProductsCached = async () => {
+        const now = Date.now();
+        if (_productsCache && (now - _productsCacheTs) < _LOOKUP_CACHE_TTL_MS) return _productsCache;
+        _productsCache = await AppDataStore.getAll('products').catch(() => []);
+        _productsCacheTs = Date.now();
+        return _productsCache;
+    };
+
     const renderCalendar = async () => {
+        const myToken = ++_renderCalendarToken;
         updateMonthHeader(_currentDate);
 
         const header = document.getElementById('calendar-days-header');
@@ -12668,6 +12698,12 @@ function _wireLoginBtn() {
 
         const grid = document.getElementById('calendar-grid');
         if (!grid) return;
+
+        // Immediate visual feedback so a mobile tap on prev/next looks responsive
+        // even while the parallel Supabase fetches resolve. Also blocks rage-taps
+        // from queuing more concurrent renders while one is already in flight.
+        grid.style.opacity = '0.55';
+        grid.style.pointerEvents = 'none';
 
         let html = '';
 
@@ -12798,6 +12834,13 @@ function _wireLoginBtn() {
 
         const todayDate = new Date();
         const isCurrentMonth = todayDate.getMonth() === month && todayDate.getFullYear() === year;
+        // Cap rendered cards per cell on mobile. Previously every activity was
+        // emitted to the DOM and CSS hid the overflow with `display:none`,
+        // bloating a busy day's cell with dozens of nodes + inline onclicks.
+        // Now we render only what's visible and surface the rest behind a
+        // "+N more" tap that opens the day view.
+        const isMobileCalendar = window.innerWidth < 768;
+        const maxRenderPerCell = isMobileCalendar ? 2 : Infinity;
 
         for (let i = 1; i <= daysInMonth; i++) {
             const isToday = isCurrentMonth && i === todayDate.getDate();
@@ -12806,6 +12849,8 @@ function _wireLoginBtn() {
                 .sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
 
             let activityHtml = '';
+            let renderedInCell = 0;
+            let skippedInCell = 0;
             const seenIds = new Set();
             // Defensive dedup: when multiple agents create separate EVENT activity
             // rows for the same event on the same day at the same time, collapse them
@@ -12828,6 +12873,10 @@ function _wireLoginBtn() {
                     const entityName = prospect ? prospect.full_name : (customer ? customer.full_name : (a.activity_title || a.customer_name || 'Event'));
 
                     if (entityName) {
+                        if (renderedInCell >= maxRenderPerCell) {
+                            skippedInCell++;
+                            continue;
+                        }
                         const isEvent = a.activity_type === 'EVENT';
                         const agent = (!isEvent && a.lead_agent_id) ? userMap.get(String(a.lead_agent_id)) : null;
                         // Fall back through lead → first co-agent → "Unassigned" so the UI
@@ -12885,8 +12934,14 @@ function _wireLoginBtn() {
                                 ` : ''}
                             </div>
                         `;
+                        renderedInCell++;
                     }
                 }
+            }
+
+            // "+N more" indicator (mobile only — desktop has Infinity cap so this never fires)
+            if (skippedInCell > 0) {
+                activityHtml += `<div class="more-events-indicator" onclick="event.stopPropagation(); app.openDayView('${dateStr}')">+${skippedInCell} more</div>`;
             }
 
             html += `
@@ -12909,7 +12964,16 @@ function _wireLoginBtn() {
             html += `<div class="calendar-cell" onclick="app.openActivityModal('${nextDateStr}')"><span class="date-num other-month">${i}</span></div>`;
         }
 
+        // Discard if a newer render started while this one's fetches were in flight.
+        if (myToken !== _renderCalendarToken) return;
         grid.innerHTML = html;
+        grid.style.opacity = '';
+        grid.style.pointerEvents = '';
+
+        // Warm the activity-modal lookup caches in the background so the first
+        // tap on a day cell opens instantly instead of waiting on two fetches.
+        _getVenuesCached();
+        _getProductsCached();
     };
 
     const getDotColor = (type) => {
@@ -15129,13 +15193,16 @@ function _wireLoginBtn() {
         _selectedReferrer = null;
         window._cpsDuplicateConfirmed = false;
 
-        // Pre-fetch lookup data BEFORE building the template (safer than await inside template literals)
-        const _venueData = await AppDataStore.getAll('venues').catch(() => []);
+        // Pre-fetch lookup data BEFORE building the template (safer than await inside template literals).
+        // Cached helpers turn this from two network round-trips per modal open into
+        // an instant cache hit after the first call — which is the difference
+        // between a snappy day-tap and a 1-3s freeze on mobile.
+        const _venueData = await _getVenuesCached();
         const _venueOptions = (_venueData || [])
             .sort((a, b) => (a.sequence || 0) - (b.sequence || 0))
             .map(v => `<option value="${v.name} | ${v.location}">${v.name} | ${v.location}</option>`)
             .join('');
-        const _productOptions = (await AppDataStore.getAll('products'))
+        const _productOptions = (await _getProductsCached())
             .filter(p => p.is_active !== false)
             .map(p => `<option value="${p.name}">${p.name}</option>`)
             .join('') || '<option value="">No products available</option>';
