@@ -39869,7 +39869,10 @@ JB 星期二到
                     if (da !== db) return da.localeCompare(db);
                     return (a.order_no || '').localeCompare(b.order_no || '');
                 });
-                const rows = sortedPrev.map(r => `
+                const PREV_ROW_LIMIT = 10;
+                const shownPrev = sortedPrev.slice(-PREV_ROW_LIMIT);
+                const hiddenCount = Math.max(0, sortedPrev.length - shownPrev.length);
+                const rows = shownPrev.map(r => `
                     <tr style="border-top:1px solid var(--gray-100);">
                         <td style="padding:6px 8px;">${r.agent_name || '-'}</td>
                         <td style="padding:6px 8px;font-size:12px;">${r.order_date ? eggFormatDateShort(new Date(r.order_date)) : '-'}</td>
@@ -39880,8 +39883,9 @@ JB 星期二到
                         <td style="padding:6px 8px;">${r.channel || '-'}</td>
                     </tr>`).join('');
                 const titleText = hasMeta ? `Last Week's Orders — Week of ${weekLabel}` : `Last Week's Orders`;
+                const shownNote = hiddenCount > 0 ? ` &nbsp;•&nbsp; showing last ${shownPrev.length} of ${sortedPrev.length}` : '';
                 const headerSubtitle = hasMeta
-                    ? `${prev.length} orders &nbsp;•&nbsp; GOLD ${goldTotal} &nbsp;•&nbsp; KING ${kingTotal}`
+                    ? `${prev.length} orders &nbsp;•&nbsp; GOLD ${goldTotal} &nbsp;•&nbsp; KING ${kingTotal}${shownNote}`
                     : `No previous run found — this is your first reconcile.`;
                 const bodyContent = (hasMeta && prev.length > 0)
                     ? `<table style="width:100%;border-collapse:collapse;font-size:13px;">
