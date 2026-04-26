@@ -125,6 +125,64 @@ class DataStore {
             // and must appear in list/tab views so Meet Up History can show thumbnails.
             activities: 'id,activity_type,activity_date,activity_title,prospect_id,customer_id,lead_agent_id,start_time,end_time,visibility,co_agents,event_id,closing_amount,amount_closed,is_closing,solution_sold,location_address,venue,status,unable_to_serve,unable_reason,note_key_points,note_outcome,note_next_steps,cps_invitation_method,cps_invitation_details,source,created_at,updated_at,score_value,is_closed,next_action,next_action_done,completed_at,photo_urls'
         };
+
+        // Prune the SWR cache at startup if localStorage is close to its
+        // ~5 MB browser quota. The Supabase auth token writes to the same
+        // bucket, and a quota error there hard-blocks login (the user has
+        // to clear site data manually). The cached table snapshots are
+        // recoverable from Supabase, so they're safe to drop — pick the
+        // largest fs_crm_ keys first.
+        try { this._pruneStorageIfFull(); } catch (_) {}
+    }
+
+    // Drop fs_crm_ snapshots when localStorage usage approaches the quota.
+    // Conservative threshold: 3.5 MB used. Browsers cap at ~5 MB per origin,
+    // and supabase-js's auth-token write is a few KB — keeping ~1.5 MB free
+    // leaves room for auth + any in-flight setItem calls during render.
+    _pruneStorageIfFull() {
+        const PROTECTED = new Set([
+            'offline_queue',
+            'fs_crm_sync_queue',
+            'fs_crm_tombstones',
+            'remember_me',
+        ]);
+        const THRESHOLD_BYTES = 3.5 * 1024 * 1024;
+        const TARGET_BYTES = 2.0 * 1024 * 1024; // prune down to 2 MB
+
+        const entries = [];
+        let total = 0;
+        for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (!k) continue;
+            const v = localStorage.getItem(k) || '';
+            // Each char is 2 bytes in UTF-16 (browser localStorage spec).
+            const bytes = (k.length + v.length) * 2;
+            entries.push({ k, bytes });
+            total += bytes;
+        }
+        if (total < THRESHOLD_BYTES) return;
+
+        // Drop largest fs_crm_ snapshots first (excluding the protected
+        // sync/queue keys) until we're under TARGET_BYTES.
+        const candidates = entries
+            .filter(e => e.k.startsWith('fs_crm_') && !PROTECTED.has(e.k))
+            .sort((a, b) => b.bytes - a.bytes);
+        let freed = 0;
+        const dropped = [];
+        for (const c of candidates) {
+            if (total - freed <= TARGET_BYTES) break;
+            try {
+                localStorage.removeItem(c.k);
+                freed += c.bytes;
+                dropped.push(c.k);
+            } catch (_) {}
+        }
+        if (dropped.length) {
+            console.warn(
+                `[DataStore] localStorage at ${(total / 1024 / 1024).toFixed(2)} MB; ` +
+                `pruned ${dropped.length} cache entries (${(freed / 1024 / 1024).toFixed(2)} MB freed)`
+            );
+        }
     }
 
     // PostgREST `select` clause to use for a given table. Lets us omit heavy

@@ -7078,6 +7078,30 @@ function _wireLoginBtn() {
     // Restore remembered checkbox state
     const rememberChk = document.getElementById('rememberMe');
     if (rememberChk) rememberChk.checked = localStorage.getItem('remember_me') === '1';
+    // Wipe the SWR cache (fs_crm_*) and tombstones from localStorage. Used
+    // when the auth-token write hits the quota — the cached row snapshots
+    // are recoverable from Supabase, but the session token isn't, so the
+    // cache loses every time.
+    const _purgeLocalCache = () => {
+        try {
+            const toRemove = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const k = localStorage.key(i);
+                if (!k) continue;
+                if (k.startsWith('fs_crm_')) toRemove.push(k);
+            }
+            for (const k of toRemove) {
+                try { localStorage.removeItem(k); } catch (_) {}
+            }
+        } catch (_) {}
+    };
+    const _isQuotaErr = (e) => {
+        if (!e) return false;
+        if (e.name === 'QuotaExceededError') return true;
+        const m = (e.message || '').toLowerCase();
+        return m.includes('exceeded the quota') || m.includes('quotaexceeded') || (m.includes('storage') && m.includes('quota'));
+    };
+
     btn.onclick = async () => {
         const email = document.getElementById('loginEmail')?.value?.trim();
         const password = document.getElementById('loginPassword')?.value;
@@ -7088,7 +7112,23 @@ function _wireLoginBtn() {
         try {
             btn.disabled = true;
             btn.textContent = 'Logging in...';
-            const user = await Auth.login(email, password);
+            let user;
+            try {
+                user = await Auth.login(email, password);
+            } catch (loginErr) {
+                if (_isQuotaErr(loginErr)) {
+                    // Auth-token write failed because localStorage is full of
+                    // cached table snapshots. Wipe the SWR cache (recoverable
+                    // from Supabase) and retry once. If retry also fails,
+                    // bubble up to the outer catch.
+                    btn.textContent = 'Clearing cache…';
+                    _purgeLocalCache();
+                    user = await Auth.login(email, password);
+                    UI.toast?.warning?.('Local cache cleared to make room for login.');
+                } else {
+                    throw loginErr;
+                }
+            }
             
             // Try to get profile from 'users' table using service-role client to bypass RLS
             const profileMatches = await AppDataStore.query('users', { email: user.email });
@@ -7232,6 +7272,12 @@ function _wireLoginBtn() {
                 // Supabase client in broken lock state — reload to recover
                 btn.textContent = 'Reloading…';
                 setTimeout(() => window.location.reload(true), 800);
+            } else if (_isQuotaErr(err)) {
+                // Last-ditch: cache wipe didn't fix it. Drop EVERYTHING in
+                // localStorage and reload — the user is locked out otherwise.
+                btn.textContent = 'Clearing storage…';
+                try { localStorage.clear(); } catch (_) {}
+                setTimeout(() => window.location.reload(true), 600);
             } else {
                 alert('Login failed: ' + msg);
             }
