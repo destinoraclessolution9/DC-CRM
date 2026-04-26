@@ -250,20 +250,21 @@ class DataStore {
         // DB trigger on activities — so a write to either table must evict it.
         if (tableName === 'prospects' || tableName === 'activities') {
             for (const k of this._cache.keys()) {
-                if (typeof k === 'string' && k.startsWith('__prospects_active_')) {
-                    this._cache.delete(k);
-                }
+                if (typeof k === 'string' && (
+                    k.startsWith('__prospects_active_') ||
+                    k.startsWith('__latact_')
+                )) this._cache.delete(k);
             }
-            // Also wipe any persisted active-prospect snapshots from
-            // localStorage so the next page load doesn't serve stale rows
-            // through the SWR Tier-2 path.
+            // Wipe persisted snapshots from localStorage for both
+            // active-prospect and per-page activity caches.
             try {
                 const toRemove = [];
                 for (let i = 0; i < localStorage.length; i++) {
                     const lsKey = localStorage.key(i);
-                    if (lsKey && lsKey.startsWith('fs_crm___prospects_active_')) {
-                        toRemove.push(lsKey);
-                    }
+                    if (lsKey && (
+                        lsKey.startsWith('fs_crm___prospects_active_') ||
+                        lsKey.startsWith('fs_crm___latact_')
+                    )) toRemove.push(lsKey);
                 }
                 for (const k of toRemove) localStorage.removeItem(k);
             } catch (_) {}
@@ -1714,10 +1715,42 @@ class DataStore {
         const ids = Array.from(new Set((prospectIds || []).filter(Boolean).map(String)));
         const result = new Map();
         if (ids.length === 0) return result;
+
+        // ── SWR cache for per-page activity lookup ────────────────────────
+        // Key = sorted IDs so the same set of prospects always maps to the
+        // same cache entry regardless of order. Only the 3 fields the list
+        // view actually displays are stored (activity_date, activity_type,
+        // prospect_id) — keeping the localStorage entry small.
+        const cacheKey = `__latact_${ids.slice().sort().join(',')}`;
+        const memEntry = this._cache.get(cacheKey);
+        if (memEntry && (Date.now() - memEntry.ts) < 120_000) return memEntry.data;
+
+        // Tier 2: stale localStorage snapshot
         try {
+            const raw = localStorage.getItem(`fs_crm_${cacheKey}`);
+            if (raw) {
+                const pairs = JSON.parse(raw);
+                if (Array.isArray(pairs) && pairs.length > 0) {
+                    const staleMap = new Map(pairs);
+                    // Prime memory cache and fire background refresh
+                    this._cache.set(cacheKey, { data: staleMap, ts: Date.now() });
+                    this._refreshLatestActivitiesBg(cacheKey, ids).catch(() => {});
+                    if (window.__FS_DEBUG_SWR) console.log(`[SWR] ${cacheKey}: served from localStorage`);
+                    return staleMap;
+                }
+            }
+        } catch (_) {}
+
+        // Tier 3: cold network fetch
+        return this._fetchAndCacheLatestActivities(cacheKey, ids, result);
+    }
+
+    async _fetchAndCacheLatestActivities(cacheKey, ids, result = new Map()) {
+        try {
+            // Lean select — only the 3 fields the list cell needs.
             const { data, error } = await this._readClient()
                 .from('activities')
-                .select(this._selectClauseForGetAll('activities'))
+                .select('prospect_id,activity_date,activity_type')
                 .in('prospect_id', ids)
                 .order('activity_date', { ascending: false })
                 .limit(1000);
@@ -1726,6 +1759,12 @@ class DataStore {
                 const key = String(row.prospect_id);
                 if (!result.has(key)) result.set(key, row);
             }
+            this._cache.set(cacheKey, { data: result, ts: Date.now() });
+            setTimeout(() => {
+                try {
+                    localStorage.setItem(`fs_crm_${cacheKey}`, JSON.stringify([...result.entries()]));
+                } catch (_) {}
+            }, 0);
             return result;
         } catch (e) {
             console.warn('getLatestActivitiesForProspects fallback (cache):', e?.message);
@@ -1739,6 +1778,29 @@ class DataStore {
                 if (!result.has(key)) result.set(key, row);
             }
             return result;
+        }
+    }
+
+    async _refreshLatestActivitiesBg(cacheKey, ids) {
+        if (!this._swrInFlight) this._swrInFlight = new Set();
+        if (this._swrInFlight.has(cacheKey)) return;
+        this._swrInFlight.add(cacheKey);
+        try {
+            const prev = this._cache.get(cacheKey)?.data || new Map();
+            const fresh = await this._fetchAndCacheLatestActivities(cacheKey, ids, new Map());
+            // Only emit if something changed
+            let changed = prev.size !== fresh.size;
+            if (!changed) {
+                for (const [k, v] of fresh) {
+                    const p = prev.get(k);
+                    if (!p || p.activity_date !== v.activity_date || p.activity_type !== v.activity_type) {
+                        changed = true; break;
+                    }
+                }
+            }
+            if (changed) this.emit('dataChanged', { action: 'revalidate', table: 'activities' });
+        } finally {
+            this._swrInFlight.delete(cacheKey);
         }
     }
 

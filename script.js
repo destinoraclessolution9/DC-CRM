@@ -19378,25 +19378,20 @@ function _wireLoginBtn() {
         const pageStart = _prospectPage * _prospectPageSize;
         const pageProspects = filtered.slice(pageStart, pageStart + _prospectPageSize);
 
-        // ── Fetch latest activity for ONLY the visible page (ONE round trip) ──
-        // Single `.in(prospect_id, [...])` query served by idx_activities_prospect_date.
-        // Previous implementation fanned out N parallel getActivitiesForProspect()
-        // calls which made the list appear frozen on cold loads.
-        if (pageProspects.length > 0) {
-            const latestMap = await AppDataStore.getLatestActivitiesForProspects(
-                pageProspects.map(p => p.id)
-            );
-            for (const [k, v] of latestMap) latestActivityByProspect.set(k, v);
-        }
-        _mark('latest-activities-loaded');
+        // ── Progressive Last Activity render ──────────────────────────────
+        // `last_activity_date` is already a column on prospects rows (kept in
+        // sync by a DB trigger on activities inserts). Use it for instant
+        // first render — no extra round-trip. We fire getLatestActivities in
+        // the background ONLY for the activity_type suffix (e.g. "Meet Up").
+        // When it resolves, we patch just those cells via data-la-id selectors.
+        // This decouples the 307 ms activities query from the table's first paint.
+        _mark('latest-activities-loaded'); // updated once background fetch resolves
 
         let html = '';
         for (const p of pageProspects) {
             const grade = getScoreGrade(p.score);
-            const lastActivity = latestActivityByProspect.get(String(p.id));
-            const lastActivityText = lastActivity
-                ? `${lastActivity.activity_date} ${lastActivity.activity_type}`
-                : 'No activity';
+            // Show date immediately; type fills in after background fetch.
+            const lastActivityText = p.last_activity_date || 'No activity';
             const daysLeft = calculateProtectionDays(p);
             const protectionStatus = getProtectionStatus(daysLeft);
             const agent = userById.get(String(p.responsible_agent_id));
@@ -19427,7 +19422,7 @@ function _wireLoginBtn() {
                     </td>
                     <td data-label="Ming Gua">${p.ming_gua || 'MG4'}</td>
                     <td data-label="Occupation">${p.occupation || ''}${p.company_name ? ' · ' + p.company_name : ''}</td>
-                    <td data-label="Last Activity">${lastActivityText}</td>
+                    <td data-label="Last Activity" data-la-id="${p.id}">${lastActivityText}</td>
                     <td data-label="Protection">
                         <div>${daysLeft} days left</div>
                         <div class="protection-bar">
@@ -19459,6 +19454,28 @@ function _wireLoginBtn() {
         }
 
         tbody.innerHTML = html;
+
+        // ── Background activity-type fill-in ───────────────────────────────
+        // Table is already visible with dates. Now fetch the activity TYPE
+        // in the background (SWR-cached in data.js) and patch only the
+        // Last Activity cells that exist in the current tbody. Uses
+        // data-la-id to target cells without a full re-render.
+        if (pageProspects.length > 0) {
+            AppDataStore.getLatestActivitiesForProspects(pageProspects.map(p => p.id))
+                .then(latestMap => {
+                    _mark('latest-activities-loaded');
+                    for (const [pid, act] of latestMap) {
+                        const cell = document.querySelector(`td[data-la-id="${pid}"]`);
+                        if (cell) {
+                            const text = act.activity_type
+                                ? `${act.activity_date} ${act.activity_type}`
+                                : act.activity_date;
+                            cell.textContent = text;
+                        }
+                    }
+                })
+                .catch(() => {});
+        }
 
         // ── Instagram-style next-page prefetch ─────────────────────────────
         // While the user reads page N, silently warm the activity cache for
