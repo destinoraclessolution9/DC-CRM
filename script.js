@@ -11216,6 +11216,9 @@ function _wireLoginBtn() {
                 <!-- Follow-Up Reminders (populated by renderFollowUpReminders) -->
                 <div id="follow-up-reminders" style="display:none;"></div>
 
+                <!-- Pending Proposed Solutions widget (populated by renderPendingSolutionsWidget) -->
+                <div id="pending-solutions-widget" style="display:none;"></div>
+
                 <!-- Section 1.3: Today's Activities -->
                 <div class="today-activities-section">
                     <h3>📅 TODAY'S ACTIVITIES</h3>
@@ -11285,8 +11288,12 @@ function _wireLoginBtn() {
         _migrateFollowUpTemplateColumns().catch(e => console.warn('Follow-up template migration failed:', e));
         Promise.all([
             dispatchBirthdayTriggers(),
-            dispatchProactiveEventInvites()
-        ]).then(() => renderFollowUpReminders()).catch(e => console.warn('Follow-up reminders failed:', e));
+            dispatchProactiveEventInvites(),
+            dispatchPendingSolutionReminders()
+        ]).then(() => Promise.all([
+            renderFollowUpReminders(),
+            renderPendingSolutionsWidget()
+        ])).catch(e => console.warn('Follow-up reminders failed:', e));
 
         // Show Special Program progress popup (once per session, for participating agents)
         // Deferred so it doesn't block the calendar paint.
@@ -11321,7 +11328,13 @@ function _wireLoginBtn() {
         cps_huiji: { trigger_category: 'after_cps', event_keywords: '汇集,huiji,hui ji', cps_interest_match: '', solution_match: '', icon: '🏛️', description: 'After any CPS consultation. Invites to next 汇集 event.', sort_order: 3, template_name: 'HuiJi Invite', message_template: 'Hi {name}, thank you for your CPS consultation! We would like to invite you to our upcoming 汇集 event on {date} at {venue}. Looking forward to seeing you there! — {agent_name}', delay_days: 0, event_window_days: 30 },
         apu_appointment: { trigger_category: 'on_apu_photo', event_keywords: '', cps_interest_match: '', solution_match: '', icon: '📋', description: 'When APU photo is attached. Reminds prospect to make an appointment.', sort_order: 4, template_name: 'APU Appointment Reminder', message_template: 'Hi {name}, your APU form has been received. Please schedule your appointment with {agent_name} at your earliest convenience.', delay_days: 0, event_window_days: 0 },
         diy_review: { trigger_category: 'on_event_attendance', event_keywords: 'diy', cps_interest_match: '', solution_match: '', icon: '🔄', description: 'After attending a DIY event. Follows up after delay to review progress.', sort_order: 5, template_name: 'DIY 3-Day Review Follow-up', message_template: 'Hi {name}, hope you enjoyed {event_name}! How has your progress been? — {agent_name}', delay_days: 3, event_window_days: 0 },
-        birthday: { trigger_category: 'on_birthday', event_keywords: '', cps_interest_match: '', solution_match: '', icon: '🎂', description: 'Daily on calendar load. Sends birthday greeting to prospects/customers.', sort_order: 6, template_name: 'Birthday Greeting', message_template: 'Hi {name}, wishing you a very happy birthday! — {agent_name}', delay_days: 0, event_window_days: 0 }
+        birthday: { trigger_category: 'on_birthday', event_keywords: '', cps_interest_match: '', solution_match: '', icon: '🎂', description: 'Daily on calendar load. Sends birthday greeting to prospects/customers.', sort_order: 6, template_name: 'Birthday Greeting', message_template: 'Hi {name}, wishing you a very happy birthday! — {agent_name}', delay_days: 0, event_window_days: 0 },
+        // ── Solution follow-up sequence (after_solution_proposed) ──────────────────
+        painting_day1: { trigger_category: 'after_solution_proposed', event_keywords: '', cps_interest_match: '', solution_match: 'harmony painting,画作,painting', icon: '🖼️', description: 'Day 1 after 画作/Harmony Painting proposed. Thank-you + brochure follow-up.', sort_order: 10, template_name: '画作 Day-1 Thank You', message_template: 'Hi {name}, thank you for your time today! As discussed, I\'ve attached our Harmony Painting brochure for you to browse. Feel free to reach out if you have any questions — {agent_name}', delay_days: 1, event_window_days: 0 },
+        painting_day3: { trigger_category: 'after_solution_proposed', event_keywords: '', cps_interest_match: '', solution_match: 'harmony painting,画作,painting', icon: '🖼️', description: 'Day 3 after 画作 proposed. Check-in call reminder.', sort_order: 11, template_name: '画作 Day-3 Check-In', message_template: 'Hi {name}, just checking in on the Harmony Painting we discussed! Have you had a chance to browse the catalogue? I\'d love to hear your thoughts — {agent_name}', delay_days: 3, event_window_days: 0 },
+        painting_day7: { trigger_category: 'after_solution_proposed', event_keywords: '', cps_interest_match: '', solution_match: 'harmony painting,画作,painting', icon: '🖼️', description: 'Day 7 after 画作 proposed. Send 3D mockup / in-room preview.', sort_order: 12, template_name: '画作 Day-7 Mockup', message_template: 'Hi {name}, I\'ve prepared a 3D mockup of the Harmony Painting placed in your space — would love to share it with you! When would be a good time to connect? — {agent_name}', delay_days: 7, event_window_days: 0 },
+        painting_day14: { trigger_category: 'after_solution_proposed', event_keywords: '', cps_interest_match: '', solution_match: 'harmony painting,画作,painting', icon: '🖼️', description: 'Day 14 after 画作 proposed. Closing push / quote follow-up.', sort_order: 13, template_name: '画作 Day-14 Closing', message_template: 'Hi {name}, I wanted to follow up on the Harmony Painting quote. We have limited slots for this month\'s commission — shall we lock in your piece? — {agent_name}', delay_days: 14, event_window_days: 0 },
+        solution_overdue: { trigger_category: 'solution_overdue', event_keywords: '', cps_interest_match: '', solution_match: '', icon: '⚠️', description: 'Day 21+ — proposed solution still pending. Escalation reminder to agent/manager.', sort_order: 14, template_name: 'Solution Overdue Alert', message_template: 'Hi {name}, it has been over 21 days since we proposed a solution for you. We\'d love to reconnect and address any concerns — {agent_name}', delay_days: 21, event_window_days: 0 }
     };
 
     // One-time JS migration: ensure all templates exist + backfill new columns
@@ -11822,6 +11835,108 @@ function _wireLoginBtn() {
         }
     };
 
+    // ── Dispatcher: pending solution follow-ups — runs on calendar load ──────────────
+    // For each proposed_solutions row where status='Proposed' and next_follow_up_date <= today,
+    // creates a follow_up_draft for the responsible agent.
+    // Also escalates solutions that have been Proposed for 21+ days.
+    const dispatchPendingSolutionReminders = async () => {
+        const templates = await loadFollowUpTemplates();
+        const todayStr = new Date().toISOString().split('T')[0];
+
+        let solutions = [];
+        try { solutions = await AppDataStore.getAll('proposed_solutions') || []; } catch (e) { return; }
+
+        const pending = solutions.filter(s => s.status === 'Proposed');
+        if (!pending.length) return;
+
+        // Load people + agents in bulk
+        const [prospects, customers] = await Promise.all([
+            AppDataStore.getAll('prospects').catch(() => []),
+            AppDataStore.getAll('customers').catch(() => [])
+        ]);
+        const prospectMap = Object.fromEntries(prospects.map(p => [String(p.id), p]));
+        const customerMap = Object.fromEntries(customers.map(c => [String(c.id), c]));
+
+        // Build solution-match → template lookup for after_solution_proposed triggers
+        const solutionTpls = templates.filter(t => t.trigger_category === 'after_solution_proposed' && t.is_active);
+        const overdueTpl  = templates.find(t => t.trigger_type === 'solution_overdue' && t.is_active);
+
+        for (const sol of pending) {
+            const person = sol.prospect_id ? prospectMap[String(sol.prospect_id)]
+                         : sol.customer_id ? customerMap[String(sol.customer_id)] : null;
+            if (!person) continue;
+
+            // Only create drafts for the current agent's own prospects
+            if (person.responsible_agent_id && person.responsible_agent_id != _currentUser?.id) continue;
+
+            const solutionLower = (sol.solution || '').toLowerCase();
+            const proposedDate  = sol.proposed_date || '';
+
+            // ── Sequence reminders (day 1/3/7/14) based on next_follow_up_date ──
+            if (sol.next_follow_up_date && sol.next_follow_up_date <= todayStr) {
+                // Find which sequence template matches this solution
+                for (const tpl of solutionTpls) {
+                    const matchList = (tpl.solution_match || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+                    if (matchList.length && !matchList.some(m => solutionLower.includes(m))) continue;
+
+                    const msg = interpolateTemplate(tpl.message_template, {
+                        name: person.full_name || '',
+                        solution: sol.solution || '',
+                        proposed_date: proposedDate,
+                        agent_name: _currentUser?.full_name || ''
+                    });
+
+                    await createFollowUpDraft({
+                        prospectId: sol.prospect_id || null,
+                        customerId: sol.customer_id || null,
+                        triggerType: tpl.trigger_type,
+                        messageText: msg,
+                        phone: person.phone || '',
+                        prospectName: person.full_name || '',
+                        dueDate: sol.next_follow_up_date
+                    });
+                }
+
+                // Advance next_follow_up_date by 7 days so we don't re-fire tomorrow
+                const next = new Date(sol.next_follow_up_date);
+                next.setDate(next.getDate() + 7);
+                AppDataStore.update('proposed_solutions', sol.id, {
+                    last_follow_up_date: sol.next_follow_up_date,
+                    next_follow_up_date: next.toISOString().split('T')[0],
+                    follow_up_count: (sol.follow_up_count || 0) + 1,
+                    updated_at: new Date().toISOString()
+                }).catch(() => {});
+            }
+
+            // ── Overdue escalation (21+ days since proposed_date, not yet escalated) ──
+            if (overdueTpl && proposedDate && !sol.escalated_at) {
+                const daysSince = Math.floor((new Date(todayStr) - new Date(proposedDate)) / 86400000);
+                if (daysSince >= 21) {
+                    const msg = interpolateTemplate(overdueTpl.message_template, {
+                        name: person.full_name || '',
+                        solution: sol.solution || '',
+                        days: daysSince,
+                        agent_name: _currentUser?.full_name || ''
+                    });
+                    await createFollowUpDraft({
+                        prospectId: sol.prospect_id || null,
+                        customerId: sol.customer_id || null,
+                        triggerType: 'solution_overdue',
+                        messageText: msg,
+                        phone: person.phone || '',
+                        prospectName: person.full_name || '',
+                        dueDate: todayStr
+                    });
+                    AppDataStore.update('proposed_solutions', sol.id, {
+                        escalated_at: new Date().toISOString(),
+                        escalation_notes: `Auto-escalated after ${daysSince} days pending`,
+                        updated_at: new Date().toISOString()
+                    }).catch(() => {});
+                }
+            }
+        }
+    };
+
     // Render follow-up reminders below calendar
     const renderFollowUpReminders = async () => {
         const container = document.getElementById('follow-up-reminders');
@@ -11951,6 +12066,81 @@ function _wireLoginBtn() {
         } catch (e) {
             UI.toast.error('Failed to dismiss');
         }
+    };
+
+    // ── Pending Proposals widget — shown on calendar page below follow-up reminders ──
+    const renderPendingSolutionsWidget = async () => {
+        const container = document.getElementById('pending-solutions-widget');
+        if (!container) return;
+
+        let solutions = [];
+        try { solutions = await AppDataStore.getAll('proposed_solutions') || []; } catch (e) { container.style.display = 'none'; return; }
+
+        const [prospects, customers] = await Promise.all([
+            AppDataStore.getAll('prospects').catch(() => []),
+            AppDataStore.getAll('customers').catch(() => [])
+        ]);
+        const prospectMap = Object.fromEntries(prospects.map(p => [String(p.id), p]));
+        const customerMap = Object.fromEntries(customers.map(c => [String(c.id), c]));
+
+        const todayStr = new Date().toISOString().split('T')[0];
+        const pending = solutions.filter(s => {
+            if (s.status !== 'Proposed') return false;
+            const person = s.prospect_id ? prospectMap[String(s.prospect_id)] : s.customer_id ? customerMap[String(s.customer_id)] : null;
+            if (!person) return false;
+            return !person.responsible_agent_id || person.responsible_agent_id == _currentUser?.id;
+        }).sort((a, b) => (a.proposed_date || '').localeCompare(b.proposed_date || ''));
+
+        if (!pending.length) { container.style.display = 'none'; return; }
+
+        const overdueCount = pending.filter(s => {
+            if (!s.proposed_date) return false;
+            return Math.floor((new Date(todayStr) - new Date(s.proposed_date)) / 86400000) >= 7;
+        }).length;
+
+        container.style.display = 'block';
+        container.innerHTML = `
+            <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px;margin-top:16px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+                    <div style="display:flex;align-items:center;gap:10px;">
+                        <div style="width:32px;height:32px;border-radius:50%;background:#f59e0b;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;">${pending.length}</div>
+                        <h3 style="margin:0;font-size:16px;color:#1f2937;">🖼️ Pending Proposed Solutions</h3>
+                        ${overdueCount ? `<span style="background:#fef2f2;color:#dc2626;font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600;"><i class="fas fa-exclamation-circle"></i> ${overdueCount} overdue</span>` : ''}
+                    </div>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:8px;">
+                    ${pending.map(sol => {
+                        const person = sol.prospect_id ? prospectMap[String(sol.prospect_id)] : sol.customer_id ? customerMap[String(sol.customer_id)] : null;
+                        const name = person?.full_name || 'Unknown';
+                        const daysSince = sol.proposed_date ? Math.floor((new Date(todayStr) - new Date(sol.proposed_date)) / 86400000) : null;
+                        const isOverdue = daysSince !== null && daysSince >= 7;
+                        const isEscalated = !!sol.escalated_at;
+                        const borderColor = isEscalated ? '#dc2626' : isOverdue ? '#f59e0b' : '#22c55e';
+                        const navId = sol.prospect_id || sol.customer_id;
+                        const navFn = sol.prospect_id ? `app.showProspectDetail(${navId})` : `app.showCustomerDetail(${navId})`;
+                        return `
+                        <div style="display:flex;align-items:center;gap:12px;padding:10px 12px;background:#f9fafb;border-radius:8px;border-left:4px solid ${borderColor};cursor:pointer;" onclick="${navFn}">
+                            <div style="flex:1;min-width:0;">
+                                <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">
+                                    <strong style="font-size:13px;color:#1f2937;">${escapeHtml(name)}</strong>
+                                    <span style="font-size:11px;background:#fef9c3;color:#92400e;padding:2px 8px;border-radius:10px;">${escapeHtml(sol.solution || '')}</span>
+                                    ${isEscalated ? '<span style="font-size:11px;background:#fef2f2;color:#dc2626;padding:2px 8px;border-radius:10px;">Escalated</span>' : ''}
+                                </div>
+                                <div style="font-size:11px;color:#6b7280;">
+                                    Proposed: ${sol.proposed_date || '—'}
+                                    ${daysSince !== null ? ` · <span style="color:${isOverdue ? '#dc2626' : '#6b7280'};font-weight:${isOverdue ? '600' : '400'}">${daysSince}d ago</span>` : ''}
+                                    ${sol.next_follow_up_date ? ` · Next follow-up: ${sol.next_follow_up_date}` : ''}
+                                </div>
+                            </div>
+                            <button class="btn primary btn-sm" style="font-size:11px;padding:5px 10px;white-space:nowrap;"
+                                onclick="event.stopPropagation(); app.openEditSolutionModal(${sol.id}, ${sol.prospect_id || sol.customer_id}, ${!!sol.prospect_id})">
+                                <i class="fas fa-edit"></i> Update
+                            </button>
+                        </div>`;
+                    }).join('')}
+                </div>
+            </div>
+        `;
     };
 
     // Fetch activities where the current user is in the co_agents JSONB array.
@@ -17532,6 +17722,29 @@ function _wireLoginBtn() {
             dispatchAfterCpsTriggers(activity.prospect_id).catch(e => console.warn('CPS follow-up triggers failed:', e));
         }
 
+        // === Auto-mark proposed solution as Purchased when closing activity has solution_sold ===
+        if (activity.is_closing && activity.solution_sold) {
+            const soldLower = (activity.solution_sold || '').toLowerCase();
+            const entityId = activity.prospect_id || activity.customer_id;
+            if (entityId) {
+                AppDataStore.getAll('proposed_solutions').then(sols => {
+                    const matches = (sols || []).filter(s => {
+                        const samePerson = String(s.prospect_id) === String(activity.prospect_id) ||
+                                           String(s.customer_id) === String(activity.customer_id);
+                        return samePerson && s.status !== 'Purchased' &&
+                               (s.solution || '').toLowerCase().includes(soldLower.slice(0, 8));
+                    });
+                    for (const s of matches) {
+                        AppDataStore.update('proposed_solutions', s.id, {
+                            status: 'Purchased',
+                            next_follow_up_date: null,
+                            updated_at: new Date().toISOString()
+                        }).catch(() => {});
+                    }
+                }).catch(() => {});
+            }
+        }
+
         await renderCalendar();
         await renderFollowUpReminders();
         await renderTodayActivities();
@@ -20387,6 +20600,20 @@ function _wireLoginBtn() {
 
         setTimeout(async () => {
             await addWhatsAppButtonToProfile('prospect', prospectId);
+            // Badge: count pending proposed solutions for this prospect
+            try {
+                const sols = await AppDataStore.getAll('proposed_solutions');
+                const pendingCount = (sols || []).filter(s => String(s.prospect_id) === String(prospectId) && s.status === 'Proposed').length;
+                const badge = document.getElementById(`pending-sol-badge-${prospectId}`);
+                if (badge) {
+                    if (pendingCount > 0) {
+                        badge.textContent = pendingCount;
+                        badge.style.display = 'inline-block';
+                    } else {
+                        badge.style.display = 'none';
+                    }
+                }
+            } catch (e) {}
         }, 100);
 
         container.innerHTML = `
@@ -20495,7 +20722,7 @@ function _wireLoginBtn() {
                         <!-- ⑤ Potential & Opportunities -->
                         <div class="acc-item" id="acc-potential-${prospect.id}">
                             <div class="acc-hdr" onclick="app.toggleAccordion('potential',${prospect.id},this.parentElement)">
-                                <span><i class="fas fa-bolt"></i> Potential &amp; Opportunities</span>
+                                <span><i class="fas fa-bolt"></i> Potential &amp; Opportunities <span id="pending-sol-badge-${prospect.id}" style="display:none;background:#f59e0b;color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:10px;margin-left:6px;vertical-align:middle;"></span></span>
                                 <i class="fas fa-chevron-down acc-chev"></i>
                             </div>
                             <div class="acc-body" id="acc-body-potential-${prospect.id}" style="display:none" data-loaded="false"></div>
@@ -23877,28 +24104,25 @@ for (const p of allPackages) {
 
     // Solution Functions
 const openAddSolutionModal = async (prospectId) => {
-    const products = await AppDataStore.getAll('products');
-    const productOptions = products
-        .filter(p => p.is_active !== false)
-        .map(p => `<option value="${escapeHtml(p.name)}">${escapeHtml(p.name)}</option>`)
-        .join('');
+    const today = new Date().toISOString().split('T')[0];
+    const nextWeek = new Date(Date.now() + 3 * 86400000).toISOString().split('T')[0];
 
     const content = `
         <div class="form-group">
-            <label>Solution</label>
+            <label>Solution / Product</label>
             <select id="solution-name" class="form-control">
+                <option value="Harmony Painting">🖼️ Harmony Painting (画作)</option>
                 <option value="PR4 Power Ring">PR4 Power Ring</option>
                 <option value="PR3 Ring">PR3 Ring</option>
                 <option value="PR5 Ring">PR5 Ring</option>
                 <option value="Office Audit">Office Audit</option>
                 <option value="Home Audit">Home Audit</option>
                 <option value="Career Consultation">Career Consultation</option>
-                <option value="Harmony Painting">Harmony Painting</option>
             </select>
         </div>
         <div class="form-group">
             <label>Proposed Date</label>
-            <input type="date" id="solution-date" class="form-control" value="${new Date().toISOString().split('T')[0]}">
+            <input type="date" id="solution-date" class="form-control" value="${today}">
         </div>
         <div class="form-group">
             <label>Status</label>
@@ -23910,13 +24134,12 @@ const openAddSolutionModal = async (prospectId) => {
             </select>
         </div>
         <div class="form-group">
-            <label>Solution Proposed</label>
-            <select name="activity-outcome" class="form-control">
-                <option value="">-- Select Solution --</option>
-                ${productOptions}
-                <option value="No Solution Needed">No Solution Needed</option>
-                <option value="Follow-up Required">Follow-up Required</option>
-            </select>
+            <label>Next Follow-Up Date <span style="color:#6b7280;font-size:12px;">(auto-reminders will fire on this date)</span></label>
+            <input type="date" id="solution-followup-date" class="form-control" value="${nextWeek}">
+        </div>
+        <div class="form-group">
+            <label>Notes</label>
+            <textarea id="solution-notes" class="form-control" rows="2" placeholder="e.g. Customer prefers size 80x120cm, mountain motif"></textarea>
         </div>
     `;
 
@@ -23932,6 +24155,7 @@ const openAddSolutionModal = async (prospectId) => {
         const date = document.getElementById('solution-date')?.value;
         const status = document.getElementById('solution-status')?.value;
         const notes = document.getElementById('solution-notes')?.value;
+        const followUpDate = document.getElementById('solution-followup-date')?.value || null;
 
         if (!solution || !date) {
             UI.toast.error('Solution and date are required');
@@ -23943,12 +24167,98 @@ const openAddSolutionModal = async (prospectId) => {
             solution: solution,
             proposed_date: date,
             status: status,
-            notes: notes
+            notes: notes || null,
+            next_follow_up_date: followUpDate,
+            follow_up_count: 0,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
         });
+
+        // Dispatch after_solution_proposed triggers immediately for day-0 / day-1 drafts
+        dispatchPendingSolutionReminders().catch(() => {});
 
         UI.hideModal();
         await app.showProspectDetail(prospectId);
         UI.toast.success('Solution added');
+    };
+
+    const openEditSolutionModal = async (solutionId, entityId, isProspect = true) => {
+        let sol;
+        try { sol = (await AppDataStore.getAll('proposed_solutions')).find(s => String(s.id) === String(solutionId)); } catch (e) {}
+        if (!sol) { UI.toast.error('Solution not found'); return; }
+
+        const content = `
+            <div class="form-group">
+                <label>Solution / Product</label>
+                <select id="edit-solution-name" class="form-control">
+                    <option value="Harmony Painting" ${sol.solution === 'Harmony Painting' ? 'selected' : ''}>🖼️ Harmony Painting (画作)</option>
+                    <option value="PR4 Power Ring" ${sol.solution === 'PR4 Power Ring' ? 'selected' : ''}>PR4 Power Ring</option>
+                    <option value="PR3 Ring" ${sol.solution === 'PR3 Ring' ? 'selected' : ''}>PR3 Ring</option>
+                    <option value="PR5 Ring" ${sol.solution === 'PR5 Ring' ? 'selected' : ''}>PR5 Ring</option>
+                    <option value="Office Audit" ${sol.solution === 'Office Audit' ? 'selected' : ''}>Office Audit</option>
+                    <option value="Home Audit" ${sol.solution === 'Home Audit' ? 'selected' : ''}>Home Audit</option>
+                    <option value="Career Consultation" ${sol.solution === 'Career Consultation' ? 'selected' : ''}>Career Consultation</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Status</label>
+                <select id="edit-solution-status" class="form-control">
+                    <option value="Proposed" ${sol.status === 'Proposed' ? 'selected' : ''}>Proposed</option>
+                    <option value="Approved" ${sol.status === 'Approved' ? 'selected' : ''}>Approved</option>
+                    <option value="Rejected" ${sol.status === 'Rejected' ? 'selected' : ''}>Rejected</option>
+                    <option value="Purchased" ${sol.status === 'Purchased' ? 'selected' : ''}>Purchased</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Next Follow-Up Date</label>
+                <input type="date" id="edit-solution-followup-date" class="form-control" value="${sol.next_follow_up_date || ''}">
+            </div>
+            <div class="form-group">
+                <label>Notes</label>
+                <textarea id="edit-solution-notes" class="form-control" rows="2">${escapeHtml(sol.notes || '')}</textarea>
+            </div>
+            ${sol.escalated_at ? `<div style="background:#fef2f2;border-radius:6px;padding:8px 12px;font-size:12px;color:#dc2626;margin-top:4px;"><i class="fas fa-exclamation-triangle"></i> Escalated ${sol.escalated_at.split('T')[0]}: ${escapeHtml(sol.escalation_notes || '')}</div>` : ''}
+            ${sol.follow_up_count ? `<div style="font-size:12px;color:#6b7280;margin-top:6px;"><i class="fas fa-clock"></i> ${sol.follow_up_count} follow-up${sol.follow_up_count > 1 ? 's' : ''} sent${sol.last_follow_up_date ? ' · Last: ' + sol.last_follow_up_date : ''}</div>` : ''}
+        `;
+
+        UI.showModal('Edit Proposed Solution', content, [
+            { label: 'Delete', type: 'danger', action: `(async () => { await app.deleteSolution(${solutionId}, ${entityId}, ${isProspect}); })()` },
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save', type: 'primary', action: `(async () => { await app.saveSolutionEdit(${solutionId}, ${entityId}, ${isProspect}); })()` }
+        ]);
+    };
+
+    const saveSolutionEdit = async (solutionId, entityId, isProspect = true) => {
+        const solution    = document.getElementById('edit-solution-name')?.value;
+        const status      = document.getElementById('edit-solution-status')?.value;
+        const followUpDate = document.getElementById('edit-solution-followup-date')?.value || null;
+        const notes       = document.getElementById('edit-solution-notes')?.value;
+
+        await AppDataStore.update('proposed_solutions', solutionId, {
+            solution,
+            status,
+            next_follow_up_date: followUpDate,
+            notes: notes || null,
+            // Clear escalation if agent explicitly marks as something other than Proposed
+            ...(status !== 'Proposed' ? { escalated_at: null, escalation_notes: null } : {}),
+            updated_at: new Date().toISOString()
+        });
+
+        UI.hideModal();
+        if (isProspect) await app.showProspectDetail(entityId);
+        else await app.showCustomerDetail(entityId);
+        await renderPendingSolutionsWidget();
+        UI.toast.success('Solution updated');
+    };
+
+    const deleteSolution = async (solutionId, entityId, isProspect = true) => {
+        if (!confirm('Delete this proposed solution?')) return;
+        await AppDataStore.delete('proposed_solutions', solutionId);
+        UI.hideModal();
+        if (isProspect) await app.showProspectDetail(entityId);
+        else await app.showCustomerDetail(entityId);
+        await renderPendingSolutionsWidget();
+        UI.toast.success('Solution removed');
     };
 
     // Name List Functions
@@ -43732,6 +44042,11 @@ JB 星期二到
         removeTagFromProspect,
         openAddSolutionModal,
         saveSolution,
+        openEditSolutionModal,
+        saveSolutionEdit,
+        deleteSolution,
+        dispatchPendingSolutionReminders,
+        renderPendingSolutionsWidget,
 
         // Phase 6 Pipeline Functions
         showPipelineView,
@@ -43896,6 +44211,7 @@ JB 星期二到
         bulkDispatchApuReminders,
         dispatchBirthdayTriggers,
         dispatchProactiveEventInvites,
+        dispatchPendingSolutionReminders,
         renderAutomationTab,
         toggleFollowUpTemplate,
         invalidateFollowUpTemplatesCache,
