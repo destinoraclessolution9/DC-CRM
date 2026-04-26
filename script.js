@@ -11321,20 +11321,59 @@ function _wireLoginBtn() {
 
     const invalidateFollowUpTemplatesCache = () => { _followUpTemplatesCache = null; };
 
-    // Default trigger config for JS-side migration (mirrors SQL migration backfill)
+    // Default trigger config — single source of truth for all follow-up templates.
+    // solution_category_match: matches against the product CATEGORY (from products table) of the
+    //   prospect's proposed_solutions rows. e.g. 'Power Ring', '画作', '风水方案'.
+    // eligibility_tiers: pipe-separated list — 'active' (CPS ≤180d), 'engaged' (>180d + 3+ events),
+    //   'returning' (attended same event category last year), 'customer' (converted customer).
     const _TRIGGER_DEFAULTS = {
-        cps_9star: { trigger_category: 'after_cps', event_keywords: '9 star,nine star,九星', cps_interest_match: '个人改命', solution_match: 'power ring', icon: '⭐', description: 'After CPS with interest 个人改命 or Power Ring proposed. Invites to next 9 Star Basic Class.', sort_order: 1, template_name: '9 Star Class Invite', message_template: 'Hi {name}, we would like to invite you to our upcoming 9 Star Basic Class on {date} at {venue}. Looking forward to seeing you!', delay_days: 0, event_window_days: 30 },
-        cps_fengshui: { trigger_category: 'after_cps', event_keywords: 'diy,风水diy,环境风水', cps_interest_match: '风水', solution_match: '风水方案,fengshui,office audit,home audit', icon: '🏠', description: 'After CPS with interest 风水 or 风水方案 proposed. Invites to next Feng Shui DIY.', sort_order: 2, template_name: 'Feng Shui DIY Invite', message_template: 'Hi {name}, we would like to invite you to our upcoming Feng Shui DIY on {date} at {venue}. Looking forward to seeing you!', delay_days: 0, event_window_days: 30 },
-        cps_huiji: { trigger_category: 'after_cps', event_keywords: '汇集,huiji,hui ji', cps_interest_match: '', solution_match: '', icon: '🏛️', description: 'After any CPS consultation. Invites to next 汇集 event.', sort_order: 3, template_name: 'HuiJi Invite', message_template: 'Hi {name}, thank you for your CPS consultation! We would like to invite you to our upcoming 汇集 event on {date} at {venue}. Looking forward to seeing you there! — {agent_name}', delay_days: 0, event_window_days: 30 },
-        apu_appointment: { trigger_category: 'on_apu_photo', event_keywords: '', cps_interest_match: '', solution_match: '', icon: '📋', description: 'When APU photo is attached. Reminds prospect to make an appointment.', sort_order: 4, template_name: 'APU Appointment Reminder', message_template: 'Hi {name}, your APU form has been received. Please schedule your appointment with {agent_name} at your earliest convenience.', delay_days: 0, event_window_days: 0 },
-        diy_review: { trigger_category: 'on_event_attendance', event_keywords: 'diy', cps_interest_match: '', solution_match: '', icon: '🔄', description: 'After attending a DIY event. Follows up after delay to review progress.', sort_order: 5, template_name: 'DIY 3-Day Review Follow-up', message_template: 'Hi {name}, hope you enjoyed {event_name}! How has your progress been? — {agent_name}', delay_days: 3, event_window_days: 0 },
-        birthday: { trigger_category: 'on_birthday', event_keywords: '', cps_interest_match: '', solution_match: '', icon: '🎂', description: 'Daily on calendar load. Sends birthday greeting to prospects/customers.', sort_order: 6, template_name: 'Birthday Greeting', message_template: 'Hi {name}, wishing you a very happy birthday! — {agent_name}', delay_days: 0, event_window_days: 0 },
-        // ── Solution follow-up sequence (after_solution_proposed) ──────────────────
-        painting_day1: { trigger_category: 'after_solution_proposed', event_keywords: '', cps_interest_match: '', solution_match: 'harmony painting,画作,painting', icon: '🖼️', description: 'Day 1 after 画作/Harmony Painting proposed. Thank-you + brochure follow-up.', sort_order: 10, template_name: '画作 Day-1 Thank You', message_template: 'Hi {name}, thank you for your time today! As discussed, I\'ve attached our Harmony Painting brochure for you to browse. Feel free to reach out if you have any questions — {agent_name}', delay_days: 1, event_window_days: 0 },
-        painting_day3: { trigger_category: 'after_solution_proposed', event_keywords: '', cps_interest_match: '', solution_match: 'harmony painting,画作,painting', icon: '🖼️', description: 'Day 3 after 画作 proposed. Check-in call reminder.', sort_order: 11, template_name: '画作 Day-3 Check-In', message_template: 'Hi {name}, just checking in on the Harmony Painting we discussed! Have you had a chance to browse the catalogue? I\'d love to hear your thoughts — {agent_name}', delay_days: 3, event_window_days: 0 },
-        painting_day7: { trigger_category: 'after_solution_proposed', event_keywords: '', cps_interest_match: '', solution_match: 'harmony painting,画作,painting', icon: '🖼️', description: 'Day 7 after 画作 proposed. Send 3D mockup / in-room preview.', sort_order: 12, template_name: '画作 Day-7 Mockup', message_template: 'Hi {name}, I\'ve prepared a 3D mockup of the Harmony Painting placed in your space — would love to share it with you! When would be a good time to connect? — {agent_name}', delay_days: 7, event_window_days: 0 },
-        painting_day14: { trigger_category: 'after_solution_proposed', event_keywords: '', cps_interest_match: '', solution_match: 'harmony painting,画作,painting', icon: '🖼️', description: 'Day 14 after 画作 proposed. Closing push / quote follow-up.', sort_order: 13, template_name: '画作 Day-14 Closing', message_template: 'Hi {name}, I wanted to follow up on the Harmony Painting quote. We have limited slots for this month\'s commission — shall we lock in your piece? — {agent_name}', delay_days: 14, event_window_days: 0 },
-        solution_overdue: { trigger_category: 'solution_overdue', event_keywords: '', cps_interest_match: '', solution_match: '', icon: '⚠️', description: 'Day 21+ — proposed solution still pending. Escalation reminder to agent/manager.', sort_order: 14, template_name: 'Solution Overdue Alert', message_template: 'Hi {name}, it has been over 21 days since we proposed a solution for you. We\'d love to reconnect and address any concerns — {agent_name}', delay_days: 21, event_window_days: 0 }
+        // ── System triggers (non-CPS) — always kept ─────────────────────────────────
+        apu_appointment: { trigger_category: 'on_apu_photo', event_keywords: '', cps_interest_match: '', solution_match: '', solution_category_match: '', eligibility_tiers: 'active', icon: '📋', description: 'When APU photo is attached. Reminds prospect to schedule appointment.', sort_order: 4, template_name: 'APU Appointment Reminder', message_template: 'Hi {name}, your APU form has been received. Please schedule your appointment with {agent_name} at your earliest convenience.', delay_days: 0, event_window_days: 0 },
+        diy_review:      { trigger_category: 'on_event_attendance', event_keywords: '环境风水基础课', cps_interest_match: '', solution_match: '', solution_category_match: '', eligibility_tiers: 'active', icon: '🔄', description: 'After attending 环境风水基础课. 3-day follow-up.', sort_order: 5, template_name: 'DIY 3-Day Review Follow-up', message_template: 'Hi {name}, hope you enjoyed {event_name}! How has your progress been? — {agent_name}', delay_days: 3, event_window_days: 0 },
+        birthday:        { trigger_category: 'on_birthday', event_keywords: '', cps_interest_match: '', solution_match: '', solution_category_match: '', eligibility_tiers: 'active', icon: '🎂', description: 'Daily on calendar load. Sends birthday greeting.', sort_order: 6, template_name: 'Birthday Greeting', message_template: 'Hi {name}, wishing you a very happy birthday! — {agent_name}', delay_days: 0, event_window_days: 0 },
+        // ── Power Ring ───────────────────────────────────────────────────────────────
+        pr_9star:    { trigger_category: 'after_cps', event_keywords: '个人风水基础课', solution_category_match: 'Power Ring', cps_interest_match: '', solution_match: '', eligibility_tiers: 'active', icon: '⭐', template_name: 'Power Ring → 个人风水基础课', description: 'Power Ring proposed → 个人风水基础课 invite (Active)', sort_order: 10, message_template: 'Hi {name}，诚邀您出席《个人风水基础课》！日期：{date}，地点：{venue}。期待与您相见！— {agent_name}', delay_days: 0, event_window_days: 60 },
+        pr_destiny:  { trigger_category: 'after_cps', event_keywords: '个人改命分享会', solution_category_match: 'Power Ring', cps_interest_match: '', solution_match: '', eligibility_tiers: 'active', icon: '⭐', template_name: 'Power Ring → 个人改命分享会', description: 'Power Ring proposed → 个人改命分享会 invite (Active)', sort_order: 11, message_template: 'Hi {name}，诚邀您出席《个人改命分享会》！日期：{date}，地点：{venue}。— {agent_name}', delay_days: 0, event_window_days: 60 },
+        pr_boss:     { trigger_category: 'after_cps', event_keywords: '老板每月主题课', solution_category_match: 'Power Ring', cps_interest_match: '', solution_match: '', eligibility_tiers: 'active', icon: '⭐', template_name: 'Power Ring → 老板每月主题课', description: 'Power Ring proposed → 老板每月主题课 invite (Active)', sort_order: 12, message_template: 'Hi {name}，诚邀您出席每月《老板主题课》！日期：{date}，地点：{venue}。— {agent_name}', delay_days: 0, event_window_days: 60 },
+        pr_museum:   { trigger_category: 'after_cps', event_keywords: '博物馆', solution_category_match: 'Power Ring', cps_interest_match: '', solution_match: '', eligibility_tiers: 'active', icon: '⭐', template_name: 'Power Ring → 博物馆', description: 'Power Ring proposed → 博物馆 invite (Active)', sort_order: 13, message_template: 'Hi {name}，诚邀您参观《天渊玄空风水博物馆》！日期：{date}，地点：{venue}。— {agent_name}', delay_days: 0, event_window_days: 60 },
+        // ── 画作 ───────────────────────────────���─────────────────��───────────────────
+        painting_sharing: { trigger_category: 'after_cps', event_keywords: '画作分享会', solution_category_match: '画作', cps_interest_match: '', solution_match: '', eligibility_tiers: 'active', icon: '🖼️', template_name: '画作 → 画作分享会', description: '画作 proposed → 画作分享会 invite (Active)', sort_order: 20, message_template: 'Hi {name}，诚邀您出席《画作分享会》，了解更多画作资讯！日期：{date}，地点：{venue}。— {agent_name}', delay_days: 0, event_window_days: 60 },
+        painting_art:     { trigger_category: 'after_cps', event_keywords: '艺品分享会', solution_category_match: '画作', cps_interest_match: '', solution_match: '', eligibility_tiers: 'active', icon: '🖼️', template_name: '画作 → 艺品分享会', description: '画作 proposed → 艺品分享会 invite (Active)', sort_order: 21, message_template: 'Hi {name}，诚邀您出席《艺品分享会》！日期：{date}，地点：{venue}。— {agent_name}', delay_days: 0, event_window_days: 60 },
+        painting_huiji:   { trigger_category: 'after_cps', event_keywords: '汇集-商业,汇集-灵活,汇集-简易,汇聚-专案', solution_category_match: '画作', cps_interest_match: '', solution_match: '', eligibility_tiers: 'active', icon: '🖼️', template_name: '画作 → 汇集', description: '画作 proposed → any 汇集 invite (Active)', sort_order: 22, message_template: 'Hi {name}，诚邀您出席《{event_name}》！日期：{date}，地点：{venue}。— {agent_name}', delay_days: 0, event_window_days: 60 },
+        // ── 风水方案 ───────────────────────────���─────────────────���────────────────────
+        fs_diy:     { trigger_category: 'after_cps', event_keywords: '环境风水基础课', solution_category_match: '风水方案', cps_interest_match: '', solution_match: '', eligibility_tiers: 'active', icon: '🏠', template_name: '风水方案 → 环境风水基础课', description: '风水方案 proposed → 环境风水基础课 invite (Active)', sort_order: 30, message_template: 'Hi {name}，诚邀您出席《环境风水基础课》！日期：{date}，地点：{venue}。— {agent_name}', delay_days: 0, event_window_days: 60 },
+        fs_boss:    { trigger_category: 'after_cps', event_keywords: '老板每月主题课', solution_category_match: '风水方案', cps_interest_match: '', solution_match: '', eligibility_tiers: 'active', icon: '🏠', template_name: '风水方案 → 老板每月主题课', description: '风水方案 proposed → 老板每月主题课 invite (Active)', sort_order: 31, message_template: 'Hi {name}，诚邀您出席每月《老板主题课》！日期：{date}，地点：{venue}。— {agent_name}', delay_days: 0, event_window_days: 60 },
+        fs_museum:  { trigger_category: 'after_cps', event_keywords: '博物馆', solution_category_match: '风水方案', cps_interest_match: '', solution_match: '', eligibility_tiers: 'active', icon: '🏠', template_name: '风水方案 → 博物馆', description: '风水方案 proposed → 博物馆 invite (Active)', sort_order: 32, message_template: 'Hi {name}，诚邀您参观《天渊玄空风水博物馆》！日期：{date}，地点：{venue}。— {agent_name}', delay_days: 0, event_window_days: 60 },
+        fs_huiji:   { trigger_category: 'after_cps', event_keywords: '汇集-商业,汇集-灵活,汇集-简易,汇聚-专案', solution_category_match: '风水方案', cps_interest_match: '', solution_match: '', eligibility_tiers: 'active', icon: '🏠', template_name: '风水方案 → 汇集', description: '风水方案 proposed → any 汇集 invite (Active)', sort_order: 33, message_template: 'Hi {name}，诚邀您出席《{event_name}》！日期：{date}，地点：{venue}。— {agent_name}', delay_days: 0, event_window_days: 60 },
+        fs_sharing: { trigger_category: 'after_cps', event_keywords: '风水改命分享会-简易,风水改命分享会-专案', solution_category_match: '风水方案', cps_interest_match: '', solution_match: '', eligibility_tiers: 'active', icon: '🏠', template_name: '风水方案 → 风水改命分享会', description: '风水方案 proposed → 风水改命分享会 invite (Active)', sort_order: 34, message_template: 'Hi {name}，诚邀您出席《{event_name}》！日期：{date}，地点：{venue}。— {agent_name}', delay_days: 0, event_window_days: 60 },
+        // ── Bujishu ──────────────────────────────────────────────────────────────────
+        bujishu_sharing: { trigger_category: 'after_cps', event_keywords: 'Bujishu 分享会', solution_category_match: 'Bujishu', cps_interest_match: '', solution_match: '', eligibility_tiers: 'active', icon: '💎', template_name: 'Bujishu → 分享会', description: 'Bujishu proposed → Bujishu 分享会 invite (Active)', sort_order: 40, message_template: 'Hi {name}，诚邀您出席《Bujishu 分享会》！日期：{date}，地点：{venue}。— {agent_name}', delay_days: 0, event_window_days: 60 },
+        bujishu_launch:  { trigger_category: 'after_cps', event_keywords: 'Bujishu 新品发布会', solution_category_match: 'Bujishu', cps_interest_match: '', solution_match: '', eligibility_tiers: 'active', icon: '💎', template_name: 'Bujishu → 新品发布会', description: 'Bujishu proposed → Bujishu 新品发布会 invite (Active)', sort_order: 41, message_template: 'Hi {name}，诚邀您出席《Bujishu 新品发布会》！日期：{date}，地点：{venue}。— {agent_name}', delay_days: 0, event_window_days: 60 },
+        // ── Formula ───────────────────────────��───────────────────────────���──────────
+        formula_sharing:    { trigger_category: 'after_cps', event_keywords: 'Formula 分享会', solution_category_match: 'Formula', cps_interest_match: '', solution_match: '', eligibility_tiers: 'active', icon: '💊', template_name: 'Formula → 分享会', description: 'Formula proposed → Formula 分享会 invite (Active)', sort_order: 50, message_template: 'Hi {name}，诚邀您出席《Formula 分享会》！日期：{date}，地点：{venue}。— {agent_name}', delay_days: 0, event_window_days: 60 },
+        formula_launch:     { trigger_category: 'after_cps', event_keywords: 'Formula 新品发布会', solution_category_match: 'Formula', cps_interest_match: '', solution_match: '', eligibility_tiers: 'active', icon: '💊', template_name: 'Formula → 新品发布会', description: 'Formula proposed → Formula 新品发布会 invite (Active)', sort_order: 51, message_template: 'Hi {name}，诚邀您出席《Formula 新品发布会》！日期：{date}，地点：{venue}。— {agent_name}', delay_days: 0, event_window_days: 60 },
+        formula_exhibition: { trigger_category: 'after_cps', event_keywords: 'Formula 展览', solution_category_match: 'Formula', cps_interest_match: '', solution_match: '', eligibility_tiers: 'active', icon: '💊', template_name: 'Formula → 展览', description: 'Formula proposed → Formula 展览 invite (Active)', sort_order: 52, message_template: 'Hi {name}，诚邀您出席《Formula 展览》！日期：{date}，地点：{venue}。— {agent_name}', delay_days: 0, event_window_days: 60 },
+        formula_memberday:  { trigger_category: 'after_cps', event_keywords: 'Formula Member Day', solution_category_match: 'Formula', cps_interest_match: '', solution_match: '', eligibility_tiers: 'active', icon: '💊', template_name: 'Formula → Member Day', description: 'Formula proposed → Formula Member Day invite (Active)', sort_order: 53, message_template: 'Hi {name}，诚邀您出席《Formula Member Day》！日期：{date}，地点：{venue}。— {agent_name}', delay_days: 0, event_window_days: 60 },
+        // ── 招商 (Recruitment) ──────────────────────��─────────────────────────────────
+        recruitment_dc: { trigger_category: 'after_cps', event_keywords: 'DC 招商会', solution_category_match: '', cps_interest_match: '招商', solution_match: '', eligibility_tiers: 'active', icon: '🤝', template_name: '招商 → DC 招商会', description: '招商 interest → DC 招商会 invite (Active)', sort_order: 60, message_template: 'Hi {name}，诚邀您出席《DC 招商会》！日期：{date}，地点：{venue}。— {agent_name}', delay_days: 0, event_window_days: 60 },
+        // ── 课程 (Courses) ────────────────────────────���────────────────────────────���──
+        course_class: { trigger_category: 'after_cps', event_keywords: '课程', solution_category_match: '', cps_interest_match: '课程', solution_match: '', eligibility_tiers: 'active', icon: '📚', template_name: '课程 → 课程', description: '课程 interest → 课程 event invite (Active)', sort_order: 70, message_template: 'Hi {name}，诚邀您出席即将举行的课程！日期：{date}，地点：{venue}。— {agent_name}', delay_days: 0, event_window_days: 60 },
+        course_boss:  { trigger_category: 'after_cps', event_keywords: '老板每月主题课', solution_category_match: '', cps_interest_match: '课程', solution_match: '', eligibility_tiers: 'active', icon: '📚', template_name: '课程 → 老板每月主题课', description: '课程 interest → 老板每月主题课 invite (Active)', sort_order: 71, message_template: 'Hi {name}，诚邀您出席《老板主题课》！日期：{date}，地点：{venue}。— {agent_name}', delay_days: 0, event_window_days: 60 },
+        // ── 咨询类型 ───────────────���─────────────────────────────��────────────────────
+        consult_xinguiyun: { trigger_category: 'after_cps', event_keywords: '运程讲座', solution_category_match: '咨询类型', cps_interest_match: '星卦解运', solution_match: '', eligibility_tiers: 'returning', icon: '🔮', template_name: '咨询-星卦解运 → 运程讲座', description: '星卦解运 consultation → 运程讲座 re-invite (Returning)', sort_order: 80, message_template: 'Hi {name}，诚邀您再次出席《运程讲座》！日期：{date}，地点：{venue}。— {agent_name}', delay_days: 0, event_window_days: 60 },
+        // ── General — all active (CPS ≤180d) ─────────────────────────────────────────
+        general_fuqi:     { trigger_category: 'after_cps', event_keywords: '福气分享会', solution_category_match: '', cps_interest_match: '', solution_match: '', eligibility_tiers: 'active', icon: '🎊', template_name: '全体 → 福气分享会', description: 'All active → 福气分享会 invite', sort_order: 90, message_template: 'Hi {name}，诚邀您出席《福气分享会》！日期：{date}，地点：{venue}。— {agent_name}', delay_days: 0, event_window_days: 60 },
+        // ── General — active + engaged + returning ────────────────────────────────────
+        general_yuncheng: { trigger_category: 'after_cps', event_keywords: '运程讲座', solution_category_match: '', cps_interest_match: '', solution_match: '', eligibility_tiers: 'active|engaged|returning', icon: '🌟', template_name: '全体 → 运程讲座', description: 'All active/engaged/returning → 运程讲座 invite', sort_order: 91, message_template: 'Hi {name}，诚邀您出席《运程讲座》！日期：{date}，地点：{venue}。— {agent_name}', delay_days: 0, event_window_days: 60 },
+        general_spring:   { trigger_category: 'after_cps', event_keywords: '新春活动', solution_category_match: '', cps_interest_match: '', solution_match: '', eligibility_tiers: 'active|engaged|returning', icon: '🧧', template_name: '全体 → 新春活动', description: 'All active/engaged/returning → 新春活动 invite', sort_order: 92, message_template: 'Hi {name}，诚邀您出席《新春活动》！日期：{date}，地点：{venue}。— {agent_name}', delay_days: 0, event_window_days: 90 },
+        general_dcday:    { trigger_category: 'after_cps', event_keywords: 'DC 日', solution_category_match: '', cps_interest_match: '', solution_match: '', eligibility_tiers: 'active|engaged|returning', icon: '🗓️', template_name: '全体 → DC 日', description: 'All active/engaged/returning → DC 日 invite', sort_order: 93, message_template: 'Hi {name}，诚邀您出席《DC 日》！日期：{date}，地点：{venue}。— {agent_name}', delay_days: 0, event_window_days: 60 },
+        customer_trip:    { trigger_category: 'after_cps', event_keywords: '游一游', solution_category_match: '', cps_interest_match: '', solution_match: '', eligibility_tiers: 'customer|engaged|returning', icon: '✈️', template_name: '客户 → 游一游', description: 'Customers (engaged/returning) → 游一游 invite', sort_order: 94, message_template: 'Hi {name}，诚邀您参加《游一游》活动！日期：{date}，地点：{venue}。— {agent_name}', delay_days: 0, event_window_days: 90 },
+        // ── Solution follow-up sequence (after_solution_proposed) ─────────────────────
+        painting_day1:    { trigger_category: 'after_solution_proposed', event_keywords: '', cps_interest_match: '', solution_match: 'harmony painting,画作,painting', solution_category_match: '画作', eligibility_tiers: 'active', icon: '🖼️', description: 'Day 1 after 画作 proposed — thank you + brochure.', sort_order: 100, template_name: '画作 Day-1 Thank You', message_template: 'Hi {name}，感谢您今天的时间！附上我们的画作目录，如有任何疑问欢迎联系我。— {agent_name}', delay_days: 1, event_window_days: 0 },
+        painting_day3:    { trigger_category: 'after_solution_proposed', event_keywords: '', cps_interest_match: '', solution_match: 'harmony painting,画作,painting', solution_category_match: '画作', eligibility_tiers: 'active', icon: '🖼️', description: 'Day 3 after 画作 proposed — check-in.', sort_order: 101, template_name: '画作 Day-3 Check-In', message_template: 'Hi {name}，想了解您对画作目录的看法，有什么想法吗？— {agent_name}', delay_days: 3, event_window_days: 0 },
+        painting_day7:    { trigger_category: 'after_solution_proposed', event_keywords: '', cps_interest_match: '', solution_match: 'harmony painting,画作,painting', solution_category_match: '画作', eligibility_tiers: 'active', icon: '🖼️', description: 'Day 7 after 画作 proposed — send mockup.', sort_order: 102, template_name: '画作 Day-7 Mockup', message_template: 'Hi {name}，我已为您准备好画作的3D效果图，方便的话可以约个时间给您展示！— {agent_name}', delay_days: 7, event_window_days: 0 },
+        painting_day14:   { trigger_category: 'after_solution_proposed', event_keywords: '', cps_interest_match: '', solution_match: 'harmony painting,画作,painting', solution_category_match: '画作', eligibility_tiers: 'active', icon: '🖼️', description: 'Day 14 after 画作 proposed — closing push.', sort_order: 103, template_name: '画作 Day-14 Closing', message_template: 'Hi {name}，本月画作名额有限，请问您准备好锁定了吗？— {agent_name}', delay_days: 14, event_window_days: 0 },
+        solution_overdue: { trigger_category: 'solution_overdue', event_keywords: '', cps_interest_match: '', solution_match: '', solution_category_match: '', eligibility_tiers: 'active', icon: '⚠️', description: 'Day 21+ — proposed solution still Proposed. Escalation alert.', sort_order: 104, template_name: 'Solution Overdue Alert', message_template: 'Hi {name}，距离我们上次提案已超过21天，希望能再约个时间为您跟进。— {agent_name}', delay_days: 21, event_window_days: 0 }
     };
 
     // One-time JS migration: ensure all templates exist + backfill new columns
@@ -11343,7 +11382,22 @@ function _wireLoginBtn() {
             const templates = await AppDataStore.getAll('follow_up_templates');
             const existing = (templates || []);
 
-            // Seed missing templates
+            // Deactivate legacy templates superseded by the new category-based system
+            const _LEGACY_DEACTIVATE = {
+                cps_9star:    { is_active: false, event_keywords: '个人风水基础课', solution_category_match: 'Power Ring', eligibility_tiers: 'active' },
+                cps_fengshui: { is_active: false, event_keywords: '环境风水基础课', solution_category_match: '风水方案', eligibility_tiers: 'active' },
+                cps_huiji:    { is_active: false, event_keywords: '汇集-商业,汇集-灵活,汇集-简易,汇聚-专案', solution_category_match: '', eligibility_tiers: 'active' },
+            };
+            for (const tpl of existing) {
+                if (_LEGACY_DEACTIVATE[tpl.trigger_type] && tpl.is_active !== false) {
+                    await AppDataStore.update('follow_up_templates', tpl.id, {
+                        ..._LEGACY_DEACTIVATE[tpl.trigger_type],
+                        updated_at: new Date().toISOString()
+                    });
+                }
+            }
+
+            // Seed missing templates from _TRIGGER_DEFAULTS
             for (const [tType, defaults] of Object.entries(_TRIGGER_DEFAULTS)) {
                 if (!existing.some(t => t.trigger_type === tType)) {
                     await AppDataStore.create('follow_up_templates', {
@@ -11357,9 +11411,10 @@ function _wireLoginBtn() {
                 }
             }
 
-            // Backfill new columns on existing rows that haven't been migrated
+            // Backfill solution_category_match + eligibility_tiers on existing rows that lack them
             for (const tpl of existing) {
-                if (tpl.trigger_category) continue; // already migrated
+                if (_LEGACY_DEACTIVATE[tpl.trigger_type]) continue; // already handled above
+                if (tpl.eligibility_tiers != null && tpl.eligibility_tiers !== '') continue; // already migrated
                 const defaults = _TRIGGER_DEFAULTS[tpl.trigger_type];
                 if (!defaults) continue;
                 await AppDataStore.update('follow_up_templates', tpl.id, {
@@ -11367,10 +11422,12 @@ function _wireLoginBtn() {
                     event_keywords: defaults.event_keywords,
                     cps_interest_match: defaults.cps_interest_match,
                     solution_match: defaults.solution_match,
+                    solution_category_match: defaults.solution_category_match || '',
+                    eligibility_tiers: defaults.eligibility_tiers || 'active',
                     icon: defaults.icon,
                     description: defaults.description,
                     sort_order: defaults.sort_order,
-                    event_window_days: tpl.event_window_days === 21 ? 30 : (tpl.event_window_days || defaults.event_window_days),
+                    event_window_days: defaults.event_window_days,
                     updated_at: new Date().toISOString()
                 });
             }
@@ -11528,7 +11585,7 @@ function _wireLoginBtn() {
         });
     };
 
-    // Dispatcher: after CPS consultation — checks cps_interest_match + solution_match
+    // Dispatcher: after CPS consultation — checks cps_interest_match + solution_match + solution_category_match
     const dispatchAfterCpsTriggers = async (prospectId) => {
         const templates = await loadFollowUpTemplates();
         const cpsTriggers = templates.filter(t => t.trigger_category === 'after_cps' && t.is_active);
@@ -11538,24 +11595,35 @@ function _wireLoginBtn() {
         if (!prospect) return;
         const interest = (prospect.cps_interest || '').trim().toLowerCase();
 
+        // Build product name→category map for category matching
+        let productCatMap = {};
+        try {
+            const prods = await AppDataStore.query('products', {});
+            (prods || []).forEach(p => {
+                if (p.name && p.category) productCatMap[p.name.toLowerCase()] = p.category.toLowerCase();
+            });
+        } catch (e) { /* products table may not be seeded */ }
+
         let solutionNames = [];
+        let solutionCategories = [];
         try {
             const solutions = await AppDataStore.query('proposed_solutions', { prospect_id: prospectId });
             solutionNames = (solutions || []).map(s => (s.solution || '').toLowerCase());
+            solutionCategories = solutionNames.map(n => productCatMap[n] || '').filter(Boolean);
         } catch (e) { /* proposed_solutions may not exist yet */ }
 
         for (const tpl of cpsTriggers) {
             const interestList = (tpl.cps_interest_match || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
             const solutionList = (tpl.solution_match || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+            const solCatList   = (tpl.solution_category_match || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
 
-            // If both match lists are empty, trigger fires unconditionally
             const interestOk = !interestList.length || interestList.some(m => interest === m);
             const solutionOk = !solutionList.length || solutionList.some(m => solutionNames.some(s => s.includes(m)));
+            const solCatOk   = !solCatList.length   || solCatList.some(m => solutionCategories.some(c => c.includes(m)));
 
-            if (interestList.length || solutionList.length) {
-                // At least one match list is defined — need at least one to match
-                if (!interestOk && !solutionOk) continue;
-            }
+            // Skip if any match criteria are defined but none match
+            const hasMatchCrit = interestList.length || solutionList.length || solCatList.length;
+            if (hasMatchCrit && !interestOk && !solutionOk && !solCatOk) continue;
 
             executeEventBasedTrigger(tpl, prospectId, prospect.full_name, prospect.phone).catch(e => console.warn(`CPS trigger ${tpl.trigger_type} failed:`, e));
         }
@@ -11700,37 +11768,68 @@ function _wireLoginBtn() {
     };
 
     // Dispatcher: PROACTIVE event invites — scans upcoming events and finds eligible
-    // prospects/customers based on each trigger's match conditions. Called on calendar load.
-    // Creates draft invites for each match. Dismissed/sent drafts are NOT recreated.
+    // prospects/customers based on solution category, interest, and eligibility tier.
+    // Tiers: active (CPS ≤180d) | engaged (>180d + 3+ events) | returning (same category last year) | customer
     const dispatchProactiveEventInvites = async () => {
         const templates = await loadFollowUpTemplates();
         const eventTriggers = templates.filter(t =>
-            t.trigger_category === 'after_cps' &&
-            t.is_active &&
-            (t.event_keywords || '').trim() &&
-            ((t.cps_interest_match || '').trim() || (t.solution_match || '').trim())
-            // Skip triggers with no match criteria (e.g. cps_huiji) — too broad for proactive scan
+            t.trigger_category === 'after_cps' && t.is_active && (t.event_keywords || '').trim()
         );
         if (!eventTriggers.length) return;
 
         const today = new Date();
         const todayStr = today.toISOString().split('T')[0];
+        const prevYearStart = `${today.getFullYear() - 1}-01-01`;
+        const prevYearEnd   = `${today.getFullYear() - 1}-12-31`;
 
-        const [events, prospects, customers] = await Promise.all([
+        const [events, prospects, customers, products] = await Promise.all([
             AppDataStore.getAll('events'),
             AppDataStore.getAll('prospects'),
-            AppDataStore.getAll('customers')
+            AppDataStore.getAll('customers'),
+            AppDataStore.getAll('products').catch(() => [])
         ]);
 
-        // Index proposed_solutions by entity id (one query, cached locally)
+        // product name (lowercase) → category
+        const productCatMap = {};
+        for (const p of (products || [])) {
+            if (p.name && p.category) productCatMap[p.name.toLowerCase()] = p.category.toLowerCase();
+        }
+
+        // Index proposed_solutions — both names and product categories
         let allSolutions = [];
-        try { allSolutions = await AppDataStore.getAll('proposed_solutions') || []; } catch (e) { /* table may not exist */ }
-        const solutionsByProspect = {};
-        const solutionsByCustomer = {};
+        try { allSolutions = await AppDataStore.getAll('proposed_solutions') || []; } catch (e) {}
+        const solNamesByProspect = {}, solNamesByCustomer = {};
+        const solCatsByProspect  = {}, solCatsByCustomer  = {};
         for (const s of allSolutions) {
             const name = (s.solution || '').toLowerCase();
-            if (s.prospect_id) (solutionsByProspect[s.prospect_id] = solutionsByProspect[s.prospect_id] || []).push(name);
-            if (s.customer_id) (solutionsByCustomer[s.customer_id] = solutionsByCustomer[s.customer_id] || []).push(name);
+            const cat  = productCatMap[name] || '';
+            if (s.prospect_id) {
+                (solNamesByProspect[s.prospect_id] = solNamesByProspect[s.prospect_id] || []).push(name);
+                if (cat) (solCatsByProspect[s.prospect_id] = solCatsByProspect[s.prospect_id] || []).push(cat);
+            }
+            if (s.customer_id) {
+                (solNamesByCustomer[s.customer_id] = solNamesByCustomer[s.customer_id] || []).push(name);
+                if (cat) (solCatsByCustomer[s.customer_id] = solCatsByCustomer[s.customer_id] || []).push(cat);
+            }
+        }
+
+        // Load EVENT activities for Engaged (3+ events) and Returning (same category last year) tiers
+        let eventActs = [];
+        try { eventActs = (await AppDataStore.getAll('activities')).filter(a => a.activity_type === 'EVENT'); } catch (e) {}
+        const eventsMap = Object.fromEntries((events || []).map(e => [String(e.id), e]));
+        const eventCountP = {}, eventCountC = {};
+        const prevYearCatsP = {}, prevYearCatsC = {};
+        for (const a of eventActs) {
+            if (a.prospect_id) eventCountP[a.prospect_id] = (eventCountP[a.prospect_id] || 0) + 1;
+            if (a.customer_id) eventCountC[a.customer_id] = (eventCountC[a.customer_id] || 0) + 1;
+            const d = a.activity_date || '';
+            if (d >= prevYearStart && d <= prevYearEnd) {
+                const ev = eventsMap[String(a.event_id)];
+                if (!ev) continue;
+                const cats = _parseEventCats(ev.categories);
+                if (a.prospect_id) { if (!prevYearCatsP[a.prospect_id]) prevYearCatsP[a.prospect_id] = new Set(); cats.forEach(c => prevYearCatsP[a.prospect_id].add(c)); }
+                if (a.customer_id) { if (!prevYearCatsC[a.customer_id]) prevYearCatsC[a.customer_id] = new Set(); cats.forEach(c => prevYearCatsC[a.customer_id].add(c)); }
+            }
         }
 
         const allPeople = [
@@ -11739,65 +11838,78 @@ function _wireLoginBtn() {
         ];
 
         for (const tpl of eventTriggers) {
-            const targetCats = (tpl.event_keywords || '').split(',').map(k => k.trim()).filter(Boolean);
+            const targetCats    = (tpl.event_keywords || '').split(',').map(k => k.trim()).filter(Boolean);
             if (!targetCats.length) continue;
-            const interestList = (tpl.cps_interest_match || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
-            const solutionList = (tpl.solution_match || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+            const interestList  = (tpl.cps_interest_match || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+            const solutionList  = (tpl.solution_match || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+            const solCatList    = (tpl.solution_category_match || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+            const tplTiers      = (tpl.eligibility_tiers || 'active').split('|').map(s => s.trim());
+            const hasMatchCrit  = interestList.length || solutionList.length || solCatList.length;
 
             const windowEnd = new Date(today);
             windowEnd.setDate(windowEnd.getDate() + (tpl.event_window_days || 60));
             const windowEndStr = windowEnd.toISOString().split('T')[0];
 
-            // Find ALL matching events in window by CATEGORY (not title keywords)
             const matchingEvents = events.filter(e => {
                 const eDate = e.event_date || e.date || '';
                 if (eDate < todayStr || eDate > windowEndStr) return false;
                 if ((e.status || '').toLowerCase() === 'cancelled') return false;
-                const eventCats = _parseEventCats(e.categories);
-                return targetCats.some(tc => eventCats.includes(tc));
+                return targetCats.some(tc => _parseEventCats(e.categories).includes(tc));
             }).sort((a, b) => (a.event_date || a.date || '').localeCompare(b.event_date || b.date || ''));
-
             if (!matchingEvents.length) continue;
 
-            // Find eligible people (current agent only)
             for (const person of allPeople) {
                 if (person.responsible_agent_id && person.responsible_agent_id != _currentUser?.id) continue;
 
-                const interest = (person.cps_interest || '').trim().toLowerCase();
-                const interestOk = interestList.length && interestList.some(m => interest === m);
+                // ── Tier eligibility ──────────────────────────────────────────────────────
+                const cpsDate     = person.cps_assignment_date || person.cps_form_date;
+                const daysSinceCps = cpsDate ? Math.floor((new Date(todayStr) - new Date(cpsDate)) / 86400000) : 999;
+                const isActive    = daysSinceCps >= 0 && daysSinceCps <= 180;
+                const pid         = person.id;
+                const evCount     = person._type === 'prospect' ? (eventCountP[pid] || 0) : (eventCountC[pid] || 0);
+                const isEngaged   = !isActive && evCount >= 3;
+                const isCustomer  = person._type === 'customer' || person.conversion_status === 'converted';
+                const prevCats    = person._type === 'prospect' ? (prevYearCatsP[pid] || new Set()) : (prevYearCatsC[pid] || new Set());
+                const isReturning = targetCats.some(tc => prevCats.has(tc));
 
-                let solutionOk = false;
-                if (solutionList.length) {
-                    const personSolutions = person._type === 'prospect'
-                        ? (solutionsByProspect[person.id] || [])
-                        : (solutionsByCustomer[person.id] || []);
-                    solutionOk = solutionList.some(m => personSolutions.some(s => s.includes(m)));
-                }
+                const tierOk =
+                    (tplTiers.includes('active')    && isActive)   ||
+                    (tplTiers.includes('engaged')   && isEngaged)  ||
+                    (tplTiers.includes('returning') && isReturning)||
+                    (tplTiers.includes('customer')  && isCustomer  && (isEngaged || isReturning));
+                if (!tierOk) continue;
 
-                if (!interestOk && !solutionOk) continue;
+                // ── Solution / interest match ───────────────────────────────────────��─────
+                const interest      = (person.cps_interest || '').trim().toLowerCase();
+                const interestOk    = !interestList.length || interestList.some(m => interest.includes(m));
+                const personSolNames = person._type === 'prospect' ? (solNamesByProspect[pid] || []) : (solNamesByCustomer[pid] || []);
+                const personSolCats  = person._type === 'prospect' ? (solCatsByProspect[pid]  || []) : (solCatsByCustomer[pid]  || []);
+                const solNameOk     = !solutionList.length || solutionList.some(m => personSolNames.some(s => s.includes(m)));
+                const solCatOk      = !solCatList.length   || solCatList.some(m => personSolCats.some(c => c.includes(m)));
+                // General templates (no match criteria) fire for all tier-qualified people
+                const matchOk = !hasMatchCrit || interestOk || solNameOk || solCatOk;
+                if (!matchOk) continue;
 
-                // Create a draft for EACH matching event (dedup per event_id handles repeats)
                 for (const ev of matchingEvents) {
                     const msg = interpolateTemplate(tpl.message_template, {
-                        name: person.full_name || '',
-                        date: ev.event_date || ev.date || '',
-                        time: (ev.start_time || ev.time || '').slice(0, 5),
-                        venue: ev.location || '',
-                        event_name: ev.event_title || ev.title || '',
+                        name:       person.full_name || '',
+                        date:       ev.event_date || ev.date || '',
+                        time:       (ev.start_time || ev.time || '').slice(0, 5),
+                        venue:      ev.location || '',
+                        event_name: ev.title || '',
                         agent_name: _currentUser?.full_name || ''
                     });
-
                     await createFollowUpDraft({
-                        prospectId: person._type === 'prospect' ? person.id : null,
-                        customerId: person._type === 'customer' ? person.id : null,
-                        triggerType: tpl.trigger_type,
-                        messageText: msg,
-                        phone: person.phone || '',
+                        prospectId:   person._type === 'prospect' ? person.id : null,
+                        customerId:   person._type === 'customer' ? person.id : null,
+                        triggerType:  tpl.trigger_type,
+                        messageText:  msg,
+                        phone:        person.phone || '',
                         prospectName: person.full_name || '',
-                        eventId: ev.id,
-                        eventDate: ev.event_date || ev.date,
-                        eventName: ev.event_title || ev.title,
-                        dueDate: todayStr
+                        eventId:      ev.id,
+                        eventDate:    ev.event_date || ev.date,
+                        eventName:    ev.title || '',
+                        dueDate:      todayStr
                     });
                 }
             }
