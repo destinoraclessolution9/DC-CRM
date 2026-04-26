@@ -117,7 +117,7 @@ class DataStore {
             // hierarchy traversal (reporting_to, team_id), role checks,
             // agent name display, reassign dropdowns. Profile/edit views
             // call getById which gets *.
-            users: 'id,full_name,email,phone,role,status,team_id,reporting_to,created_at,updated_at,agent_code,hire_date',
+            users: 'id,full_name,email,phone,role,status,team_id,reporting_to,created_at,updated_at',
             // Activities: verified against actual DB schema 2026-04-16.
             // Excludes: consultants (JSONB blob), payment detail columns,
             // long discussion_summary field — only needed in detail/edit view.
