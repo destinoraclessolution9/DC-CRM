@@ -12699,11 +12699,15 @@ function _wireLoginBtn() {
         const grid = document.getElementById('calendar-grid');
         if (!grid) return;
 
-        // Immediate visual feedback so a mobile tap on prev/next looks responsive
-        // even while the parallel Supabase fetches resolve. Also blocks rage-taps
-        // from queuing more concurrent renders while one is already in flight.
+        // Dim the grid as visual feedback while the parallel Supabase fetches
+        // resolve. NOTE: do NOT set pointerEvents: 'none' here — that blocks
+        // legitimate day-cell taps during the 1-3 s render on mobile and was
+        // the root cause of the "hard to click, no response" complaint.
+        // Prev/next month buttons live outside the grid, so race-prevention is
+        // handled by _renderCalendarToken below, not by blocking pointer input.
         grid.style.opacity = '0.55';
-        grid.style.pointerEvents = 'none';
+
+        try {
 
         let html = '';
 
@@ -12967,13 +12971,20 @@ function _wireLoginBtn() {
         // Discard if a newer render started while this one's fetches were in flight.
         if (myToken !== _renderCalendarToken) return;
         grid.innerHTML = html;
-        grid.style.opacity = '';
-        grid.style.pointerEvents = '';
 
         // Warm the activity-modal lookup caches in the background so the first
         // tap on a day cell opens instantly instead of waiting on two fetches.
         _getVenuesCached();
         _getProductsCached();
+
+        } finally {
+            // Always lift the dim — even on error or early-return — so the grid
+            // never stays "frozen" looking. Only the latest render touches it
+            // so an older render doesn't undo the dim a newer render just set.
+            if (myToken === _renderCalendarToken) {
+                grid.style.opacity = '';
+            }
+        }
     };
 
     const getDotColor = (type) => {
