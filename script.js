@@ -9034,6 +9034,25 @@ function _wireLoginBtn() {
         // Silent nav switch — previous info toast was firing on every click, spamming
         // the DOM with toast nodes + timers and contributing to the perceived lag.
 
+        // Update document title so screen readers and browser tabs reflect the current view.
+        const VIEW_TITLES = {
+            calendar: 'Calendar', month: 'Calendar', prospects: 'Prospects & Customers',
+            pipeline: 'Pipeline', agents: 'Consultants', promotions: 'Monthly Promotion',
+            marketing_automation: 'Marketing Automation', reports: 'Reporting KPI',
+            documents: 'Documents', protection: 'Protection Monitoring', import: 'Import / Export',
+            integrations: 'Integrations', referrals: 'Referral Relationships', cases: 'Success Cases',
+            marketing_lists: 'Marketing Lists', ranking: 'Ranking Performance', performance: 'Ranking Performance',
+            workflows: 'Workflow Automation', booking_settings: 'Booking Scheduler',
+            lead_forms: 'Lead Capture Forms', surveys: 'NPS Surveys', contracts: 'Contracts',
+            custom_fields: 'Custom Fields', settings: 'Settings', milestones: 'Milestones',
+            fude: '福运相随', egg_purchasing: 'Egg Purchasing', standard_functions: 'Standard Functions',
+            formula_purchaser: 'Formula Purchaser', purchases_history: 'Purchases History',
+            stock_take: 'Stock Take', ai: 'AI Insights', security: 'Security', admin: 'Admin',
+            risk: 'Attrition Risk', nps: 'NPS Surveys',
+        };
+        const viewLabel = VIEW_TITLES[viewId] || viewId;
+        document.title = `${viewLabel} — 悅客匯 CRM`;
+
         // Mobile: update bottom nav active state + apply table card labels
         if (isMobile()) {
             updateBottomNavActive(viewId);

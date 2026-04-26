@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://cdn.sheetjs.com https://unpkg.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com; font-src 'self' https://cdnjs.cloudflare.com https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.qrserver.com; frame-ancestors 'self'; base-uri 'self'; form-action 'self';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://cdn.sheetjs.com https://unpkg.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com; font-src 'self' https://cdnjs.cloudflare.com https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.qrserver.com https://ui-avatars.com; frame-ancestors 'self'; base-uri 'self'; form-action 'self';">
     <meta http-equiv="X-Content-Type-Options" content="nosniff">
     <meta name="referrer" content="strict-origin-when-cross-origin">
     <title>Feng Shui CRM V8.7 - Enterprise Edition</title>
@@ -104,15 +104,18 @@
 </head>
 
 <body>
+    <a href="#content-viewport" class="skip-to-content" style="position:absolute;left:-9999px;top:4px;z-index:9999;padding:8px 16px;background:var(--primary,#800020);color:#fff;border-radius:4px;font-size:14px;font-weight:600;text-decoration:none;" onfocus="this.style.left='4px'" onblur="this.style.left='-9999px'">Skip to main content</a>
     <div id="login-container" class="login-container">
         <div class="login-box">
             <div class="login-logo">
-                <i class="fas fa-dharmachakra fa-3x" style="color: var(--primary);"></i>
-                <h2 style="margin-top: 12px; font-size: 22px; font-weight: 700;">悅客匯</h2>
+                <i class="fas fa-dharmachakra fa-3x" style="color: var(--primary);" aria-hidden="true"></i>
+                <h1 style="margin-top: 12px; font-size: 22px; font-weight: 700;">悅客匯</h1>
             </div>
             <div class="login-form">
-                <input type="email" id="loginEmail" class="form-control" placeholder="Email" required style="margin-bottom: 12px;">
-                <input type="password" id="loginPassword" class="form-control" placeholder="Password" required style="margin-bottom: 12px;">
+                <label for="loginEmail" style="display:block;font-size:13px;font-weight:500;margin-bottom:4px;color:var(--text-secondary);">Email</label>
+                <input type="email" id="loginEmail" class="form-control" placeholder="Email" required autocomplete="email" style="margin-bottom: 12px;">
+                <label for="loginPassword" style="display:block;font-size:13px;font-weight:500;margin-bottom:4px;color:var(--text-secondary);">Password</label>
+                <input type="password" id="loginPassword" class="form-control" placeholder="Password" required autocomplete="current-password" style="margin-bottom: 12px;">
                 <label style="display:flex;align-items:center;gap:8px;margin-bottom:16px;font-size:14px;color:var(--text-secondary);cursor:pointer;user-select:none;">
                     <input type="checkbox" id="rememberMe" style="width:16px;height:16px;accent-color:var(--primary);cursor:pointer;">
                     Keep me logged in
@@ -126,7 +129,7 @@
     <div class="mobile-drawer-overlay" id="mobile-drawer-overlay" onclick="window.app && window.app.closeMobileDrawer && window.app.closeMobileDrawer()"></div>
     <nav class="mobile-drawer" id="mobile-drawer">
         <div class="mobile-drawer-header">
-            <i class="fas fa-dharmachakra"></i>
+            <i class="fas fa-dharmachakra" aria-hidden="true"></i>
             <span>悅客匯</span>
         </div>
         <div class="mobile-drawer-body" id="mobile-drawer-body">
@@ -138,8 +141,8 @@
                 <div class="mobile-drawer-footer-name" id="drawer-user-name">Guest</div>
                 <div class="mobile-drawer-footer-role" id="drawer-user-role">—</div>
             </div>
-            <button class="mobile-drawer-logout" onclick="app.logout()" title="Logout">
-                <i class="fas fa-sign-out-alt"></i>
+            <button class="mobile-drawer-logout" onclick="app.logout()" title="Logout" aria-label="Logout">
+                <i class="fas fa-sign-out-alt" aria-hidden="true"></i>
             </button>
         </div>
     </nav>
@@ -148,13 +151,13 @@
         <!-- Top Navigation -->
         <nav class="top-bar">
             <div class="brand" id="brand-logo">
-                <i class="fas fa-dharmachakra"></i>
+                <i class="fas fa-dharmachakra" aria-hidden="true"></i>
                 <span class="brand-name">悅客匯</span>
             </div>
 
             <!-- Phase 14: Mobile hamburger menu -->
-            <div class="hamburger-menu" id="hamburger-menu" onclick="app.toggleMobileNav()">
-                <i class="fas fa-bars"></i>
+            <div class="hamburger-menu" id="hamburger-menu" onclick="app.toggleMobileNav()" role="button" aria-label="Open navigation menu" tabindex="0">
+                <i class="fas fa-bars" aria-hidden="true"></i>
             </div>
 
             <ul class="nav-links" id="nav-links">
@@ -280,14 +283,14 @@
                     <span id="live-status-label">LIVE</span>
                 </div>
                 <button class="theme-toggle" id="theme-toggle" title="Toggle theme (Ctrl+Shift+L)" aria-label="Toggle theme">
-                    <i class="fas fa-moon" id="theme-toggle-icon"></i>
+                    <i class="fas fa-moon" id="theme-toggle-icon" aria-hidden="true"></i>
                 </button>
                 <button class="theme-toggle" id="cmdk-trigger" title="Command palette (Ctrl+K)" aria-label="Open command palette">
-                    <i class="fas fa-search"></i>
+                    <i class="fas fa-search" aria-hidden="true"></i>
                 </button>
-                <div class="notif-bell">
-                    <i class="fas fa-bell"></i>
-                    <span class="badget">0</span>
+                <div class="notif-bell" role="button" aria-label="Notifications" tabindex="0">
+                    <i class="fas fa-bell" aria-hidden="true"></i>
+                    <span class="badget" aria-live="polite">0</span>
                 </div>
                 <div class="user-info" id="current-user-display">
                     <span id="user-name-label">Guest</span>
@@ -320,8 +323,8 @@
         <div class="cmdk-overlay" id="cmdk-overlay" onclick="if(event.target===this){this.classList.remove('active');}">
             <div class="cmdk-panel" role="dialog" aria-label="Command palette">
                 <div class="cmdk-input-row">
-                    <i class="fas fa-search"></i>
-                    <input type="text" class="cmdk-input" id="cmdk-input" placeholder="Search views, customers, agents, actions..." autocomplete="off">
+                    <i class="fas fa-search" aria-hidden="true"></i>
+                    <input type="text" class="cmdk-input" id="cmdk-input" placeholder="Search views, customers, agents, actions..." autocomplete="off" aria-label="Command palette search">
                     <span class="cmdk-kbd">ESC</span>
                 </div>
                 <div class="cmdk-results" id="cmdk-results"></div>
@@ -337,8 +340,8 @@
             <!-- Fixed Sidebar -->
             <aside class="sidebar">
                 <div class="sidebar-top">
-                    <button class="search-trigger" id="sidebar-search-btn">
-                        <i class="fas fa-search"></i>
+                    <button class="search-trigger" id="sidebar-search-btn" aria-label="Open search">
+                        <i class="fas fa-search" aria-hidden="true"></i>
                     </button>
                     <div class="search-tooltip">Click to search</div>
                 </div>
@@ -347,7 +350,7 @@
             </aside>
 
             <!-- Content Area -->
-            <main class="content-viewport" id="content-viewport">
+            <main class="content-viewport" id="content-viewport" tabindex="-1">
                 <!-- FB/IG-style skeleton: structured placeholder painted
                      instantly so the user sees the app shape before any
                      real data arrives. The router replaces this on first
@@ -380,6 +383,14 @@
                 </div>
             </main>
         </div>
+        <footer class="app-footer" style="text-align:center;padding:8px 16px;font-size:11px;color:var(--text-secondary);border-top:1px solid var(--border,rgba(0,0,0,0.08));background:var(--surface,#fff);flex-shrink:0;">
+            &copy; <span id="footer-year"></span> DestinOraclesSolution. All rights reserved.
+            &nbsp;|&nbsp;
+            <a href="/privacy.html" style="color:var(--text-secondary);text-decoration:underline;" target="_blank">Privacy Policy</a>
+            &nbsp;|&nbsp;
+            <a href="mailto:destinoraclessolution9@gmail.com" style="color:var(--text-secondary);text-decoration:underline;">Contact</a>
+        </footer>
+        <script>document.getElementById('footer-year').textContent = new Date().getFullYear();</script>
     </div>
 
     <!-- Scripts -->
@@ -997,6 +1008,37 @@
             const obs = new MutationObserver(() => { if (window.Chart) applyChartDefaults(); });
             obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
         })();
+    </script>
+
+    <!-- Vercel Analytics — enable in Vercel Dashboard → Analytics tab to activate -->
+    <script defer src="/_vercel/insights/script.js"></script>
+
+    <!-- Global error tracker: captures uncaught JS errors and stores them for admin review -->
+    <script>
+    (function() {
+        const MAX_ERRORS = 50;
+        function storeError(entry) {
+            try {
+                const key = 'crm_error_log';
+                const log = JSON.parse(localStorage.getItem(key) || '[]');
+                log.unshift(entry);
+                if (log.length > MAX_ERRORS) log.length = MAX_ERRORS;
+                localStorage.setItem(key, JSON.stringify(log));
+            } catch(e) {}
+        }
+        window.addEventListener('error', function(e) {
+            storeError({ type: 'error', msg: e.message, src: e.filename, line: e.lineno, col: e.colno, ts: new Date().toISOString() });
+        });
+        window.addEventListener('unhandledrejection', function(e) {
+            storeError({ type: 'promise', msg: String(e.reason), ts: new Date().toISOString() });
+        });
+        window.getCRMErrors = function() {
+            try { return JSON.parse(localStorage.getItem('crm_error_log') || '[]'); } catch(e) { return []; }
+        };
+        window.clearCRMErrors = function() {
+            try { localStorage.removeItem('crm_error_log'); } catch(e) {}
+        };
+    })();
     </script>
 </body>
 

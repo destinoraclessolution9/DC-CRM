@@ -1,0 +1,5 @@
+User-agent: *
+Disallow: /
+
+# This is a private internal CRM. No public content to index.
+# Contact: destinoraclessolution9@gmail.com
