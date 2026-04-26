@@ -11510,29 +11510,38 @@ function _wireLoginBtn() {
     const createFollowUpDraft = async (opts) => {
         const { prospectId, customerId, triggerType, messageText, phone, prospectName, eventId, eventDate, eventName, dueDate, attachmentUrl } = opts;
         try {
-            // Dedup per (prospect_or_customer + trigger + event), regardless of status.
-            // Once a draft exists (pending/sent/dismissed), don't recreate it — the agent's
-            // decision sticks. This prevents proactive scans from re-spawning dismissed invites.
+            // Dedup regardless of status — once a draft exists (pending/sent/
+            // dismissed), don't recreate it. The agent's decision sticks.
             //
-            // The events catalog has historical duplicates (same conceptual
-            // event saved as N different rows by different agents), so an
-            // event_id-only check lets the same prospect+trigger spawn one
-            // draft per duplicate row — we'd see the same person 4 times in
-            // a row on the reminder list. Fall back to (event_name, event_date)
-            // when event_id differs so duplicate catalog rows still collapse.
+            // Two failure modes this needs to handle:
+            //   (a) Events catalog has duplicate rows for the same conceptual
+            //       event (different agents re-created it). event_id-only
+            //       matching lets each duplicate row spawn its own draft.
+            //   (b) One prospect has multiple cps_interest categories (e.g.
+            //       Power Ring + 风水方案 + 课程) and several templates target
+            //       the same upcoming event — so trigger_type-scoped dedup
+            //       fires 3 different drafts for the same person to invite
+            //       to the same event. Customer should only get ONE invite.
+            //
+            // Strategy:
+            //   - birthday trigger: dedup by (person, type, due_date)
+            //   - non-event triggers (APU, etc.): dedup by (person, type)
+            //   - event-based triggers: dedup by (person, event), IGNORING
+            //     trigger_type, so case (b) collapses. Match the event by
+            //     event_id OR (event_name, event_date) so case (a) collapses.
             const _norm = (s) => String(s || '').trim().toLowerCase();
             const existing = await AppDataStore.getAll('follow_up_drafts');
             const dup = existing.find(d => {
                 const personMatch = (prospectId && d.prospect_id == prospectId) ||
                                     (customerId && d.customer_id == customerId);
                 if (!personMatch) return false;
-                if (d.trigger_type !== triggerType) return false;
-                if (triggerType === 'birthday') return d.due_date === dueDate;
-                if (!eventId) return true;
+                if (triggerType === 'birthday') {
+                    return d.trigger_type === 'birthday' && d.due_date === dueDate;
+                }
+                if (!eventId) {
+                    return d.trigger_type === triggerType;
+                }
                 if (d.event_id == eventId) return true;
-                // Fallback: same conceptual event saved under a different
-                // catalog row (typical when agents re-create the same event
-                // separately). Match on title + date.
                 if (opts.eventName && d.event_name && opts.eventDate && d.event_date
                     && _norm(opts.eventName) === _norm(d.event_name)
                     && opts.eventDate === d.event_date) return true;
@@ -12317,19 +12326,34 @@ function _wireLoginBtn() {
                 (!d.event_date || d.event_date >= todayStr) &&
                 (!d.agent_id || d.agent_id == _currentUser?.id)
             );
-            // Collapse duplicates that already exist in the DB — same person
-            // + same trigger + same event (matched by event_id OR by
-            // event_name+event_date for legacy duplicate catalog rows). Keeps
-            // the oldest draft so dismissals stay attached to a stable row.
+            // Collapse duplicates already in the DB. For event-based reminders
+            // we dedupe at (person, event) — IGNORING trigger_type — because
+            // a prospect with multiple cps_interest categories can match
+            // several templates pointing at the same event, producing 3-4
+            // identical-feeling rows (same name, same event, different
+            // trigger badge). The customer only needs one invite. Event is
+            // matched by event_id OR (event_name + event_date) so legacy
+            // duplicate catalog rows also collapse.
+            //
+            // For non-event reminders (birthday, APU), keep trigger_type and
+            // due_date in the key so distinct types still show separately.
+            // Keep the oldest draft (lowest id) so dismissals stay attached
+            // to a stable row.
             const _norm = (s) => String(s || '').trim().toLowerCase();
             const seen = new Map();
             const deduped = [];
             for (const d of visible.sort((a, b) => (a.id || 0) - (b.id || 0))) {
                 const personKey = d.prospect_id ? `p:${d.prospect_id}` : (d.customer_id ? `c:${d.customer_id}` : `n:${d.id}`);
-                const eventKey = d.event_id
-                    ? `eid:${d.event_id}`
-                    : `en:${_norm(d.event_name)}|ed:${d.event_date || ''}`;
-                const key = `${personKey}|t:${d.trigger_type}|${eventKey}`;
+                const isEventBased = !!d.event_id || (!!d.event_name && !!d.event_date);
+                let key;
+                if (isEventBased) {
+                    const eventKey = d.event_id
+                        ? `eid:${d.event_id}`
+                        : `en:${_norm(d.event_name)}|ed:${d.event_date || ''}`;
+                    key = `${personKey}|${eventKey}`;
+                } else {
+                    key = `${personKey}|t:${d.trigger_type}|due:${d.due_date || ''}`;
+                }
                 if (seen.has(key)) continue;
                 seen.set(key, true);
                 deduped.push(d);
