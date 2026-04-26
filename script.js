@@ -12311,12 +12311,27 @@ function _wireLoginBtn() {
 
         let drafts = [];
         try {
-            const all = await AppDataStore.getAll('follow_up_drafts');
+            const [all, allProspectsR, allCustomersR] = await Promise.all([
+                AppDataStore.getAll('follow_up_drafts'),
+                AppDataStore.getAll('prospects').catch(() => []),
+                AppDataStore.getAll('customers').catch(() => []),
+            ]);
             const _now = new Date();
             const _yR = _now.getFullYear();
             const _mR = String(_now.getMonth() + 1).padStart(2, '0');
             const _dR = String(_now.getDate()).padStart(2, '0');
             const todayStr = `${_yR}-${_mR}-${_dR}`;
+            // Build the set of prospect/customer IDs flagged unable_to_serve
+            // so we can hide their existing drafts. The dispatcher already
+            // refuses to CREATE drafts for them (script.js:11680, 11951,
+            // 12109), but a draft made before the flag was set sticks around
+            // forever otherwise.
+            const _unableP = new Set(
+                (allProspectsR || []).filter(p => p.unable_to_serve).map(p => String(p.id))
+            );
+            const _unableC = new Set(
+                (allCustomersR || []).filter(c => c.unable_to_serve).map(c => String(c.id))
+            );
             const visible = (all || []).filter(d =>
                 d.status === 'pending' &&
                 d.due_date <= todayStr &&
@@ -12324,7 +12339,10 @@ function _wireLoginBtn() {
                 // invite is moot once the date passes. Non-event reminders
                 // (no event_date) are unaffected.
                 (!d.event_date || d.event_date >= todayStr) &&
-                (!d.agent_id || d.agent_id == _currentUser?.id)
+                (!d.agent_id || d.agent_id == _currentUser?.id) &&
+                // Hide drafts for prospects/customers marked unable to serve.
+                !(d.prospect_id && _unableP.has(String(d.prospect_id))) &&
+                !(d.customer_id && _unableC.has(String(d.customer_id)))
             );
             // Collapse duplicates already in the DB. For event-based reminders
             // we dedupe at (person, event) — IGNORING trigger_type — because
