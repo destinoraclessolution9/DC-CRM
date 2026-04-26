@@ -11467,6 +11467,14 @@ function _wireLoginBtn() {
             // Dedup per (prospect_or_customer + trigger + event), regardless of status.
             // Once a draft exists (pending/sent/dismissed), don't recreate it — the agent's
             // decision sticks. This prevents proactive scans from re-spawning dismissed invites.
+            //
+            // The events catalog has historical duplicates (same conceptual
+            // event saved as N different rows by different agents), so an
+            // event_id-only check lets the same prospect+trigger spawn one
+            // draft per duplicate row — we'd see the same person 4 times in
+            // a row on the reminder list. Fall back to (event_name, event_date)
+            // when event_id differs so duplicate catalog rows still collapse.
+            const _norm = (s) => String(s || '').trim().toLowerCase();
             const existing = await AppDataStore.getAll('follow_up_drafts');
             const dup = existing.find(d => {
                 const personMatch = (prospectId && d.prospect_id == prospectId) ||
@@ -11474,7 +11482,15 @@ function _wireLoginBtn() {
                 if (!personMatch) return false;
                 if (d.trigger_type !== triggerType) return false;
                 if (triggerType === 'birthday') return d.due_date === dueDate;
-                return d.event_id == eventId || !eventId;
+                if (!eventId) return true;
+                if (d.event_id == eventId) return true;
+                // Fallback: same conceptual event saved under a different
+                // catalog row (typical when agents re-create the same event
+                // separately). Match on title + date.
+                if (opts.eventName && d.event_name && opts.eventDate && d.event_date
+                    && _norm(opts.eventName) === _norm(d.event_name)
+                    && opts.eventDate === d.event_date) return true;
+                return false;
             });
             if (dup) return null; // already exists
 
@@ -12246,7 +12262,7 @@ function _wireLoginBtn() {
             const _mR = String(_now.getMonth() + 1).padStart(2, '0');
             const _dR = String(_now.getDate()).padStart(2, '0');
             const todayStr = `${_yR}-${_mR}-${_dR}`;
-            drafts = (all || []).filter(d =>
+            const visible = (all || []).filter(d =>
                 d.status === 'pending' &&
                 d.due_date <= todayStr &&
                 // Hide event invites whose event has already happened — the
@@ -12254,7 +12270,25 @@ function _wireLoginBtn() {
                 // (no event_date) are unaffected.
                 (!d.event_date || d.event_date >= todayStr) &&
                 (!d.agent_id || d.agent_id == _currentUser?.id)
-            ).sort((a, b) => (a.due_date || '').localeCompare(b.due_date || ''));
+            );
+            // Collapse duplicates that already exist in the DB — same person
+            // + same trigger + same event (matched by event_id OR by
+            // event_name+event_date for legacy duplicate catalog rows). Keeps
+            // the oldest draft so dismissals stay attached to a stable row.
+            const _norm = (s) => String(s || '').trim().toLowerCase();
+            const seen = new Map();
+            const deduped = [];
+            for (const d of visible.sort((a, b) => (a.id || 0) - (b.id || 0))) {
+                const personKey = d.prospect_id ? `p:${d.prospect_id}` : (d.customer_id ? `c:${d.customer_id}` : `n:${d.id}`);
+                const eventKey = d.event_id
+                    ? `eid:${d.event_id}`
+                    : `en:${_norm(d.event_name)}|ed:${d.event_date || ''}`;
+                const key = `${personKey}|t:${d.trigger_type}|${eventKey}`;
+                if (seen.has(key)) continue;
+                seen.set(key, true);
+                deduped.push(d);
+            }
+            drafts = deduped.sort((a, b) => (a.due_date || '').localeCompare(b.due_date || ''));
         } catch (e) {
             console.warn('renderFollowUpReminders failed:', e);
         }
@@ -12378,24 +12412,42 @@ function _wireLoginBtn() {
         let body;
         if (draft.event_id) {
             const event = await AppDataStore.getById('events', draft.event_id);
+            // Time lives on the calendar ACTIVITY (the slot), not the events
+            // catalog row. Look up the matching activity so we can show the
+            // start/end time the user expects in the invite.
+            let activity = null;
+            try {
+                const allActs = await AppDataStore.getAll('activities');
+                activity = (allActs || []).find(a =>
+                    a.activity_type === 'EVENT'
+                    && String(a.event_id) === String(draft.event_id)
+                    && (!draft.event_date || a.activity_date === draft.event_date)
+                ) || null;
+            } catch (_) {}
+
             const title = event?.event_title || event?.title || draft.event_name || '';
             const date = (event?.event_date || event?.date || draft.event_date || '').toString();
-            const startT = (event?.start_time || '').toString().slice(0, 5);
-            const endT = (event?.end_time || '').toString().slice(0, 5);
-            const time = startT && endT ? `${startT} - ${endT}` : startT;
-            const venue = event?.location || '';
+            const startTRaw = (activity?.start_time || event?.start_time || '').toString();
+            const endTRaw = (activity?.end_time || event?.end_time || '').toString();
+            const time = startTRaw && endTRaw
+                ? `${startTRaw} - ${endTRaw}`
+                : (startTRaw || '');
+            const venue = activity?.venue || activity?.location_address || event?.location || '';
             const description = event?.description || '';
             const ticketPrice = event?.ticket_price ? `RM ${event.ticket_price}` : '';
+            // Use Unicode escapes — the source file's literal emoji bytes can
+            // get mangled by Windows clipboards and copy-paste round-trips,
+            // which is why the previous build sent "�" instead of 📅/📍/🎟️.
             const E = { sparkle: '✨', calendar: '\u{1F4C5}', clock: '\u{1F550}', pin: '\u{1F4CD}', ticket: '\u{1F39F}️' };
-            const lines = [];
-            if (draft.prospect_name) lines.push(`Hi ${draft.prospect_name},`, '');
-            lines.push(`${E.sparkle} *${title || 'You are invited!'}* ${E.sparkle}`, '');
+            // Match the calendar event-details invite exactly: no "Hi {name},"
+            // prefix, no "— {agent}" sign-off. The agent's name is already on
+            // their own WhatsApp profile; the prospect knows who's sending.
+            const lines = [`${E.sparkle} *${title || 'You are invited!'}* ${E.sparkle}`, ''];
             if (date) lines.push(`${E.calendar} Date: ${date}`);
             if (time) lines.push(`${E.clock} Time: ${time}`);
             if (venue) lines.push(`${E.pin} Venue: ${venue}`);
             if (ticketPrice) lines.push(`${E.ticket} Ticket Price: ${ticketPrice}`);
             if (description) lines.push('', description);
-            if (_currentUser?.full_name) lines.push('', `— ${_currentUser.full_name}`);
             body = lines.join('\n');
         } else {
             body = draft.message_text || '';
