@@ -11916,6 +11916,169 @@ function _wireLoginBtn() {
         }
     };
 
+    // Dispatcher: fires immediately when a new event is added to the calendar.
+    // Scans all prospects + customers and creates invite drafts for those who:
+    //   1. Pass tier + solution/interest match criteria for a matching template
+    //   2. Have NOT already attended any event with the same title (prevents re-inviting)
+    const dispatchOnNewEventAdded = async (eventId) => {
+        const newEvent = await AppDataStore.getById('events', eventId);
+        if (!newEvent) return;
+        const newEventTitle = (newEvent.title || newEvent.event_title || '').toLowerCase();
+        const newEventCats  = _parseEventCats(newEvent.categories);
+        if (!newEventCats.length) return;
+
+        const templates = await loadFollowUpTemplates();
+        const matchingTpls = templates.filter(t =>
+            t.trigger_category === 'after_cps' && t.is_active &&
+            (t.event_keywords || '').split(',').map(k => k.trim()).some(kw => newEventCats.includes(kw))
+        );
+        if (!matchingTpls.length) return;
+
+        const today     = new Date();
+        const todayStr  = today.toISOString().split('T')[0];
+        const prevYearStart = `${today.getFullYear() - 1}-01-01`;
+        const prevYearEnd   = `${today.getFullYear() - 1}-12-31`;
+
+        const [prospects, customers, products, allEventRows] = await Promise.all([
+            AppDataStore.getAll('prospects'),
+            AppDataStore.getAll('customers'),
+            AppDataStore.getAll('products').catch(() => []),
+            AppDataStore.getAll('events').catch(() => [])
+        ]);
+
+        const productCatMap = {};
+        for (const p of (products || [])) {
+            if (p.name && p.category) productCatMap[p.name.toLowerCase()] = p.category.toLowerCase();
+        }
+
+        let allSolutions = [];
+        try { allSolutions = await AppDataStore.getAll('proposed_solutions') || []; } catch (e) {}
+        const solNamesByProspect = {}, solNamesByCustomer = {};
+        const solCatsByProspect  = {}, solCatsByCustomer  = {};
+        for (const s of allSolutions) {
+            const name = (s.solution || '').toLowerCase();
+            const cat  = productCatMap[name] || '';
+            if (s.prospect_id) {
+                (solNamesByProspect[s.prospect_id] = solNamesByProspect[s.prospect_id] || []).push(name);
+                if (cat) (solCatsByProspect[s.prospect_id] = solCatsByProspect[s.prospect_id] || []).push(cat);
+            }
+            if (s.customer_id) {
+                (solNamesByCustomer[s.customer_id] = solNamesByCustomer[s.customer_id] || []).push(name);
+                if (cat) (solCatsByCustomer[s.customer_id] = solCatsByCustomer[s.customer_id] || []).push(cat);
+            }
+        }
+
+        // Build per-person: event count (Engaged), prev-year categories (Returning), attended titles (dedup)
+        let eventActs = [];
+        try { eventActs = (await AppDataStore.getAll('activities')).filter(a => a.activity_type === 'EVENT'); } catch (e) {}
+        const eventsMap = Object.fromEntries(allEventRows.map(e => [String(e.id), e]));
+        const eventCountP = {}, eventCountC = {};
+        const prevYearCatsP = {}, prevYearCatsC = {};
+        const attendedTitlesP = {}, attendedTitlesC = {};
+
+        for (const a of eventActs) {
+            if (a.prospect_id) eventCountP[a.prospect_id] = (eventCountP[a.prospect_id] || 0) + 1;
+            if (a.customer_id) eventCountC[a.customer_id] = (eventCountC[a.customer_id] || 0) + 1;
+            const ev = eventsMap[String(a.event_id)];
+            if (ev) {
+                const evTitle = (ev.title || ev.event_title || '').toLowerCase();
+                if (a.prospect_id) {
+                    if (!attendedTitlesP[a.prospect_id]) attendedTitlesP[a.prospect_id] = new Set();
+                    attendedTitlesP[a.prospect_id].add(evTitle);
+                }
+                if (a.customer_id) {
+                    if (!attendedTitlesC[a.customer_id]) attendedTitlesC[a.customer_id] = new Set();
+                    attendedTitlesC[a.customer_id].add(evTitle);
+                }
+                const d = a.activity_date || '';
+                if (d >= prevYearStart && d <= prevYearEnd) {
+                    const cats = _parseEventCats(ev.categories);
+                    if (a.prospect_id) { if (!prevYearCatsP[a.prospect_id]) prevYearCatsP[a.prospect_id] = new Set(); cats.forEach(c => prevYearCatsP[a.prospect_id].add(c)); }
+                    if (a.customer_id) { if (!prevYearCatsC[a.customer_id]) prevYearCatsC[a.customer_id] = new Set(); cats.forEach(c => prevYearCatsC[a.customer_id].add(c)); }
+                }
+            }
+        }
+
+        const allPeople = [
+            ...prospects.map(p => ({ ...p, _type: 'prospect' })),
+            ...customers.map(c => ({ ...c, _type: 'customer' }))
+        ];
+
+        let draftsCreated = 0;
+        for (const tpl of matchingTpls) {
+            const targetCats   = (tpl.event_keywords || '').split(',').map(k => k.trim()).filter(Boolean);
+            const interestList = (tpl.cps_interest_match || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+            const solutionList = (tpl.solution_match || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+            const solCatList   = (tpl.solution_category_match || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+            const tplTiers     = (tpl.eligibility_tiers || 'active').split('|').map(s => s.trim());
+            const hasMatchCrit = interestList.length || solutionList.length || solCatList.length;
+
+            for (const person of allPeople) {
+                if (person.responsible_agent_id && person.responsible_agent_id != _currentUser?.id) continue;
+
+                const pid = person.id;
+
+                // Skip if already attended an event with the same title
+                const myTitles = person._type === 'prospect' ? (attendedTitlesP[pid] || new Set()) : (attendedTitlesC[pid] || new Set());
+                if (newEventTitle && myTitles.has(newEventTitle)) continue;
+
+                // Tier eligibility
+                const cpsDate      = person.cps_assignment_date || person.cps_form_date;
+                const daysSinceCps = cpsDate ? Math.floor((new Date(todayStr) - new Date(cpsDate)) / 86400000) : 999;
+                const isActive     = daysSinceCps >= 0 && daysSinceCps <= 180;
+                const evCount      = person._type === 'prospect' ? (eventCountP[pid] || 0) : (eventCountC[pid] || 0);
+                const isEngaged    = !isActive && evCount >= 3;
+                const isCustomer   = person._type === 'customer' || person.conversion_status === 'converted';
+                const prevCats     = person._type === 'prospect' ? (prevYearCatsP[pid] || new Set()) : (prevYearCatsC[pid] || new Set());
+                const isReturning  = targetCats.some(tc => prevCats.has(tc));
+
+                const tierOk =
+                    (tplTiers.includes('active')    && isActive)    ||
+                    (tplTiers.includes('engaged')   && isEngaged)   ||
+                    (tplTiers.includes('returning') && isReturning) ||
+                    (tplTiers.includes('customer')  && isCustomer   && (isEngaged || isReturning));
+                if (!tierOk) continue;
+
+                // Solution / interest match
+                const interest       = (person.cps_interest || '').trim().toLowerCase();
+                const interestOk     = !interestList.length || interestList.some(m => interest.includes(m));
+                const personSolNames = person._type === 'prospect' ? (solNamesByProspect[pid] || []) : (solNamesByCustomer[pid] || []);
+                const personSolCats  = person._type === 'prospect' ? (solCatsByProspect[pid]  || []) : (solCatsByCustomer[pid]  || []);
+                const solNameOk      = !solutionList.length || solutionList.some(m => personSolNames.some(s => s.includes(m)));
+                const solCatOk       = !solCatList.length   || solCatList.some(m => personSolCats.some(c => c.includes(m)));
+                const matchOk = !hasMatchCrit || interestOk || solNameOk || solCatOk;
+                if (!matchOk) continue;
+
+                const msg = interpolateTemplate(tpl.message_template, {
+                    name:       person.full_name || '',
+                    date:       newEvent.event_date || newEvent.date || '',
+                    time:       (newEvent.start_time || newEvent.time || '').slice(0, 5),
+                    venue:      newEvent.location || '',
+                    event_name: newEvent.title || newEvent.event_title || '',
+                    agent_name: _currentUser?.full_name || ''
+                });
+
+                await createFollowUpDraft({
+                    prospectId:   person._type === 'prospect' ? person.id : null,
+                    customerId:   person._type === 'customer' ? person.id : null,
+                    triggerType:  tpl.trigger_type,
+                    messageText:  msg,
+                    phone:        person.phone || '',
+                    prospectName: person.full_name || '',
+                    eventId:      newEvent.id,
+                    eventDate:    newEvent.event_date || newEvent.date,
+                    eventName:    newEvent.title || newEvent.event_title || '',
+                    dueDate:      todayStr
+                });
+                draftsCreated++;
+            }
+        }
+
+        if (draftsCreated > 0) {
+            UI.toast.success(`${draftsCreated} invite reminder${draftsCreated > 1 ? 's' : ''} queued for this event`);
+        }
+    };
+
     // Dispatcher: birthday triggers — called on calendar load
     const dispatchBirthdayTriggers = async () => {
         const templates = await loadFollowUpTemplates();
@@ -31652,8 +31815,12 @@ const exportKPIReport = async (format) => {
                 UI.toast.success('Record updated successfully');
             } else {
                 data.created_by = _currentUser ? _currentUser.id : null;
-                await AppDataStore.create(type, data);
+                const created = await AppDataStore.create(type, data);
                 UI.toast.success('Record added successfully');
+                // Fire invite scan immediately when a new event is added
+                if (type === 'events' && created?.id) {
+                    dispatchOnNewEventAdded(created.id).catch(e => console.warn('New event invite dispatch failed:', e));
+                }
             }
             UI.hideModal();
             const viewport = document.getElementById('content-viewport');
@@ -44322,6 +44489,7 @@ JB 星期二到
         markFollowUpSent,
         dismissFollowUp,
         dispatchAfterCpsTriggers,
+        dispatchOnNewEventAdded,
         dispatchOnEventAttendanceTriggers,
         dispatchOnApuPhotoTriggers,
         bulkDispatchApuReminders,
