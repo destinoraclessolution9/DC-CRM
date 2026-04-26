@@ -18693,6 +18693,14 @@ function _wireLoginBtn() {
         const tbody = document.getElementById('prospects-table-body');
         if (!tbody) return;
 
+        // ── Perf timing (temp diagnostic) ──────────────────────────────────
+        // Logs wall-clock for each phase to the console so we can see where
+        // the cold-load time is going. Remove once perf is sorted.
+        const _perf = { t0: performance.now(), marks: {} };
+        const _mark = (label) => {
+            _perf.marks[label] = performance.now() - _perf.t0;
+        };
+
         // ── Read UI filter values (search term drives the load strategy) ──
         const searchQueryRaw = document.getElementById('prospect-search')?.value?.trim() || '';
         const searchQuery = searchQueryRaw.toLowerCase();
@@ -18702,6 +18710,22 @@ function _wireLoginBtn() {
         const agentFilter = document.getElementById('filter-agent')?.value || '';
         const includeDormantToggle = document.getElementById('filter-include-dormant')?.checked || false;
 
+        // ── Instant skeleton paint (cold-load only) ────────────────────────
+        // If the body is empty (first visit, no cache) the user otherwise
+        // stares at a totally blank table for the 1–2 s it takes to fetch
+        // prospects + users + latest-activities. Paint shimmer rows the
+        // moment render starts so the page feels alive. On subsequent
+        // re-renders (filter change, sort) we leave the existing rows in
+        // place — swapping them feels faster than flashing a skeleton.
+        if (tbody.children.length === 0) {
+            const skelCell = (w) => `<td><span class="skeleton-block skeleton-row" style="width:${w}%;"></span></td>`;
+            let skelHtml = '';
+            for (let i = 0; i < 8; i++) {
+                skelHtml += `<tr class="skeleton-prospect-row">${skelCell(70)}${skelCell(80)}${skelCell(50)}${skelCell(40)}${skelCell(75)}${skelCell(60)}${skelCell(65)}${skelCell(55)}</tr>`;
+            }
+            tbody.innerHTML = skelHtml;
+        }
+
         // ── Dormancy-aware load ────────────────────────────────────────────
         // Ops rule (2026-04-23): prospects inactive for >500 days are NOT
         // loaded by default. They remain searchable by phone/name/email — a
@@ -18709,26 +18733,19 @@ function _wireLoginBtn() {
         // the pg_trgm indexes and INCLUDES dormant records. Toggle the
         // "Include dormant" checkbox to load them unconditionally.
         //
-        // activities and users are still fetched for per-row rendering
-        // (protection status, agent name).
-        let allProspects;
-        if (searchQueryRaw) {
-            // Agent typed something → search everyone, dormant included.
-            allProspects = await AppDataStore.searchProspects(searchQueryRaw, {
-                includeDormant: true,
-                limit: 200,
-            });
-        } else {
-            // Normal list → active only.
-            allProspects = await AppDataStore.getActiveProspects({
-                includeDormant: includeDormantToggle,
-            });
-        }
-
-        // Only fetch users here — users is small. Activities is fetched per
-        // visible-page row below (indexed lookup) to avoid downloading the
-        // entire activities table just to show a last-activity column.
-        const allUsers = await AppDataStore.getAll('users');
+        // activities is fetched per visible-page row below (indexed lookup)
+        // to avoid downloading the entire activities table just to show a
+        // last-activity column. prospects + users are independent and run
+        // in parallel — saves ~one round-trip on cold load.
+        _mark('skeleton-painted');
+        const prospectsPromise = searchQueryRaw
+            ? AppDataStore.searchProspects(searchQueryRaw, { includeDormant: true, limit: 200 })
+            : AppDataStore.getActiveProspects({ includeDormant: includeDormantToggle });
+        const [allProspects, allUsers] = await Promise.all([
+            prospectsPromise,
+            AppDataStore.getAll('users'),
+        ]);
+        _mark('prospects+users-loaded');
 
         // ── Scope by role hierarchy ──
         let prospects;
@@ -18831,6 +18848,7 @@ function _wireLoginBtn() {
             );
             for (const [k, v] of latestMap) latestActivityByProspect.set(k, v);
         }
+        _mark('latest-activities-loaded');
 
         let html = '';
         for (const p of pageProspects) {
@@ -18935,6 +18953,16 @@ function _wireLoginBtn() {
             pgHtml += dormantNote;
             paginationEl.innerHTML = pgHtml;
         }
+        _mark('done');
+        console.table({
+            'skeleton-painted (ms)': Math.round(_perf.marks['skeleton-painted'] || 0),
+            'prospects+users-loaded (ms)': Math.round(_perf.marks['prospects+users-loaded'] || 0),
+            'latest-activities-loaded (ms)': Math.round(_perf.marks['latest-activities-loaded'] || 0),
+            'done (ms)': Math.round(_perf.marks['done'] || 0),
+            'rows rendered': pageProspects.length,
+            'total filtered': totalCount,
+            'all prospects fetched': allProspects.length,
+        });
     };
 
     const prospectPageNav = async (dir) => {

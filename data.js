@@ -243,6 +243,19 @@ class DataStore {
                     this._cache.delete(k);
                 }
             }
+            // Also wipe any persisted active-prospect snapshots from
+            // localStorage so the next page load doesn't serve stale rows
+            // through the SWR Tier-2 path.
+            try {
+                const toRemove = [];
+                for (let i = 0; i < localStorage.length; i++) {
+                    const lsKey = localStorage.key(i);
+                    if (lsKey && lsKey.startsWith('fs_crm___prospects_active_')) {
+                        toRemove.push(lsKey);
+                    }
+                }
+                for (const k of toRemove) localStorage.removeItem(k);
+            } catch (_) {}
         }
     }
 
@@ -1411,8 +1424,23 @@ class DataStore {
 
         const cacheKey = `__prospects_active_${dormantDays}`;
         if (!fresh) {
+            // Tier 1 — in-memory cache hit (warmest path)
             const cached = this._cacheGet(cacheKey);
             if (cached) return cached;
+
+            // Tier 2 — stale-while-revalidate from localStorage. Same pattern
+            // as getAll(): if the previous session persisted a snapshot,
+            // serve it instantly so the user sees the list with no network
+            // wait, then refresh in the background. Tombstones are looked up
+            // against the underlying 'prospects' table (the cacheKey is a
+            // derived view, not its own tombstone bucket).
+            const stale = this._swrGetLocalDerived(cacheKey, 'prospects');
+            if (stale) {
+                this._cacheSet(cacheKey, stale);
+                if (window.__FS_DEBUG_SWR) console.log(`[SWR] ${cacheKey}: served ${stale.length} rows instantly from cache`);
+                this._refreshActiveProspectsBg(cacheKey, opts).catch(() => {});
+                return stale;
+            }
         }
 
         const cutoff = new Date(Date.now() - dormantDays * 86400000)
@@ -1443,6 +1471,11 @@ class DataStore {
                 console.warn(`[DataStore] getActiveProspects hit limit ${limit} — raise it or paginate.`);
             }
             this._cacheSet(cacheKey, result);
+            // Persist for next session — non-blocking. setTimeout defers the
+            // JSON.stringify off the critical path.
+            setTimeout(() => {
+                try { localStorage.setItem(`fs_crm_${cacheKey}`, JSON.stringify(result)); } catch (_) {}
+            }, 0);
             return result;
         } catch (e) {
             console.warn('getActiveProspects failed, falling back to getAll + client filter', e);
@@ -1454,6 +1487,47 @@ class DataStore {
                 if (!p.last_activity_date) return true;
                 return p.last_activity_date >= cutoff;
             });
+        }
+    }
+
+    // SWR variant of _swrGetLocal for derived-view cache keys (e.g.
+    // __prospects_active_500). Same shape as the main helper, but tombstone
+    // lookup uses the *underlying* table name rather than the cache key.
+    _swrGetLocalDerived(localKey, tombstoneTable) {
+        try {
+            const raw = localStorage.getItem(`fs_crm_${localKey}`);
+            if (!raw) return null;
+            const data = JSON.parse(raw);
+            if (!Array.isArray(data) || data.length === 0) return null;
+            const tombstoneRaw = localStorage.getItem('fs_crm_tombstones');
+            const tombstones = tombstoneRaw ? JSON.parse(tombstoneRaw) : {};
+            const deletedIds = new Set(tombstones[tombstoneTable] || []);
+            return data.filter(r => !deletedIds.has(String(r.id)));
+        } catch (_) {
+            return null;
+        }
+    }
+
+    // Background refresh after serving a stale __prospects_active_* snapshot.
+    // Re-calls getActiveProspects with fresh:true (which goes straight to the
+    // network path, updates memory + persisted cache), then emits dataChanged
+    // if the rows actually moved — same gating pattern as _swrRevalidate so
+    // we don't trigger needless re-renders.
+    async _refreshActiveProspectsBg(cacheKey, opts) {
+        if (!this._swrInFlight) this._swrInFlight = new Set();
+        if (this._swrInFlight.has(cacheKey)) return;
+        this._swrInFlight.add(cacheKey);
+        const prevSnapshot = this._cache.get(cacheKey)?.data || [];
+        try {
+            const fresh = await this.getActiveProspects({ ...opts, fresh: true });
+            if (this._snapshotsDiffer(prevSnapshot, fresh)) {
+                if (window.__FS_DEBUG_SWR) console.log(`[SWR] ${cacheKey}: revalidated (${prevSnapshot.length} → ${fresh.length}), refreshing view`);
+                this.emit('dataChanged', { action: 'revalidate', table: 'prospects' });
+            }
+        } catch (_) {
+            // Silent — user keeps the stale view
+        } finally {
+            this._swrInFlight.delete(cacheKey);
         }
     }
 
