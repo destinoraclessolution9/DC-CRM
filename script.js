@@ -11966,10 +11966,15 @@ function _wireLoginBtn() {
             if (!_currentUser || _currentUser.id == null) return [];
             const client = AppDataStore._readClient && AppDataStore._readClient();
             if (!client) return [];
+            // .contains() serialises the JS array as {[object Object]} instead
+            // of valid JSON, causing a 400. Use .filter() with an explicit
+            // JSON string so PostgREST receives: co_agents=cs.[{"id":123}]
+            // JSONB @> partial-object matching handles the remaining keys
+            // (name, co_role, status) correctly.
             let q = client
                 .from('activities')
                 .select('*')
-                .contains('co_agents', [{ id: _currentUser.id }]);
+                .filter('co_agents', 'cs', JSON.stringify([{ id: _currentUser.id }]));
             if (rangeStart) q = q.gte('activity_date', rangeStart);
             if (rangeEnd) q = q.lte('activity_date', rangeEnd);
             const { data, error } = await q;

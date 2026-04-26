@@ -26,8 +26,8 @@
          it before the parser reaches the <script> tag near </body>.
          script.js is ~2.5 MB so getting it in flight ASAP is the single
          biggest perceived-load win on first visit. -->
-    <link rel="preload" href="script.js?v=20260425perf" as="script">
-    <link rel="preload" href="data.js?v=20260425perf" as="script">
+    <link rel="preload" href="script.js?v=20260426swr" as="script">
+    <link rel="preload" href="data.js?v=20260426swr" as="script">
     <link rel="preload" href="styles-fixed.css" as="style">
 
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" media="print" onload="this.media='all'; this.onload=null;">
@@ -421,11 +421,11 @@
 
     <!-- Critical scripts loaded eagerly (needed on login screen + app shell) -->
     <script defer src="lunar-calendar.min.js"></script>
-    <script defer src="data.js?v=20260425perf"></script>
+    <script defer src="data.js?v=20260426swr"></script>
     <script defer src="auth.js?v=20260424a"></script>
     <script defer src="ui.js?v=20260424a"></script>
     <script defer src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js" crossorigin="anonymous"></script>
-    <script defer src="script.js?v=20260425perf"></script>
+    <script defer src="script.js?v=20260426swr"></script>
 
     <!--
       The following libraries are loaded on-demand via window._loadScriptOnce()
