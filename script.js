@@ -16184,7 +16184,19 @@ function _wireLoginBtn() {
             ...(formulaItems.length ? [`<div style="font-weight:600;font-size:12px;color:var(--primary);margin:8px 0 4px;border-bottom:1px solid var(--gray-200);padding-bottom:3px;">Formula</div>`] : []),
             ...formulaItems.map(f => cb('opp-items', f.name, 'Formula', parsedOpp.selected)),
         ];
-        const naCheckboxes = events.map(e => cb('na-items', e.event_title || e.title || '', '', parsedNA.selected));
+        // Next Actions options: canonical EVENT_CATEGORIES + custom "Others" categories from events.
+        // Saved selections are parsed directly from the raw string (avoids group-marker mismatch).
+        const naCategories = new Set(EVENT_CATEGORIES);
+        events.forEach(e => parseEventCategories(e.categories).forEach(c => c && naCategories.add(c)));
+        const rawNAFull = a.next_action || '';
+        const rawNARemarksMatch = rawNAFull.match(/ \| Remarks: ([\s\S]*)$/);
+        const rawNARemarksText = rawNARemarksMatch ? rawNARemarksMatch[1].trim() : '';
+        const rawNAItemsPart = rawNARemarksMatch ? rawNAFull.slice(0, rawNAFull.lastIndexOf(' | Remarks:')) : rawNAFull;
+        const savedNAArr = rawNAItemsPart.split(',').map(s => s.trim()).filter(Boolean);
+        const naOthers = savedNAArr.filter(s => !naCategories.has(s));
+        const naOthersText = naOthers.join(', ').replace(/"/g, '&quot;');
+        const hasNaOthers = naOthers.length > 0;
+        const naCheckboxes = Array.from(naCategories).map(cat => cb('na-items', cat, '', savedNAArr));
 
         // Voice-recorder button only makes sense in the editable context.
         const voiceBtn = (targetId) => readOnly ? '' : `<button class="btn-icon" onclick="app.openVoiceRecorder('${targetId}', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>`;
@@ -16226,10 +16238,17 @@ function _wireLoginBtn() {
                 <div class="form-group">
                     <label>Next Actions:</label>
                     <div style="border:1px solid var(--gray-300);border-radius:6px;padding:10px;max-height:180px;overflow-y:auto;background:#fafafa;">
-                        ${naCheckboxes.length > 0 ? naCheckboxes.join('') : '<p style="color:var(--gray-400);font-size:12px;margin:0;">No active events found.</p>'}
+                        ${naCheckboxes.join('')}
+                        <label style="display:flex;align-items:center;gap:6px;margin-bottom:4px;cursor:${readOnly ? 'default' : 'pointer'};font-size:13px;padding:3px 8px;border-radius:4px;" ${!readOnly ? `onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background=''"` : ''}>
+                            <input type="checkbox" id="${prefix}-na-others-cb" ${hasNaOthers ? 'checked' : ''} ${disabled} ${!readOnly ? `onchange="(function(el){var b=document.getElementById('${prefix}-na-others-box');b.style.display=el.checked?'block':'none';if(el.checked)document.getElementById('${prefix}-na-others-input').focus();})(this)"` : ''}>
+                            Others
+                        </label>
+                        <div id="${prefix}-na-others-box" style="display:${hasNaOthers ? 'block' : 'none'};padding:0 8px 4px;">
+                            <input type="text" id="${prefix}-na-others-input" class="form-control" placeholder="Type custom categories, separate with commas" value="${naOthersText}" ${disabled} style="font-size:13px;">
+                        </div>
                     </div>
                     <div style="display:flex;gap:8px;margin-top:6px;">
-                        <textarea id="${prefix}-next-action-remarks" class="form-control" rows="2" placeholder="Additional remarks..." ${disabled}>${escapeHtml(parsedNA.remarks || '')}</textarea>
+                        <textarea id="${prefix}-next-action-remarks" class="form-control" rows="2" placeholder="Additional remarks..." ${disabled}>${escapeHtml(rawNARemarksText)}</textarea>
                         ${voiceBtn(`${prefix}-next-action-remarks`)}
                     </div>
                     <div style="font-size:11px;color:var(--gray-400);margin-top:3px;"><i class="fas fa-link"></i> Linked to prospect profile → Next Actions / Pipeline → Action Needed to Close Deal</div>
@@ -16250,7 +16269,18 @@ function _wireLoginBtn() {
             note_needs: document.getElementById(`${prefix}-needs`)?.value || '',
             note_pain_points: document.getElementById(`${prefix}-pain-points`)?.value || '',
             opportunity_potential: serializeMultiSelectToText(`${prefix}-opp-items`, `${prefix}-opportunity-remarks`),
-            next_action: serializeEventSelectToText(`${prefix}-na-items`, `${prefix}-next-action-remarks`),
+            next_action: (() => {
+                const items = Array.from(document.querySelectorAll(`input[name="${prefix}-na-items"]:checked`)).map(c => c.value);
+                const othersCb = document.getElementById(`${prefix}-na-others-cb`);
+                const othersInput = document.getElementById(`${prefix}-na-others-input`);
+                if (othersCb?.checked && othersInput?.value?.trim()) {
+                    othersInput.value.split(',').map(s => s.trim()).filter(Boolean).forEach(c => { if (!items.includes(c)) items.push(c); });
+                }
+                const remarks = document.getElementById(`${prefix}-next-action-remarks`)?.value?.trim() || '';
+                let result = items.join(', ');
+                if (remarks) result += (result ? ' | ' : '') + 'Remarks: ' + remarks;
+                return result;
+            })(),
         };
     };
 
