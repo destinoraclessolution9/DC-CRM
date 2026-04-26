@@ -14538,6 +14538,50 @@ function _wireLoginBtn() {
         // Standard Functions all see the same field set.
         const mo = collectMeetingOutcomeData('mo');
         const isClosed = mo.is_closing;
+
+        // Upload the invoice file (if a new one was selected). The Meeting
+        // Outcome modal previously only used the file for OCR auto-fill and
+        // never persisted it — so users would upload an invoice, save the
+        // outcome, then have no way to retrieve the file. Now we mirror the
+        // closing-record-form upload path: push to Supabase storage, get a
+        // public URL, then save it on the prospect's closing_record JSONB
+        // so existing "View invoice" links throughout the profile pages
+        // light up. (We don't write invoice_file directly on the activity
+        // row — that column isn't in the activities schema.)
+        let invoice_file = null;
+        let invoice_file_name = null;
+        const _moFileInput = document.getElementById('mo-invoice-file');
+        const _moFile = _moFileInput?.files?.[0] || null;
+        if (_moFile) {
+            try {
+                const sb = window.supabase || window.supabaseClient;
+                if (sb && sb.storage) {
+                    const safeName = _moFile.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+                    const path = `invoices/${Date.now()}_${safeName}`;
+                    const { error: upErr } = await sb.storage
+                        .from('attachments')
+                        .upload(path, _moFile, { upsert: false, contentType: _moFile.type });
+                    if (upErr) throw upErr;
+                    const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
+                    invoice_file = urlData?.publicUrl || null;
+                } else {
+                    // Storage unavailable — fall back to base64 so the file
+                    // still survives the save (chunkier but recoverable).
+                    invoice_file = await new Promise((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onload = e => resolve(e.target.result);
+                        reader.onerror = () => reject(reader.error);
+                        reader.readAsDataURL(_moFile);
+                    });
+                }
+                invoice_file_name = _moFile.name;
+            } catch (e) {
+                console.warn('saveMeetingOutcome: invoice upload failed:', e);
+                UI.toast.error('Invoice upload failed: ' + (e.message || e));
+                // Don't abort the whole save — text fields should still persist.
+            }
+        }
+
         const updates = {
             is_closing: isClosed,
             unable_to_serve: mo.unable_to_serve,
@@ -14604,6 +14648,8 @@ function _wireLoginBtn() {
                         pop_tenure:       paymentMethod === 'POP' ? (mo.pop_tenure  || '') : '',
                         pop_down_payment: paymentMethod === 'POP' ? (mo.pop_down    || '') : '',
                         invoice_number:  mo.invoice_number || '',
+                        invoice_file:    invoice_file || existingCR?.invoice_file || '',
+                        invoice_file_name: invoice_file_name || existingCR?.invoice_file_name || '',
                         closing_date:    mo.collection_date || '',
                         order_date:      mo.order_date || '',
                         closing_remarks: mo.closing_remarks ?? existingCR?.closing_remarks ?? '',
@@ -16011,6 +16057,12 @@ function _wireLoginBtn() {
             pop_tenure:      cr.pop_tenure      || a.pop_tenure        || '',
             pop_down:        cr.pop_down_payment || a.pop_down_payment || '',
             invoice_no:      cr.invoice_number  || a.invoice_number    || '',
+            // Invoice file URL lives on the prospect's closing_record JSONB
+            // (the activities schema has no invoice_file column). When the
+            // form is rendered for an activity NOT yet linked to a closing
+            // record, this stays empty.
+            invoice_file:    cr.invoice_file        || '',
+            invoice_file_name: cr.invoice_file_name || '',
             closing_date:    cr.closing_date    || a.collection_date   || '',
             closing_remarks: cr.closing_remarks || '',
             sales_idea:      cr.sales_idea      || '',
@@ -16070,6 +16122,7 @@ function _wireLoginBtn() {
             <div class="form-group">
                 <label>Upload Purchased Invoice <span style="font-size:11px;color:var(--gray-400);font-weight:normal;">(AI auto-fill on upload)</span></label>
                 <input id="${prefix}-invoice-file" type="file" class="form-control" accept="image/png,image/jpeg,application/pdf" ${disabled} onchange="if(!this.disabled)app.scanInvoiceWithAI(this,'${prefix}','mo')">
+                ${v.invoice_file ? `<div style="margin-top:6px;font-size:11px;color:var(--gray-500);"><i class="fas fa-paperclip"></i> Current: <a href="${v.invoice_file}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);">${escapeHtml(v.invoice_file_name || 'View invoice')}</a> <span style="color:var(--gray-400);">(choosing a new file will replace it)</span></div>` : ''}
             </div>
         ` : '';
 
