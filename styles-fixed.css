@@ -25,6 +25,11 @@ body {
     font-family: 'Inter', sans-serif;
     background: var(--gray-50);
     color: var(--gray-800);
+    /* Suppress browser-native pull-to-refresh on mobile (Android Chrome).
+       Without this, pulling down on the calendar triggers a hard page reload
+       in addition to the in-app pull-to-refresh, which can dump the user
+       back to the login screen. */
+    overscroll-behavior-y: contain;
 }
 
 /* App Shell */

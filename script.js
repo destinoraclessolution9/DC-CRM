@@ -4070,6 +4070,19 @@ In a production system, this would show the actual file contents.
             const diff = e.changedTouches[0].clientY - startY;
             if (diff > 80) {
                 refreshEl.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i> Refreshing...';
+                // Invalidate the in-memory caches for the tables this view reads
+                // so newly-created activities (added moments ago in another tab
+                // or by another user) actually show up after the refresh —
+                // otherwise SWR re-serves the stale snapshot and the user sees
+                // no change.
+                try {
+                    AppDataStore.invalidateCache('activities');
+                    AppDataStore.invalidateCache('events');
+                    AppDataStore.invalidateCache('event_registrations');
+                    AppDataStore.invalidateCache('event_attendees');
+                    AppDataStore.invalidateCache('prospects');
+                    AppDataStore.invalidateCache('customers');
+                } catch (_) {}
                 // If inside a prospect/customer profile, reload that profile — not the list.
                 if (_currentDetailView?.type === 'prospect') {
                     await showProspectDetail(_currentDetailView.id);
@@ -13566,14 +13579,72 @@ function _wireLoginBtn() {
 
     const renderDayView = async () => {
         const grid = document.getElementById('calendar-grid');
-        const todayStr = _currentDate.toISOString().split('T')[0];
-        const [allActivitiesDV, allProspectsDV, allCustomersDV, allUsersDV] = await Promise.all([
-            AppDataStore.getAll('activities'),
+        // Build local YYYY-MM-DD — toISOString() shifts to UTC and can return
+        // the previous calendar day for users east of GMT (e.g. Malaysia +08).
+        const _y = _currentDate.getFullYear();
+        const _m = String(_currentDate.getMonth() + 1).padStart(2, '0');
+        const _d = String(_currentDate.getDate()).padStart(2, '0');
+        const todayStr = `${_y}-${_m}-${_d}`;
+
+        // Mirror renderCalendar's scoped fetch so the day view shows the SAME
+        // activities the user just saw on the month grid. Previously this used
+        // AppDataStore.getAll('activities'), which served whatever happened to
+        // be in the SWR cache and could miss public events / co-agent invites
+        // — producing a "Total Activities 4" stat that didn't match the 10
+        // chips visible in the month cell the user just tapped.
+        const visibleIdsDV = await getVisibleUserIds(_currentUser);
+        const actQueryOptsDV = {
+            gte: { activity_date: todayStr },
+            lte: { activity_date: todayStr },
+            sort: 'start_time',
+            sortDir: 'asc',
+            limit: 5000,
+            offset: 0,
+            countMode: null,
+            filters: {},
+        };
+        if (!isSystemAdmin(_currentUser) && _filters?.agent && _filters.agent !== 'all') {
+            actQueryOptsDV.filters.lead_agent_id = _filters.agent;
+        }
+        if (_filters?.type && _filters.type !== 'all') {
+            actQueryOptsDV.filters.activity_type = _filters.type;
+        }
+        if (!isSystemAdmin(_currentUser) && visibleIdsDV !== 'all') {
+            actQueryOptsDV.scopeFields = [
+                { field: 'lead_agent_id', values: visibleIdsDV },
+                { field: 'visibility', values: ['open', 'public'] }
+            ];
+        }
+        const needsCoAgentMergeDV = !isSystemAdmin(_currentUser) && _currentUser?.id != null;
+        const [actResultDV, allProspectsDV, allCustomersDV, allUsersDV, coAgentRowsDV] = await Promise.all([
+            AppDataStore.queryAdvanced('activities', actQueryOptsDV),
             AppDataStore.getAll('prospects'),
             AppDataStore.getAll('customers'),
             AppDataStore.getAll('users'),
+            needsCoAgentMergeDV ? _fetchActivitiesAsCoAgent(todayStr, todayStr) : Promise.resolve([]),
         ]);
-        const dayActivities = (allActivitiesDV || []).filter(a => a.activity_date === todayStr);
+        let rawActivitiesDV = actResultDV.data || [];
+        if (coAgentRowsDV && coAgentRowsDV.length > 0) {
+            const seen = new Set(rawActivitiesDV.map(a => String(a.id)));
+            for (const a of coAgentRowsDV) {
+                if (!seen.has(String(a.id)) && a.activity_date === todayStr) {
+                    seen.add(String(a.id));
+                    rawActivitiesDV.push(a);
+                }
+            }
+        }
+        // Dedupe identical EVENT activities at the same slot (matches month grid).
+        const dayActivities = [];
+        const seenEventSlotsDV = new Set();
+        for (const a of rawActivitiesDV) {
+            if (a.activity_type === 'EVENT' && a.event_id) {
+                const slotKey = `${a.event_id}|${a.start_time || ''}|${a.end_time || ''}`;
+                if (seenEventSlotsDV.has(slotKey)) continue;
+                seenEventSlotsDV.add(slotKey);
+            }
+            dayActivities.push(a);
+        }
+        dayActivities.sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
         const prospectMapDV = new Map((allProspectsDV || []).map(p => [String(p.id), p]));
         const customerMapDV = new Map((allCustomersDV || []).map(c => [String(c.id), c]));
         const userMapDV = new Map((allUsersDV || []).map(u => [String(u.id), u]));
@@ -20145,8 +20216,11 @@ function _wireLoginBtn() {
                 AppDataStore.getAll('event_registrations'),
                 AppDataStore.getAll('events'),
             ]);
+            const VALID_REG_STATUSES_C = new Set(['Registered', 'Attended', 'No Show']);
             const registrations = (allRegs || []).filter(
-                r => r.attendee_type === 'customer' && r.attendee_id == customerId
+                r => r.attendee_type === 'customer'
+                    && r.attendee_id == customerId
+                    && VALID_REG_STATUSES_C.has(r.attendance_status)
             );
             const eventsById = new Map((allEvents || []).map(e => [String(e.id), e]));
             let html = '<h4>Events Attended</h4>';
@@ -20237,8 +20311,11 @@ function _wireLoginBtn() {
                 AppDataStore.getAll('event_registrations'),
                 AppDataStore.getAll('events'),
             ]);
+            const VALID_REG_STATUSES_C2 = new Set(['Registered', 'Attended', 'No Show']);
             const registrations = (allRegs || []).filter(
-                r => r.attendee_type === 'customer' && r.attendee_id == customerId
+                r => r.attendee_type === 'customer'
+                    && r.attendee_id == customerId
+                    && VALID_REG_STATUSES_C2.has(r.attendance_status)
             );
             const eventsById = new Map((allEvents || []).map(e => [String(e.id), e]));
             if (registrations.length === 0) {
@@ -21405,8 +21482,11 @@ function _wireLoginBtn() {
                     && (a.activity_type !== 'EVENT' || !a.event_id || validEventIds.has(String(a.event_id)))
             ).sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
 
+            const VALID_REG_STATUSES = new Set(['Registered', 'Attended', 'No Show']);
             const registrations = (allRegs || []).filter(
-                r => r.attendee_type === 'prospect' && r.attendee_id == prospectId
+                r => r.attendee_type === 'prospect'
+                    && r.attendee_id == prospectId
+                    && VALID_REG_STATUSES.has(r.attendance_status)
             );
 
             const typeIcon = { EVENT: 'fa-calendar-star', AGENT_MEETING: 'fa-handshake', AGENT_TRAINING: 'fa-graduation-cap', SITE: 'fa-map-marker-alt' };
