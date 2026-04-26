@@ -23961,15 +23961,69 @@ NOTIFY pgrst, 'reload schema';`;
         await _refreshFengShuiTab(prospectId);
     };
 
+    // Mirror a prospect's closing_record back onto its linked activity row so
+    // the calendar's "✓ CLOSED" badge (and anything else keyed on
+    // activities.closing_amount) shows up regardless of which path the agent
+    // used to record the sale. The Meeting Outcome flow already writes the
+    // activity directly; this covers the DC Closing Record tab path, which
+    // otherwise only touches prospect.closing_record.
+    // Picks an activity already flagged as the closing one if present;
+    // otherwise falls back to the most recent meeting activity for the
+    // prospect (CPS/FTF/FSA/EVENT).
+    const _mirrorCrToActivity = async (prospectId, cr) => {
+        if (!prospectId || !cr) return;
+        const saleAmount = parseFloat(cr.sale_amount) || 0;
+        if (saleAmount <= 0) return;
+
+        let acts = [];
+        try { acts = await AppDataStore.query('activities', { prospect_id: prospectId }); }
+        catch (_) { return; }
+        if (!Array.isArray(acts) || !acts.length) return;
+
+        const meetingTypes = new Set(['CPS', 'FTF', 'FSA', 'EVENT']);
+        const meetings = acts.filter(a => meetingTypes.has(a.activity_type));
+        if (!meetings.length) return;
+
+        const sortByRecency = (a, b) => {
+            const ka = `${a.activity_date || ''} ${a.start_time || ''}`;
+            const kb = `${b.activity_date || ''} ${b.start_time || ''}`;
+            return kb.localeCompare(ka);
+        };
+        const flagged = meetings.filter(a => a.is_closing || (parseFloat(a.closing_amount) || 0) > 0);
+        const target = (flagged.length ? flagged : meetings).sort(sortByRecency)[0];
+        if (!target) return;
+
+        const updates = {
+            is_closing: true,
+            solution_sold: cr.product || target.solution_sold || '',
+            amount_closed: saleAmount,
+            closing_amount: saleAmount,
+        };
+        if (cr.payment_method) updates.payment_method = cr.payment_method;
+        if (cr.invoice_number) updates.invoice_number = cr.invoice_number;
+        if (cr.closing_date)   updates.collection_date = cr.closing_date;
+        if (cr.order_date)     updates.order_date = cr.order_date;
+        if (cr.payment_method === 'POP') {
+            if (cr.pop_monthly) updates.pop_monthly_amount = cr.pop_monthly;
+            if (cr.pop_tenure)  updates.pop_tenure = cr.pop_tenure;
+            if (cr.pop_down)    updates.pop_down_payment = cr.pop_down;
+        }
+
+        try { await AppDataStore.update('activities', target.id, updates); }
+        catch (e) { console.warn('mirror closing_record → activity failed:', e); }
+    };
+
     const saveClosingRecord = async (prospectId) => {
         const prospect = await AppDataStore.getById('prospects', prospectId);
         const existingCr = prospect?.closing_record || {};
         const data = await gatherClosingFormData(existingCr);
         if (!data.full_name) return UI.toast.error('Full name is required');
         // Spread existingCr first so fields like pre2025_purchases survive a draft re-save.
+        const mergedCr = { ...existingCr, ...data, status: 'draft' };
         await AppDataStore.update('prospects', prospectId, {
-            closing_record: { ...existingCr, ...data, status: 'draft' }
+            closing_record: mergedCr
         });
+        await _mirrorCrToActivity(prospectId, mergedCr);
         UI.toast.success('Draft saved');
         const bodyEl = document.getElementById(`acc-body-closing-${prospectId}`);
         if (bodyEl) await switchProspectTab('closing', prospectId, null, bodyEl);
@@ -24000,8 +24054,9 @@ NOTIFY pgrst, 'reload schema';`;
 
         const saleAmount = parseFloat(data.sale_amount) || 0;
         const isAlreadyConverted = prospect.status === 'converted' || prospect.conversion_status === 'approved';
+        const submittedCr = { ...existingCr, ...data, status: 'submitted', submitted_at: new Date().toISOString() };
         const updates = {
-            closing_record: { ...existingCr, ...data, status: 'submitted', submitted_at: new Date().toISOString() }
+            closing_record: submittedCr
         };
 
         // Auto-trigger conversion approval only for first-time conversions
@@ -24012,6 +24067,7 @@ NOTIFY pgrst, 'reload schema';`;
         }
 
         await AppDataStore.update('prospects', prospectId, updates);
+        await _mirrorCrToActivity(prospectId, submittedCr);
 
         // Create approval queue entries for non-managers
         const isManager = isSystemAdmin(_currentUser) || isMarketingManager(_currentUser);
