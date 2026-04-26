@@ -14031,7 +14031,7 @@ function _wireLoginBtn() {
                             : ``
                         }
                         <button class="act-action-btn act-btn-edit" onclick="app.editActivityTiming(${activityId})"><span class="act-icon"><i class="fas fa-pen"></i></span><span class="act-label">Edit</span></button>
-                        <button class="act-action-btn act-btn-outcome" onclick="(async () => { await app.openMeetingOutcomeModal(${activityId}); })()"><span class="act-icon"><i class="fas fa-clipboard-check"></i></span><span class="act-label">Outcome</span></button>
+                        ${activity.activity_type !== 'EVENT' && activity.prospect_id ? `<button class="act-action-btn act-btn-outcome" onclick="(async () => { await app.openMeetingOutcomeModal(${activityId}); })()"><span class="act-icon"><i class="fas fa-clipboard-check"></i></span><span class="act-label">Outcome</span></button>` : ''}
                         ${activity.prospect_id ? `<button class="act-action-btn act-btn-notes" onclick="(async () => { await app.openPostMeetupNotesModal(${activityId}, ${activity.prospect_id}); })()"><span class="act-icon"><i class="fas fa-sticky-note"></i></span><span class="act-label">Notes</span></button>` : ''}
                         <button class="act-action-btn act-action-delete" onclick="(async () => { await app.deleteActivity(${activityId}); })()"><i class="fas fa-trash-alt"></i> Delete</button>
                     </div>
