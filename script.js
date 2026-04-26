@@ -12091,9 +12091,13 @@ function _wireLoginBtn() {
         const userMap = new Map(allUsers.map(u => [String(u.id), u]));
         const eventMap = new Map(allEvents.map(e => [String(e.id), e]));
 
-        let activities = rawActivities.filter(a =>
-            a.activity_type !== 'EVENT' || !a.event_id || eventIds.has(String(a.event_id))
-        );
+        // If allEvents is empty it means SWR hasn't loaded yet — skip the orphan
+        // filter rather than hiding valid EVENT activities on cold sessions.
+        let activities = allEvents.length === 0
+            ? rawActivities
+            : rawActivities.filter(a =>
+                a.activity_type !== 'EVENT' || !a.event_id || eventIds.has(String(a.event_id))
+              );
 
         // Phase 21: Case Status filter (Closed/Open) — must stay client-side (computed)
         if (_filters.caseStatus === 'closed') {
