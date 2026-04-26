@@ -18769,9 +18769,15 @@ function _wireLoginBtn() {
         const latestActivityByProspect = new Map();
         const userById = new Map(allUsers.map(u => [String(u.id), u]));
 
-        // ── Populate agent filter dropdown (agents visible to current user) ──
+        // ── Populate agent filter dropdown (lazy — only when panel is open) ──
+        // Rebuilding a 1000-option <select> on every render is expensive DOM
+        // work. Skip it when the filter panel is hidden; populate on first open
+        // via the panel toggle onclick, and mark it hydrated so we don't redo
+        // it on the next render unless the user list actually changed.
         const agentFilterEl = document.getElementById('filter-agent');
-        if (agentFilterEl) {
+        const filterPanelOpen = document.getElementById('prospect-adv-filters')?.style.display !== 'none';
+        const agentDropdownStale = agentFilterEl && !agentFilterEl.dataset.hydrated;
+        if (agentFilterEl && (filterPanelOpen || agentDropdownStale)) {
             const currentAgentVal = agentFilterEl.value;
             const visibleAgents = allUsers.filter(u => {
                 const lvl = _getUserLevel(u);
@@ -18779,6 +18785,7 @@ function _wireLoginBtn() {
             }).sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''));
             agentFilterEl.innerHTML = '<option value="">All Agents</option>' +
                 visibleAgents.map(a => `<option value="${a.id}"${String(a.id) === currentAgentVal ? ' selected' : ''}>${a.full_name || 'Agent'}</option>`).join('');
+            agentFilterEl.dataset.hydrated = '1';
         }
 
         const _userLvlMatch = _currentUser?.role?.match(/Level\s+(\d+)/i);
@@ -18921,6 +18928,19 @@ function _wireLoginBtn() {
         }
 
         tbody.innerHTML = html;
+
+        // ── Instagram-style next-page prefetch ─────────────────────────────
+        // While the user reads page N, silently warm the activity cache for
+        // page N+1 so clicking "Next" feels instant. Fire-and-forget with a
+        // 300 ms delay to stay off the critical render path.
+        const nextPageStart = (pageStart + _prospectPageSize);
+        const nextPageProspects = filtered.slice(nextPageStart, nextPageStart + _prospectPageSize);
+        if (nextPageProspects.length > 0) {
+            setTimeout(() => {
+                AppDataStore.getLatestActivitiesForProspects(nextPageProspects.map(p => p.id))
+                    .catch(() => {});
+            }, 300);
+        }
 
         // ── Dormancy info line ──
         // Tells the user why some records might not be visible, and offers a
@@ -35632,13 +35652,25 @@ const simulateCampaignSending = async (campaignId) => {
     };
 
     const quickReassign = async (prospectId, newAgentId) => {
+        // Optimistic UI: the <select> already shows the new agent the moment
+        // the user changes it. We read fromAgentId from the in-memory cache
+        // (no extra network round-trip), fire the DB writes in the background,
+        // and only revert the dropdown if something fails.
+        newAgentId = parseInt(newAgentId);
+        if (!prospectId || !newAgentId) return;
+
+        // Pull fromAgentId from cache — avoids a blocking getById round-trip.
+        const cachedProspect = (AppDataStore._cacheGet('__prospects_active_500') || [])
+            .find(p => String(p.id) === String(prospectId));
+        const fromAgentId = cachedProspect?.responsible_agent_id;
+        if (fromAgentId != null && String(fromAgentId) === String(newAgentId)) return;
+
+        // Show toast optimistically using the agent name already in the dropdown.
+        const selectEl = document.querySelector(`select[onchange*="quickReassign(${prospectId}"]`);
+        const optimisticName = selectEl?.options[selectEl.selectedIndex]?.text || 'Agent';
+        UI.toast.success(`Reassigned to ${optimisticName}`);
+
         try {
-            newAgentId = parseInt(newAgentId);
-            if (!prospectId || !newAgentId) return;
-            const prospect = await AppDataStore.getById('prospects', prospectId);
-            if (!prospect) { UI.toast.error('Prospect not found'); return; }
-            const fromAgentId = prospect.responsible_agent_id;
-            if (fromAgentId == newAgentId) return;
             await AppDataStore.update('prospects', prospectId, { responsible_agent_id: newAgentId });
             await AppDataStore.create('reassignment_history', {
                 prospect_id: prospectId,
@@ -35650,9 +35682,9 @@ const simulateCampaignSending = async (campaignId) => {
                 reason_notes: 'Quick reassign from table',
                 created_at: new Date().toISOString()
             });
-            const newAgent = await AppDataStore.getById('users', newAgentId);
-            UI.toast.success(`Reassigned to ${newAgent?.full_name || 'Agent'}`);
         } catch (err) {
+            // Revert the dropdown to previous value on failure.
+            if (selectEl && fromAgentId != null) selectEl.value = String(fromAgentId);
             UI.toast.error('Reassignment failed: ' + err.message);
         }
     };

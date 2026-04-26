@@ -107,6 +107,17 @@ class DataStore {
             // exportData to silently return zero rows. The new fallback in
             // getAllPaged retries with '*' if this list goes stale again.
             prospects: 'id,full_name,nickname,title,gender,nationality,phone,email,ic_number,date_of_birth,lunar_birth,ming_gua,element,occupation,company_name,income_range,address,city,state,postal_code,responsible_agent_id,cps_agent_id,cps_assignment_date,protection_deadline,pipeline_stage,deal_value,expected_close_date,status,referred_by,referred_by_id,referred_by_type,referral_relationship,cps_invitation_method,cps_invitation_details,cps_attachment,score,tags,notes,created_at,updated_at,cps_form_date,cps_form_name,closing_record,closing_records_history,conversion_status,conversion_requested_by,conversion_rejected_by,conversion_rejected_at,closed_at,closed_date,closing_date,potential_level,close_probability,is_own_business,business_name,business_industry,business_area,business_title_role,business_started,company_size,pre2025_purchases,original_source,source_id,source,lead_agent_id,cps_interest,manual_grade,feng_shui_audits,last_activity_date',
+            // Lean variant for the Prospects LIST view only. Enough to render
+            // every column, run all client-side filters, and drive the SWR
+            // cache. ~75% fewer columns than the full prospects select.
+            // Detail view always uses getById('prospects', id) which sends
+            // select=* and gets every column including those omitted here.
+            prospects_listing: 'id,full_name,nickname,phone,email,ming_gua,score,occupation,company_name,responsible_agent_id,status,conversion_status,last_activity_date,protection_deadline,manual_grade,tags',
+            // Lean users select — covers every use-case in list views:
+            // hierarchy traversal (reporting_to, team_id), role checks,
+            // agent name display, reassign dropdowns. Profile/edit views
+            // call getById which gets *.
+            users: 'id,full_name,email,phone,role,status,team_id,reporting_to,created_at,updated_at,agent_code,hire_date',
             // Activities: verified against actual DB schema 2026-04-16.
             // Excludes: consultants (JSONB blob), payment detail columns,
             // long discussion_summary field — only needed in detail/edit view.
@@ -1445,16 +1456,27 @@ class DataStore {
 
         const cutoff = new Date(Date.now() - dormantDays * 86400000)
             .toISOString().slice(0, 10); // YYYY-MM-DD
-        const selectClause = this._selectClauseForGetAll('prospects');
+        // Use the lean listing select — only the 16 columns the list view
+        // needs. ~75% fewer bytes over the wire vs. the full 60-column select.
+        // Falls back to full prospects select, then '*', on stale-column 400.
+        const listingSelect = this._lightSelects['prospects_listing'];
+        const fullSelect    = this._lightSelects['prospects'] || '*';
 
         try {
             let { data, error } = await this._readClient()
                 .from('prospects')
-                .select(selectClause)
+                .select(listingSelect)
                 .gte('last_activity_date', cutoff)
                 .limit(limit);
-            // Retry with '*' if light-select column list has gone stale
-            if (error && selectClause !== '*') {
+            if (error && listingSelect !== fullSelect) {
+                ({ data, error } = await this._readClient()
+                    .from('prospects')
+                    .select(fullSelect)
+                    .gte('last_activity_date', cutoff)
+                    .limit(limit));
+            }
+            // Final fallback: bare * so nothing is blocked by a stale column list
+            if (error && fullSelect !== '*') {
                 ({ data, error } = await this._readClient()
                     .from('prospects')
                     .select('*')
@@ -1559,6 +1581,7 @@ class DataStore {
             sortDir: 'desc',
             limit,
             countMode: null, // skip count — just want rows
+            select: this._lightSelects['prospects_listing'], // lean, same as listing view
         };
         if (!includeDormant) {
             const cutoff = new Date(Date.now() - dormantDays * 86400000)
