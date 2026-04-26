@@ -12241,10 +12241,18 @@ function _wireLoginBtn() {
         let drafts = [];
         try {
             const all = await AppDataStore.getAll('follow_up_drafts');
-            const todayStr = new Date().toISOString().split('T')[0];
+            const _now = new Date();
+            const _yR = _now.getFullYear();
+            const _mR = String(_now.getMonth() + 1).padStart(2, '0');
+            const _dR = String(_now.getDate()).padStart(2, '0');
+            const todayStr = `${_yR}-${_mR}-${_dR}`;
             drafts = (all || []).filter(d =>
                 d.status === 'pending' &&
                 d.due_date <= todayStr &&
+                // Hide event invites whose event has already happened — the
+                // invite is moot once the date passes. Non-event reminders
+                // (no event_date) are unaffected.
+                (!d.event_date || d.event_date >= todayStr) &&
                 (!d.agent_id || d.agent_id == _currentUser?.id)
             ).sort((a, b) => (a.due_date || '').localeCompare(b.due_date || ''));
         } catch (e) {
@@ -12274,14 +12282,6 @@ function _wireLoginBtn() {
                 </div>
                 <div style="display:flex; flex-direction:column; gap:10px;">
                     ${drafts.map(d => {
-                        const phone = (d.phone || '').replace(/\D/g, '');
-                        const waPhone = phone.startsWith('0') ? '60' + phone.slice(1) : phone;
-                        // Append attachment URL to WhatsApp message if present (auto-preview on WA)
-                        let waMessage = d.message_text || '';
-                        if (d.attachment_url && !waMessage.includes(d.attachment_url)) {
-                            waMessage += '\n\n' + d.attachment_url;
-                        }
-                        const waUrl = `https://wa.me/${waPhone}?text=${encodeURIComponent(waMessage)}`;
                         const thumbHtml = d.attachment_url
                             ? `<img loading="lazy" decoding="async" data-attach-src="${escapeHtml(d.attachment_url)}" alt="Attachment" style="width:48px; height:48px; border-radius:6px; object-fit:cover; cursor:pointer; border:1px solid var(--gray-200); flex-shrink:0;" onclick="event.stopPropagation(); window._openAttachment('${escapeHtml(d.attachment_url)}');" title="Click to view full image">`
                             : '';
@@ -12297,10 +12297,9 @@ function _wireLoginBtn() {
                                     ${d.event_name ? `<span style="font-size:11px; color:var(--gray-500,#6b7280);">${d.event_name}${d.event_date ? ' — ' + d.event_date : ''}</span>` : ''}
                                     ${d.attachment_url ? '<span style="font-size:11px; background:#dcfce7; color:#059669; padding:2px 8px; border-radius:10px;"><i class="fas fa-paperclip"></i> Photo</span>' : ''}
                                 </div>
-                                <div style="font-size:12px; color:var(--gray-600,#4b5563); white-space:pre-wrap; max-height:60px; overflow:hidden; text-overflow:ellipsis; line-height:1.4;">${(d.message_text || '').slice(0, 200)}${(d.message_text || '').length > 200 ? '...' : ''}</div>
                             </div>
                             <div style="display:flex; gap:6px; flex-shrink:0;">
-                                <button class="btn primary btn-sm" onclick="event.stopPropagation(); window.open('${waUrl}', '_blank');" style="font-size:12px; padding:6px 12px; white-space:nowrap;">
+                                <button class="btn primary btn-sm" onclick="event.stopPropagation(); (async () => { await app.sendFollowUpInvite(${d.id}); })();" style="font-size:12px; padding:6px 12px; white-space:nowrap;">
                                     <i class="fab fa-whatsapp"></i> Send
                                 </button>
                                 <button class="btn secondary btn-sm" onclick="event.stopPropagation(); app.dismissFollowUp(${d.id});" style="font-size:12px; padding:6px 8px;" title="Dismiss">
@@ -12362,6 +12361,51 @@ function _wireLoginBtn() {
         } catch (e) {
             UI.toast.error('Failed to dismiss');
         }
+    };
+
+    // Build the WhatsApp invite text from the LIVE event row at click time, so
+    // edits to the event description/venue/time after the draft was created
+    // are picked up. The draft's stored message_text is used only as a fallback
+    // when no event_id is set (e.g. birthday triggers, manual drafts).
+    const sendFollowUpInvite = async (draftId) => {
+        const draft = await AppDataStore.getById('follow_up_drafts', draftId);
+        if (!draft) { UI.toast.error('Reminder not found'); return; }
+
+        const phone = (draft.phone || '').replace(/\D/g, '');
+        if (!phone) { UI.toast.error('No phone number on this contact'); return; }
+        const waPhone = phone.startsWith('0') ? '60' + phone.slice(1) : phone;
+
+        let body;
+        if (draft.event_id) {
+            const event = await AppDataStore.getById('events', draft.event_id);
+            const title = event?.event_title || event?.title || draft.event_name || '';
+            const date = (event?.event_date || event?.date || draft.event_date || '').toString();
+            const startT = (event?.start_time || '').toString().slice(0, 5);
+            const endT = (event?.end_time || '').toString().slice(0, 5);
+            const time = startT && endT ? `${startT} - ${endT}` : startT;
+            const venue = event?.location || '';
+            const description = event?.description || '';
+            const ticketPrice = event?.ticket_price ? `RM ${event.ticket_price}` : '';
+            const E = { sparkle: '✨', calendar: '\u{1F4C5}', clock: '\u{1F550}', pin: '\u{1F4CD}', ticket: '\u{1F39F}️' };
+            const lines = [];
+            if (draft.prospect_name) lines.push(`Hi ${draft.prospect_name},`, '');
+            lines.push(`${E.sparkle} *${title || 'You are invited!'}* ${E.sparkle}`, '');
+            if (date) lines.push(`${E.calendar} Date: ${date}`);
+            if (time) lines.push(`${E.clock} Time: ${time}`);
+            if (venue) lines.push(`${E.pin} Venue: ${venue}`);
+            if (ticketPrice) lines.push(`${E.ticket} Ticket Price: ${ticketPrice}`);
+            if (description) lines.push('', description);
+            if (_currentUser?.full_name) lines.push('', `— ${_currentUser.full_name}`);
+            body = lines.join('\n');
+        } else {
+            body = draft.message_text || '';
+        }
+        if (draft.attachment_url && !body.includes(draft.attachment_url)) {
+            body += '\n\n' + draft.attachment_url;
+        }
+
+        const url = `https://wa.me/${waPhone}?text=${encodeURIComponent(body)}`;
+        window.open(url, '_blank');
     };
 
     // ── Pending Proposals widget — shown on calendar page below follow-up reminders ──
@@ -44678,6 +44722,7 @@ JB 星期二到
         renderFollowUpReminders,
         markFollowUpSent,
         dismissFollowUp,
+        sendFollowUpInvite,
         dispatchAfterCpsTriggers,
         dispatchOnNewCalendarEvent,
         dispatchOnEventAttendanceTriggers,
