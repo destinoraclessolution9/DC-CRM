@@ -1023,3 +1023,24 @@ table td.num, table td.id, .mono { font-family: var(--font-mono); }
         transition-duration: 0.01ms !important;
     }
 }
+
+/* ---------- Pipeline Management page fonts ---------- */
+.pipeline-dual-view,
+.pipeline-dual-view p,
+.pipeline-dual-view td,
+.pipeline-dual-view th,
+.pipeline-dual-view select,
+.pipeline-dual-view button,
+.pipeline-dual-view label,
+.pipeline-dual-view span {
+    font-family: var(--font-body);
+}
+.pipeline-dual-view h1,
+.pipeline-dual-view h2,
+.pipeline-dual-view h3,
+.pipeline-dual-view h4,
+.action-plan-section h2,
+.action-plan-section h3,
+.action-plan-section h4 {
+    font-family: var(--font-display);
+}
