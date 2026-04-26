@@ -14171,7 +14171,7 @@ function _wireLoginBtn() {
                             <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
                                 <input type="checkbox" ${unattendedChecked} onchange="app.toggleAttendeeUnattended(${att.id}, this.checked, ${entityId}, '${att.attendee_type}', ${activity.event_id}, '${activity.activity_date}')"> Unattended
                             </label>
-                            ${entityId ? `<button class="btn btn-sm secondary" onclick="(async()=>{ await app.openPostMeetupNotesModal(${activityId}, ${entityId}); })()">Post Event</button>` : ''}
+                            ${entityId ? `<button class="btn btn-sm secondary" onclick="(async()=>{ await app.openAttendeePostEventModal(${att.id}, ${activityId}, ${entityId}); })()">Post Event</button>` : ''}
                         </div>
                     </div>
                 `;
@@ -14943,6 +14943,153 @@ function _wireLoginBtn() {
         }
     };
 
+    // ──────────────────────────────────────────────────────────────────────
+    // PER-ATTENDEE POST-EVENT NOTES (event_attendees row)
+    //
+    // The event activity row has ONE prospect_id, but events have many
+    // attendees. Saving post-event notes onto the activity makes them
+    // invisible on every attendee's profile except the activity owner,
+    // and lets attendees overwrite each other's notes. These helpers route
+    // Post Event saves to the event_attendees row keyed by (activity_id,
+    // entity_id) so each attendee owns their own note bundle and the
+    // prospect profile can surface it.
+    const openAttendeePostEventModal = async (attendeeId, activityId, prospectId) => {
+        const attendee = await AppDataStore.getById('event_attendees', attendeeId);
+        if (!attendee) { UI.toast.error('Attendee not found'); return; }
+        const activity = await AppDataStore.getById('activities', activityId) || {};
+
+        const [products, bujishu, formula, events] = await Promise.all([
+            AppDataStore.getAll('products').then(r => r.filter(p => p.is_active !== false)),
+            AppDataStore.getAll('bujishu').then(r => r.filter(b => b.is_active !== false)),
+            AppDataStore.getAll('formula').then(r => r.filter(f => f.is_active !== false)),
+            AppDataStore.getAll('events').then(r => r.filter(e => e.is_active !== false && e.status !== 'inactive')),
+        ]);
+
+        // Pre-populate from the attendee row (per-person notes), not the
+        // activity. Inherit event_id/title/date from the parent so the
+        // event-checkbox group still renders contextually.
+        const seedActivity = {
+            ...activity,
+            note_key_points: attendee.note_key_points || '',
+            note_needs: attendee.note_needs || '',
+            note_pain_points: attendee.note_pain_points || '',
+            opportunity_potential: attendee.opportunity_potential || '',
+            next_action: attendee.next_action || '',
+            summary: attendee.summary || '',
+        };
+
+        const attendeeName = attendee.entity_name || 'Attendee';
+        const content = buildPostMeetupNotesBlock('pmn', seedActivity, { products, bujishu, formula, events });
+        UI.showModal(`📝 Post-Event Notes — ${escapeHtml(attendeeName)}`, content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save', type: 'primary', action: `(async () => { await app.saveAttendeePostEventNotes(${attendeeId}, ${activityId}, ${prospectId}); })()` }
+        ]);
+    };
+
+    const saveAttendeePostEventNotes = async (attendeeId, activityId, prospectId) => {
+        const fields = collectPostMeetupNotesData('pmn');
+        const updates = {
+            note_key_points: fields.note_key_points,
+            note_needs: fields.note_needs,
+            note_pain_points: fields.note_pain_points,
+            opportunity_potential: fields.opportunity_potential,
+            next_action: fields.next_action,
+            summary: fields.summary,
+            post_event_updated_at: new Date().toISOString(),
+            post_event_updated_by: _currentUser?.id || null,
+        };
+
+        const sb = window.supabase || window.supabaseClient;
+        let writeOk = false;
+        if (sb) {
+            try {
+                const { error } = await sb.from('event_attendees').update(updates).eq('id', attendeeId);
+                if (error) console.warn('saveAttendeePostEventNotes update failed:', error);
+                else writeOk = true;
+            } catch (e) {
+                console.warn('saveAttendeePostEventNotes threw:', e);
+            }
+        }
+        if (!writeOk) {
+            try {
+                await AppDataStore.update('event_attendees', attendeeId, updates);
+                writeOk = true;
+            } catch (e) {
+                console.warn('AppDataStore.update fallback failed:', e);
+            }
+        }
+        if (!writeOk) {
+            UI.toast.error('Failed to save notes — please try again');
+            return;
+        }
+
+        AppDataStore.invalidateCache('event_attendees');
+
+        UI.hideModal();
+        UI.toast.success('Post-event notes saved');
+
+        if (prospectId) {
+            await showProspectDetail(prospectId);
+            setTimeout(async () => {
+                for (const tab of ['potential', 'nextactions']) {
+                    const itemEl = document.getElementById(`acc-${tab}-${prospectId}`);
+                    const bodyEl = document.getElementById(`acc-body-${tab}-${prospectId}`);
+                    if (itemEl && bodyEl && !itemEl.classList.contains('open')) {
+                        itemEl.classList.add('open');
+                        bodyEl.style.display = 'block';
+                        if (bodyEl.dataset.loaded === 'false') {
+                            bodyEl.dataset.loaded = 'true';
+                            await switchProspectTab(tab, prospectId, null, bodyEl);
+                        }
+                    }
+                }
+                document.getElementById(`acc-potential-${prospectId}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }, 400);
+        }
+    };
+
+    // Returns activity-shaped records for every event_attendees row that
+    // captures post-event notes for this prospect. Lets the prospect
+    // profile read sites (meetup history modal, potential / nextactions /
+    // events tabs) merge attendee-side notes alongside activity-owner
+    // notes without rewriting their render code.
+    const getProspectAttendeeNotes = async (prospectId) => {
+        if (!prospectId) return [];
+        const allAttendees = await AppDataStore.getAll('event_attendees');
+        const myRows = allAttendees.filter(a =>
+            String(a.entity_id || a.attendee_id) === String(prospectId) &&
+            (a.attendee_type || 'prospect') === 'prospect' &&
+            (a.note_key_points || a.note_needs || a.note_pain_points ||
+             a.opportunity_potential || a.next_action || a.summary)
+        );
+        if (myRows.length === 0) return [];
+        const allActivities = await AppDataStore.getAll('activities');
+        const byId = new Map(allActivities.map(a => [String(a.id), a]));
+        return myRows.map(att => {
+            const parent = byId.get(String(att.activity_id)) || {};
+            return {
+                // Synthetic ID — never collides with real activity IDs so the
+                // 'nextactions' tab's per-item keys (`${a.id}_na`) stay unique
+                // even when the prospect both hosted and attended the same event.
+                id: `att${att.id}`,
+                _parentActivityId: parent.id || att.activity_id,
+                _attendeeRowId: att.id,
+                _isAttendeeNote: true,
+                activity_type: parent.activity_type || 'EVENT',
+                activity_title: parent.activity_title || '',
+                activity_date: parent.activity_date || (att.created_at ? String(att.created_at).slice(0, 10) : ''),
+                event_id: parent.event_id || att.event_id,
+                prospect_id: prospectId,
+                note_key_points: att.note_key_points || '',
+                note_needs: att.note_needs || '',
+                note_pain_points: att.note_pain_points || '',
+                opportunity_potential: att.opportunity_potential || '',
+                next_action: att.next_action || '',
+                summary: att.summary || '',
+            };
+        });
+    };
+
     const editActivity = async (activityId) => {
         const activity = await AppDataStore.getById('activities', activityId);
         if (!activity) return;
@@ -15001,9 +15148,11 @@ function _wireLoginBtn() {
         const prospect = await AppDataStore.getById('prospects', prospectId);
         if (!prospect) { UI.toast.error('Prospect not found'); return; }
         const MEETUP_TYPES = ['CPS','FTF','FSA','GR','XG','CALL','EMAIL','WHATSAPP'];
-        const activities = (await AppDataStore.getAll('activities'))
-            .filter(a => a.prospect_id == prospectId && MEETUP_TYPES.includes(a.activity_type))
-            .sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date) || b.id - a.id);
+        const ownActivities = (await AppDataStore.getAll('activities'))
+            .filter(a => a.prospect_id == prospectId && MEETUP_TYPES.includes(a.activity_type));
+        const attendeeNotes = await getProspectAttendeeNotes(prospectId);
+        const activities = [...ownActivities, ...attendeeNotes]
+            .sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date) || (b.id || 0) - (a.id || 0));
 
         const fmt = (txt) => txt ? escapeHtml(txt).replace(/\n/g, '<br>') : '';
         const section = (label, text) => text
@@ -15014,14 +15163,20 @@ function _wireLoginBtn() {
             ? '<p style="text-align:center;padding:24px;color:var(--gray-400);">No meet-up history recorded yet.</p>'
             : activities.map(a => {
                 const hasAnyNote = a.note_key_points || a.note_needs || a.note_pain_points || a.opportunity_potential || a.next_action || a.summary;
+                const editHandler = a._isAttendeeNote
+                    ? `UI.hideModal();app.openAttendeePostEventModal(${a._attendeeRowId}, ${a._parentActivityId}, ${prospectId})`
+                    : `UI.hideModal();app.openPostMeetupNotesModal(${a.id}, ${prospectId})`;
+                const sourceTag = a._isAttendeeNote
+                    ? `<span style="font-size:10px;background:var(--gray-100);color:var(--gray-600);padding:1px 6px;border-radius:10px;margin-left:6px;">attended</span>`
+                    : '';
                 return `
                     <div style="border:1px solid var(--gray-200);border-radius:8px;padding:12px 14px;margin-bottom:10px;background:#fff;">
                         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
                             <div>
-                                <div style="font-weight:600;font-size:14px;"><i class="fas fa-user-friends" style="color:var(--primary);"></i> ${escapeHtml(a.activity_type || 'Meeting')}${a.activity_title ? ' — ' + escapeHtml(a.activity_title) : ''}</div>
+                                <div style="font-weight:600;font-size:14px;"><i class="fas fa-user-friends" style="color:var(--primary);"></i> ${escapeHtml(a.activity_type || 'Meeting')}${a.activity_title ? ' — ' + escapeHtml(a.activity_title) : ''}${sourceTag}</div>
                                 <div style="font-size:12px;color:var(--gray-500);margin-top:2px;">${escapeHtml(a.activity_date || '')}</div>
                             </div>
-                            <button class="btn btn-sm secondary" style="font-size:11px;padding:3px 8px;" onclick="UI.hideModal();app.openPostMeetupNotesModal(${a.id}, ${prospectId})"><i class="fas fa-edit"></i> Edit</button>
+                            <button class="btn btn-sm secondary" style="font-size:11px;padding:3px 8px;" onclick="${editHandler}"><i class="fas fa-edit"></i> Edit</button>
                         </div>
                         ${hasAnyNote ? `
                             ${section('Key Points', a.note_key_points || a.summary)}
@@ -21773,18 +21928,25 @@ function _wireLoginBtn() {
         }
         else if (tab === 'events') {
             const EVENT_TYPES = ['EVENT','AGENT_MEETING','AGENT_TRAINING','SITE'];
-            // Fetch events + registrations + per-prospect activities in parallel
-            const [allEvents, allRegs, _eventActs] = await Promise.all([
+            // Fetch events + registrations + per-prospect activities + attendee notes in parallel
+            const [allEvents, allRegs, _eventActs, _attendeeNotes] = await Promise.all([
                 AppDataStore.getAll('events'),
                 AppDataStore.getAll('event_registrations'),
                 AppDataStore.getActivitiesForProspect(prospectId, { limit: 500 }),
+                getProspectAttendeeNotes(prospectId),
             ]);
             const eventsById = new Map((allEvents || []).map(e => [String(e.id), e]));
             const validEventIds = new Set(eventsById.keys());
-            const activityEvents = _eventActs.filter(
+            const ownEvents = _eventActs.filter(
                 a => EVENT_TYPES.includes(a.activity_type)
                     && (a.activity_type !== 'EVENT' || !a.event_id || validEventIds.has(String(a.event_id)))
-            ).sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
+            );
+            // Drop attendee-notes whose parent activity is already in ownEvents
+            // (the prospect both hosted and attended) — the owner row wins.
+            const ownActivityIds = new Set(ownEvents.map(a => String(a.id)));
+            const attendeeEvents = _attendeeNotes.filter(a => !ownActivityIds.has(String(a._parentActivityId)));
+            const activityEvents = [...ownEvents, ...attendeeEvents]
+                .sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
 
             const VALID_REG_STATUSES = new Set(['Registered', 'Attended', 'No Show']);
             const registrations = (allRegs || []).filter(
@@ -21803,14 +21965,21 @@ function _wireLoginBtn() {
                 for (const a of activityEvents) {
                     const icon = typeIcon[a.activity_type] || 'fa-calendar';
                     const label = typeLabel[a.activity_type] || a.activity_type;
+                    const detailsId = a._isAttendeeNote ? a._parentActivityId : a.id;
+                    const notesBtn = a._isAttendeeNote
+                        ? `<button class="btn btn-sm secondary" onclick="event.stopPropagation();app.openAttendeePostEventModal(${a._attendeeRowId}, ${a._parentActivityId}, ${prospect.id})"><i class="fas fa-sticky-note"></i> Post Event Notes</button>`
+                        : `<button class="btn btn-sm secondary" onclick="event.stopPropagation();app.openPostMeetupNotesModal(${a.id}, ${prospect.id})"><i class="fas fa-sticky-note"></i> Post Event Notes</button>`;
+                    const sourceTag = a._isAttendeeNote
+                        ? `<span style="font-size:10px;background:var(--gray-100);color:var(--gray-600);padding:1px 6px;border-radius:10px;margin-left:6px;">attended</span>`
+                        : '';
                     html += `
                         <div class="meet-card" style="margin-bottom:10px;">
                             <div class="meet-card-hdr">
                                 <div>
-                                    <span class="meet-type"><i class="fas ${icon}"></i> ${label}${a.activity_title ? ' — ' + a.activity_title : ''}</span>
+                                    <span class="meet-type"><i class="fas ${icon}"></i> ${label}${a.activity_title ? ' — ' + a.activity_title : ''}${sourceTag}</span>
                                     <span class="meet-date">${a.activity_date || ''}</span>
                                 </div>
-                                <button class="btn btn-sm secondary" style="font-size:12px;padding:4px 8px;" onclick="event.stopPropagation();app.viewActivityDetails(${a.id})">Details</button>
+                                <button class="btn btn-sm secondary" style="font-size:12px;padding:4px 8px;" onclick="event.stopPropagation();app.viewActivityDetails(${detailsId})">Details</button>
                             </div>
                             ${a.summary || a.note_key_points ? `<div class="meet-section"><div class="meet-lbl">Key Points</div><div class="meet-txt">${a.summary || a.note_key_points}</div></div>` : ''}
                             ${a.note_needs ? `<div class="meet-section"><div class="meet-lbl">Needs</div><div class="meet-txt">${a.note_needs}</div></div>` : ''}
@@ -21820,7 +21989,7 @@ function _wireLoginBtn() {
                             ${a.location_address ? `<div class="meet-section"><div class="meet-lbl">Location</div><div class="meet-txt">${a.location_address}</div></div>` : ''}
                             ${a.score_value ? `<div style="margin-bottom:6px;"><span class="badge success" style="font-size:11px;">+${a.score_value} pts</span></div>` : ''}
                             <div class="meet-actions">
-                                <button class="btn btn-sm secondary" onclick="event.stopPropagation();app.openPostMeetupNotesModal(${a.id}, ${prospect.id})"><i class="fas fa-sticky-note"></i> Post Event Notes</button>
+                                ${notesBtn}
                             </div>
                         </div>
                     `;
@@ -21899,9 +22068,14 @@ function _wireLoginBtn() {
         }
         else if (tab === 'potential') {
             const MEETUP_TYPES = ['CPS','FTF','FSA','GR','XG','CALL','EMAIL','WHATSAPP','EVENT'];
-            const allActivities = await AppDataStore.getActivitiesForProspect(prospectId, { limit: 500 });
-            const meetups = allActivities.filter(a => MEETUP_TYPES.includes(a.activity_type))
-                .sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
+            const [allActivities, attendeeNotes] = await Promise.all([
+                AppDataStore.getActivitiesForProspect(prospectId, { limit: 500 }),
+                getProspectAttendeeNotes(prospectId),
+            ]);
+            const meetups = [
+                ...allActivities.filter(a => MEETUP_TYPES.includes(a.activity_type)),
+                ...attendeeNotes,
+            ].sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
 
             // Feng Shui Audit product selections flow into Solutions (same format as post-meetup notes)
             const fengShuiAudits = _readFengShuiAudits(prospect);
@@ -21980,8 +22154,12 @@ function _wireLoginBtn() {
             `;
         }
         else if (tab === 'nextactions') {
-            const activities = (await AppDataStore.getActivitiesForProspect(prospectId, { limit: 500 }))
-                .sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date) || b.id - a.id);
+            const [_ownActs, _attendeeNotes] = await Promise.all([
+                AppDataStore.getActivitiesForProspect(prospectId, { limit: 500 }),
+                getProspectAttendeeNotes(prospectId),
+            ]);
+            const activities = [..._ownActs, ..._attendeeNotes]
+                .sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date) || ((b.id || 0) > (a.id || 0) ? 1 : -1));
 
             // Collect action items: next_action field + note_next_steps field, deduplicated per activity
             const actionItems = [];
@@ -44733,6 +44911,8 @@ JB 星期二到
         scanInvoiceWithAI,
         openPostMeetupNotesModal,
         savePostMeetupNotes,
+        openAttendeePostEventModal,
+        saveAttendeePostEventNotes,
         editActivity,
         deleteActivity,
         confirmDeleteActivity,
