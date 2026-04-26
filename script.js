@@ -27667,7 +27667,7 @@ const deactivateAgent = async (agentId) => {
                     </div>
                 </td>
                 <td style="padding:14px 12px;">
-                    <div style="font-weight:600;color:#111827;">${escapeHtml(prospect.name || prospect.full_name || '')}</div>
+                    <div style="font-weight:600;color:#2563EB;cursor:pointer;text-decoration:underline;" onclick="event.stopPropagation();app.showProspectMenu(${prospect.id})" title="Open prospect profile">${escapeHtml(prospect.name || prospect.full_name || '')}</div>
                     <div style="font-size:11px;color:#9CA3AF;">Last activity: ${entry.lastActivityDate ? entry.lastActivityDate.toLocaleDateString('en-GB') : 'None'}</div>
                 </td>
                 <td style="padding:14px 12px;">${productColumnHtml}</td>
@@ -27720,7 +27720,7 @@ const deactivateAgent = async (agentId) => {
         return `
             <tr style="border-bottom:1px solid #F3F4F6;" onmouseover="this.style.background='#F9FAFB'" onmouseout="this.style.background=''">
                 <td style="padding:14px 12px;">
-                    <div style="font-weight:600;color:#111827;">${escapeHtml(prospect.name || prospect.full_name || '')}</div>
+                    <div style="font-weight:600;color:#2563EB;cursor:pointer;text-decoration:underline;" onclick="event.stopPropagation();app.showProspectMenu(${prospect.id})" title="Open prospect profile">${escapeHtml(prospect.name || prospect.full_name || '')}</div>
                     <div style="font-size:11px;color:#9CA3AF;">Last activity: ${entry.lastActivityDate ? entry.lastActivityDate.toLocaleDateString('en-GB') : 'None'}</div>
                 </td>
                 <td style="padding:14px 12px;">
