@@ -238,6 +238,7 @@
         color: var(--accent);
         font-weight: 700;
         margin-top: 1px;
+        cursor: pointer;
     }
 
     /* Today highlight */

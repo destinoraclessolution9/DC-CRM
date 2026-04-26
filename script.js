@@ -13464,6 +13464,13 @@ function _wireLoginBtn() {
         await switchView(_currentView);
     };
 
+    const openDayView = async (dateStr) => {
+        const [y, m, d] = dateStr.split('-').map(Number);
+        _currentDate = new Date(y, m - 1, d);
+        updateMonthHeader(_currentDate);
+        await switchView('day');
+    };
+
     const updateMonthHeader = (date) => {
         const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
             'July', 'August', 'September', 'October', 'November', 'December'];
@@ -44509,6 +44516,7 @@ JB 星期二到
         goToToday,
         openMonthPicker,
         jumpToMonth,
+        openDayView,
         switchView,
         openCalendarFilterModal,
         applyCalendarFilters,
