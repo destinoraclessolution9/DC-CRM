@@ -11593,6 +11593,7 @@ function _wireLoginBtn() {
 
         const prospect = await AppDataStore.getById('prospects', prospectId);
         if (!prospect) return;
+        if (prospect.unable_to_serve) return; // greyed-out prospects are excluded from all automation
         const interest = (prospect.cps_interest || '').trim().toLowerCase();
 
         // Build product name→category map for category matching
@@ -11863,6 +11864,7 @@ function _wireLoginBtn() {
 
             for (const person of allPeople) {
                 if (person.responsible_agent_id && person.responsible_agent_id != _currentUser?.id) continue;
+                if (person.unable_to_serve) continue;
 
                 // ── Tier eligibility ──────────────────────────────────────────────────────
                 const cpsDate     = person.cps_assignment_date || person.cps_form_date;
@@ -12020,6 +12022,7 @@ function _wireLoginBtn() {
 
             for (const person of allPeople) {
                 if (person.responsible_agent_id && person.responsible_agent_id != _currentUser?.id) continue;
+                if (person.unable_to_serve) continue;
 
                 const pid = person.id;
 
@@ -14313,6 +14316,16 @@ function _wireLoginBtn() {
             updates.unable_reason = mo.unable_reason;
         }
         await AppDataStore.update('activities', activityId, updates);
+
+        // Sync unable_to_serve to the prospect row so filtering works without scanning activities
+        try {
+            const _uta = await AppDataStore.getById('activities', activityId);
+            if (_uta?.prospect_id) {
+                const _uSync = { updated_at: new Date().toISOString(), unable_to_serve: !!updates.unable_to_serve };
+                if (updates.unable_to_serve) _uSync.unable_reason = updates.unable_reason || '';
+                await AppDataStore.update('prospects', _uta.prospect_id, _uSync);
+            }
+        } catch (_) {}
 
         // ── Mirror to prospect's DC Closing Record ──
         // When the activity is linked to a prospect AND the user marked the
@@ -17790,6 +17803,15 @@ function _wireLoginBtn() {
             return;
         }
 
+        // Sync unable_to_serve to prospect row when set via the activity form
+        if (activity.unable_to_serve && activity.prospect_id) {
+            AppDataStore.update('prospects', activity.prospect_id, {
+                unable_to_serve: true,
+                unable_reason: activity.unable_reason || '',
+                updated_at: new Date().toISOString()
+            }).catch(() => {});
+        }
+
         // Upload CPS attachment to Supabase storage and save URL into activities.photo_urls.
         // Kept non-blocking for the rest of the save flow — errors show a toast but don't fail the activity.
         if (_pendingCpsFile && savedActivity?.id) {
@@ -19374,8 +19396,11 @@ function _wireLoginBtn() {
             const agentName = agent ? agent.full_name : '—';
 
             html += `
-                <tr onclick="app.showProspectDetail(${p.id})">
-                    <td data-label="Name"><strong>${p.full_name || '(No Name)'}</strong></td>
+                <tr onclick="app.showProspectDetail(${p.id})" ${p.unable_to_serve ? 'style="opacity:0.5;background:#f1f5f9;"' : ''}>
+                    <td data-label="Name">
+                        <strong>${p.full_name || '(No Name)'}</strong>
+                        ${p.unable_to_serve ? `<br><span style="font-size:10px;background:#94a3b8;color:#fff;padding:1px 7px;border-radius:10px;font-weight:600;letter-spacing:.3px;">Unable to Serve</span>` : ''}
+                    </td>
                     <td data-label="Agent" onclick="event.stopPropagation()">${canReassign
                         ? `<select class="form-control" style="padding:2px 6px;font-size:12px;min-width:120px;border:1px solid var(--border);border-radius:4px;background:var(--surface);cursor:pointer;" onchange="app.quickReassign(${p.id}, this.value)" title="Reassign agent">${(() => {
                             // Render a selected placeholder so the dropdown can't fall back to showing
@@ -20952,11 +20977,23 @@ function _wireLoginBtn() {
                         <i class="fas fa-arrow-left"></i> Back to List
                     </button>
                 </div>
-                <div class="pv-hdr" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
+                ${prospect.unable_to_serve ? `
+                <div style="background:#f1f5f9;border-bottom:2px solid #94a3b8;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+                    <div>
+                        <span style="font-weight:700;color:#475569;font-size:14px;">⛔ Unable to Serve</span>
+                        ${prospect.unable_reason ? `<span style="color:#64748b;font-size:13px;margin-left:8px;">${escapeHtml(prospect.unable_reason)}</span>` : ''}
+                    </div>
+                    <button class="btn secondary btn-sm" onclick="app.openReviveProspectModal(${prospect.id})" style="flex-shrink:0;">
+                        🔄 Revive Profile
+                    </button>
+                </div>` : ''}
+                <div class="pv-hdr" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;${prospect.unable_to_serve ? 'opacity:0.6;' : ''}">
                     <div style="flex:1;min-width:0;">
                         <div class="pv-hdr-meta">
                             <span>ID: P100${prospect.id}</span>
-                            <span class="badge success">Active</span>
+                            ${prospect.unable_to_serve
+                                ? `<span class="badge" style="background:#94a3b8;color:#fff;">Unable to Serve</span>`
+                                : `<span class="badge success">Active</span>`}
                             <span class="badge info" onclick="event.stopPropagation();app.openProspectGradePicker(${prospect.id})" style="cursor:pointer;user-select:none;" title="Click to set grade">Grade ${prospect.manual_grade || '—'} <i class="fas fa-caret-down" style="font-size:10px;opacity:.7;"></i></span>
                         </div>
                         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:6px 0 8px;">
@@ -20967,7 +21004,7 @@ function _wireLoginBtn() {
                     ${cpsPhoto ? `<img loading="lazy" decoding="async" data-attach-src="${cpsPhoto.url}" onclick="event.stopPropagation();app.zoomCpsPhoto('${cpsPhoto.url}')" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:2px solid var(--gray-200);cursor:zoom-in;flex-shrink:0;margin-top:4px;" title="CPS Photo — click to enlarge">` : ''}
                 </div>
 
-                    <div class="acc-container" id="acc-container-${prospect.id}">
+                    <div class="acc-container" id="acc-container-${prospect.id}" ${prospect.unable_to_serve ? 'style="opacity:0.6;pointer-events:none;"' : ''}>
 
                         <!-- ① Basic Information — collapsed by default -->
                         <div class="acc-item" id="acc-info-${prospect.id}">
@@ -24631,6 +24668,38 @@ const openAddSolutionModal = async (prospectId) => {
     };
 
 
+    const openReviveProspectModal = async (prospectId) => {
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) return;
+        UI.showModal('Revive Prospect Profile', `
+            <div style="margin-bottom:12px;padding:12px;background:#f1f5f9;border-radius:8px;border-left:4px solid #94a3b8;">
+                <div style="font-weight:600;color:#475569;font-size:13px;margin-bottom:4px;">Current reason (Unable to Serve):</div>
+                <div style="color:#64748b;font-size:13px;">${escapeHtml(prospect.unable_reason || '—')}</div>
+            </div>
+            <div class="form-group">
+                <label style="font-weight:600;">Revive Notes <span style="color:#9CA3AF;font-weight:400;">(why are you re-activating this profile?)</span></label>
+                <textarea id="revive-notes-input" class="form-control" rows="3" placeholder="e.g. Reconnected after 6 months, prospect now interested again..."></textarea>
+            </div>
+        `, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: '🔄 Confirm Revive', type: 'primary', action: `(async () => { await app.saveReviveProspect(${prospectId}); })()` }
+        ]);
+    };
+
+    const saveReviveProspect = async (prospectId) => {
+        const notes = document.getElementById('revive-notes-input')?.value?.trim() || '';
+        await AppDataStore.update('prospects', prospectId, {
+            unable_to_serve: false,
+            unable_reason: null,
+            revived_at: new Date().toISOString(),
+            revive_notes: notes || null,
+            updated_at: new Date().toISOString()
+        });
+        UI.hideModal();
+        UI.toast.success('Profile revived — prospect is now active again.');
+        await showProspectDetail(prospectId);
+    };
+
     const convertToCustomer = async (prospectId) => {
         const prospect = await AppDataStore.getById('prospects', prospectId);
         if (!prospect) return;
@@ -27313,7 +27382,7 @@ const deactivateAgent = async (agentId) => {
         if (_pipelineAgentFilter !== 'all') prospects = prospects.filter(p => p.responsible_agent_id == _pipelineAgentFilter);
         if (_pipelineStatusFilter !== 'all') prospects = prospects.filter(p => p.status === _pipelineStatusFilter);
 
-        const activeProspects = prospects.filter(p => p.status !== 'converted' && p.status !== 'lost');
+        const activeProspects = prospects.filter(p => p.status !== 'converted' && p.status !== 'lost' && !p.unable_to_serve);
 
         let focusList;
         if (_isArchiveView) {
@@ -44222,6 +44291,8 @@ JB 星期二到
         transferProspect,
         reassignProspect,
         quickReassign,
+        openReviveProspectModal,
+        saveReviveProspect,
         convertToCustomer,
         confirmConvertToCustomer,
         requestProspectConversion,
