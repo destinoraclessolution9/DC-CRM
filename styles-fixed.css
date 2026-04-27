@@ -10204,6 +10204,58 @@ input:checked+.slider:before {
     margin-left: auto;
 }
 
+/* =======================================================================
+   KPI Dashboard — Performance Metric Cards (div-based, no table scroll)
+   ======================================================================= */
+.perf-card-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.perf-metric-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    background: var(--gray-50, #f9fafb);
+    border: 1px solid var(--gray-100, #f3f4f6);
+    border-radius: 8px;
+}
+.perf-metric-card:nth-child(even) {
+    background: var(--white, #fff);
+}
+.perf-metric-name {
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--gray-800, #1f2937);
+    min-width: 200px;
+    flex-shrink: 0;
+}
+.perf-metric-stats {
+    display: flex;
+    gap: 20px;
+    flex: 1;
+    flex-wrap: wrap;
+    align-items: center;
+}
+.perf-stat-pair {
+    display: flex;
+    flex-direction: column;
+    min-width: 80px;
+}
+.perf-stat-lbl {
+    font-size: 10px;
+    color: var(--gray-400, #9ca3af);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 2px;
+}
+.perf-stat-val {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--gray-700, #374151);
+}
+
 /* Dashboard header — tidy button row */
 .dashboard-header {
     display: flex;
