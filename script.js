@@ -30416,7 +30416,7 @@ container.innerHTML = `
                     <div style="grid-column:1/-1; text-align:center; padding:32px; color:var(--gray-400);"><i class="fas fa-spinner fa-spin"></i> Loading KPI data...</div>
                 </div>
 
-                <div class="dashboard-charts-row" style="display: grid; grid-template-columns: 2fr 1fr; gap: 24px; margin-bottom: 24px;">
+                <div class="dashboard-charts-row">
                     <div class="chart-container">
                         <div class="chart-header">
                             <h3>Revenue Trend (Actual vs Target)</h3>
@@ -30432,7 +30432,7 @@ container.innerHTML = `
                     </div>
                 </div>
 
-                <div style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 24px;">
+                <div class="kpi-bottom-grid">
                     <div class="performance-card card">
                         <div class="card-header">
                             <h3>Current Quarter Performance Breakdown</h3>
@@ -30756,14 +30756,16 @@ container.innerHTML = `
         // prospects → customers respectively, with role-scope filtering
         // that's awkward to express in a single RPC. Keep them client-side
         // for now (they're cached by AppDataStore so the cost is bounded).
-        const [activityHeadcount, conversionRate] = await Promise.all([
+        const [activityHeadcount, conversionRate, meetUpExistingCount, cfHeadcount] = await Promise.all([
             getActivityHeadcount(from, to),
             getConversionRate(from, to),
+            getMeetUpExistingCustomerCount(from, to),
+            getCFHeadcount(from, to),
         ]);
 
         // Fast path: try server-side aggregates first.
         const fast = await _tryKpiRPCs(from, to);
-        if (fast) return { ...fast, activityHeadcount, conversionRate };
+        if (fast) return { ...fast, activityHeadcount, conversionRate, meetUpExistingCount, cfHeadcount };
 
         // Fallback: original 11-call client-side path.
         const [
@@ -30786,7 +30788,8 @@ container.innerHTML = `
         return {
             cpsCount, totalSales, popCaseCount, popSales,
             eppCaseCount, eppSales, newAgents, newCustomers,
-            totalMeetings, clientMeetings, activityHeadcount, conversionRate, eppDetails
+            totalMeetings, clientMeetings, activityHeadcount, conversionRate, eppDetails,
+            meetUpExistingCount, cfHeadcount
         };
     };
 
@@ -31001,6 +31004,50 @@ const getClientMeetings = async (from, to) => {
             const agent = userMap[a.lead_agent_id];
             if (!agent || agent.role !== _currentRoleFilter) continue;
         }
+        count++;
+    }
+    return count;
+};
+
+const getMeetUpExistingCustomerCount = async (from, to) => {
+    const needUsers = _currentRoleFilter !== 'All' || _visibleUserIds !== 'all';
+    const [activities, users] = await Promise.all([
+        AppDataStore.getAll('activities'),
+        needUsers ? AppDataStore.getAll('users') : Promise.resolve([])
+    ]);
+    const userMap = {};
+    users.forEach(u => { userMap[String(u.id)] = u; });
+    let count = 0;
+    for (const a of activities) {
+        if (a.activity_date < from || a.activity_date > to) continue;
+        if (!CLIENT_MEETING_TYPES.includes(a.activity_type)) continue;
+        if (!a.customer_id) continue;
+        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(a.lead_agent_id)) continue;
+        if (_currentRoleFilter !== 'All') {
+            const agent = userMap[String(a.lead_agent_id)];
+            if (!agent || agent.role !== _currentRoleFilter) continue;
+        }
+        count++;
+    }
+    return count;
+};
+
+const getCFHeadcount = async (from, to) => {
+    const [attendees, activities] = await Promise.all([
+        AppDataStore.getAll('event_attendees'),
+        AppDataStore.getAll('activities')
+    ]);
+    const actMap = {};
+    activities.forEach(a => { actMap[String(a.id)] = a; });
+    let count = 0;
+    for (const att of attendees) {
+        if (!att.attended && att.attendance_status !== 'Attended') continue;
+        const act = actMap[String(att.activity_id)];
+        if (!act) continue;
+        if (act.activity_date < from || act.activity_date > to) continue;
+        const title = (act.event_title || act.activity_title || '').toLowerCase();
+        if (!title.includes('cf') && (act.activity_type || '').toUpperCase() !== 'CF') continue;
+        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(act.lead_agent_id)) continue;
         count++;
     }
     return count;
@@ -31272,22 +31319,22 @@ const buildClientMeetingsDetails = async (from, to) => {
         AppDataStore.getAll('customers'),
         AppDataStore.getAll('prospects')
     ]);
-    const userMap = {}; users.forEach(u => { userMap[u.id] = u; });
-    const custMap = {}; customers.forEach(c => { custMap[c.id] = c; });
-    const prospMap = {}; prospects.forEach(p => { prospMap[p.id] = p; });
+    const userMap = {}; users.forEach(u => { userMap[String(u.id)] = u; });
+    const custMap = {}; customers.forEach(c => { custMap[String(c.id)] = c; });
+    const prospMap = {}; prospects.forEach(p => { prospMap[String(p.id)] = p; });
     const rows = [];
     for (const a of activities) {
         if (a.activity_date < from || a.activity_date > to) continue;
         if (!CLIENT_MEETING_TYPES.includes(a.activity_type)) continue;
         if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(a.lead_agent_id)) continue;
         if (_currentRoleFilter !== 'All') {
-            const agent = userMap[a.lead_agent_id];
+            const agent = userMap[String(a.lead_agent_id)];
             if (!agent || agent.role !== _currentRoleFilter) continue;
         }
-        const agentName = userMap[a.lead_agent_id]?.full_name || '—';
-        const cust = a.customer_id ? custMap[a.customer_id] : null;
-        const prosp = a.prospect_id ? prospMap[a.prospect_id] : null;
-        const entityName = cust?.full_name || prosp?.full_name || '—';
+        const agentName = userMap[String(a.lead_agent_id)]?.full_name || '—';
+        const cust = a.customer_id ? custMap[String(a.customer_id)] : null;
+        const prosp = a.prospect_id ? prospMap[String(a.prospect_id)] : null;
+        const entityName = cust?.full_name || prosp?.full_name || a.contact_name || '—';
         rows.push([a.activity_date, a.activity_type || '—', a.activity_title || '—', agentName, entityName]);
     }
     return renderDetailTable(['Date', 'Type', 'Title', 'Lead Agent', 'Customer / Prospect'], rows);
@@ -31568,7 +31615,9 @@ const renderTargetOverview = async () => {
             { name: 'New Agents', target: qTarget.new_agents_target || 0, actual: kpis.newAgents },
             { name: 'New Customers', target: qTarget.new_customers_target || 0, actual: kpis.newCustomers },
             { name: 'POP Cases', target: qTarget.pop_case_count_target || 0, actual: kpis.popCaseCount },
-            { name: 'EPP Cases', target: qTarget.epp_case_count_target || 0, actual: kpis.eppCaseCount }
+            { name: 'EPP Cases', target: qTarget.epp_case_count_target || 0, actual: kpis.eppCaseCount },
+            { name: 'Meet Up (Existing Customers)', target: qTarget.meetup_existing_target || 0, actual: kpis.meetUpExistingCount || 0 },
+            { name: 'CF Headcount', target: qTarget.cf_headcount_target || 0, actual: kpis.cfHeadcount || 0 }
         ];
 
         container.innerHTML = `
