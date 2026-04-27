@@ -299,6 +299,16 @@ class DataStore {
         }
     }
 
+    // Strip fields that must never be persisted to localStorage (e.g. plaintext passwords).
+    _sanitizeForStorage(tableName, records) {
+        if (tableName !== 'users' || !Array.isArray(records)) return records;
+        return records.map(r => {
+            if (!r.password) return r;
+            const { password: _pw, ...safe } = r;
+            return safe;
+        });
+    }
+
     // Invalidate cache for a table (and any table that depends on it)
     invalidateCache(tableName) {
         this._cache.delete(tableName);
@@ -395,7 +405,7 @@ class DataStore {
                         this._cacheSet(tableName, result);
                         setTimeout(() => {
                             try {
-                                localStorage.setItem(`fs_crm_${tableName}`, JSON.stringify(result));
+                                localStorage.setItem(`fs_crm_${tableName}`, JSON.stringify(this._sanitizeForStorage(tableName, result)));
                                 localStorage.setItem(`fs_crm_${tableName}_last_sync`, now);
                             } catch (_) {}
                         }, 0);
@@ -608,7 +618,7 @@ class DataStore {
                     this._cacheSet(tableName, merged);
                     setTimeout(() => {
                         try {
-                            localStorage.setItem(`fs_crm_${tableName}`, JSON.stringify(merged));
+                            localStorage.setItem(`fs_crm_${tableName}`, JSON.stringify(this._sanitizeForStorage(tableName, merged)));
                             // Record sync time so _swrRevalidate can use delta fetch next time
                             localStorage.setItem(`fs_crm_${tableName}_last_sync`, new Date().toISOString());
                         } catch (_) {}
@@ -619,7 +629,7 @@ class DataStore {
             this._cacheSet(tableName, result);
             setTimeout(() => {
                 try {
-                    localStorage.setItem(`fs_crm_${tableName}`, JSON.stringify(result));
+                    localStorage.setItem(`fs_crm_${tableName}`, JSON.stringify(this._sanitizeForStorage(tableName, result)));
                     // Record sync time so _swrRevalidate can use delta fetch next time
                     localStorage.setItem(`fs_crm_${tableName}_last_sync`, new Date().toISOString());
                 } catch (_) {}
@@ -922,7 +932,7 @@ class DataStore {
                     const key = `fs_crm_${tableName}`;
                     const all = JSON.parse(localStorage.getItem(key) || '[]');
                     all.push({ ...insertData, ...dataToInsert, ...data });
-                    localStorage.setItem(key, JSON.stringify(all));
+                    localStorage.setItem(key, JSON.stringify(this._sanitizeForStorage(tableName, all)));
                 } catch (_) {}
                 this._writeAudit('insert', tableName, data.id || insertData.id, null, data);
                 this.invalidateCache(tableName);
@@ -955,7 +965,7 @@ class DataStore {
         try {
             const all = JSON.parse(localStorage.getItem(key) || '[]');
             all.push(dataToInsert);
-            localStorage.setItem(key, JSON.stringify(all));
+            localStorage.setItem(key, JSON.stringify(this._sanitizeForStorage(tableName, all)));
         } catch (_) {}
         // Queue for auto-sync to Supabase on next successful getAll()
         try {
@@ -1062,7 +1072,7 @@ class DataStore {
                     const all = JSON.parse(localStorage.getItem(key) || '[]');
                     const idx = all.findIndex(r => String(r.id) === String(id));
                     const full = { ...data, ...updates };
-                    if (idx >= 0) { all[idx] = full; localStorage.setItem(key, JSON.stringify(all)); }
+                    if (idx >= 0) { all[idx] = full; localStorage.setItem(key, JSON.stringify(this._sanitizeForStorage(tableName, all))); }
                 } catch (_) {}
                 this._writeAudit('update', tableName, id, _auditOldData, data);
                 this.invalidateCache(tableName);
@@ -1162,7 +1172,7 @@ class DataStore {
                             const idx = all.findIndex(r => String(r.id) === String(id));
                             const full = { ...inserted, ...updates };
                             if (idx >= 0) all[idx] = full; else all.push(full);
-                            localStorage.setItem(key, JSON.stringify(all));
+                            localStorage.setItem(key, JSON.stringify(this._sanitizeForStorage(tableName, all)));
                         } catch (_) {}
                         this.invalidateCache(tableName);
                         this.emit('dataChanged', { action: 'update', table: tableName, record: inserted });
@@ -1185,7 +1195,7 @@ class DataStore {
             const idx = all.findIndex(r => r.id == id);
             updatedRecord = idx >= 0 ? { ...all[idx], ...updates } : { id, ...updates };
             if (idx >= 0) all[idx] = updatedRecord; else all.push(updatedRecord);
-            localStorage.setItem(key, JSON.stringify(all));
+            localStorage.setItem(key, JSON.stringify(this._sanitizeForStorage(tableName, all)));
         } catch (_) { updatedRecord = { id, ...updates }; }
         // Queue for auto-sync to Supabase on next successful getAll()
         try {
