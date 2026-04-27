@@ -868,10 +868,37 @@
         min-width: 480px;
     }
 
-    /* Leaderboard card full width */
+    /* Leaderboard + performance card: full width, comfortable padding */
     .leaderboard-card,
     .performance-card {
         border-radius: 10px !important;
+        padding: 14px !important;
+    }
+
+    /* Leaderboard rows: slightly more compact on mobile */
+    .lb-row {
+        gap: 8px !important;
+        padding: 9px 0 !important;
+    }
+    .lb-agent strong { font-size: 12px !important; }
+    .lb-agent small  { font-size: 10px !important; }
+    .lb-sales        { font-size: 12px !important; }
+    .rank-badge      { width: 22px !important; height: 22px !important; line-height: 22px !important; font-size: 11px !important; flex-shrink: 0; }
+
+    /* Performance table: full horizontal scroll, no auto-card */
+    .perf-table-scroll {
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch;
+        border-radius: 6px;
+    }
+    .perf-table-scroll .performance-table {
+        min-width: 460px !important;
+        font-size: 12px !important;
+    }
+    .perf-table-scroll .performance-table th,
+    .perf-table-scroll .performance-table td {
+        padding: 8px 10px !important;
+        white-space: nowrap;
     }
 }
 
