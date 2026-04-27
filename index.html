@@ -1,13 +1,23 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="zh-TW" data-theme="light">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://cdn.sheetjs.com https://unpkg.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com; font-src 'self' https://cdnjs.cloudflare.com https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.qrserver.com https://ui-avatars.com; frame-ancestors 'self'; base-uri 'self'; form-action 'self';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://cdn.sheetjs.com https://unpkg.com https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com; font-src 'self' https://cdnjs.cloudflare.com https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.qrserver.com https://ui-avatars.com https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; frame-ancestors 'self'; base-uri 'self'; form-action 'self';">
     <meta http-equiv="X-Content-Type-Options" content="nosniff">
     <meta name="referrer" content="strict-origin-when-cross-origin">
     <title>悅客匯 CRM</title>
+    <meta name="description" content="悅客匯 CRM — DestinOraclesSolution 专业风水顾问客户关系管理平台，助力顾问团队高效管理客户、追踪销售与绩效。">
+    <link rel="canonical" href="https://destinoraclessolution.com/">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://destinoraclessolution.com/">
+    <meta property="og:title" content="悅客匯 CRM — DestinOraclesSolution">
+    <meta property="og:description" content="专业风水顾问客户关系管理平台，助力顾问团队高效管理客户、追踪销售与绩效。">
+    <meta property="og:image" content="https://destinoraclessolution.com/icons/icon-512x512.png">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="悅客匯 CRM — DestinOraclesSolution">
+    <meta name="twitter:description" content="专业风水顾问客户关系管理平台，助力顾问团队高效管理客户、追踪销售与绩效。">
 
     <!-- ===== FB/IG-style perceived-perf hints =====
          Open the network connections to origins we'll need ASAP, in parallel
@@ -21,6 +31,7 @@
     <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
     <link rel="dns-prefetch" href="https://cdn.sheetjs.com">
     <link rel="dns-prefetch" href="https://unpkg.com">
+    <link rel="preconnect" href="https://challenges.cloudflare.com" crossorigin>
 
     <!-- Preload the largest single asset so the browser starts fetching
          it before the parser reaches the <script> tag near </body>.
@@ -101,6 +112,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="FS CRM">
     <link rel="apple-touch-icon" href="icons/icon-192x192.png">
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 </head>
 
 <body>
@@ -120,9 +132,17 @@
                     <input type="checkbox" id="rememberMe" style="width:16px;height:16px;accent-color:var(--primary);cursor:pointer;">
                     Keep me logged in
                 </label>
+                <div class="cf-turnstile" data-sitekey="0x4AAAAAAA_PLACEHOLDER_REPLACE_ME" data-theme="light" style="margin-bottom:14px;"></div>
                 <button id="loginBtn" class="btn primary" style="width: 100%;">Login</button>
             </div>
             <p class="login-hint">Enter your email and password to continue</p>
+            <p style="margin-top:12px;font-size:11px;text-align:center;color:var(--text-secondary);">
+                <a href="/privacy" style="color:var(--text-secondary);">隐私政策</a>
+                &nbsp;·&nbsp;
+                <a href="/terms" style="color:var(--text-secondary);">服务条款</a>
+                &nbsp;·&nbsp;
+                <a href="/privacy#cookies" style="color:var(--text-secondary);">Cookie 政策</a>
+            </p>
         </div>
     </div>
     <!-- Mobile Side Drawer -->

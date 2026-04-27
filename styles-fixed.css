@@ -43,6 +43,7 @@ body {
     position: sticky;
     top: 0;
     z-index: 100;
+    overflow: hidden;
 }
 
 .brand {
@@ -69,8 +70,11 @@ body {
     list-style: none;
     margin-left: 32px;
     flex-grow: 1;
+    min-width: 0;
     overflow-x: auto;
+    scrollbar-width: none;
 }
+.nav-links::-webkit-scrollbar { display: none; }
 
 .nav-links li {
     font-size: 14px;
@@ -92,6 +96,7 @@ body {
     display: flex;
     align-items: center;
     gap: 20px;
+    flex-shrink: 0;
 }
 
 .user-info {
@@ -557,7 +562,8 @@ body {
 }
 
 .form-control:focus {
-    outline: none;
+    outline: 2px solid var(--primary);
+    outline-offset: -1px;
     border-color: var(--primary);
     box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.1);
 }
@@ -8370,7 +8376,6 @@ input:checked+.slider:before {
     font-size: 14px;
     background: var(--white);
     transition: border-color 0.15s, box-shadow 0.15s;
-    outline: none;
     color: var(--gray-800);
 }
 
@@ -8472,7 +8477,6 @@ input:checked+.slider:before {
     font-size: 13px;
     background: var(--white);
     color: var(--gray-700);
-    outline: none;
     transition: border-color 0.15s;
 }
 .adv-field select:focus,
@@ -9173,7 +9177,6 @@ input:checked+.slider:before {
     border: 1px solid var(--gray-200);
     border-radius: 6px;
     font-size: 13px;
-    outline: none;
     background: var(--gray-50);
 }
 .templates-search input:focus {
@@ -9357,7 +9360,6 @@ input:checked+.slider:before {
     border: 1px solid var(--gray-200);
     border-radius: 6px;
     font-size: 13px;
-    outline: none;
     background: #fff;
 }
 .campaigns-table-container {

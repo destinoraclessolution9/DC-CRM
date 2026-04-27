@@ -2293,11 +2293,11 @@ const appLogic = (() => {
             <table class="search-results-table table-hover">
                 <thead>
                     <tr>
-                        <th>Name/Title</th>
-                        <th>Identifier/Contact</th>
-                        <th>Agent Name</th>
-                        <th>Status</th>
-                        <th>Actions</th>
+                        <th scope="col">Name/Title</th>
+                        <th scope="col">Identifier/Contact</th>
+                        <th scope="col">Agent Name</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -2612,8 +2612,8 @@ const appLogic = (() => {
                     <span class="folder-name">${folder.name}</span>
                 </div>
                 <div class="folder-actions">
-                    <button class="btn-icon" onclick="app.renameFolder(${folder.id}); event.stopPropagation()"><i class="fas fa-edit"></i></button>
-                    <button class="btn-icon" onclick="app.deleteFolder(${folder.id}); event.stopPropagation()"><i class="fas fa-trash"></i></button>
+                    <button class="btn-icon" aria-label="Rename folder" onclick="app.renameFolder(${folder.id}); event.stopPropagation()"><i class="fas fa-edit" aria-hidden="true"></i></button>
+                    <button class="btn-icon" aria-label="Delete folder" onclick="app.deleteFolder(${folder.id}); event.stopPropagation()"><i class="fas fa-trash" aria-hidden="true"></i></button>
                 </div>
             `;
             treeContainer.appendChild(div);
@@ -2744,7 +2744,7 @@ const appLogic = (() => {
             <div class="version-history">
                 <div class="version-header"><h3>Version History: ${file.filename}</h3><p>Current: v${file.current_version || 1}</p></div>
                 <table class="version-table">
-                    <thead><tr><th>Version</th><th>Date</th><th>Size</th><th>By</th><th>Notes</th><th>Actions</th></tr></thead>
+                    <thead><tr><th scope="col">Version</th><th scope="col">Date</th><th scope="col">Size</th><th scope="col">By</th><th scope="col">Notes</th><th scope="col">Actions</th></tr></thead>
                     <tbody>
                         ${versions.map(v => `
                             <tr class="${v.version_number === file.current_version ? 'current-version' : ''}">
@@ -2754,8 +2754,8 @@ const appLogic = (() => {
                                 <td>${verUserMap.get(String(v.created_by)) || 'System'}</td>
                                 <td>${v.change_note || '-'}</td>
                                 <td>
-                                    <button class="btn-icon" onclick="app.downloadVersion(${v.id})"><i class="fas fa-download"></i></button>
-                                    <button class="btn-icon" onclick="app.restoreVersion(${v.id})"><i class="fas fa-undo"></i></button>
+                                    <button class="btn-icon" aria-label="Download version" onclick="app.downloadVersion(${v.id})"><i class="fas fa-download" aria-hidden="true"></i></button>
+                                    <button class="btn-icon" aria-label="Restore version" onclick="app.restoreVersion(${v.id})"><i class="fas fa-undo" aria-hidden="true"></i></button>
                                 </td>
                             </tr>
                         `).join('')}
@@ -2939,20 +2939,20 @@ const appLogic = (() => {
             <table class="file-table">
                 <thead>
                     <tr>
-                        <th style="width: 30px;">
+                        <th scope="col" style="width: 30px;">
                             <input type="checkbox" onchange="app.selectAllFiles()" 
                                    ${_selectedFiles.length === files.length && files.length > 0 ? 'checked' : ''}>
                         </th>
-                        <th onclick="app.sortFiles('name')" style="cursor: pointer;">
+                        <th scope="col" onclick="app.sortFiles('name')" style="cursor: pointer;">
                             Name ${_fileSortBy === 'name' ? (_fileSortDirection === 'asc' ? '↑' : '↓') : ''}
                         </th>
-                        <th onclick="app.sortFiles('date')" style="cursor: pointer;">
+                        <th scope="col" onclick="app.sortFiles('date')" style="cursor: pointer;">
                             Modified ${_fileSortBy === 'date' ? (_fileSortDirection === 'asc' ? '↑' : '↓') : ''}
                         </th>
-                        <th onclick="app.sortFiles('size')" style="cursor: pointer;">
+                        <th scope="col" onclick="app.sortFiles('size')" style="cursor: pointer;">
                             Size ${_fileSortBy === 'size' ? (_fileSortDirection === 'asc' ? '↑' : '↓') : ''}
                         </th>
-                        <th>Actions</th>
+                        <th scope="col">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -4858,11 +4858,11 @@ In a production system, this would show the actual file contents.
                 <table class="history-table" style="width:100%;border-collapse:collapse;margin-bottom:16px;">
                     <thead>
                         <tr style="background:var(--gray-50);border-bottom:2px solid var(--gray-200);text-align:left;">
-                            <th style="padding:12px;">#</th>
-                            <th style="padding:12px;">Activity</th>
-                            <th style="padding:12px;">Direction</th>
-                            <th style="padding:12px;">Status</th>
-                            <th style="padding:12px;">Time</th>
+                            <th scope="col" style="padding:12px;">#</th>
+                            <th scope="col" style="padding:12px;">Activity</th>
+                            <th scope="col" style="padding:12px;">Direction</th>
+                            <th scope="col" style="padding:12px;">Status</th>
+                            <th scope="col" style="padding:12px;">Time</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -5084,7 +5084,7 @@ In a production system, this would show the actual file contents.
                         <label>Webhook URL</label>
                         <div class="webhook-url">
                             <input type="text" id="webhook-url" class="form-control" value="https://your-crm.com/api/whatsapp/webhook" readonly>
-                            <button class="btn-icon" onclick="app.copyWebhookUrl()" title="Copy"><i class="fas fa-copy"></i></button>
+                            <button class="btn-icon" aria-label="Copy webhook URL" onclick="app.copyWebhookUrl()" title="Copy"><i class="fas fa-copy" aria-hidden="true"></i></button>
                         </div>
                     </div>
                     
@@ -5363,7 +5363,7 @@ In a production system, this would show the actual file contents.
                                 ${msg.status === 'sent' ? '✓ Sent' : msg.status === 'delivered' ? '✓✓ Delivered' : msg.status === 'read' ? '👁️ Read' : '❌ Failed'}
                             </span>
                             <div class="message-actions">
-                                <button class="btn-icon" onclick="app.viewMessageDetails('${msg.id}')"><i class="fas fa-eye"></i></button>
+                                <button class="btn-icon" aria-label="View message details" onclick="app.viewMessageDetails('${msg.id}')"><i class="fas fa-eye" aria-hidden="true"></i></button>
                                 <button class="btn-icon" title="Resend" onclick="app.resendMessage('${msg.id}')"><i class="fas fa-redo"></i></button>
                                 <button class="btn-icon" title="Reply" onclick="app.replyToMessage('${msg.id}')"><i class="fas fa-reply"></i></button>
                                 <button class="btn-icon" title="Create Activity" onclick="app.createTaskFromMessage('${msg.id}')"><i class="fas fa-calendar-plus"></i></button>
@@ -5792,11 +5792,11 @@ In a production system, this would show the actual file contents.
                     <table class="predictions-table">
                         <thead>
                             <tr>
-                                <th>Lead/Customer</th>
-                                <th>Prediction Type</th>
-                                <th>Score</th>
-                                <th>Confidence</th>
-                                <th>Recommended Action</th>
+                                <th scope="col">Lead/Customer</th>
+                                <th scope="col">Prediction Type</th>
+                                <th scope="col">Score</th>
+                                <th scope="col">Confidence</th>
+                                <th scope="col">Recommended Action</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -6016,7 +6016,7 @@ In a production system, this would show the actual file contents.
                     <td>${trendIcon} ${score.trend === 'up' ? '+' + (score.factors?.engagement_score || 0) : ''}</td>
                     <td>${score.prediction === 'hot' ? '🔥 Hot' : score.prediction === 'warm' ? '👌 Warm' : '❄️ Cold'}</td>
                     <td>${score.recommended_action || 'Contact'}</td>
-                    <td><button class="btn-icon" onclick="app.viewLeadDetails(${prospect.id})"><i class="fas fa-eye"></i></button></td>
+                    <td><button class="btn-icon" aria-label="View lead details" onclick="app.viewLeadDetails(${prospect.id})"><i class="fas fa-eye" aria-hidden="true"></i></button></td>
                 </tr>
             `;
         }
@@ -6038,10 +6038,10 @@ In a production system, this would show the actual file contents.
                     <table class="factors-table">
                         <thead>
                             <tr>
-                                <th>Factor</th>
-                                <th>Weight</th>
-                                <th>Current Value</th>
-                                <th>Impact</th>
+                                <th scope="col">Factor</th>
+                                <th scope="col">Weight</th>
+                                <th scope="col">Current Value</th>
+                                <th scope="col">Impact</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -6099,12 +6099,12 @@ In a production system, this would show the actual file contents.
                     <table class="leads-table">
                         <thead>
                             <tr>
-                                <th>Lead Name</th>
-                                <th>Score</th>
-                                <th>Trend</th>
-                                <th>Prediction</th>
-                                <th>Recommended Action</th>
-                                <th></th>
+                                <th scope="col">Lead Name</th>
+                                <th scope="col">Score</th>
+                                <th scope="col">Trend</th>
+                                <th scope="col">Prediction</th>
+                                <th scope="col">Recommended Action</th>
+                                <th scope="col"></th>
                             </tr>
                         </thead>
                         <tbody>
@@ -6311,11 +6311,11 @@ In a production system, this would show the actual file contents.
                     <table class="breakdown-table">
                         <thead>
                             <tr>
-                                <th>Source</th>
-                                <th>Current</th>
-                                <th>Predicted</th>
-                                <th>Confidence</th>
-                                <th></th>
+                                <th scope="col">Source</th>
+                                <th scope="col">Current</th>
+                                <th scope="col">Predicted</th>
+                                <th scope="col">Confidence</th>
+                                <th scope="col"></th>
                             </tr>
                         </thead>
                         <tbody>
@@ -6558,10 +6558,10 @@ In a production system, this would show the actual file contents.
                     <table class="risk-table">
                         <thead>
                             <tr>
-                                <th>Customer</th>
-                                <th>Risk Score</th>
-                                <th>Key Factors</th>
-                                <th>Action</th>
+                                <th scope="col">Customer</th>
+                                <th scope="col">Risk Score</th>
+                                <th scope="col">Key Factors</th>
+                                <th scope="col">Action</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -6752,7 +6752,7 @@ In a production system, this would show the actual file contents.
                                 <span class="insight-improvement">📈 ${insights.improvement}</span>
                             </div>
                         </td>
-                        <td><button class="btn-icon" onclick="app.viewAgentDetails(${agent.id})"><i class="fas fa-chart-bar"></i></button></td>
+                        <td><button class="btn-icon" aria-label="View agent performance" onclick="app.viewAgentDetails(${agent.id})"><i class="fas fa-chart-bar" aria-hidden="true"></i></button></td>
                     </tr>
                 `;
             }
@@ -6772,13 +6772,13 @@ In a production system, this would show the actual file contents.
                     <table class="performance-table">
                         <thead>
                             <tr>
-                                <th>Agent</th>
-                                <th>Target</th>
-                                <th>Actual</th>
-                                <th>Predicted</th>
-                                <th>Variance</th>
-                                <th>Insights</th>
-                                <th></th>
+                                <th scope="col">Agent</th>
+                                <th scope="col">Target</th>
+                                <th scope="col">Actual</th>
+                                <th scope="col">Predicted</th>
+                                <th scope="col">Variance</th>
+                                <th scope="col">Insights</th>
+                                <th scope="col"></th>
                             </tr>
                         </thead>
                         <tbody>
@@ -7121,6 +7121,11 @@ function _wireLoginBtn() {
         const password = document.getElementById('loginPassword')?.value;
         if (!email || !password) {
             alert('Please enter email and password');
+            return;
+        }
+        const captchaToken = document.querySelector('[name="cf-turnstile-response"]')?.value;
+        if (!captchaToken) {
+            alert('Please complete the CAPTCHA verification.');
             return;
         }
         try {
@@ -7743,7 +7748,7 @@ function _wireLoginBtn() {
                                     <label style="display:flex; align-items:center; gap:6px; font-size:13px; cursor:pointer;">
                                         <input type="checkbox" ${slot.is_active ? 'checked' : ''} onchange="app.toggleSlotActive(${slot.id}, this.checked)"> Active
                                     </label>
-                                    <button class="btn-icon" onclick="app.deleteBookingSlot(${slot.id})" style="color:var(--error);"><i class="fas fa-trash"></i></button>
+                                    <button class="btn-icon" aria-label="Delete time slot" onclick="app.deleteBookingSlot(${slot.id})" style="color:var(--error);"><i class="fas fa-trash" aria-hidden="true"></i></button>
                                 </div>
                             </div>
                         `).join('')}
@@ -8360,10 +8365,10 @@ function _wireLoginBtn() {
                 ${submissions.length === 0 ? '<p style="text-align:center; color:var(--gray-400); padding:40px 0;">No submissions yet.</p>' : `
                     <table style="width:100%; border-collapse:collapse;">
                         <thead><tr style="background:var(--gray-50); border-bottom:2px solid var(--gray-200);">
-                            <th style="padding:10px; text-align:left;">Name</th>
-                            <th style="padding:10px; text-align:left;">Date</th>
-                            <th style="padding:10px; text-align:left;">Status</th>
-                            <th style="padding:10px; text-align:left;">Action</th>
+                            <th scope="col" style="padding:10px; text-align:left;">Name</th>
+                            <th scope="col" style="padding:10px; text-align:left;">Date</th>
+                            <th scope="col" style="padding:10px; text-align:left;">Status</th>
+                            <th scope="col" style="padding:10px; text-align:left;">Action</th>
                         </tr></thead>
                         <tbody>${submissions.map(s => {
                             const data = s.data || {};
@@ -8537,10 +8542,10 @@ function _wireLoginBtn() {
                 ${responses.length === 0 ? '<p style="text-align:center; color:var(--gray-400);">No responses yet. Share your survey link.</p>' : `
                     <table style="width:100%; border-collapse:collapse;">
                         <thead><tr style="background:var(--gray-50); border-bottom:2px solid var(--gray-200);">
-                            <th style="padding:10px; text-align:left;">Respondent</th>
-                            <th style="padding:10px; text-align:left;">Score</th>
-                            <th style="padding:10px; text-align:left;">Feedback</th>
-                            <th style="padding:10px; text-align:left;">Date</th>
+                            <th scope="col" style="padding:10px; text-align:left;">Respondent</th>
+                            <th scope="col" style="padding:10px; text-align:left;">Score</th>
+                            <th scope="col" style="padding:10px; text-align:left;">Feedback</th>
+                            <th scope="col" style="padding:10px; text-align:left;">Date</th>
                         </tr></thead>
                         <tbody>${responses.slice(0,20).map(r => `
                             <tr style="border-bottom:1px solid var(--gray-100);">
@@ -8587,11 +8592,11 @@ function _wireLoginBtn() {
                 ` : `
                     <table style="width:100%; border-collapse:collapse; background:white; border:1px solid var(--gray-200); border-radius:12px; overflow:hidden;">
                         <thead><tr style="background:var(--gray-50); border-bottom:2px solid var(--gray-200);">
-                            <th style="padding:12px 16px; text-align:left;">Title</th>
-                            <th style="padding:12px 16px; text-align:left;">Customer</th>
-                            <th style="padding:12px 16px; text-align:left;">Status</th>
-                            <th style="padding:12px 16px; text-align:left;">Date</th>
-                            <th style="padding:12px 16px; text-align:left;">Actions</th>
+                            <th scope="col" style="padding:12px 16px; text-align:left;">Title</th>
+                            <th scope="col" style="padding:12px 16px; text-align:left;">Customer</th>
+                            <th scope="col" style="padding:12px 16px; text-align:left;">Status</th>
+                            <th scope="col" style="padding:12px 16px; text-align:left;">Date</th>
+                            <th scope="col" style="padding:12px 16px; text-align:left;">Actions</th>
                         </tr></thead>
                         <tbody>${contracts.map(c => `
                             <tr style="border-bottom:1px solid var(--gray-100);">
@@ -9374,12 +9379,12 @@ function _wireLoginBtn() {
             <table class="leaderboard-table-v2">
                 <thead>
                     <tr>
-                        <th>Rank</th>
-                        <th>Referrer Name</th>
-                        <th>Total Referrals</th>
-                        <th>Converted</th>
-                        <th>Latest Activity</th>
-                        <th class="text-right">Action</th>
+                        <th scope="col">Rank</th>
+                        <th scope="col">Referrer Name</th>
+                        <th scope="col">Total Referrals</th>
+                        <th scope="col">Converted</th>
+                        <th scope="col">Latest Activity</th>
+                        <th scope="col" class="text-right">Action</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -19086,14 +19091,14 @@ function _wireLoginBtn() {
                     <table class="prospects-table" id="prospects-table">
                         <thead>
                             <tr>
-                                <th onclick="app.sortProspects('name')" style="cursor: pointer;">Name ${_sortField === 'name' ? (_sortDirection === 'asc' ? '↑' : '↓') : ''}</th>
-                                <th>Agent</th>
-                                <th onclick="app.sortProspects('score')" style="cursor: pointer;">Score ${_sortField === 'score' ? (_sortDirection === 'asc' ? '↑' : '↓') : ''}</th>
-                                <th>Ming Gua</th>
-                                <th>Occupation/Company</th>
-                                <th onclick="app.sortProspects('activity')" style="cursor: pointer;">Last Activity ${_sortField === 'activity' ? (_sortDirection === 'asc' ? '↑' : '↓') : ''}</th>
-                                <th onclick="app.sortProspects('protection')" style="cursor: pointer;">Protection ${_sortField === 'protection' ? (_sortDirection === 'asc' ? '↑' : '↓') : ''}</th>
-                                <th>Actions</th>
+                                <th scope="col" onclick="app.sortProspects('name')" style="cursor: pointer;">Name ${_sortField === 'name' ? (_sortDirection === 'asc' ? '↑' : '↓') : ''}</th>
+                                <th scope="col">Agent</th>
+                                <th scope="col" onclick="app.sortProspects('score')" style="cursor: pointer;">Score ${_sortField === 'score' ? (_sortDirection === 'asc' ? '↑' : '↓') : ''}</th>
+                                <th scope="col">Ming Gua</th>
+                                <th scope="col">Occupation/Company</th>
+                                <th scope="col" onclick="app.sortProspects('activity')" style="cursor: pointer;">Last Activity ${_sortField === 'activity' ? (_sortDirection === 'asc' ? '↑' : '↓') : ''}</th>
+                                <th scope="col" onclick="app.sortProspects('protection')" style="cursor: pointer;">Protection ${_sortField === 'protection' ? (_sortDirection === 'asc' ? '↑' : '↓') : ''}</th>
+                                <th scope="col">Actions</th>
                             </tr>
 
                         </thead>
@@ -19166,12 +19171,12 @@ function _wireLoginBtn() {
                         <table class="prospects-table">
                             <thead>
                                 <tr>
-                                    <th>Type</th>
-                                    <th>Prospect / Customer</th>
-                                    <th>Submitted By</th>
-                                    <th>Date</th>
-                                    <th>Description</th>
-                                    <th>Actions</th>
+                                    <th scope="col">Type</th>
+                                    <th scope="col">Prospect / Customer</th>
+                                    <th scope="col">Submitted By</th>
+                                    <th scope="col">Date</th>
+                                    <th scope="col">Description</th>
+                                    <th scope="col">Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="approval-queue-body">
@@ -19239,14 +19244,14 @@ function _wireLoginBtn() {
                     <table class="prospects-table">
                         <thead>
                             <tr>
-                                <th>Name</th>
-                                <th>Lifetime Value</th>
-                                <th>Customer Since</th>
-                                <th>Ming Gua</th>
-                                <th>Agent</th>
-                                <th>Health</th>
-                                <th>Status</th>
-                                <th>Actions</th>
+                                <th scope="col">Name</th>
+                                <th scope="col">Lifetime Value</th>
+                                <th scope="col">Customer Since</th>
+                                <th scope="col">Ming Gua</th>
+                                <th scope="col">Agent</th>
+                                <th scope="col">Health</th>
+                                <th scope="col">Status</th>
+                                <th scope="col">Actions</th>
                             </tr>
                         </thead>
                         <tbody id="customers-table-body">
@@ -19512,9 +19517,9 @@ function _wireLoginBtn() {
                 ${changedFields.length > 0 ? `
                     <table style="width:100%; border-collapse:collapse; font-size:13px;">
                         <thead><tr>
-                            <th style="text-align:left; padding:6px 8px; border-bottom:2px solid var(--gray-200); color:var(--gray-500);">Field</th>
-                            <th style="text-align:left; padding:6px 8px; border-bottom:2px solid var(--gray-200); color:#dc2626;">Before</th>
-                            <th style="text-align:left; padding:6px 8px; border-bottom:2px solid var(--gray-200); color:#16a34a;">After</th>
+                            <th scope="col" style="text-align:left; padding:6px 8px; border-bottom:2px solid var(--gray-200); color:var(--gray-500);">Field</th>
+                            <th scope="col" style="text-align:left; padding:6px 8px; border-bottom:2px solid var(--gray-200); color:#dc2626;">Before</th>
+                            <th scope="col" style="text-align:left; padding:6px 8px; border-bottom:2px solid var(--gray-200); color:#16a34a;">After</th>
                         </tr></thead>
                         <tbody>${changedFields.map(f => `<tr>
                             <td style="padding:6px 8px; border-bottom:1px solid var(--gray-100); font-weight:500;">${f.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</td>
@@ -20756,7 +20761,7 @@ function _wireLoginBtn() {
             if (registrations.length === 0) {
                 html += '<p>No events attended.</p>';
             } else {
-                html += '<table class="events-table"><thead><tr><th>Event</th><th>Date</th><th>Status</th><th>Points</th></tr></thead><tbody>';
+                html += '<table class="events-table"><thead><tr><th scope="col">Event</th><th scope="col">Date</th><th scope="col">Status</th><th scope="col">Points</th></tr></thead><tbody>';
                 for (const r of registrations) {
                     const event = eventsById.get(String(r.event_id));
                     html += `<tr><td>${event?.title || 'Unknown'}</td><td>${r.event_date || '-'}</td><td>${r.attendance_status}</td><td>${r.points_awarded || 0}</td></tr>`;
@@ -21098,13 +21103,13 @@ function _wireLoginBtn() {
             <table class="purchase-table">
                 <thead>
                     <tr>
-                        <th>Date</th>
-                        <th>Invoice Number</th>
-                        <th>Item/Product</th>
-                        <th>Amount</th>
-                        <th>Status</th>
-                        <th>Proof/Image</th>
-                        <th>Actions</th>
+                        <th scope="col">Date</th>
+                        <th scope="col">Invoice Number</th>
+                        <th scope="col">Item/Product</th>
+                        <th scope="col">Amount</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">Proof/Image</th>
+                        <th scope="col">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -21170,12 +21175,12 @@ function _wireLoginBtn() {
             <table class="purchase-table">
                 <thead>
                     <tr>
-                        <th>Referred Person</th>
-                        <th>Relationship</th>
-                        <th>Referral Date</th>
-                        <th>Status</th>
-                        <th>Reward Status</th>
-                        <th>Actions</th>
+                        <th scope="col">Referred Person</th>
+                        <th scope="col">Relationship</th>
+                        <th scope="col">Referral Date</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">Reward Status</th>
+                        <th scope="col">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -22066,7 +22071,7 @@ function _wireLoginBtn() {
                 }
                 if (registrations.length > 0) {
                     html += `<div class="pv-sub" style="margin-top:8px;">Event Registrations</div>`;
-                    html += '<div style="overflow-x:auto;"><table class="events-table" style="width:100%;"><thead><tr><th>Event</th><th>Date</th><th>Status</th><th>Pts</th></tr></thead><tbody>';
+                    html += '<div style="overflow-x:auto;"><table class="events-table" style="width:100%;"><thead><tr><th scope="col">Event</th><th scope="col">Date</th><th scope="col">Status</th><th scope="col">Pts</th></tr></thead><tbody>';
                     for (const r of registrations) {
                         const ev = eventsById.get(String(r.event_id));
                         html += `<tr><td>${ev?.event_title || ev?.title || 'Unknown'}</td><td>${r.event_date || '-'}</td><td>${r.attendance_status}</td><td>${r.points_awarded || 0}</td></tr>`;
@@ -22320,10 +22325,10 @@ function _wireLoginBtn() {
                     </div>
                     <table style="width:100%;border-collapse:collapse;font-size:13px;">
                         <thead><tr style="background:#fafafa;">
-                            <th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e5e7eb;font-weight:600;">Product / Service</th>
-                            <th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e5e7eb;font-weight:600;">Notes</th>
-                            <th style="padding:4px;width:36px;border-bottom:1px solid #e5e7eb;text-align:center;font-weight:600;font-size:11px;">File</th>
-                            <th style="padding:4px;width:36px;border-bottom:1px solid #e5e7eb;"></th>
+                            <th scope="col" style="padding:6px 10px;text-align:left;border-bottom:1px solid #e5e7eb;font-weight:600;">Product / Service</th>
+                            <th scope="col" style="padding:6px 10px;text-align:left;border-bottom:1px solid #e5e7eb;font-weight:600;">Notes</th>
+                            <th scope="col" style="padding:4px;width:36px;border-bottom:1px solid #e5e7eb;text-align:center;font-weight:600;font-size:11px;">File</th>
+                            <th scope="col" style="padding:4px;width:36px;border-bottom:1px solid #e5e7eb;"></th>
                         </tr></thead>
                         <tbody id="pre2025-rows-${pid}">${pre2025Rows}</tbody>
                     </table>
@@ -22658,13 +22663,13 @@ function _wireLoginBtn() {
                     <div style="overflow-x:auto;">
                     <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:${isFormula ? 680 : 560}px;">
                         <thead><tr style="background:#fafafa;">
-                            <th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e5e7eb;font-weight:600;">Product</th>
-                            <th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e5e7eb;font-weight:600;">Date</th>
-                            ${isFormula ? `<th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e5e7eb;font-weight:600;">Est. Finish</th>` : ''}
-                            <th style="padding:6px 10px;text-align:right;border-bottom:1px solid #e5e7eb;font-weight:600;">Amount</th>
-                            <th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e5e7eb;font-weight:600;">Notes</th>
-                            <th style="padding:4px;width:36px;border-bottom:1px solid #e5e7eb;text-align:center;font-weight:600;font-size:11px;">File</th>
-                            <th style="padding:4px;width:36px;border-bottom:1px solid #e5e7eb;"></th>
+                            <th scope="col" style="padding:6px 10px;text-align:left;border-bottom:1px solid #e5e7eb;font-weight:600;">Product</th>
+                            <th scope="col" style="padding:6px 10px;text-align:left;border-bottom:1px solid #e5e7eb;font-weight:600;">Date</th>
+                            ${isFormula ? `<th scope="col" style="padding:6px 10px;text-align:left;border-bottom:1px solid #e5e7eb;font-weight:600;">Est. Finish</th>` : ''}
+                            <th scope="col" style="padding:6px 10px;text-align:right;border-bottom:1px solid #e5e7eb;font-weight:600;">Amount</th>
+                            <th scope="col" style="padding:6px 10px;text-align:left;border-bottom:1px solid #e5e7eb;font-weight:600;">Notes</th>
+                            <th scope="col" style="padding:4px;width:36px;border-bottom:1px solid #e5e7eb;text-align:center;font-weight:600;font-size:11px;">File</th>
+                            <th scope="col" style="padding:4px;width:36px;border-bottom:1px solid #e5e7eb;"></th>
                         </tr></thead>
                         <tbody id="${tab}-rows-${pid}">${rowsHtml}</tbody>
                     </table>
@@ -22893,10 +22898,10 @@ function _wireLoginBtn() {
                 </div>
                 <table style="width:100%;border-collapse:collapse;font-size:13px;">
                     <thead><tr style="background:#fafafa;">
-                        <th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e5e7eb;font-weight:600;">Product / Service</th>
-                        <th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e5e7eb;font-weight:600;">Notes</th>
-                        <th style="padding:4px;width:36px;border-bottom:1px solid #e5e7eb;text-align:center;font-weight:600;font-size:11px;">File</th>
-                        <th style="padding:4px;width:36px;border-bottom:1px solid #e5e7eb;"></th>
+                        <th scope="col" style="padding:6px 10px;text-align:left;border-bottom:1px solid #e5e7eb;font-weight:600;">Product / Service</th>
+                        <th scope="col" style="padding:6px 10px;text-align:left;border-bottom:1px solid #e5e7eb;font-weight:600;">Notes</th>
+                        <th scope="col" style="padding:4px;width:36px;border-bottom:1px solid #e5e7eb;text-align:center;font-weight:600;font-size:11px;">File</th>
+                        <th scope="col" style="padding:4px;width:36px;border-bottom:1px solid #e5e7eb;"></th>
                     </tr></thead>
                     <tbody id="pre2025-rows-${pid}">${pre2025Rows}</tbody>
                 </table>
@@ -24747,17 +24752,17 @@ NOTIFY pgrst, 'reload schema';`;
                 <table style="width:100%;border-collapse:collapse;min-width:1000px;">
                     <thead>
                         <tr style="background:#f9fafb;border-bottom:2px solid #e5e7eb;">
-                            <th style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);text-align:center;white-space:nowrap;">SN</th>
-                            <th style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);white-space:nowrap;">Date</th>
-                            <th style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);white-space:nowrap;">Consultant</th>
-                            <th style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);white-space:nowrap;">Invoice No</th>
-                            <th style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);white-space:nowrap;">Customer Name</th>
-                            <th style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);white-space:nowrap;">Product / Service</th>
-                            <th style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);text-align:right;white-space:nowrap;">Amount (RM)</th>
-                            <th style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);white-space:nowrap;">Delivery Tracking</th>
-                            <th style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);white-space:nowrap;">Remarks</th>
-                            <th style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);text-align:center;white-space:nowrap;">Case Completed</th>
-                            <th style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);text-align:center;white-space:nowrap;">Save</th>
+                            <th scope="col" style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);text-align:center;white-space:nowrap;">SN</th>
+                            <th scope="col" style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);white-space:nowrap;">Date</th>
+                            <th scope="col" style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);white-space:nowrap;">Consultant</th>
+                            <th scope="col" style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);white-space:nowrap;">Invoice No</th>
+                            <th scope="col" style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);white-space:nowrap;">Customer Name</th>
+                            <th scope="col" style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);white-space:nowrap;">Product / Service</th>
+                            <th scope="col" style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);text-align:right;white-space:nowrap;">Amount (RM)</th>
+                            <th scope="col" style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);white-space:nowrap;">Delivery Tracking</th>
+                            <th scope="col" style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);white-space:nowrap;">Remarks</th>
+                            <th scope="col" style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);text-align:center;white-space:nowrap;">Case Completed</th>
+                            <th scope="col" style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);text-align:center;white-space:nowrap;">Save</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -25751,14 +25756,14 @@ const openAddSolutionModal = async (prospectId) => {
                     <table class="agents-table">
                         <thead>
                             <tr>
-                                <th>Name / Agent ID</th>
-                                <th>Team</th>
-                                <th>Status</th>
-                                <th>License Expiry</th>
-                                <th>Assigned Prospects</th>
-                                <th>Customers</th>
-                                <th>Follow-up Rate</th>
-                                <th>Actions</th>
+                                <th scope="col">Name / Agent ID</th>
+                                <th scope="col">Team</th>
+                                <th scope="col">Status</th>
+                                <th scope="col">License Expiry</th>
+                                <th scope="col">Assigned Prospects</th>
+                                <th scope="col">Customers</th>
+                                <th scope="col">Follow-up Rate</th>
+                                <th scope="col">Actions</th>
                             </tr>
                         </thead>
                         <tbody id="agents-table-body">
@@ -28276,12 +28281,12 @@ const deactivateAgent = async (agentId) => {
                         <table class="plan-items-table" style="width:100%;border-collapse:collapse;">
                             <thead>
                                 <tr style="background:#f9fafb;border-bottom:2px solid #e5e7eb;">
-                                    <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Event Name</th>
-                                    <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Objective</th>
-                                    <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Target</th>
-                                    <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Due Date</th>
-                                    <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">This Week</th>
-                                    <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Remarks</th>
+                                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Event Name</th>
+                                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Objective</th>
+                                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Target</th>
+                                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Due Date</th>
+                                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">This Week</th>
+                                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Remarks</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -28352,13 +28357,13 @@ const deactivateAgent = async (agentId) => {
                             <table style="width:100%;border-collapse:collapse;min-width:1080px;">
                                 <thead>
                                     <tr style="background:#F9FAFB;border-bottom:2px solid #E5E7EB;">
-                                        <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;width:50px;">#</th>
-                                        <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Prospect Name</th>
-                                        <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Target to Sign</th>
-                                        <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Amount (RM)</th>
-                                        <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Probability</th>
-                                        <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Action Needed</th>
-                                        <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Actions</th>
+                                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;width:50px;">#</th>
+                                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Prospect Name</th>
+                                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Target to Sign</th>
+                                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Amount (RM)</th>
+                                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Probability</th>
+                                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Action Needed</th>
+                                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>${subRows}</tbody>
@@ -28421,13 +28426,13 @@ const deactivateAgent = async (agentId) => {
             <table style="width:100%;border-collapse:collapse;min-width:1080px;">
                 <thead>
                     <tr style="background:#F9FAFB;border-bottom:2px solid #E5E7EB;">
-                        <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;width:50px;">#</th>
-                        <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Prospect Name</th>
-                        <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Target to Sign (Product/Service)</th>
-                        <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Amount (RM)</th>
-                        <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Probability</th>
-                        <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Action Needed to Close Deal</th>
-                        <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Actions</th>
+                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;width:50px;">#</th>
+                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Prospect Name</th>
+                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Target to Sign (Product/Service)</th>
+                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Amount (RM)</th>
+                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Probability</th>
+                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Action Needed to Close Deal</th>
+                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Actions</th>
                     </tr>
                 </thead>
                 <tbody id="focus-list-body">
@@ -28457,12 +28462,12 @@ const deactivateAgent = async (agentId) => {
             <table style="width:100%;border-collapse:collapse;min-width:1080px;">
                 <thead>
                     <tr style="background:#F9FAFB;border-bottom:2px solid #E5E7EB;">
-                        <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Prospect Name</th>
-                        <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Target to Sign (Product/Service)</th>
-                        <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Amount (RM)</th>
-                        <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Probability</th>
-                        <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Action Needed to Close Deal</th>
-                        <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Quick Action</th>
+                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Prospect Name</th>
+                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Target to Sign (Product/Service)</th>
+                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Amount (RM)</th>
+                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Probability</th>
+                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Action Needed to Close Deal</th>
+                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Quick Action</th>
                     </tr>
                 </thead>
                 <tbody id="pipeline-list-body">
@@ -28818,10 +28823,10 @@ const deactivateAgent = async (agentId) => {
                 <table class="data-table" style="width:100%;border-collapse:collapse;">
                     <thead>
                         <tr style="background:#f9fafb;border-bottom:2px solid #e5e7eb;">
-                            <th style="padding:10px 12px;text-align:left;">Month</th>
-                            <th style="padding:10px 12px;text-align:left;">Main Target</th>
-                            <th style="padding:10px 12px;text-align:left;">Status</th>
-                            <th style="padding:10px 12px;text-align:left;">Actions</th>
+                            <th scope="col" style="padding:10px 12px;text-align:left;">Month</th>
+                            <th scope="col" style="padding:10px 12px;text-align:left;">Main Target</th>
+                            <th scope="col" style="padding:10px 12px;text-align:left;">Status</th>
+                            <th scope="col" style="padding:10px 12px;text-align:left;">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -29019,11 +29024,11 @@ const deactivateAgent = async (agentId) => {
                 <div style="overflow-x:auto;">
                     <table style="width:100%;border-collapse:collapse;font-size:12px;">
                         <thead><tr style="background:#F9FAFB;border-bottom:2px solid #E5E7EB;">
-                            <th style="padding:6px 8px;text-align:left;">ID</th>
-                            <th style="padding:6px 8px;text-align:left;">Name</th>
-                            <th style="padding:6px 8px;text-align:left;">Products</th>
-                            <th style="padding:6px 8px;text-align:left;width:110px;">Default RM</th>
-                            ${isAdmin ? '<th style="padding:6px 8px;width:40px;"></th>' : ''}
+                            <th scope="col" style="padding:6px 8px;text-align:left;">ID</th>
+                            <th scope="col" style="padding:6px 8px;text-align:left;">Name</th>
+                            <th scope="col" style="padding:6px 8px;text-align:left;">Products</th>
+                            <th scope="col" style="padding:6px 8px;text-align:left;width:110px;">Default RM</th>
+                            ${isAdmin ? '<th scope="col" style="padding:6px 8px;width:40px;"></th>' : ''}
                         </tr></thead>
                         <tbody>
                         ${cats.map((c, i) => `
@@ -29048,9 +29053,9 @@ const deactivateAgent = async (agentId) => {
                 <div style="overflow-x:auto;">
                     <table style="width:100%;border-collapse:collapse;font-size:12px;max-width:400px;">
                         <thead><tr style="background:#F9FAFB;border-bottom:2px solid #E5E7EB;">
-                            <th style="padding:6px 8px;text-align:left;">Activity Type</th>
-                            <th style="padding:6px 8px;text-align:left;">Base Weight</th>
-                            ${isAdmin ? '<th style="padding:6px 8px;width:40px;"></th>' : ''}
+                            <th scope="col" style="padding:6px 8px;text-align:left;">Activity Type</th>
+                            <th scope="col" style="padding:6px 8px;text-align:left;">Base Weight</th>
+                            ${isAdmin ? '<th scope="col" style="padding:6px 8px;width:40px;"></th>' : ''}
                         </tr></thead>
                         <tbody>
                         ${weightKeys.map(k => `
@@ -29072,10 +29077,10 @@ const deactivateAgent = async (agentId) => {
                 <div style="overflow-x:auto;">
                     <table style="width:100%;border-collapse:collapse;font-size:12px;max-width:600px;">
                         <thead><tr style="background:#F9FAFB;border-bottom:2px solid #E5E7EB;">
-                            <th style="padding:6px 8px;text-align:left;">Up to N days</th>
-                            <th style="padding:6px 8px;text-align:left;">Factor</th>
-                            <th style="padding:6px 8px;text-align:left;">Label</th>
-                            ${isAdmin ? '<th style="padding:6px 8px;width:40px;"></th>' : ''}
+                            <th scope="col" style="padding:6px 8px;text-align:left;">Up to N days</th>
+                            <th scope="col" style="padding:6px 8px;text-align:left;">Factor</th>
+                            <th scope="col" style="padding:6px 8px;text-align:left;">Label</th>
+                            ${isAdmin ? '<th scope="col" style="padding:6px 8px;width:40px;"></th>' : ''}
                         </tr></thead>
                         <tbody>
                         ${decay.map((t, i) => `
@@ -29092,17 +29097,17 @@ const deactivateAgent = async (agentId) => {
             </details>`;
 
         // === Section 4: Event Boosters (2D matrix) ===
-        const boosterHeader = cats.map(c => `<th style="padding:6px 6px;font-size:10px;text-align:center;min-width:70px;">${escapeHtml(c.id)}</th>`).join('');
+        const boosterHeader = cats.map(c => `<th scope="col" style="padding:6px 6px;font-size:10px;text-align:center;min-width:70px;">${escapeHtml(c.id)}</th>`).join('');
         const boostersSection = `
             <details open style="margin-bottom:14px;">
                 <summary style="cursor:pointer;font-size:14px;font-weight:600;padding:8px 0;">4. Event Boosters <span style="color:#9CA3AF;font-weight:400;font-size:11px;">(EVENT title regex → per-category multiplier)</span></summary>
                 <div style="overflow-x:auto;">
                     <table style="width:100%;border-collapse:collapse;font-size:11px;min-width:900px;">
                         <thead><tr style="background:#F9FAFB;border-bottom:2px solid #E5E7EB;">
-                            <th style="padding:6px;text-align:left;min-width:140px;">Event Name</th>
-                            <th style="padding:6px;text-align:left;min-width:200px;">Match Pattern (regex)</th>
+                            <th scope="col" style="padding:6px;text-align:left;min-width:140px;">Event Name</th>
+                            <th scope="col" style="padding:6px;text-align:left;min-width:200px;">Match Pattern (regex)</th>
                             ${boosterHeader}
-                            ${isAdmin ? '<th style="padding:6px;width:30px;"></th>' : ''}
+                            ${isAdmin ? '<th scope="col" style="padding:6px;width:30px;"></th>' : ''}
                         </tr></thead>
                         <tbody>
                         ${boosters.map((b, i) => `
@@ -29129,9 +29134,9 @@ const deactivateAgent = async (agentId) => {
                 <div style="overflow-x:auto;">
                     <table style="width:100%;border-collapse:collapse;font-size:11px;">
                         <thead><tr style="background:#F9FAFB;border-bottom:2px solid #E5E7EB;">
-                            <th style="padding:6px;text-align:left;min-width:120px;">Activity / Key</th>
-                            ${cats.map(c => `<th style="padding:6px;font-size:10px;text-align:center;min-width:70px;">${escapeHtml(c.id)}</th>`).join('')}
-                            <th style="padding:6px;text-align:left;min-width:160px;">Sub-pattern (optional)</th>
+                            <th scope="col" style="padding:6px;text-align:left;min-width:120px;">Activity / Key</th>
+                            ${cats.map(c => `<th scope="col" style="padding:6px;font-size:10px;text-align:center;min-width:70px;">${escapeHtml(c.id)}</th>`).join('')}
+                            <th scope="col" style="padding:6px;text-align:left;min-width:160px;">Sub-pattern (optional)</th>
                         </tr></thead>
                         <tbody>
                         ${actMultRows.map(key => {
@@ -29402,9 +29407,9 @@ const deactivateAgent = async (agentId) => {
                 <div style="max-height:400px;overflow-y:auto;">
                     <table style="width:100%;border-collapse:collapse;font-size:12px;">
                         <thead><tr style="background:#F9FAFB;">
-                            <th style="padding:8px;text-align:left;">Saved At</th>
-                            <th style="padding:8px;text-align:left;">Note</th>
-                            <th style="padding:8px;width:50px;"></th>
+                            <th scope="col" style="padding:8px;text-align:left;">Saved At</th>
+                            <th scope="col" style="padding:8px;text-align:left;">Note</th>
+                            <th scope="col" style="padding:8px;width:50px;"></th>
                         </tr></thead>
                         <tbody>${rows || '<tr><td colspan="3" style="padding:24px;text-align:center;color:#9CA3AF;">No history yet</td></tr>'}</tbody>
                     </table>
@@ -29498,13 +29503,13 @@ const deactivateAgent = async (agentId) => {
                 <h4 style="font-size:13px;margin:12px 0 6px;">Activity contributions (sorted)</h4>
                 <table style="width:100%;border-collapse:collapse;font-size:11px;">
                     <thead><tr style="background:#F9FAFB;">
-                        <th style="padding:6px 8px;text-align:left;">Type</th>
-                        <th style="padding:6px 8px;text-align:left;">Title</th>
-                        <th style="padding:6px 8px;text-align:right;">Age</th>
-                        <th style="padding:6px 8px;text-align:right;">Base</th>
-                        <th style="padding:6px 8px;text-align:right;">Decay</th>
-                        <th style="padding:6px 8px;text-align:right;">Mult</th>
-                        <th style="padding:6px 8px;text-align:right;">Total</th>
+                        <th scope="col" style="padding:6px 8px;text-align:left;">Type</th>
+                        <th scope="col" style="padding:6px 8px;text-align:left;">Title</th>
+                        <th scope="col" style="padding:6px 8px;text-align:right;">Age</th>
+                        <th scope="col" style="padding:6px 8px;text-align:right;">Base</th>
+                        <th scope="col" style="padding:6px 8px;text-align:right;">Decay</th>
+                        <th scope="col" style="padding:6px 8px;text-align:right;">Mult</th>
+                        <th scope="col" style="padding:6px 8px;text-align:right;">Total</th>
                     </tr></thead>
                     <tbody>${breakdownRows || '<tr><td colspan="7" style="padding:12px;text-align:center;color:#9CA3AF;">No contributing activities</td></tr>'}</tbody>
                 </table>
@@ -29512,9 +29517,9 @@ const deactivateAgent = async (agentId) => {
                 <h4 style="font-size:13px;margin:14px 0 6px;">All category scores</h4>
                 <table style="width:100%;border-collapse:collapse;font-size:11px;">
                     <thead><tr style="background:#F9FAFB;">
-                        <th style="padding:6px 8px;text-align:left;">Category</th>
-                        <th style="padding:6px 8px;text-align:right;">Score</th>
-                        <th style="padding:6px 8px;text-align:right;">→ %</th>
+                        <th scope="col" style="padding:6px 8px;text-align:left;">Category</th>
+                        <th scope="col" style="padding:6px 8px;text-align:right;">Score</th>
+                        <th scope="col" style="padding:6px 8px;text-align:right;">→ %</th>
                     </tr></thead>
                     <tbody>${allCatScores}</tbody>
                 </table>
@@ -29952,12 +29957,12 @@ const deactivateAgent = async (agentId) => {
                     </h4>
                     <table style="width:100%;border-collapse:collapse;font-size:12px;">
                         <thead><tr style="background:#F9FAFB;border-bottom:1px solid #E5E7EB;">
-                            <th style="padding:8px 10px;text-align:left;">Name</th>
-                            <th style="padding:8px 10px;text-align:left;">Product</th>
-                            <th style="padding:8px 10px;text-align:left;">Amount</th>
-                            <th style="padding:8px 10px;text-align:left;">Prob</th>
-                            <th style="padding:8px 10px;text-align:left;">Action</th>
-                            <th style="padding:8px 10px;text-align:left;"></th>
+                            <th scope="col" style="padding:8px 10px;text-align:left;">Name</th>
+                            <th scope="col" style="padding:8px 10px;text-align:left;">Product</th>
+                            <th scope="col" style="padding:8px 10px;text-align:left;">Amount</th>
+                            <th scope="col" style="padding:8px 10px;text-align:left;">Prob</th>
+                            <th scope="col" style="padding:8px 10px;text-align:left;">Action</th>
+                            <th scope="col" style="padding:8px 10px;text-align:left;"></th>
                         </tr></thead>
                         <tbody>${rows}</tbody>
                     </table>
@@ -29997,11 +30002,11 @@ const deactivateAgent = async (agentId) => {
                     ${availRows ? `
                         <table style="width:100%;border-collapse:collapse;font-size:12px;">
                             <thead><tr style="background:#F9FAFB;border-bottom:1px solid #E5E7EB;">
-                                <th style="padding:8px 10px;text-align:left;">Name</th>
-                                <th style="padding:8px 10px;text-align:left;">Category</th>
-                                <th style="padding:8px 10px;text-align:left;">Prob</th>
-                                <th style="padding:8px 10px;text-align:left;">Last Activity</th>
-                                <th style="padding:8px 10px;text-align:left;"></th>
+                                <th scope="col" style="padding:8px 10px;text-align:left;">Name</th>
+                                <th scope="col" style="padding:8px 10px;text-align:left;">Category</th>
+                                <th scope="col" style="padding:8px 10px;text-align:left;">Prob</th>
+                                <th scope="col" style="padding:8px 10px;text-align:left;">Last Activity</th>
+                                <th scope="col" style="padding:8px 10px;text-align:left;"></th>
                             </tr></thead>
                             <tbody id="expired-pipeline-body">${availRows}</tbody>
                         </table>
@@ -30097,11 +30102,11 @@ container.innerHTML = `
     <table class="history-table">
         <thead>
             <tr>
-                <th>Prospect</th>
-                <th>Date</th>
-                <th>Type</th>
-                <th>Changes</th>
-                <th>Status</th>
+                <th scope="col">Prospect</th>
+                <th scope="col">Date</th>
+                <th scope="col">Type</th>
+                <th scope="col">Changes</th>
+                <th scope="col">Status</th>
             </tr>
         </thead>
         <tbody>
@@ -30288,12 +30293,12 @@ container.innerHTML = `
     <table class="history-table">
         <thead>
             <tr>
-                <th>Prospect Name</th>
-                <th>Date</th>
-                <th>Type</th>
-                <th>From Rank → To Rank</th>
-                <th>Status</th>
-                <th>Actions</th>
+                <th scope="col">Prospect Name</th>
+                <th scope="col">Date</th>
+                <th scope="col">Type</th>
+                <th scope="col">From Rank → To Rank</th>
+                <th scope="col">Status</th>
+                <th scope="col">Actions</th>
             </tr>
         </thead>
         <tbody>
@@ -30602,7 +30607,7 @@ container.innerHTML = `
         const counts = await getCaseCountsByProduct(ranges.current.from, ranges.current.to);
         const rows = Object.entries(counts).filter(([, cnt]) => cnt > 0);
         if (rows.length === 0) { container.innerHTML = '<p style="padding:16px;color:var(--gray-500)">No cases in this period.</p>'; return; }
-        let html = `<table class="data-table"><thead><tr><th>Product Category</th><th>Case Count</th></tr></thead><tbody>`;
+        let html = `<table class="data-table"><thead><tr><th scope="col">Product Category</th><th scope="col">Case Count</th></tr></thead><tbody>`;
         for (const [cat, cnt] of rows) html += `<tr><td>${cat}</td><td>${cnt}</td></tr>`;
         container.innerHTML = html + `</tbody></table>`;
     };
@@ -30614,7 +30619,7 @@ container.innerHTML = `
         const headcounts = await getHeadcountByEventType(ranges.current.from, ranges.current.to);
         const rows = Object.entries(headcounts).filter(([, d]) => d.total > 0);
         if (rows.length === 0) { container.innerHTML = '<p style="padding:16px;color:var(--gray-500)">No event attendance in this period.</p>'; return; }
-        let html = `<table class="data-table"><thead><tr><th>Event Type</th><th>Prospects</th><th>Agents</th><th>Total</th></tr></thead><tbody>`;
+        let html = `<table class="data-table"><thead><tr><th scope="col">Event Type</th><th scope="col">Prospects</th><th scope="col">Agents</th><th scope="col">Total</th></tr></thead><tbody>`;
         for (const [type, d] of rows) html += `<tr><td>${type}</td><td>${d.prospects}</td><td>${d.agents}</td><td>${d.total}</td></tr>`;
         container.innerHTML = html + `</tbody></table>`;
     };
@@ -30625,7 +30630,7 @@ container.innerHTML = `
         const ranges = getDateRanges(_currentTimeFilter, _customDateFrom, _customDateTo);
         const details = await getActivityAttendanceDetails(ranges.current.from, ranges.current.to);
         if (details.length === 0) { container.innerHTML = '<p style="padding:16px;color:var(--gray-500)">No attendance data for this period.</p>'; return; }
-        let html = `<table class="data-table"><thead><tr><th>Topic / Activity</th><th>Prospects</th><th>Agents</th><th>Total</th></tr></thead><tbody>`;
+        let html = `<table class="data-table"><thead><tr><th scope="col">Topic / Activity</th><th scope="col">Prospects</th><th scope="col">Agents</th><th scope="col">Total</th></tr></thead><tbody>`;
         for (const d of details) html += `<tr><td>${escapeHtml(d.title)}</td><td>${d.prospectCount}</td><td>${d.agentCount}</td><td>${d.total}</td></tr>`;
         container.innerHTML = html + `</tbody></table>`;
     };
@@ -31114,7 +31119,7 @@ const renderDetailTable = (headers, rows, emptyMsg = 'No records in this period'
         <div style="max-height:55vh;overflow:auto;border:1px solid var(--border,#e5e0d8);border-radius:6px;">
             <table style="width:100%;border-collapse:collapse;font-size:13px;">
                 <thead style="background:var(--gray-50,#f7f4ed);position:sticky;top:0;z-index:1;">
-                    <tr>${headers.map(h => `<th style="padding:10px 12px;text-align:left;font-weight:600;color:var(--gray-500);border-bottom:1px solid var(--border,#e5e0d8);">${h}</th>`).join('')}</tr>
+                    <tr>${headers.map(h => `<th scope="col" style="padding:10px 12px;text-align:left;font-weight:600;color:var(--gray-500);border-bottom:1px solid var(--border,#e5e0d8);">${h}</th>`).join('')}</tr>
                 </thead>
                 <tbody>
                     ${rows.map(r => `<tr>${r.map(cell => `<td style="padding:10px 12px;border-bottom:1px solid var(--gray-100,#f1ede3);">${cell ?? '—'}</td>`).join('')}</tr>`).join('')}
@@ -31603,10 +31608,10 @@ const renderTargetOverview = async () => {
             <table class="targets-table no-card-mode">
                 <thead>
                     <tr>
-                        <th>Quarter</th>
-                        <th>CPS Target</th>
-                        <th>Sales Target</th>
-                        <th>Progress</th>
+                        <th scope="col">Quarter</th>
+                        <th scope="col">CPS Target</th>
+                        <th scope="col">Sales Target</th>
+                        <th scope="col">Progress</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -32251,16 +32256,16 @@ const exportKPIReport = async (format) => {
                 <table class="data-table">
                     <thead>
                         <tr>
-                            <th>Name</th>
-                            <th>Category</th>
-                            <th>Functions Description</th>
-                            <th>Product Description</th>
-                            <th>Price (RM)</th>
-                            <th>Lead Time</th>
-                            <th>Dimension</th>
-                            <th>Weight</th>
-                            <th>Status</th>
-                            <th>Actions</th>
+                            <th scope="col">Name</th>
+                            <th scope="col">Category</th>
+                            <th scope="col">Functions Description</th>
+                            <th scope="col">Product Description</th>
+                            <th scope="col">Price (RM)</th>
+                            <th scope="col">Lead Time</th>
+                            <th scope="col">Dimension</th>
+                            <th scope="col">Weight</th>
+                            <th scope="col">Status</th>
+                            <th scope="col">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -32293,18 +32298,18 @@ const exportKPIReport = async (format) => {
                 <table class="data-table">
                     <thead>
                         <tr>
-                            <th style="min-width:160px;">Categories</th>
-                            <th>Title</th>
-                            <th>Price (RM)</th>
-                            <th>Early Bird (RM)</th>
-                            <th>Group Price (RM)</th>
-                            <th>Duration</th>
-                            <th>Target Group</th>
-                            <th>Location</th>
-                            <th>Speaker</th>
-                            <th>Remarks</th>
-                            <th>Status</th>
-                            <th>Actions</th>
+                            <th scope="col" style="min-width:160px;">Categories</th>
+                            <th scope="col">Title</th>
+                            <th scope="col">Price (RM)</th>
+                            <th scope="col">Early Bird (RM)</th>
+                            <th scope="col">Group Price (RM)</th>
+                            <th scope="col">Duration</th>
+                            <th scope="col">Target Group</th>
+                            <th scope="col">Location</th>
+                            <th scope="col">Speaker</th>
+                            <th scope="col">Remarks</th>
+                            <th scope="col">Status</th>
+                            <th scope="col">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -32346,12 +32351,12 @@ const exportKPIReport = async (format) => {
                 <table class="data-table">
                     <thead>
                         <tr>
-                            <th style="width:60px">#</th>
-                            <th>Venue Name</th>
-                            <th>Location</th>
-                            <th>Address</th>
-                            <th>Waze</th>
-                            <th>Actions</th>
+                            <th scope="col" style="width:60px">#</th>
+                            <th scope="col">Venue Name</th>
+                            <th scope="col">Location</th>
+                            <th scope="col">Address</th>
+                            <th scope="col">Waze</th>
+                            <th scope="col">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -32380,15 +32385,15 @@ const exportKPIReport = async (format) => {
                 <table class="data-table">
                     <thead>
                         <tr>
-                            <th>Name</th>
-                            <th>Category</th>
-                            <th>Function</th>
-                            <th>Price (RM)</th>
-                            <th>Lead Time</th>
-                            <th>Dimension</th>
-                            <th>Weight</th>
-                            <th>Status</th>
-                            <th>Actions</th>
+                            <th scope="col">Name</th>
+                            <th scope="col">Category</th>
+                            <th scope="col">Function</th>
+                            <th scope="col">Price (RM)</th>
+                            <th scope="col">Lead Time</th>
+                            <th scope="col">Dimension</th>
+                            <th scope="col">Weight</th>
+                            <th scope="col">Status</th>
+                            <th scope="col">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -32420,15 +32425,15 @@ const exportKPIReport = async (format) => {
                 <table class="data-table">
                     <thead>
                         <tr>
-                            <th>Name</th>
-                            <th>Category</th>
-                            <th>Functions</th>
-                            <th>Pills/Bottles</th>
-                            <th>Dosage</th>
-                            <th>Price (RM)</th>
-                            <th>Lead Time</th>
-                            <th>Status</th>
-                            <th>Actions</th>
+                            <th scope="col">Name</th>
+                            <th scope="col">Category</th>
+                            <th scope="col">Functions</th>
+                            <th scope="col">Pills/Bottles</th>
+                            <th scope="col">Dosage</th>
+                            <th scope="col">Price (RM)</th>
+                            <th scope="col">Lead Time</th>
+                            <th scope="col">Status</th>
+                            <th scope="col">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -33081,17 +33086,17 @@ const exportKPIReport = async (format) => {
                 <table class="data-table" style="width:100%; font-size:13px;">
                     <thead>
                         <tr>
-                            <th style="width:30px;">#</th>
-                            <th style="width:30px;"></th>
-                            <th>Name</th>
-                            <th>Category</th>
-                            <th>Event Categories</th>
-                            <th>CPS Interest</th>
-                            <th>Solution Match</th>
-                            <th style="width:50px;">Delay</th>
-                            <th style="width:60px;">Window</th>
-                            <th style="width:60px;">Active</th>
-                            <th style="width:80px;">Actions</th>
+                            <th scope="col" style="width:30px;">#</th>
+                            <th scope="col" style="width:30px;"></th>
+                            <th scope="col">Name</th>
+                            <th scope="col">Category</th>
+                            <th scope="col">Event Categories</th>
+                            <th scope="col">CPS Interest</th>
+                            <th scope="col">Solution Match</th>
+                            <th scope="col" style="width:50px;">Delay</th>
+                            <th scope="col" style="width:60px;">Window</th>
+                            <th scope="col" style="width:60px;">Active</th>
+                            <th scope="col" style="width:80px;">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -33423,10 +33428,10 @@ const exportKPIReport = async (format) => {
                 <table class="data-table" style="width: 100%; border-collapse: collapse;">
                     <thead>
                         <tr style="background: var(--gray-100); text-align: left;">
-                            <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Name</th>
-                            <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Category</th>
-                            <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Status</th>
-                            <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Actions</th>
+                            <th scope="col" style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Name</th>
+                            <th scope="col" style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Category</th>
+                            <th scope="col" style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Status</th>
+                            <th scope="col" style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -33572,15 +33577,15 @@ const exportKPIReport = async (format) => {
                     <table style="width:100%;border-collapse:collapse;min-width:880px;">
                         <thead>
                             <tr>
-                                <th class="pkg-th">Package Name</th>
-                                <th class="pkg-th">Product / Service</th>
-                                <th class="pkg-th">Amount (RM)</th>
-                                <th class="pkg-th">Discounted Value Worth</th>
-                                <th class="pkg-th">Requirement</th>
-                                <th class="pkg-th" style="text-align:center;">Limited To (Sets)</th>
-                                <th class="pkg-th">Time Frame</th>
-                                <th class="pkg-th">Status</th>
-                                <th class="pkg-th">Actions</th>
+                                <th scope="col" class="pkg-th">Package Name</th>
+                                <th scope="col" class="pkg-th">Product / Service</th>
+                                <th scope="col" class="pkg-th">Amount (RM)</th>
+                                <th scope="col" class="pkg-th">Discounted Value Worth</th>
+                                <th scope="col" class="pkg-th">Requirement</th>
+                                <th scope="col" class="pkg-th" style="text-align:center;">Limited To (Sets)</th>
+                                <th scope="col" class="pkg-th">Time Frame</th>
+                                <th scope="col" class="pkg-th">Status</th>
+                                <th scope="col" class="pkg-th">Actions</th>
                             </tr>
                         </thead>
                         <tbody id="packages-table-body">
@@ -33749,15 +33754,15 @@ const exportKPIReport = async (format) => {
                     <table class="data-table" style="width: 100%; border-collapse: collapse; min-width: 900px;">
                         <thead>
                             <tr style="background: var(--gray-100); text-align: left;">
-                                <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Promotion Name</th>
-                                <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Month/Year</th>
-                                <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Time Frame</th>
-                                <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Special Package</th>
-                                <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Payment Mode</th>
-                                <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Target Customer</th>
-                                <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Entitlement Req.</th>
-                                <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Status</th>
-                                <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Actions</th>
+                                <th scope="col" style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Promotion Name</th>
+                                <th scope="col" style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Month/Year</th>
+                                <th scope="col" style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Time Frame</th>
+                                <th scope="col" style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Special Package</th>
+                                <th scope="col" style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Payment Mode</th>
+                                <th scope="col" style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Target Customer</th>
+                                <th scope="col" style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Entitlement Req.</th>
+                                <th scope="col" style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Status</th>
+                                <th scope="col" style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Actions</th>
                             </tr>
                         </thead>
                         <tbody id="monthly-promotions-tbody">
@@ -34525,10 +34530,10 @@ ALTER TABLE public.promotions
             <table class="data-table" style="width: 100%; border-collapse: collapse;">
                 <thead>
                     <tr style="background: var(--gray-100); text-align: left;">
-                        <th style="padding: 10px; border-bottom: 2px solid var(--gray-200);">Customer Name</th>
-                        <th style="padding: 10px; border-bottom: 2px solid var(--gray-200);">Purchase Date</th>
-                        <th style="padding: 10px; border-bottom: 2px solid var(--gray-200);">Amount Paid</th>
-                        <th style="padding: 10px; border-bottom: 2px solid var(--gray-200);">Status</th>
+                        <th scope="col" style="padding: 10px; border-bottom: 2px solid var(--gray-200);">Customer Name</th>
+                        <th scope="col" style="padding: 10px; border-bottom: 2px solid var(--gray-200);">Purchase Date</th>
+                        <th scope="col" style="padding: 10px; border-bottom: 2px solid var(--gray-200);">Amount Paid</th>
+                        <th scope="col" style="padding: 10px; border-bottom: 2px solid var(--gray-200);">Status</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -34942,13 +34947,13 @@ ALTER TABLE public.promotions
         <table class="campaigns-table">
             <thead>
                 <tr>
-                    <th>Campaign Name</th>
-                    <th>Status</th>
-                    <th>Schedule</th>
-                    <th>Recipients</th>
-                    <th>Open Rate</th>
-                    <th>Response</th>
-                    <th>Actions</th>
+                    <th scope="col">Campaign Name</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Schedule</th>
+                    <th scope="col">Recipients</th>
+                    <th scope="col">Open Rate</th>
+                    <th scope="col">Response</th>
+                    <th scope="col">Actions</th>
                 </tr>
             </thead>
             <tbody id="campaigns-list-body">
@@ -35516,10 +35521,10 @@ const simulateCampaignSending = async (campaignId) => {
                     <table class="campaigns-table">
                         <thead>
                             <tr>
-                                <th>Campaign</th>
-                                <th>Sent</th>
-                                <th>Open Rate</th>
-                                <th>Score</th>
+                                <th scope="col">Campaign</th>
+                                <th scope="col">Sent</th>
+                                <th scope="col">Open Rate</th>
+                                <th scope="col">Score</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -35765,11 +35770,11 @@ const simulateCampaignSending = async (campaignId) => {
                             <table class="recipient-table">
                                 <thead>
                                     <tr>
-                                        <th>Recipient</th>
-                                        <th>Phone</th>
-                                        <th>Status</th>
-                                        <th>Sent At</th>
-                                        <th>Actions</th>
+                                        <th scope="col">Recipient</th>
+                                        <th scope="col">Phone</th>
+                                        <th scope="col">Status</th>
+                                        <th scope="col">Sent At</th>
+                                        <th scope="col">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody id="recipient-list-body">
@@ -36074,7 +36079,7 @@ const simulateCampaignSending = async (campaignId) => {
                     <h3>Recent Imports</h3>
                     <div class="imports-table-container">
                         <table class="imports-table">
-                            <thead><tr><th>File Name</th><th>Type</th><th>Records</th><th>Success %</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead>
+                            <thead><tr><th scope="col">File Name</th><th scope="col">Type</th><th scope="col">Records</th><th scope="col">Success %</th><th scope="col">Status</th><th scope="col">Date</th><th scope="col">Actions</th></tr></thead>
                             <tbody id="imports-table-body">${await renderRecentImports()}</tbody>
                         </table>
                     </div>
@@ -36085,7 +36090,7 @@ const simulateCampaignSending = async (campaignId) => {
                     <p style="color:var(--gray-500);margin-bottom:16px;font-size:14px;">Download your CRM data as CSV or Excel. Access is restricted to authorized roles only.</p>
                     <div class="imports-table-container">
                         <table class="imports-table">
-                            <thead><tr><th>Data Type</th><th>Description</th><th style="width:180px">Export</th></tr></thead>
+                            <thead><tr><th scope="col">Data Type</th><th scope="col">Description</th><th scope="col" style="width:180px">Export</th></tr></thead>
                             <tbody>
                                 <tr>
                                     <td><strong><i class="fas fa-users" style="color:var(--primary-600);margin-right:8px;"></i>Prospects</strong></td>
@@ -36224,7 +36229,7 @@ const simulateCampaignSending = async (campaignId) => {
                         <button class="btn secondary btn-sm" onclick="app.clearMapping()"><i class="fas fa-times"></i> Clear all</button>
                     </div>
                     <div class="mapping-table-container">
-                        <table class="mapping-table"><thead><tr><th>Excel Column</th><th>CRM Field</th></tr></thead>
+                        <table class="mapping-table"><thead><tr><th scope="col">Excel Column</th><th scope="col">CRM Field</th></tr></thead>
                         <tbody>${renderMappingRows()}</tbody></table>
                     </div>
                 </div>
@@ -36265,10 +36270,10 @@ const simulateCampaignSending = async (campaignId) => {
                     </div>
                     <div class="validation-log">
                         <h4>Error Log</h4>
-                        <table class="error-table"><thead><tr><th>Row</th><th>Column</th><th>Error</th><th>Suggestion</th></tr></thead>
+                        <table class="error-table"><thead><tr><th scope="col">Row</th><th scope="col">Column</th><th scope="col">Error</th><th scope="col">Suggestion</th></tr></thead>
                         <tbody>${renderIssueRows(errorRows, 'error')}</tbody></table>
                         <h4 style="margin-top:16px">Warning Log</h4>
-                        <table class="warning-table"><thead><tr><th>Row</th><th>Column</th><th>Warning</th><th>Action</th></tr></thead>
+                        <table class="warning-table"><thead><tr><th scope="col">Row</th><th scope="col">Column</th><th scope="col">Warning</th><th scope="col">Action</th></tr></thead>
                         <tbody>${renderIssueRows(warningRows, 'warning')}</tbody></table>
                     </div>
                     <div class="validation-actions">
@@ -36320,7 +36325,7 @@ const simulateCampaignSending = async (campaignId) => {
                     </div>
                     <div class="duplicate-preview">
                         <h4>Preview of affected records${list.length > 20 ? ' (showing first 20)' : ''}</h4>
-                        <table class="preview-table"><thead><tr><th>Existing Record</th><th>Import Record</th><th>Status</th></tr></thead>
+                        <table class="preview-table"><thead><tr><th scope="col">Existing Record</th><th scope="col">Import Record</th><th scope="col">Status</th></tr></thead>
                         <tbody>${previewRows}</tbody></table>
                     </div>
                 </div>
@@ -36845,7 +36850,7 @@ const simulateCampaignSending = async (campaignId) => {
     const openTemplatesModal = () => {
         const content = `
             <table style="width:100%;border-collapse:collapse">
-                <thead><tr><th style="padding:10px;text-align:left;background:var(--gray-50)">Template</th><th style="padding:10px;text-align:left;background:var(--gray-50)">Description</th><th style="padding:10px;text-align:left;background:var(--gray-50)">Download</th></tr></thead>
+                <thead><tr><th scope="col" style="padding:10px;text-align:left;background:var(--gray-50)">Template</th><th scope="col" style="padding:10px;text-align:left;background:var(--gray-50)">Description</th><th scope="col" style="padding:10px;text-align:left;background:var(--gray-50)">Download</th></tr></thead>
                 <tbody>
                     ${['Prospects', 'Customers', 'Agents', 'Products', 'Events', 'Promotions', 'Activities'].map(t => `<tr><td style="padding:10px;border-bottom:1px solid var(--gray-100)">${t} Template</td><td style="padding:10px;border-bottom:1px solid var(--gray-100)">${t} data import</td><td style="padding:10px;border-bottom:1px solid var(--gray-100)"><button class="btn secondary btn-sm" onclick="app.downloadTemplate('${t.toLowerCase()}','csv')">CSV</button> <button class="btn secondary btn-sm" onclick="app.downloadTemplate('${t.toLowerCase()}','xlsx')">Excel</button></td></tr>`).join('')}
                 </tbody>
@@ -36931,7 +36936,7 @@ const simulateCampaignSending = async (campaignId) => {
         const jobs = (await AppDataStore.getAll('import_jobs')).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
         const rows = jobs.length === 0 ? '<tr><td colspan="6" style="text-align:center;padding:20px">No import history</td></tr>' :
             jobs.map(j => `<tr><td>${j.file_name}</td><td>${j.import_type}</td><td>${j.total_rows}</td><td><span class="import-status status-${j.status}">${j.status.toUpperCase()}</span></td><td>${UI.formatDate(j.created_at)}</td><td><button class="btn-icon" onclick="app.viewImportDetails(${j.id})"><i class="fas fa-eye"></i></button></td></tr>`).join('');
-        const content = `<table style="width:100%;border-collapse:collapse"><thead><tr style="background:var(--gray-50)"><th style="padding:10px;text-align:left">File</th><th style="padding:10px;text-align:left">Type</th><th style="padding:10px;text-align:left">Records</th><th style="padding:10px;text-align:left">Status</th><th style="padding:10px;text-align:left">Date</th><th style="padding:10px;text-align:left">Actions</th></tr></thead><tbody>${rows}</tbody></table>`;
+        const content = `<table style="width:100%;border-collapse:collapse"><thead><tr style="background:var(--gray-50)"><th scope="col" style="padding:10px;text-align:left">File</th><th scope="col" style="padding:10px;text-align:left">Type</th><th scope="col" style="padding:10px;text-align:left">Records</th><th scope="col" style="padding:10px;text-align:left">Status</th><th scope="col" style="padding:10px;text-align:left">Date</th><th scope="col" style="padding:10px;text-align:left">Actions</th></tr></thead><tbody>${rows}</tbody></table>`;
         UI.showModal('Import History', content, [{ label: 'Close', type: 'primary', action: 'UI.hideModal()' }]);
     };
 
@@ -36982,7 +36987,7 @@ const simulateCampaignSending = async (campaignId) => {
                     <h3>Agent Performance</h3>
                     <div class="agent-table-container">
                         <table class="agent-performance-table">
-                            <thead><tr><th>Agent</th><th>Team</th><th>Assigned</th><th>Followed up (7d)</th><th>Rate</th><th>Inactive (3-7d)</th><th>Inactive (8-14d)</th><th>Inactive (15d+)</th><th>Actions</th></tr></thead>
+                            <thead><tr><th scope="col">Agent</th><th scope="col">Team</th><th scope="col">Assigned</th><th scope="col">Followed up (7d)</th><th scope="col">Rate</th><th scope="col">Inactive (3-7d)</th><th scope="col">Inactive (8-14d)</th><th scope="col">Inactive (15d+)</th><th scope="col">Actions</th></tr></thead>
                             <tbody>${renderAgentPerformanceRows(monitorData)}</tbody>
                         </table>
                     </div>
@@ -36991,7 +36996,7 @@ const simulateCampaignSending = async (campaignId) => {
                     <h3>Inactive Prospects (>7 days)</h3>
                     <div class="inactive-table-container">
                         <table class="inactive-table">
-                            <thead><tr><th>Prospect</th><th>Agent</th><th>Days Inactive</th><th>Score</th><th>Protection Deadline</th><th>Status</th><th>Actions</th></tr></thead>
+                            <thead><tr><th scope="col">Prospect</th><th scope="col">Agent</th><th scope="col">Days Inactive</th><th scope="col">Score</th><th scope="col">Protection Deadline</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
                             <tbody>${renderInactiveProspectsRows(monitorData)}</tbody>
                         </table>
                     </div>
@@ -37077,7 +37082,7 @@ const simulateCampaignSending = async (campaignId) => {
 
         const rows = history.map(r => `<tr><td>${UI.formatDate(r.reassignment_date)}</td><td>#${r.prospect_id}</td><td>${nameOf(r.from_agent_id)}</td><td>${nameOf(r.to_agent_id)}</td><td>${r.reassignment_reason}</td><td>${nameOf(r.reassigned_by)}</td></tr>`);
 
-        return `<table class="agent-performance-table"><thead><tr><th>Date</th><th>Prospect ID</th><th>From Agent</th><th>To Agent</th><th>Reason</th><th>By</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
+        return `<table class="agent-performance-table"><thead><tr><th scope="col">Date</th><th scope="col">Prospect ID</th><th scope="col">From Agent</th><th scope="col">To Agent</th><th scope="col">Reason</th><th scope="col">By</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
     };
 
     const openReassignModal = async (prospectId) => {
@@ -37954,11 +37959,11 @@ const initImportDemoData = async () => {
                     <table style="width:100%; border-collapse:collapse;">
                         <thead>
                             <tr style="background:var(--gray-100);">
-                                <th style="text-align:left; padding:6px 8px; font-size:12px; font-weight:600;">Metric</th>
-                                <th style="text-align:center; padding:6px 8px; font-size:12px; font-weight:600;">Q1</th>
-                                <th style="text-align:center; padding:6px 8px; font-size:12px; font-weight:600;">Q2</th>
-                                <th style="text-align:center; padding:6px 8px; font-size:12px; font-weight:600;">Q3</th>
-                                <th style="text-align:center; padding:6px 8px; font-size:12px; font-weight:600;">Q4</th>
+                                <th scope="col" style="text-align:left; padding:6px 8px; font-size:12px; font-weight:600;">Metric</th>
+                                <th scope="col" style="text-align:center; padding:6px 8px; font-size:12px; font-weight:600;">Q1</th>
+                                <th scope="col" style="text-align:center; padding:6px 8px; font-size:12px; font-weight:600;">Q2</th>
+                                <th scope="col" style="text-align:center; padding:6px 8px; font-size:12px; font-weight:600;">Q3</th>
+                                <th scope="col" style="text-align:center; padding:6px 8px; font-size:12px; font-weight:600;">Q4</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -38090,11 +38095,11 @@ const initImportDemoData = async () => {
                     <table style="width:100%; border-collapse:collapse; min-width:560px;">
                         <thead>
                             <tr style="background:var(--gray-100);">
-                                <th style="text-align:left; padding:8px; font-size:12px; font-weight:600;">Metric</th>
-                                <th style="text-align:center; padding:8px; font-size:12px; font-weight:600;">Q1 (Jan–Mar)</th>
-                                <th style="text-align:center; padding:8px; font-size:12px; font-weight:600;">Q2 (Apr–Jun)</th>
-                                <th style="text-align:center; padding:8px; font-size:12px; font-weight:600;">Q3 (Jul–Sep)</th>
-                                <th style="text-align:center; padding:8px; font-size:12px; font-weight:600;">Q4 (Oct–Dec)</th>
+                                <th scope="col" style="text-align:left; padding:8px; font-size:12px; font-weight:600;">Metric</th>
+                                <th scope="col" style="text-align:center; padding:8px; font-size:12px; font-weight:600;">Q1 (Jan–Mar)</th>
+                                <th scope="col" style="text-align:center; padding:8px; font-size:12px; font-weight:600;">Q2 (Apr–Jun)</th>
+                                <th scope="col" style="text-align:center; padding:8px; font-size:12px; font-weight:600;">Q3 (Jul–Sep)</th>
+                                <th scope="col" style="text-align:center; padding:8px; font-size:12px; font-weight:600;">Q4 (Oct–Dec)</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -38272,11 +38277,11 @@ const initImportDemoData = async () => {
                 <table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:12px;">
                     <thead>
                         <tr style="background:var(--gray-50,#f7f4ed);">
-                            <th style="text-align:left;padding:8px;border-bottom:1px solid var(--gray-200);">Agent</th>
-                            ${program.sales_target > 0 ? '<th style="text-align:left;padding:8px;border-bottom:1px solid var(--gray-200);">Sales</th>' : ''}
-                            ${program.new_customers_target > 0 ? '<th style="text-align:left;padding:8px;border-bottom:1px solid var(--gray-200);">New Customers</th>' : ''}
-                            ${program.cps_target > 0 ? '<th style="text-align:left;padding:8px;border-bottom:1px solid var(--gray-200);">CPS</th>' : ''}
-                            <th style="text-align:center;padding:8px;border-bottom:1px solid var(--gray-200);">Status</th>
+                            <th scope="col" style="text-align:left;padding:8px;border-bottom:1px solid var(--gray-200);">Agent</th>
+                            ${program.sales_target > 0 ? '<th scope="col" style="text-align:left;padding:8px;border-bottom:1px solid var(--gray-200);">Sales</th>' : ''}
+                            ${program.new_customers_target > 0 ? '<th scope="col" style="text-align:left;padding:8px;border-bottom:1px solid var(--gray-200);">New Customers</th>' : ''}
+                            ${program.cps_target > 0 ? '<th scope="col" style="text-align:left;padding:8px;border-bottom:1px solid var(--gray-200);">CPS</th>' : ''}
+                            <th scope="col" style="text-align:center;padding:8px;border-bottom:1px solid var(--gray-200);">Status</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -38455,13 +38460,13 @@ const initImportDemoData = async () => {
                 <table class="data-table" style="width:100%;">
                     <thead>
                         <tr>
-                            <th style="text-align:left;">Program</th>
-                            <th style="text-align:left;">Agent</th>
-                            <th style="text-align:left;">Total Sales</th>
-                            <th style="text-align:left;">New Customers</th>
-                            <th style="text-align:left;">CPS Count</th>
-                            <th style="text-align:center;">Status</th>
-                            <th style="text-align:left;">Actions</th>
+                            <th scope="col" style="text-align:left;">Program</th>
+                            <th scope="col" style="text-align:left;">Agent</th>
+                            <th scope="col" style="text-align:left;">Total Sales</th>
+                            <th scope="col" style="text-align:left;">New Customers</th>
+                            <th scope="col" style="text-align:left;">CPS Count</th>
+                            <th scope="col" style="text-align:center;">Status</th>
+                            <th scope="col" style="text-align:left;">Actions</th>
                         </tr>
                     </thead>
                     <tbody>${tbody}</tbody>
@@ -38530,9 +38535,9 @@ const initImportDemoData = async () => {
                     <table style="width:100%;border-collapse:collapse;font-size:12px;">
                         <thead style="background:var(--gray-50,#f7f4ed);position:sticky;top:0;">
                             <tr>
-                                <th style="padding:8px;width:40px;"><input type="checkbox" id="sp-select-all" onchange="document.querySelectorAll('.sp-agent-cb').forEach(cb => cb.checked = this.checked)"></th>
-                                <th style="text-align:left;padding:8px;">Name</th>
-                                <th style="text-align:left;padding:8px;">Role</th>
+                                <th scope="col" style="padding:8px;width:40px;"><input type="checkbox" id="sp-select-all" onchange="document.querySelectorAll('.sp-agent-cb').forEach(cb => cb.checked = this.checked)"></th>
+                                <th scope="col" style="text-align:left;padding:8px;">Name</th>
+                                <th scope="col" style="text-align:left;padding:8px;">Role</th>
                             </tr>
                         </thead>
                         <tbody>${agentRows || '<tr><td colspan="3" style="padding:16px;text-align:center;color:var(--gray-400);">No eligible agents found</td></tr>'}</tbody>
@@ -38739,7 +38744,7 @@ const initImportDemoData = async () => {
             <div class="profile-section" style="margin-top:20px;">
                 <h2><i class="fas fa-bullseye"></i> Q${quarter} ${year} — Target vs Actual</h2>
                 <table class="data-table" style="width:100%;">
-                    <thead><tr><th>Metric</th><th style="text-align:right;">Target</th><th style="text-align:right;">Actual</th><th style="text-align:right;">Variance</th><th style="text-align:right;">%</th></tr></thead>
+                    <thead><tr><th scope="col">Metric</th><th scope="col" style="text-align:right;">Target</th><th scope="col" style="text-align:right;">Actual</th><th scope="col" style="text-align:right;">Variance</th><th scope="col" style="text-align:right;">%</th></tr></thead>
                     <tbody>
                         ${row('CPS Count', cpsActual, quarterlyTarget?.cps_count_target || 0)}
                         ${row('Total Sales', salesActual, quarterlyTarget?.total_sales_target || 0)}
@@ -38756,7 +38761,7 @@ const initImportDemoData = async () => {
             <div class="profile-section" style="margin-top:16px;">
                 <h2><i class="fas fa-calendar-alt"></i> Yearly Target Overview — ${year}</h2>
                 <table class="data-table" style="width:100%;">
-                    <thead><tr><th>Metric</th><th style="text-align:right;">Q1</th><th style="text-align:right;">Q2</th><th style="text-align:right;">Q3</th><th style="text-align:right;">Q4</th><th style="text-align:right;">Year Total</th></tr></thead>
+                    <thead><tr><th scope="col">Metric</th><th scope="col" style="text-align:right;">Q1</th><th scope="col" style="text-align:right;">Q2</th><th scope="col" style="text-align:right;">Q3</th><th scope="col" style="text-align:right;">Q4</th><th scope="col" style="text-align:right;">Year Total</th></tr></thead>
                     <tbody>
                         ${await renderYearlyTargetRows(year)}
                     </tbody>
@@ -38908,16 +38913,16 @@ const initImportDemoData = async () => {
                     <table class="data-table" style="width:100%;">
                         <thead>
                             <tr>
-                                <th>Rank</th>
-                                <th>Agent</th>
-                                <th>Team</th>
-                                <th style="text-align:right;">Score</th>
-                                <th style="text-align:right;">CPS</th>
-                                <th style="text-align:right;">Sales (RM)</th>
-                                <th style="text-align:right;">Meetings</th>
-                                <th style="text-align:right;">Prospects</th>
-                                <th style="text-align:right;">Follow-up %</th>
-                                <th style="text-align:right;">Closing %</th>
+                                <th scope="col">Rank</th>
+                                <th scope="col">Agent</th>
+                                <th scope="col">Team</th>
+                                <th scope="col" style="text-align:right;">Score</th>
+                                <th scope="col" style="text-align:right;">CPS</th>
+                                <th scope="col" style="text-align:right;">Sales (RM)</th>
+                                <th scope="col" style="text-align:right;">Meetings</th>
+                                <th scope="col" style="text-align:right;">Prospects</th>
+                                <th scope="col" style="text-align:right;">Follow-up %</th>
+                                <th scope="col" style="text-align:right;">Closing %</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -39641,7 +39646,7 @@ const initImportDemoData = async () => {
             return `<div class="fude-section">
                 <div class="fude-sec-bar"><div class="fude-sec-bar-icon news">🏆</div><h2>福气 Leaderboard</h2></div>
                 <div class="fude-sec-body"><div style="overflow-x:auto;"><table class="data-table"><thead><tr>
-                    <th>#</th><th>Name</th><th>福气 Points</th><th>Sharing Returns (RM)</th>
+                    <th scope="col">#</th><th scope="col">Name</th><th scope="col">福气 Points</th><th scope="col">Sharing Returns (RM)</th>
                 </tr></thead><tbody>
                     ${ranked.map((r, i) => `<tr>
                         <td>${medals[i] || (i + 1)}</td>
@@ -39661,7 +39666,7 @@ const initImportDemoData = async () => {
                     <button class="btn primary btn-sm" onclick="app.openHighlightModal()"><i class="fas fa-plus"></i> Add New</button>
                 </div>
                 <div class="fude-sec-body"><div style="overflow-x:auto;"><table class="data-table"><thead><tr>
-                    <th>Title</th><th>Type</th><th>Status</th><th>Created</th><th>Actions</th>
+                    <th scope="col">Title</th><th scope="col">Type</th><th scope="col">Status</th><th scope="col">Created</th><th scope="col">Actions</th>
                 </tr></thead><tbody>
                     ${highlights.length ? highlights.map(h => `<tr>
                         <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;">${h.title}</td>
@@ -39684,7 +39689,7 @@ const initImportDemoData = async () => {
                     <button class="btn primary btn-sm" onclick="app.openRewardModal()"><i class="fas fa-plus"></i> Award Points</button>
                 </div>
                 <div class="fude-sec-body"><div style="overflow-x:auto;"><table class="data-table"><thead><tr>
-                    <th>User</th><th>Action</th><th>福气 Pts</th><th>Sharing Return</th><th>Description</th><th>Date</th><th></th>
+                    <th scope="col">User</th><th scope="col">Action</th><th scope="col">福气 Pts</th><th scope="col">Sharing Return</th><th scope="col">Description</th><th scope="col">Date</th><th scope="col"></th>
                 </tr></thead><tbody>
                     ${allRewards.length ? allRewards.map(r => {
                         const u = allUsersForReward.find(u => u.id === r.user_id);
@@ -39715,7 +39720,7 @@ const initImportDemoData = async () => {
             purchasesSection = `<div class="fude-section">
                 <div class="fude-sec-bar"><div class="fude-sec-bar-icon story">🛍️</div><h2>My Purchase History</h2></div>
                 <div class="fude-sec-body"><div style="overflow-x:auto;"><table class="data-table"><thead><tr>
-                    <th>Product / Package</th><th>Amount</th><th>Status</th><th>Date</th>
+                    <th scope="col">Product / Package</th><th scope="col">Amount</th><th scope="col">Status</th><th scope="col">Date</th>
                 </tr></thead><tbody>${rows}</tbody></table></div></div></div>`;
         }
 
@@ -39723,7 +39728,7 @@ const initImportDemoData = async () => {
         const rewardsHtml = myRewards.length === 0
             ? '<p style="color:var(--gray-500,#6b7280);margin:0;">No recommendations or rewards yet.</p>'
             : `<div style="overflow-x:auto;"><table class="data-table"><thead><tr>
-                <th>Action</th><th>福气 Points</th><th>Sharing Return (RM)</th><th>Description</th><th>Date</th>
+                <th scope="col">Action</th><th scope="col">福气 Points</th><th scope="col">Sharing Return (RM)</th><th scope="col">Description</th><th scope="col">Date</th>
                </tr></thead><tbody>
                 ${myRewards.map(r => `<tr>
                     <td>${badge(r.action_type || '-', '#e0e7ff', '#3730a3')}</td>
@@ -40659,11 +40664,11 @@ JB 星期二到
                     <table style="width:100%;border-collapse:collapse;border:1px solid var(--gray-200);">
                         <thead>
                             <tr style="background:var(--gray-50);text-align:left;font-size:12px;">
-                                <th style="padding:6px 8px;">Agent</th>
-                                <th style="padding:6px 8px;">Order Date</th>
-                                <th style="padding:6px 8px;">Order No</th>
-                                <th style="padding:6px 8px;">Product</th>
-                                <th style="padding:6px 8px;text-align:right;">Qty</th>
+                                <th scope="col" style="padding:6px 8px;">Agent</th>
+                                <th scope="col" style="padding:6px 8px;">Order Date</th>
+                                <th scope="col" style="padding:6px 8px;">Order No</th>
+                                <th scope="col" style="padding:6px 8px;">Product</th>
+                                <th scope="col" style="padding:6px 8px;text-align:right;">Qty</th>
                             </tr>
                         </thead>
                         <tbody>${body}</tbody>
@@ -40997,15 +41002,15 @@ JB 星期二到
             `<table style="width:100%;border-collapse:collapse;">
                 <thead>
                     <tr style="background:var(--gray-50);text-align:left;">
-                        <th style="padding:8px;width:40px;"></th>
-                        <th style="padding:8px;">Agent</th>
-                        <th style="padding:8px;">Order Date</th>
-                        <th style="padding:8px;">Order No</th>
-                        <th style="padding:8px;">Product</th>
-                        <th style="padding:8px;">Region</th>
-                        <th style="padding:8px;text-align:right;">Qty</th>
-                        <th style="padding:8px;">Channel</th>
-                        <th style="padding:8px;">Match</th>
+                        <th scope="col" style="padding:8px;width:40px;"></th>
+                        <th scope="col" style="padding:8px;">Agent</th>
+                        <th scope="col" style="padding:8px;">Order Date</th>
+                        <th scope="col" style="padding:8px;">Order No</th>
+                        <th scope="col" style="padding:8px;">Product</th>
+                        <th scope="col" style="padding:8px;">Region</th>
+                        <th scope="col" style="padding:8px;text-align:right;">Qty</th>
+                        <th scope="col" style="padding:8px;">Channel</th>
+                        <th scope="col" style="padding:8px;">Match</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -41109,13 +41114,13 @@ JB 星期二到
                     ? `<table style="width:100%;border-collapse:collapse;font-size:13px;">
                             <thead>
                                 <tr style="background:var(--gray-50);text-align:left;">
-                                    <th style="padding:6px 8px;">Agent</th>
-                                    <th style="padding:6px 8px;">Order Date</th>
-                                    <th style="padding:6px 8px;">Order No</th>
-                                    <th style="padding:6px 8px;">Product</th>
-                                    <th style="padding:6px 8px;">Region</th>
-                                    <th style="padding:6px 8px;text-align:right;">Qty</th>
-                                    <th style="padding:6px 8px;">Channel</th>
+                                    <th scope="col" style="padding:6px 8px;">Agent</th>
+                                    <th scope="col" style="padding:6px 8px;">Order Date</th>
+                                    <th scope="col" style="padding:6px 8px;">Order No</th>
+                                    <th scope="col" style="padding:6px 8px;">Product</th>
+                                    <th scope="col" style="padding:6px 8px;">Region</th>
+                                    <th scope="col" style="padding:6px 8px;text-align:right;">Qty</th>
+                                    <th scope="col" style="padding:6px 8px;">Channel</th>
                                 </tr>
                             </thead>
                             <tbody>${rows}</tbody>
@@ -41622,15 +41627,15 @@ JB 星期二到
                 <table style="width:100%;border-collapse:collapse;">
                     <thead>
                         <tr style="background:var(--gray-50);text-align:left;">
-                            <th style="padding:8px;">Week</th>
-                            <th style="padding:8px;">Agent</th>
-                            <th style="padding:8px;">Product</th>
-                            <th style="padding:8px;">Region</th>
-                            <th style="padding:8px;text-align:right;">Qty</th>
-                            <th style="padding:8px;">Channel</th>
-                            <th style="padding:8px;">Status</th>
-                            <th style="padding:8px;">Notes</th>
-                            <th style="padding:8px;">Actions</th>
+                            <th scope="col" style="padding:8px;">Week</th>
+                            <th scope="col" style="padding:8px;">Agent</th>
+                            <th scope="col" style="padding:8px;">Product</th>
+                            <th scope="col" style="padding:8px;">Region</th>
+                            <th scope="col" style="padding:8px;text-align:right;">Qty</th>
+                            <th scope="col" style="padding:8px;">Channel</th>
+                            <th scope="col" style="padding:8px;">Status</th>
+                            <th scope="col" style="padding:8px;">Notes</th>
+                            <th scope="col" style="padding:8px;">Actions</th>
                         </tr>
                     </thead>
                     <tbody>${rowsHtml}</tbody>
@@ -41791,11 +41796,11 @@ JB 星期二到
                     <table style="width:100%;border-collapse:collapse;">
                         <thead>
                             <tr style="background:var(--gray-50);text-align:left;">
-                                <th style="padding:6px;">Select</th>
-                                <th style="padding:6px;">Order No</th>
-                                <th style="padding:6px;">Agent</th>
-                                <th style="padding:6px;">Qty</th>
-                                <th style="padding:6px;">Week</th>
+                                <th scope="col" style="padding:6px;">Select</th>
+                                <th scope="col" style="padding:6px;">Order No</th>
+                                <th scope="col" style="padding:6px;">Agent</th>
+                                <th scope="col" style="padding:6px;">Qty</th>
+                                <th scope="col" style="padding:6px;">Week</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -41885,14 +41890,14 @@ JB 星期二到
                 <table style="width:100%;border-collapse:collapse;">
                     <thead>
                         <tr style="background:var(--gray-50);text-align:left;">
-                            <th style="padding:8px;">Run At</th>
-                            <th style="padding:8px;">Week</th>
-                            <th style="padding:8px;">Files</th>
-                            <th style="padding:8px;text-align:right;">Rows</th>
-                            <th style="padding:8px;text-align:right;">Excluded</th>
-                            <th style="padding:8px;text-align:right;">Cartons</th>
-                            <th style="padding:8px;">Run By</th>
-                            <th style="padding:8px;">Actions</th>
+                            <th scope="col" style="padding:8px;">Run At</th>
+                            <th scope="col" style="padding:8px;">Week</th>
+                            <th scope="col" style="padding:8px;">Files</th>
+                            <th scope="col" style="padding:8px;text-align:right;">Rows</th>
+                            <th scope="col" style="padding:8px;text-align:right;">Excluded</th>
+                            <th scope="col" style="padding:8px;text-align:right;">Cartons</th>
+                            <th scope="col" style="padding:8px;">Run By</th>
+                            <th scope="col" style="padding:8px;">Actions</th>
                         </tr>
                     </thead>
                     <tbody>${rowsHtml}</tbody>
@@ -42385,13 +42390,13 @@ JB 星期二到
                     <table style="width:100%;border-collapse:collapse;font-size:13px;">
                         <thead style="background:var(--gray-50);position:sticky;top:0;">
                             <tr>
-                                <th style="padding:10px;text-align:left;">Code</th>
-                                <th style="padding:10px;text-align:left;">Name</th>
-                                <th style="padding:10px;text-align:right;">Total</th>
-                                <th style="padding:10px;text-align:right;">Min</th>
-                                <th style="padding:10px;text-align:right;">Short</th>
-                                <th style="padding:10px;text-align:right;">Recommended</th>
-                                <th style="padding:10px;text-align:left;">Deal / Refund</th>
+                                <th scope="col" style="padding:10px;text-align:left;">Code</th>
+                                <th scope="col" style="padding:10px;text-align:left;">Name</th>
+                                <th scope="col" style="padding:10px;text-align:right;">Total</th>
+                                <th scope="col" style="padding:10px;text-align:right;">Min</th>
+                                <th scope="col" style="padding:10px;text-align:right;">Short</th>
+                                <th scope="col" style="padding:10px;text-align:right;">Recommended</th>
+                                <th scope="col" style="padding:10px;text-align:left;">Deal / Refund</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -42458,13 +42463,13 @@ JB 星期二到
                 <table style="width:100%;border-collapse:collapse;font-size:13px;">
                     <thead style="background:var(--gray-50);">
                         <tr>
-                            <th style="padding:10px;text-align:left;">PO #</th>
-                            <th style="padding:10px;text-align:left;">Vendor</th>
-                            <th style="padding:10px;text-align:left;">Branch</th>
-                            <th style="padding:10px;text-align:left;">Date</th>
-                            <th style="padding:10px;text-align:right;">Items</th>
-                            <th style="padding:10px;text-align:center;">Status</th>
-                            <th style="padding:10px;text-align:right;">Actions</th>
+                            <th scope="col" style="padding:10px;text-align:left;">PO #</th>
+                            <th scope="col" style="padding:10px;text-align:left;">Vendor</th>
+                            <th scope="col" style="padding:10px;text-align:left;">Branch</th>
+                            <th scope="col" style="padding:10px;text-align:left;">Date</th>
+                            <th scope="col" style="padding:10px;text-align:right;">Items</th>
+                            <th scope="col" style="padding:10px;text-align:center;">Status</th>
+                            <th scope="col" style="padding:10px;text-align:right;">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -42557,14 +42562,14 @@ JB 星期二到
                     <table style="width:100%;border-collapse:collapse;font-size:13px;" id="fp-po-items-table">
                         <thead style="background:var(--gray-50);">
                             <tr>
-                                <th style="padding:8px;text-align:center;width:40px;">#</th>
-                                <th style="padding:8px;text-align:left;">Code</th>
-                                <th style="padding:8px;text-align:left;">Name</th>
-                                <th style="padding:8px;text-align:left;">Attr</th>
-                                <th style="padding:8px;text-align:center;">Qty</th>
-                                <th style="padding:8px;text-align:right;">Stock</th>
-                                <th style="padding:8px;text-align:left;">Remark</th>
-                                <th style="padding:8px;width:40px;"></th>
+                                <th scope="col" style="padding:8px;text-align:center;width:40px;">#</th>
+                                <th scope="col" style="padding:8px;text-align:left;">Code</th>
+                                <th scope="col" style="padding:8px;text-align:left;">Name</th>
+                                <th scope="col" style="padding:8px;text-align:left;">Attr</th>
+                                <th scope="col" style="padding:8px;text-align:center;">Qty</th>
+                                <th scope="col" style="padding:8px;text-align:right;">Stock</th>
+                                <th scope="col" style="padding:8px;text-align:left;">Remark</th>
+                                <th scope="col" style="padding:8px;width:40px;"></th>
                             </tr>
                         </thead>
                         <tbody>${itemsHtml}</tbody>
@@ -42752,13 +42757,13 @@ JB 星期二到
                     <table style="width:100%;border-collapse:collapse;font-size:13px;">
                         <thead style="background:var(--gray-50);position:sticky;top:0;">
                             <tr>
-                                <th style="padding:10px;text-align:left;">Outlet</th>
-                                <th style="padding:10px;text-align:left;">SKU</th>
-                                <th style="padding:10px;text-align:right;">Outlet Stock</th>
-                                <th style="padding:10px;text-align:right;">Outlet Min</th>
-                                <th style="padding:10px;text-align:right;">Hub Stock</th>
-                                <th style="padding:10px;text-align:right;">Transfer Qty</th>
-                                <th style="padding:10px;text-align:right;">Action</th>
+                                <th scope="col" style="padding:10px;text-align:left;">Outlet</th>
+                                <th scope="col" style="padding:10px;text-align:left;">SKU</th>
+                                <th scope="col" style="padding:10px;text-align:right;">Outlet Stock</th>
+                                <th scope="col" style="padding:10px;text-align:right;">Outlet Min</th>
+                                <th scope="col" style="padding:10px;text-align:right;">Hub Stock</th>
+                                <th scope="col" style="padding:10px;text-align:right;">Transfer Qty</th>
+                                <th scope="col" style="padding:10px;text-align:right;">Action</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -42787,11 +42792,11 @@ JB 星期二到
                 <table style="width:100%;border-collapse:collapse;font-size:13px;">
                     <thead style="background:var(--gray-50);">
                         <tr>
-                            <th style="padding:10px;text-align:left;">Date</th>
-                            <th style="padding:10px;text-align:left;">From</th>
-                            <th style="padding:10px;text-align:left;">To</th>
-                            <th style="padding:10px;text-align:right;">Items</th>
-                            <th style="padding:10px;text-align:center;">Status</th>
+                            <th scope="col" style="padding:10px;text-align:left;">Date</th>
+                            <th scope="col" style="padding:10px;text-align:left;">From</th>
+                            <th scope="col" style="padding:10px;text-align:left;">To</th>
+                            <th scope="col" style="padding:10px;text-align:right;">Items</th>
+                            <th scope="col" style="padding:10px;text-align:center;">Status</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -42888,13 +42893,13 @@ JB 星期二到
                     <table style="width:100%;border-collapse:collapse;font-size:12px;">
                         <thead style="background:var(--gray-50);position:sticky;top:0;">
                             <tr>
-                                <th style="padding:10px;text-align:left;">Code</th>
-                                <th style="padding:10px;text-align:left;">Name</th>
-                                ${locs.map(l => `<th style="padding:10px;text-align:right;">${fpEsc(l.name.replace(/^00\d /, '').slice(0, 18))}</th>`).join('')}
-                                <th style="padding:10px;text-align:right;">Total</th>
-                                <th style="padding:10px;text-align:right;">Auto Min</th>
-                                <th style="padding:10px;text-align:right;">Actual Min</th>
-                                <th style="padding:10px;text-align:right;">Cost</th>
+                                <th scope="col" style="padding:10px;text-align:left;">Code</th>
+                                <th scope="col" style="padding:10px;text-align:left;">Name</th>
+                                ${locs.map(l => `<th scope="col" style="padding:10px;text-align:right;">${fpEsc(l.name.replace(/^00\d /, '').slice(0, 18))}</th>`).join('')}
+                                <th scope="col" style="padding:10px;text-align:right;">Total</th>
+                                <th scope="col" style="padding:10px;text-align:right;">Auto Min</th>
+                                <th scope="col" style="padding:10px;text-align:right;">Actual Min</th>
+                                <th scope="col" style="padding:10px;text-align:right;">Cost</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -42972,12 +42977,12 @@ JB 星期二到
                 <table style="width:100%;border-collapse:collapse;font-size:13px;">
                     <thead style="background:var(--gray-50);">
                         <tr>
-                            <th style="padding:10px;text-align:left;">Name</th>
-                            <th style="padding:10px;text-align:left;">Address</th>
-                            <th style="padding:10px;text-align:left;">Phone</th>
-                            <th style="padding:10px;text-align:left;">Email</th>
-                            <th style="padding:10px;text-align:center;">Active</th>
-                            <th style="padding:10px;text-align:right;">Actions</th>
+                            <th scope="col" style="padding:10px;text-align:left;">Name</th>
+                            <th scope="col" style="padding:10px;text-align:left;">Address</th>
+                            <th scope="col" style="padding:10px;text-align:left;">Phone</th>
+                            <th scope="col" style="padding:10px;text-align:left;">Email</th>
+                            <th scope="col" style="padding:10px;text-align:center;">Active</th>
+                            <th scope="col" style="padding:10px;text-align:right;">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -43075,11 +43080,11 @@ JB 星期二到
                 <table style="width:100%;border-collapse:collapse;font-size:13px;">
                     <thead style="background:var(--gray-50);">
                         <tr>
-                            <th style="padding:10px;text-align:left;">Code/Pattern</th>
-                            <th style="padding:10px;text-align:left;">Match</th>
-                            <th style="padding:10px;text-align:left;">Reason</th>
-                            <th style="padding:10px;text-align:center;">Active</th>
-                            <th style="padding:10px;text-align:right;">Actions</th>
+                            <th scope="col" style="padding:10px;text-align:left;">Code/Pattern</th>
+                            <th scope="col" style="padding:10px;text-align:left;">Match</th>
+                            <th scope="col" style="padding:10px;text-align:left;">Reason</th>
+                            <th scope="col" style="padding:10px;text-align:center;">Active</th>
+                            <th scope="col" style="padding:10px;text-align:right;">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -43108,12 +43113,12 @@ JB 星期二到
                 <table style="width:100%;border-collapse:collapse;font-size:13px;">
                     <thead style="background:var(--gray-50);">
                         <tr>
-                            <th style="padding:10px;text-align:left;">SKU</th>
-                            <th style="padding:10px;text-align:left;">Type</th>
-                            <th style="padding:10px;text-align:right;">Buy</th>
-                            <th style="padding:10px;text-align:right;">Free</th>
-                            <th style="padding:10px;text-align:left;">Effective</th>
-                            <th style="padding:10px;text-align:right;">Actions</th>
+                            <th scope="col" style="padding:10px;text-align:left;">SKU</th>
+                            <th scope="col" style="padding:10px;text-align:left;">Type</th>
+                            <th scope="col" style="padding:10px;text-align:right;">Buy</th>
+                            <th scope="col" style="padding:10px;text-align:right;">Free</th>
+                            <th scope="col" style="padding:10px;text-align:left;">Effective</th>
+                            <th scope="col" style="padding:10px;text-align:right;">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -43632,7 +43637,7 @@ JB 星期二到
                         <div style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:8px;overflow:hidden;font-size:12px;max-height:260px;overflow-y:auto;">
                             <table style="width:100%;border-collapse:collapse;">
                                 <thead style="background:var(--gray-100);position:sticky;top:0;">
-                                    <tr><th style="padding:6px 8px;text-align:left;">Code</th><th style="padding:6px 8px;text-align:left;">Name</th></tr>
+                                    <tr><th scope="col" style="padding:6px 8px;text-align:left;">Code</th><th scope="col" style="padding:6px 8px;text-align:left;">Name</th></tr>
                                 </thead>
                                 <tbody>${previewRows}</tbody>
                             </table>
@@ -43811,15 +43816,15 @@ JB 星期二到
             ` : `
                 <table style="width:100%;border-collapse:collapse;background:white;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
                     <thead style="background:var(--gray-50);"><tr>
-                        <th style="padding:10px;text-align:left;font-size:12px;">Session ID</th>
-                        <th style="padding:10px;text-align:left;font-size:12px;">Created</th>
-                        <th style="padding:10px;text-align:left;font-size:12px;">Locations</th>
-                        <th style="padding:10px;text-align:center;font-size:12px;">QR Counts</th>
-                        <th style="padding:10px;text-align:center;font-size:12px;">System SKUs</th>
-                        <th style="padding:10px;text-align:center;font-size:12px;">Bulk Rows</th>
-                        <th style="padding:10px;text-align:center;font-size:12px;">Method</th>
-                        <th style="padding:10px;text-align:center;font-size:12px;">Status</th>
-                        <th style="padding:10px;text-align:right;font-size:12px;">Actions</th>
+                        <th scope="col" style="padding:10px;text-align:left;font-size:12px;">Session ID</th>
+                        <th scope="col" style="padding:10px;text-align:left;font-size:12px;">Created</th>
+                        <th scope="col" style="padding:10px;text-align:left;font-size:12px;">Locations</th>
+                        <th scope="col" style="padding:10px;text-align:center;font-size:12px;">QR Counts</th>
+                        <th scope="col" style="padding:10px;text-align:center;font-size:12px;">System SKUs</th>
+                        <th scope="col" style="padding:10px;text-align:center;font-size:12px;">Bulk Rows</th>
+                        <th scope="col" style="padding:10px;text-align:center;font-size:12px;">Method</th>
+                        <th scope="col" style="padding:10px;text-align:center;font-size:12px;">Status</th>
+                        <th scope="col" style="padding:10px;text-align:right;font-size:12px;">Actions</th>
                     </tr></thead>
                     <tbody>
                         ${list.map(s => {
@@ -43935,9 +43940,9 @@ JB 星期二到
                         ${stock.length === 0 ? `<div style="color:var(--gray-500);padding:20px;text-align:center;">No system stock imported yet.</div>` : `
                             <table style="width:100%;border-collapse:collapse;font-size:12px;">
                                 <thead style="position:sticky;top:0;background:var(--gray-50);"><tr>
-                                    <th style="padding:6px;text-align:left;">Location</th>
-                                    <th style="padding:6px;text-align:left;">SKU</th>
-                                    <th style="padding:6px;text-align:right;">Qty</th>
+                                    <th scope="col" style="padding:6px;text-align:left;">Location</th>
+                                    <th scope="col" style="padding:6px;text-align:left;">SKU</th>
+                                    <th scope="col" style="padding:6px;text-align:right;">Qty</th>
                                 </tr></thead>
                                 <tbody>${stock.slice(0,500).map(r => `<tr style="border-top:1px solid var(--gray-100);">
                                     <td style="padding:6px;">${_stEsc(r.Location)}</td>
@@ -44031,13 +44036,13 @@ JB 星期二到
                 ${counts.length === 0 ? `<div style="padding:30px;text-align:center;color:var(--gray-500);">No counts yet.</div>` : `
                     <table style="width:100%;border-collapse:collapse;font-size:12px;">
                         <thead style="position:sticky;top:0;background:var(--gray-50);"><tr>
-                            <th style="padding:6px;text-align:left;">When</th>
-                            <th style="padding:6px;text-align:left;">Who</th>
-                            <th style="padding:6px;text-align:left;">Location</th>
-                            <th style="padding:6px;text-align:left;">Shelf</th>
-                            <th style="padding:6px;text-align:left;">SKU</th>
-                            <th style="padding:6px;text-align:right;">Qty</th>
-                            <th></th>
+                            <th scope="col" style="padding:6px;text-align:left;">When</th>
+                            <th scope="col" style="padding:6px;text-align:left;">Who</th>
+                            <th scope="col" style="padding:6px;text-align:left;">Location</th>
+                            <th scope="col" style="padding:6px;text-align:left;">Shelf</th>
+                            <th scope="col" style="padding:6px;text-align:left;">SKU</th>
+                            <th scope="col" style="padding:6px;text-align:right;">Qty</th>
+                            <th scope="col"></th>
                         </tr></thead>
                         <tbody>${counts.map(c => `<tr style="border-top:1px solid var(--gray-100);">
                             <td style="padding:6px;">${_stEsc((c.timestamp||'').slice(11,16))}</td>
@@ -44347,12 +44352,12 @@ JB 星期二到
             <div style="background:white;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.05);overflow:auto;max-height:600px;">
                 <table style="width:100%;border-collapse:collapse;font-size:13px;">
                     <thead style="position:sticky;top:0;background:var(--gray-50);z-index:1;"><tr>
-                        <th style="padding:10px;text-align:left;">Location</th>
-                        <th style="padding:10px;text-align:left;">SKU</th>
-                        <th style="padding:10px;text-align:right;">Physical</th>
-                        <th style="padding:10px;text-align:right;">System</th>
-                        <th style="padding:10px;text-align:right;">Variance</th>
-                        <th style="padding:10px;text-align:center;">Status</th>
+                        <th scope="col" style="padding:10px;text-align:left;">Location</th>
+                        <th scope="col" style="padding:10px;text-align:left;">SKU</th>
+                        <th scope="col" style="padding:10px;text-align:right;">Physical</th>
+                        <th scope="col" style="padding:10px;text-align:right;">System</th>
+                        <th scope="col" style="padding:10px;text-align:right;">Variance</th>
+                        <th scope="col" style="padding:10px;text-align:center;">Status</th>
                     </tr></thead>
                     <tbody>${rows.map(r => `<tr style="border-top:1px solid var(--gray-100);">
                         <td style="padding:8px 10px;">${_stEsc(r.Location)}</td>
@@ -44393,11 +44398,11 @@ JB 星期二到
                         </div>
                         <table style="width:100%;border-collapse:collapse;font-size:13px;">
                             <thead style="background:var(--gray-50);"><tr>
-                                <th style="padding:8px 10px;text-align:left;">SKU</th>
-                                <th style="padding:8px 10px;text-align:right;">Physical</th>
-                                <th style="padding:8px 10px;text-align:right;">System</th>
-                                <th style="padding:8px 10px;text-align:right;">Variance</th>
-                                <th style="padding:8px 10px;text-align:center;">Recount action</th>
+                                <th scope="col" style="padding:8px 10px;text-align:left;">SKU</th>
+                                <th scope="col" style="padding:8px 10px;text-align:right;">Physical</th>
+                                <th scope="col" style="padding:8px 10px;text-align:right;">System</th>
+                                <th scope="col" style="padding:8px 10px;text-align:right;">Variance</th>
+                                <th scope="col" style="padding:8px 10px;text-align:center;">Recount action</th>
                             </tr></thead>
                             <tbody>${items.map(r => `<tr style="border-top:1px solid var(--gray-100);">
                                 <td style="padding:8px 10px;font-family:monospace;">${_stEsc(r.SKU)}</td>
@@ -44530,10 +44535,10 @@ JB 星期二到
                         ${list.length === 0 ? `<div style="color:var(--gray-500);padding:24px;text-align:center;">No exclusions yet.</div>` : `
                             <table style="width:100%;border-collapse:collapse;font-size:12px;">
                                 <thead style="position:sticky;top:0;background:var(--gray-50);"><tr>
-                                    <th style="padding:6px;text-align:left;">SKU</th>
-                                    <th style="padding:6px;text-align:left;">Reason</th>
-                                    <th style="padding:6px;text-align:left;">Added</th>
-                                    <th style="padding:6px;"></th>
+                                    <th scope="col" style="padding:6px;text-align:left;">SKU</th>
+                                    <th scope="col" style="padding:6px;text-align:left;">Reason</th>
+                                    <th scope="col" style="padding:6px;text-align:left;">Added</th>
+                                    <th scope="col" style="padding:6px;"></th>
                                 </tr></thead>
                                 <tbody>${list.slice().sort((a,b) => (b.addedAt||'').localeCompare(a.addedAt||'')).map(e => `
                                     <tr style="border-top:1px solid var(--gray-100);">
@@ -44662,9 +44667,9 @@ JB 星期二到
                         ${rows.length === 0 ? `<div style="color:var(--gray-500);padding:20px;text-align:center;">No bulk physical counts uploaded yet.</div>` : `
                             <table style="width:100%;border-collapse:collapse;font-size:12px;">
                                 <thead style="position:sticky;top:0;background:var(--gray-50);"><tr>
-                                    <th style="padding:6px;text-align:left;">SKU</th>
-                                    <th style="padding:6px;text-align:left;">Location</th>
-                                    <th style="padding:6px;text-align:right;">Physical</th>
+                                    <th scope="col" style="padding:6px;text-align:left;">SKU</th>
+                                    <th scope="col" style="padding:6px;text-align:left;">Location</th>
+                                    <th scope="col" style="padding:6px;text-align:right;">Physical</th>
                                 </tr></thead>
                                 <tbody>${rows.slice(0,500).map(r => {
                                     const ex = exSet.has(r.SKU);
@@ -44828,15 +44833,15 @@ JB 星期二到
             <div style="background:white;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.05);overflow:auto;max-height:520px;">
                 <table style="width:100%;border-collapse:collapse;font-size:13px;">
                     <thead style="position:sticky;top:0;background:var(--gray-50);z-index:1;"><tr>
-                        <th style="padding:10px;text-align:left;">SKU</th>
-                        <th style="padding:10px;text-align:right;" title="Sum across all shelves">System Total</th>
-                        <th style="padding:10px;text-align:right;" title="Sum of QR scans">QR</th>
-                        <th style="padding:10px;text-align:right;" title="From bulk Excel upload">Bulk</th>
-                        <th style="padding:10px;text-align:right;" title="QR overrides Bulk if any QR scan exists for that SKU">Physical Used</th>
-                        <th style="padding:10px;text-align:right;">Variance</th>
-                        <th style="padding:10px;text-align:center;">Source</th>
-                        <th style="padding:10px;text-align:center;">Status</th>
-                        <th style="padding:10px;text-align:left;">Reason</th>
+                        <th scope="col" style="padding:10px;text-align:left;">SKU</th>
+                        <th scope="col" style="padding:10px;text-align:right;" title="Sum across all shelves">System Total</th>
+                        <th scope="col" style="padding:10px;text-align:right;" title="Sum of QR scans">QR</th>
+                        <th scope="col" style="padding:10px;text-align:right;" title="From bulk Excel upload">Bulk</th>
+                        <th scope="col" style="padding:10px;text-align:right;" title="QR overrides Bulk if any QR scan exists for that SKU">Physical Used</th>
+                        <th scope="col" style="padding:10px;text-align:right;">Variance</th>
+                        <th scope="col" style="padding:10px;text-align:center;">Source</th>
+                        <th scope="col" style="padding:10px;text-align:center;">Status</th>
+                        <th scope="col" style="padding:10px;text-align:left;">Reason</th>
                     </tr></thead>
                     <tbody>${bySku.map(r => `<tr style="border-top:1px solid var(--gray-100);">
                         <td style="padding:8px 10px;font-family:monospace;">${_stEsc(r.SKU)}${r.ShelfCount > 1 ? ` <span style="background:#dbeafe;color:#1e40af;padding:1px 5px;border-radius:3px;font-size:10px;cursor:help;" title="On ${r.ShelfCount} shelves: ${(r.Shelves||[]).map(s => _stEsc(s.Location) + '=' + s.Qty).join(', ')}">×${r.ShelfCount}</span>` : ''}</td>
@@ -46306,11 +46311,11 @@ const showAuditLogs = async () => {
             <table class="audit-table">
                 <thead>
                     <tr>
-                        <th>Timestamp</th>
-                        <th>Level</th>
-                        <th>Category</th>
-                        <th>Action</th>
-                        <th>User</th>
+                        <th scope="col">Timestamp</th>
+                        <th scope="col">Level</th>
+                        <th scope="col">Category</th>
+                        <th scope="col">Action</th>
+                        <th scope="col">User</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -46487,12 +46492,12 @@ const showTenantManagement = () => {
                 <table class="data-table" style="width: 100%; border-collapse: collapse;">
                     <thead>
                         <tr style="background: var(--gray-100); text-align: left;">
-                            <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Tenant ID</th>
-                            <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Name</th>
-                            <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Plan</th>
-                            <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Status</th>
-                            <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Provisioned</th>
-                            <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Actions</th>
+                            <th scope="col" style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Tenant ID</th>
+                            <th scope="col" style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Name</th>
+                            <th scope="col" style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Plan</th>
+                            <th scope="col" style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Status</th>
+                            <th scope="col" style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Provisioned</th>
+                            <th scope="col" style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -46605,12 +46610,12 @@ const showBackupManager = async () => {
                 <table class="data-table" style="width: 100%; border-collapse: collapse;">
                     <thead>
                         <tr style="background: var(--gray-100); text-align: left;">
-                            <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Backup ID</th>
-                            <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Date</th>
-                            <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Type</th>
-                            <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Status</th>
-                            <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Size (KB)</th>
-                            <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Actions</th>
+                            <th scope="col" style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Backup ID</th>
+                            <th scope="col" style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Date</th>
+                            <th scope="col" style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Type</th>
+                            <th scope="col" style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Status</th>
+                            <th scope="col" style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Size (KB)</th>
+                            <th scope="col" style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -46697,11 +46702,11 @@ const showDeploymentCenter = async () => {
                 <table class="data-table" style="width: 100%; border-collapse: collapse;">
                     <thead>
                         <tr style="background: var(--gray-100); text-align: left;">
-                            <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Version</th>
-                            <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Environment</th>
-                            <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Status</th>
-                            <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Deployed At</th>
-                            <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Actions</th>
+                            <th scope="col" style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Version</th>
+                            <th scope="col" style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Environment</th>
+                            <th scope="col" style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Status</th>
+                            <th scope="col" style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Deployed At</th>
+                            <th scope="col" style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
