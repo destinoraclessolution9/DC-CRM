@@ -10103,6 +10103,59 @@ input:checked+.slider:before {
 }
 
 /* =======================================================================
+   KPI Dashboard — Agent Leaderboard (div-based, no auto-card breakage)
+   ======================================================================= */
+.lb-list {
+    display: flex;
+    flex-direction: column;
+}
+.lb-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--gray-100);
+}
+.lb-row:last-child { border-bottom: none; }
+.lb-agent {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.lb-agent strong {
+    font-size: 13px;
+    font-weight: 600;
+    white-space: normal;
+    word-break: break-word;
+}
+.lb-agent small {
+    font-size: 11px;
+    color: var(--gray-500);
+}
+.lb-sales {
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+    color: var(--gray-700);
+}
+.lb-trend {
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+/* Performance table scroll wrapper */
+.perf-table-scroll {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+.perf-table-scroll .performance-table {
+    min-width: 480px;
+}
+
+/* =======================================================================
    KPI Dashboard — Layout grids
    ======================================================================= */
 .dashboard-charts-row {

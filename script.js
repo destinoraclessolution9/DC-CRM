@@ -30638,10 +30638,18 @@ container.innerHTML = `
         const toEl = document.getElementById('kpi-date-to');
         if (fromEl) fromEl.value = ranges.current.from;
         if (toEl) toEl.value = ranges.current.to;
-        const [kpis, prevKpis] = await Promise.all([
+        const quarterlyRanges = getDateRanges('quarterly');
+        const isQuarterlyView = _currentTimeFilter === 'quarterly';
+        // Compute current, previous, AND quarterly KPIs in one parallel batch.
+        // renderPerformanceTable always uses the quarterly range regardless of
+        // the active time filter, so computing it here (where AppDataStore data
+        // is already being fetched) avoids a sequential 3rd calculateKPIs call.
+        const [kpis, prevKpis, quarterlyKpis] = await Promise.all([
             calculateKPIs(ranges.current.from, ranges.current.to),
-            calculateKPIs(ranges.previous.from, ranges.previous.to)
+            calculateKPIs(ranges.previous.from, ranges.previous.to),
+            isQuarterlyView ? Promise.resolve(null) : calculateKPIs(quarterlyRanges.current.from, quarterlyRanges.current.to)
         ]);
+        const perfKpis = isQuarterlyView ? kpis : quarterlyKpis;
 
         renderKPIStats(kpis, prevKpis);
         // These four renders are independent — they paint into different
@@ -30650,7 +30658,7 @@ container.innerHTML = `
         // and chart-rendering work that should run in parallel.
         await Promise.all([
             renderTargetOverview(),
-            renderPerformanceTable(),
+            renderPerformanceTable(perfKpis),
             renderAgentLeaderboard(),
             renderRevenueChart(_currentTimeFilter, ranges.current),
             renderCaseCountsTable(),
@@ -31599,12 +31607,16 @@ const renderTargetOverview = async () => {
 };
 
 
-    const renderPerformanceTable = async () => {
+    const renderPerformanceTable = async (kpis) => {
         const container = document.getElementById('quarterly-performance-table');
         if (!container) return;
 
-        const ranges = getDateRanges('quarterly');
-        const kpis = await calculateKPIs(ranges.current.from, ranges.current.to);
+        // kpis is pre-computed by refreshKPIDashboard; fall back to computing
+        // it here only when this function is called in isolation (e.g. tests).
+        if (!kpis) {
+            const ranges = getDateRanges('quarterly');
+            kpis = await calculateKPIs(ranges.current.from, ranges.current.to);
+        }
         const year = new Date().getFullYear();
         const quarter = Math.floor(new Date().getMonth() / 3) + 1;
         const qTarget = (await AppDataStore.getAll('quarterly_targets')).find(t => t.year === year && t.quarter === quarter) || {};
@@ -31621,7 +31633,8 @@ const renderTargetOverview = async () => {
         ];
 
         container.innerHTML = `
-            <table class="performance-table">
+            <div class="perf-table-scroll">
+            <table class="performance-table no-card-mode">
                 <thead>
                     <tr>
                         <th>Metric</th>
@@ -31654,6 +31667,7 @@ const renderTargetOverview = async () => {
         }).join('')}
                 </tbody>
             </table>
+            </div>
         `;
     };
 
@@ -31706,31 +31720,24 @@ const renderAgentLeaderboard = async () => {
     agentStats.sort((a, b) => b.sales - a.sales);
     const top10 = agentStats.slice(0, 10);
 
+    if (top10.length === 0) {
+        container.innerHTML = '<p style="padding:20px;text-align:center;color:var(--gray-400);">No agent data for this period</p>';
+        return;
+    }
     container.innerHTML = `
-        <table class="leaderboard-table">
-            <thead>
-                <tr>
-                    <th>Rank</th>
-                    <th>Agent</th>
-                    <th>Sales</th>
-                    <th>Trend</th>
-                </tr>
-            </thead>
-            <tbody>
-                ${top10.map((a, i) => `
-                    <tr>
-                        <td><span class="rank-badge rank-${Math.min(i + 1, 5)}">${i + 1}</span></td>
-                        <td>
-                            <div><strong>${a.name}</strong></div>
-                            <div style="font-size: 11px; color: var(--gray-500);">${a.team}</div>
-                        </td>
-                        <td>RM ${a.sales.toLocaleString()}</td>
-                        <td><span class="status-badge-${a.trendClass}">${a.trend}</span></td>
-                    </tr>
-                `).join('')}
-                ${top10.length === 0 ? '<tr><td colspan="4" style="text-align:center; padding: 20px;">No agent data for this period</td></tr>' : ''}
-            </tbody>
-        </table>
+        <div class="lb-list">
+            ${top10.map((a, i) => `
+                <div class="lb-row">
+                    <span class="rank-badge rank-${Math.min(i + 1, 5)}">${i + 1}</span>
+                    <div class="lb-agent">
+                        <strong>${escapeHtml(a.name)}</strong>
+                        <small>${escapeHtml(a.team)}</small>
+                    </div>
+                    <span class="lb-sales">RM ${a.sales.toLocaleString()}</span>
+                    <span class="status-badge-${a.trendClass} lb-trend">${a.trend}</span>
+                </div>
+            `).join('')}
+        </div>
     `;
 };
 
