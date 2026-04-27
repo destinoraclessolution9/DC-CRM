@@ -801,6 +801,81 @@
 }
 
 /* =======================================================================
+   M11 — KPI Dashboard mobile layout
+   ======================================================================= */
+@media (max-width: 768px) {
+    /* Stack all KPI grid columns */
+    .dashboard-charts-row,
+    .kpi-bottom-grid {
+        grid-template-columns: 1fr !important;
+    }
+
+    /* Dashboard header — stack title + buttons */
+    .dashboard-header {
+        flex-direction: column !important;
+        align-items: stretch !important;
+    }
+    .dashboard-header .header-actions {
+        justify-content: flex-start !important;
+    }
+    .dashboard-header .header-actions .btn {
+        font-size: 12px !important;
+        padding: 7px 10px !important;
+    }
+
+    /* Filter bar — wrap everything, remove margin hacks */
+    .time-filter-bar {
+        padding: 10px 12px !important;
+        gap: 8px !important;
+    }
+    .time-filter-bar .role-filter-group {
+        flex: 1 1 calc(50% - 4px) !important;
+        min-width: 0 !important;
+        margin-left: 0 !important;
+    }
+    .time-filter-bar .role-filter-group select,
+    #kpi-role-filter,
+    #kpi-agent-filter {
+        width: 100% !important;
+    }
+    .time-filter-bar .date-range-picker {
+        margin-left: 0 !important;
+        width: 100% !important;
+        flex-wrap: wrap;
+    }
+    .time-filter-bar .date-range-picker input[type="date"] {
+        flex: 1 !important;
+        min-width: 120px !important;
+    }
+    .time-toggle-group {
+        width: 100%;
+        display: flex;
+        gap: 4px;
+    }
+    .time-toggle-btn {
+        flex: 1 !important;
+        font-size: 11px !important;
+        padding: 6px 4px !important;
+        text-align: center;
+    }
+
+    /* Performance table — horizontal scroll so columns don't crush */
+    #quarterly-performance-table {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    #quarterly-performance-table .performance-table {
+        min-width: 480px;
+    }
+
+    /* Leaderboard card full width */
+    .leaderboard-card,
+    .performance-card {
+        border-radius: 10px !important;
+    }
+}
+
+/* =======================================================================
    Extra — Drawer polish (add theme toggle + cmdk at top)
    ======================================================================= */
 @media (max-width: 768px) {
