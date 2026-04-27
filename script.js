@@ -31589,7 +31589,8 @@ const renderTargetOverview = async () => {
             <div class="targets-header">
                 <h2>${year} Target Overview</h2>
             </div>
-            <table class="targets-table">
+            <div class="perf-table-scroll">
+            <table class="targets-table no-card-mode">
                 <thead>
                     <tr>
                         <th>Quarter</th>
@@ -31602,6 +31603,7 @@ const renderTargetOverview = async () => {
                     ${rows.join('')}
                 </tbody>
             </table>
+            </div>
         </div>
     `;
 };
