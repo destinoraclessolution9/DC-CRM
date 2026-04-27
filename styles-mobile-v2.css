@@ -475,10 +475,13 @@
     .chart-container {
         padding: 12px !important;
         min-width: 0 !important;
+        overflow: hidden !important;
     }
     .chart-container canvas {
+        display: block !important;
+        width: 100% !important;
         max-width: 100% !important;
-        height: 180px !important;
+        height: 200px !important;
     }
 
     /* --- Target overview: scroll wrapper --- */
@@ -961,6 +964,29 @@
         padding: 8px 10px !important;
         white-space: nowrap;
     }
+
+    /* Performance metric cards: stack layout on mobile */
+    .perf-card-list { gap: 5px !important; }
+    .perf-metric-card {
+        flex-direction: column !important;
+        align-items: flex-start !important;
+        padding: 9px 12px !important;
+        gap: 5px !important;
+    }
+    .perf-metric-name {
+        min-width: 0 !important;
+        font-size: 12px !important;
+        width: 100% !important;
+    }
+    .perf-metric-stats {
+        display: grid !important;
+        grid-template-columns: 1fr 1fr !important;
+        gap: 5px 10px !important;
+        width: 100% !important;
+    }
+    .perf-stat-pair { min-width: 0 !important; }
+    .perf-stat-lbl  { font-size: 9px !important; }
+    .perf-stat-val  { font-size: 11px !important; }
 }
 
 /* =======================================================================

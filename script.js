@@ -13759,7 +13759,17 @@ function _wireLoginBtn() {
         const [y, m, d] = dateStr.split('-').map(Number);
         _currentDate = new Date(y, m - 1, d);
         updateMonthHeader(_currentDate);
-        await switchView('day');
+        // Show skeleton immediately so tapping "+N more" feels instant
+        _currentView = 'day';
+        document.querySelectorAll('.btn-toggle').forEach(btn => {
+            btn.classList.toggle('active', btn.textContent.trim().toLowerCase() === 'day');
+        });
+        const grid = document.getElementById('calendar-grid');
+        if (grid) {
+            const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][_currentDate.getMonth()];
+            grid.innerHTML = `<div style="padding:40px 24px;text-align:center;"><i class="fas fa-spinner fa-spin" style="color:var(--accent);font-size:28px;"></i><p style="color:var(--gray-400);margin-top:14px;font-size:15px;">Loading ${_currentDate.getDate()} ${mon} ${_currentDate.getFullYear()}…</p></div>`;
+        }
+        await renderDayView();
     };
 
     const updateMonthHeader = (date) => {
@@ -31635,40 +31645,40 @@ const renderTargetOverview = async () => {
         ];
 
         container.innerHTML = `
-            <div class="perf-table-scroll">
-            <table class="performance-table no-card-mode">
-                <thead>
-                    <tr>
-                        <th>Metric</th>
-                        <th>Target</th>
-                        <th>Actual</th>
-                        <th>Variance</th>
-                        <th>Achievement</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${metrics.map(m => {
-            const variance = m.actual - m.target;
-            const achievement = m.target > 0 ? (m.actual / m.target * 100) : 0;
-            const statusClass = achievement > 90 ? 'success' : (achievement > 70 ? 'warning' : 'danger');
-            const statusIcon = achievement > 90 ? '🟢' : (achievement > 70 ? '🟡' : '🔴');
-
-            return `
-                            <tr>
-                                <td>${m.name}</td>
-                                <td>${m.isRM ? 'RM ' : ''}${m.target.toLocaleString()}</td>
-                                <td>${m.isRM ? 'RM ' : ''}${m.actual.toLocaleString()}</td>
-                                <td style="color: ${variance >= 0 ? 'var(--success)' : 'var(--error)'}">
-                                    ${m.isRM ? (variance >= 0 ? '+RM ' : '-RM ') : (variance >= 0 ? '+' : '')}${Math.abs(variance).toLocaleString()}
-                                </td>
-                                <td>
+            <div class="perf-card-list">
+                ${metrics.map(m => {
+                    const variance = m.actual - m.target;
+                    const achievement = m.target > 0 ? (m.actual / m.target * 100) : 0;
+                    const statusClass = achievement > 90 ? 'success' : (achievement > 70 ? 'warning' : 'danger');
+                    const statusIcon = achievement > 90 ? '🟢' : (achievement > 70 ? '🟡' : '🔴');
+                    const prefix = m.isRM ? 'RM ' : '';
+                    const varStr = m.isRM
+                        ? (variance >= 0 ? '+RM ' : '-RM ') + Math.abs(variance).toLocaleString()
+                        : (variance >= 0 ? '+' : '') + variance.toLocaleString();
+                    return `
+                        <div class="perf-metric-card">
+                            <div class="perf-metric-name">${m.name}</div>
+                            <div class="perf-metric-stats">
+                                <div class="perf-stat-pair">
+                                    <span class="perf-stat-lbl">Target</span>
+                                    <span class="perf-stat-val">${prefix}${m.target.toLocaleString()}</span>
+                                </div>
+                                <div class="perf-stat-pair">
+                                    <span class="perf-stat-lbl">Actual</span>
+                                    <span class="perf-stat-val">${prefix}${m.actual.toLocaleString()}</span>
+                                </div>
+                                <div class="perf-stat-pair">
+                                    <span class="perf-stat-lbl">Variance</span>
+                                    <span class="perf-stat-val" style="color:${variance >= 0 ? 'var(--success)' : 'var(--error)'}">${varStr}</span>
+                                </div>
+                                <div class="perf-stat-pair">
+                                    <span class="perf-stat-lbl">Achievement</span>
                                     <span class="status-badge-${statusClass}">${achievement.toFixed(1)}% ${statusIcon}</span>
-                                </td>
-                            </tr>
-                        `;
-        }).join('')}
-                </tbody>
-            </table>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('')}
             </div>
         `;
     };
@@ -31879,8 +31889,16 @@ const renderAgentLeaderboard = async () => {
                     y: {
                         beginAtZero: true,
                         ticks: {
-                            callback: function (value) { return 'RM ' + value.toLocaleString(); }
+                            callback: function (value) {
+                                if (value >= 1000000) return 'RM ' + (value / 1000000).toFixed(1) + 'M';
+                                if (value >= 1000) return 'RM ' + (value / 1000).toFixed(0) + 'K';
+                                return 'RM ' + value;
+                            },
+                            maxTicksLimit: 6
                         }
+                    },
+                    x: {
+                        ticks: { maxRotation: 0, autoSkipPadding: 8 }
                     }
                 }
             }
