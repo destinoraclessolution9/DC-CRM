@@ -807,31 +807,11 @@
             // inside .filter-bar (e.g. line ~17878), so no JS injection is
             // needed here. Mobile CSS in styles-mobile-v2.css handles layout.
 
-            // M2 — Calendar: add "+N more" chip when a cell has >2 appointments
-            function addCalendarMoreIndicators() {
-                if (!isMobile()) return;
-                document.querySelectorAll('.calendar-cell').forEach(cell => {
-                    cell.querySelectorAll('.more-events-indicator').forEach(e => e.remove());
-                    const pills = cell.querySelectorAll('.calendar-appointment, .grid-act-item');
-                    if (pills.length > 2) {
-                        const more = document.createElement('div');
-                        more.className = 'more-events-indicator';
-                        more.textContent = '+' + (pills.length - 2) + ' more';
-                        const cellOnclick = cell.getAttribute('onclick') || '';
-                        const dateMatch = cellOnclick.match(/'(\d{4}-\d{2}-\d{2})'/);
-                        if (dateMatch) {
-                            const dateStr = dateMatch[1];
-                            more.addEventListener('click', (e) => {
-                                e.stopPropagation();
-                                if (window.app && window.app.openDayView) {
-                                    window.app.openDayView(dateStr);
-                                }
-                            });
-                        }
-                        cell.appendChild(more);
-                    }
-                });
-            }
+            // M2 — "+N more" chip is now injected directly by renderCalendar() in
+            // script.js (skippedInCell counter). This DOM-walk approach is kept as a
+            // no-op so the MutationObserver runAll() call does not erase the chips
+            // that script.js just rendered.
+            function addCalendarMoreIndicators() { /* no-op */ }
 
             // M3 — Pipeline view in script.js (~line 26697) is two wide tables
             // inside `.pipeline-dual-view`, not a kanban. CSS in
