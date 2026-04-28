@@ -7429,6 +7429,7 @@ function _wireLoginBtn() {
         document.getElementById('app-shell').style.display = 'block';
         updateUserDisplay();
         updateNavVisibility();
+        setTimeout(_initNotifBell, 800); // wire bell after shell is visible
 
         // Fire-and-forget the sync module initializers — they have no awaitable
         // state the render path needs.
@@ -7583,6 +7584,9 @@ function _wireLoginBtn() {
         window.app.ready = true;
         window.app.initialized = true;
         window.dispatchEvent(new Event('appReady'));
+
+        // Wire notification bell
+        _initNotifBell();
 
         // Session inactivity timeout — auto-logout after 60 min of no interaction
         // (skipped for "remember me" users who explicitly opted into persistence)
@@ -7785,11 +7789,157 @@ function _wireLoginBtn() {
         if (_currentUser) {
             const displayName = _currentUser.preferred_name || _currentUser.full_name || _currentUser.username;
             if (userDisplay) userDisplay.textContent = displayName;
-            if (userAvatar) userAvatar.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=0D9488&color=fff`;
+            if (userAvatar) userAvatar.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=8B1A1A&color=fff&size=64`;
         } else {
             if (userDisplay) userDisplay.textContent = 'Guest';
-            if (userAvatar) userAvatar.src = 'https://ui-avatars.com/api/?name=Guest&background=0D9488&color=fff';
+            if (userAvatar) userAvatar.src = 'https://ui-avatars.com/api/?name=Guest&background=8B1A1A&color=fff&size=64';
         }
+    };
+
+    // ========== NOTIFICATION BELL ==========
+    const _refreshNotifBadge = async () => {
+        const badge = document.querySelector('.notif-bell .badget');
+        if (!badge) return;
+        let count = 0;
+        try {
+            // Pending CPS intakes
+            const visibleIds = await getVisibleUserIds(_currentUser);
+            let intakes = [];
+            try {
+                intakes = await AppDataStore.query('cps_intake_requests', { status: 'submitted' });
+            } catch (_) {
+                const all = await AppDataStore.getAll('cps_intake_requests');
+                intakes = (all || []).filter(r => r.status === 'submitted');
+            }
+            if (visibleIds !== 'all') {
+                const vStrs = visibleIds.map(String);
+                intakes = intakes.filter(i => vStrs.includes(String(i.agent_id)));
+            }
+            count += intakes.length;
+
+            // Today's + tomorrow's birthdays
+            const today = new Date();
+            const mmdd = d => `${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+            const todayMD = mmdd(today);
+            const tom = new Date(today); tom.setDate(tom.getDate()+1);
+            const tomMD = mmdd(tom);
+            const [allProspects, allCustomers] = await Promise.all([
+                AppDataStore.getAll('prospects'), AppDataStore.getAll('customers')
+            ]);
+            const birthdayPeople = [...allProspects, ...allCustomers].filter(p => {
+                const dob = p.date_of_birth || '';
+                if (!dob || dob.length < 5) return false;
+                const md = dob.slice(5, 10); // MM-DD
+                return md === todayMD || md === tomMD;
+            });
+            count += birthdayPeople.length;
+
+            // Pending refill reminders
+            try {
+                const reminders = await AppDataStore.query('refill_reminders', { status: 'pending' });
+                count += (reminders || []).length;
+            } catch (_) {}
+        } catch (_) {}
+
+        badge.textContent = count > 99 ? '99+' : String(count);
+        badge.setAttribute('data-zero', count === 0 ? '1' : '0');
+        badge.setAttribute('data-count', count);
+    };
+
+    const _buildNotifPanel = async () => {
+        const items = [];
+        const today = new Date();
+        const mmdd = d => `${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        const todayMD = mmdd(today);
+        const tom = new Date(today); tom.setDate(tom.getDate()+1);
+        const tomMD = mmdd(tom);
+
+        // CPS intakes
+        const visibleIds = await getVisibleUserIds(_currentUser);
+        let intakes = [];
+        try {
+            intakes = await AppDataStore.query('cps_intake_requests', { status: 'submitted' });
+        } catch (_) {
+            const all = await AppDataStore.getAll('cps_intake_requests');
+            intakes = (all || []).filter(r => r.status === 'submitted');
+        }
+        if (visibleIds !== 'all') {
+            const vStrs = visibleIds.map(String);
+            intakes = intakes.filter(i => vStrs.includes(String(i.agent_id)));
+        }
+        for (const i of intakes) {
+            items.push({ icon: '📋', title: `CPS Intake: ${i.prospect_name || 'Unknown'}`, sub: `${i.activity_date || ''} · Pending approval`, action: `app.openApproveCpsIntakeModal(${i.id})` });
+        }
+
+        // Birthdays
+        const [allProspects, allCustomers] = await Promise.all([
+            AppDataStore.getAll('prospects'), AppDataStore.getAll('customers')
+        ]);
+        [...allProspects, ...allCustomers].forEach(p => {
+            const dob = p.date_of_birth || '';
+            if (!dob || dob.length < 5) return;
+            const md = dob.slice(5, 10);
+            const isToday = md === todayMD;
+            const isTom   = md === tomMD;
+            if (!isToday && !isTom) return;
+            items.push({ icon: '🎂', title: `${p.full_name || 'Someone'}'s Birthday`, sub: isToday ? 'Today!' : 'Tomorrow' });
+        });
+
+        // Refill reminders
+        try {
+            const reminders = await AppDataStore.query('refill_reminders', { status: 'pending' });
+            for (const r of (reminders || []).slice(0, 5)) {
+                items.push({ icon: '💊', title: `Refill due: ${r.product_name || 'Product'}`, sub: `Customer needs reorder · Due ${r.due_date || ''}` });
+            }
+        } catch (_) {}
+
+        if (!items.length) {
+            return `<div class="notif-panel-header"><i class="fas fa-bell"></i> Notifications</div>
+                    <div class="notif-panel-empty">🎉 All caught up! No pending items.</div>`;
+        }
+        return `<div class="notif-panel-header"><i class="fas fa-bell"></i> Notifications <span style="margin-left:auto;font-size:12px;font-weight:500;color:var(--text-secondary);">${items.length} item${items.length===1?'':'s'}</span></div>` +
+            items.map(it => `
+                <div class="notif-item" ${it.action ? `onclick="${it.action}; document.querySelector('.notif-panel')?.remove()" style="cursor:pointer;"` : ''}>
+                    <div class="notif-item-icon">${it.icon}</div>
+                    <div class="notif-item-body">
+                        <div class="notif-item-title">${it.title}</div>
+                        <div class="notif-item-sub">${it.sub}</div>
+                    </div>
+                </div>`).join('');
+    };
+
+    const toggleNotifPanel = async () => {
+        const existing = document.querySelector('.notif-panel');
+        if (existing) { existing.remove(); return; }
+        const panel = document.createElement('div');
+        panel.className = 'notif-panel';
+        panel.innerHTML = `<div class="notif-panel-header"><i class="fas fa-spinner fa-spin"></i> Loading…</div>`;
+        document.body.appendChild(panel);
+        // Close on outside click
+        setTimeout(() => {
+            document.addEventListener('click', function handler(e) {
+                if (!panel.contains(e.target) && !e.target.closest('.notif-bell')) {
+                    panel.remove();
+                    document.removeEventListener('click', handler);
+                }
+            });
+        }, 10);
+        try {
+            panel.innerHTML = await _buildNotifPanel();
+        } catch (e) {
+            panel.innerHTML = '<div class="notif-panel-empty">Failed to load notifications.</div>';
+        }
+    };
+
+    // Wire bell click + initial badge load
+    const _initNotifBell = () => {
+        const bell = document.querySelector('.notif-bell');
+        if (!bell || bell._notifWired) return;
+        bell._notifWired = true;
+        bell.addEventListener('click', e => { e.stopPropagation(); toggleNotifPanel(); });
+        _refreshNotifBadge();
+        // Refresh badge every 2 minutes
+        setInterval(_refreshNotifBadge, 120_000);
     };
 
     const getViewPhase = (viewId) => {
