@@ -1101,12 +1101,18 @@ const appLogic = (() => {
         container.innerHTML = basicHtml;
         if (extraContainer) extraContainer.innerHTML = extraHtml;
 
-        // Populate dynamic agent dropdowns
+        // Populate dynamic agent dropdowns — only show agents visible to the current user
+        // (admins see all; managers/agents see only their own downline team)
         const agentSelects = [...container.querySelectorAll('select[id$="-agent"]'), ...container.querySelectorAll('select[id$="-responsible-agent"]')];
         if (agentSelects.length > 0) {
             try {
                 const allUsers = await AppDataStore.getAll('users');
-                const agents = allUsers.filter(u => isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'));
+                const visibleIds = await getVisibleUserIds(_currentUser);
+                const agents = allUsers.filter(u => {
+                    if (!(isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'))) return false;
+                    if (visibleIds === 'all') return true;
+                    return visibleIds.includes(u.id);
+                });
                 agentSelects.forEach(sel => {
                     agents.forEach(a => {
                         const opt = document.createElement('option');
