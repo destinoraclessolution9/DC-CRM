@@ -10289,16 +10289,10 @@ button:focus-visible {
     box-shadow: 0 0 0 4px rgba(128, 0, 32, 0.2);
 }
 
-/* Minimum touch target size for interactive elements */
-.btn, button, [role="button"],
-input[type="checkbox"], input[type="radio"] {
-    min-height: 44px;
-    min-width: 44px;
-}
-
-input[type="checkbox"], input[type="radio"] {
-    min-height: 20px;
-    min-width: 20px;
+/* Minimum touch target size — only primary action buttons, not icon buttons */
+.btn.primary, .btn.secondary, .btn.danger,
+button[type="submit"], button[type="button"].btn {
+    min-height: 36px;
 }
 
 /* Error state: add icon indicator alongside color (not color-only) */
@@ -10326,8 +10320,8 @@ textarea[aria-invalid="true"] {
     max-width: 100%;
 }
 
-/* Line height for readability */
-body, p, li, td, th, label, span {
+/* Line height for readability — scoped to text containers only */
+body, p, li, td, th, label {
     line-height: 1.5;
 }
 
