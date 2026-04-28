@@ -20787,15 +20787,6 @@ function _wireLoginBtn() {
                         <div class="acc-body" id="cust-acc-body-platforms-${customer.id}" style="display:none" data-loaded="false"></div>
                     </div>
 
-                    <!-- 4 Purchase History -->
-                    <div class="acc-item" id="cust-acc-purchases-${customer.id}">
-                        <div class="acc-hdr" onclick="app.toggleCustomerAccordion('purchases',${customer.id},this.parentElement)">
-                            <span><i class="fas fa-shopping-cart"></i> Purchase History</span>
-                            <i class="fas fa-chevron-down acc-chev"></i>
-                        </div>
-                        <div class="acc-body" id="cust-acc-body-purchases-${customer.id}" style="display:none" data-loaded="false"></div>
-                    </div>
-
                     <!-- 5 Referrals Made -->
                     <div class="acc-item" id="cust-acc-referrals-${customer.id}">
                         <div class="acc-hdr" onclick="app.toggleCustomerAccordion('referrals',${customer.id},this.parentElement)">
@@ -22996,9 +22987,85 @@ function _wireLoginBtn() {
 
     const renderCustomerClosingTab = async (customer, container) => {
         if (!container) return;
+
+        // ── Section 1: Purchases table (merged from former Purchase History tab) ──
+        const purchases = await AppDataStore.query('purchases', { customer_id: customer.id }).catch(() => []);
+        let totalPaid = 0, totalPending = 0;
+
+        // Pull the original conversion sale from the linked prospect closing_record
+        let conversionRow = '';
+        if (customer.converted_from_prospect_id) {
+            const origP = await AppDataStore.getById('prospects', customer.converted_from_prospect_id);
+            if (origP?.closing_record) {
+                const cr0 = origP.closing_record;
+                const amt0 = parseFloat(cr0.sale_amount) || 0;
+                totalPaid += amt0;
+                conversionRow = `
+                    <tr style="background:#f0fdf4;">
+                        <td style="padding:6px 10px;">${cr0.closing_date || customer.customer_since || '-'}</td>
+                        <td style="padding:6px 10px;">${escapeHtml(cr0.invoice_number || '-')}</td>
+                        <td style="padding:6px 10px;"><strong>${escapeHtml(cr0.product || '-')}</strong> <span style="font-size:11px;color:var(--gray-400);">(Conversion)</span></td>
+                        <td style="padding:6px 10px;">RM ${amt0.toLocaleString('en-MY',{minimumFractionDigits:2})}</td>
+                        <td style="padding:6px 10px;"><span style="background:#dcfce7;color:#166534;border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600;">PAID</span></td>
+                        <td style="padding:6px 10px;">${cr0.invoice_file ? `<a href="${cr0.invoice_file}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);font-size:12px;"><i class="fas fa-paperclip"></i> View</a>` : '-'}</td>
+                        <td style="padding:6px 10px;font-size:11px;color:var(--gray-400);">Locked</td>
+                    </tr>`;
+            }
+        }
+
+        const purchaseRows = purchases.map(p => {
+            const amt = parseFloat(p.amount) || 0;
+            if (p.status !== 'PENDING') totalPaid += amt; else totalPending += amt;
+            const statusColor = p.status === 'PAID' ? '#dcfce7;color:#166534' : p.status === 'PENDING' ? '#fef9c3;color:#854d0e' : '#e0e7ff;color:#3730a3';
+            return `
+                <tr>
+                    <td style="padding:6px 10px;">${p.date || '-'}</td>
+                    <td style="padding:6px 10px;">${escapeHtml(p.invoice || '-')}</td>
+                    <td style="padding:6px 10px;">${escapeHtml(p.item || '-')}</td>
+                    <td style="padding:6px 10px;">RM ${amt.toLocaleString('en-MY',{minimumFractionDigits:2})}</td>
+                    <td style="padding:6px 10px;"><span style="background:${statusColor};border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600;">${p.status}</span></td>
+                    <td style="padding:6px 10px;">${p.proof
+                        ? `<a href="#" style="color:var(--primary);font-size:12px;"><i class="fas fa-paperclip"></i> ${p.proof.endsWith('.pdf') ? 'Report' : 'Image'}</a>`
+                        : `<button class="btn secondary btn-sm" style="font-size:11px;padding:2px 8px;" onclick="app.uploadPaymentProof(${p.id},${customer.id})">Upload</button>`}</td>
+                    <td style="padding:6px 10px;">
+                        ${p.status === 'PENDING' ? `<button class="btn-icon" title="Delete" onclick="app.deletePurchase(${p.id},${customer.id})"><i class="fas fa-trash" style="color:var(--error);font-size:12px;"></i></button>` : ''}
+                    </td>
+                </tr>`;
+        }).join('');
+
+        const purchasesHtml = `
+            <div style="margin-bottom:16px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
+                <div style="background:#f8fafc;padding:8px 12px;font-weight:600;font-size:13px;border-bottom:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center;">
+                    <span><i class="fas fa-shopping-cart" style="color:var(--primary);margin-right:6px;"></i>Purchase Records</span>
+                    <button class="btn primary btn-sm" style="font-size:12px;" onclick="app.openAddPurchaseModal(${customer.id})"><i class="fas fa-plus"></i> Add Purchase</button>
+                </div>
+                <div style="overflow-x:auto;">
+                    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                        <thead><tr style="background:#fafafa;border-bottom:1px solid #e5e7eb;">
+                            <th style="padding:6px 10px;text-align:left;font-weight:600;">Date</th>
+                            <th style="padding:6px 10px;text-align:left;font-weight:600;">Invoice #</th>
+                            <th style="padding:6px 10px;text-align:left;font-weight:600;">Item / Product</th>
+                            <th style="padding:6px 10px;text-align:left;font-weight:600;">Amount</th>
+                            <th style="padding:6px 10px;text-align:left;font-weight:600;">Status</th>
+                            <th style="padding:6px 10px;text-align:left;font-weight:600;">Proof</th>
+                            <th style="padding:4px;width:32px;"></th>
+                        </tr></thead>
+                        <tbody style="border-bottom:1px solid #e5e7eb;">
+                            ${conversionRow}${purchaseRows}
+                            ${!conversionRow && !purchaseRows ? `<tr><td colspan="7" style="padding:14px;text-align:center;color:var(--gray-400);font-size:12px;font-style:italic;">No purchase records yet.</td></tr>` : ''}
+                        </tbody>
+                    </table>
+                </div>
+                <div style="padding:10px 12px;display:flex;gap:16px;font-size:13px;flex-wrap:wrap;background:#fafafa;">
+                    <span>Paid: <strong style="color:#166534;">RM ${totalPaid.toLocaleString('en-MY',{minimumFractionDigits:2})}</strong></span>
+                    <span>Pending: <strong style="color:#854d0e;">RM ${totalPending.toLocaleString('en-MY',{minimumFractionDigits:2})}</strong></span>
+                    <span style="margin-left:auto;">Lifetime Total: <strong style="color:var(--primary);">RM ${(totalPaid+totalPending).toLocaleString('en-MY',{minimumFractionDigits:2})}</strong></span>
+                </div>
+            </div>`;
+
         const prospectId = customer.converted_from_prospect_id;
         if (!prospectId) {
-            container.innerHTML = '<p style="text-align:center;padding:20px;color:var(--gray-400);font-size:13px;">No linked prospect — DC Closing Record not available for manually-added customers.</p>';
+            container.innerHTML = purchasesHtml;
             return;
         }
         container.dataset.prospectId = prospectId;
