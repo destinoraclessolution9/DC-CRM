@@ -7461,6 +7461,7 @@ function _wireLoginBtn() {
         // Requires 3 intentional downward pulls at the top of the page to trigger a soft refresh.
         // A soft refresh re-renders the current view without a full page reload — no login screen flash.
         if ('ontouchstart' in window) {
+            const _isIOS = /iP(hone|ad|od)/.test(navigator.userAgent);
             let _ptrStartY = 0, _ptrCount = 0, _ptrTimer = null, _ptrPulling = false, _ptrPill = null;
 
             const _ptrPillEl = () => {
@@ -7490,8 +7491,10 @@ function _wireLoginBtn() {
                     el = el.parentElement;
                 }
 
-                // At the page top pulling down — block native PTR on iOS Safari
-                if (e.cancelable) e.preventDefault();
+                // At the page top pulling down — block native PTR on iOS Safari only.
+                // Android uses CSS overscroll-behavior; calling preventDefault() here
+                // would also kill normal downward scrolling on Android Chrome.
+                if (_isIOS && e.cancelable) e.preventDefault();
                 _ptrPulling = true;
 
                 if (dy > 60) {
