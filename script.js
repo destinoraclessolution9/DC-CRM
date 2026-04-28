@@ -37690,7 +37690,7 @@ const initImportDemoData = async () => {
         HEARD_LIFE_PLAN: 40,
         REFERRAL_CLOSED: 50,
         WEEKLY_INACTIVITY: -5,
-        MARK_NOT_INTERESTED: -30
+        MARK_NOT_INTERESTED: -500
     };
 
     const addScoreToProspect = async (prospectId, points, reason) => {
