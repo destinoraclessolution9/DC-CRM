@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://cdn.sheetjs.com https://unpkg.com https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com; font-src 'self' https://cdnjs.cloudflare.com https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.qrserver.com https://ui-avatars.com https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; frame-ancestors 'self'; base-uri 'self'; form-action 'self';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://cdn.sheetjs.com https://unpkg.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com; font-src 'self' https://cdnjs.cloudflare.com https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.qrserver.com https://ui-avatars.com https://api.pwnedpasswords.com; frame-src 'none'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;">
     <meta http-equiv="X-Content-Type-Options" content="nosniff">
     <meta name="referrer" content="strict-origin-when-cross-origin">
     <title>悅客匯 CRM</title>
@@ -15,9 +15,34 @@
     <meta property="og:title" content="悅客匯 CRM — DestinOraclesSolution">
     <meta property="og:description" content="专业风水顾问客户关系管理平台，助力顾问团队高效管理客户、追踪销售与绩效。">
     <meta property="og:image" content="https://destinoraclessolution.com/icons/icon-512x512.png">
-    <meta name="twitter:card" content="summary">
+    <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="悅客匯 CRM — DestinOraclesSolution">
     <meta name="twitter:description" content="专业风水顾问客户关系管理平台，助力顾问团队高效管理客户、追踪销售与绩效。">
+    <meta name="twitter:image" content="https://destinoraclessolution.com/icons/icon-512x512.png">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "悅客匯 CRM",
+      "alternateName": "DestinOraclesSolution CRM",
+      "url": "https://destinoraclessolution.com/",
+      "description": "专业风水顾问客户关系管理平台，助力顾问团队高效管理客户、追踪销售与绩效。",
+      "applicationCategory": "BusinessApplication",
+      "operatingSystem": "Web",
+      "inLanguage": ["zh-TW", "en"],
+      "author": {
+        "@type": "Organization",
+        "name": "DestinOraclesSolution",
+        "email": "destinoraclessolution9@gmail.com",
+        "url": "https://destinoraclessolution.com/"
+      },
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "MYR"
+      }
+    }
+    </script>
 
     <!-- ===== FB/IG-style perceived-perf hints =====
          Open the network connections to origins we'll need ASAP, in parallel
@@ -114,6 +139,7 @@
 </head>
 
 <body>
+    <noscript><div style="position:fixed;top:0;left:0;right:0;z-index:99999;background:#b91c1c;color:#fff;text-align:center;padding:12px 16px;font-size:14px;font-weight:600;">⚠️ 悅客匯 CRM requires JavaScript to be enabled. Please enable JavaScript in your browser to continue.</div></noscript>
     <a href="#content-viewport" class="skip-to-content" style="position:absolute;left:-9999px;top:4px;z-index:9999;padding:8px 16px;background:var(--primary,#800020);color:#fff;border-radius:4px;font-size:14px;font-weight:600;text-decoration:none;" onfocus="this.style.left='4px'" onblur="this.style.left='-9999px'">Skip to main content</a>
     <div id="login-container" class="login-container">
         <div class="login-box">
@@ -123,9 +149,11 @@
             </div>
             <div class="login-form">
                 <label for="loginEmail" style="display:block;font-size:13px;font-weight:500;margin-bottom:4px;color:var(--text-secondary);">Email</label>
-                <input type="email" id="loginEmail" class="form-control" placeholder="Email" required autocomplete="email" style="margin-bottom: 12px;">
+                <input type="email" id="loginEmail" class="form-control" placeholder="Email" required aria-required="true" aria-describedby="loginEmailErr" autocomplete="email" style="margin-bottom: 4px;">
+                <span id="loginEmailErr" role="alert" aria-live="polite" style="display:none;font-size:11px;color:#ef4444;margin-bottom:8px;display:block;min-height:16px;"></span>
                 <label for="loginPassword" style="display:block;font-size:13px;font-weight:500;margin-bottom:4px;color:var(--text-secondary);">Password</label>
-                <input type="password" id="loginPassword" class="form-control" placeholder="Password" required autocomplete="current-password" style="margin-bottom: 12px;">
+                <input type="password" id="loginPassword" class="form-control" placeholder="Password" required aria-required="true" aria-describedby="loginPasswordErr" autocomplete="current-password" style="margin-bottom: 4px;">
+                <span id="loginPasswordErr" role="alert" aria-live="polite" style="display:none;font-size:11px;color:#ef4444;margin-bottom:8px;display:block;min-height:16px;"></span>
                 <label style="display:flex;align-items:center;gap:8px;margin-bottom:16px;font-size:14px;color:var(--text-secondary);cursor:pointer;user-select:none;">
                     <input type="checkbox" id="rememberMe" style="width:16px;height:16px;accent-color:var(--primary);cursor:pointer;">
                     Keep me logged in
@@ -164,7 +192,7 @@
         </div>
     </nav>
 
-    <div class="app-shell" id="app-shell" style="display: none;">
+    <div class="app-shell" id="app-shell" role="application" aria-label="悅客匯 CRM" style="display: none;">
         <!-- Top Navigation -->
         <nav class="top-bar">
             <div class="brand" id="brand-logo">
@@ -382,7 +410,7 @@
                 </div>
             </main>
         </div>
-        <footer class="app-footer" style="text-align:center;padding:8px 16px;font-size:11px;color:var(--text-secondary);border-top:1px solid var(--border,rgba(0,0,0,0.08));background:var(--surface,#fff);flex-shrink:0;">
+        <footer role="contentinfo" class="app-footer" style="text-align:center;padding:8px 16px;font-size:11px;color:var(--text-secondary);border-top:1px solid var(--border,rgba(0,0,0,0.08));background:var(--surface,#fff);flex-shrink:0;">
             &copy; <span id="footer-year"></span> DestinOraclesSolution. All rights reserved.
             &nbsp;|&nbsp;
             <a href="/privacy.html" style="color:var(--text-secondary);text-decoration:underline;" target="_blank">Privacy Policy</a>
