@@ -44,7 +44,7 @@ jobs:
       # usable — without it the DB loads but nobody can log in.
       - name: Dump Supabase database (public + auth schemas)
         env:
-          DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          DB_URL: postgresql://postgres:${{ secrets.SUPABASE_DB_PASSWORD }}@db.remuwhxvzkzjtgbzqjaa.supabase.co:5432/postgres
         run: |
           pg_dump "$DB_URL" \
             --schema=public \
