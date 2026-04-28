@@ -31,7 +31,6 @@
     <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
     <link rel="dns-prefetch" href="https://cdn.sheetjs.com">
     <link rel="dns-prefetch" href="https://unpkg.com">
-    <link rel="preconnect" href="https://challenges.cloudflare.com" crossorigin>
 
     <!-- Preload the largest single asset so the browser starts fetching
          it before the parser reaches the <script> tag near </body>.
@@ -112,7 +111,6 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="FS CRM">
     <link rel="apple-touch-icon" href="icons/icon-192x192.png">
-    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 </head>
 
 <body>
@@ -132,8 +130,6 @@
                     <input type="checkbox" id="rememberMe" style="width:16px;height:16px;accent-color:var(--primary);cursor:pointer;">
                     Keep me logged in
                 </label>
-                <!-- Turnstile: replace key with real site key from dash.cloudflare.com/turnstile, then enable captcha in Supabase Auth → Settings -->
-                <div class="cf-turnstile" data-sitekey="1x00000000000000000000AA" data-theme="light" style="margin-bottom:14px;"></div>
                 <button id="loginBtn" class="btn primary" style="width: 100%;">Login</button>
             </div>
             <p class="login-hint">Enter your email and password to continue</p>

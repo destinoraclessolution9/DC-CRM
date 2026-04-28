@@ -7123,11 +7123,6 @@ function _wireLoginBtn() {
             alert('Please enter email and password');
             return;
         }
-        const captchaToken = document.querySelector('[name="cf-turnstile-response"]')?.value;
-        if (!captchaToken) {
-            alert('Please complete the CAPTCHA verification.');
-            return;
-        }
         try {
             btn.disabled = true;
             btn.textContent = 'Logging in...';
@@ -12936,7 +12931,7 @@ function _wireLoginBtn() {
                         const displayVenue = a.venue || eventVenue || a.location_address || '';
 
                         activityHtml += `
-                            <div class="calendar-appointment ${a.activity_type.toLowerCase()} ${a.closing_amount ? 'closed-case' : ''} ${isPendingInvite ? 'pending-invite' : ''} ${isRejectedInvite ? 'rejected-invite' : ''}"
+                            <div class="calendar-appointment ${a.activity_type.toLowerCase()} ${(a.closing_amount || a.is_closing) ? 'closed-case' : ''} ${isPendingInvite ? 'pending-invite' : ''} ${isRejectedInvite ? 'rejected-invite' : ''}"
                                 onclick="event.stopPropagation(); app.viewActivityDetails(${a.id})">
                                 <div class="appointment-time">${(a.start_time || '00:00').slice(0,5)}</div>
                                 ${isEvent
@@ -12953,11 +12948,11 @@ function _wireLoginBtn() {
                                 </div>
                                 ` : ''}
                                 ${isRejectedInvite ? `<div class="appointment-status-rejected" style="margin-top:6px;padding:3px 6px;background:#fee2e2;color:#991b1b;border-radius:4px;font-size:11px;text-align:center;"><i class="fas fa-times-circle"></i> You rejected this</div>` : ''}
-                                ${a.closing_amount ? `
+                                ${(a.closing_amount || a.is_closing) ? `
                                 <div class="appointment-closed">
                                     <div class="closed-badge">✓ CLOSED</div>
-                                    <div class="closed-product">📦 ${a.solution_sold || 'Product'}</div>
-                                    <div class="closed-amount">💰 RM ${a.closing_amount}</div>
+                                    ${a.solution_sold ? `<div class="closed-product">📦 ${a.solution_sold}</div>` : ''}
+                                    ${a.closing_amount ? `<div class="closed-amount">💰 RM ${a.closing_amount}</div>` : ''}
                                 </div>
                                 ` : ''}
                             </div>
@@ -13205,7 +13200,7 @@ function _wireLoginBtn() {
                     <div class="tac-meta">
                         <span class="tac-time">${a.start_time ? a.start_time.slice(0,5) : '--:--'}</span>
                         <span class="tac-type ${typeClass}">${a.activity_type}</span>
-                        <span class="tac-status">${statusText}${a.closing_amount ? ' · Closed' : ''}</span>
+                        <span class="tac-status">${statusText}${(a.closing_amount || a.is_closing) ? ' · Closed' : ''}</span>
                     </div>
                     <div class="tac-names">
                         <div class="tac-agent">${agent.full_name}</div>
@@ -14665,6 +14660,12 @@ function _wireLoginBtn() {
         // Standard Functions all see the same field set.
         const mo = collectMeetingOutcomeData('mo');
         const isClosed = mo.is_closing;
+
+        if (isClosed && (!mo.amount_closed || parseFloat(mo.amount_closed) <= 0)) {
+            UI.toast.error('Please enter the Amount Closed (RM) — it is required to record a sales closing.');
+            document.getElementById('mo-amount-closed')?.focus();
+            return;
+        }
 
         // Upload the invoice file (if a new one was selected). The Meeting
         // Outcome modal previously only used the file for OCR auto-fill and
@@ -16485,8 +16486,8 @@ function _wireLoginBtn() {
                     </div>
                     <div class="form-row">
                         <div class="form-group half">
-                            <label>Amount Closed (RM)</label>
-                            <input type="number" id="${prefix}-amount-closed" class="form-control" value="${escapeHtml(v.sale_amount)}" placeholder="0.00" ${disabled}>
+                            <label>Amount Closed (RM) <span style="color:#ef4444;font-weight:700;" title="Required">*</span></label>
+                            <input type="number" id="${prefix}-amount-closed" class="form-control" value="${escapeHtml(v.sale_amount)}" placeholder="0.00" min="0.01" step="0.01" ${disabled}>
                         </div>
                         <div class="form-group half">
                             <label>Payment Method</label>
