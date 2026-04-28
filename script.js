@@ -31365,8 +31365,8 @@ const getNewCustomers = async (from, to) => {
     let count = 0;
     for (const c of customers) {
         if (c.customer_since < from || c.customer_since > to) continue;
-        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(c.responsible_agent_id)) continue;
-        const hasPurchaseInRange = purchases.some(p => p.customer_id == c.id && p.purchase_date >= from && p.purchase_date <= to);
+        if (_visibleUserIds !== 'all' && !_visibleUserIds.map(String).includes(String(c.responsible_agent_id))) continue;
+        const hasPurchaseInRange = purchases.some(p => p.customer_id == c.id && (p.date || p.purchase_date) >= from && (p.date || p.purchase_date) <= to);
         if (!hasPurchaseInRange) continue;
         count++;
     }
@@ -31431,9 +31431,10 @@ const getMeetUpExistingCustomerCount = async (from, to) => {
     let count = 0;
     for (const a of activities) {
         if (a.activity_date < from || a.activity_date > to) continue;
-        if (!CLIENT_MEETING_TYPES.includes(a.activity_type)) continue;
-        if (!a.customer_id) continue;
-        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(a.lead_agent_id)) continue;
+        const isClientMeet = CLIENT_MEETING_TYPES.includes(a.activity_type) ||
+            (a.activity_title || '').toLowerCase().includes('golden road');
+        if (!isClientMeet) continue;
+        if (_visibleUserIds !== 'all' && !_visibleUserIds.map(String).includes(String(a.lead_agent_id))) continue;
         if (_currentRoleFilter !== 'All') {
             const agent = userMap[String(a.lead_agent_id)];
             if (!agent || agent.role !== _currentRoleFilter) continue;
@@ -31444,24 +31445,27 @@ const getMeetUpExistingCustomerCount = async (from, to) => {
 };
 
 const getCFHeadcount = async (from, to) => {
-    const [attendees, activities] = await Promise.all([
-        AppDataStore.getAll('event_attendees'),
-        AppDataStore.getAll('activities')
+    // CF Headcount = unique existing customers who referred someone to a CPS session.
+    // One customer who brought 3 referrals still counts as 1.
+    const needUsers = _currentRoleFilter !== 'All' || _visibleUserIds !== 'all';
+    const [activities, users] = await Promise.all([
+        AppDataStore.getAll('activities'),
+        needUsers ? AppDataStore.getAll('users') : Promise.resolve([])
     ]);
-    const actMap = {};
-    activities.forEach(a => { actMap[String(a.id)] = a; });
-    let count = 0;
-    for (const att of attendees) {
-        if (!att.attended && att.attendance_status !== 'Attended') continue;
-        const act = actMap[String(att.activity_id)];
-        if (!act) continue;
-        if (act.activity_date < from || act.activity_date > to) continue;
-        const title = (act.event_title || act.activity_title || '').toLowerCase();
-        if (!title.includes('cf') && (act.activity_type || '').toUpperCase() !== 'CF') continue;
-        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(act.lead_agent_id)) continue;
-        count++;
+    const userMap = {};
+    users.forEach(u => { userMap[String(u.id)] = u; });
+    const uniqueReferrers = new Set();
+    for (const a of activities) {
+        if (a.activity_type !== 'CPS') continue;
+        if (a.activity_date < from || a.activity_date > to) continue;
+        if (_visibleUserIds !== 'all' && !_visibleUserIds.map(String).includes(String(a.lead_agent_id))) continue;
+        if (_currentRoleFilter !== 'All') {
+            const agent = userMap[String(a.lead_agent_id)];
+            if (!agent || agent.role !== _currentRoleFilter) continue;
+        }
+        if (a.customer_id) uniqueReferrers.add(String(a.customer_id));
     }
-    return count;
+    return uniqueReferrers.size;
 };
 
 const getActivityHeadcount = async (from, to) => {
@@ -31558,12 +31562,12 @@ const buildTotalSalesDetails = async (from, to) => {
     for (const p of purchases) {
         if (p.date < from || p.date > to || p.is_agent_package) continue;
         const agentId = custMap[p.customer_id]?.responsible_agent_id;
-        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(agentId)) continue;
+        if (_visibleUserIds !== 'all' && !_visibleUserIds.map(String).includes(String(agentId))) continue;
         if (_currentRoleFilter !== 'All') {
-            const agent = userMap[agentId];
+            const agent = userMap[agentId] || userMap[String(agentId)];
             if (!agent || agent.role !== _currentRoleFilter) continue;
         }
-        const agentName = userMap[agentId]?.full_name || '—';
+        const agentName = userMap[agentId]?.full_name || userMap[String(agentId)]?.full_name || '—';
         const custName = custMap[p.customer_id]?.full_name || '—';
         total += p.amount || 0;
         rows.push([p.date, agentName, custName, `RM ${(p.amount || 0).toLocaleString()}`, p.payment_method || '—', p.item || '—']);
@@ -31585,12 +31589,12 @@ const buildPOPDetails = async (from, to) => {
     for (const p of purchases) {
         if (p.payment_method !== 'POP' || p.date < from || p.date > to) continue;
         const agentId = custMap[p.customer_id]?.responsible_agent_id;
-        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(agentId)) continue;
+        if (_visibleUserIds !== 'all' && !_visibleUserIds.map(String).includes(String(agentId))) continue;
         if (_currentRoleFilter !== 'All') {
-            const agent = userMap[agentId];
+            const agent = userMap[agentId] || userMap[String(agentId)];
             if (!agent || agent.role !== _currentRoleFilter) continue;
         }
-        const agentName = userMap[agentId]?.full_name || '—';
+        const agentName = userMap[agentId]?.full_name || userMap[String(agentId)]?.full_name || '—';
         const custName = custMap[p.customer_id]?.full_name || '—';
         total += p.amount || 0;
         rows.push([p.date, agentName, custName, `RM ${(p.amount || 0).toLocaleString()}`, p.pop_tenure ? `${p.pop_tenure} mo` : '—', p.item || '—']);
@@ -31613,12 +31617,12 @@ const buildEPPCasesDetails = async (from, to) => {
     for (const p of purchases) {
         if (p.payment_method !== 'EPP' || p.date < from || p.date > to) continue;
         const agentId = custMap[p.customer_id]?.responsible_agent_id;
-        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(agentId)) continue;
+        if (_visibleUserIds !== 'all' && !_visibleUserIds.map(String).includes(String(agentId))) continue;
         if (_currentRoleFilter !== 'All') {
-            const agent = userMap[agentId];
+            const agent = userMap[agentId] || userMap[String(agentId)];
             if (!agent || agent.role !== _currentRoleFilter) continue;
         }
-        const agentName = userMap[agentId]?.full_name || '—';
+        const agentName = userMap[agentId]?.full_name || userMap[String(agentId)]?.full_name || '—';
         const custName = custMap[p.customer_id]?.full_name || '—';
         const bank = p.epp_bank || 'Unknown';
         const months = p.epp_months || '-';
@@ -31754,10 +31758,10 @@ const buildNewCustomersDetails = async (from, to) => {
     const rows = [];
     for (const c of customers) {
         if (c.customer_since < from || c.customer_since > to) continue;
-        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(c.responsible_agent_id)) continue;
-        const hasPurchaseInRange = purchases.some(p => p.customer_id == c.id && p.purchase_date >= from && p.purchase_date <= to);
-        if (!hasPurchaseInRange) continue;
-        const agent = c.responsible_agent_id ? (userMap[c.responsible_agent_id]?.full_name || '—') : '—';
+        if (_visibleUserIds !== 'all' && !_visibleUserIds.map(String).includes(String(c.responsible_agent_id))) continue;
+        const agent = c.responsible_agent_id
+            ? (userMap[c.responsible_agent_id]?.full_name || userMap[String(c.responsible_agent_id)]?.full_name || '—')
+            : '—';
         rows.push([c.customer_since, c.full_name || '—', agent, c.source || '—']);
     }
     return renderDetailTable(['Since', 'Name', 'Agent', 'Source'], rows);
@@ -31844,6 +31848,61 @@ const buildClientMeetingsDetails = async (from, to) => {
         rows.push([a.activity_date, a.activity_type || '—', a.activity_title || '—', agentName, entityName]);
     }
     return renderDetailTable(['Date', 'Type', 'Title', 'Lead Agent', 'Customer / Prospect'], rows);
+};
+
+const buildMeetUpExistingDetails = async (from, to) => {
+    const [activities, users] = await Promise.all([
+        AppDataStore.getAll('activities'),
+        AppDataStore.getAll('users')
+    ]);
+    const userMap = {}; users.forEach(u => { userMap[String(u.id)] = u; });
+    const rows = [];
+    for (const a of activities) {
+        if (a.activity_date < from || a.activity_date > to) continue;
+        const isClientMeet = CLIENT_MEETING_TYPES.includes(a.activity_type) ||
+            (a.activity_title || '').toLowerCase().includes('golden road');
+        if (!isClientMeet) continue;
+        if (_visibleUserIds !== 'all' && !_visibleUserIds.map(String).includes(String(a.lead_agent_id))) continue;
+        if (_currentRoleFilter !== 'All') {
+            const agent = userMap[String(a.lead_agent_id)];
+            if (!agent || agent.role !== _currentRoleFilter) continue;
+        }
+        const agentName = userMap[String(a.lead_agent_id)]?.full_name || '—';
+        rows.push([a.activity_date, a.activity_type || '—', a.activity_title || '—', agentName]);
+    }
+    return renderDetailTable(['Date', 'Type', 'Title', 'Lead Agent'], rows);
+};
+
+const buildCFHeadcountDetails = async (from, to) => {
+    const [activities, users, customers] = await Promise.all([
+        AppDataStore.getAll('activities'),
+        AppDataStore.getAll('users'),
+        AppDataStore.getAll('customers')
+    ]);
+    const userMap = {}; users.forEach(u => { userMap[String(u.id)] = u; });
+    const custMap = {}; customers.forEach(c => { custMap[String(c.id)] = c; });
+    // Collect one row per unique referrer (customer)
+    const referrerMap = {}; // customer_id → { name, sessions }
+    for (const a of activities) {
+        if (a.activity_type !== 'CPS') continue;
+        if (a.activity_date < from || a.activity_date > to) continue;
+        if (_visibleUserIds !== 'all' && !_visibleUserIds.map(String).includes(String(a.lead_agent_id))) continue;
+        if (_currentRoleFilter !== 'All') {
+            const agent = userMap[String(a.lead_agent_id)];
+            if (!agent || agent.role !== _currentRoleFilter) continue;
+        }
+        if (!a.customer_id) continue;
+        const key = String(a.customer_id);
+        if (!referrerMap[key]) {
+            referrerMap[key] = { name: custMap[key]?.full_name || '—', agent: userMap[String(a.lead_agent_id)]?.full_name || '—', sessions: 0 };
+        }
+        referrerMap[key].sessions++;
+    }
+    const rows = Object.values(referrerMap).map(r => [r.name, r.agent, r.sessions]);
+    const summary = `<div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:13px;">
+        <strong>${rows.length}</strong> unique referrer${rows.length===1?'':'s'} brought <strong>${rows.reduce((s,r)=>s+r[2],0)}</strong> total CPS sessions
+    </div>`;
+    return summary + renderDetailTable(['Referrer (Customer)', 'Agent', 'CPS Sessions'], rows);
 };
 
 const buildActivityHeadcountDetails = async (from, to) => {
@@ -31950,7 +32009,9 @@ const showKPIDetails = async (key) => {
         conversionRate: 'Conversion Rate',
         totalMeetings: 'Meetings & Training',
         clientMeetings: 'Client Meetings',
-        activityHeadcount: 'Activity Attendance'
+        activityHeadcount: 'Activity Attendance',
+        meetUpExistingCount: 'Meet Up (Existing Customers)',
+        cfHeadcount: 'CF Headcount (CPS Referrers)'
     };
     const title = titles[key] || 'Details';
 
@@ -31978,7 +32039,9 @@ const showKPIDetails = async (key) => {
         else if (key === 'conversionRate')   body = await buildConversionDetails(from, to);
         else if (key === 'totalMeetings')    body = await buildMeetingsDetails(from, to);
         else if (key === 'clientMeetings')   body = await buildClientMeetingsDetails(from, to);
-        else if (key === 'activityHeadcount') body = await buildActivityHeadcountDetails(from, to);
+        else if (key === 'activityHeadcount')  body = await buildActivityHeadcountDetails(from, to);
+        else if (key === 'meetUpExistingCount') body = await buildMeetUpExistingDetails(from, to);
+        else if (key === 'cfHeadcount')        body = await buildCFHeadcountDetails(from, to);
         else body = '<p>No details available for this metric.</p>';
     } catch (e) {
         console.error('showKPIDetails error', e);
