@@ -10330,6 +10330,33 @@ body, p, li, label {
     line-height: 1.5;
 }
 
+/* Prevent native pull-to-refresh on Chrome/Android — JS handles iOS Safari */
+html, body {
+    overscroll-behavior-y: none;
+}
+#content-viewport {
+    overscroll-behavior-y: contain;
+}
+
+/* Pull-to-refresh indicator pill */
+#ptr-pill {
+    position: fixed;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%) translateY(-100%);
+    background: var(--primary, #800020);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 10px 24px;
+    border-radius: 0 0 20px 20px;
+    z-index: 99999;
+    transition: transform .25s ease;
+    pointer-events: none;
+    white-space: nowrap;
+    box-shadow: 0 3px 10px rgba(128,0,32,.35);
+}
+
 /* Print styles — expanded */
 @media print {
     .top-bar, .mobile-drawer, .mobile-drawer-overlay,

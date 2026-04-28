@@ -7457,6 +7457,69 @@ function _wireLoginBtn() {
         // Weekly inactivity scoring — fire-and-forget, deferred 10s to avoid blocking startup
         setTimeout(() => _runWeeklyInactivityCheck().catch(() => {}), 10000);
 
+        // Block native pull-to-refresh on iOS Safari (Chrome/Android handled by CSS overscroll-behavior).
+        // Requires 3 intentional downward pulls at the top of the page to trigger a soft refresh.
+        // A soft refresh re-renders the current view without a full page reload — no login screen flash.
+        if ('ontouchstart' in window) {
+            let _ptrStartY = 0, _ptrCount = 0, _ptrTimer = null, _ptrPulling = false, _ptrPill = null;
+
+            const _ptrPillEl = () => {
+                if (!_ptrPill) {
+                    _ptrPill = document.createElement('div');
+                    _ptrPill.id = 'ptr-pill';
+                    document.body.appendChild(_ptrPill);
+                }
+                return _ptrPill;
+            };
+            const _ptrShow = (t) => { const p = _ptrPillEl(); p.textContent = t; p.style.transform = 'translateX(-50%) translateY(0)'; };
+            const _ptrHide = () => { if (_ptrPill) _ptrPill.style.transform = 'translateX(-50%) translateY(-100%)'; };
+
+            document.addEventListener('touchstart', e => {
+                _ptrStartY = e.touches[0].pageY;
+                _ptrPulling = false;
+            }, { passive: true });
+
+            document.addEventListener('touchmove', e => {
+                const dy = e.touches[0].pageY - _ptrStartY;
+                if (dy <= 0) { _ptrHide(); _ptrPulling = false; return; }
+
+                // Allow normal scroll if any ancestor element is not yet at its own scroll top
+                let el = e.target;
+                while (el && el !== document.documentElement) {
+                    if (el.scrollTop > 0) { _ptrHide(); _ptrPulling = false; return; }
+                    el = el.parentElement;
+                }
+
+                // At the page top pulling down — block native PTR on iOS Safari
+                if (e.cancelable) e.preventDefault();
+                _ptrPulling = true;
+
+                if (dy > 60) {
+                    const left = 3 - _ptrCount;
+                    _ptrShow(left > 0
+                        ? `↓ Pull ${left} more time${left > 1 ? 's' : ''} to refresh`
+                        : '↓ Release to refresh');
+                }
+            }, { passive: false });
+
+            document.addEventListener('touchend', () => {
+                if (!_ptrPulling) { _ptrHide(); return; }
+                _ptrPulling = false;
+                _ptrHide();
+
+                _ptrCount++;
+                clearTimeout(_ptrTimer);
+                _ptrTimer = setTimeout(() => { _ptrCount = 0; }, 30000); // reset counter after 30s idle
+
+                if (_ptrCount >= 3) {
+                    _ptrCount = 0;
+                    clearTimeout(_ptrTimer);
+                    UI.toast.success('Refreshing…');
+                    setTimeout(() => navigateTo(_currentView || 'calendar').catch(() => {}), 200);
+                }
+            }, { passive: true });
+        }
+
         // Resize + orientation listeners
         let _resizeTimer;
         window.addEventListener('resize', () => {
