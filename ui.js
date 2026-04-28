@@ -93,6 +93,9 @@ window.UI = (() => {
 
             const toastEl = document.createElement('div');
             toastEl.className = `toast toast-${type}`;
+            toastEl.setAttribute('role', type === 'error' ? 'alert' : 'status');
+            toastEl.setAttribute('aria-live', type === 'error' ? 'assertive' : 'polite');
+            toastEl.setAttribute('aria-atomic', 'true');
 
             let icon = 'info-circle';
             if (type === 'success') icon = 'check-circle';
@@ -102,6 +105,7 @@ window.UI = (() => {
             // Build DOM nodes — never innerHTML with user/error text (XSS).
             const iconEl = document.createElement('i');
             iconEl.className = `fas fa-${icon}`;
+            iconEl.setAttribute('aria-hidden', 'true');
             const span = document.createElement('span');
             span.textContent = String(message ?? '');
             toastEl.appendChild(iconEl);
@@ -121,7 +125,29 @@ window.UI = (() => {
     };
 
     // --- Modals ---
+    let _modalPreviousFocus = null;
+    const _FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+
+    const _trapFocus = (e) => {
+        const overlay = document.getElementById('global-modal-overlay');
+        if (!overlay || !overlay.classList.contains('active')) return;
+        const focusable = Array.from(overlay.querySelectorAll(_FOCUSABLE)).filter(el => el.offsetParent !== null);
+        if (!focusable.length) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.key === 'Tab') {
+            if (e.shiftKey) {
+                if (document.activeElement === first) { e.preventDefault(); last.focus(); }
+            } else {
+                if (document.activeElement === last) { e.preventDefault(); first.focus(); }
+            }
+        }
+        if (e.key === 'Escape') { e.preventDefault(); hideModal(); }
+    };
+
     const showModal = (title, contentHtml, actions = [], size = '') => {
+        _modalPreviousFocus = document.activeElement;
+
         let overlay = document.getElementById('global-modal-overlay');
         if (!overlay) {
             overlay = document.createElement('div');
@@ -133,25 +159,21 @@ window.UI = (() => {
         const buttonsHtml = actions.map(btn => {
             const btnClass = btn.type === 'primary' ? 'btn primary' : 'btn secondary';
             const action = (btn.action === 'UI.modal.hide()' || btn.action === 'UI.hideModal()') ? 'UI.hideModal()' : btn.action;
-            // Cancel/close buttons skip loading state
             const isCancel = action === 'UI.hideModal()' || /cancel|close|no\b|back/i.test(btn.label);
-            // action is JS — escape quotes only to keep the attribute well-formed; labels are text
             const safeAction = String(action).replace(/"/g, '&quot;');
             const safeLabel = escapeHtml(btn.label);
             return `<button class="${btnClass}" ${isCancel ? 'data-no-load' : ''} onclick="${safeAction}">${safeLabel}</button>`;
         }).join('');
 
         const modalBoxClass = size === 'fullscreen' ? 'modal-box fullscreen' : 'modal-box';
-        // Title is treated as plain text. Callers that need markup in the title
-        // should pre-escape user data and pass a pre-built string, knowing that
-        // only a narrow safelist of tags is allowed via a DOMPurify pass below.
         const safeTitle = escapeHtml(title);
+        const titleId = 'modal-title-' + Date.now();
 
         overlay.innerHTML = `
-            <div class="${modalBoxClass}">
+            <div class="${modalBoxClass}" role="dialog" aria-modal="true" aria-labelledby="${titleId}">
                 <div class="modal-header">
-                    <h3>${safeTitle}</h3>
-                    <button class="modal-close" onclick="UI.hideModal()">&times;</button>
+                    <h3 id="${titleId}">${safeTitle}</h3>
+                    <button class="modal-close" onclick="UI.hideModal()" aria-label="Close dialog">&times;</button>
                 </div>
                 <div class="modal-content">
                     ${contentHtml}
@@ -161,15 +183,27 @@ window.UI = (() => {
         `;
 
         overlay.classList.add('active');
+        document.addEventListener('keydown', _trapFocus);
+
+        // Focus first focusable element inside modal
+        const firstFocusable = overlay.querySelector(_FOCUSABLE);
+        if (firstFocusable) setTimeout(() => firstFocusable.focus(), 50);
+
         if (window._resolveAttachmentImages) window._resolveAttachmentImages(overlay);
     };
 
     const hideModal = () => {
         _endAllBtnLoads();
+        document.removeEventListener('keydown', _trapFocus);
         const overlay = document.getElementById('global-modal-overlay');
         if (overlay) {
             overlay.classList.remove('active');
             overlay.innerHTML = '';
+        }
+        // Restore focus to element that opened the modal
+        if (_modalPreviousFocus && typeof _modalPreviousFocus.focus === 'function') {
+            try { _modalPreviousFocus.focus(); } catch (_) {}
+            _modalPreviousFocus = null;
         }
     };
 

@@ -3239,15 +3239,36 @@ const appLogic = (() => {
         }, false);
     };
 
+    const MAX_UPLOAD_SIZE_MB = 20;
+    const MAX_UPLOAD_SIZE_BYTES = MAX_UPLOAD_SIZE_MB * 1024 * 1024;
+    const ALLOWED_UPLOAD_EXTENSIONS = /\.(pdf|doc|docx|xls|xlsx|csv|txt|png|jpg|jpeg|gif|webp|mp4|mov|zip|json)$/i;
+
     const handleFileSelect = (files) => {
         const list = document.getElementById('upload-list');
         if (!list) return;
 
-        window._pendingUploads = Array.from(files);
+        const oversized = [];
+        const badType = [];
+        const valid = [];
+
+        Array.from(files).forEach(file => {
+            if (file.size > MAX_UPLOAD_SIZE_BYTES) {
+                oversized.push(file.name);
+            } else if (!ALLOWED_UPLOAD_EXTENSIONS.test(file.name)) {
+                badType.push(file.name);
+            } else {
+                valid.push(file);
+            }
+        });
+
+        if (oversized.length) UI.toast.error(`File too large (max ${MAX_UPLOAD_SIZE_MB}MB): ${oversized.join(', ')}`);
+        if (badType.length) UI.toast.error(`File type not allowed: ${badType.join(', ')}`);
+
+        window._pendingUploads = valid;
 
         let html = '<h4 style="margin: 16px 0 8px; font-size: 14px;">Files to upload:</h4><ul style="list-style: none; padding: 0;">';
-        Array.from(files).forEach(file => {
-            html += `<li style="padding: 6px 0; border-bottom: 1px solid #eee; font-size: 13px;"><i class="fas ${getFileIcon(file.name)}"></i> ${file.name} (${(file.size > 1048576 ? (file.size / 1048576).toFixed(1) + " MB" : (file.size / 1024).toFixed(0) + " KB")})</li>`;
+        valid.forEach(file => {
+            html += `<li style="padding: 6px 0; border-bottom: 1px solid #eee; font-size: 13px;"><i class="fas ${getFileIcon(file.name)}"></i> ${escapeHtml(file.name)} (${(file.size > 1048576 ? (file.size / 1048576).toFixed(1) + ' MB' : (file.size / 1024).toFixed(0) + ' KB')})</li>`;
         });
         html += '</ul>';
 
@@ -7117,12 +7138,33 @@ function _wireLoginBtn() {
     };
 
     btn.onclick = async () => {
-        const email = document.getElementById('loginEmail')?.value?.trim();
-        const password = document.getElementById('loginPassword')?.value;
-        if (!email || !password) {
-            alert('Please enter email and password');
-            return;
+        const emailEl = document.getElementById('loginEmail');
+        const passwordEl = document.getElementById('loginPassword');
+        const emailErrEl = document.getElementById('loginEmailErr');
+        const passwordErrEl = document.getElementById('loginPasswordErr');
+        const email = emailEl?.value?.trim();
+        const password = passwordEl?.value;
+
+        // Clear previous inline errors
+        if (emailErrEl) { emailErrEl.textContent = ''; emailErrEl.style.display = 'none'; }
+        if (passwordErrEl) { passwordErrEl.textContent = ''; passwordErrEl.style.display = 'none'; }
+        emailEl?.removeAttribute('aria-invalid');
+        passwordEl?.removeAttribute('aria-invalid');
+
+        let hasError = false;
+        if (!email) {
+            if (emailErrEl) { emailErrEl.textContent = 'Email is required.'; emailErrEl.style.display = 'block'; }
+            emailEl?.setAttribute('aria-invalid', 'true');
+            emailEl?.focus();
+            hasError = true;
         }
+        if (!password) {
+            if (passwordErrEl) { passwordErrEl.textContent = 'Password is required.'; passwordErrEl.style.display = 'block'; }
+            passwordEl?.setAttribute('aria-invalid', 'true');
+            if (!hasError) passwordEl?.focus();
+            hasError = true;
+        }
+        if (hasError) return;
         try {
             btn.disabled = true;
             btn.textContent = 'Logging in...';
@@ -7293,7 +7335,20 @@ function _wireLoginBtn() {
                 try { localStorage.clear(); } catch (_) {}
                 setTimeout(() => window.location.reload(true), 600);
             } else {
-                alert('Login failed: ' + msg);
+                // Show inline error on the form instead of alert()
+                const loginErrEl = document.getElementById('loginPasswordErr') || document.getElementById('loginEmailErr');
+                const errText = msg.toLowerCase().includes('invalid') || msg.toLowerCase().includes('credential')
+                    ? 'Incorrect email or password. Please try again.'
+                    : ('Login failed: ' + (msg || 'Unknown error'));
+                if (loginErrEl) {
+                    loginErrEl.textContent = errText;
+                    loginErrEl.style.display = 'block';
+                    loginErrEl.setAttribute('role', 'alert');
+                    document.getElementById('loginEmail')?.setAttribute('aria-invalid', 'true');
+                    document.getElementById('loginPassword')?.setAttribute('aria-invalid', 'true');
+                } else {
+                    UI.toast?.error?.(errText);
+                }
             }
         } finally {
             btn.disabled = false;
@@ -7453,6 +7508,25 @@ function _wireLoginBtn() {
         window.app.ready = true;
         window.app.initialized = true;
         window.dispatchEvent(new Event('appReady'));
+
+        // Session inactivity timeout — auto-logout after 60 min of no interaction
+        // (skipped for "remember me" users who explicitly opted into persistence)
+        if (localStorage.getItem('remember_me') !== '1') {
+            const SESSION_TIMEOUT_MS = 60 * 60 * 1000; // 60 minutes
+            let _sessionTimer = null;
+            const _resetSessionTimer = () => {
+                clearTimeout(_sessionTimer);
+                _sessionTimer = setTimeout(async () => {
+                    UI.toast.warning('Session expired due to inactivity. Logging out...');
+                    await new Promise(r => setTimeout(r, 2000));
+                    await logout();
+                }, SESSION_TIMEOUT_MS);
+            };
+            ['click', 'keydown', 'mousemove', 'touchstart', 'scroll'].forEach(evt =>
+                window.addEventListener(evt, _resetSessionTimer, { passive: true })
+            );
+            _resetSessionTimer();
+        }
         // App initialized
     } catch (err) {
         console.error('App init failed:', err);
@@ -7600,7 +7674,7 @@ function _wireLoginBtn() {
 
     // ----- 5. Demo users: Level 13 Customer & Level 14 Referrer -----
     const demoLevel1314 = [
-        { id: 102, username: 'referrer1', password: 'ref123',  full_name: 'Tan Mei Mei (Referrer)', role: 'Level 14 Referrer', status: 'active' }
+        { id: 102, username: 'referrer1', full_name: 'Tan Mei Mei (Referrer)', role: 'Level 14 Referrer', status: 'active' }
     ];
     for (const u of demoLevel1314) { await safeInsert('users', u); }
 
@@ -12952,7 +13026,7 @@ function _wireLoginBtn() {
                                 <div class="appointment-closed">
                                     <div class="closed-badge">✓ CLOSED</div>
                                     ${a.solution_sold ? `<div class="closed-product">📦 ${a.solution_sold}</div>` : ''}
-                                    ${a.closing_amount ? `<div class="closed-amount">💰 RM ${a.closing_amount}</div>` : ''}
+                                    ${a.closing_amount ? `<div class="closed-amount">💰 RM ${parseFloat(a.closing_amount).toLocaleString('en-MY', {minimumFractionDigits:2,maximumFractionDigits:2})}</div>` : ''}
                                 </div>
                                 ` : ''}
                             </div>
@@ -16486,8 +16560,9 @@ function _wireLoginBtn() {
                     </div>
                     <div class="form-row">
                         <div class="form-group half">
-                            <label>Amount Closed (RM) <span style="color:#ef4444;font-weight:700;" title="Required">*</span></label>
-                            <input type="number" id="${prefix}-amount-closed" class="form-control" value="${escapeHtml(v.sale_amount)}" placeholder="0.00" min="0.01" step="0.01" ${disabled}>
+                            <label for="${prefix}-amount-closed">Amount Closed (RM) <span style="color:#ef4444;font-weight:700;" title="Required" aria-hidden="true">*</span></label>
+                            <input type="number" id="${prefix}-amount-closed" class="form-control" value="${escapeHtml(v.sale_amount)}" placeholder="0.00" min="0.01" step="0.01" aria-required="true" aria-describedby="${prefix}-amount-closed-hint" ${disabled}>
+                            <span id="${prefix}-amount-closed-hint" style="font-size:11px;color:var(--gray-400);">Required when case is closed</span>
                         </div>
                         <div class="form-group half">
                             <label>Payment Method</label>

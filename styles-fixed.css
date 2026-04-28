@@ -10273,3 +10273,72 @@ input:checked+.slider:before {
     flex-wrap: wrap;
     justify-content: flex-end;
 }
+
+/* ── Accessibility: keyboard focus indicators ─────────────────────────── */
+/* Visible focus ring for keyboard users (not shown on mouse click via :focus-visible) */
+:focus-visible {
+    outline: 2px solid var(--primary, #800020);
+    outline-offset: 2px;
+    border-radius: 3px;
+}
+
+.btn:focus-visible,
+button:focus-visible {
+    outline: 2px solid var(--primary, #800020);
+    outline-offset: 3px;
+    box-shadow: 0 0 0 4px rgba(128, 0, 32, 0.2);
+}
+
+/* Minimum touch target size for interactive elements */
+.btn, button, [role="button"],
+input[type="checkbox"], input[type="radio"] {
+    min-height: 44px;
+    min-width: 44px;
+}
+
+input[type="checkbox"], input[type="radio"] {
+    min-height: 20px;
+    min-width: 20px;
+}
+
+/* Error state: add icon indicator alongside color (not color-only) */
+input[aria-invalid="true"],
+select[aria-invalid="true"],
+textarea[aria-invalid="true"] {
+    border-color: #ef4444 !important;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='7' fill='%23ef4444'/%3E%3Ctext x='8' y='12' text-anchor='middle' fill='white' font-size='10' font-weight='bold'%3E!%3C/text%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    background-size: 16px 16px;
+    padding-right: 36px;
+}
+
+/* Text overflow — prevent content from breaking layout */
+.appointment-customer,
+.appointment-agent,
+.appointment-type,
+.appointment-venue,
+.tac-customer,
+.tac-agent {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+}
+
+/* Line height for readability */
+body, p, li, td, th, label, span {
+    line-height: 1.5;
+}
+
+/* Print styles — expanded */
+@media print {
+    .top-bar, .mobile-drawer, .mobile-drawer-overlay,
+    .bottom-nav, .command-palette, #toast-container,
+    .modal-overlay, .btn, button { display: none !important; }
+    body { background: #fff !important; color: #000 !important; }
+    a { color: #000 !important; text-decoration: underline; }
+    .content-viewport { padding: 0 !important; }
+    * { box-shadow: none !important; }
+}
+/* ── End accessibility additions ──────────────────────────────────────── */
