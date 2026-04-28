@@ -1,9 +1,9 @@
 {
-  "name": "Feng Shui CRM",
-  "short_name": "FS CRM",
-  "description": "Feng Shui CRM — real estate & consulting CRM",
-  "start_url": "./index.html",
-  "scope": "./",
+  "name": "悅客匯 CRM",
+  "short_name": "悅客匯",
+  "description": "悅客匯 CRM — DestinOraclesSolution 专业风水顾问客户关系管理平台",
+  "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#800020",
@@ -35,5 +35,5 @@
     }
   ],
   "categories": ["business", "productivity"],
-  "lang": "en"
+  "lang": "zh-TW"
 }
