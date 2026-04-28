@@ -16335,16 +16335,14 @@ function _wireLoginBtn() {
                     <div class="form-group half">
                         <div style="display:flex;align-items:center;gap:8px;">
                             <label style="margin-bottom:0;">Date of Birth</label>
-                            <input type="checkbox" id="${prefix}-use-dob" ${chk(useDob)} ${disabled} title="Use for life chart">
-                            <small style="color:var(--gray-400);font-size:11px;">Use for life chart</small>
+                            ${readOnly ? '' : `<input type="checkbox" id="${prefix}-use-dob" ${chk(useDob)} title="Use for life chart"><small style="color:var(--gray-400);font-size:11px;">Use for life chart</small>`}
                         </div>
                         <input type="date" id="${prefix}-dob" class="form-control" value="${esc(d.date_of_birth)}" onchange="app.updateLunarBirth('${prefix}-dob','${prefix}-lunar')" ${disabled}>
                     </div>
                     <div class="form-group half">
                         <div style="display:flex;align-items:center;gap:8px;">
                             <label style="margin-bottom:0;">Lunar Birth</label>
-                            <input type="checkbox" id="${prefix}-use-lunar" ${chk(useLunar)} ${disabled} title="Use for life chart">
-                            <small style="color:var(--gray-400);font-size:11px;">Use for life chart</small>
+                            ${readOnly ? '' : `<input type="checkbox" id="${prefix}-use-lunar" ${chk(useLunar)} title="Use for life chart"><small style="color:var(--gray-400);font-size:11px;">Use for life chart</small>`}
                         </div>
                         <input type="text" id="${prefix}-lunar" class="form-control" value="${esc(d.lunar_birth)}" placeholder="Lunar date" ${disabled}>
                     </div>
@@ -16394,14 +16392,16 @@ function _wireLoginBtn() {
                 </div>
                 <div class="form-group">
                     <label>Marital Status</label>
-                    <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
+                    ${readOnly
+                        ? `<div style="padding:6px 0;color:var(--text-primary);">${d.marital_status || '—'}</div>`
+                        : `<div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
                         ${['Single','Married','Others'].map(opt => `
                             <label style="display:flex;align-items:center;gap:6px;font-weight:normal;margin:0;cursor:pointer;">
-                                <input type="checkbox" class="${prefix}-marital-cb" value="${opt}" ${chk(d.marital_status === opt)} ${disabled} onchange="document.querySelectorAll('.${prefix}-marital-cb').forEach(cb=>{if(cb!==this)cb.checked=false;});">
+                                <input type="checkbox" class="${prefix}-marital-cb" value="${opt}" ${chk(d.marital_status === opt)} onchange="document.querySelectorAll('.${prefix}-marital-cb').forEach(cb=>{if(cb!==this)cb.checked=false;});">
                                 ${opt}
                             </label>
                         `).join('')}
-                    </div>
+                    </div>`}
                 </div>
                 <div class="form-group">
                     <label>Children</label>
