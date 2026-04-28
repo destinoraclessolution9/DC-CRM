@@ -17493,6 +17493,7 @@ function _wireLoginBtn() {
                 ${row('Agent', agent?.full_name)}
             </div>`;
         UI.showModal(person.full_name || 'Attendee Details', content, [
+            { label: 'View Full Profile', type: 'primary', action: `UI.hideModal(); app.${type === 'customer' ? 'showCustomerDetail' : 'showProspectDetail'}(${entityId})` },
             { label: 'Close', type: 'secondary', action: 'UI.hideModal()' }
         ]);
     };
@@ -22091,6 +22092,20 @@ function _wireLoginBtn() {
                             <div class="meet-lbl">Next Action</div>
                             <div class="meet-txt" style="color:var(--primary);font-weight:500;">${a.next_action}</div>
                         </div>` : ''}
+                        ${(a.note_key_points || a.note_outcome || a.note_needs || a.note_pain_points || a.note_next_steps) ? `
+                        <div style="margin:4px 0 6px;">
+                            <button class="btn btn-sm secondary" style="font-size:11px;width:100%;text-align:left;display:flex;justify-content:space-between;align-items:center;" onclick="event.stopPropagation();const n=document.getElementById('inl-notes-${a.id}');const open=n.style.display!=='none';n.style.display=open?'none':'block';this.querySelector('.fa-chevron-down').style.transform=open?'':'rotate(180deg)';">
+                                <span><i class="fas fa-sticky-note" style="color:var(--primary);margin-right:4px;"></i> Meeting Notes</span>
+                                <i class="fas fa-chevron-down" style="font-size:10px;transition:transform .2s;"></i>
+                            </button>
+                            <div id="inl-notes-${a.id}" style="display:none;margin-top:6px;padding:10px 12px;background:var(--surface-alt,#fafaf8);border-radius:6px;border-left:3px solid var(--primary,#800020);">
+                                ${a.note_key_points ? `<div style="margin-bottom:8px;"><div style="font-size:10px;color:var(--gray-400);font-weight:700;text-transform:uppercase;letter-spacing:.6px;margin-bottom:2px;">Key Points</div><div style="font-size:13px;">${a.note_key_points}</div></div>` : ''}
+                                ${a.note_outcome ? `<div style="margin-bottom:8px;"><div style="font-size:10px;color:var(--gray-400);font-weight:700;text-transform:uppercase;letter-spacing:.6px;margin-bottom:2px;">Outcome</div><div style="font-size:13px;">${a.note_outcome}</div></div>` : ''}
+                                ${a.note_needs ? `<div style="margin-bottom:8px;"><div style="font-size:10px;color:var(--gray-400);font-weight:700;text-transform:uppercase;letter-spacing:.6px;margin-bottom:2px;">Needs Identified</div><div style="font-size:13px;">${a.note_needs}</div></div>` : ''}
+                                ${a.note_pain_points ? `<div style="margin-bottom:8px;"><div style="font-size:10px;color:var(--gray-400);font-weight:700;text-transform:uppercase;letter-spacing:.6px;margin-bottom:2px;">Pain Points</div><div style="font-size:13px;">${a.note_pain_points}</div></div>` : ''}
+                                ${a.note_next_steps ? `<div><div style="font-size:10px;color:var(--gray-400);font-weight:700;text-transform:uppercase;letter-spacing:.6px;margin-bottom:2px;">Next Steps</div><div style="font-size:13px;color:var(--primary);font-weight:500;">${a.note_next_steps}</div></div>` : ''}
+                            </div>
+                        </div>` : ''}
                         ${a.score_value ? `<div style="margin-bottom:6px;"><span class="badge success" style="font-size:11px;">+${a.score_value} pts</span></div>` : ''}
                         <div class="meet-actions">
                             <button class="btn btn-sm secondary" onclick="event.stopPropagation();app.attachActivityPhoto(${a.id})"><i class="fas fa-camera"></i> Photo</button>
@@ -23007,6 +23022,7 @@ function _wireLoginBtn() {
                         <td style="padding:6px 10px;"><strong>${escapeHtml(cr0.product || '-')}</strong> <span style="font-size:11px;color:var(--gray-400);">(Conversion)</span></td>
                         <td style="padding:6px 10px;">RM ${amt0.toLocaleString('en-MY',{minimumFractionDigits:2})}</td>
                         <td style="padding:6px 10px;"><span style="background:#dcfce7;color:#166534;border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600;">PAID</span></td>
+                        <td style="padding:6px 10px;">${(()=>{ const ds=cr0.delivery_status||'Pending Delivery'; const dc={'Pending Delivery':'background:#fef3c7;color:#92400e','Dispatched':'background:#dbeafe;color:#1e40af','Delivered':'background:#dcfce7;color:#166534'}; return `<span style="${dc[ds]||dc['Pending Delivery']};border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600;cursor:pointer;" onclick="app.updateConversionDelivery(${origP.id},${customer.id})" title="Click to update">${ds} ✎</span>`; })()}</td>
                         <td style="padding:6px 10px;">${cr0.invoice_file ? `<a href="${cr0.invoice_file}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);font-size:12px;"><i class="fas fa-paperclip"></i> View</a>` : '-'}</td>
                         <td style="padding:6px 10px;font-size:11px;color:var(--gray-400);">Locked</td>
                     </tr>`;
@@ -23024,6 +23040,7 @@ function _wireLoginBtn() {
                     <td style="padding:6px 10px;">${escapeHtml(p.item || '-')}</td>
                     <td style="padding:6px 10px;">RM ${amt.toLocaleString('en-MY',{minimumFractionDigits:2})}</td>
                     <td style="padding:6px 10px;"><span style="background:${statusColor};border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600;">${p.status}</span></td>
+                    <td style="padding:6px 10px;">${(()=>{ const ds=p.delivery_status||'Pending Delivery'; const dc={'Pending Delivery':'background:#fef3c7;color:#92400e','Dispatched':'background:#dbeafe;color:#1e40af','Delivered':'background:#dcfce7;color:#166534'}; return `<span style="${dc[ds]||dc['Pending Delivery']};border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600;cursor:pointer;" onclick="app.updatePurchaseDelivery(${p.id},${customer.id})" title="Click to update">${ds} ✎</span>`; })()}</td>
                     <td style="padding:6px 10px;">${p.proof
                         ? `<a href="#" style="color:var(--primary);font-size:12px;"><i class="fas fa-paperclip"></i> ${p.proof.endsWith('.pdf') ? 'Report' : 'Image'}</a>`
                         : `<button class="btn secondary btn-sm" style="font-size:11px;padding:2px 8px;" onclick="app.uploadPaymentProof(${p.id},${customer.id})">Upload</button>`}</td>
@@ -23046,13 +23063,14 @@ function _wireLoginBtn() {
                             <th style="padding:6px 10px;text-align:left;font-weight:600;">Invoice #</th>
                             <th style="padding:6px 10px;text-align:left;font-weight:600;">Item / Product</th>
                             <th style="padding:6px 10px;text-align:left;font-weight:600;">Amount</th>
-                            <th style="padding:6px 10px;text-align:left;font-weight:600;">Status</th>
+                            <th style="padding:6px 10px;text-align:left;font-weight:600;">Payment</th>
+                            <th style="padding:6px 10px;text-align:left;font-weight:600;">Delivery</th>
                             <th style="padding:6px 10px;text-align:left;font-weight:600;">Proof</th>
                             <th style="padding:4px;width:32px;"></th>
                         </tr></thead>
                         <tbody style="border-bottom:1px solid #e5e7eb;">
                             ${conversionRow}${purchaseRows}
-                            ${!conversionRow && !purchaseRows ? `<tr><td colspan="7" style="padding:14px;text-align:center;color:var(--gray-400);font-size:12px;font-style:italic;">No purchase records yet.</td></tr>` : ''}
+                            ${!conversionRow && !purchaseRows ? `<tr><td colspan="8" style="padding:14px;text-align:center;color:var(--gray-400);font-size:12px;font-style:italic;">No purchase records yet.</td></tr>` : ''}
                         </tbody>
                     </table>
                 </div>
@@ -25170,7 +25188,7 @@ NOTIFY pgrst, 'reload schema';`;
                     </div>
                     <div class="form-row">
                         <div class="form-group half"><label>Invoice No. <span class="required">*</span></label><input type="text" id="pur-inv" class="form-control" placeholder="Enter invoice number"></div>
-                        <div class="form-group half"><label>Status</label>
+                        <div class="form-group half"><label>Payment Status</label>
                             <select id="pur-status" class="form-control">
                                 <option value="PENDING">Pending</option>
                                 <option value="COMPLETED">Completed</option>
@@ -25178,6 +25196,13 @@ NOTIFY pgrst, 'reload schema';`;
                                 <option value="N/A">N/A</option>
                             </select>
                         </div>
+                    </div>
+                    <div class="form-group"><label>Delivery Status</label>
+                        <select id="pur-delivery" class="form-control">
+                            <option value="Pending Delivery">Pending Delivery</option>
+                            <option value="Dispatched">Dispatched</option>
+                            <option value="Delivered">Delivered</option>
+                        </select>
                     </div>
                     <div class="form-group"><label>Redemption Image</label><input type="file" id="pur-file" class="form-control"></div>
                     <div class="form-group">
@@ -25241,6 +25266,7 @@ for (const p of allPackages) {
             item: item,
             amount: amt,
             status: document.getElementById('pur-status')?.value,
+            delivery_status: document.getElementById('pur-delivery')?.value || 'Pending Delivery',
             proof: document.getElementById('pur-file')?.value ? 'image_uploaded.png' : '',
             package_id: packageId,
             payment_method: purMethod,
@@ -25254,10 +25280,46 @@ for (const p of allPackages) {
 
         UI.hideModal();
         UI.toast.success('Purchase added');
-        const accCid = `cust-acc-body-purchases-${customerId}`;
-        if (document.getElementById(accCid)) await renderPurchaseHistoryTab(customer, accCid);
-        else if (document.getElementById('profile-tab-content')) await renderPurchaseHistoryTab(customer);
+        const closingBody = document.getElementById(`cust-acc-body-closing-${customerId}`);
+        if (closingBody) await renderCustomerClosingTab(customer, closingBody);
         else if (document.getElementById('customers-table-body')) await renderCustomersTable();
+    };
+
+    const _deliveryStatusColors = { 'Pending Delivery': 'background:#fef3c7;color:#92400e', 'Dispatched': 'background:#dbeafe;color:#1e40af', 'Delivered': 'background:#dcfce7;color:#166534' };
+    const _deliveryStatusIcons = { 'Pending Delivery': 'fa-clock', 'Dispatched': 'fa-truck', 'Delivered': 'fa-check-circle' };
+
+    const _setDelivery = async (mode, id, customerId, newStatus) => {
+        if (mode === 'purchase') {
+            await AppDataStore.update('purchases', id, { delivery_status: newStatus });
+        } else {
+            const prospect = await AppDataStore.getById('prospects', id);
+            const cr = { ...(prospect?.closing_record || {}), delivery_status: newStatus };
+            await AppDataStore.update('prospects', id, { closing_record: cr });
+        }
+        UI.toast.success('Delivery updated: ' + newStatus);
+        const customer = await AppDataStore.getById('customers', customerId);
+        const closingBody = document.getElementById(`cust-acc-body-closing-${customerId}`);
+        if (closingBody) await renderCustomerClosingTab(customer, closingBody);
+    };
+
+    const updatePurchaseDelivery = async (purchaseId, customerId) => {
+        const p = await AppDataStore.getById('purchases', purchaseId);
+        const current = p?.delivery_status || 'Pending Delivery';
+        const statuses = ['Pending Delivery', 'Dispatched', 'Delivered'];
+        const content = `<div style="display:flex;flex-direction:column;gap:10px;padding:4px 0;">
+            ${statuses.map(s => `<button class="btn ${s === current ? 'primary' : 'secondary'}" style="text-align:left;justify-content:flex-start;gap:10px;" onclick="(async()=>{await app._setDelivery('purchase',${purchaseId},${customerId},'${s}');UI.hideModal();})()"><i class="fas ${_deliveryStatusIcons[s]||'fa-circle'}" style="width:16px;"></i> ${s}${s===current?' ✓':''}</button>`).join('')}
+        </div>`;
+        UI.showModal('Update Delivery Status', content, [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }]);
+    };
+
+    const updateConversionDelivery = async (prospectId, customerId) => {
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        const current = prospect?.closing_record?.delivery_status || 'Pending Delivery';
+        const statuses = ['Pending Delivery', 'Dispatched', 'Delivered'];
+        const content = `<div style="display:flex;flex-direction:column;gap:10px;padding:4px 0;">
+            ${statuses.map(s => `<button class="btn ${s === current ? 'primary' : 'secondary'}" style="text-align:left;justify-content:flex-start;gap:10px;" onclick="(async()=>{await app._setDelivery('conversion',${prospectId},${customerId},'${s}');UI.hideModal();})()"><i class="fas ${_deliveryStatusIcons[s]||'fa-circle'}" style="width:16px;"></i> ${s}${s===current?' ✓':''}</button>`).join('')}
+        </div>`;
+        UI.showModal('Update Delivery Status', content, [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }]);
     };
 
     const openRecruitModal = async (customerId) => {
@@ -45531,6 +45593,9 @@ JB 星期二到
         renderAgentEligibility,
         openAddPurchaseModal,
         savePurchase,
+        updatePurchaseDelivery,
+        updateConversionDelivery,
+        _setDelivery,
         copyToClipboard,
         openRecruitModal,
         switchProfileTab,
