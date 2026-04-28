@@ -30686,6 +30686,7 @@ container.innerHTML = `
         popSales: "Revenue from POP cases - Sum of POP transaction amounts",
         eppCaseCount: "Easy Payment Plan cases - Count of transactions with payment_method = EPP",
         eppSales: "Revenue from EPP cases - Sum of EPP transaction amounts",
+        activeAgents: "Active agents (60-day window) - Agents with any activity log or event attendance in the past 60 days, grouped by team",
         newAgents: "Agent recruits - Count of new agents created",
         newCustomers: "Customer conversions - Count of prospects converted to customers",
         totalMeetings: "Agent meetings & training - Events and internal agent meetings only",
@@ -31121,16 +31122,17 @@ container.innerHTML = `
         // prospects → customers respectively, with role-scope filtering
         // that's awkward to express in a single RPC. Keep them client-side
         // for now (they're cached by AppDataStore so the cost is bounded).
-        const [activityHeadcount, conversionRate, meetUpExistingCount, cfHeadcount] = await Promise.all([
+        const [activityHeadcount, conversionRate, meetUpExistingCount, cfHeadcount, activeAgents] = await Promise.all([
             getActivityHeadcount(from, to),
             getConversionRate(from, to),
             getMeetUpExistingCustomerCount(from, to),
             getCFHeadcount(from, to),
+            getActiveAgents(),
         ]);
 
         // Fast path: try server-side aggregates first.
         const fast = await _tryKpiRPCs(from, to);
-        if (fast) return { ...fast, activityHeadcount, conversionRate, meetUpExistingCount, cfHeadcount };
+        if (fast) return { ...fast, activityHeadcount, conversionRate, meetUpExistingCount, cfHeadcount, activeAgents };
 
         // Fallback: original 11-call client-side path.
         const [
@@ -31154,7 +31156,7 @@ container.innerHTML = `
             cpsCount, totalSales, popCaseCount, popSales,
             eppCaseCount, eppSales, newAgents, newCustomers,
             totalMeetings, clientMeetings, activityHeadcount, conversionRate, eppDetails,
-            meetUpExistingCount, cfHeadcount
+            meetUpExistingCount, cfHeadcount, activeAgents
         };
     };
 
@@ -31307,6 +31309,50 @@ const getNewAgents = async (from, to) => {
             if (!isAgent(u)) continue;
         }
         count++;
+    }
+    return count;
+};
+
+// Active agents: agents with any activity log or event attendance in the past 60 days.
+// Window is FIXED at 60 days back from today — independent of the KPI time filter.
+const getActiveAgents = async () => {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 60);
+    const cutoffStr = cutoff.toISOString().slice(0, 10);
+
+    const [users, allActivities, allAttendees] = await Promise.all([
+        AppDataStore.getAll('users'),
+        AppDataStore.getAll('activities'),
+        AppDataStore.getAll('event_attendees'),
+    ]);
+
+    // Build set of event_ids whose activity_date falls within the 60-day window
+    const recentEventIds = new Set();
+    for (const a of allActivities) {
+        if (a.activity_type === 'EVENT' && a.event_id && (a.activity_date || '') >= cutoffStr) {
+            recentEventIds.add(String(a.event_id));
+        }
+    }
+
+    // Collect active agent IDs
+    const activeSet = new Set();
+    // (1) Led any activity in the past 60 days
+    for (const a of allActivities) {
+        if (!a.lead_agent_id || (a.activity_date || '') < cutoffStr) continue;
+        activeSet.add(String(a.lead_agent_id));
+    }
+    // (2) Attended any recent event as an agent attendee
+    for (const ea of allAttendees) {
+        if (ea.attendee_type !== 'agent' || !ea.entity_id) continue;
+        if (!recentEventIds.has(String(ea.event_id))) continue;
+        activeSet.add(String(ea.entity_id));
+    }
+
+    let count = 0;
+    for (const u of users) {
+        if (!isAgent(u)) continue;
+        if (_visibleUserIds !== 'all' && !_visibleUserIds.map(String).includes(String(u.id))) continue;
+        if (activeSet.has(String(u.id))) count++;
     }
     return count;
 };
@@ -31603,6 +31649,101 @@ const buildNewAgentsDetails = async (from, to) => {
     return renderDetailTable(['Join Date', 'Name', 'Role', 'Upline'], rows);
 };
 
+const buildActiveAgentsDetails = async () => {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 60);
+    const cutoffStr = cutoff.toISOString().slice(0, 10);
+
+    const [users, allActivities, allAttendees] = await Promise.all([
+        AppDataStore.getAll('users'),
+        AppDataStore.getAll('activities'),
+        AppDataStore.getAll('event_attendees'),
+    ]);
+
+    // Recent event IDs
+    const recentEventIds = new Set();
+    for (const a of allActivities) {
+        if (a.activity_type === 'EVENT' && a.event_id && (a.activity_date || '') >= cutoffStr) {
+            recentEventIds.add(String(a.event_id));
+        }
+    }
+
+    // Latest activity date per agent
+    const lastActivityDate = new Map();
+    for (const a of allActivities) {
+        if (!a.lead_agent_id || (a.activity_date || '') < cutoffStr) continue;
+        const k = String(a.lead_agent_id);
+        if (!lastActivityDate.has(k) || a.activity_date > lastActivityDate.get(k)) {
+            lastActivityDate.set(k, a.activity_date);
+        }
+    }
+    // Also mark from event attendance
+    for (const ea of allAttendees) {
+        if (ea.attendee_type !== 'agent' || !ea.entity_id) continue;
+        if (!recentEventIds.has(String(ea.event_id))) continue;
+        const k = String(ea.entity_id);
+        if (!lastActivityDate.has(k)) lastActivityDate.set(k, cutoffStr);
+    }
+
+    // Group agents by team
+    const agents = users.filter(u => {
+        if (!isAgent(u)) return false;
+        if (_visibleUserIds !== 'all' && !_visibleUserIds.map(String).includes(String(u.id))) return false;
+        return true;
+    });
+
+    const teamMap = new Map(); // teamLabel -> { active: [], inactive: [] }
+    for (const u of agents) {
+        const teamLabel = u.team_id ? `Team ${u.team_id}` : (u.team || 'No Team');
+        if (!teamMap.has(teamLabel)) teamMap.set(teamLabel, { active: [], inactive: [] });
+        const bucket = teamMap.get(teamLabel);
+        if (lastActivityDate.has(String(u.id))) {
+            bucket.active.push({ name: u.full_name || '—', lastDate: lastActivityDate.get(String(u.id)), role: u.role || '—' });
+        } else {
+            bucket.inactive.push({ name: u.full_name || '—', role: u.role || '—' });
+        }
+    }
+
+    // Sort teams alphabetically
+    const sortedTeams = [...teamMap.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+    const totalAgents = agents.length;
+    const totalActive = agents.filter(u => lastActivityDate.has(String(u.id))).length;
+
+    let html = `
+        <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:13px;">
+            <strong>🟢 ${totalActive} active</strong> out of <strong>${totalAgents} total agents</strong> — past 60 days (from ${cutoffStr})
+        </div>`;
+
+    for (const [teamLabel, { active, inactive }] of sortedTeams) {
+        const total = active.length + inactive.length;
+        const pct = total > 0 ? Math.round(active.length / total * 100) : 0;
+        const barColor = pct >= 80 ? '#16a34a' : pct >= 50 ? '#d97706' : '#dc2626';
+        html += `
+        <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:14px;margin-bottom:12px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <strong style="font-size:14px;">${escapeHtml(teamLabel)}</strong>
+                <span style="font-size:13px;font-weight:600;color:${barColor};">${active.length}/${total} active (${pct}%)</span>
+            </div>
+            <div style="background:#e5e7eb;border-radius:4px;height:6px;margin-bottom:10px;">
+                <div style="background:${barColor};height:6px;border-radius:4px;width:${pct}%;transition:width 0.3s;"></div>
+            </div>
+            ${active.length > 0 ? `
+            <div style="font-size:12px;color:#374151;margin-bottom:6px;"><strong style="color:#16a34a;">✓ Active agents:</strong></div>
+            <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                ${active.sort((a,b)=>b.lastDate.localeCompare(a.lastDate)).map(a => `
+                <tr style="border-bottom:1px solid #f3f4f6;">
+                    <td style="padding:4px 8px;">${escapeHtml(a.name)}</td>
+                    <td style="padding:4px 8px;color:#6b7280;">${escapeHtml(a.role)}</td>
+                    <td style="padding:4px 8px;text-align:right;color:#059669;">Last: ${a.lastDate}</td>
+                </tr>`).join('')}
+            </table>` : ''}
+            ${inactive.length > 0 ? `
+            <div style="font-size:12px;color:#6b7280;margin-top:8px;"><strong style="color:#dc2626;">✗ Inactive (60d):</strong> ${inactive.map(a=>escapeHtml(a.name)).join(', ')}</div>` : ''}
+        </div>`;
+    }
+    return html || '<p style="color:#6b7280;text-align:center;padding:24px;">No agents found.</p>';
+};
+
 const buildNewCustomersDetails = async (from, to) => {
     const [customers, users, purchases] = await Promise.all([
         AppDataStore.getAll('customers'),
@@ -31803,6 +31944,7 @@ const showKPIDetails = async (key) => {
         totalSales: 'Total Sales',
         popCaseCount: 'POP Cases',
         eppCaseCount: 'EPP Cases',
+        activeAgents: 'Active Agents (60-day)',
         newAgents: 'New Agents',
         newCustomers: 'New Customers',
         conversionRate: 'Conversion Rate',
@@ -31830,6 +31972,7 @@ const showKPIDetails = async (key) => {
         else if (key === 'totalSales')       body = await buildTotalSalesDetails(from, to);
         else if (key === 'popCaseCount')     body = await buildPOPDetails(from, to);
         else if (key === 'eppCaseCount')     body = await buildEPPCasesDetails(from, to);
+        else if (key === 'activeAgents')     body = await buildActiveAgentsDetails();
         else if (key === 'newAgents')        body = await buildNewAgentsDetails(from, to);
         else if (key === 'newCustomers')     body = await buildNewCustomersDetails(from, to);
         else if (key === 'conversionRate')   body = await buildConversionDetails(from, to);
@@ -31864,6 +32007,8 @@ const showKPIDetails = async (key) => {
               subHtml: `<div style="font-size:12px;color:var(--gray-500);margin-top:2px;">RM ${(kpis.popSales || 0).toLocaleString()} total</div>` },
             { label: 'EPP Cases', value: kpis.eppCaseCount, prev: prevKpis.eppCaseCount, icon: '💳', color: 'purple', key: 'eppCaseCount',
               subHtml: eppDetailsHtml },
+            { label: 'Active Agents', value: kpis.activeAgents || 0, prev: prevKpis.activeAgents || 0, icon: '⚡', color: 'green', key: 'activeAgents',
+              subHtml: `<div style="font-size:12px;color:var(--gray-500);margin-top:2px;">Past 60 days · click for team breakdown</div>` },
             { label: 'New Agents', value: kpis.newAgents, prev: prevKpis.newAgents, icon: '👤', color: 'blue', key: 'newAgents' },
             { label: 'New Customers', value: kpis.newCustomers, prev: prevKpis.newCustomers, icon: '👥', color: 'green', key: 'newCustomers' },
             { label: 'Conversion Rate', value: `${kpis.conversionRate}% `, prev: prevKpis.conversionRate, icon: '📈', color: 'purple', key: 'conversionRate' },
