@@ -28416,71 +28416,308 @@ const deactivateAgent = async (agentId) => {
 
     const showPipelineView = async (container) => {
         const userId = _currentUser?.id || 5;
-        // Warm the config cache once per view render
-        await loadPipelineConfig();
-        // Background: one-time migration of legacy 汇聚 → 汇集 (fire-and-forget)
-        runHuiJiMigration();
+        runHuiJiMigration(); // fire-and-forget
 
-        const allActivities = await getVisibleActivities();
+        // ── STEP 1: Paint skeleton immediately so the page feels alive ────────
+        // Same philosophy as Facebook/IG: show structure first, fill data after.
+        const _skelR = (cols) => `<tr>${Array.from({length:cols},(_,i)=>`<td style="padding:10px 12px;"><div class="skeleton" style="height:14px;border-radius:4px;width:${[72,88,48,44,82,58,40][i%7]}%;"></div></td>`).join('')}</tr>`;
+        const _skelRows = (n, cols) => Array(n).fill(0).map(()=>_skelR(cols)).join('');
+        const _skelCard = (h=80) => `<div class="skeleton" style="border-radius:8px;height:${h}px;margin-bottom:12px;"></div>`;
 
-        // === MONTH FOCUS: Auto-expiry + archive logic ===
+        container.innerHTML = `
+<div class="pipeline-dual-view">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;">
+        <div>
+            <h1 style="font-size:24px;font-weight:700;margin:0;">Potential Pipeline Management</h1>
+            <p style="color:#6B7280;margin-top:4px;">Track signing probability across 6 solution categories</p>
+        </div>
+        <div id="pl-header-controls" style="display:flex;gap:12px;align-items:center;">
+            <div class="skeleton" style="width:160px;height:38px;border-radius:6px;"></div>
+            <div class="skeleton" style="width:140px;height:38px;border-radius:6px;"></div>
+            <button class="btn secondary" disabled><i class="fas fa-sync-alt"></i> Refresh</button>
+            <button class="btn primary" disabled><i class="fas fa-info-circle"></i> Rules</button>
+        </div>
+    </div>
+    <div id="pl-action-plan">
+        <div style="background:white;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.1);margin-bottom:32px;">
+            ${_skelCard(28)}${_skelCard(60)}${_skelCard(120)}
+        </div>
+    </div>
+    <div id="pl-focus-section">
+        <div style="background:white;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.1);margin-bottom:32px;">
+            ${_skelCard(28)}<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;min-width:1080px;"><tbody>${_skelRows(4,7)}</tbody></table></div>
+        </div>
+    </div>
+    <div style="background:white;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.1);padding:20px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <div style="display:flex;align-items:center;gap:12px;">
+                <h2 style="font-size:18px;font-weight:600;margin:0;">📊 Auto-Generated Pipeline</h2>
+                <span id="pl-table2-count"><div class="skeleton" style="display:inline-block;width:90px;height:22px;border-radius:20px;vertical-align:middle;"></div></span>
+            </div>
+            <p style="font-size:11px;color:#9CA3AF;margin:0;">Sorted: highest probability → most recent activity → name</p>
+        </div>
+        <div style="overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;min-width:1080px;">
+                <thead>
+                    <tr style="background:#F9FAFB;border-bottom:2px solid #E5E7EB;">
+                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Prospect Name</th>
+                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Target to Sign (Product/Service)</th>
+                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Amount (RM)</th>
+                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Probability</th>
+                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Action Needed to Close Deal</th>
+                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Quick Action</th>
+                    </tr>
+                </thead>
+                <tbody id="pipeline-list-body">${_skelRows(6,6)}</tbody>
+            </table>
+        </div>
+    </div>
+</div>`;
+
+        // ── STEP 2: Fire ALL big queries in parallel ──────────────────────────
+        const [allActivities, allProspects, allUsers] = await Promise.all([
+            getVisibleActivities(),
+            getVisibleProspects(),
+            AppDataStore.getAll('users'),
+            loadPipelineConfig(), // warms cache, result not needed here
+        ]);
+
+        const agents = (allUsers || []).filter(u => isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'));
+
+        // Fill header controls as soon as agents are available
+        const _plHdrCtrl = document.getElementById('pl-header-controls');
+        if (_plHdrCtrl) {
+            _plHdrCtrl.innerHTML = `
+            <select class="form-control" style="width:160px;height:38px;" onchange="app.setPipelineFilter('agent', this.value)">
+                <option value="all">All Agents</option>
+                ${agents.map(a => `<option value="${a.id}" ${_pipelineAgentFilter == a.id ? 'selected' : ''}>${escapeHtml(a.full_name)}</option>`).join('')}
+            </select>
+            <select class="form-control" style="width:140px;height:38px;" onchange="(async () => { await app.setPipelineFilter('status', this.value); })()">
+                <option value="all">All Status</option>
+                <option value="prospect" ${_pipelineStatusFilter === 'prospect' ? 'selected' : ''}>Prospect</option>
+                <option value="active" ${_pipelineStatusFilter === 'active' ? 'selected' : ''}>Active</option>
+                <option value="warm" ${_pipelineStatusFilter === 'warm' ? 'selected' : ''}>Warm</option>
+                <option value="hot" ${_pipelineStatusFilter === 'hot' ? 'selected' : ''}>Hot</option>
+            </select>
+            <button class="btn secondary" onclick="app.refreshPipeline()"><i class="fas fa-sync-alt"></i> Refresh</button>
+            <button class="btn primary" onclick="app.openPipelineConfigModal()"><i class="fas fa-info-circle"></i> Rules</button>`;
+        }
+
+        // Filter prospects
+        let prospects = allProspects ? [...allProspects] : [];
+        if (_pipelineAgentFilter !== 'all') prospects = prospects.filter(p => p.responsible_agent_id == _pipelineAgentFilter);
+        if (_pipelineStatusFilter !== 'all') prospects = prospects.filter(p => p.status === _pipelineStatusFilter);
+        const activeProspects = prospects.filter(p => p.status !== 'converted' && p.status !== 'lost' && !p.unable_to_serve);
+
+        // ── STEP 3: Fast queries (action plan + archive + focus) in parallel ──
         const _focusCurrentMonth = new Date().toISOString().slice(0, 7);
         const _focusMonthLabel = new Date().toLocaleString('default', { month: 'long', year: 'numeric' });
-        const _allMyFocusItems = await AppDataStore.query('my_potential_list', { user_id: userId });
-        // Tag legacy items (no focus_month) with current month — one-time migration
-        for (const item of _allMyFocusItems.filter(i => !i.focus_month)) {
-            await AppDataStore.update('my_potential_list', item.id, { focus_month: _focusCurrentMonth });
-            item.focus_month = _focusCurrentMonth;
+        const _apCurrentMonth = _focusCurrentMonth + '-01';
+        const _apMonthLabel = _focusMonthLabel;
+
+        const [_allMyFocusItemsRaw, _apPlanListRaw, _archiveItems] = await Promise.all([
+            AppDataStore.query('my_potential_list', { user_id: userId }).catch(() => []),
+            AppDataStore.query('action_plans', { user_id: userId, month_year: _apCurrentMonth }).catch(() => []),
+            AppDataStore.query('monthly_focus_archive', { user_id: userId }).catch(() => []),
+        ]);
+
+        // Tag legacy items (no focus_month) — fire-and-forget, don't block paint
+        let _allMyFocusItems = [..._allMyFocusItemsRaw];
+        const _legacyItems = _allMyFocusItemsRaw.filter(i => !i.focus_month);
+        if (_legacyItems.length > 0) {
+            Promise.all(_legacyItems.map(item =>
+                AppDataStore.update('my_potential_list', item.id, { focus_month: _focusCurrentMonth })
+                    .then(() => { item.focus_month = _focusCurrentMonth; }).catch(() => {})
+            ));
         }
-        // Archive expired items (focus_month < current month)
+        // Archive expired items — fire-and-forget
         const _expiredFocusItems = _allMyFocusItems.filter(i => i.focus_month && i.focus_month < _focusCurrentMonth);
         if (_expiredFocusItems.length > 0) {
-            for (const item of _expiredFocusItems) {
-                const ep = await AppDataStore.getById('prospects', item.prospect_id);
-                if (!ep) { await AppDataStore.delete('my_potential_list', item.id); continue; }
-                const eActs = allActivities.filter(a => a.prospect_id === ep.id);
-                const eEntry = await calcPipelineEntry(ep, eActs);
-                const eAmt = await getPipelineAmount(ep, eEntry.category);
-                const existing = await AppDataStore.query('monthly_focus_archive', { user_id: userId, month: item.focus_month, prospect_id: item.prospect_id });
-                if (existing.length === 0) {
-                    await AppDataStore.create('monthly_focus_archive', {
-                        user_id: userId, month: item.focus_month, prospect_id: item.prospect_id,
-                        priority_order: item.priority_order,
-                        target_product: item.target_product || eEntry.latestOppPotential || eEntry.category?.name || '',
-                        amount: eAmt, probability: String(eEntry.probability || 0),
-                        action_needed: eEntry.latestNextAction || ''
-                    });
+            (async () => {
+                let archived = 0;
+                for (const item of _expiredFocusItems) {
+                    try {
+                        const ep = await AppDataStore.getById('prospects', item.prospect_id);
+                        if (!ep) { await AppDataStore.delete('my_potential_list', item.id); continue; }
+                        const eActs = (allActivities || []).filter(a => a.prospect_id === ep.id);
+                        const eEntry = await calcPipelineEntry(ep, eActs);
+                        const eAmt = await getPipelineAmount(ep, eEntry.category);
+                        const existing = await AppDataStore.query('monthly_focus_archive', { user_id: userId, month: item.focus_month, prospect_id: item.prospect_id });
+                        if (existing.length === 0) {
+                            await AppDataStore.create('monthly_focus_archive', {
+                                user_id: userId, month: item.focus_month, prospect_id: item.prospect_id,
+                                priority_order: item.priority_order,
+                                target_product: item.target_product || eEntry.latestOppPotential || eEntry.category?.name || '',
+                                amount: eAmt, probability: String(eEntry.probability || 0),
+                                action_needed: eEntry.latestNextAction || ''
+                            });
+                        }
+                        await AppDataStore.delete('my_potential_list', item.id);
+                        archived++;
+                    } catch(e) {}
                 }
-                await AppDataStore.delete('my_potential_list', item.id);
-            }
-            UI.toast.info(`${_expiredFocusItems.length} expired focus item(s) archived from last month.`);
+                if (archived > 0) UI.toast.info(`${archived} expired focus item(s) archived from last month.`);
+            })();
+            _allMyFocusItems = _allMyFocusItems.filter(i => !_expiredFocusItems.includes(i));
         }
-        // Fetch archive data for dropdown
-        let _archiveItems = [];
-        try { _archiveItems = await AppDataStore.query('monthly_focus_archive', { user_id: userId }); } catch(e) {}
+
         const _archiveMonths = [...new Set(_archiveItems.map(a => a.month))].sort().reverse();
         const _isArchiveView = _focusViewMonth !== 'current';
 
-        let prospects = await getVisibleProspects();
-        const agents = (await AppDataStore.getAll('users')).filter(u => isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'));
+        // ── STEP 4: Fetch action plan items + render action plan card ─────────
+        const _activePlan = _apPlanListRaw[0] || null;
+        let _apItems = [], _apChecks = [];
+        if (_activePlan) {
+            try {
+                const _today = new Date();
+                const _diff = (_today.getDay() === 0 ? 6 : _today.getDay() - 1);
+                const _monday = new Date(_today);
+                _monday.setDate(_today.getDate() - _diff);
+                const _mondayStr = _monday.toISOString().slice(0,10);
+                [_apItems, _apChecks] = await Promise.all([
+                    AppDataStore.query('action_plan_items', { plan_id: _activePlan.id }),
+                    AppDataStore.query('action_plan_checks', { plan_id: _activePlan.id, check_date: _mondayStr }),
+                ]);
+                _apItems.sort((a,b) => (a.display_order||0) - (b.display_order||0));
+            } catch(e) { /* offline fallback */ }
+        }
 
-        if (_pipelineAgentFilter !== 'all') prospects = prospects.filter(p => p.responsible_agent_id == _pipelineAgentFilter);
-        if (_pipelineStatusFilter !== 'all') prospects = prospects.filter(p => p.status === _pipelineStatusFilter);
+        // Fill action plan section — users see this before the slow table loads
+        const _plActionPlan = document.getElementById('pl-action-plan');
+        if (_plActionPlan) {
+            _plActionPlan.outerHTML = `
+<div id="pl-action-plan" class="action-plan-section" style="margin-bottom:32px;background:white;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <div>
+            <h2 style="font-size:18px;font-weight:600;margin:0;">📋 Action Plan — ${_apMonthLabel}</h2>
+            ${_activePlan ? `<span style="background:#d1fae5;color:#065f46;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600;margin-top:4px;display:inline-block;">${(_activePlan.status||'active').toUpperCase()}</span>` : ''}
+        </div>
+        <div style="display:flex;gap:8px;">
+            <button class="btn secondary btn-sm" onclick="app.showActionPlanHistory()">View History</button>
+            <button class="btn primary btn-sm" onclick="app.openActionPlanModal()">${_activePlan ? 'Edit Plan' : 'Create Plan'}</button>
+        </div>
+    </div>
+    ${_activePlan ? `
+        <div style="background:#f0fdf4;padding:12px;border-radius:8px;margin-bottom:20px;">
+            <strong>🎯 Main Target:</strong> RM ${(_activePlan.main_target||0).toLocaleString()}
+        </div>
+        <div style="overflow-x:auto;">
+            <table class="plan-items-table" style="width:100%;border-collapse:collapse;">
+                <thead>
+                    <tr style="background:#f9fafb;border-bottom:2px solid #e5e7eb;">
+                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Event Name</th>
+                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Objective</th>
+                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Target</th>
+                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Due Date</th>
+                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">This Week</th>
+                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Remarks</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${_apItems.length ? _apItems.map(item => {
+                        const chk = _apChecks.find(c => c.item_id === item.id);
+                        const done = chk?.is_done || false;
+                        return `<tr style="border-bottom:1px solid #e5e7eb;">
+                            <td style="padding:10px 12px;">${escapeHtml(item.event_name)}</td>
+                            <td style="padding:10px 12px;">${escapeHtml(item.objective||'')}</td>
+                            <td style="padding:10px 12px;">${escapeHtml(item.target_to_achieve||'')}</td>
+                            <td style="padding:10px 12px;">${item.when_to_achieve||'-'}</td>
+                            <td style="padding:10px 12px;">
+                                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+                                    <input type="checkbox" class="plan-checkbox" ${done?'checked':''} onchange="app.updatePlanCheck(${_activePlan.id},${item.id},this.checked)">
+                                    ${done ? '<span style="color:#059669;font-weight:600;">✅ Done</span>' : '<span style="color:#9ca3af;">⏳ Pending</span>'}
+                                </label>
+                            </td>
+                            <td style="padding:10px 12px;">${escapeHtml(item.remarks||'')}</td>
+                        </tr>`;
+                    }).join('') : `<tr><td colspan="6" style="padding:24px;text-align:center;color:#9ca3af;">No items added yet. Click "Edit Plan" to add items.</td></tr>`}
+                </tbody>
+            </table>
+        </div>
+        <div class="weekly-reminder" style="margin-top:16px;padding:12px;background:#fef3c7;border-radius:8px;display:flex;justify-content:space-between;align-items:center;">
+            <span><i class="fas fa-bell"></i> Weekly check every Monday — mark completed items above.</span>
+            <button class="btn secondary btn-sm" onclick="app.sendPlanReminder()">Send Reminder</button>
+        </div>
+    ` : `
+        <div style="text-align:center;padding:40px;color:#9ca3af;">
+            <i class="fas fa-clipboard-list" style="font-size:40px;margin-bottom:16px;display:block;"></i>
+            <p>No action plan for this month. Click <strong>"Create Plan"</strong> to get started.</p>
+        </div>
+    `}
+</div>`;
+        }
 
-        const activeProspects = prospects.filter(p => p.status !== 'converted' && p.status !== 'lost' && !p.unable_to_serve);
-
+        // ── STEP 5: Build focus list (medium speed) ───────────────────────────
         let focusList;
         if (_isArchiveView) {
             focusList = _archiveItems
                 .filter(a => a.month === _focusViewMonth)
                 .sort((a, b) => (a.priority_order || 0) - (b.priority_order || 0));
         } else {
-            focusList = (await AppDataStore.query('my_potential_list', { user_id: userId }))
+            focusList = _allMyFocusItems
                 .filter(rec => activeProspects.some(p => p.id == rec.prospect_id))
                 .sort((a, b) => a.priority_order - b.priority_order);
         }
 
-        // Enrich and qualify prospects for Table 2 — v6: async calcPipelineEntry
+        const probBadge = (prob, prospectId) => {
+            const color = prob >= 80 ? '#DC2626' : prob >= 60 ? '#F59E0B' : '#6B7280';
+            const label = prob >= 80 ? '🔥 HOT' : prob >= 50 ? '⚡ WARM' : '❄️ COLD';
+            const clickable = prospectId != null ? `onclick="event.stopPropagation();app.showPipelineExplain(${prospectId})" style="cursor:pointer;" title="Click to see score breakdown"` : '';
+            return `<span ${clickable}><span style="background:${color};color:white;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;">${label}</span><strong style="margin-left:6px;">${prob}%</strong></span>`;
+        };
+
+        const focusRows = _isArchiveView
+            ? (await Promise.all(focusList.map((arc, idx) => renderArchiveFocusRow(arc, idx)))).join('')
+            : (await Promise.all(focusList.map((rec, idx) => renderFocusRow(rec, idx, allActivities, probBadge)))).join('');
+
+        // Fill focus section — visible before expensive table 2 loads
+        const _plFocusSection = document.getElementById('pl-focus-section');
+        if (_plFocusSection) {
+            _plFocusSection.outerHTML = `
+<div id="pl-focus-section" style="margin-bottom:32px;background:white;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.1);padding:20px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px;">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+            <h2 style="font-size:18px;font-weight:600;margin:0;">🔥 MONTH FOCUS — My Priority List</h2>
+            <span style="background:#F3F4F6;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;">${focusList.length} prospects</span>
+            <select onchange="app.switchFocusMonth(this.value)" style="border:1px solid #D1D5DB;border-radius:6px;padding:4px 10px;font-size:12px;color:#374151;cursor:pointer;">
+                <option value="current" ${_focusViewMonth === 'current' ? 'selected' : ''}>${_focusMonthLabel} (Current)</option>
+                ${_archiveMonths.map(m => {
+                    const ml = new Date(m + '-01').toLocaleString('default', { month: 'long', year: 'numeric' });
+                    return '<option value="' + m + '" ' + (_focusViewMonth === m ? 'selected' : '') + '>' + ml + '</option>';
+                }).join('')}
+            </select>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+            <button class="btn secondary btn-sm" onclick="app.openExpiredSearchModal()" title="Browse expired & available prospects"><i class="fas fa-search"></i> Browse Past</button>
+            ${!_isArchiveView ? '<button class="btn-icon" onclick="app.saveManualOrder()" title="Save Order"><i class="fas fa-save"></i></button>' : ''}
+        </div>
+    </div>
+    ${_isArchiveView
+        ? '<div style="background:#FEF3C7;padding:8px 16px;border-radius:8px;margin-bottom:12px;font-size:12px;color:#92400E;"><i class="fas fa-archive" style="margin-right:4px;"></i> Viewing archived month (read-only). Use "Browse Past" to re-add prospects to current month.</div>'
+        : '<p style="font-size:12px;color:#9CA3AF;margin-bottom:16px;"><i class="fas fa-arrows-alt" style="margin-right:4px;"></i> Drag ☰ to reorder priority • Add prospects from Table 2 below</p>'}
+    <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;min-width:1080px;">
+            <thead>
+                <tr style="background:#F9FAFB;border-bottom:2px solid #E5E7EB;">
+                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;width:50px;">#</th>
+                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Prospect Name</th>
+                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Target to Sign (Product/Service)</th>
+                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Amount (RM)</th>
+                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Probability</th>
+                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Action Needed to Close Deal</th>
+                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Actions</th>
+                </tr>
+            </thead>
+            <tbody id="focus-list-body">
+                ${focusRows || '<tr><td colspan="7" style="padding:32px;text-align:center;color:#9CA3AF;">No prospects in your priority list. Add from Table 2 below.</td></tr>'}
+            </tbody>
+        </table>
+    </div>
+    <div id="pl-team-sections"></div>
+</div>`;
+        }
+
+        // ── STEP 6: Expensive enrichment — Table 2 tbody has skeleton, fill after ──
         const enrichedRaw = await Promise.all(activeProspects.map(async (p) => {
             const acts = allActivities.filter(a => a.prospect_id === p.id);
             const pipeline = await calcPipelineEntry(p, acts);
@@ -28510,119 +28747,31 @@ const deactivateAgent = async (agentId) => {
                 return (a.name || a.full_name || '').localeCompare(b.name || b.full_name || '');
             });
 
-        const probBadge = (prob, prospectId) => {
-            const color = prob >= 80 ? '#DC2626' : prob >= 60 ? '#F59E0B' : '#6B7280';
-            const label = prob >= 80 ? '🔥 HOT' : prob >= 50 ? '⚡ WARM' : '❄️ COLD';
-            const clickable = prospectId != null ? `onclick="event.stopPropagation();app.showPipelineExplain(${prospectId})" style="cursor:pointer;" title="Click to see score breakdown"` : '';
-            return `<span ${clickable}><span style="background:${color};color:white;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;">${label}</span><strong style="margin-left:6px;">${prob}%</strong></span>`;
-        };
-
-        const focusRows = _isArchiveView
-            ? (await Promise.all(focusList.map((arc, idx) => renderArchiveFocusRow(arc, idx)))).join('')
-            : (await Promise.all(focusList.map((rec, idx) => renderFocusRow(rec, idx, allActivities, probBadge)))).join('');
         const systemRows = (await Promise.all(enriched.map(p => renderSystemRow(p, probBadge)))).join('');
 
-        // ---- ACTION PLAN DATA FETCH ----
-        const _apCurrentMonth = new Date().toISOString().slice(0, 7) + '-01';
-        let _apPlanList = [];
-        let _apItems = [];
-        let _apChecks = [];
-        try {
-            _apPlanList = await AppDataStore.query('action_plans', { user_id: userId, month_year: _apCurrentMonth });
-        } catch(e) { /* offline fallback */ }
-        const _activePlan = _apPlanList[0] || null;
-        if (_activePlan) {
-            try {
-                _apItems = await AppDataStore.query('action_plan_items', { plan_id: _activePlan.id });
-                _apItems.sort((a,b) => (a.display_order||0) - (b.display_order||0));
-                const _today = new Date();
-                const _diff = (_today.getDay() === 0 ? 6 : _today.getDay() - 1);
-                const _monday = new Date(_today);
-                _monday.setDate(_today.getDate() - _diff);
-                const _mondayStr = _monday.toISOString().slice(0,10);
-                _apChecks = await AppDataStore.query('action_plan_checks', { plan_id: _activePlan.id, check_date: _mondayStr });
-            } catch(e) { /* offline fallback */ }
+        // Fill table 2 — replaces skeleton rows
+        const _tbody2 = document.getElementById('pipeline-list-body');
+        if (_tbody2) {
+            _tbody2.innerHTML = systemRows || '<tr><td colspan="6" style="padding:32px;text-align:center;color:#9CA3AF;">No qualified prospects found. Complete prerequisites for any category to appear here.</td></tr>';
         }
-        const _apMonthLabel = new Date().toLocaleString('default', { month: 'long', year: 'numeric' });
-        const _actionPlanHtml = `
-            <div class="action-plan-section" style="margin-bottom:32px;background:white;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-                    <div>
-                        <h2 style="font-size:18px;font-weight:600;margin:0;">📋 Action Plan — ${_apMonthLabel}</h2>
-                        ${_activePlan ? `<span style="background:#d1fae5;color:#065f46;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600;margin-top:4px;display:inline-block;">${(_activePlan.status||'active').toUpperCase()}</span>` : ''}
-                    </div>
-                    <div style="display:flex;gap:8px;">
-                        <button class="btn secondary btn-sm" onclick="app.showActionPlanHistory()">View History</button>
-                        <button class="btn primary btn-sm" onclick="app.openActionPlanModal()">${_activePlan ? 'Edit Plan' : 'Create Plan'}</button>
-                    </div>
-                </div>
-                ${_activePlan ? `
-                    <div style="background:#f0fdf4;padding:12px;border-radius:8px;margin-bottom:20px;">
-                        <strong>🎯 Main Target:</strong> RM ${(_activePlan.main_target||0).toLocaleString()}
-                    </div>
-                    <div style="overflow-x:auto;">
-                        <table class="plan-items-table" style="width:100%;border-collapse:collapse;">
-                            <thead>
-                                <tr style="background:#f9fafb;border-bottom:2px solid #e5e7eb;">
-                                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Event Name</th>
-                                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Objective</th>
-                                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Target</th>
-                                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Due Date</th>
-                                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">This Week</th>
-                                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Remarks</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${_apItems.length ? _apItems.map(item => {
-                                    const chk = _apChecks.find(c => c.item_id === item.id);
-                                    const done = chk?.is_done || false;
-                                    return `<tr style="border-bottom:1px solid #e5e7eb;">
-                                        <td style="padding:10px 12px;">${escapeHtml(item.event_name)}</td>
-                                        <td style="padding:10px 12px;">${escapeHtml(item.objective||'')}</td>
-                                        <td style="padding:10px 12px;">${escapeHtml(item.target_to_achieve||'')}</td>
-                                        <td style="padding:10px 12px;">${item.when_to_achieve||'-'}</td>
-                                        <td style="padding:10px 12px;">
-                                            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
-                                                <input type="checkbox" class="plan-checkbox" ${done?'checked':''} onchange="app.updatePlanCheck(${_activePlan.id},${item.id},this.checked)">
-                                                ${done ? '<span style="color:#059669;font-weight:600;">✅ Done</span>' : '<span style="color:#9ca3af;">⏳ Pending</span>'}
-                                            </label>
-                                        </td>
-                                        <td style="padding:10px 12px;">${escapeHtml(item.remarks||'')}</td>
-                                    </tr>`;
-                                }).join('') : `<tr><td colspan="6" style="padding:24px;text-align:center;color:#9ca3af;">No items added yet. Click "Edit Plan" to add items.</td></tr>`}
-                            </tbody>
-                        </table>
-                    </div>
-                    <div class="weekly-reminder" style="margin-top:16px;padding:12px;background:#fef3c7;border-radius:8px;display:flex;justify-content:space-between;align-items:center;">
-                        <span><i class="fas fa-bell"></i> Weekly check every Monday — mark completed items above.</span>
-                        <button class="btn secondary btn-sm" onclick="app.sendPlanReminder()">Send Reminder</button>
-                    </div>
-                ` : `
-                    <div style="text-align:center;padding:40px;color:#9ca3af;">
-                        <i class="fas fa-clipboard-list" style="font-size:40px;margin-bottom:16px;display:block;"></i>
-                        <p>No action plan for this month. Click <strong>"Create Plan"</strong> to get started.</p>
-                    </div>
-                `}
-            </div>
-        `;
-        // ---- END ACTION PLAN HTML ----
+        const _countEl = document.getElementById('pl-table2-count');
+        if (_countEl) {
+            _countEl.innerHTML = `<span style="background:#F3F4F6;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;">${enriched.length} qualified</span>`;
+        }
 
-        // === TEAM LEADER VIEW: Build collapsible agent sections ===
-        let _teamAgentSections = '';
+        // ── STEP 7: Team sections (uses enriched + allUsers, fill last) ────────
         if (isTeamLeaderOrAbove(_currentUser) && !_isArchiveView) {
             const _visIds = await getVisibleUserIds(_currentUser);
-            const _allUsersForTeam = await AppDataStore.getAll('users');
             let _subUsers;
             if (_visIds === 'all') {
-                // Super Admin / Marketing Manager — show all agents with focus lists
-                _subUsers = _allUsersForTeam.filter(u => u.id !== userId && (isAgent(u) || isTeamLeaderOrAbove(u)));
+                _subUsers = allUsers.filter(u => u.id !== userId && (isAgent(u) || isTeamLeaderOrAbove(u)));
             } else {
-                _subUsers = _allUsersForTeam.filter(u => _visIds.includes(u.id) && u.id !== userId);
+                _subUsers = allUsers.filter(u => _visIds.includes(u.id) && u.id !== userId);
             }
-            // Group by their direct reporting_to (team leader)
+            let _teamAgentSections = '';
             let agentCount = 0;
             for (const sub of _subUsers) {
-                if (agentCount >= 30) break; // limit for performance
+                if (agentCount >= 30) break;
                 const subFocus = (await AppDataStore.query('my_potential_list', { user_id: sub.id }))
                     .filter(rec => activeProspects.some(p => p.id == rec.prospect_id))
                     .sort((a, b) => a.priority_order - b.priority_order);
@@ -28654,112 +28803,16 @@ const deactivateAgent = async (agentId) => {
                         </div>
                     </div>`;
             }
+            const _plTeamSections = document.getElementById('pl-team-sections');
+            if (_plTeamSections && _teamAgentSections) {
+                _plTeamSections.innerHTML = `
+                    <div style="margin-top:16px;border-top:2px solid #E5E7EB;padding-top:16px;">
+                        <h3 style="font-size:15px;font-weight:600;color:#374151;margin-bottom:8px;"><i class="fas fa-users" style="margin-right:6px;color:#6366F1;"></i> Team Agents Focus Lists</h3>
+                        <p style="font-size:11px;color:#9CA3AF;margin-bottom:8px;">Click agent name to expand/collapse their focus list</p>
+                        ${_teamAgentSections}
+                    </div>`;
+            }
         }
-
-        container.innerHTML = `
-<div class="pipeline-dual-view">
-    <!--PIPELINE HEADER-->
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;">
-        <div>
-            <h1 style="font-size:24px;font-weight:700;margin:0;">Potential Pipeline Management</h1>
-            <p style="color:#6B7280;margin-top:4px;">Track signing probability across 6 solution categories</p>
-        </div>
-        <div style="display:flex;gap:12px;align-items:center;">
-            <select class="form-control" style="width:160px;height:38px;" onchange="app.setPipelineFilter('agent', this.value)">
-                <option value="all">All Agents</option>
-                ${agents.map(a => `<option value="${a.id}" ${_pipelineAgentFilter == a.id ? 'selected' : ''}>${escapeHtml(a.full_name)}</option>`).join('')}
-            </select>
-            <select class="form-control" style="width:140px;height:38px;" onchange="(async () => { await app.setPipelineFilter('status', this.value); })()">
-                <option value="all">All Status</option>
-                <option value="prospect" ${_pipelineStatusFilter === 'prospect' ? 'selected' : ''}>Prospect</option>
-                <option value="active" ${_pipelineStatusFilter === 'active' ? 'selected' : ''}>Active</option>
-                <option value="warm" ${_pipelineStatusFilter === 'warm' ? 'selected' : ''}>Warm</option>
-                <option value="hot" ${_pipelineStatusFilter === 'hot' ? 'selected' : ''}>Hot</option>
-            </select>
-            <button class="btn secondary" onclick="app.refreshPipeline()"><i class="fas fa-sync-alt"></i> Refresh</button>
-            <button class="btn primary" onclick="app.openPipelineConfigModal()"><i class="fas fa-info-circle"></i> Rules</button>
-        </div>
-    </div>
-
-    ${_actionPlanHtml}
-
-    <!--TABLE 1: MONTH FOCUS - MANUAL PRIORITY LIST-->
-    <div style="margin-bottom:32px;background:white;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.1);padding:20px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px;">
-            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-                <h2 style="font-size:18px;font-weight:600;margin:0;">🔥 MONTH FOCUS — My Priority List</h2>
-                <span style="background:#F3F4F6;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;">${focusList.length} prospects</span>
-                <select onchange="app.switchFocusMonth(this.value)" style="border:1px solid #D1D5DB;border-radius:6px;padding:4px 10px;font-size:12px;color:#374151;cursor:pointer;">
-                    <option value="current" ${_focusViewMonth === 'current' ? 'selected' : ''}>${_focusMonthLabel} (Current)</option>
-                    ${_archiveMonths.map(m => {
-                        const ml = new Date(m + '-01').toLocaleString('default', { month: 'long', year: 'numeric' });
-                        return '<option value="' + m + '" ' + (_focusViewMonth === m ? 'selected' : '') + '>' + ml + '</option>';
-                    }).join('')}
-                </select>
-            </div>
-            <div style="display:flex;gap:8px;align-items:center;">
-                <button class="btn secondary btn-sm" onclick="app.openExpiredSearchModal()" title="Browse expired & available prospects"><i class="fas fa-search"></i> Browse Past</button>
-                ${!_isArchiveView ? '<button class="btn-icon" onclick="app.saveManualOrder()" title="Save Order"><i class="fas fa-save"></i></button>' : ''}
-            </div>
-        </div>
-        ${_isArchiveView
-            ? '<div style="background:#FEF3C7;padding:8px 16px;border-radius:8px;margin-bottom:12px;font-size:12px;color:#92400E;"><i class="fas fa-archive" style="margin-right:4px;"></i> Viewing archived month (read-only). Use "Browse Past" to re-add prospects to current month.</div>'
-            : '<p style="font-size:12px;color:#9CA3AF;margin-bottom:16px;"><i class="fas fa-arrows-alt" style="margin-right:4px;"></i> Drag ☰ to reorder priority • Add prospects from Table 2 below</p>'}
-        <div style="overflow-x:auto;">
-            <table style="width:100%;border-collapse:collapse;min-width:1080px;">
-                <thead>
-                    <tr style="background:#F9FAFB;border-bottom:2px solid #E5E7EB;">
-                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;width:50px;">#</th>
-                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Prospect Name</th>
-                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Target to Sign (Product/Service)</th>
-                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Amount (RM)</th>
-                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Probability</th>
-                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Action Needed to Close Deal</th>
-                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="focus-list-body">
-                    ${focusRows || '<tr><td colspan="7" style="padding:32px;text-align:center;color:#9CA3AF;">No prospects in your priority list. Add from Table 2 below.</td></tr>'}
-                </tbody>
-            </table>
-        </div>
-        ${_teamAgentSections ? `
-            <div style="margin-top:16px;border-top:2px solid #E5E7EB;padding-top:16px;">
-                <h3 style="font-size:15px;font-weight:600;color:#374151;margin-bottom:8px;"><i class="fas fa-users" style="margin-right:6px;color:#6366F1;"></i> Team Agents Focus Lists</h3>
-                <p style="font-size:11px;color:#9CA3AF;margin-bottom:8px;">Click agent name to expand/collapse their focus list</p>
-                ${_teamAgentSections}
-            </div>
-        ` : ''}
-    </div>
-
-    <!--TABLE 2: AUTO-GENERATED PIPELINE (sorted by probability)-->
-    <div style="background:white;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.1);padding:20px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-            <div style="display:flex;align-items:center;gap:12px;">
-                <h2 style="font-size:18px;font-weight:600;margin:0;">📊 Auto-Generated Pipeline</h2>
-                <span style="background:#F3F4F6;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;">${enriched.length} qualified</span>
-            </div>
-            <p style="font-size:11px;color:#9CA3AF;margin:0;">Sorted: highest probability → most recent activity → name</p>
-        </div>
-        <div style="overflow-x:auto;">
-            <table style="width:100%;border-collapse:collapse;min-width:1080px;">
-                <thead>
-                    <tr style="background:#F9FAFB;border-bottom:2px solid #E5E7EB;">
-                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Prospect Name</th>
-                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Target to Sign (Product/Service)</th>
-                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Amount (RM)</th>
-                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Probability</th>
-                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Action Needed to Close Deal</th>
-                        <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Quick Action</th>
-                    </tr>
-                </thead>
-                <tbody id="pipeline-list-body">
-                    ${systemRows || '<tr><td colspan="6" style="padding:32px;text-align:center;color:#9CA3AF;">No qualified prospects found. Complete prerequisites for any category to appear here.</td></tr>'}
-                </tbody>
-            </table>
-        </div>
-    </div>
-</div>`;
     };
 
     const renderFocusRow = async (rec, idx, allActivities, probBadge, readOnly = false) => {
