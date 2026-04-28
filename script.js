@@ -8252,7 +8252,8 @@ function _wireLoginBtn() {
         // Filter: only show intakes created by the current user or their subordinates
         const visibleIds = await getVisibleUserIds(_currentUser);
         if (visibleIds !== 'all') {
-            intakes = intakes.filter(i => visibleIds.includes(i.agent_id));
+            const visibleStrs = visibleIds.map(String);
+            intakes = intakes.filter(i => visibleStrs.includes(String(i.agent_id)));
         }
 
         if (!intakes || intakes.length === 0) {
