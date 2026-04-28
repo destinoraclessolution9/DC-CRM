@@ -7454,6 +7454,9 @@ function _wireLoginBtn() {
         initOfflineSupport();
         applyMobileClass();
 
+        // Weekly inactivity scoring — fire-and-forget, deferred 10s to avoid blocking startup
+        setTimeout(() => _runWeeklyInactivityCheck().catch(() => {}), 10000);
+
         // Resize + orientation listeners
         let _resizeTimer;
         window.addEventListener('resize', () => {
@@ -18498,6 +18501,8 @@ function _wireLoginBtn() {
                 unable_reason: activity.unable_reason || '',
                 updated_at: new Date().toISOString()
             }).catch(() => {});
+            // Score penalty for marking unable to serve / not interested
+            addScoreToProspect(activity.prospect_id, SCORING_RULES.MARK_NOT_INTERESTED, 'Marked unable to serve / not interested').catch(() => {});
         }
 
         // Upload CPS attachment to Supabase storage and save URL into activities.photo_urls.
@@ -21706,6 +21711,7 @@ function _wireLoginBtn() {
                                 ? `<span class="badge" style="background:#94a3b8;color:#fff;">Unable to Serve</span>`
                                 : `<span class="badge success">Active</span>`}
                             <span class="badge info" onclick="event.stopPropagation();app.openProspectGradePicker(${prospect.id})" style="cursor:pointer;user-select:none;" title="Click to set grade">Grade ${prospect.manual_grade || '—'} <i class="fas fa-caret-down" style="font-size:10px;opacity:.7;"></i></span>
+                            <span class="badge" onclick="event.stopPropagation();app.openScoreAdjustmentModal('prospect',${prospect.id})" style="background:var(--primary);color:#fff;cursor:pointer;user-select:none;" title="Click to adjust score">⭐ ${prospect.score || 0} pts (${getScoreGrade(prospect.score || 0)}) <i class="fas fa-pen" style="font-size:9px;opacity:.8;margin-left:2px;"></i></span>
                         </div>
                         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:6px 0 8px;">
                             <span style="font-size:22px;font-weight:700;line-height:1.3;flex-shrink:0;">${prospect.full_name}</span>${prospect.nickname ? `<span style="font-size:15px;font-weight:400;color:var(--gray-500);">"${prospect.nickname}"</span>` : ''}
@@ -37679,6 +37685,7 @@ const initImportDemoData = async () => {
         SITE_VISIT: 15,
         CALL: 5,
         WHATSAPP: 5,
+        EVENT_ATTENDANCE: 10,
         PRICE_INQUIRY: 30,
         HEARD_LIFE_PLAN: 40,
         REFERRAL_CLOSED: 50,
@@ -37730,34 +37737,145 @@ const initImportDemoData = async () => {
 
     const scoreActivityType = (activityType) => {
         switch (activityType) {
-            case 'CPS': return { points: SCORING_RULES.CPS_ACTIVITY, reason: 'CPS - Consultation/Planning Session' };
-            case 'FTF': return { points: SCORING_RULES.FTF_MEETING, reason: 'Face to Face Meeting' };
-            case 'FSA': return { points: SCORING_RULES.FSA_CONSULTATION, reason: 'Feng Shui Analysis (Consultation)' };
-            case 'GR': return { points: SCORING_RULES.GR_GROUP_REVIEW, reason: 'Group Review' };
-            case 'SITE': return { points: SCORING_RULES.SITE_VISIT, reason: 'Site Visit' };
-            case 'XG': return { points: SCORING_RULES.FTF_MEETING, reason: 'Xin Gua Session' };
-            case 'Call': return { points: SCORING_RULES.CALL, reason: 'Phone Call' };
-            case 'WhatsApp': return { points: SCORING_RULES.WHATSAPP, reason: 'WhatsApp Chat' };
-            default: return { points: 5, reason: `Activity: ${activityType}` };
+            case 'CPS':     return { points: SCORING_RULES.CPS_ACTIVITY,     reason: 'CPS - Consultation/Planning Session' };
+            case 'FTF':     return { points: SCORING_RULES.FTF_MEETING,       reason: 'Face to Face Meeting' };
+            case 'FSA':     return { points: SCORING_RULES.FSA_CONSULTATION,  reason: 'Feng Shui Analysis (Consultation)' };
+            case 'GR':      return { points: SCORING_RULES.GR_GROUP_REVIEW,   reason: 'Group Review' };
+            case 'SITE':    return { points: SCORING_RULES.SITE_VISIT,        reason: 'Site Visit' };
+            case 'XG':      return { points: SCORING_RULES.FTF_MEETING,       reason: 'Xin Gua Session' };
+            case 'Call':    return { points: SCORING_RULES.CALL,              reason: 'Phone Call' };
+            case 'WhatsApp':return { points: SCORING_RULES.WHATSAPP,          reason: 'WhatsApp Chat' };
+            case 'EVENT':   return { points: SCORING_RULES.EVENT_ATTENDANCE,  reason: 'Event Attendance' };
+            default:        return { points: 5, reason: `Activity: ${activityType}` };
         }
     };
 
     const applyActivityScoring = async (activity) => {
         const { points, reason } = scoreActivityType(activity.activity_type);
+
         if (activity.prospect_id) {
+            // First contact bonus — awarded once, when the prospect's score has never been touched by an activity
+            try {
+                const existingActs = await AppDataStore.getActivitiesForProspect(activity.prospect_id, { limit: 2 });
+                const isFirst = existingActs.filter(a => String(a.id) !== String(activity.id)).length === 0;
+                if (isFirst) {
+                    await addScoreToProspect(activity.prospect_id, SCORING_RULES.FIRST_CONTACT, 'First contact made');
+                }
+            } catch (e) { /* ignore */ }
             await addScoreToProspect(activity.prospect_id, points, reason);
         } else if (activity.customer_id) {
             await addScoreToCustomer(activity.customer_id, points, reason);
         }
+
         // Bonus scoring for closing/transaction
         if (activity.is_closing && activity.amount_closed) {
             const txPoints = Math.round(parseFloat(activity.amount_closed) / 100);
             if (activity.prospect_id) {
                 await addScoreToProspect(activity.prospect_id, txPoints, `Transaction closed: RM ${activity.amount_closed}`);
+                // Referral bonus: if this prospect was referred by another prospect, reward the referrer
+                try {
+                    const closedP = await AppDataStore.getById('prospects', activity.prospect_id);
+                    if (closedP?.referred_by_id && closedP?.referred_by_type === 'prospect') {
+                        await addScoreToProspect(closedP.referred_by_id, SCORING_RULES.REFERRAL_CLOSED,
+                            `Referral converted: ${closedP.full_name || 'Prospect #' + activity.prospect_id}`);
+                    }
+                } catch (e) { /* ignore */ }
             } else if (activity.customer_id) {
                 await addScoreToCustomer(activity.customer_id, txPoints, `Transaction closed: RM ${activity.amount_closed}`);
             }
         }
+    };
+
+    // Weekly inactivity deduction — runs once per ISO week per browser session.
+    // Prospects with no activity in 7+ days lose 5 points (excludes unable_to_serve / converted / lost).
+    const _runWeeklyInactivityCheck = async () => {
+        const getISOWeek = (d) => {
+            const dt = new Date(d); dt.setHours(0, 0, 0, 0);
+            dt.setDate(dt.getDate() + 3 - (dt.getDay() + 6) % 7);
+            const w1 = new Date(dt.getFullYear(), 0, 4);
+            return `${dt.getFullYear()}-W${String(1 + Math.round(((dt - w1) / 86400000 - 3 + (w1.getDay() + 6) % 7) / 7)).padStart(2, '0')}`;
+        };
+        const thisWeek = getISOWeek(new Date());
+        if (localStorage.getItem('_inactivityCheckWeek') === thisWeek) return;
+        try {
+            const prospects = await AppDataStore.getAll('prospects');
+            const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+            let count = 0;
+            for (const p of prospects) {
+                if (p.unable_to_serve || p.status === 'converted' || p.status === 'lost') continue;
+                const lastAct = p.last_activity_date;
+                if (!lastAct || lastAct < cutoff) {
+                    await addScoreToProspect(p.id, SCORING_RULES.WEEKLY_INACTIVITY, 'Weekly inactivity — no activity for 7+ days');
+                    count++;
+                }
+            }
+            localStorage.setItem('_inactivityCheckWeek', thisWeek);
+            if (count > 0) console.log(`[Scoring] Weekly inactivity applied to ${count} prospects`);
+        } catch (e) { console.warn('[Scoring] Weekly inactivity check failed:', e); }
+    };
+
+    // Manual score adjustment modal — agents/admins can add or deduct points with a reason.
+    const openScoreAdjustmentModal = async (entityType, entityId) => {
+        const tableName = entityType === 'prospect' ? 'prospects' : 'customers';
+        const entity = await AppDataStore.getById(tableName, entityId);
+        if (!entity) { UI.toast.error('Record not found'); return; }
+        const currentScore = entity.score || 0;
+        const grade = getScoreGrade(currentScore);
+        const presets = [
+            { label: '— Select a quick preset —', pts: '' },
+            { label: 'Customer Satisfied (+20)', pts: 20 },
+            { label: `Price Inquiry Discussed (+${SCORING_RULES.PRICE_INQUIRY})`, pts: SCORING_RULES.PRICE_INQUIRY },
+            { label: `Life Plan Shared (+${SCORING_RULES.HEARD_LIFE_PLAN})`, pts: SCORING_RULES.HEARD_LIFE_PLAN },
+            { label: `Referral Closed Bonus (+${SCORING_RULES.REFERRAL_CLOSED})`, pts: SCORING_RULES.REFERRAL_CLOSED },
+            { label: 'Customer Complaint (−20)', pts: -20 },
+            { label: 'No-show / Cancelled (−10)', pts: -10 },
+            { label: 'Custom (enter below)', pts: '' },
+        ];
+        const content = `
+            <div>
+                <div style="background:var(--gray-50);border-radius:8px;padding:10px 14px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;font-size:14px;">
+                    <strong>${escapeHtml(entity.full_name)}</strong>
+                    <span style="font-weight:700;color:var(--primary);">${currentScore} pts &nbsp;·&nbsp; Grade ${grade}</span>
+                </div>
+                <div class="form-group">
+                    <label>Quick Presets</label>
+                    <select id="score-adj-preset" class="form-control" onchange="(function(s){const v=s.options[s.selectedIndex]?.dataset.pts;if(v!==''&&v!==undefined){document.getElementById('score-adj-points').value=v;}})(this)">
+                        ${presets.map(p => `<option data-pts="${p.pts}">${p.label}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Points adjustment <span style="color:var(--gray-400);font-size:12px;">(positive = add, negative = deduct)</span></label>
+                    <input type="number" id="score-adj-points" class="form-control" placeholder="e.g. 20 or -15">
+                </div>
+                <div class="form-group">
+                    <label>Reason / Note <span style="color:#ef4444;">*</span></label>
+                    <input type="text" id="score-adj-note" class="form-control" placeholder="e.g. Customer satisfied with feng shui analysis" maxlength="200">
+                </div>
+            </div>`;
+        UI.showModal(`Adjust Score — ${escapeHtml(entity.full_name)}`, content, [
+            { label: 'Apply', type: 'primary',   action: `app.confirmScoreAdjustment('${entityType}', ${entityId})` },
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }
+        ]);
+    };
+
+    const confirmScoreAdjustment = async (entityType, entityId) => {
+        const rawPts = document.getElementById('score-adj-points')?.value;
+        const pts = parseInt(rawPts);
+        const note = document.getElementById('score-adj-note')?.value?.trim();
+        if (!rawPts || isNaN(pts) || pts === 0) { UI.toast.error('Enter a non-zero point value.'); return; }
+        if (!note) { UI.toast.error('A reason is required.'); return; }
+        try {
+            if (entityType === 'prospect') {
+                await addScoreToProspect(entityId, pts, `[Manual] ${note}`);
+                UI.hideModal();
+                UI.toast.success(`Score ${pts > 0 ? '+' : ''}${pts} pts applied`);
+                await showProspectDetail(entityId);
+            } else {
+                await addScoreToCustomer(entityId, pts, `[Manual] ${note}`);
+                UI.hideModal();
+                UI.toast.success(`Score ${pts > 0 ? '+' : ''}${pts} pts applied`);
+            }
+        } catch (e) { UI.toast.error('Failed: ' + (e.message || 'Unknown error')); }
     };
 
     // ========== FEATURE: PROTECTION PERIOD AUTO-EXTENSION ==========
@@ -46017,6 +46135,8 @@ JB 星期二到
         addScoreToProspect,
         addScoreToCustomer,
         applyActivityScoring,
+        openScoreAdjustmentModal,
+        confirmScoreAdjustment,
 
         // Feature: Protection Auto-Extension
         autoExtendProtection,
