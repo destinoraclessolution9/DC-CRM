@@ -401,7 +401,7 @@ body {
 
 .calendar-days-header {
     display: grid;
-    grid-template-columns: repeat(7, 1fr);
+    grid-template-columns: repeat(7, minmax(0, 1fr));
     background: var(--gray-50);
     border-bottom: 1px solid var(--gray-200);
 }
@@ -417,7 +417,7 @@ body {
 
 .calendar-grid-main {
     display: grid;
-    grid-template-columns: repeat(7, 1fr);
+    grid-template-columns: repeat(7, minmax(0, 1fr));
     grid-auto-rows: minmax(120px, auto);
 }
 
@@ -10311,12 +10311,17 @@ textarea[aria-invalid="true"] {
 .appointment-customer,
 .appointment-agent,
 .appointment-type,
-.appointment-venue,
 .tac-customer,
 .tac-agent {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    max-width: 100%;
+}
+/* Venue wraps in calendar cells to avoid expanding the grid column */
+.appointment-venue {
+    overflow: hidden;
+    text-overflow: ellipsis;
     max-width: 100%;
 }
 
