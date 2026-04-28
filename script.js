@@ -7789,11 +7789,13 @@ function _wireLoginBtn() {
         if (_currentUser) {
             const displayName = _currentUser.preferred_name || _currentUser.full_name || _currentUser.username;
             if (userDisplay) userDisplay.textContent = displayName;
-            const avatarSrc = _currentUser.avatar_url ||
-                `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=8B1A1A&color=fff&size=64`;
-            if (userAvatar) userAvatar.src = avatarSrc;
+            const initials2 = (displayName || 'U').split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+            const svgNav = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Ccircle cx='32' cy='32' r='32' fill='%238B1A1A'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='central' text-anchor='middle' font-size='22' font-weight='700' font-family='sans-serif' fill='white'%3E${encodeURIComponent(initials2)}%3C/text%3E%3C/svg%3E`;
+            const avatarSrc = (_currentUser.avatar_url && _currentUser.avatar_url.startsWith('http'))
+                ? _currentUser.avatar_url : svgNav;
+            if (userAvatar) { userAvatar.src = avatarSrc; userAvatar.onerror = () => { userAvatar.src = svgNav; }; }
             const drawerAvatar = document.getElementById('drawer-user-avatar');
-            if (drawerAvatar) drawerAvatar.src = avatarSrc;
+            if (drawerAvatar) { drawerAvatar.src = avatarSrc; drawerAvatar.onerror = () => { drawerAvatar.src = svgNav; }; }
         } else {
             if (userDisplay) userDisplay.textContent = 'Guest';
             if (userAvatar) userAvatar.src = 'https://ui-avatars.com/api/?name=Guest&background=8B1A1A&color=fff&size=64';
@@ -36709,22 +36711,25 @@ const simulateCampaignSending = async (campaignId) => {
             UI.showModal('Select User to Login', content, []);
         } else {
             // Logged in mode - show user options
-            const avatarSrc = currentUser.avatar_url ||
-                `https://ui-avatars.com/api/?name=${encodeURIComponent(currentUser.full_name || 'U')}&background=8B1A1A&color=fff&size=128`;
+            // Build a local SVG initials avatar as reliable fallback
+            const initials = (currentUser.full_name || 'U').split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+            const svgFallback = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80'%3E%3Ccircle cx='40' cy='40' r='40' fill='%238B1A1A'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='central' text-anchor='middle' font-size='28' font-weight='700' font-family='sans-serif' fill='white'%3E${encodeURIComponent(initials)}%3C/text%3E%3C/svg%3E`;
+            const avatarSrc = (currentUser.avatar_url && currentUser.avatar_url.startsWith('http')) ? currentUser.avatar_url : svgFallback;
             const content = `
             <div class="user-menu-modal" style="text-align: center; padding: 20px 0;">
                     <!-- Clickable avatar with camera overlay -->
-                    <div style="position:relative; width:80px; height:80px; margin: 0 auto 16px; cursor:pointer;" onclick="document.getElementById('avatar-file-input').click()" title="Change profile photo">
+                    <div style="position:relative; width:80px; height:80px; margin: 0 auto 16px; cursor:pointer; display:inline-block;" onclick="document.getElementById('avatar-file-input').click()" title="Tap to change profile photo">
                         <img id="account-avatar-preview"
                              src="${avatarSrc}"
-                             alt="Profile"
-                             style="width:80px;height:80px;border-radius:50%;object-fit:cover;border:3px solid var(--primary,#8B1A1A);box-shadow:0 4px 12px rgba(0,0,0,.15);">
-                        <div style="position:absolute;bottom:0;right:0;width:26px;height:26px;background:var(--primary,#8B1A1A);border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,.2);">
+                             alt="${initials}"
+                             onerror="this.src='${svgFallback}'"
+                             style="width:80px;height:80px;border-radius:50%;object-fit:cover;border:3px solid var(--primary,#8B1A1A);box-shadow:0 4px 12px rgba(0,0,0,.15);display:block;">
+                        <div style="position:absolute;bottom:0;right:0;width:26px;height:26px;background:var(--primary,#8B1A1A);border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,.2);pointer-events:none;">
                             <i class="fas fa-camera" style="color:#fff;font-size:11px;"></i>
                         </div>
                     </div>
                     <input type="file" id="avatar-file-input" accept="image/*" style="display:none;" onchange="(async()=>{ await app.uploadProfilePhoto(this); })()">
-                    <div id="avatar-upload-status" style="font-size:12px;color:var(--gray-500);margin-bottom:8px;min-height:16px;"></div>
+                    <div id="avatar-upload-status" style="font-size:12px;color:var(--gray-500);margin-top:6px;margin-bottom:4px;min-height:16px;"></div>
 
                     <h2 style="margin-bottom: 4px; font-size: 20px;">${currentUser.full_name}</h2>
                     <p style="color: var(--primary,#8B1A1A); text-transform: capitalize; margin-bottom: 32px; font-weight: 500;">${currentUser.role}</p>
