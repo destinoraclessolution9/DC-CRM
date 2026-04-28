@@ -10289,9 +10289,9 @@ button:focus-visible {
     box-shadow: 0 0 0 4px rgba(128, 0, 32, 0.2);
 }
 
-/* Minimum touch target size — only primary action buttons, not icon buttons */
-.btn.primary, .btn.secondary, .btn.danger,
-button[type="submit"], button[type="button"].btn {
+/* Minimum touch target size — only primary action buttons, not small icon buttons */
+.btn.primary:not(.btn-sm), .btn.secondary:not(.btn-sm), .btn.danger:not(.btn-sm),
+button[type="submit"] {
     min-height: 36px;
 }
 
@@ -10320,8 +10320,8 @@ textarea[aria-invalid="true"] {
     max-width: 100%;
 }
 
-/* Line height for readability — scoped to text containers only */
-body, p, li, td, th, label {
+/* Line height for readability — td/th excluded to avoid overriding table-specific values */
+body, p, li, label {
     line-height: 1.5;
 }
 
