@@ -8389,15 +8389,12 @@ function _wireLoginBtn() {
 
         let intakes = [];
         try {
-            intakes = await AppDataStore.query('cps_intake_requests', {
-                status: 'submitted'
-            });
-        } catch (_) {
-            try {
-                const all = await AppDataStore.getAll('cps_intake_requests');
-                intakes = (all || []).filter(r => r.status === 'submitted');
-            } catch (__) { intakes = []; }
-        }
+            // Use getAll so RLS/quota limits don't silently drop rows.
+            // Filter client-side for any status that means "waiting for approval".
+            const all = await AppDataStore.getAll('cps_intake_requests');
+            const pendingStatuses = new Set(['submitted', 'pending', 'awaiting_approval', 'new']);
+            intakes = (all || []).filter(r => pendingStatuses.has(r.status));
+        } catch (_) { intakes = []; }
 
         // Filter: only show intakes created by the current user or their subordinates
         const visibleIds = await getVisibleUserIds(_currentUser);
