@@ -26050,7 +26050,7 @@ const openAddSolutionModal = async (prospectId) => {
                             </tr>
                         </thead>
                         <tbody id="agents-table-body">
-                            <!-- Populated by await renderAgentsTable() -->
+                            ${Array(8).fill(0).map(() => `<tr>${Array(8).fill(0).map((_, i) => `<td style="padding:10px 12px;"><div class="skeleton" style="height:14px;border-radius:4px;width:${[75,45,50,60,40,35,45,30][i]}%;"></div></td>`).join('')}</tr>`).join('')}
                         </tbody>
                     </table>
                 </div>
@@ -30704,12 +30704,8 @@ container.innerHTML = `
 
     const showKPIDashboard = async (container) => {
         _selectedEntity = null; // Clear selection
-        // Agents list for the agent filter dropdown (admins/team leaders see this)
-        const _kpiAgents = (await AppDataStore.getAll('users')).filter(u =>
-            isAgent(u) || u.role === 'team_leader' || (u.role || '').includes('Level 7')
-        );
-        const _kpiAgentOptions = `<option value="all">All Agents</option>` +
-            _kpiAgents.map(a => `<option value="${a.id}" ${String(_currentAgentFilter) === String(a.id) ? 'selected' : ''}>${escapeHtml(a.full_name || '')}</option>`).join('');
+        // Agent dropdown filled after paint — don't block initial render
+        const _kpiAgentOptions = `<option value="all">All Agents</option>`;
         container.innerHTML = `
             <div class="kpi-dashboard">
                 <div class="dashboard-header">
@@ -30827,6 +30823,16 @@ container.innerHTML = `
             </div>
 `;
 
+        // Fill agent dropdown after shell is painted (non-blocking)
+        AppDataStore.getAll('users').then(allUsers => {
+            const sel = document.getElementById('kpi-agent-filter');
+            if (!sel) return;
+            const _kpiAgents = allUsers.filter(u =>
+                isAgent(u) || u.role === 'team_leader' || (u.role || '').includes('Level 7')
+            );
+            sel.innerHTML = `<option value="all">All Agents</option>` +
+                _kpiAgents.map(a => `<option value="${a.id}" ${String(_currentAgentFilter) === String(a.id) ? 'selected' : ''}>${escapeHtml(a.full_name || '')}</option>`).join('');
+        }).catch(() => {});
         await refreshKPIDashboard();
     };
 
@@ -39246,6 +39252,26 @@ const initImportDemoData = async () => {
     // ========== FEATURE: RANKING PERFORMANCE OVERVIEW ==========
     const showRankingPerformanceView = async (container) => {
         _currentView = 'ranking';
+        // ── Paint skeleton immediately ──────────────────────────────────────
+        const _rSkelR = (cols) => `<tr>${Array.from({length:cols},(_,i)=>`<td style="padding:10px 12px;"><div class="skeleton" style="height:14px;border-radius:4px;width:${[30,70,45,40,35,50,45,40,35,35][i%10]}%;"></div></td>`).join('')}</tr>`;
+        container.innerHTML = `
+            <div class="ranking-view">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                    <div>
+                        <h1>Ranking Performance Overview</h1>
+                        <p style="color:var(--gray-500);">Calculating agent rankings…</p>
+                    </div>
+                    <div><button class="btn secondary" disabled><i class="fas fa-sync-alt"></i> Refresh</button></div>
+                </div>
+                <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:16px; margin-bottom:24px;">
+                    ${Array(3).fill(0).map(() => `<div class="skeleton" style="border-radius:12px;height:160px;"></div>`).join('')}
+                </div>
+                <div class="profile-section">
+                    <div class="skeleton" style="height:24px;width:160px;border-radius:4px;margin-bottom:16px;"></div>
+                    <table class="data-table" style="width:100%;"><tbody>${Array(10).fill(0).map(()=>_rSkelR(10)).join('')}</tbody></table>
+                </div>
+            </div>`;
+        // ── Fetch all four tables in parallel ───────────────────────────────
         // Pre-fetch all four tables in parallel ONCE, then bucket by agent_id
         // for O(1) per-agent lookups. Previously this loop did three serial
         // getAll() calls inside a per-agent for loop and re-filtered the entire
@@ -39909,6 +39935,25 @@ const initImportDemoData = async () => {
         const currentUser = _currentUser;
         if (!currentUser) return;
 
+        // ── Paint skeleton immediately ──────────────────────────────────────
+        container.innerHTML = `
+            <div class="milestone-view-wrap">
+                <div class="milestone-container">
+                    <div class="milestone-inner">
+                        <div class="milestone-header"><h1>增运九法</h1></div>
+                        <div class="nine-method-grid">
+                            ${Array(9).fill(0).map(() => `<div class="skeleton" style="border-radius:12px;height:120px;"></div>`).join('')}
+                        </div>
+                        <div style="margin-top:32px;">
+                            <div class="skeleton" style="height:24px;width:140px;border-radius:4px;margin-bottom:16px;"></div>
+                            <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:16px;">
+                                ${Array(4).fill(0).map(() => `<div class="skeleton" style="border-radius:12px;height:100px;"></div>`).join('')}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>`;
+
         // Determine admin status
         const viewerLevel = (() => {
             const m = (currentUser.role || '').match(/Level\s+(\d+)/i);
@@ -39927,9 +39972,11 @@ const initImportDemoData = async () => {
             prospect_id: subjectUser.prospect_id || null,
         };
 
-        // Compute statuses
-        const nineStatuses = await computeNineMethodStatuses(subject);
-        const pillarStatuses = await computeFourPillarStatuses(subject);
+        // Compute statuses (parallel)
+        const [nineStatuses, pillarStatuses] = await Promise.all([
+            computeNineMethodStatuses(subject),
+            computeFourPillarStatuses(subject),
+        ]);
 
         // Admin user picker
         let adminPicker = '';
