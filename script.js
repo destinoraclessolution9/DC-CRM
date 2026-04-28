@@ -7789,7 +7789,11 @@ function _wireLoginBtn() {
         if (_currentUser) {
             const displayName = _currentUser.preferred_name || _currentUser.full_name || _currentUser.username;
             if (userDisplay) userDisplay.textContent = displayName;
-            if (userAvatar) userAvatar.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=8B1A1A&color=fff&size=64`;
+            const avatarSrc = _currentUser.avatar_url ||
+                `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=8B1A1A&color=fff&size=64`;
+            if (userAvatar) userAvatar.src = avatarSrc;
+            const drawerAvatar = document.getElementById('drawer-user-avatar');
+            if (drawerAvatar) drawerAvatar.src = avatarSrc;
         } else {
             if (userDisplay) userDisplay.textContent = 'Guest';
             if (userAvatar) userAvatar.src = 'https://ui-avatars.com/api/?name=Guest&background=8B1A1A&color=fff&size=64';
@@ -8396,11 +8400,12 @@ function _wireLoginBtn() {
             intakes = (all || []).filter(r => pendingStatuses.has(r.status));
         } catch (_) { intakes = []; }
 
-        // Filter: only show intakes created by the current user or their subordinates
+        // Filter: only show intakes created by the current user or their subordinates.
+        // Records with no agent_id are always shown to any logged-in leader.
         const visibleIds = await getVisibleUserIds(_currentUser);
         if (visibleIds !== 'all') {
             const visibleStrs = visibleIds.map(String);
-            intakes = intakes.filter(i => visibleStrs.includes(String(i.agent_id)));
+            intakes = intakes.filter(i => !i.agent_id || visibleStrs.includes(String(i.agent_id)));
         }
 
         if (!intakes || intakes.length === 0) {
@@ -36704,14 +36709,26 @@ const simulateCampaignSending = async (campaignId) => {
             UI.showModal('Select User to Login', content, []);
         } else {
             // Logged in mode - show user options
+            const avatarSrc = currentUser.avatar_url ||
+                `https://ui-avatars.com/api/?name=${encodeURIComponent(currentUser.full_name || 'U')}&background=8B1A1A&color=fff&size=128`;
             const content = `
             <div class="user-menu-modal" style="text-align: center; padding: 20px 0;">
-                    <div class="avatar-lg" style="width: 72px; height: 72px; background: linear-gradient(135deg, var(--primary-color), var(--primary-dark)); color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 28px; margin: 0 auto 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
-                        ${(currentUser.full_name || 'U').split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2)}
+                    <!-- Clickable avatar with camera overlay -->
+                    <div style="position:relative; width:80px; height:80px; margin: 0 auto 16px; cursor:pointer;" onclick="document.getElementById('avatar-file-input').click()" title="Change profile photo">
+                        <img id="account-avatar-preview"
+                             src="${avatarSrc}"
+                             alt="Profile"
+                             style="width:80px;height:80px;border-radius:50%;object-fit:cover;border:3px solid var(--primary,#8B1A1A);box-shadow:0 4px 12px rgba(0,0,0,.15);">
+                        <div style="position:absolute;bottom:0;right:0;width:26px;height:26px;background:var(--primary,#8B1A1A);border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,.2);">
+                            <i class="fas fa-camera" style="color:#fff;font-size:11px;"></i>
+                        </div>
                     </div>
+                    <input type="file" id="avatar-file-input" accept="image/*" style="display:none;" onchange="(async()=>{ await app.uploadProfilePhoto(this); })()">
+                    <div id="avatar-upload-status" style="font-size:12px;color:var(--gray-500);margin-bottom:8px;min-height:16px;"></div>
+
                     <h2 style="margin-bottom: 4px; font-size: 20px;">${currentUser.full_name}</h2>
-                    <p style="color: var(--gray-500); text-transform: capitalize; margin-bottom: 32px; font-weight: 500;">${currentUser.role}</p>
-                    
+                    <p style="color: var(--primary,#8B1A1A); text-transform: capitalize; margin-bottom: 32px; font-weight: 500;">${currentUser.role}</p>
+
                     <div style="border-top: 1px solid var(--gray-100); padding-top: 20px;">
                         <button class="btn danger" onclick="app.logout()" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 10px; padding: 14px; font-weight: 600;">
                             <i class="fas fa-sign-out-alt"></i> LOGOUT FROM SYSTEM
@@ -36723,6 +36740,57 @@ const simulateCampaignSending = async (campaignId) => {
             UI.showModal('Account Settings', content, [
                 { label: 'Close', type: 'secondary', action: 'UI.hideModal()' }
             ]);
+        }
+    };
+
+    const uploadProfilePhoto = async (input) => {
+        const file = input?.files?.[0];
+        if (!file) return;
+        const statusEl = document.getElementById('avatar-upload-status');
+        const previewEl = document.getElementById('account-avatar-preview');
+        if (statusEl) statusEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Uploading…';
+
+        try {
+            let avatarUrl = null;
+            // Try Supabase storage first
+            if (window.supabase) {
+                const ext = file.name.split('.').pop() || 'jpg';
+                const path = `avatars/user_${_currentUser.id}_${Date.now()}.${ext}`;
+                const { data: upData, error: upErr } = await window.supabase.storage
+                    .from('attachments')
+                    .upload(path, file, { upsert: true, contentType: file.type });
+                if (!upErr && upData) {
+                    const { data: { publicUrl } } = window.supabase.storage
+                        .from('attachments').getPublicUrl(path);
+                    avatarUrl = publicUrl;
+                }
+            }
+            // Fallback: base64 data URL (stored in user record)
+            if (!avatarUrl) {
+                avatarUrl = await new Promise((res, rej) => {
+                    const reader = new FileReader();
+                    reader.onload = e => res(e.target.result);
+                    reader.onerror = rej;
+                    reader.readAsDataURL(file);
+                });
+            }
+
+            // Save to user record
+            await AppDataStore.update('users', _currentUser.id, { avatar_url: avatarUrl });
+            _currentUser.avatar_url = avatarUrl;
+
+            // Update preview in modal + navbar avatar
+            if (previewEl) previewEl.src = avatarUrl;
+            const navAvatar = document.getElementById('user-avatar');
+            if (navAvatar) navAvatar.src = avatarUrl;
+            const drawerAvatar = document.getElementById('drawer-user-avatar');
+            if (drawerAvatar) drawerAvatar.src = avatarUrl;
+
+            if (statusEl) statusEl.innerHTML = '<span style="color:var(--success,#16a34a);"><i class="fas fa-check"></i> Photo updated!</span>';
+            setTimeout(() => { if (statusEl) statusEl.innerHTML = ''; }, 3000);
+        } catch (e) {
+            console.error('Avatar upload failed', e);
+            if (statusEl) statusEl.innerHTML = '<span style="color:#dc2626;"><i class="fas fa-exclamation-circle"></i> Upload failed. Try again.</span>';
         }
     };
 
@@ -46854,6 +46922,7 @@ JB 星期二到
         renderPendingCpsIntakes,
         openApproveCpsIntakeModal,
         rejectCpsIntake,
+        uploadProfilePhoto,
 
         // Lead Capture Forms
         showLeadFormsView,
