@@ -14687,7 +14687,7 @@ function _wireLoginBtn() {
                 <div class="detail-section act-actions-section">
                     <h4>Actions</h4>
                     <div class="act-actions-list">
-                        ${activity.prospect_id ? `<button class="act-action-btn act-btn-profile" onclick="UI.hideModal(); app.showProspectDetail(${activity.prospect_id})"><span class="act-icon"><i class="fas fa-user"></i></span><span class="act-label">Prospect</span></button>` : ''}
+                        ${activity.prospect_id ? `<button class="act-action-btn act-btn-profile" onclick="(async()=>{ const p=await AppDataStore.getById('prospects',${activity.prospect_id}); if(!p){UI.toast.error('Prospect record not found');return;} UI.hideModal(); app.showProspectDetail(${activity.prospect_id}); })()"><span class="act-icon"><i class="fas fa-user"></i></span><span class="act-label">Prospect</span></button>` : ''}
                         ${activity.activity_type === 'CPS' && activity.prospect_id
                             ? `<button class="act-action-btn act-btn-doc" onclick="app.uploadCPSForm(${activityId}, ${activity.prospect_id})"><span class="act-icon"><i class="fas fa-file-upload"></i></span><span class="act-label">Upload CPS</span></button>
                                <button class="act-action-btn act-btn-doc" onclick="app.uploadAPUForm(${activityId}, ${activity.prospect_id})"><span class="act-icon"><i class="fas fa-file-alt"></i></span><span class="act-label">APU</span></button>`
@@ -21813,7 +21813,10 @@ function _wireLoginBtn() {
 
     const showProspectDetail = async (prospectId) => {
         const prospect = await AppDataStore.getById('prospects', prospectId);
-        if (!prospect) return;
+        if (!prospect) {
+            UI.toast.error('Prospect not found. They may not have been added to the system yet.');
+            return;
+        }
         // Single source of truth for prospect visibility: canViewProspect walks
         // the reporting tree, so team leaders / uplines (Level 3–11) can open any
         // prospect owned by someone in their subordinate chain. The previous
