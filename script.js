@@ -41358,6 +41358,7 @@ const initImportDemoData = async () => {
     const eggNormalizeCsvRow = (row) => ({
         order_no: String(eggGetField(row, ['Order No.', 'Order No', 'OrderNo', 'order_no'])).trim(),
         product_name: String(eggGetField(row, ['Product Name', 'product_name', 'Product'])).trim(),
+        product_code: String(eggGetField(row, ['Product Code', 'Item Code', 'SKU', 'Code', 'product_code', 'Item No', 'Item No.'])).trim(),
         quantity: Number(eggGetField(row, ['Quantity', 'Qty', 'quantity'])) || 0,
         outlet: String(eggGetField(row, ['Self Collection', 'Outlet', 'Outlet Name', 'outlet'])).trim(),
         order_date: eggGetField(row, ['Order Date', 'order_date', 'Date']),
@@ -41370,6 +41371,7 @@ const initImportDemoData = async () => {
     const eggNormalizeXlsxRow = (row) => ({
         order_no: String(eggGetField(row, ['Purchase Number', 'Order No.', 'order_no', 'Purchase No'])).trim(),
         product_name: String(eggGetField(row, ['Product Name', 'product_name'])).trim(),
+        product_code: String(eggGetField(row, ['Product Code', 'Item Code', 'SKU', 'Code', 'product_code', 'Item No', 'Item No.'])).trim(),
         quantity: Number(eggGetField(row, ['Product Quantity', 'Quantity', 'Qty', 'quantity'])) || 0,
         outlet: String(eggGetField(row, ['Outlet Name', 'Outlet', 'Self Collection', 'outlet'])).trim(),
         order_date: eggGetField(row, ['Purchase Date Time', 'Order Date', 'Purchase Date', 'order_date']),
@@ -41569,7 +41571,7 @@ JB 星期二到
             const totalGold = sectionRows.filter(r => r.product === 'GOLD').reduce((s, r) => s + Number(r.quantity||0), 0);
             const totalKing = sectionRows.filter(r => r.product === 'KING').reduce((s, r) => s + Number(r.quantity||0), 0);
             const body = sectionRows.length === 0 ?
-                `<tr><td colspan="5" style="padding:10px;text-align:center;color:var(--gray-400);font-size:12px;">No orders</td></tr>` :
+                `<tr><td colspan="6" style="padding:10px;text-align:center;color:var(--gray-400);font-size:12px;">No orders</td></tr>` :
                 sectionRows.map(r => {
                     const dateStr = r.order_date_parsed ? eggFormatDateShort(r.order_date_parsed) : '-';
                     return `
@@ -41577,6 +41579,7 @@ JB 星期二到
                             <td style="padding:6px 8px;">${r.agent_name || '-'}</td>
                             <td style="padding:6px 8px;font-size:12px;">${dateStr}</td>
                             <td style="padding:6px 8px;font-family:monospace;font-size:12px;">${r.order_no || '-'}</td>
+                            <td style="padding:6px 8px;font-family:monospace;font-size:12px;color:var(--gray-500);">${r.product_code || '-'}</td>
                             <td style="padding:6px 8px;">${r.product}</td>
                             <td style="padding:6px 8px;text-align:right;">${r.quantity}</td>
                         </tr>
@@ -41594,6 +41597,7 @@ JB 星期二到
                                 <th scope="col" style="padding:6px 8px;">Agent</th>
                                 <th scope="col" style="padding:6px 8px;">Order Date</th>
                                 <th scope="col" style="padding:6px 8px;">Order No</th>
+                                <th scope="col" style="padding:6px 8px;">Product Code</th>
                                 <th scope="col" style="padding:6px 8px;">Product</th>
                                 <th scope="col" style="padding:6px 8px;text-align:right;">Qty</th>
                             </tr>
@@ -41620,8 +41624,9 @@ JB 星期二到
                 const agent = (r.agent_name || '-').padEnd(20).slice(0, 20);
                 const date = dateStr.padEnd(10);
                 const ordNo = (r.order_no || '-').padEnd(15).slice(0, 15);
+                const code = (r.product_code || '').padEnd(12).slice(0, 12);
                 const prod = (r.product || '').padEnd(6);
-                out += `  ${agent} ${date} ${ordNo} ${prod} ${r.quantity}\n`;
+                out += `  ${agent} ${date} ${ordNo} ${code} ${prod} ${r.quantity}\n`;
             }
         }
         return out;
@@ -42417,6 +42422,7 @@ JB 星期二到
                         unique_key: r.unique_key,
                         order_no: r.order_no,
                         product: r.product,
+                        product_code: r.product_code || null,
                         quantity: r.quantity,
                         region: r.region,
                         agent_name: r.agent_name,
@@ -42443,6 +42449,7 @@ JB 星期二到
                         unique_key: r.unique_key,
                         order_no: r.order_no,
                         product: r.product,
+                        product_code: r.product_code || null,
                         quantity: r.quantity,
                         region: r.region,
                         agent_name: r.agent_name,
