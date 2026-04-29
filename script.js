@@ -14208,11 +14208,12 @@ function _wireLoginBtn() {
             ];
         }
         const needsCoAgentMergeDV = !isSystemAdmin(_currentUser) && _currentUser?.id != null;
-        const [actResultDV, allProspectsDV, allCustomersDV, allUsersDV, coAgentRowsDV] = await Promise.all([
+        const [actResultDV, allProspectsDV, allCustomersDV, allUsersDV, allEventsDV, coAgentRowsDV] = await Promise.all([
             AppDataStore.queryAdvanced('activities', actQueryOptsDV),
             AppDataStore.getAll('prospects'),
             AppDataStore.getAll('customers'),
             AppDataStore.getAll('users'),
+            AppDataStore.getAll('events'),
             needsCoAgentMergeDV ? _fetchActivitiesAsCoAgent(todayStr, todayStr) : Promise.resolve([]),
         ]);
         let rawActivitiesDV = actResultDV.data || [];
@@ -14224,6 +14225,14 @@ function _wireLoginBtn() {
                     rawActivitiesDV.push(a);
                 }
             }
+        }
+        // Apply orphan filter — same logic as renderCalendar — so activities linked to
+        // a deleted event never appear in the day view (would cause "Activity not found").
+        const existingEventIdsDV = new Set(allEventsDV.map(e => String(e.id)));
+        if (allEventsDV.length > 0) {
+            rawActivitiesDV = rawActivitiesDV.filter(a =>
+                a.activity_type !== 'EVENT' || !a.event_id || existingEventIdsDV.has(String(a.event_id))
+            );
         }
         // Dedupe identical EVENT activities at the same slot (matches month grid).
         const dayActivities = [];
@@ -33539,29 +33548,35 @@ const exportKPIReport = async (format) => {
     const deleteMarketingListItem = async (id) => {
         if (confirm('Are you sure you want to delete this record? This action cannot be undone.')) {
             try {
-                // When deleting an event, cascade-delete linked activities and attendees
-                // to prevent orphaned entries appearing on calendar and prospect profiles.
                 if (_currentMarketingListTab === 'events') {
-                    const allActivities = await AppDataStore.getAll('activities');
-                    for (const act of allActivities.filter(a => String(a.event_id) === String(id))) {
-                        await AppDataStore.delete('activities', act.id);
-                    }
-                    const allAttendees = await AppDataStore.getAll('event_attendees');
-                    for (const att of allAttendees.filter(a => String(a.event_id) === String(id))) {
-                        await AppDataStore.delete('event_attendees', att.id);
-                    }
+                    // Cascade-delete linked activities and attendees using fresh Supabase data
+                    // so we don't miss records that aren't in the local SWR cache.
+                    // Each cascade delete is soft — a failure here doesn't block the event delete.
+                    try {
+                        const linked = await AppDataStore.queryAdvanced('activities', {
+                            filters: { event_id: id }, countMode: null, limit: 5000
+                        });
+                        for (const act of (linked.data || [])) {
+                            try { await AppDataStore.delete('activities', act.id); } catch (_) {}
+                        }
+                    } catch (_) {}
+                    try {
+                        const linked = await AppDataStore.queryAdvanced('event_attendees', {
+                            filters: { event_id: id }, countMode: null, limit: 5000
+                        });
+                        for (const att of (linked.data || [])) {
+                            try { await AppDataStore.delete('event_attendees', att.id); } catch (_) {}
+                        }
+                    } catch (_) {}
+                    AppDataStore.invalidateCache('activities');
+                    AppDataStore.invalidateCache('event_attendees');
                 }
                 await AppDataStore.delete(_currentMarketingListTab, id);
+                UI.toast.success('Record deleted');
             } catch (e) {
-                console.warn('Supabase delete failed, cleaning up localStorage:', e);
-                // If Supabase delete fails (e.g. table missing), still remove from localStorage
-                try {
-                    const key = `fs_crm_${_currentMarketingListTab}`;
-                    const all = JSON.parse(localStorage.getItem(key) || '[]');
-                    localStorage.setItem(key, JSON.stringify(all.filter(r => String(r.id) !== String(id))));
-                } catch (_) {}
+                console.warn('Delete failed:', e);
+                UI.toast.error('Delete failed. You may not have permission, or the record no longer exists.');
             }
-            UI.toast.success('Record deleted');
             const viewport = document.getElementById('content-viewport');
             await showMarketingListsView(viewport);
         }
