@@ -18950,6 +18950,9 @@ function _wireLoginBtn() {
             }
         } catch (e) { console.warn('Milestone auto-mark failed:', e); }
 
+        // === Push notification: alert lead agent, co-agents, and management ===
+        _notifyActivityCreated(savedActivity).catch(() => {});
+
         // === Follow-Up Automation: trigger CPS-based follow-ups (data-driven, non-blocking) ===
         if (activity.activity_type === 'CPS' && activity.prospect_id) {
             dispatchAfterCpsTriggers(activity.prospect_id).catch(e => console.warn('CPS follow-up triggers failed:', e));
