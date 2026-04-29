@@ -7819,7 +7819,7 @@ function _wireLoginBtn() {
             }
             if (visibleIds !== 'all') {
                 const vStrs = visibleIds.map(String);
-                intakes = intakes.filter(i => vStrs.includes(String(i.agent_id)));
+                intakes = intakes.filter(i => !i.agent_id || vStrs.includes(String(i.agent_id)));
             }
             count += intakes.length;
 
@@ -7871,7 +7871,7 @@ function _wireLoginBtn() {
         }
         if (visibleIds !== 'all') {
             const vStrs = visibleIds.map(String);
-            intakes = intakes.filter(i => vStrs.includes(String(i.agent_id)));
+            intakes = intakes.filter(i => !i.agent_id || vStrs.includes(String(i.agent_id)));
         }
         for (const i of intakes) {
             items.push({ icon: '📋', title: `CPS Intake: ${i.prospect_name || 'Unknown'}`, sub: `${i.activity_date || ''} · Pending approval`, action: `app.openApproveCpsIntakeModal(${i.id})` });
@@ -8395,9 +8395,10 @@ function _wireLoginBtn() {
 
         let intakes = [];
         try {
-            // Use getAll so RLS/quota limits don't silently drop rows.
-            // Filter client-side for any status that means "waiting for approval".
-            const all = await AppDataStore.getAll('cps_intake_requests');
+            // Always fetch fresh from Supabase — the prospect submits via cps-intake.html
+            // which updates Supabase directly, so the local SWR cache stays stale until
+            // forced. Without { fresh: true } the widget never sees 'submitted' rows.
+            const all = await AppDataStore.getAll('cps_intake_requests', { fresh: true });
             const pendingStatuses = new Set(['submitted', 'pending', 'awaiting_approval', 'new']);
             intakes = (all || []).filter(r => pendingStatuses.has(r.status));
         } catch (_) { intakes = []; }
