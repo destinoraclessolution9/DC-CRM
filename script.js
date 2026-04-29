@@ -25241,13 +25241,30 @@ NOTIFY pgrst, 'reload schema';`;
             const cr = prospect.closing_record;
             const now = new Date().toISOString();
             const saleAmount = parseFloat(cr.sale_amount) || 0;
-            const customers = await AppDataStore.getAll('customers');
-            const customer = customers.find(c => c.converted_from_prospect_id == prospectId);
+            const customers = await AppDataStore.getAll('customers', { fresh: true });
+            let customer = customers.find(c => c.converted_from_prospect_id == prospectId);
+            if (!customer) {
+                // Prospect was marked converted but no customer record exists — create one now
+                const newCust = await AppDataStore.create('customers', {
+                    id: Date.now(),
+                    full_name: prospect.full_name,
+                    phone: prospect.phone,
+                    email: prospect.email,
+                    ic_number: prospect.ic_number,
+                    date_of_birth: prospect.date_of_birth,
+                    responsible_agent_id: prospect.responsible_agent_id,
+                    status: 'active',
+                    lifetime_value: 0,
+                    customer_since: cr.closing_date || cr.order_date || now.split('T')[0],
+                    converted_from_prospect_id: prospectId,
+                });
+                customer = newCust;
+            }
             if (customer) {
                 await AppDataStore.create('purchases', {
                     id: Date.now(),
                     customer_id: customer.id,
-                    date: cr.closing_date || now.split('T')[0],
+                    date: cr.closing_date || cr.order_date || now.split('T')[0],
                     invoice: cr.invoice_number || '',
                     item: cr.product || '',
                     amount: saleAmount,
