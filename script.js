@@ -31370,7 +31370,8 @@ const getCPSCount = async (from, to) => {
 };
   
 // Shared helper: resolves agent ID for a purchase via its linked customer
-const _getPurchaseAgentId = (p, customerMap) => (customerMap[p.customer_id] || {}).responsible_agent_id;
+const _getPurchaseAgentId = (p, customerMap) =>
+    (customerMap[p.customer_id] || {}).responsible_agent_id || p.agent_id;
 
 const _getPurchaseBase = async () => {
     const needUsers = _currentRoleFilter !== 'All' || _visibleUserIds !== 'all';
@@ -31387,7 +31388,7 @@ const _getPurchaseBase = async () => {
 };
 
 const _passesPurchaseFilter = (p, agentId, userMap) => {
-    if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(agentId)) return false;
+    if (_visibleUserIds !== 'all' && !_visibleUserIds.map(String).includes(String(agentId))) return false;
     if (_currentRoleFilter !== 'All') {
         const agent = userMap[agentId];
         if (!agent || agent.role !== _currentRoleFilter) return false;
@@ -31729,7 +31730,7 @@ const buildTotalSalesDetails = async (from, to) => {
     let total = 0;
     for (const p of purchases) {
         if (p.date < from || p.date > to || p.is_agent_package) continue;
-        const agentId = custMap[p.customer_id]?.responsible_agent_id;
+        const agentId = custMap[p.customer_id]?.responsible_agent_id || p.agent_id;
         if (_visibleUserIds !== 'all' && !_visibleUserIds.map(String).includes(String(agentId))) continue;
         if (_currentRoleFilter !== 'All') {
             const agent = userMap[agentId] || userMap[String(agentId)];
