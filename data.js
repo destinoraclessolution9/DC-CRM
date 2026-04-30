@@ -1225,13 +1225,15 @@ class DataStore {
             } catch (_) {}
         }
         // Hard delete: must succeed in Supabase first — no silent failures.
-        // If Supabase rejects the delete, the error is thrown and localStorage is
-        // left untouched so the record stays visible (no ghost-resurrection later).
-        const { error } = await this._writeClient()
+        // Use .select('id') so PostgREST returns the deleted rows; an empty array
+        // means RLS blocked the delete (RESTRICTIVE policy) with no error object.
+        const { data: deleted, error } = await this._writeClient()
             .from(tableName)
             .delete()
-            .eq('id', id);
+            .eq('id', id)
+            .select('id');
         if (error) throw error;
+        if (!deleted || deleted.length === 0) throw new Error('permission_denied');
 
         this._writeAudit('delete', tableName, id, _auditOldData, null);
 
