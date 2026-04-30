@@ -7346,11 +7346,21 @@ function _wireLoginBtn() {
                 if (existing) existing.remove();
                 document.getElementById('loginBtn')?.insertAdjacentElement('afterend', resendMsg);
             } else if (msg === 'Load failed' || msg.toLowerCase().includes('load failed') || msg.toLowerCase().includes('failed to fetch')) {
-                // Network error (no connection or mobile data drop) — show message, never reload.
-                // Reloading here created an infinite loop on mobile: no network → "Failed to fetch"
-                // → reload → try again → "Failed to fetch" → reload…
+                // Network error. Run a quick no-cors probe to distinguish
+                // "can't reach server at all" from "server reachable but request blocked".
                 const loginErrEl = document.getElementById('loginPasswordErr') || document.getElementById('loginEmailErr');
-                const networkErrText = 'Network error. Check your internet connection and try again.';
+                let networkErrText;
+                try {
+                    await Promise.race([
+                        fetch(window.SUPABASE_URL, { mode: 'no-cors' }),
+                        new Promise((_, r) => setTimeout(() => r(new Error('t')), 4000))
+                    ]);
+                    // Server is reachable — something else blocked the auth call
+                    networkErrText = 'Server is reachable but the login request was blocked. Try: close and reopen the app, or open in Safari instead of the home-screen icon.';
+                } catch (_) {
+                    // Can't reach the server at all
+                    networkErrText = 'Cannot reach the login server from this device. Try: switch between WiFi and mobile data, disable any VPN or content-blocker apps, then retry.';
+                }
                 if (loginErrEl) {
                     loginErrEl.textContent = networkErrText;
                     loginErrEl.style.display = 'block';
