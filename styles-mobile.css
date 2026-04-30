@@ -215,29 +215,38 @@
    3. LAYOUT SHELL
 ────────────────────────────────────────────────────────── */
 @media (max-width: 768px) {
-    /* Push content below fixed top bar */
-    .app-shell { padding-top: 56px; }
+    /* Push content below fixed top bar. Constrain shell to viewport so the
+       content-viewport becomes the scroll container (not the body).
+       Android Chrome requires a fixed-height ancestor for overflow-y: auto
+       to create a real scroll container — height: auto breaks this. */
+    .app-shell {
+        padding-top: 56px;
+        height: 100dvh;
+        overflow: hidden;
+    }
 
     .main-layout {
         flex-direction: column;
-        height: auto;
-        min-height: calc(100dvh - 56px);
+        height: calc(100dvh - 56px);
+        overflow: hidden;
         margin-left: 0 !important;
     }
 
     /* Hide desktop sidebar */
     .sidebar { display: none !important; }
 
-    /* Content area — bottom padding accounts for iOS home-indicator only.
-       The 80px bottom-nav reservation was removed because `.mobile-bottom-nav`
-       is not rendered in index.html; reintroduce when the nav HTML is wired. */
+    /* Content area — fixed height fills main-layout so Android Chrome
+       creates a proper scroll container. min-height: 0 overrides the
+       flex default (min-height: auto) which would let the child expand
+       past the parent and break scrolling. */
     .content-viewport {
         padding: 12px 10px !important;
-        padding-bottom: calc(12px + env(safe-area-inset-bottom)) !important;
-        overflow-y: auto;
+        padding-bottom: calc(72px + env(safe-area-inset-bottom)) !important;
+        overflow-y: auto !important;
         -webkit-overflow-scrolling: touch;
-        height: auto !important;
-        min-height: calc(100dvh - 56px);
+        height: 100% !important;
+        min-height: 0 !important;
+        flex: 1 1 0;
     }
 }
 
