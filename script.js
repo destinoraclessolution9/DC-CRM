@@ -7179,9 +7179,15 @@ function _wireLoginBtn() {
         try {
             btn.disabled = true;
             btn.textContent = 'Logging in...';
+            // Wrap every login attempt in a 20-second timeout so a hung mobile
+            // network never leaves the button stuck on "Logging in..." forever.
+            const _withTimeout = (promise, ms, label) => Promise.race([
+                promise,
+                new Promise((_, rej) => setTimeout(() => rej(new Error(label)), ms))
+            ]);
             let user;
             try {
-                user = await Auth.login(email, password);
+                user = await _withTimeout(Auth.login(email, password), 20000, 'Connection timed out. Check your internet and try again.');
             } catch (loginErr) {
                 if (_isQuotaErr(loginErr)) {
                     // Auth-token write failed because localStorage is full of
@@ -7190,7 +7196,7 @@ function _wireLoginBtn() {
                     // bubble up to the outer catch.
                     btn.textContent = 'Clearing cache…';
                     _purgeLocalCache();
-                    user = await Auth.login(email, password);
+                    user = await _withTimeout(Auth.login(email, password), 20000, 'Connection timed out. Check your internet and try again.');
                     UI.toast?.warning?.('Local cache cleared to make room for login.');
                 } else {
                     throw loginErr;
