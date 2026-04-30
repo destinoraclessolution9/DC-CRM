@@ -223,18 +223,13 @@ class DataStore {
             if (!window.supabase) {
                 throw new Error('Supabase client not found.');
             }
-            // Service-role client creation removed — RLS is now the source of
-            // authorisation. All queries go through window.supabase (anon key +
-            // auth session JWT). See the RLS migration note in index.html for
-            // the policy setup.
-
-            const { error } = await window.supabase.from('users').select('*').limit(1);
-            if (error) throw error;
+            // No pre-login network probe here. Making an unauthenticated request
+            // to supabase.co at startup can poison iOS's connection state for that
+            // host, causing the subsequent signInWithPassword to get "Load failed"
+            // even when the network is fine. Connectivity is tested lazily on the
+            // first real authenticated query instead.
             this.initialized = true;
 
-            // Permanently tombstone records deleted externally (outside AppDataStore.delete).
-            // Add IDs here whenever a record is hard-deleted via Supabase API/dashboard
-            // to prevent the sync queue from resurrecting them.
             this._ensureTombstones({
                 activities: ['1775653728135', '1775574315672', '1775574533626']
             });
@@ -243,7 +238,7 @@ class DataStore {
             this.emit('ready');
             return true;
         } catch (err) {
-            console.error('Supabase init error:', err);
+            console.error('DataStore init error:', err);
             this.emit('error', err);
             return false;
         }
