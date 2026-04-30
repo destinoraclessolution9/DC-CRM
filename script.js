@@ -7116,9 +7116,14 @@ function _wireLoginBtn() {
     const btn = document.getElementById('loginBtn');
     if (!btn || btn._supabaseSetup) return;
     btn._supabaseSetup = true;
-    // Restore remembered checkbox state
+    // Restore remembered checkbox state and pre-fill email
     const rememberChk = document.getElementById('rememberMe');
+    const rememberedEmail = localStorage.getItem('remember_me_email');
     if (rememberChk) rememberChk.checked = localStorage.getItem('remember_me') === '1';
+    if (rememberedEmail) {
+        const emailField = document.getElementById('email') || document.getElementById('loginEmail');
+        if (emailField && !emailField.value) emailField.value = rememberedEmail;
+    }
     // Wipe the SWR cache (fs_crm_*) and tombstones from localStorage. Used
     // when the auth-token write hits the quota — the cached row snapshots
     // are recoverable from Supabase, but the session token isn't, so the
@@ -7263,9 +7268,12 @@ function _wireLoginBtn() {
             await UserPreferences.load(profile.id);
             // Save "remember me" preference before leaving login screen
             const _rememberChk = document.getElementById('rememberMe');
+            const _loginEmail = document.getElementById('loginEmail');
             if (_rememberChk && _rememberChk.checked) {
                 try {
                     localStorage.setItem('remember_me', '1');
+                    // Store email so it pre-fills if iOS clears the auth token after 7 days
+                    if (_loginEmail?.value) localStorage.setItem('remember_me_email', _loginEmail.value.trim().toLowerCase());
                 } catch (e) {
                     // localStorage quota exceeded — clear stale offline queue and retry
                     localStorage.removeItem('offline_queue');
@@ -7273,6 +7281,7 @@ function _wireLoginBtn() {
                 }
             } else {
                 localStorage.removeItem('remember_me');
+                localStorage.removeItem('remember_me_email');
             }
             document.getElementById('login-container').style.display = 'none';
             document.getElementById('app-shell').style.display = 'block';
@@ -7373,9 +7382,12 @@ function _wireLoginBtn() {
     await AppDataStore.init();
 
     try {
-        // Try to get current user – if session missing, just set _currentUser = null
+        // Try to restore session — use getSession() first (reads localStorage, works
+        // offline / on slow mobile networks). getUser() always makes a network round-trip
+        // and will kick the user to the login screen if the connection is slow on startup.
         try {
-            const authUser = await Auth.getCurrentUser();
+            const { data: { session } } = await window.supabase.auth.getSession();
+            const authUser = session?.user ?? null;
             if (authUser) {
                 // Fetch the full profile from the users table (has integer id + role),
                 // same as the login flow – avoids using the raw Auth UUID as _currentUser.id
@@ -7397,6 +7409,11 @@ function _wireLoginBtn() {
                 if (profile) {
                     _currentUser = profile;
                     await UserPreferences.load(profile.id);
+                    // Background-validate the token is still accepted server-side.
+                    // If it was revoked (e.g. password changed on another device), sign out gracefully.
+                    window.supabase.auth.getUser().then(({ data, error }) => {
+                        if (error || !data?.user) logout().catch(() => {});
+                    }).catch(() => {});
                 } else {
                     // Auth session exists but no matching user profile — force sign out
                     console.warn('No user profile found for:', authUser.email, '— signing out.');

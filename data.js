@@ -145,6 +145,8 @@ class DataStore {
             'fs_crm_sync_queue',
             'fs_crm_tombstones',
             'remember_me',
+            'remember_me_email',
+            'sb-crm-auth-token',
         ]);
         const THRESHOLD_BYTES = 3.5 * 1024 * 1024;
         const TARGET_BYTES = 2.0 * 1024 * 1024; // prune down to 2 MB

@@ -5,5 +5,13 @@ window.SUPABASE_URL = 'https://remuwhxvzkzjtgbzqjaa.supabase.co';
 window._supabaseFactory = window.supabase;
 window.supabase = window.supabase.createClient(
     window.SUPABASE_URL,
-    'sb_publishable_XVWyiw5j1lnEErQUTV4XWg_lQcCIAjX'
+    'sb_publishable_XVWyiw5j1lnEErQUTV4XWg_lQcCIAjX',
+    {
+        auth: {
+            persistSession: true,
+            autoRefreshToken: true,
+            detectSessionInUrl: true,
+            storageKey: 'sb-crm-auth-token',
+        }
+    }
 );
