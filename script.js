@@ -7346,9 +7346,18 @@ function _wireLoginBtn() {
                 if (existing) existing.remove();
                 document.getElementById('loginBtn')?.insertAdjacentElement('afterend', resendMsg);
             } else if (msg === 'Load failed' || msg.toLowerCase().includes('load failed') || msg.toLowerCase().includes('failed to fetch')) {
-                // Supabase client in broken lock state — reload to recover
-                btn.textContent = 'Reloading…';
-                setTimeout(() => window.location.reload(true), 800);
+                // Network error (no connection or mobile data drop) — show message, never reload.
+                // Reloading here created an infinite loop on mobile: no network → "Failed to fetch"
+                // → reload → try again → "Failed to fetch" → reload…
+                const loginErrEl = document.getElementById('loginPasswordErr') || document.getElementById('loginEmailErr');
+                const networkErrText = 'Network error. Check your internet connection and try again.';
+                if (loginErrEl) {
+                    loginErrEl.textContent = networkErrText;
+                    loginErrEl.style.display = 'block';
+                    loginErrEl.setAttribute('role', 'alert');
+                } else {
+                    UI.toast?.error?.(networkErrText);
+                }
             } else if (_isQuotaErr(err)) {
                 // Last-ditch: cache wipe didn't fix it. Drop EVERYTHING in
                 // localStorage and reload — the user is locked out otherwise.
