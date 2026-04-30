@@ -7410,9 +7410,9 @@ function _wireLoginBtn() {
                     _currentUser = profile;
                     await UserPreferences.load(profile.id);
                     // Background-validate the token is still accepted server-side.
-                    // If it was revoked (e.g. password changed on another device), sign out gracefully.
+                    // Only force logout on explicit auth errors (401/403), never on network failures.
                     window.supabase.auth.getUser().then(({ data, error }) => {
-                        if (error || !data?.user) logout().catch(() => {});
+                        if (error && (error.status === 401 || error.status === 403)) logout().catch(() => {});
                     }).catch(() => {});
                 } else {
                     // Auth session exists but no matching user profile — force sign out
