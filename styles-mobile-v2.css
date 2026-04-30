@@ -490,14 +490,35 @@
         border-radius: 10px !important;
     }
     .targets-card h2 { font-size: 15px !important; margin-bottom: 10px !important; }
+    .perf-table-scroll {
+        overflow-x: visible !important;
+    }
     .perf-table-scroll .targets-table {
-        min-width: 360px !important;
-        font-size: 12px !important;
+        min-width: 0 !important;
+        width: 100% !important;
+        font-size: 11px !important;
+        table-layout: fixed !important;
     }
     .perf-table-scroll .targets-table th,
     .perf-table-scroll .targets-table td {
-        padding: 8px 10px !important;
-        white-space: nowrap !important;
+        padding: 7px 5px !important;
+        white-space: normal !important;
+        word-break: break-word !important;
+        vertical-align: middle !important;
+    }
+    /* Quarter col narrow, Progress col wider */
+    .perf-table-scroll .targets-table th:nth-child(1),
+    .perf-table-scroll .targets-table td:nth-child(1) { width: 14% !important; }
+    .perf-table-scroll .targets-table th:nth-child(2),
+    .perf-table-scroll .targets-table td:nth-child(2) { width: 16% !important; }
+    .perf-table-scroll .targets-table th:nth-child(3),
+    .perf-table-scroll .targets-table td:nth-child(3) { width: 28% !important; }
+    .perf-table-scroll .targets-table th:nth-child(4),
+    .perf-table-scroll .targets-table td:nth-child(4) { width: 42% !important; }
+    .target-progress {
+        flex-direction: column !important;
+        align-items: flex-start !important;
+        gap: 3px !important;
     }
 
     /* --- Performance + leaderboard cards padding --- */
@@ -966,17 +987,22 @@
     }
 
     /* Performance metric cards: stack layout on mobile */
-    .perf-card-list { gap: 5px !important; }
+    .perf-card-list { gap: 5px !important; overflow-x: hidden !important; }
     .perf-metric-card {
         flex-direction: column !important;
         align-items: flex-start !important;
         padding: 9px 12px !important;
         gap: 5px !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
+        overflow: hidden !important;
     }
     .perf-metric-name {
         min-width: 0 !important;
         font-size: 12px !important;
         width: 100% !important;
+        white-space: normal !important;
+        word-break: break-word !important;
     }
     .perf-metric-stats {
         display: grid !important;
