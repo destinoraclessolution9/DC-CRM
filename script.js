@@ -7833,7 +7833,7 @@ function _wireLoginBtn() {
             if (userDisplay) userDisplay.textContent = displayName;
             const initials2 = (displayName || 'U').split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
             const svgNav = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Ccircle cx='32' cy='32' r='32' fill='%238B1A1A'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='central' text-anchor='middle' font-size='22' font-weight='700' font-family='sans-serif' fill='white'%3E${encodeURIComponent(initials2)}%3C/text%3E%3C/svg%3E`;
-            const avatarSrc = (_currentUser.avatar_url && _currentUser.avatar_url.startsWith('http'))
+            const avatarSrc = (_currentUser.avatar_url && (_currentUser.avatar_url.startsWith('http') || _currentUser.avatar_url.startsWith('data:')))
                 ? _currentUser.avatar_url : svgNav;
             if (userAvatar) { userAvatar.src = avatarSrc; userAvatar.onerror = () => { userAvatar.src = svgNav; }; }
             const drawerAvatar = document.getElementById('drawer-user-avatar');
@@ -36838,6 +36838,17 @@ const simulateCampaignSending = async (campaignId) => {
         const previewEl = document.getElementById('account-avatar-preview');
         if (statusEl) statusEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Uploading…';
 
+        // Show local preview immediately so the user sees the new photo right away
+        const blobUrl = URL.createObjectURL(file);
+        const setAllAvatars = (src) => {
+            if (previewEl) { previewEl.onerror = null; previewEl.src = src; }
+            const navAvatar = document.getElementById('user-avatar');
+            if (navAvatar) { navAvatar.onerror = null; navAvatar.src = src; }
+            const drawerAvatar = document.getElementById('drawer-user-avatar');
+            if (drawerAvatar) { drawerAvatar.onerror = null; drawerAvatar.src = src; }
+        };
+        setAllAvatars(blobUrl);
+
         try {
             let avatarUrl = null;
             // Try Supabase storage first
@@ -36867,12 +36878,9 @@ const simulateCampaignSending = async (campaignId) => {
             await AppDataStore.update('users', _currentUser.id, { avatar_url: avatarUrl });
             _currentUser.avatar_url = avatarUrl;
 
-            // Update preview in modal + navbar avatar
-            if (previewEl) previewEl.src = avatarUrl;
-            const navAvatar = document.getElementById('user-avatar');
-            if (navAvatar) navAvatar.src = avatarUrl;
-            const drawerAvatar = document.getElementById('drawer-user-avatar');
-            if (drawerAvatar) drawerAvatar.src = avatarUrl;
+            // Switch from blob URL to the permanent URL
+            setAllAvatars(avatarUrl);
+            URL.revokeObjectURL(blobUrl);
 
             if (statusEl) statusEl.innerHTML = '<span style="color:var(--success,#16a34a);"><i class="fas fa-check"></i> Photo updated!</span>';
             setTimeout(() => { if (statusEl) statusEl.innerHTML = ''; }, 3000);
