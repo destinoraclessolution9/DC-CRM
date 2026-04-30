@@ -7815,7 +7815,8 @@ function _wireLoginBtn() {
             if (drawerAvatar) { drawerAvatar.src = avatarSrc; drawerAvatar.onerror = () => { drawerAvatar.src = svgNav; }; }
         } else {
             if (userDisplay) userDisplay.textContent = 'Guest';
-            if (userAvatar) userAvatar.src = 'https://ui-avatars.com/api/?name=Guest&background=8B1A1A&color=fff&size=64';
+            const guestSvg = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Ccircle cx='32' cy='32' r='32' fill='%238B1A1A'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='central' text-anchor='middle' font-size='22' font-weight='700' font-family='sans-serif' fill='white'%3EG%3C/text%3E%3C/svg%3E`;
+            if (userAvatar) userAvatar.src = guestSvg;
         }
     };
 
