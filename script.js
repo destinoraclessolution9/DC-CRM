@@ -40977,6 +40977,14 @@ const initImportDemoData = async () => {
         const successStories     = highlights.filter(h => h.type === 'success_story').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
         const recommendationTips = highlights.filter(h => h.type === 'recommendation_tip');
 
+        // --- Pre-sign highlight images so render doesn't depend on DOM resolver ---
+        const withImg = [...publicNews, ...successStories].filter(h => h.image_url);
+        if (withImg.length && AppDataStore.resolveAttachmentSrc) {
+            await Promise.all(withImg.map(async h => {
+                try { h._signedUrl = await AppDataStore.resolveAttachmentSrc(h.image_url); } catch(e) {}
+            }));
+        }
+
         // --- Totals & summary sync ---
         const totalPoints  = myRewards.reduce((s, r) => s + (parseInt(r.fudi_points)    || 0), 0);
         const totalReturns = myRewards.reduce((s, r) => s + (parseFloat(r.sharing_return) || 0), 0);
@@ -41105,8 +41113,8 @@ const initImportDemoData = async () => {
                </tbody></table></div>`;
 
         // --- Render ---
-        // resolveAttachmentSrc handles both full Supabase URLs and bare paths — always sign via data-attach-src
-        const resolveHighlightImg = (url) => `data-attach-src="${url}"`;
+        // Use pre-signed URL (_signedUrl) so images render immediately without DOM resolver
+        const imgSrc = (h) => h._signedUrl ? `src="${h._signedUrl}"` : '';
 
         container.innerHTML = `
             <div class="fude-tab">
@@ -41127,12 +41135,12 @@ const initImportDemoData = async () => {
                         ? '<div class="fude-sec-body"><p style="color:var(--gray-500,#6b7280);margin:0;">No highlights yet.</p></div>'
                         : (() => {
                             const [hero, ...rest] = publicNews;
-                            const heroBg = hero.image_url
-                                ? `<img loading="lazy" decoding="async" class="fude-hero-card-bg" ${resolveHighlightImg(hero.image_url)} alt="" onerror="this.style.display='none'">`
+                            const heroBg = hero._signedUrl
+                                ? `<img loading="lazy" decoding="async" class="fude-hero-card-bg" ${imgSrc(hero)} alt="" onerror="this.style.display='none'">`
                                 : '';
                             const heroCard = `<div class="fude-hero-card">${heroBg}<div class="fude-hero-card-overlay"><span class="fude-hero-badge">Latest</span><h3>${hero.title}</h3>${hero.content ? `<p>${hero.content}</p>` : ''}<span class="fude-hero-date">${fmtDate(hero.created_at)}</span></div></div>`;
                             const grid = rest.length
-                                ? `<div class="fude-news-grid">${rest.map(n => `<div class="fude-card">${n.image_url ? `<img loading="lazy" decoding="async" class="fude-card-img" ${resolveHighlightImg(n.image_url)} alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="fude-card-img-placeholder" style="display:none;">📰</div>` : `<div class="fude-card-img-placeholder">📰</div>`}<div class="fude-card-body"><span class="fude-card-tag">News</span><h3>${n.title}</h3>${n.content ? `<p>${n.content}</p>` : ''}<div class="fude-card-date">${fmtDate(n.created_at)}</div></div></div>`).join('')}</div>`
+                                ? `<div class="fude-news-grid">${rest.map(n => `<div class="fude-card">${n._signedUrl ? `<img loading="lazy" decoding="async" class="fude-card-img" ${imgSrc(n)} alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="fude-card-img-placeholder" style="display:none;">📰</div>` : `<div class="fude-card-img-placeholder">📰</div>`}<div class="fude-card-body"><span class="fude-card-tag">News</span><h3>${n.title}</h3>${n.content ? `<p>${n.content}</p>` : ''}<div class="fude-card-date">${fmtDate(n.created_at)}</div></div></div>`).join('')}</div>`
                                 : '';
                             return heroCard + grid;
                           })()
@@ -41154,7 +41162,7 @@ const initImportDemoData = async () => {
                                 <span class="fude-mag-story-num">${i + 1}</span>
                                 <h3 class="fude-mag-story-title">${s.title}</h3>
                             </div>
-                            ${s.image_url ? `<img loading="lazy" decoding="async" class="fude-mag-story-photo" ${resolveHighlightImg(s.image_url)} alt="" onerror="this.style.display='none'">` : ''}
+                            ${s._signedUrl ? `<img loading="lazy" decoding="async" class="fude-mag-story-photo" ${imgSrc(s)} alt="" onerror="this.style.display='none'">` : ''}
                             ${s.content ? `<p class="fude-mag-story-text">${s.content}</p>` : ''}
                         </div>`).join('')
                     }
@@ -41178,7 +41186,6 @@ const initImportDemoData = async () => {
                 </div>
             </div>
         `;
-        if (window._resolveAttachmentImages) window._resolveAttachmentImages(container);
     };
 
     // ========== LEVEL 13/14: Highlight CRUD (Admin only) ==========
