@@ -20899,10 +20899,11 @@ function _wireLoginBtn() {
         }
         UI.hideModal();
         try {
-            const [acts, allNotes, names] = await Promise.all([
+            const [acts, allNotes, names, referrals] = await Promise.all([
                 AppDataStore.query('activities', { prospect_id: id }).catch(() => []),
                 AppDataStore.getAll('notes').catch(() => []),
-                AppDataStore.query('names', { prospect_id: id }).catch(() => [])
+                AppDataStore.query('names', { prospect_id: id }).catch(() => []),
+                AppDataStore.query('referrals', { referred_prospect_id: id }).catch(() => []),
             ]);
             const notes = allNotes.filter(n =>
                 String(n.prospect_id) === String(id) ||
@@ -20913,6 +20914,7 @@ function _wireLoginBtn() {
                 acts.length ? AppDataStore.deleteMany('activities', acts.map(a => a.id)) : Promise.resolve(),
                 notes.length ? AppDataStore.deleteMany('notes', notes.map(n => n.id)) : Promise.resolve(),
                 names.length ? AppDataStore.deleteMany('names', names.map(n => n.id)) : Promise.resolve(),
+                referrals.length ? AppDataStore.deleteMany('referrals', referrals.map(r => r.id)) : Promise.resolve(),
             ]);
             await AppDataStore.delete('prospects', id);
             UI.toast.success('Prospect deleted.');
@@ -25962,10 +25964,11 @@ for (const p of allPackages) {
     const executeDelete = async (id) => {
         UI.hideModal();
         try {
-            const [acts, allNotes, names] = await Promise.all([
+            const [acts, allNotes, names, referrals] = await Promise.all([
                 AppDataStore.query('activities', { prospect_id: id }).catch(() => []),
                 AppDataStore.getAll('notes').catch(() => []),
-                AppDataStore.query('names', { prospect_id: id }).catch(() => [])
+                AppDataStore.query('names', { prospect_id: id }).catch(() => []),
+                AppDataStore.query('referrals', { referred_prospect_id: id }).catch(() => []),
             ]);
             const notes = allNotes.filter(n =>
                 String(n.prospect_id) === String(id) ||
@@ -25976,6 +25979,7 @@ for (const p of allPackages) {
                 acts.length ? AppDataStore.deleteMany('activities', acts.map(a => a.id)) : Promise.resolve(),
                 notes.length ? AppDataStore.deleteMany('notes', notes.map(n => n.id)) : Promise.resolve(),
                 names.length ? AppDataStore.deleteMany('names', names.map(n => n.id)) : Promise.resolve(),
+                referrals.length ? AppDataStore.deleteMany('referrals', referrals.map(r => r.id)) : Promise.resolve(),
             ]);
             await AppDataStore.delete('prospects', id);
             UI.toast.success('Prospect deleted successfully');
