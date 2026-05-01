@@ -7888,6 +7888,17 @@ function _wireLoginBtn() {
                 const reminders = await AppDataStore.query('refill_reminders', { status: 'pending' });
                 count += (reminders || []).length;
             } catch (_) {}
+
+            // Pending co-agent invitations for current user
+            try {
+                if (_currentUser?.id) {
+                    const { data: coInvites } = await window.supabase
+                        .from('activities')
+                        .select('id')
+                        .filter('co_agents', 'cs', JSON.stringify([{ id: String(_currentUser.id), status: 'pending' }]));
+                    count += (coInvites || []).length;
+                }
+            } catch (_) {}
         } catch (_) {}
 
         badge.textContent = count > 99 ? '99+' : String(count);
@@ -7939,6 +7950,30 @@ function _wireLoginBtn() {
             const reminders = await AppDataStore.query('refill_reminders', { status: 'pending' });
             for (const r of (reminders || []).slice(0, 5)) {
                 items.push({ icon: '💊', title: `Refill due: ${r.product_name || 'Product'}`, sub: `Customer needs reorder · Due ${r.due_date || ''}` });
+            }
+        } catch (_) {}
+
+        // Pending co-agent invitations for current user
+        try {
+            if (_currentUser?.id) {
+                const { data: coInvites } = await window.supabase
+                    .from('activities')
+                    .select('id, activity_type, activity_title, activity_date')
+                    .filter('co_agents', 'cs', JSON.stringify([{ id: String(_currentUser.id), status: 'pending' }]));
+                for (const act of (coInvites || []).slice(0, 5)) {
+                    const typeLabel = act.activity_type || 'Activity';
+                    const dateLabel = act.activity_date ? ` · ${act.activity_date}` : '';
+                    const actId = act.id;
+                    items.push({
+                        icon: '🤝',
+                        title: `Co-agent invitation: ${typeLabel}`,
+                        sub: `${act.activity_title || typeLabel}${dateLabel}
+                            <span style="display:inline-flex;gap:6px;margin-top:6px;">
+                                <button onclick="event.stopPropagation();app.respondCoAgentInvite(${actId},'accepted');document.querySelector('.notif-panel')?.remove()" style="background:#16a34a;color:#fff;border:none;border-radius:4px;padding:2px 10px;cursor:pointer;font-size:11px;">✓ Accept</button>
+                                <button onclick="event.stopPropagation();app.respondCoAgentInvite(${actId},'rejected');document.querySelector('.notif-panel')?.remove()" style="background:#dc2626;color:#fff;border:none;border-radius:4px;padding:2px 10px;cursor:pointer;font-size:11px;">✗ Reject</button>
+                            </span>`,
+                    });
+                }
             }
         } catch (_) {}
 
