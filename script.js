@@ -41105,6 +41105,9 @@ const initImportDemoData = async () => {
                </tbody></table></div>`;
 
         // --- Render ---
+        // image_url may be a storage path (private bucket) or a full URL (old records)
+        const resolveHighlightImg = (url) => url && !url.startsWith('http') ? `data-attach-src="${url}"` : `src="${url || ''}"`;
+
         container.innerHTML = `
             <div class="fude-tab">
                 <div class="fude-page-header">
@@ -41125,11 +41128,11 @@ const initImportDemoData = async () => {
                         : (() => {
                             const [hero, ...rest] = publicNews;
                             const heroBg = hero.image_url
-                                ? `<img loading="lazy" decoding="async" class="fude-hero-card-bg" src="${hero.image_url}" alt="" onerror="this.style.display='none'">`
+                                ? `<img loading="lazy" decoding="async" class="fude-hero-card-bg" ${resolveHighlightImg(hero.image_url)} alt="" onerror="this.style.display='none'">`
                                 : '';
                             const heroCard = `<div class="fude-hero-card">${heroBg}<div class="fude-hero-card-overlay"><span class="fude-hero-badge">Latest</span><h3>${hero.title}</h3>${hero.content ? `<p>${hero.content}</p>` : ''}<span class="fude-hero-date">${fmtDate(hero.created_at)}</span></div></div>`;
                             const grid = rest.length
-                                ? `<div class="fude-news-grid">${rest.map(n => `<div class="fude-card">${n.image_url ? `<img loading="lazy" decoding="async" class="fude-card-img" src="${n.image_url}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="fude-card-img-placeholder" style="display:none;">📰</div>` : `<div class="fude-card-img-placeholder">📰</div>`}<div class="fude-card-body"><span class="fude-card-tag">News</span><h3>${n.title}</h3>${n.content ? `<p>${n.content}</p>` : ''}<div class="fude-card-date">${fmtDate(n.created_at)}</div></div></div>`).join('')}</div>`
+                                ? `<div class="fude-news-grid">${rest.map(n => `<div class="fude-card">${n.image_url ? `<img loading="lazy" decoding="async" class="fude-card-img" ${resolveHighlightImg(n.image_url)} alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="fude-card-img-placeholder" style="display:none;">📰</div>` : `<div class="fude-card-img-placeholder">📰</div>`}<div class="fude-card-body"><span class="fude-card-tag">News</span><h3>${n.title}</h3>${n.content ? `<p>${n.content}</p>` : ''}<div class="fude-card-date">${fmtDate(n.created_at)}</div></div></div>`).join('')}</div>`
                                 : '';
                             return heroCard + grid;
                           })()
@@ -41151,7 +41154,7 @@ const initImportDemoData = async () => {
                                 <span class="fude-mag-story-num">${i + 1}</span>
                                 <h3 class="fude-mag-story-title">${s.title}</h3>
                             </div>
-                            ${s.image_url ? `<img loading="lazy" decoding="async" class="fude-mag-story-photo" src="${s.image_url}" alt="" onerror="this.style.display='none'">` : ''}
+                            ${s.image_url ? `<img loading="lazy" decoding="async" class="fude-mag-story-photo" ${resolveHighlightImg(s.image_url)} alt="" onerror="this.style.display='none'">` : ''}
                             ${s.content ? `<p class="fude-mag-story-text">${s.content}</p>` : ''}
                         </div>`).join('')
                     }
@@ -41175,6 +41178,7 @@ const initImportDemoData = async () => {
                 </div>
             </div>
         `;
+        if (window._resolveAttachmentImages) window._resolveAttachmentImages(container);
     };
 
     // ========== LEVEL 13/14: Highlight CRUD (Admin only) ==========
@@ -41265,8 +41269,7 @@ const initImportDemoData = async () => {
             const path = `highlights/${Date.now()}_${safeName}`;
             const { error: upErr } = await sb.storage.from('attachments').upload(path, file, { upsert: false, contentType: file.type });
             if (upErr) { UI.toast.error('Upload failed: ' + upErr.message); return; }
-            const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
-            imageUrl = urlData?.publicUrl || null;
+            imageUrl = path; // store path; signed URL resolved at render time
         }
 
         const payload = {
