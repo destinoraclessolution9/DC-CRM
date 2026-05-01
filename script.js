@@ -41105,8 +41105,8 @@ const initImportDemoData = async () => {
                </tbody></table></div>`;
 
         // --- Render ---
-        // image_url may be a storage path (private bucket) or a full URL (old records)
-        const resolveHighlightImg = (url) => url && !url.startsWith('http') ? `data-attach-src="${url}"` : `src="${url || ''}"`;
+        // resolveAttachmentSrc handles both full Supabase URLs and bare paths — always sign via data-attach-src
+        const resolveHighlightImg = (url) => `data-attach-src="${url}"`;
 
         container.innerHTML = `
             <div class="fude-tab">
