@@ -82,6 +82,7 @@
     top: 0;
     left: -100%;
     width: min(80vw, 320px);
+    height: 100vh;
     height: 100dvh;
     background: var(--white);
     z-index: 301;
@@ -114,9 +115,11 @@
 
 .mobile-drawer-body {
     flex: 1;
-    overflow-y: auto;
-    padding: 8px 0 24px;
+    min-height: 0;
+    overflow-y: scroll;
     -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
+    padding: 8px 0 24px;
 }
 
 .mobile-drawer-section-title {
