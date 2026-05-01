@@ -14784,6 +14784,7 @@ function _wireLoginBtn() {
                         <button class="act-action-btn act-btn-edit" onclick="app.editActivityTiming(${activityId})"><span class="act-icon"><i class="fas fa-pen"></i></span><span class="act-label">Edit</span></button>
                         ${activity.activity_type !== 'EVENT' && activity.prospect_id ? `<button class="act-action-btn act-btn-outcome" onclick="(async () => { await app.openMeetingOutcomeModal(${activityId}); })()"><span class="act-icon"><i class="fas fa-clipboard-check"></i></span><span class="act-label">Outcome</span></button>` : ''}
                         ${activity.prospect_id ? `<button class="act-action-btn act-btn-notes" onclick="(async () => { await app.openPostMeetupNotesModal(${activityId}, ${activity.prospect_id}); })()"><span class="act-icon"><i class="fas fa-sticky-note"></i></span><span class="act-label">Notes</span></button>` : ''}
+                        ${'CPS,FTF,GR,XG,AGENT_TRAINING'.includes(activity.activity_type) ? `<button class="act-action-btn act-btn-edit" onclick="(async()=>{ UI.hideModal(); await app.openMeetingCapture(${activityId}); })()"><span class="act-icon"><i class="fas fa-microphone-alt"></i></span><span class="act-label">Live Notes</span></button>` : ''}
                         <button class="act-action-btn act-action-delete" onclick="(async () => { await app.deleteActivity(${activityId}); })()"><i class="fas fa-trash-alt"></i> Delete</button>
                     </div>
                 </div>
@@ -14792,6 +14793,317 @@ function _wireLoginBtn() {
 
         UI.showModal('Activity Details', content, []);
     };
+
+    // ========== MEETING LIVE NOTES (QUICK CAPTURE) ==========
+
+    const _MC_CONFIG = {
+        CPS: {
+            label: 'CPS 咨询',
+            buttons: [
+                { emoji: '🎯', label: 'Goals 目标',      key: 'goals',       outcome: false, next: false },
+                { emoji: '💼', label: 'Situation 现状',   key: 'situation',   outcome: false, next: false },
+                { emoji: '📦', label: 'Product 产品',     key: 'product',     outcome: false, next: false },
+                { emoji: '❓', label: 'Concern 疑虑',     key: 'concern',     outcome: false, next: false },
+                { emoji: '🚫', label: 'Objection 反对',   key: 'objection',   outcome: false, next: false },
+                { emoji: '✅', label: 'Decision 决定',    key: 'decision',    outcome: true,  next: false },
+                { emoji: '📅', label: 'Next Action 跟进', key: 'next_action', outcome: false, next: true  },
+            ],
+        },
+        FTF: {
+            label: 'FTF 会面',
+            buttons: [
+                { emoji: '🎯', label: 'Purpose 目的',   key: 'purpose',    outcome: false, next: false },
+                { emoji: '💬', label: 'Discussion 讨论', key: 'discussion', outcome: false, next: false },
+                { emoji: '📦', label: 'Product 产品',    key: 'product',    outcome: false, next: false },
+                { emoji: '😊', label: 'Response 反应',   key: 'response',   outcome: false, next: false },
+                { emoji: '✅', label: 'Outcome 结果',    key: 'outcome',    outcome: true,  next: false },
+                { emoji: '📅', label: 'Follow-up 跟进',  key: 'followup',   outcome: false, next: true  },
+            ],
+        },
+        GR: {
+            label: 'Golden Road',
+            buttons: [
+                { emoji: '💰', label: 'Financial Goal 财务目标', key: 'fin_goal',  outcome: false, next: false },
+                { emoji: '⚖️', label: 'Risk Profile 风险',       key: 'risk',      outcome: false, next: false },
+                { emoji: '📦', label: 'Product Match 产品',       key: 'product',   outcome: false, next: false },
+                { emoji: '❓', label: 'Concern 疑虑',             key: 'concern',   outcome: false, next: false },
+                { emoji: '✅', label: 'Decision 决定',            key: 'decision',  outcome: true,  next: false },
+                { emoji: '📅', label: 'Next Step 下步',           key: 'next_step', outcome: false, next: true  },
+            ],
+        },
+        XG: {
+            label: 'Xin Gua 星卦',
+            buttons: [
+                { emoji: '🔮', label: 'Focus 分析重点',      key: 'focus',          outcome: false, next: false },
+                { emoji: '💡', label: 'Finding 发现',         key: 'finding',        outcome: true,  next: false },
+                { emoji: '📋', label: 'Recommendation 建议',  key: 'recommendation', outcome: true,  next: false },
+                { emoji: '😊', label: 'Reaction 反应',        key: 'reaction',       outcome: false, next: false },
+                { emoji: '📅', label: 'Action Plan 行动',     key: 'action_plan',    outcome: false, next: true  },
+            ],
+        },
+        AGENT_TRAINING: {
+            label: 'Agent Training 培训',
+            buttons: [
+                { emoji: '📚', label: 'Topic 主题',       key: 'topic',       outcome: false, next: false },
+                { emoji: '🛠', label: 'Skills 技能',      key: 'skills',      outcome: false, next: false },
+                { emoji: '📊', label: 'Performance 表现', key: 'performance', outcome: true,  next: false },
+                { emoji: '⬆', label: 'Improve 改进',     key: 'improve',     outcome: false, next: true  },
+                { emoji: '🎯', label: 'Next Focus 重点',  key: 'next_focus',  outcome: false, next: true  },
+            ],
+        },
+    };
+
+    let _mcState = null;
+
+    const _mcElapsed = () => {
+        if (!_mcState) return '00:00:00';
+        const s = Math.floor((Date.now() - _mcState.startTime) / 1000);
+        const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+        return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+    };
+
+    const _mcTimestamp = () => {
+        const now = new Date();
+        return `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+    };
+
+    const _mcRenderLog = () => {
+        const logEl = document.getElementById('mc-log');
+        if (!logEl || !_mcState) return;
+        if (!_mcState.items.length) {
+            logEl.innerHTML = '<div style="color:#94a3b8;text-align:center;padding:30px;font-size:13px;">Tap a button above to capture a note</div>';
+            return;
+        }
+        logEl.innerHTML = _mcState.items.map((it, i) => `
+            <div style="display:flex;align-items:flex-start;gap:8px;padding:10px 14px;border-bottom:1px solid #f1f5f9;">
+                <div style="font-size:18px;line-height:1.4;">${it.emoji}</div>
+                <div style="flex:1;min-width:0;">
+                    <div style="font-size:11px;color:#64748b;font-weight:600;">${it.time} · ${it.label}</div>
+                    <div style="font-size:13px;color:#1e293b;margin-top:2px;word-break:break-word;">${it.text}</div>
+                </div>
+                <button onclick="app.mcRemoveItem(${i})" style="background:none;border:none;color:#cbd5e1;cursor:pointer;font-size:16px;padding:0 4px;flex-shrink:0;">✕</button>
+            </div>
+        `).join('');
+    };
+
+    const openMeetingCapture = async (activityId) => {
+        const activity = await AppDataStore.getById('activities', activityId);
+        if (!activity) { UI.toast.error('Activity not found'); return; }
+        const config = _MC_CONFIG[activity.activity_type];
+        if (!config) { UI.toast.error('Live Notes not available for this activity type'); return; }
+
+        _mcState = { activityId, config, items: [], startTime: Date.now(), timerInterval: null, micOn: false, recognition: null, activeBtn: null };
+
+        const overlay = document.createElement('div');
+        overlay.id = 'mc-overlay';
+        overlay.style.cssText = 'position:fixed;inset:0;background:#f8fafc;z-index:9999;display:flex;flex-direction:column;overflow:hidden;font-family:inherit;';
+        overlay.innerHTML = `
+            <div style="background:#7f1d1d;color:#fff;padding:12px 16px;display:flex;align-items:center;gap:10px;flex-shrink:0;">
+                <button onclick="app.closeMeetingCapture()" style="background:rgba(255,255,255,0.2);border:none;color:#fff;width:34px;height:34px;border-radius:50%;cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center;">✕</button>
+                <div style="flex:1;">
+                    <div style="font-weight:700;font-size:15px;">📝 Live Notes</div>
+                    <div style="font-size:12px;opacity:0.8;">${config.label}</div>
+                </div>
+                <div id="mc-timer" style="font-size:13px;font-variant-numeric:tabular-nums;background:rgba(0,0,0,0.25);padding:4px 12px;border-radius:20px;letter-spacing:0.05em;">00:00:00</div>
+            </div>
+
+            <div style="padding:12px 16px;border-bottom:1px solid #e2e8f0;flex-shrink:0;background:#fff;">
+                <div style="font-size:11px;font-weight:700;color:#64748b;letter-spacing:0.06em;margin-bottom:8px;">QUICK CAPTURE</div>
+                <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                    ${config.buttons.map(b => `
+                        <button id="mc-btn-${b.key}" onclick="app.mcSelectCategory('${b.key}','${b.label.replace(/'/g,"\\'")}','${b.emoji}')"
+                            style="background:#f8fafc;border:1.5px solid #e2e8f0;border-radius:20px;padding:7px 13px;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:5px;transition:all 0.15s;white-space:nowrap;">
+                            <span>${b.emoji}</span><span style="font-weight:500;">${b.label}</span>
+                        </button>
+                    `).join('')}
+                </div>
+            </div>
+
+            <div id="mc-input-area" style="padding:10px 16px;border-bottom:1px solid #e2e8f0;flex-shrink:0;display:none;background:#fffbeb;">
+                <div id="mc-input-label" style="font-size:11px;font-weight:700;color:#7f1d1d;margin-bottom:6px;"></div>
+                <div style="display:flex;gap:8px;align-items:flex-end;">
+                    <textarea id="mc-text-input" rows="2" placeholder="Type your note here..."
+                        style="flex:1;border:1.5px solid #cbd5e1;border-radius:8px;padding:8px;font-size:13px;resize:none;outline:none;font-family:inherit;line-height:1.5;"
+                        onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();app.mcAddItem();}"></textarea>
+                    <button onclick="app.mcAddItem()"
+                        style="background:#7f1d1d;color:#fff;border:none;border-radius:8px;padding:10px 16px;cursor:pointer;font-size:20px;font-weight:700;flex-shrink:0;line-height:1;">+</button>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;margin-top:7px;">
+                    <button id="mc-mic-btn" onclick="app.mcToggleMic()"
+                        style="background:#f1f5f9;border:1.5px solid #e2e8f0;border-radius:16px;padding:4px 12px;cursor:pointer;font-size:11px;display:flex;align-items:center;gap:4px;transition:all 0.2s;">
+                        🎤 <span id="mc-mic-label">Mic Off</span>
+                    </button>
+                    <span style="font-size:10px;color:#94a3b8;">Voice → input only, never saved to server</span>
+                </div>
+            </div>
+
+            <div id="mc-log" style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;">
+                <div style="color:#94a3b8;text-align:center;padding:30px;font-size:13px;">Tap a button above to capture a note</div>
+            </div>
+
+            <div style="padding:12px 16px;border-top:2px solid #e2e8f0;background:#fff;flex-shrink:0;">
+                <div id="mc-count" style="text-align:center;font-size:12px;color:#64748b;margin-bottom:8px;">0 notes captured</div>
+                <button onclick="(async()=>{ await app.endMeetingCapture(${activityId}); })()"
+                    style="width:100%;background:#7f1d1d;color:#fff;border:none;border-radius:10px;padding:14px;font-size:15px;font-weight:700;cursor:pointer;letter-spacing:0.02em;">
+                    ✅ End & Save Notes
+                </button>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+
+        _mcState.timerInterval = setInterval(() => {
+            const el = document.getElementById('mc-timer');
+            if (el) el.textContent = _mcElapsed();
+        }, 1000);
+    };
+
+    const closeMeetingCapture = () => {
+        if (_mcState) {
+            clearInterval(_mcState.timerInterval);
+            if (_mcState.recognition) { try { _mcState.recognition.stop(); } catch(_) {} }
+            _mcState = null;
+        }
+        document.getElementById('mc-overlay')?.remove();
+    };
+
+    const mcSelectCategory = (key, label, emoji) => {
+        if (!_mcState) return;
+        _mcState.activeBtn = { key, label, emoji };
+
+        // Reset all buttons then highlight active
+        _mcState.config.buttons.forEach(b => {
+            const el = document.getElementById(`mc-btn-${b.key}`);
+            if (el) { el.style.background = '#f8fafc'; el.style.color = '#374151'; el.style.borderColor = '#e2e8f0'; }
+        });
+        const activeEl = document.getElementById(`mc-btn-${key}`);
+        if (activeEl) { activeEl.style.background = '#7f1d1d'; activeEl.style.color = '#fff'; activeEl.style.borderColor = '#7f1d1d'; }
+
+        const area = document.getElementById('mc-input-area');
+        const labelEl = document.getElementById('mc-input-label');
+        const input = document.getElementById('mc-text-input');
+        if (area) area.style.display = 'block';
+        if (labelEl) labelEl.textContent = `${emoji} ${label}`;
+        if (input) { input.value = ''; input.focus(); }
+    };
+
+    const mcAddItem = () => {
+        if (!_mcState || !_mcState.activeBtn) { UI.toast.error('Select a category first'); return; }
+        const input = document.getElementById('mc-text-input');
+        const text = (input?.value || '').trim().replace(/\[…[^\]]*\]$/, '').trim();
+        if (!text) { UI.toast.error('Please enter a note'); return; }
+
+        const btn = _mcState.config.buttons.find(b => b.key === _mcState.activeBtn.key);
+        _mcState.items.push({
+            key:       _mcState.activeBtn.key,
+            label:     _mcState.activeBtn.label,
+            emoji:     _mcState.activeBtn.emoji,
+            text,
+            time:      _mcTimestamp(),
+            isOutcome: btn?.outcome || false,
+            isNext:    btn?.next    || false,
+        });
+
+        if (input) input.value = '';
+        _mcRenderLog();
+        const log = document.getElementById('mc-log');
+        if (log) log.scrollTop = log.scrollHeight;
+        const countEl = document.getElementById('mc-count');
+        if (countEl) countEl.textContent = `${_mcState.items.length} note${_mcState.items.length === 1 ? '' : 's'} captured`;
+    };
+
+    const mcRemoveItem = (index) => {
+        if (!_mcState) return;
+        _mcState.items.splice(index, 1);
+        _mcRenderLog();
+        const countEl = document.getElementById('mc-count');
+        if (countEl) countEl.textContent = `${_mcState.items.length} note${_mcState.items.length === 1 ? '' : 's'} captured`;
+    };
+
+    const mcToggleMic = () => {
+        if (!_mcState) return;
+        const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SR) { UI.toast.error('Speech recognition not supported in this browser'); return; }
+
+        if (_mcState.micOn) {
+            try { _mcState.recognition?.stop(); } catch(_) {}
+            _mcState.micOn = false;
+            _mcState.recognition = null;
+            const btn = document.getElementById('mc-mic-btn');
+            const lbl = document.getElementById('mc-mic-label');
+            if (btn) { btn.style.background = '#f1f5f9'; btn.style.borderColor = '#e2e8f0'; btn.style.color = '#374151'; }
+            if (lbl) lbl.textContent = 'Mic Off';
+            return;
+        }
+
+        const recog = new SR();
+        recog.continuous = true;
+        recog.interimResults = true;
+        recog.lang = 'zh';
+        recog.onresult = (e) => {
+            const input = document.getElementById('mc-text-input');
+            if (!input) return;
+            let finalText = '', interimText = '';
+            for (let i = e.resultIndex; i < e.results.length; i++) {
+                if (e.results[i].isFinal) finalText += e.results[i][0].transcript;
+                else interimText += e.results[i][0].transcript;
+            }
+            if (finalText) {
+                input.value = (input.value.replace(/\[…[^\]]*\]$/, '') + finalText).trim();
+            } else if (interimText) {
+                input.value = input.value.replace(/\[…[^\]]*\]$/, '') + `[…${interimText}]`;
+            }
+        };
+        recog.onend = () => {
+            // Auto-restart so 90-min sessions don't cut off
+            if (_mcState?.micOn) { try { recog.start(); } catch(_) {} }
+        };
+        recog.onerror = (e) => {
+            if (e.error !== 'no-speech') UI.toast.error('Mic: ' + e.error);
+        };
+
+        try {
+            recog.start();
+            _mcState.micOn = true;
+            _mcState.recognition = recog;
+            const btn = document.getElementById('mc-mic-btn');
+            const lbl = document.getElementById('mc-mic-label');
+            if (btn) { btn.style.background = '#dcfce7'; btn.style.borderColor = '#16a34a'; btn.style.color = '#166534'; }
+            if (lbl) lbl.textContent = 'Mic On 🔴';
+        } catch(e) {
+            UI.toast.error('Could not start microphone: ' + (e.message || e));
+        }
+    };
+
+    const endMeetingCapture = async (activityId) => {
+        if (!_mcState) return;
+        if (!_mcState.items.length) { UI.toast.error('No notes captured yet — tap a category button to add notes'); return; }
+
+        const { items, config } = _mcState;
+        const dateStr = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' });
+        const elapsed = _mcElapsed();
+
+        const keyPoints  = `[Live Notes · ${config.label} · ${dateStr} · ${elapsed}]\n` +
+            items.map(it => `${it.time}  ${it.emoji} ${it.label}: ${it.text}`).join('\n');
+        const outcome    = items.filter(it => it.isOutcome).map(it => `${it.emoji} ${it.label}: ${it.text}`).join('\n');
+        const nextSteps  = items.filter(it => it.isNext   ).map(it => `${it.emoji} ${it.label}: ${it.text}`).join('\n');
+
+        try {
+            const existing = await AppDataStore.getById('activities', activityId) || {};
+            await AppDataStore.update('activities', activityId, {
+                note_key_points: [existing.note_key_points, keyPoints].filter(Boolean).join('\n\n---\n\n'),
+                note_outcome:    [existing.note_outcome,    outcome  ].filter(Boolean).join('\n'),
+                note_next_steps: [existing.note_next_steps, nextSteps].filter(Boolean).join('\n'),
+            });
+            const n = items.length;
+            UI.toast.success(`${n} note${n === 1 ? '' : 's'} saved ✓`);
+            closeMeetingCapture();
+            if (document.querySelector('.calendar-view-container')) renderCalendar().catch(() => {});
+        } catch(e) {
+            UI.toast.error('Could not save notes: ' + (e.message || 'Unknown error'));
+        }
+    };
+
+    // ========== END MEETING LIVE NOTES ==========
 
     const uploadCPSForm = (activityId, prospectId) => {
         const input = document.createElement('input');
@@ -46095,6 +46407,13 @@ JB 星期二到
         removeCoAgent,
         updateCoAgentRole,
         respondCoAgentInvite,
+        openMeetingCapture,
+        closeMeetingCapture,
+        mcSelectCategory,
+        mcAddItem,
+        mcRemoveItem,
+        mcToggleMic,
+        endMeetingCapture,
         saveActivity,
         saveAndAddAnother,
         viewActivityDetails,
