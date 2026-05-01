@@ -14955,12 +14955,15 @@ function _wireLoginBtn() {
             const el = document.getElementById('mc-timer');
             if (el) el.textContent = _mcElapsed();
         }, 1000);
+
+        try { _mcState.wakeLock = await navigator.wakeLock.request('screen'); } catch(_) {}
     };
 
     const closeMeetingCapture = () => {
         if (_mcState) {
             clearInterval(_mcState.timerInterval);
             if (_mcState.recognition) { try { _mcState.recognition.stop(); } catch(_) {} }
+            try { _mcState.wakeLock?.release(); } catch(_) {}
             _mcState = null;
         }
         document.getElementById('mc-overlay')?.remove();
