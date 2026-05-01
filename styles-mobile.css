@@ -672,6 +672,18 @@
         font-size: 12px;
     }
 
+    /* Pill buttons must NOT flex-grow — they are fixed 40px circles */
+    .cal-controls-pill .cal-icon-btn {
+        flex: none !important;
+        width: 40px !important;
+        height: 40px !important;
+    }
+
+    /* Center the pill in its row */
+    .calendar-controls {
+        justify-content: center;
+    }
+
     /* Day headers short form handled by JS */
     .calendar-days-header .day-header { font-size: 10px; }
 

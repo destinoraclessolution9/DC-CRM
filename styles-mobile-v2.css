@@ -207,37 +207,30 @@
    M2 — Calendar
    ======================================================================= */
 @media (max-width: 768px) {
-    /* Sticky mini-toolbar */
+    /* Toolbar: not sticky on mobile (causes Android flex reorder glitches) */
     .calendar-header-toolbar {
-        position: sticky;
-        top: 56px;
-        z-index: 140;
+        position: static;
         padding: 10px !important;
     }
 
-    /* On mobile, the calendar grid fills the viewport so anything below
-       (follow-up reminders, today's activities, birthdays, pending
-       proposals) is invisible until the user scrolls past a full month.
-       Reorder these flex children so the action-item widgets surface
-       ABOVE the month grid, where the user actually sees them. The
-       header stays at order 0 (sticky); cells with `gap:24px` on the
-       parent already give vertical breathing room.
+    /* Mobile calendar order: toolbar → calendar grid → widgets below.
+       The calendar must be visible immediately without scrolling.
 
        Order:
-         0  calendar-header-toolbar  (default — sticky toolbar at top)
-         1  #pending-cps-intakes     (approval queue first)
-         2  #follow-up-reminders     (the reminder card the user is asking about)
-         3  #pending-solutions-widget
-         4  .today-activities-section
-         5  .birthday-section
-         6  .calendar-monthly-wrapper (month grid pushed below the actionables)
+         0  calendar-header-toolbar  (default — no explicit order)
+         1  .calendar-monthly-wrapper (calendar grid right after toolbar)
+         2  #pending-cps-intakes
+         3  #follow-up-reminders
+         4  #pending-solutions-widget
+         5  .today-activities-section
+         6  .birthday-section (birthday + health product refills)
     */
-    .calendar-view-container > #pending-cps-intakes      { order: 1; }
-    .calendar-view-container > #follow-up-reminders      { order: 2; }
-    .calendar-view-container > #pending-solutions-widget { order: 3; }
-    .calendar-view-container > .today-activities-section { order: 4; }
-    .calendar-view-container > .birthday-section         { order: 5; }
-    .calendar-view-container > .calendar-monthly-wrapper { order: 6; }
+    .calendar-view-container > .calendar-monthly-wrapper { order: 1; }
+    .calendar-view-container > #pending-cps-intakes      { order: 2; }
+    .calendar-view-container > #follow-up-reminders      { order: 3; }
+    .calendar-view-container > #pending-solutions-widget { order: 4; }
+    .calendar-view-container > .today-activities-section { order: 5; }
+    .calendar-view-container > .birthday-section         { order: 6; }
 
     /* Month cells: more breathing room, bigger date */
     .calendar-grid-main {
