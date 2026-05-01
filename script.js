@@ -18515,7 +18515,7 @@ function _wireLoginBtn() {
             UI.toast.error('Invalid response');
             return;
         }
-        const activity = await AppDataStore.getById('activities', activityId);
+        const activity = await AppDataStore.getByIdFull('activities', activityId);
         if (!activity) { UI.toast.error('Activity not found'); return; }
         const coAgents = Array.isArray(activity.co_agents) ? activity.co_agents : [];
         const myEntry = coAgents.find(ca => String(ca.id) === String(_currentUser.id));
