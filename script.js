@@ -35,7 +35,7 @@ window._ensureExcelJs = () => typeof ExcelJS !== 'undefined'
     : window._loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js');
 window._ensureXlsx = () => typeof XLSX !== 'undefined'
     ? Promise.resolve()
-    : window._loadScriptOnce('https://cdn.jsdelivr.net/npm/xlsx@0.20.3/dist/xlsx.full.min.js');
+    : window._loadScriptOnce('./libs/xlsx.full.min.js');
 
 // Patch to prevent the "undefined .call" error and map missing .create to .add
 if (!window.AppDataStore._patched) {
