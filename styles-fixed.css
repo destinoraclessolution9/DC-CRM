@@ -145,6 +145,39 @@ body {
     color: var(--white);
 }
 
+/* The .search-tooltip <div> next to the search-trigger button used to render
+   as visible plain text ("Click to search") next to the icon because no
+   styling was ever defined for it. Hide by default and reveal on hover/focus
+   of the search button as a floating tooltip. */
+.sidebar-top {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.search-tooltip {
+    position: absolute;
+    left: 100%;
+    top: 50%;
+    transform: translate(8px, -50%);
+    background: var(--gray-800, #1f2937);
+    color: #fff;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease;
+    z-index: 50;
+}
+
+.sidebar-top:hover .search-tooltip,
+.search-trigger:focus-visible + .search-tooltip {
+    opacity: 1;
+}
+
 .content-viewport {
     flex-grow: 1;
     padding: 24px;

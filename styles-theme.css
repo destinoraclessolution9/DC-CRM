@@ -468,10 +468,25 @@ h1, h2, h3, h4 {
     box-shadow: 0 4px 14px rgba(200, 16, 46, 0.28);
 }
 
+/* Re-declare background here so the older styles-fixed.css `.btn.primary:hover`
+   (which sets a solid var(--primary-dark)) doesn't cascade-win and replace the
+   gradient. Without this the LOGIN button "loses" its red→orange gradient
+   permanently after the first hover and stays a flat maroon afterwards. */
 .btn.primary:hover {
+    background: var(--accent-grad);
     transform: translateY(-1px);
     box-shadow: 0 8px 22px rgba(200, 16, 46, 0.40);
     filter: brightness(1.05);
+}
+
+/* Same reason: keep the gradient visible while disabled / "Logging in…". */
+.btn.primary:disabled,
+.btn.primary[disabled] {
+    background: var(--accent-grad);
+    opacity: 0.75;
+    cursor: not-allowed;
+    filter: none;
+    transform: none;
 }
 
 .btn.secondary {

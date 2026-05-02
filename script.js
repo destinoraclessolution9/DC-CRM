@@ -402,6 +402,19 @@ const appLogic = (() => {
         return result;
     };
 
+    // Race a promise against a timeout. On timeout returns the fallback so
+    // a slow Supabase call never leaves a view stuck on a skeleton loader.
+    const withTimeout = (promise, ms, fallback, label) => Promise.race([
+        Promise.resolve(promise).catch(e => {
+            if (label) console.warn(`[withTimeout] ${label} rejected:`, e?.message || e);
+            return fallback;
+        }),
+        new Promise(resolve => setTimeout(() => {
+            if (label) console.warn(`[withTimeout] ${label} timed out after ${ms}ms — using fallback`);
+            resolve(fallback);
+        }, ms)),
+    ]);
+
     // Check if current user can view a given prospect
     const canViewProspect = async (prospect) => {
         const user = _currentUser;
@@ -7415,8 +7428,16 @@ function _wireLoginBtn() {
             const authUser = session?.user ?? null;
             if (authUser) {
                 // Fetch the full profile from the users table (has integer id + role),
-                // same as the login flow – avoids using the raw Auth UUID as _currentUser.id
-                const profileMatches = await AppDataStore.query('users', { email: authUser.email });
+                // same as the login flow – avoids using the raw Auth UUID as _currentUser.id.
+                // Detect network errors so we don't sign out on a flaky connection.
+                let profileMatches = [];
+                let profileFetchFailed = false;
+                try {
+                    profileMatches = await AppDataStore.query('users', { email: authUser.email });
+                } catch (qErr) {
+                    profileFetchFailed = true;
+                    console.warn('users-table lookup failed during auto-login:', qErr?.message || qErr);
+                }
                 let profile = null;
                 if (profileMatches && profileMatches.length > 0) {
                     // If duplicates exist, prefer: 1) has team_id, 2) lowest level, 3) highest id (newest)
@@ -7439,8 +7460,22 @@ function _wireLoginBtn() {
                     window.supabase.auth.getUser().then(({ data, error }) => {
                         if (error && (error.status === 401 || error.status === 403)) logout().catch(() => {});
                     }).catch(() => {});
+                } else if (profileFetchFailed) {
+                    // Network/server error fetching the profile — KEEP the session
+                    // so a flaky connection doesn't bounce the user back to login.
+                    // Build a minimal profile from the auth user and let normal
+                    // app flow heal the cache on next successful query.
+                    console.warn('Keeping session despite failed profile fetch — using minimal auth-only profile.');
+                    _currentUser = {
+                        id: authUser.id,
+                        email: authUser.email,
+                        full_name: authUser.user_metadata?.full_name || authUser.email,
+                        role: 'Level 12 Agent', // safe default until real profile loads
+                        status: 'active',
+                        _placeholder: true,
+                    };
                 } else {
-                    // Auth session exists but no matching user profile — force sign out
+                    // Auth session exists but no matching user profile in DB — force sign out
                     console.warn('No user profile found for:', authUser.email, '— signing out.');
                     await window.supabase.auth.signOut();
                     _currentUser = null;
@@ -7454,7 +7489,8 @@ function _wireLoginBtn() {
                 // No active session – showing login screen
                 _currentUser = null;
             } else {
-                throw err; // re-throw other errors
+                console.warn('Auto-login getSession failed:', err?.message || err);
+                _currentUser = null;
             }
         }
 
@@ -9292,6 +9328,26 @@ function _wireLoginBtn() {
             li.classList.toggle('active', li.getAttribute('data-view') === viewId);
         });
 
+        // Update document title BEFORE awaiting the view render. If the render
+        // hangs or throws, the browser tab title still reflects the user's
+        // last click — previously the title would lag on the prior view.
+        const VIEW_TITLES = {
+            calendar: 'Calendar', month: 'Calendar', prospects: 'Prospects & Customers',
+            pipeline: 'Pipeline', agents: 'Consultants', promotions: 'Monthly Promotion',
+            marketing_automation: 'Marketing Automation', reports: 'Reporting KPI',
+            documents: 'Documents', protection: 'Protection Monitoring', import: 'Import / Export',
+            integrations: 'Integrations', referrals: 'Referral Relationships', cases: 'Success Cases',
+            marketing_lists: 'Marketing Lists', ranking: 'Ranking Performance', performance: 'Ranking Performance',
+            workflows: 'Workflow Automation', booking_settings: 'Booking Scheduler',
+            lead_forms: 'Lead Capture Forms', surveys: 'NPS Surveys', contracts: 'Contracts',
+            custom_fields: 'Custom Fields', settings: 'Settings', milestones: 'Milestones',
+            fude: '福运相随', egg_purchasing: 'Egg Purchasing', standard_functions: 'Standard Functions',
+            formula_purchaser: 'Formula Purchaser', purchases_history: 'Purchases History',
+            stock_take: 'Stock Take', ai: 'AI Insights', security: 'Security', admin: 'Admin',
+            risk: 'Attrition Risk', nps: 'NPS Surveys',
+        };
+        document.title = `${VIEW_TITLES[viewId] || viewId} — 悅客匯 CRM`;
+
         const viewport = document.getElementById('content-viewport');
 
         if (viewId === 'calendar' || viewId === 'month') {
@@ -9416,25 +9472,7 @@ function _wireLoginBtn() {
 
         // Silent nav switch — previous info toast was firing on every click, spamming
         // the DOM with toast nodes + timers and contributing to the perceived lag.
-
-        // Update document title so screen readers and browser tabs reflect the current view.
-        const VIEW_TITLES = {
-            calendar: 'Calendar', month: 'Calendar', prospects: 'Prospects & Customers',
-            pipeline: 'Pipeline', agents: 'Consultants', promotions: 'Monthly Promotion',
-            marketing_automation: 'Marketing Automation', reports: 'Reporting KPI',
-            documents: 'Documents', protection: 'Protection Monitoring', import: 'Import / Export',
-            integrations: 'Integrations', referrals: 'Referral Relationships', cases: 'Success Cases',
-            marketing_lists: 'Marketing Lists', ranking: 'Ranking Performance', performance: 'Ranking Performance',
-            workflows: 'Workflow Automation', booking_settings: 'Booking Scheduler',
-            lead_forms: 'Lead Capture Forms', surveys: 'NPS Surveys', contracts: 'Contracts',
-            custom_fields: 'Custom Fields', settings: 'Settings', milestones: 'Milestones',
-            fude: '福运相随', egg_purchasing: 'Egg Purchasing', standard_functions: 'Standard Functions',
-            formula_purchaser: 'Formula Purchaser', purchases_history: 'Purchases History',
-            stock_take: 'Stock Take', ai: 'AI Insights', security: 'Security', admin: 'Admin',
-            risk: 'Attrition Risk', nps: 'NPS Surveys',
-        };
-        const viewLabel = VIEW_TITLES[viewId] || viewId;
-        document.title = `${viewLabel} — 悅客匯 CRM`;
+        // (document.title was set at the top of this function — see VIEW_TITLES.)
 
         // Mobile: update bottom nav active state + apply table card labels
         if (isMobile()) {
@@ -9571,6 +9609,22 @@ function _wireLoginBtn() {
                 .rank-3 .rank-cell { color: #b45309; }
                 .name-cell { font-weight: 600; color: #3b82f6; cursor: pointer; }
                 .name-cell:hover { text-decoration: underline; }
+                /* Role chip rendered next to a referrer's name. Without explicit
+                   padding/margin the inline-styled <span class="badge"> chunked
+                   visually with the blue name-cell text, so "Chen Mei Lin Agent"
+                   read like one underlined link. Make it a clear pill. */
+                .name-cell .badge {
+                    display: inline-block;
+                    margin-left: 8px;
+                    padding: 2px 8px;
+                    border-radius: 999px;
+                    font-size: 11px;
+                    font-weight: 600;
+                    line-height: 1.4;
+                    vertical-align: middle;
+                    text-decoration: none;
+                }
+                .name-cell:hover .badge { text-decoration: none; }
                 
                 /* Tree Section */
                 .ref-v2-tree-section { background: white; border-radius: 12px; border: 1px solid var(--gray-200); display: flex; flex-direction: column; min-height: 500px; }
@@ -29060,11 +29114,14 @@ const deactivateAgent = async (agentId) => {
 </div>`;
 
         // ── STEP 2: Fire ALL big queries in parallel ──────────────────────────
+        // Each query gets a 15s timeout so a slow Supabase call no longer
+        // leaves the page on a permanent skeleton. On timeout we render with
+        // empty data and the user can hit Refresh to retry.
         const [allActivities, allProspects, allUsers] = await Promise.all([
-            getVisibleActivities(),
-            getVisibleProspects(),
-            AppDataStore.getAll('users'),
-            loadPipelineConfig(), // warms cache, result not needed here
+            withTimeout(getVisibleActivities(), 15000, [], 'pipeline:getVisibleActivities'),
+            withTimeout(getVisibleProspects(), 15000, [], 'pipeline:getVisibleProspects'),
+            withTimeout(AppDataStore.getAll('users'), 15000, [], 'pipeline:getAll(users)'),
+            withTimeout(loadPipelineConfig(), 15000, null, 'pipeline:loadPipelineConfig'), // warms cache
         ]);
 
         const agents = (allUsers || []).filter(u => isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'));
@@ -34100,6 +34157,13 @@ const exportKPIReport = async (format) => {
     // ========== PHASE 12: MARKETING AUTOMATION ==========
 
     const showMarketingAutomationView = async (container) => {
+        // ── STEP 1: Paint shell + skeleton immediately so the page never
+        // looks frozen, even if the inner tab data fetch is slow/timing out.
+        const _mktSkel = `
+            <div class="marketing-tab-loading" style="padding:48px;text-align:center;color:#6B7280;">
+                <i class="fas fa-spinner fa-spin" style="font-size:24px;margin-bottom:12px;"></i>
+                <div>Loading…</div>
+            </div>`;
         container.innerHTML = `
             <div class="marketing-view">
                 <div class="marketing-header">
@@ -34124,7 +34188,7 @@ const exportKPIReport = async (format) => {
                     ` : ''}
                     </div>
                 </div>
-                
+
                 <div class="marketing-tabs">
                     <button class="marketing-tab ${_currentMarketingTab === 'templates' ? 'active' : ''}" onclick="app.switchMarketingTab('templates')">
                         <i class="fas fa-layer-group"></i> Message Templates
@@ -34147,19 +34211,55 @@ const exportKPIReport = async (format) => {
                     </button>
                     ` : ''}
                 </div>
-                
+
                 <div id="marketing-tab-content" class="marketing-tab-content">
-                    ${await renderMarketingTabContent()}
+                    ${_mktSkel}
                 </div>
             </div>
         `;
+
+        // ── STEP 2: Load the active tab content with a timeout so a slow
+        // Supabase call never leaves the user staring at the spinner forever.
+        try {
+            const tabHtml = await withTimeout(
+                renderMarketingTabContent(),
+                15000,
+                `<div style="padding:32px;text-align:center;color:#9CA3AF;">
+                    <div style="margin-bottom:8px;">Couldn't load this tab — the request timed out.</div>
+                    <button class="btn secondary" onclick="app.switchMarketingTab('${_currentMarketingTab || 'templates'}')">
+                        <i class="fas fa-sync-alt"></i> Retry
+                    </button>
+                </div>`,
+                'marketing:renderTabContent'
+            );
+            const target = document.getElementById('marketing-tab-content');
+            if (target) target.innerHTML = tabHtml;
+        } catch (e) {
+            console.warn('marketing tab render failed:', e);
+            const target = document.getElementById('marketing-tab-content');
+            if (target) {
+                target.innerHTML = `<div style="padding:32px;text-align:center;color:#9CA3AF;">Couldn't load this tab. <button class="btn secondary" onclick="app.switchMarketingTab('${_currentMarketingTab || 'templates'}')"><i class="fas fa-sync-alt"></i> Retry</button></div>`;
+            }
+        }
     };
 
     const switchMarketingTab = async (tab) => {
         _currentMarketingTab = tab;
         const container = document.getElementById('marketing-tab-content');
         if (container) {
-            container.innerHTML = await renderMarketingTabContent();
+            container.innerHTML = `<div class="marketing-tab-loading" style="padding:48px;text-align:center;color:#6B7280;"><i class="fas fa-spinner fa-spin" style="font-size:24px;margin-bottom:12px;"></i><div>Loading…</div></div>`;
+            const tabHtml = await withTimeout(
+                renderMarketingTabContent(),
+                15000,
+                `<div style="padding:32px;text-align:center;color:#9CA3AF;">
+                    <div style="margin-bottom:8px;">Couldn't load this tab — the request timed out.</div>
+                    <button class="btn secondary" onclick="app.switchMarketingTab('${tab}')"><i class="fas fa-sync-alt"></i> Retry</button>
+                </div>`,
+                `marketing:switchTab(${tab})`
+            );
+            // Re-fetch the container in case the user navigated away during the await
+            const stillThere = document.getElementById('marketing-tab-content');
+            if (stillThere) stillThere.innerHTML = tabHtml;
         }
 
         // Update active tab styling
