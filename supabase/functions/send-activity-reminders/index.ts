@@ -331,33 +331,117 @@ Deno.serve(async (req: Request) => {
   if ((mode === "auto" && isDailySummaryWindow) || mode === "daily_summary") {
     try {
       const todayMYT = nowMYT.toISOString().slice(0, 10); // YYYY-MM-DD in MYT
+      const todayMMDD = todayMYT.slice(5); // MM-DD for birthday matching
 
       // Users who want daily summary
       const prefs: any[] = await pgSelect("notification_preferences",
         `select=user_id&daily_summary=eq.true`);
 
+      // --- Shared data fetched once for all users ---
+
+      // Today's activities with customer/prospect names (denormalised customer_name field)
+      const allTodayActs: any[] = await pgSelect("activities",
+        `select=id,activity_title,activity_type,start_time,lead_agent_id,customer_name,co_agents` +
+        `&activity_date=eq.${todayMYT}` +
+        `&activity_type=neq.EVENT`);
+
+      // Today's events (shared across all users — open/public visibility)
+      const allTodayEvents: any[] = await pgSelect("activities",
+        `select=id,activity_title,activity_type,start_time,event_id` +
+        `&activity_date=eq.${todayMYT}` +
+        `&activity_type=eq.EVENT` +
+        `&visibility=in.(open,public)` +
+        `&order=start_time.asc&limit=5`);
+
+      // Fetch event titles for today's public events
+      let eventTitles: Map<number, string> = new Map();
+      if (allTodayEvents.length > 0) {
+        const eventIds = [...new Set(allTodayEvents.map((e: any) => e.event_id).filter(Boolean))];
+        if (eventIds.length > 0) {
+          const evRows: any[] = await pgSelect("events",
+            `select=id,event_title,title&id=in.(${eventIds.join(",")})`);
+          for (const ev of evRows) {
+            eventTitles.set(Number(ev.id), ev.event_title || ev.title || "Event");
+          }
+        }
+      }
+      // Deduplicate public events by event_id (one pill per event, not per attendee row)
+      const seenEventIds = new Set<number>();
+      const dedupedEvents: any[] = [];
+      for (const e of allTodayEvents) {
+        const eid = Number(e.event_id);
+        if (!seenEventIds.has(eid)) { seenEventIds.add(eid); dedupedEvents.push(e); }
+      }
+
+      // Today's birthdays from prospects and customers
+      const [bdayProspects, bdayCustomers]: [any[], any[]] = await Promise.all([
+        pgSelect("prospects", `select=full_name&date_of_birth=like.*-${todayMMDD}&status=neq.inactive`),
+        pgSelect("customers", `select=full_name&date_of_birth=like.*-${todayMMDD}`),
+      ]);
+      const birthdayNames = [
+        ...bdayProspects.map((p: any) => p.full_name),
+        ...bdayCustomers.map((c: any) => c.full_name),
+      ].filter(Boolean);
+
+      // --- Per-user notification ---
       for (const pref of prefs) {
         const userId = Number(pref.user_id);
 
-        // Count today's scheduled activities for this user
-        const acts: any[] = await pgSelect("activities",
-          `select=id,activity_title,activity_type,start_time` +
-          `&status=eq.scheduled` +
-          `&activity_date=eq.${todayMYT}` +
-          `&lead_agent_id=eq.${userId}`);
-
-        if (acts.length === 0) continue; // nothing to summarise
-
-        // Build a short list of today's events (max 3 shown)
-        const lines = acts.slice(0, 3).map((a) => {
-          const t = formatTime(todayMYT, a.start_time);
-          return `• ${t} ${a.activity_title || a.activity_type || "Activity"}`;
+        // This user's today activities (lead agent OR listed as co-agent)
+        const myActs = allTodayActs.filter((a: any) => {
+          if (Number(a.lead_agent_id) === userId) return true;
+          if (Array.isArray(a.co_agents)) {
+            return a.co_agents.some((ca: any) => Number(ca.id) === userId);
+          }
+          return false;
         });
-        if (acts.length > 3) lines.push(`…and ${acts.length - 3} more`);
+
+        const hasAnything = myActs.length > 0 || dedupedEvents.length > 0 || birthdayNames.length > 0;
+        if (!hasAnything) continue;
+
+        const bodyLines: string[] = [];
+
+        // Section: Today's activities
+        if (myActs.length > 0) {
+          const sortedActs = myActs.sort((a: any, b: any) =>
+            (a.start_time || "").localeCompare(b.start_time || ""));
+          bodyLines.push("📋 Your Activities:");
+          for (const a of sortedActs.slice(0, 4)) {
+            const t = a.start_time ? a.start_time.slice(0, 5) : "--:--";
+            const type = a.activity_type || "Activity";
+            const name = a.customer_name || a.activity_title || "";
+            bodyLines.push(`  ${t} [${type}]${name ? ` – ${name}` : ""}`);
+          }
+          if (myActs.length > 4) bodyLines.push(`  …+${myActs.length - 4} more`);
+        }
+
+        // Section: Events
+        if (dedupedEvents.length > 0) {
+          bodyLines.push("📅 Events Today:");
+          for (const e of dedupedEvents.slice(0, 3)) {
+            const t = e.start_time ? e.start_time.slice(0, 5) : "";
+            const title = eventTitles.get(Number(e.event_id)) || e.activity_title || "Event";
+            bodyLines.push(`  ${t ? t + " " : ""}${title}`);
+          }
+          if (dedupedEvents.length > 3) bodyLines.push(`  …+${dedupedEvents.length - 3} more`);
+        }
+
+        // Section: Birthdays
+        if (birthdayNames.length > 0) {
+          bodyLines.push("🎂 Birthdays Today:");
+          const shown = birthdayNames.slice(0, 4);
+          bodyLines.push(`  ${shown.join(", ")}${birthdayNames.length > 4 ? ` +${birthdayNames.length - 4} more` : ""}`);
+        }
+
+        const actCount = myActs.length;
+        const titleParts: string[] = [];
+        if (actCount > 0) titleParts.push(`${actCount} activit${actCount > 1 ? "ies" : "y"}`);
+        if (dedupedEvents.length > 0) titleParts.push(`${dedupedEvents.length} event${dedupedEvents.length > 1 ? "s" : ""}`);
+        if (birthdayNames.length > 0) titleParts.push(`${birthdayNames.length} birthday${birthdayNames.length > 1 ? "s" : ""}`);
 
         const payload = {
-          title: `You have ${acts.length} event${acts.length > 1 ? "s" : ""} today.`,
-          body: `Have a nice day!\n${lines.join("\n")}`,
+          title: `Good morning! Today: ${titleParts.join(", ")} 🌅`,
+          body: bodyLines.join("\n"),
           icon: "icons/icon-192x192.png",
           badge: "icons/icon-72x72.png",
           tag: `daily_${todayMYT}_${userId}`,
