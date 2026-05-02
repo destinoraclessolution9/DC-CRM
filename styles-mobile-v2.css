@@ -209,28 +209,18 @@
 @media (max-width: 768px) {
     /* Toolbar: not sticky on mobile (causes Android flex reorder glitches) */
     .calendar-header-toolbar {
-        position: static;
+        position: static !important;
         padding: 10px !important;
     }
 
-    /* Mobile calendar order: toolbar → calendar grid → widgets below.
-       The calendar must be visible immediately without scrolling.
-
-       Order:
-         0  calendar-header-toolbar  (default — no explicit order)
-         1  .calendar-monthly-wrapper (calendar grid right after toolbar)
-         2  #pending-cps-intakes
-         3  #follow-up-reminders
-         4  #pending-solutions-widget
-         5  .today-activities-section
-         6  .birthday-section (birthday + health product refills)
-    */
-    .calendar-view-container > .calendar-monthly-wrapper { order: 1; }
-    .calendar-view-container > #pending-cps-intakes      { order: 2; }
-    .calendar-view-container > #follow-up-reminders      { order: 3; }
-    .calendar-view-container > #pending-solutions-widget { order: 4; }
-    .calendar-view-container > .today-activities-section { order: 5; }
-    .calendar-view-container > .birthday-section         { order: 6; }
+    /* Mobile calendar order: toolbar → today's activities → calendar grid → widgets below. */
+    .calendar-view-container > .calendar-header-toolbar   { order: 0 !important; }
+    .calendar-view-container > .today-activities-section  { order: 1 !important; }
+    .calendar-view-container > .calendar-monthly-wrapper  { order: 2 !important; }
+    .calendar-view-container > #pending-cps-intakes       { order: 3 !important; }
+    .calendar-view-container > #follow-up-reminders       { order: 4 !important; }
+    .calendar-view-container > #pending-solutions-widget  { order: 5 !important; }
+    .calendar-view-container > .birthday-section          { order: 6 !important; }
 
     /* Month cells: more breathing room, bigger date */
     .calendar-grid-main {
