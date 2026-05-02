@@ -213,10 +213,10 @@
         padding: 10px !important;
     }
 
-    /* Mobile calendar order: toolbar → today's activities → calendar grid → widgets below. */
+    /* Mobile calendar order: toolbar → calendar grid → today's activities → widgets below. */
     .calendar-view-container > .calendar-header-toolbar   { order: 0 !important; }
-    .calendar-view-container > .today-activities-section  { order: 1 !important; }
-    .calendar-view-container > .calendar-monthly-wrapper  { order: 2 !important; }
+    .calendar-view-container > .calendar-monthly-wrapper  { order: 1 !important; }
+    .calendar-view-container > .today-activities-section  { order: 2 !important; }
     .calendar-view-container > #pending-cps-intakes       { order: 3 !important; }
     .calendar-view-container > #follow-up-reminders       { order: 4 !important; }
     .calendar-view-container > #pending-solutions-widget  { order: 5 !important; }
