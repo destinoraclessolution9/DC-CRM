@@ -42787,6 +42787,8 @@ JB 星期二到
                         aoa.push(['', r.agent_name || '-', dateStr, r.order_no || '-', r.product || '', Number(r.quantity)||0]);
                     }
                 }
+                aoa.push(['', '', '', '', 'FMLENX068 Gold', totalGold]);
+                aoa.push(['', '', '', '', 'FMLEGG002 King', totalKing]);
                 aoa.push(['', '', '', '', '', '']); // blank separator row
             }
             const ws = XLSX.utils.aoa_to_sheet(aoa);
