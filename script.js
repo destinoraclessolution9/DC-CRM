@@ -7539,8 +7539,10 @@ function _wireLoginBtn() {
         initOfflineSupport();
         applyMobileClass();
 
-        // Weekly inactivity scoring — fire-and-forget, deferred 10s to avoid blocking startup
-        setTimeout(() => _runWeeklyInactivityCheck().catch(() => {}), 10000);
+        // Weekly inactivity scoring is handled server-side by pg_cron now (see
+        // migrations/server_cron_2026-05-03.sql). Browser must not run table-wide
+        // sweeps — even once per ISO week per agent, parallel logins on Monday
+        // morning bursted the nano IO budget. Server cron runs once globally.
 
         // Block native pull-to-refresh on iOS Safari (Chrome/Android handled by CSS overscroll-behavior).
         // Requires 3 intentional downward pulls at the top of the page to trigger a soft refresh.
@@ -7639,8 +7641,10 @@ function _wireLoginBtn() {
         ];
         _bgInit.forEach(p => p && typeof p.catch === 'function' && p.catch(e => console.warn('bg init task failed:', e)));
 
-        // Action Plan: schedule Monday reminders
-        initActionPlanReminder();
+        // Action Plan reminders are handled server-side by pg_cron now (see
+        // migrations/server_cron_2026-05-03.sql). The old client-side loop did
+        // getAll('users') then a per-user query('action_plans') every 4 hours
+        // in every tab — N+1 over the user table on nano was a major IO drain.
 
         // Auto-subscribe to push notifications for PWA / homescreen users
         _autoSubscribePush();
@@ -8051,15 +8055,22 @@ function _wireLoginBtn() {
         }
     };
 
-    // Wire bell click + initial badge load
+    // Wire bell click + initial badge load.
+    // Badge polling is the single biggest browser→DB chatter source on nano:
+    // every tab × 5 agents × 30 ticks/hour = 150 query() round trips/hour
+    // (cps_intake_requests, refill_reminders, activities co-agent JSONB scan).
+    // Two guards: skip while the tab is hidden (Page Visibility API) and bump
+    // the cadence to 5 minutes. On focus, fire one immediate refresh so the
+    // badge isn't stale when the user comes back.
     const _initNotifBell = () => {
         const bell = document.querySelector('.notif-bell');
         if (!bell || bell._notifWired) return;
         bell._notifWired = true;
         bell.addEventListener('click', e => { e.stopPropagation(); toggleNotifPanel(); });
-        _refreshNotifBadge();
-        // Refresh badge every 2 minutes
-        setInterval(_refreshNotifBadge, 120_000);
+        const tick = () => { if (!document.hidden) _refreshNotifBadge(); };
+        tick();
+        setInterval(tick, 5 * 60 * 1000);
+        document.addEventListener('visibilitychange', () => { if (!document.hidden) _refreshNotifBadge(); });
     };
 
     const getViewPhase = (viewId) => {
@@ -38927,6 +38938,16 @@ const initImportDemoData = async () => {
         MARK_NOT_INTERESTED: -500
     };
 
+    // Audit-log threshold for score_history. Activities that fire on every
+    // CPS/Call/WhatsApp/event-attendance (±5..±10 points) generate >80% of the
+    // write volume but carry the least audit value. The Postgres trigger
+    // log_score_change_trigger (migrations/server_cron_2026-05-03.sql) covers
+    // every change atomically; this client-side write is now a redundant
+    // backup that we only keep for high-signal events while the trigger rolls
+    // out. Once every environment has the trigger applied, this constant can
+    // be raised to Infinity (effectively disabling client-side logging).
+    const _SCORE_HISTORY_MIN_ABS = 20;
+
     const addScoreToProspect = async (prospectId, points, reason) => {
         if (!prospectId || !points) return;
         const prospect = await AppDataStore.getById('prospects', prospectId);
@@ -38934,9 +38955,8 @@ const initImportDemoData = async () => {
         const oldScore = prospect.score || 0;
         const newScore = Math.max(0, oldScore + points);
         await AppDataStore.update('prospects', prospectId, { score: newScore });
-        // Log score history
-        try {
-            await AppDataStore.create('score_history', {
+        if (Math.abs(points) >= _SCORE_HISTORY_MIN_ABS) {
+            AppDataStore.create('score_history', {
                 entity_type: 'prospect',
                 entity_id: prospectId,
                 old_score: oldScore,
@@ -38944,9 +38964,8 @@ const initImportDemoData = async () => {
                 points_change: points,
                 reason: reason,
                 created_at: new Date().toISOString()
-            });
-        } catch (e) { /* score_history table may not exist yet */ }
-        // Score updated
+            }).catch(() => {});
+        }
     };
 
     const addScoreToCustomer = async (customerId, points, reason) => {
@@ -38956,8 +38975,8 @@ const initImportDemoData = async () => {
         const oldScore = customer.score || 0;
         const newScore = Math.max(0, oldScore + points);
         await AppDataStore.update('customers', customerId, { score: newScore });
-        try {
-            await AppDataStore.create('score_history', {
+        if (Math.abs(points) >= _SCORE_HISTORY_MIN_ABS) {
+            AppDataStore.create('score_history', {
                 entity_type: 'customer',
                 entity_id: customerId,
                 old_score: oldScore,
@@ -38965,8 +38984,8 @@ const initImportDemoData = async () => {
                 points_change: points,
                 reason: reason,
                 created_at: new Date().toISOString()
-            });
-        } catch (e) { /* score_history table may not exist */ }
+            }).catch(() => {});
+        }
     };
 
     const scoreActivityType = (activityType) => {
@@ -47624,7 +47643,9 @@ const initSecurity = async () => {
     if (typeof window.app.monitorLoginAttempts !== 'undefined') window.app.monitorLoginAttempts();
     if (typeof window.app.initSessionTimeout !== 'undefined') window.app.initSessionTimeout();
     if (typeof window.app.checkExpiredConsents !== 'undefined') window.app.checkExpiredConsents();
-    if (typeof window.app.scheduleRetentionJobs !== 'undefined') window.app.scheduleRetentionJobs();
+    // Retention jobs run server-side via pg_cron now (migrations/server_cron_2026-05-03.sql).
+    // The old daily browser interval scanned system_config and applied retention from every tab.
+    // if (typeof window.app.scheduleRetentionJobs !== 'undefined') window.app.scheduleRetentionJobs();
 };
 
 let sessionTimeoutTimer;
