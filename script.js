@@ -8056,21 +8056,52 @@ function _wireLoginBtn() {
     };
 
     // Wire bell click + initial badge load.
-    // Badge polling is the single biggest browser→DB chatter source on nano:
-    // every tab × 5 agents × 30 ticks/hour = 150 query() round trips/hour
-    // (cps_intake_requests, refill_reminders, activities co-agent JSONB scan).
-    // Two guards: skip while the tab is hidden (Page Visibility API) and bump
-    // the cadence to 5 minutes. On focus, fire one immediate refresh so the
-    // badge isn't stale when the user comes back.
+    // Notification badge used to be the single biggest browser→DB chatter
+    // source on nano: a 2-min poll firing four query() calls (cps_intake_requests,
+    // refill_reminders, prospects+customers for birthdays, activities co-agent
+    // JSONB scan) × every tab × every agent. Now we use Supabase Realtime
+    // (postgres_changes) to be PUSHED a single event whenever any of the three
+    // tables changes, and only re-fetch then. The 15-min safety-net interval
+    // exists in case the websocket reconnect logic drops an event during a
+    // network blip — but the steady-state cost is zero queries.
     const _initNotifBell = () => {
         const bell = document.querySelector('.notif-bell');
         if (!bell || bell._notifWired) return;
         bell._notifWired = true;
         bell.addEventListener('click', e => { e.stopPropagation(); toggleNotifPanel(); });
-        const tick = () => { if (!document.hidden) _refreshNotifBadge(); };
-        tick();
-        setInterval(tick, 5 * 60 * 1000);
-        document.addEventListener('visibilitychange', () => { if (!document.hidden) _refreshNotifBadge(); });
+
+        const refreshIfVisible = () => { if (!document.hidden) _refreshNotifBadge(); };
+        // Initial load
+        refreshIfVisible();
+
+        // Coalesce bursts of events (e.g. a bulk admin update) into a single
+        // refresh per ~1 s window so we don't trigger a stampede of badge
+        // re-counts when many rows change at once.
+        let _coalesceTimer = null;
+        const onRealtimeEvent = () => {
+            if (_coalesceTimer) clearTimeout(_coalesceTimer);
+            _coalesceTimer = setTimeout(() => { _coalesceTimer = null; refreshIfVisible(); }, 1000);
+        };
+
+        try {
+            const sb = window.supabase;
+            if (sb && typeof sb.channel === 'function') {
+                const ch = sb.channel('notif-badge')
+                    .on('postgres_changes', { event: '*', schema: 'public', table: 'cps_intake_requests' }, onRealtimeEvent)
+                    .on('postgres_changes', { event: '*', schema: 'public', table: 'refill_reminders' }, onRealtimeEvent)
+                    .on('postgres_changes', { event: '*', schema: 'public', table: 'activities' }, onRealtimeEvent)
+                    .subscribe();
+                window._notifChannel = ch;
+            }
+        } catch (e) { console.warn('[notif] realtime subscribe failed, falling back to interval:', e); }
+
+        // Refresh on tab focus — covers events the websocket may have missed
+        // while the tab was backgrounded by the OS.
+        document.addEventListener('visibilitychange', refreshIfVisible);
+        // 15-min safety-net poll. Was 2 min when we polled; now realtime is
+        // primary, so this is just belt-and-braces if the websocket dies
+        // and reconnect fails silently.
+        setInterval(refreshIfVisible, 15 * 60 * 1000);
     };
 
     const getViewPhase = (viewId) => {
@@ -9761,37 +9792,65 @@ function _wireLoginBtn() {
 
         const hiddenIds = UserPreferences.getSync('hidden_referrers', []);
 
-        const allReferrals = await getVisibleReferrals();
-        // BUG FIX 2026-04-11: filter by period (set via changeLeaderboardPeriod)
-        const now = new Date();
-        let cutoff = null;
-        if (_leaderboardPeriod === 'year') cutoff = new Date(now.getFullYear(), 0, 1);
-        else if (_leaderboardPeriod === 'month') cutoff = new Date(now.getFullYear(), now.getMonth(), 1);
-        const referrals = cutoff
-            ? allReferrals.filter(r => r.created_at && new Date(r.created_at) >= cutoff)
-            : allReferrals;
-        const grouped = {};
-        referrals.forEach(r => {
-            if (!r.referrer_id) return;
-            if (!grouped[r.referrer_id]) {
-                grouped[r.referrer_id] = { id: r.referrer_id, type: r.referrer_type, count: 0, converted: 0, latest: r.created_at };
+        // Fast path: single RPC returns ranked rows already joined to
+        // customers/prospects/users so the referrer name is resolved server-side.
+        // Fallback: original 1+3N path (full referrals fetch + per-referrer
+        // getById fan-out) only kicks in if the RPC is missing or errors.
+        let sorted = null;
+        try {
+            const sb = window.supabase;
+            if (sb && sb.rpc) {
+                const { data, error } = await sb.rpc('get_referral_leaderboard', { p_period: _leaderboardPeriod });
+                if (!error && Array.isArray(data)) {
+                    sorted = data.map(r => ({
+                        id: r.referrer_id,
+                        type: r.referrer_type,
+                        name: r.referrer_name,
+                        count: Number(r.referral_count) || 0,
+                        converted: Number(r.converted_count) || 0,
+                        latest: r.latest_at
+                    }));
+                }
             }
-            grouped[r.referrer_id].count++;
-            if (r.status === 'Active' || r.is_converted) grouped[r.referrer_id].converted++;
-            if (new Date(r.created_at) > new Date(grouped[r.referrer_id].latest)) grouped[r.referrer_id].latest = r.created_at;
-        });
+        } catch (_) { /* fall through to JS path */ }
 
-        const sorted = Object.values(grouped).sort((a, b) => b.count - a.count);
+        if (!sorted) {
+            const allReferrals = await getVisibleReferrals();
+            const now = new Date();
+            let cutoff = null;
+            if (_leaderboardPeriod === 'year') cutoff = new Date(now.getFullYear(), 0, 1);
+            else if (_leaderboardPeriod === 'month') cutoff = new Date(now.getFullYear(), now.getMonth(), 1);
+            const referrals = cutoff
+                ? allReferrals.filter(r => r.created_at && new Date(r.created_at) >= cutoff)
+                : allReferrals;
+            const grouped = {};
+            referrals.forEach(r => {
+                if (!r.referrer_id) return;
+                if (!grouped[r.referrer_id]) {
+                    grouped[r.referrer_id] = { id: r.referrer_id, type: r.referrer_type, count: 0, converted: 0, latest: r.created_at };
+                }
+                grouped[r.referrer_id].count++;
+                if (r.status === 'Active' || r.is_converted) grouped[r.referrer_id].converted++;
+                if (new Date(r.created_at) > new Date(grouped[r.referrer_id].latest)) grouped[r.referrer_id].latest = r.created_at;
+            });
+            sorted = Object.values(grouped).sort((a, b) => b.count - a.count);
+            // Resolve referrer names via getById on the fallback path only.
+            for (const item of sorted) {
+                const person = await AppDataStore.getById('customers', item.id)
+                    || await AppDataStore.getById('prospects', item.id)
+                    || await AppDataStore.getById('users', item.id);
+                item.name = person?.full_name || '';
+            }
+        }
 
-        const leaderboardItems = await Promise.all(sorted.map(async (item, idx) => {
+        const leaderboardItems = sorted.map((item, idx) => {
             if (hiddenIds.includes(String(item.id))) return '';
-            const person = await AppDataStore.getById('customers', item.id) || await AppDataStore.getById('prospects', item.id) || await AppDataStore.getById('users', item.id);
-            if (!person) return '';
+            if (!item.name) return '';
             return `
                 <tr class="rank-${idx + 1}">
                     <td data-label="Rank" class="rank-cell">${idx + 1}</td>
                     <td data-label="Referrer" class="name-cell" onclick="app.showReferralTree(${item.id}, '${item.type || 'prospect'}')">
-                        ${person.full_name}
+                        ${item.name}
                         ${item.type === 'customer' ? '<span class="badge" style="background:#dcfce7; color:#166534">C</span>' : ''}
                         ${item.type === 'user' ? '<span class="badge" style="background:#dbeafe; color:#1e40af">Agent</span>' : ''}
                     </td>
@@ -9805,7 +9864,7 @@ function _wireLoginBtn() {
                     </td>
                 </tr>
             `;
-        }));
+        });
 
         container.innerHTML = `
             <div class="leaderboard-controls-v2">
@@ -15189,20 +15248,32 @@ function _wireLoginBtn() {
                 return;
             }
             try {
-                const reader = new FileReader();
-                reader.onload = async (e) => {
-                    const dataUrl = e.target.result;
-                    await AppDataStore.update('prospects', prospectId, {
-                        cps_form_data: dataUrl,
-                        cps_form_date: new Date().toISOString().split('T')[0],
-                        cps_form_name: file.name
-                    });
-                    UI.hideModal();
-                    UI.toast.success('CPS form uploaded and saved to prospect profile');
-                };
-                reader.readAsDataURL(file);
+                // Storage path is the canonical store. Embedding the file as
+                // base64 in prospects.cps_form_data was previously bloating the
+                // table to 57 MB for 9 prospects — every getAll() shipped that
+                // payload back. Now we upload to the attachments bucket and
+                // store only the public URL on the row.
+                const sb = window.supabase;
+                if (!sb || !sb.storage) {
+                    UI.toast.error('Storage unavailable — cannot upload CPS form.');
+                    return;
+                }
+                const ext = (file.name.match(/\.[a-z0-9]+$/i)?.[0] || '.bin').toLowerCase();
+                const path = `cps-forms/${prospectId}_${Date.now()}${ext}`;
+                const { error: upErr } = await sb.storage
+                    .from('attachments')
+                    .upload(path, file, { upsert: true, contentType: file.type });
+                if (upErr) throw upErr;
+                const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
+                await AppDataStore.update('prospects', prospectId, {
+                    cps_form_url: urlData?.publicUrl || null,
+                    cps_form_date: new Date().toISOString().split('T')[0],
+                    cps_form_name: file.name
+                });
+                UI.hideModal();
+                UI.toast.success('CPS form uploaded and saved to prospect profile');
             } catch (err) {
-                UI.toast.error('Upload failed: ' + err.message);
+                UI.toast.error('Upload failed: ' + (err.message || err));
             }
         };
         input.oncancel = () => document.body.removeChild(input);
@@ -22563,29 +22634,28 @@ function _wireLoginBtn() {
             btn.style.fontWeight = '600';
         }
 
-        // For the Info tab we need the FULL prospect row (including the heavy
-        // cps_form_data blob, which is excluded from the default getAll light
-        // select). All other tabs only need the light columns, so they use the
-        // cheaper cached getById path.
-        const prospect = (tab === 'info' || tab === 'closing')
-            ? await AppDataStore.getByIdFull('prospects', prospectId)
-            : await AppDataStore.getById('prospects', prospectId);
+        // CPS form file now lives in Storage (cps_form_url). Both tabs can
+        // therefore use the lean cached getById — no need to ship the heavy
+        // base64 column over the wire just to render an <img src="...">.
+        const prospect = await AppDataStore.getById('prospects', prospectId);
         const container = containerOverride || document.getElementById('prospect-tab-content');
         if (!container || !prospect) return;
 
         if (tab === 'info') {
-            const cpsHtml = prospect.cps_form_data ? `
+            const cpsUrl = prospect.cps_form_url || '';
+            const isImage = cpsUrl && /\.(jpe?g|png|gif|webp|heic|heif)(\?|$)/i.test(cpsUrl);
+            const cpsHtml = cpsUrl ? `
                 <div class="pv-sub">CPS Form</div>
                 <div class="pv-row"><span class="pv-lbl">Uploaded</span><span class="pv-val">${prospect.cps_form_date || '-'}</span></div>
                 <div class="pv-row"><span class="pv-lbl">File</span><span class="pv-val">${prospect.cps_form_name || 'CPS Form'}</span></div>
-                ${prospect.cps_form_data.startsWith('data:image') ? `
+                ${isImage ? `
                     <div style="margin-top:10px;text-align:center;">
-                        <img loading="lazy" decoding="async" src="${prospect.cps_form_data}" alt="CPS Form" style="max-width:100%;max-height:280px;border-radius:8px;border:1px solid var(--border);cursor:pointer;" onclick="window.open(this.src,'_blank')">
+                        <img loading="lazy" decoding="async" src="${cpsUrl}" alt="CPS Form" style="max-width:100%;max-height:280px;border-radius:8px;border:1px solid var(--border);cursor:pointer;" onclick="window.open(this.src,'_blank')">
                         <div style="font-size:11px;color:var(--gray-400);margin-top:4px;">Tap to view full size</div>
                     </div>
                 ` : `
                     <div style="margin-top:8px;">
-                        <a href="${prospect.cps_form_data}" download="${prospect.cps_form_name || 'cps_form.pdf'}" class="btn secondary btn-sm"><i class="fas fa-download"></i> Download PDF</a>
+                        <a href="${cpsUrl}" target="_blank" rel="noopener" download="${prospect.cps_form_name || 'cps_form.pdf'}" class="btn secondary btn-sm"><i class="fas fa-download"></i> Download</a>
                     </div>
                 `}
             ` : '';
@@ -31814,6 +31884,24 @@ container.innerHTML = `
     };
 
     const getConversionRate = async (from, to) => {
+        // Fast path: single RPC returns the conversion percentage already
+        // computed in SQL — replaces two getAll() full-table scans + JS filter.
+        try {
+            const sb = window.supabase;
+            if (sb && sb.rpc) {
+                const agentIds = (_visibleUserIds === 'all' || !Array.isArray(_visibleUserIds))
+                    ? null
+                    : _visibleUserIds.map(v => Number(v)).filter(n => Number.isFinite(n));
+                const { data, error } = await sb.rpc('get_conversion_rate', {
+                    p_from: from, p_to: to, p_agent_ids: agentIds
+                });
+                if (!error && Array.isArray(data) && data[0]) {
+                    return Number(data[0].conversion_pct) || 0;
+                }
+            }
+        } catch (_) { /* fall through */ }
+
+        // Fallback: original two-full-table-scan path.
         const [allProspects, allCustomers] = await Promise.all([
             AppDataStore.getAll('prospects'),
             AppDataStore.getAll('customers')

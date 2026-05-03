@@ -94,19 +94,20 @@ class DataStore {
         // every column so the detail view still sees it. That's an acceptable
         // tradeoff for avoiding a 9.7 MB download on every list fetch.
         // IMPORTANT: this column list must match the actual prospects schema
-        // (minus cps_form_data). If a new column is added to Supabase, add it
-        // here so it flows into list views. Unknown columns here cause PostgREST
-        // 400, which the fallback retry-with-'*' handles gracefully — but that
-        // also re-downloads the 9.7 MB blob, defeating the point. So keep this
-        // list authoritative.
+        // (minus the legacy cps_form_data BLOB column, which has been migrated
+        // to Storage and is always NULL post-2026-05-03). If a new column is
+        // added to Supabase, add it here so it flows into list views. Unknown
+        // columns here cause PostgREST 400, which the fallback retry-with-'*'
+        // handles gracefully — but a fallback to '*' would re-include any
+        // legacy heavy column, so keep this list authoritative.
         this._lightSelects = {
             // Prospects: verified against actual DB schema 2026-04-25.
-            // EXCLUDES cps_form_data (base64 PDF blob — causes 27 MB download).
-            // life_chart_type was listed but never made it into the live
-            // schema — removed 2026-04-25 after a stale-column 400 caused
-            // exportData to silently return zero rows. The new fallback in
-            // getAllPaged retries with '*' if this list goes stale again.
-            prospects: 'id,full_name,nickname,title,gender,nationality,phone,email,ic_number,date_of_birth,lunar_birth,ming_gua,element,occupation,company_name,income_range,address,city,state,postal_code,responsible_agent_id,cps_agent_id,cps_assignment_date,protection_deadline,pipeline_stage,deal_value,expected_close_date,status,referred_by,referred_by_id,referred_by_type,referral_relationship,cps_invitation_method,cps_invitation_details,cps_attachment,score,tags,notes,created_at,updated_at,cps_form_date,cps_form_name,closing_record,closing_records_history,conversion_status,conversion_requested_by,conversion_rejected_by,conversion_rejected_at,closed_at,closed_date,closing_date,potential_level,close_probability,is_own_business,business_name,business_industry,business_area,business_title_role,business_started,company_size,pre2025_purchases,original_source,source_id,source,lead_agent_id,cps_interest,manual_grade,feng_shui_audits,last_activity_date',
+            // 2026-05-03: cps_form_data BLOB migrated to Storage; cps_form_url
+            //   replaced it as a short text URL pointer. The original column
+            //   is left in place (always NULL) for one deploy cycle, then
+            //   dropped in a follow-up migration once cached older clients
+            //   have rolled over.
+            prospects: 'id,full_name,nickname,title,gender,nationality,phone,email,ic_number,date_of_birth,lunar_birth,ming_gua,element,occupation,company_name,income_range,address,city,state,postal_code,responsible_agent_id,cps_agent_id,cps_assignment_date,protection_deadline,pipeline_stage,deal_value,expected_close_date,status,referred_by,referred_by_id,referred_by_type,referral_relationship,cps_invitation_method,cps_invitation_details,cps_attachment,score,tags,notes,created_at,updated_at,cps_form_date,cps_form_name,cps_form_url,closing_record,closing_records_history,conversion_status,conversion_requested_by,conversion_rejected_by,conversion_rejected_at,closed_at,closed_date,closing_date,potential_level,close_probability,is_own_business,business_name,business_industry,business_area,business_title_role,business_started,company_size,pre2025_purchases,original_source,source_id,source,lead_agent_id,cps_interest,manual_grade,feng_shui_audits,last_activity_date',
             // Lean variant for the Prospects LIST view only. Enough to render
             // every column, run all client-side filters, and drive the SWR
             // cache. ~75% fewer columns than the full prospects select.
