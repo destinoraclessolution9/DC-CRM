@@ -261,6 +261,11 @@ const appLogic = (() => {
     // arrive out of order — the slower fetch arriving second clobbers the
     // newer view and the calendar appears to "jump back".
     let _renderCalendarToken = 0;
+    // Cache of full activity rows for the "hot window" (yesterday + today + 7d).
+    // Warmed in parallel with the light calendar fetch so taps on near-term
+    // activity cards open the detail modal instantly — no extra network round-trip.
+    // Keyed by activity id (string). Refreshed on every renderCalendar.
+    const _hotActivityCache = new Map();
     // Tracks the open detail view so pull-to-refresh can re-open it instead of jumping to the list.
     let _currentDetailView = null; // { type: 'prospect'|'customer', id: number }
 
@@ -13144,6 +13149,177 @@ function _wireLoginBtn() {
         return _productsCache;
     };
 
+    // Legacy multi-query calendar fetch — the pre-2026-05-03 path. Kept as a
+    // fallback so the calendar still renders if the get_calendar_window RPC
+    // hasn't been deployed yet (e.g. during the gap between code push and
+    // migration apply). Once the RPC is verified live, this function and the
+    // fallback branch above can be deleted.
+    const _renderCalendarLegacy = async ({ myToken, year, month, daysInMonth, startDay, rangeStart, monthEnd, html, grid, visibleIds }) => {
+        const actQueryOpts = {
+            gte: { activity_date: rangeStart },
+            lte: { activity_date: monthEnd },
+            sort: 'activity_date',
+            sortDir: 'asc',
+            limit: 5000,
+            offset: 0,
+            countMode: null,
+            filters: {},
+        };
+        if (!isSystemAdmin(_currentUser) && _filters.agent && _filters.agent !== 'all') {
+            actQueryOpts.filters.lead_agent_id = _filters.agent;
+        }
+        if (_filters.type && _filters.type !== 'all') {
+            actQueryOpts.filters.activity_type = _filters.type;
+        }
+        if (!isSystemAdmin(_currentUser) && visibleIds !== 'all') {
+            actQueryOpts.scopeFields = [
+                { field: 'lead_agent_id', values: visibleIds },
+                { field: 'visibility', values: ['open', 'public'] }
+            ];
+        }
+        const needsCoAgentMerge = !isSystemAdmin(_currentUser) && _currentUser?.id != null;
+        const coAgentFetch = needsCoAgentMerge
+            ? _fetchActivitiesAsCoAgent(rangeStart, monthEnd)
+            : Promise.resolve([]);
+        const [actResult, allEvents, allUsers, coAgentRows] = await Promise.all([
+            AppDataStore.queryAdvanced('activities', actQueryOpts),
+            AppDataStore.getAll('events'),
+            AppDataStore.getAll('users'),
+            coAgentFetch,
+        ]);
+        let rawActivities = actResult.data;
+        if (coAgentRows && coAgentRows.length > 0) {
+            const seen = new Set(rawActivities.map(a => String(a.id)));
+            for (const a of coAgentRows) {
+                if (!seen.has(String(a.id))) {
+                    seen.add(String(a.id));
+                    rawActivities.push(a);
+                }
+            }
+        }
+        const eventIds = new Set(allEvents.map(e => String(e.id)));
+        const userMap = new Map(allUsers.map(u => [String(u.id), u]));
+        const eventMap = new Map(allEvents.map(e => [String(e.id), e]));
+        let activities = allEvents.length === 0
+            ? rawActivities
+            : rawActivities.filter(a =>
+                a.activity_type !== 'EVENT' || !a.event_id || eventIds.has(String(a.event_id))
+              );
+        if (_filters.caseStatus === 'closed') {
+            activities = activities.filter(a => a.closing_amount && parseFloat(a.closing_amount) > 0);
+        } else if (_filters.caseStatus === 'open') {
+            activities = activities.filter(a => !a.closing_amount || parseFloat(a.closing_amount) <= 0);
+        }
+        const neededProspectIds = [...new Set(activities.filter(a => a.prospect_id).map(a => a.prospect_id))];
+        const neededCustomerIds = [...new Set(activities.filter(a => a.customer_id).map(a => a.customer_id))];
+        const [prospectResult, customerResult] = await Promise.all([
+            neededProspectIds.length > 0
+                ? AppDataStore.queryAdvanced('prospects', { scopeField: 'id', scopeValues: neededProspectIds, limit: 5000, select: 'id,full_name', countMode: null })
+                : Promise.resolve({ data: [] }),
+            neededCustomerIds.length > 0
+                ? AppDataStore.queryAdvanced('customers', { scopeField: 'id', scopeValues: neededCustomerIds, limit: 5000, select: 'id,full_name', countMode: null })
+                : Promise.resolve({ data: [] }),
+        ]);
+        const prospectMap = new Map(prospectResult.data.map(p => [String(p.id), p]));
+        const customerMap = new Map(customerResult.data.map(c => [String(c.id), c]));
+        const todayDate = new Date();
+        const isCurrentMonth = todayDate.getMonth() === month && todayDate.getFullYear() === year;
+        const isMobileCalendar = window.innerWidth < 768;
+        const maxRenderPerCell = isMobileCalendar ? 2 : Infinity;
+        for (let i = 1; i <= daysInMonth; i++) {
+            const isToday = isCurrentMonth && i === todayDate.getDate();
+            const dateStr = `${year}-${(month + 1).toString().padStart(2, '0')}-${i.toString().padStart(2, '0')}`;
+            const dayActivities = activities.filter(a => a.activity_date === dateStr)
+                .sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
+            let activityHtml = '';
+            let renderedInCell = 0;
+            let skippedInCell = 0;
+            const seenIds = new Set();
+            const seenEventSlots = new Set();
+            for (const a of dayActivities) {
+                if (seenIds.has(a.id)) continue;
+                seenIds.add(a.id);
+                if (a.activity_type === 'EVENT' && a.event_id) {
+                    const slotKey = `${a.event_id}|${a.start_time || ''}|${a.end_time || ''}`;
+                    if (seenEventSlots.has(slotKey)) continue;
+                    seenEventSlots.add(slotKey);
+                }
+                const prospect = a.prospect_id ? prospectMap.get(String(a.prospect_id)) : null;
+                const customer = a.customer_id ? customerMap.get(String(a.customer_id)) : null;
+                const entityName = prospect ? prospect.full_name : (customer ? customer.full_name : (a.activity_title || 'Event'));
+                if (!entityName) continue;
+                if (renderedInCell >= maxRenderPerCell) { skippedInCell++; continue; }
+                const isEvent = a.activity_type === 'EVENT';
+                const agent = (!isEvent && a.lead_agent_id) ? userMap.get(String(a.lead_agent_id)) : null;
+                const firstCoAgentName = Array.isArray(a.co_agents) && a.co_agents[0]?.name;
+                const agentName = agent?.full_name || firstCoAgentName || 'Unassigned';
+                const coAgentCount = Array.isArray(a.co_agents) ? a.co_agents.length : 0;
+                const extraCoAgents = agent?.full_name ? coAgentCount : Math.max(coAgentCount - 1, 0);
+                const myCoAgentStatus = _currentUser && Array.isArray(a.co_agents)
+                    ? a.co_agents.find(ca => String(ca.id) === String(_currentUser.id))?.status
+                    : null;
+                const isPendingInvite = myCoAgentStatus === 'pending';
+                const isRejectedInvite = myCoAgentStatus === 'rejected';
+                let eventTitle = null;
+                let eventVenue = null;
+                if (isEvent && a.event_id) {
+                    const ev = eventMap.get(String(a.event_id));
+                    eventTitle = ev ? (ev.event_title || ev.title) : null;
+                    eventVenue = ev ? (ev.location || null) : null;
+                }
+                const displayVenue = a.venue || eventVenue || a.location_address || '';
+                activityHtml += `
+                    <div class="calendar-appointment ${a.activity_type.toLowerCase()} ${(a.closing_amount || a.is_closing) ? 'closed-case' : ''} ${isPendingInvite ? 'pending-invite' : ''} ${isRejectedInvite ? 'rejected-invite' : ''}"
+                        onclick="event.stopPropagation(); app.viewActivityDetails(${a.id})">
+                        <div class="appointment-time">${(a.start_time || '00:00').slice(0,5)}</div>
+                        ${isEvent
+                            ? `<div class="appointment-customer">${eventTitle || a.activity_title || 'Event'}</div>`
+                            : `<div class="appointment-customer">${entityName}</div>
+                        <div class="appointment-agent">${agentName}${extraCoAgents > 0 ? ` +${extraCoAgents}` : ''}</div>`
+                        }
+                        <div class="appointment-type">${a.activity_type}</div>
+                        ${displayVenue ? `<div class="appointment-venue">${displayVenue}</div>` : ''}
+                        ${isPendingInvite ? `
+                        <div class="co-agent-invite-actions" style="display:flex;gap:4px;margin-top:6px;padding-top:6px;border-top:1px dashed rgba(0,0,0,0.1);">
+                            <button class="btn btn-sm" style="flex:1;background:#dcfce7;color:#166534;border:none;padding:3px 6px;border-radius:4px;cursor:pointer;font-size:11px;" onclick="event.stopPropagation();(async()=>{await app.respondCoAgentInvite(${a.id},'accepted');})()"><i class="fas fa-check"></i> Accept</button>
+                            <button class="btn btn-sm" style="flex:1;background:#fee2e2;color:#991b1b;border:none;padding:3px 6px;border-radius:4px;cursor:pointer;font-size:11px;" onclick="event.stopPropagation();(async()=>{await app.respondCoAgentInvite(${a.id},'rejected');})()"><i class="fas fa-times"></i> Reject</button>
+                        </div>
+                        ` : ''}
+                        ${isRejectedInvite ? `<div class="appointment-status-rejected" style="margin-top:6px;padding:3px 6px;background:#fee2e2;color:#991b1b;border-radius:4px;font-size:11px;text-align:center;"><i class="fas fa-times-circle"></i> You rejected this</div>` : ''}
+                        ${(a.closing_amount || a.is_closing) ? `
+                        <div class="appointment-closed">
+                            <div class="closed-badge">✓ CLOSED</div>
+                            ${a.solution_sold ? `<div class="closed-product">📦 ${a.solution_sold}</div>` : ''}
+                            ${a.closing_amount ? `<div class="closed-amount">💰 RM ${parseFloat(a.closing_amount).toLocaleString('en-MY', {minimumFractionDigits:2,maximumFractionDigits:2})}</div>` : ''}
+                        </div>
+                        ` : ''}
+                    </div>
+                `;
+                renderedInCell++;
+            }
+            if (skippedInCell > 0) {
+                activityHtml += `<div class="more-events-indicator" onclick="event.stopPropagation(); app.openDayView('${dateStr}')">+${skippedInCell} more</div>`;
+            }
+            html += `
+                <div class="calendar-cell ${isToday ? 'today' : ''}" onclick="app.openActivityModal('${dateStr}')">
+                    <span class="date-num">${i}</span>
+                    <div class="grid-activities">${activityHtml}</div>
+                </div>`;
+        }
+        const totalCells = startDay + daysInMonth;
+        const remainingCells = 42 - totalCells;
+        for (let i = 1; i <= remainingCells; i++) {
+            const nextMonth = month === 11 ? 0 : month + 1;
+            const nextYear = month === 11 ? year + 1 : year;
+            const nextDateStr = `${nextYear}-${(nextMonth + 1).toString().padStart(2, '0')}-${i.toString().padStart(2, '0')}`;
+            html += `<div class="calendar-cell" onclick="app.openActivityModal('${nextDateStr}')"><span class="date-num other-month">${i}</span></div>`;
+        }
+        if (myToken !== _renderCalendarToken) return;
+        grid.innerHTML = html;
+        _getVenuesCached();
+        _getProductsCached();
+    };
+
     const renderCalendar = async () => {
         const myToken = ++_renderCalendarToken;
         updateMonthHeader(_currentDate);
@@ -13188,109 +13364,135 @@ function _wireLoginBtn() {
             html += `<div class="calendar-cell" onclick="app.openActivityModal('${prevDateStr}')"><span class="date-num other-month">${dateNum}</span></div>`;
         }
 
-        // ── Fetch ONLY this month's activities from Supabase (not all history) ──
-        // With overflow days from prev/next month included
-        const monthStart = `${year}-${(month + 1).toString().padStart(2, '0')}-01`;
+        // ── Visible date range (incl. prev-month overflow + next-month overflow) ──
         const nextMonth = month === 11 ? 0 : month + 1;
         const nextYear = month === 11 ? year + 1 : year;
         const monthEnd = `${nextYear}-${(nextMonth + 1).toString().padStart(2, '0')}-01`;
-        // Include a few days before (prev month overflow) and after
         const prevOverflow = new Date(year, month, 1 - startDay);
         const rangeStart = `${prevOverflow.getFullYear()}-${(prevOverflow.getMonth() + 1).toString().padStart(2, '0')}-${prevOverflow.getDate().toString().padStart(2, '0')}`;
 
-        // Build scoped query for activities — agents only get their hierarchy's activities
+        // Hot window = yesterday → today + 7 days. Full activity rows for this
+        // window are warmed into _hotActivityCache so click-to-detail is instant
+        // (no second network round-trip). Independent of the visible month —
+        // even when viewing a past/future month, the cache always covers the
+        // user's near-term activity.
+        const _todayJs = new Date();
+        const _yJs = new Date(_todayJs); _yJs.setDate(_todayJs.getDate() - 1);
+        const _hotEndJs = new Date(_todayJs); _hotEndJs.setDate(_todayJs.getDate() + 7);
+        const _ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        const hotStart = _ymd(_yJs);
+        const hotEnd   = _ymd(_hotEndJs);
+
+        // Translate getVisibleUserIds → RPC params. 'all' (admin/lead) maps to
+        // is_admin=true so the RPC short-circuits the OR scope.
         const visibleIds = await getVisibleUserIds(_currentUser);
-        const actQueryOpts = {
-            gte: { activity_date: rangeStart },
-            lte: { activity_date: monthEnd },
-            sort: 'activity_date',
-            sortDir: 'asc',
-            limit: 5000,
-            offset: 0,
-            countMode: null, // no pagination needed — skip expensive count
-            filters: {},
+        const isAdmin = isSystemAdmin(_currentUser) || visibleIds === 'all';
+        const visibleIdsArr = Array.isArray(visibleIds) ? visibleIds : null;
+        const userId = _currentUser?.id ?? 0;
+
+        const lightParams = {
+            p_range_start:  rangeStart,
+            p_range_end:    monthEnd,
+            p_user_id:      userId,
+            p_visible_ids:  isAdmin ? null : visibleIdsArr,
+            p_is_admin:     isAdmin,
+            p_agent_filter: (!isAdmin && _filters.agent && _filters.agent !== 'all') ? _filters.agent : null,
+            p_type_filter:  (_filters.type && _filters.type !== 'all') ? _filters.type : null,
         };
-        // Agent filter
-        if (!isSystemAdmin(_currentUser) && _filters.agent && _filters.agent !== 'all') {
-            actQueryOpts.filters.lead_agent_id = _filters.agent;
-        }
-        // Type filter
-        if (_filters.type && _filters.type !== 'all') {
-            actQueryOpts.filters.activity_type = _filters.type;
-        }
-        // Scope by user hierarchy for non-admins, OR'd with public/open events
-        // so that "Open Event (Public)" activities reach every agent's calendar
-        // regardless of who created them. Without the OR clause, an agent would
-        // only ever fetch activities whose lead_agent_id is inside their own
-        // reporting subtree — which is exactly why public events created by
-        // unrelated agents (e.g. company-wide Super Admin events) silently
-        // disappeared from every other agent's calendar.
-        if (!isSystemAdmin(_currentUser) && visibleIds !== 'all') {
-            actQueryOpts.scopeFields = [
-                { field: 'lead_agent_id', values: visibleIds },
-                { field: 'visibility', values: ['open', 'public'] }
-            ];
-        }
+        const hotParams = {
+            p_range_start:  hotStart,
+            p_range_end:    hotEnd,
+            p_user_id:      userId,
+            p_visible_ids:  isAdmin ? null : visibleIdsArr,
+            p_is_admin:     isAdmin,
+        };
 
-        // Fetch month activities + lookup tables in parallel.
-        // Non-admins also need a parallel JSONB query for activities where they are
-        // a co-agent (the lead_agent_id IN (...) scope above silently drops those).
-        const needsCoAgentMerge = !isSystemAdmin(_currentUser) && _currentUser?.id != null;
-        const coAgentFetch = needsCoAgentMerge
-            ? _fetchActivitiesAsCoAgent(rangeStart, monthEnd)
-            : Promise.resolve([]);
-        const [actResult, allEvents, allUsers, coAgentRows] = await Promise.all([
-            AppDataStore.queryAdvanced('activities', actQueryOpts),
-            AppDataStore.getAll('events'),
-            AppDataStore.getAll('users'),
-            coAgentFetch,
+        // Two parallel RPCs replace the previous 6 round-trips
+        // (activities + events + users + co-agent JSONB + prospects + customers).
+        // The light call drives the visible grid; the hot call warms the
+        // detail-modal cache. We tolerate the hot call failing — the calendar
+        // still renders, taps just incur a normal getById on click.
+        const [lightRes, hotRes] = await Promise.all([
+            window.supabase.rpc('get_calendar_window', lightParams),
+            window.supabase.rpc('get_calendar_hot_details', hotParams).catch(e => {
+                console.warn('[calendar] hot warm-up failed:', e?.message || e);
+                return { data: [], error: e };
+            }),
         ]);
-        // Merge & dedupe by activity id so co-agent-only invitations show on the
-        // viewer's calendar even though the lead_agent_id scope excluded them.
-        let rawActivities = actResult.data;
-        if (coAgentRows && coAgentRows.length > 0) {
-            const seen = new Set(rawActivities.map(a => String(a.id)));
-            for (const a of coAgentRows) {
-                if (!seen.has(String(a.id))) {
-                    seen.add(String(a.id));
-                    rawActivities.push(a);
-                }
+
+        // Transition fallback: if the calendar_perf_2026-05-03 migration hasn't
+        // been applied to this DB yet, the RPC won't exist (PG code 42883). Fall
+        // back to the legacy multi-query path so the calendar still renders.
+        // Safe to remove once the migration has been verified live.
+        if (lightRes.error) {
+            const msg = lightRes.error.message || '';
+            const missing = lightRes.error.code === '42883' || /function .* does not exist/i.test(msg);
+            if (missing) {
+                console.warn('[calendar] RPC not yet deployed, using legacy fetch path');
+                return await _renderCalendarLegacy({
+                    myToken, year, month, daysInMonth, startDay,
+                    rangeStart, monthEnd, html, grid, visibleIds,
+                });
             }
+            console.error('[calendar] get_calendar_window failed:', lightRes.error);
+            UI.toast.error('Calendar load failed: ' + msg);
+            return;
         }
 
-        const eventIds = new Set(allEvents.map(e => String(e.id)));
-        const userMap = new Map(allUsers.map(u => [String(u.id), u]));
-        const eventMap = new Map(allEvents.map(e => [String(e.id), e]));
+        let activities = (lightRes.data || []).slice();
 
-        // If allEvents is empty it means SWR hasn't loaded yet — skip the orphan
-        // filter rather than hiding valid EVENT activities on cold sessions.
-        let activities = allEvents.length === 0
-            ? rawActivities
-            : rawActivities.filter(a =>
-                a.activity_type !== 'EVENT' || !a.event_id || eventIds.has(String(a.event_id))
-              );
+        // Refresh hot cache from this render's hot fetch.
+        if (hotRes && hotRes.data && hotRes.data.length > 0) {
+            for (const a of hotRes.data) _hotActivityCache.set(String(a.id), a);
+        }
 
-        // Phase 21: Case Status filter (Closed/Open) — must stay client-side (computed)
+        // Orphan EVENT filter: server returns event_title NULL when the linked
+        // event row is missing. Drop those (mirrors the previous client filter).
+        activities = activities.filter(a =>
+            a.activity_type !== 'EVENT' || !a.event_id || a.event_title != null
+        );
+
+        // Phase 21: Case Status filter (Closed/Open) — kept client-side (computed)
         if (_filters.caseStatus === 'closed') {
             activities = activities.filter(a => a.closing_amount && parseFloat(a.closing_amount) > 0);
         } else if (_filters.caseStatus === 'open') {
             activities = activities.filter(a => !a.closing_amount || parseFloat(a.closing_amount) <= 0);
         }
 
-        // Build prospect/customer maps ONLY for IDs referenced in this month's activities
-        // (not all 5000 prospects — just the ~50-200 referenced this month)
-        const neededProspectIds = [...new Set(activities.filter(a => a.prospect_id).map(a => a.prospect_id))];
-        const neededCustomerIds = [...new Set(activities.filter(a => a.customer_id).map(a => a.customer_id))];
-        const [prospectResult, customerResult] = await Promise.all([
-            neededProspectIds.length > 0
-                ? AppDataStore.queryAdvanced('prospects', { scopeField: 'id', scopeValues: neededProspectIds, limit: 5000, select: 'id,full_name', countMode: null })
-                : Promise.resolve({ data: [] }),
-            neededCustomerIds.length > 0
-                ? AppDataStore.queryAdvanced('customers', { scopeField: 'id', scopeValues: neededCustomerIds, limit: 5000, select: 'id,full_name', countMode: null })
-                : Promise.resolve({ data: [] }),
-        ]);
-        const prospectMap = new Map(prospectResult.data.map(p => [String(p.id), p]));
-        const customerMap = new Map(customerResult.data.map(c => [String(c.id), c]));
+        // Sort once (server returns unordered for grouped queries)
+        activities.sort((a, b) => {
+            const da = (a.activity_date || '').localeCompare(b.activity_date || '');
+            if (da !== 0) return da;
+            return (a.start_time || '').localeCompare(b.start_time || '');
+        });
+
+        // Lookup maps reconstructed from joined RPC fields (no extra queries).
+        // userMap/eventMap/prospectMap/customerMap shaped to match the legacy
+        // contract used by the per-cell render block below — but only entries
+        // we actually need are populated, no full-table scans.
+        const userMap = new Map();
+        const eventMap = new Map();
+        const prospectMap = new Map();
+        const customerMap = new Map();
+        for (const a of activities) {
+            if (a.lead_agent_id != null && a.lead_agent_name) {
+                userMap.set(String(a.lead_agent_id), { id: a.lead_agent_id, full_name: a.lead_agent_name });
+            }
+            if (a.event_id != null && a.event_title != null) {
+                eventMap.set(String(a.event_id), {
+                    id: a.event_id,
+                    event_title: a.event_title,
+                    title: a.event_title,
+                    location: a.event_location,
+                });
+            }
+            if (a.prospect_id != null && a.prospect_name) {
+                prospectMap.set(String(a.prospect_id), { id: a.prospect_id, full_name: a.prospect_name });
+            }
+            if (a.customer_id != null && a.customer_name) {
+                customerMap.set(String(a.customer_id), { id: a.customer_id, full_name: a.customer_name });
+            }
+        }
 
         const todayDate = new Date();
         const isCurrentMonth = todayDate.getMonth() === month && todayDate.getFullYear() === year;
@@ -14566,7 +14768,13 @@ function _wireLoginBtn() {
     };
 
     const viewActivityDetails = async (activityId) => {
-        let activity = await AppDataStore.getById('activities', activityId);
+        // Hot cache hit: activity is in the yesterday→today+7 window pre-warmed by
+        // the last renderCalendar(). Skip the network round-trip entirely so the
+        // detail modal opens instantly on near-term taps.
+        let activity = _hotActivityCache.get(String(activityId)) || null;
+        if (!activity) {
+            activity = await AppDataStore.getById('activities', activityId);
+        }
         if (!activity) {
             // Fallback for locally-stored activities (timestamp IDs not yet synced to Supabase)
             const all = await AppDataStore.getAll('activities');
