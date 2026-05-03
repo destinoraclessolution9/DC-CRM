@@ -18437,29 +18437,25 @@ function _wireLoginBtn() {
         app.showProspectDetail(entityId);
     };
 
-    const showAddAttendeeSearch = async (eventId, activityId) => {
-        const [prospects, customers] = await Promise.all([AppDataStore.getAll('prospects'), AppDataStore.getAll('customers')]);
-        // BUG FIX 2026-04-11: dedupe by normalized phone (fallback: name) within each list
-        // so the same person (accidental duplicate row) doesn't show twice in the picker.
-        const dedupe = (list, type) => {
-            const seen = new Map();
-            for (const p of list) {
-                const key = (p.phone && String(p.phone).replace(/\D+/g,''))
-                    || `name:${String(p.full_name||'').trim().toLowerCase()}`;
-                if (!key || key === 'name:') continue;
-                if (!seen.has(key)) seen.set(key, { ...p, _type: type });
-            }
-            return Array.from(seen.values());
-        };
-        window._addAttAll = [...dedupe(prospects, 'prospect'), ...dedupe(customers, 'customer')];
+    const showAddAttendeeSearch = (eventId, activityId) => {
+        // Modal opens instantly. No preload of getAll('prospects') —
+        // a 124-row prospects fetch with heavy jsonb columns
+        // (closing_records_history / pre2025_purchases / feng_shui_audits)
+        // can take 5–20 s on nano under load, leaving the user staring at
+        // "no results" while typing. Search is now server-side via the
+        // pg_trgm-indexed searchProspects path (~300 ms per query).
         window._addAttSelected = null;
         window._addAttEventId = eventId;
         window._addAttActivityId = activityId;
+        window._addAttSearchSeq = 0;       // race-token: only the most-recent search commits
+        window._addAttCustomers = null;    // lazily fetched on first search (small table)
         const content = `
             <div class="form-group">
                 <label>Search Prospect / Customer</label>
-                <input type="text" id="add-att-search" class="form-control" placeholder="Type name or phone..." oninput="app.searchAddAttendee(this.value)">
-                <div id="add-att-results" style="border:1px solid var(--border,#e5e0d8);border-radius:4px;max-height:160px;overflow-y:auto;display:none;background:#fff;"></div>
+                <input type="text" id="add-att-search" class="form-control" placeholder="Type name or phone..." oninput="app.searchAddAttendee(this.value)" autocomplete="off">
+                <div id="add-att-results" style="border:1px solid var(--border,#e5e0d8);border-radius:4px;max-height:200px;overflow-y:auto;background:#fff;margin-top:4px;">
+                    <div style="padding:10px 12px;color:#9CA3AF;font-size:12px;">Type 2 or more characters to search…</div>
+                </div>
             </div>
             <div id="add-att-name" style="margin-top:8px;font-weight:600;color:var(--primary);min-height:20px;"></div>
             <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border,#e5e0d8);">
@@ -18599,20 +18595,82 @@ function _wireLoginBtn() {
         }
     };
 
+    // Server-side search with debounce + race-token + visible loading state.
+    // Replaces the old in-memory filter on a preloaded getAll('prospects') +
+    // getAll('customers') array — that pattern made the modal feel "stuck"
+    // because typing a name showed zero results until the 5–20 s preload
+    // finished. Each call hits searchProspects (pg_trgm-indexed, ~300 ms)
+    // plus a one-time customers fetch (small table — 10 rows today).
     const searchAddAttendee = (query) => {
-        const q = (query || '').toLowerCase();
+        const q = (query || '').trim();
         const res = document.getElementById('add-att-results');
         if (!res) return;
-        if (q.length < 2) { res.style.display = 'none'; res.innerHTML = ''; return; }
-        const matches = (window._addAttAll || []).filter(p =>
-            (p.full_name || '').toLowerCase().includes(q) || (p.phone || '').includes(q)
-        ).slice(0, 10);
-        res.innerHTML = matches.map(p =>
-            `<div style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #eee;" onmousedown="app.selectAddAttendee(${p.id},'${(p.full_name||'').replace(/'/g,"\\'")}','${p._type}')">
-                ${p.full_name} <small style="color:gray;">${p._type}</small>
-            </div>`
-        ).join('');
-        res.style.display = matches.length ? 'block' : 'none';
+        const setState = (html) => { res.innerHTML = html; res.style.display = 'block'; };
+
+        if (q.length < 2) {
+            setState('<div style="padding:10px 12px;color:#9CA3AF;font-size:12px;">Type 2 or more characters to search…</div>');
+            return;
+        }
+
+        // Debounce — coalesce keystrokes within 250 ms into a single query.
+        if (window._addAttSearchTimer) clearTimeout(window._addAttSearchTimer);
+        // Show searching state immediately so the user gets feedback while typing.
+        setState('<div style="padding:10px 12px;color:#6b7280;font-size:12px;"><i class="fas fa-circle-notch fa-spin" style="margin-right:6px;"></i>Searching database…</div>');
+
+        const seq = ++window._addAttSearchSeq;
+        window._addAttSearchTimer = setTimeout(async () => {
+            try {
+                // Customers table is small (≤ a few hundred); cache once per modal open.
+                if (!window._addAttCustomers) {
+                    try { window._addAttCustomers = await AppDataStore.getAll('customers'); }
+                    catch { window._addAttCustomers = []; }
+                }
+                const qLower = q.toLowerCase();
+                const customerMatches = (window._addAttCustomers || []).filter(c =>
+                    (c.full_name || '').toLowerCase().includes(qLower) || (c.phone || '').includes(q)
+                ).slice(0, 5).map(c => ({ ...c, _type: 'customer' }));
+
+                let prospectMatches = [];
+                try {
+                    const rows = await AppDataStore.searchProspects(q, { limit: 10, includeDormant: true });
+                    prospectMatches = (rows || []).map(p => ({ ...p, _type: 'prospect' }));
+                } catch (e) {
+                    console.warn('[addAttendee] searchProspects failed:', e);
+                }
+
+                // If a newer keystroke fired while we were waiting, drop this result.
+                if (seq !== window._addAttSearchSeq) return;
+
+                // Dedupe by normalized phone (fallback: name) so the same person
+                // doesn't appear twice when they exist as both prospect and customer.
+                const all = [...prospectMatches, ...customerMatches];
+                const seen = new Map();
+                for (const p of all) {
+                    const key = (p.phone && String(p.phone).replace(/\D+/g, ''))
+                        || `name:${String(p.full_name || '').trim().toLowerCase()}`;
+                    if (!key || key === 'name:') continue;
+                    if (!seen.has(key)) seen.set(key, p);
+                }
+                const matches = Array.from(seen.values()).slice(0, 10);
+
+                if (matches.length === 0) {
+                    setState('<div style="padding:10px 12px;color:#9CA3AF;font-size:12px;">No matches in database. Use “First Time Friend” below to add as new prospect.</div>');
+                    return;
+                }
+
+                res.innerHTML = matches.map(p => {
+                    const safeName = (p.full_name || '').replace(/'/g, "\\'");
+                    return `<div style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #eee;" onmousedown="app.selectAddAttendee(${p.id},'${safeName}','${p._type}')">
+                        ${escapeHtml(p.full_name || '')} <small style="color:gray;margin-left:6px;">${p._type}${p.phone ? ' · ' + escapeHtml(p.phone) : ''}</small>
+                    </div>`;
+                }).join('');
+                res.style.display = 'block';
+            } catch (e) {
+                if (seq !== window._addAttSearchSeq) return;
+                setState('<div style="padding:10px 12px;color:#b91c1c;font-size:12px;">Search failed. Check your connection and try again.</div>');
+                console.error('[addAttendee] search error:', e);
+            }
+        }, 250);
     };
 
     const selectAddAttendee = (id, name, type) => {
