@@ -62,10 +62,11 @@ create trigger prospects_score_audit
     after update of score on public.prospects
     for each row execute function public.log_score_change('prospect');
 
-drop trigger if exists customers_score_audit on public.customers;
-create trigger customers_score_audit
-    after update of score on public.customers
-    for each row execute function public.log_score_change('customer');
+-- Note 2026-05-03: customers table has no `score` column (verified via
+-- information_schema.columns), so addScoreToCustomer in script.js has been
+-- a no-op-with-error since launch. No trigger is attached for customers
+-- here. If a customer scoring system is ever added, copy the prospects
+-- trigger and reuse log_score_change() with arg 'customer'.
 
 
 -- ---------------------------------------------------------------------------
@@ -85,13 +86,15 @@ declare
     affected integer;
 begin
     perform set_config('app.score_reason', 'Weekly inactivity — no activity for 7+ days', true);
+    -- last_activity_date is type `date`; compare against current_date - 7
+    -- (date - integer is date, no cast needed).
     update public.prospects p
        set score = greatest(0, coalesce(p.score, 0) - 5)
      where coalesce(p.unable_to_serve, false) = false
        and coalesce(p.status, '') not in ('converted','lost')
        and (
             p.last_activity_date is null
-         or p.last_activity_date < (current_date - interval '7 days')::date::text
+         or p.last_activity_date < current_date - 7
        );
     get diagnostics affected = row_count;
     return affected;
@@ -107,6 +110,27 @@ $func$;
 -- hasn't been reminded today. The browser used to do this with N+1 reads
 -- (getAll('users'), then per-user query('action_plans'), then per-plan
 -- query('action_plan_checks')). One INSERT...SELECT replaces all of it.
+-- action_plan_checks.id is bigint NOT NULL with no default — the original
+-- browser code generated client-side IDs. Server-side INSERT...SELECT can't
+-- do that, so attach a sequence first. Idempotent: only creates the sequence
+-- if it doesn't already exist, then sets the default.
+do $seq$
+begin
+    if exists (select 1 from information_schema.tables
+               where table_schema='public' and table_name='action_plan_checks') then
+        if not exists (select 1 from pg_class where relname='action_plan_checks_id_seq') then
+            create sequence public.action_plan_checks_id_seq
+                owned by public.action_plan_checks.id;
+            perform setval(
+                'public.action_plan_checks_id_seq',
+                greatest(1, coalesce((select max(id) from public.action_plan_checks), 0))
+            );
+        end if;
+        execute 'alter table public.action_plan_checks
+                 alter column id set default nextval(''public.action_plan_checks_id_seq'')';
+    end if;
+end $seq$;
+
 create or replace function public.queue_action_plan_reminders()
 returns integer
 language plpgsql
