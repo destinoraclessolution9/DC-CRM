@@ -13482,9 +13482,12 @@ function _wireLoginBtn() {
         // The light call drives the visible grid; the hot call warms the
         // detail-modal cache. We tolerate the hot call failing — the calendar
         // still renders, taps just incur a normal getById on click.
+        // NOTE: supabase-js v2 .rpc() returns a thenable PostgrestFilterBuilder,
+        // not a real Promise — .catch() on it throws "is not a function". Wrap
+        // in Promise.resolve() to convert to a real Promise before catching.
         const [lightRes, hotRes] = await Promise.all([
             window.supabase.rpc('get_calendar_window', lightParams),
-            window.supabase.rpc('get_calendar_hot_details', hotParams).catch(e => {
+            Promise.resolve(window.supabase.rpc('get_calendar_hot_details', hotParams)).catch(e => {
                 console.warn('[calendar] hot warm-up failed:', e?.message || e);
                 return { data: [], error: e };
             }),
@@ -28154,7 +28157,7 @@ const renderCurrentAssignments = async (agentId) => {
         // getAll('prospects') approach would be unacceptable here; this groups
         // on the server and returns only the dupe rows.
         try {
-            const { data, error } = await window.supabase.rpc('_fs_phone_dupes').catch(() => ({ data: null, error: 'no-rpc' }));
+            const { data, error } = await Promise.resolve(window.supabase.rpc('_fs_phone_dupes')).catch(() => ({ data: null, error: 'no-rpc' }));
             if (data && !error) return data;
         } catch (_) {}
         // Fallback: pull phone list via PostgREST, group client-side. Uses the
@@ -28182,7 +28185,7 @@ const renderCurrentAssignments = async (agentId) => {
     // feature still works pre-migration).
     const _loadEmailDupes = async () => {
         try {
-            const { data, error } = await window.supabase.rpc('_fs_email_dupes').catch(() => ({ data: null, error: 'no-rpc' }));
+            const { data, error } = await Promise.resolve(window.supabase.rpc('_fs_email_dupes')).catch(() => ({ data: null, error: 'no-rpc' }));
             if (data && !error) {
                 return data.map(row => ({
                     email: row.email,
