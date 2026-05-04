@@ -2912,6 +2912,46 @@ body {
     color: #b91c1c;
 }
 
+.week-activity.gr {
+    background: #ede9fe;
+    color: #5b21b6;
+}
+
+.week-activity.site {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.week-activity.xg {
+    background: #ffedd5;
+    color: #b45309;
+}
+
+.week-activity.call {
+    background: #cffafe;
+    color: #0e7490;
+}
+
+.week-activity.email {
+    background: #f1f5f9;
+    color: #334155;
+}
+
+.week-activity.whatsapp {
+    background: #dcfce7;
+    color: #15803d;
+}
+
+.week-activity.agent_meeting {
+    background: #f3e8ff;
+    color: #6d28d9;
+}
+
+.week-activity.agent_training {
+    background: #fce7f3;
+    color: #9d174d;
+}
+
 /* ==================== ENHANCED DAY VIEW STYLES ==================== */
 .enhanced-day-view {
     background: var(--white);
@@ -3015,6 +3055,38 @@ body {
 
 .timeline-activity.event {
     border-left-color: #ef4444;
+}
+
+.timeline-activity.gr {
+    border-left-color: #8b5cf6;
+}
+
+.timeline-activity.site {
+    border-left-color: #92400e;
+}
+
+.timeline-activity.xg {
+    border-left-color: #b45309;
+}
+
+.timeline-activity.call {
+    border-left-color: #0891b2;
+}
+
+.timeline-activity.email {
+    border-left-color: #64748b;
+}
+
+.timeline-activity.whatsapp {
+    border-left-color: #16a34a;
+}
+
+.timeline-activity.agent_meeting {
+    border-left-color: #7c3aed;
+}
+
+.timeline-activity.agent_training {
+    border-left-color: #be185d;
 }
 
 .activity-time {
@@ -8233,6 +8305,38 @@ input:checked+.slider:before {
 
 .calendar-appointment.event {
     border-left-color: #ef4444;
+}
+
+.calendar-appointment.gr {
+    border-left-color: #8b5cf6;
+}
+
+.calendar-appointment.site {
+    border-left-color: #92400e;
+}
+
+.calendar-appointment.xg {
+    border-left-color: #b45309;
+}
+
+.calendar-appointment.call {
+    border-left-color: #0891b2;
+}
+
+.calendar-appointment.email {
+    border-left-color: #64748b;
+}
+
+.calendar-appointment.whatsapp {
+    border-left-color: #16a34a;
+}
+
+.calendar-appointment.agent_meeting {
+    border-left-color: #7c3aed;
+}
+
+.calendar-appointment.agent_training {
+    border-left-color: #be185d;
 }
 
 .appointment-time {
