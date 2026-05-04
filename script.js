@@ -27452,7 +27452,8 @@ const showAgentProfile = async (agentId) => {
         return `<div class="stat-row"><span>Follow-up rate: 85%</span></div>`;
     };
     const renderCurrentAssignments = async (agentId) => {
-        const allP = await AppDataStore.getAll('prospects');
+        // fresh:true bypasses SWR cache so stale localStorage data never hides prospects
+        const allP = await AppDataStore.getAll('prospects', { fresh: true });
         const agentProspects = allP.filter(p => String(p.responsible_agent_id) === String(agentId));
         if (agentProspects.length === 0) return '<p style="color:var(--gray-400);font-size:13px;">No prospects assigned.</p>';
         agentProspects.sort((a, b) => (b.last_activity_date || '').localeCompare(a.last_activity_date || ''));
