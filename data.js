@@ -297,7 +297,8 @@ class DataStore {
         }
     }
 
-    // Strip fields that must never be persisted to localStorage (e.g. plaintext passwords).
+    // Strip fields that must never be sent to the client (e.g. legacy plaintext password
+    // column on public.users — column is now REVOKED at DB level but guard here too).
     _sanitizeForStorage(tableName, records) {
         if (tableName !== 'users' || !Array.isArray(records)) return records;
         return records.map(r => {
@@ -305,6 +306,13 @@ class DataStore {
             const { password: _pw, ...safe } = r;
             return safe;
         });
+    }
+
+    // Strip sensitive fields from a single user record.
+    _sanitizeUserRecord(record) {
+        if (!record || typeof record !== 'object') return record;
+        const { password: _pw, ...safe } = record;
+        return safe;
     }
 
     // Invalidate cache for a table (and any table that depends on it)
@@ -845,21 +853,23 @@ class DataStore {
             if (data) {
                 // Merge with localStorage to preserve extra fields not in Supabase schema
                 // (same logic as getAll) — server fields always win
+                let result = data;
                 try {
                     const local = localStorage.getItem(`fs_crm_${tableName}`);
                     if (local) {
                         const records = JSON.parse(local);
                         const localRecord = records.find(r => String(r.id) === String(id));
-                        if (localRecord) return { ...localRecord, ...data };
+                        if (localRecord) result = { ...localRecord, ...data };
                     }
                 } catch (_) {}
-                return data;
+                return tableName === 'users' ? this._sanitizeUserRecord(result) : result;
             }
             // Not found in Supabase — check localStorage fallback (schema-mismatch saves)
             const local = localStorage.getItem(`fs_crm_${tableName}`);
             if (local) {
                 const records = JSON.parse(local);
-                return records.find(r => String(r.id) === String(id)) || null;
+                const found = records.find(r => String(r.id) === String(id)) || null;
+                return tableName === 'users' ? this._sanitizeUserRecord(found) : found;
             }
             return null;
         } catch (e) {
