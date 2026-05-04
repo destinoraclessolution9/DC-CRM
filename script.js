@@ -11635,12 +11635,6 @@ function _wireLoginBtn() {
                     </div>
 
                     <div class="form-group">
-                        <label class="checkbox-label">
-                            <input type="checkbox" id="case-is-public" ${c && c.is_public ? 'checked' : ''}> Make this case public to other agents
-                        </label>
-                    </div>
-
-                    <div class="form-group">
                         <label><i class="fas fa-camera"></i> Photos</label>
                         <p class="help-text">Add event photos, testimonials, or product shots — the first photo becomes the cover.</p>
                         <div class="case-photo-uploader">
@@ -11827,7 +11821,6 @@ function _wireLoginBtn() {
             product: document.getElementById('case-product').value,
             amount: parseFloat(document.getElementById('case-amount').value) || 0,
             closing_date: document.getElementById('case-closing-date').value,
-            is_public: document.getElementById('case-is-public').checked,
             cps_invitation_details: document.getElementById('case-cps-details').value,
             closing_details: document.getElementById('case-closing-details').value,
             sales_idea: document.getElementById('case-sales-idea').value,
@@ -11838,6 +11831,17 @@ function _wireLoginBtn() {
             photo_urls: Array.isArray(_casePendingPhotos) ? _casePendingPhotos : [],
             updated_at: new Date().toISOString()
         };
+        const photos = Array.isArray(_casePendingPhotos) ? _casePendingPhotos : [];
+        data.is_public = !!(
+            data.cps_invitation_details?.trim() ||
+            data.closing_details?.trim() ||
+            data.sales_idea?.trim() ||
+            data.plan_details?.trim() ||
+            data.success_story?.trim() ||
+            data.key_success_factor?.trim() ||
+            data.script?.trim() ||
+            photos.length > 0
+        );
 
         if (id) {
             await AppDataStore.update('case_studies', id, data);
@@ -19823,7 +19827,7 @@ function _wireLoginBtn() {
                     cps_invitation_details: activity.cps_invitation_details || '',
                     closing_date: activity.activity_date,
                     created_by: _currentUser?.id || null,
-                    is_public: false
+                    is_public: !!(activity.cps_invitation_details && activity.cps_invitation_details.trim())
                 });
             } catch (err) {
                 console.warn('CPS case study auto-create failed:', err.message);
