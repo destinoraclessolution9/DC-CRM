@@ -21195,9 +21195,11 @@ function _wireLoginBtn() {
         // last-activity column. prospects + users are independent and run
         // in parallel — saves ~one round-trip on cold load.
         _mark('skeleton-painted');
+        // When filtering by a specific agent, always include dormant so the admin
+        // sees the agent's full prospect list, not just the "active" subset.
         const prospectsPromise = searchQueryRaw
             ? AppDataStore.searchProspects(searchQueryRaw, { includeDormant: true, limit: 200 })
-            : AppDataStore.getActiveProspects({ includeDormant: includeDormantToggle });
+            : AppDataStore.getActiveProspects({ includeDormant: includeDormantToggle || !!agentFilter });
         const [allProspects, allUsers] = await Promise.all([
             prospectsPromise,
             AppDataStore.getAll('users'),
