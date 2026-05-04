@@ -27452,7 +27452,26 @@ const showAgentProfile = async (agentId) => {
         return `<div class="stat-row"><span>Follow-up rate: 85%</span></div>`;
     };
     const renderCurrentAssignments = async (agentId) => {
-        return `<div>3 active prospects assigned</div>`;
+        const allP = await AppDataStore.getAll('prospects');
+        const agentProspects = allP.filter(p => String(p.responsible_agent_id) === String(agentId));
+        if (agentProspects.length === 0) return '<p style="color:var(--gray-400);font-size:13px;">No prospects assigned.</p>';
+        agentProspects.sort((a, b) => (b.last_activity_date || '').localeCompare(a.last_activity_date || ''));
+        return `
+            <div class="assignments-list">
+                ${agentProspects.map(p => `
+                    <div class="assignment-item" onclick="app.showProspectDetail(${p.id})" style="cursor:pointer;">
+                        <div>
+                            <div class="assignment-prospect">${escapeHtml(p.full_name || '(No Name)')}</div>
+                            <div class="next-action" style="font-size:12px;color:var(--gray-500);">
+                                ${p.last_activity_date ? 'Last: ' + p.last_activity_date : 'No activity yet'}
+                            </div>
+                        </div>
+                        <span class="assignment-status status-${(p.status || 'prospect').toLowerCase()}">${p.status || 'Prospect'}</span>
+                    </div>
+                `).join('')}
+            </div>
+            <p style="font-size:12px;color:var(--gray-400);margin-top:8px;">${agentProspects.length} prospect${agentProspects.length !== 1 ? 's' : ''} total</p>
+        `;
     };
     const renderPerformanceTargets = async (agentId) => {
         return `<div>Monthly target: RM 50,000</div>`;
