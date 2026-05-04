@@ -22375,51 +22375,6 @@ function _wireLoginBtn() {
         `;
     };
 
-    const PLATFORM_LIST = ['Bujishu', 'Metapoint', 'Formula', 'Monalisa', 'Florida', 'Far Coffee', 'Patiseri'];
-
-    const openEditPlatformIdsModal = async (customerId) => {
-        const existing = await AppDataStore.query('platform_ids', { customer_id: customerId });
-        const getVal = (name) => existing.find(p => p.platform === name)?.platform_id || '';
-
-        const fields = PLATFORM_LIST.map(name => `
-            <div class="form-group">
-                <label>${name} ID</label>
-                <input type="text" id="pid-${name.replace(/\s/g,'-').toLowerCase()}" class="form-control"
-                    placeholder="Enter ${name} ID" value="${escapeHtml(getVal(name))}">
-            </div>
-        `).join('');
-
-        const content = `<div class="form-section">${fields}</div>`;
-
-        UI.showModal('Edit Platform IDs', content, [
-            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save', type: 'primary', action: `(async () => { await app.savePlatformIds(${customerId}); })()` }
-        ]);
-    };
-
-    const savePlatformIds = async (customerId) => {
-        const existing = await AppDataStore.query('platform_ids', { customer_id: customerId });
-
-        for (const name of PLATFORM_LIST) {
-            const inputId = `pid-${name.replace(/\s/g, '-').toLowerCase()}`;
-            const value = document.getElementById(inputId)?.value?.trim() || '';
-            const record = existing.find(p => p.platform === name);
-
-            if (record) {
-                await AppDataStore.update('platform_ids', record.id, { platform_id: value });
-            } else if (value) {
-                await AppDataStore.create('platform_ids', {
-                    customer_id: customerId,
-                    platform: name,
-                    platform_id: value
-                });
-            }
-        }
-
-        UI.toast.success('Platform IDs updated.');
-        UI.hideModal();
-    };
-
     const openUploadRedemptionImageModal = async (purchaseId) => {
         const content = `
             <div class="form-section">
@@ -26683,21 +26638,6 @@ for (const p of allPackages) {
         ]);
     };
 
-
-    const submitRecruitmentApproval = async (customerId) => {
-        const customer = await AppDataStore.getById('customers', customerId);
-        await AppDataStore.create('recruitment_approvals', {
-            customer_id: customerId,
-            customer_name: customer?.full_name || 'Unknown',
-            package_type: document.getElementById('rec-pkg')?.value || 'Standard',
-            package_amount: parseInt(document.getElementById('rec-amt')?.value || 3000),
-            status: 'Pending',
-            submitted_at: new Date().toISOString(),
-            submitted_by: _currentUser?.id
-        });
-        UI.hideModal();
-        UI.toast.success('Recruitment submitted for Super Admin approval.');
-    };
 
     const confirmDelete = async (id) => {
         UI.showModal('Delete Confirmation',
