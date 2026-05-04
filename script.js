@@ -34653,6 +34653,9 @@ const exportKPIReport = async (format) => {
                     <button class="marketing-tab ${_currentMarketingTab === 'promotions' ? 'active' : ''}" onclick="app.switchMarketingTab('promotions')">
                         <i class="fas fa-calendar-alt"></i> Monthly Promotions
                     </button>
+                    <button class="marketing-tab ${_currentMarketingTab === 'promotions' ? 'active' : ''}" onclick="app.switchMarketingTab('promotions')">
+                        <i class="fas fa-calendar-alt"></i> Monthly Promotions
+                    </button>
                     ` : ''}
                 </div>
 
@@ -34735,6 +34738,11 @@ const exportKPIReport = async (format) => {
             return await renderAnalyticsTab();
         } else if (_currentMarketingTab === 'products') {
             return await renderProductsTab();
+<<<<<<< HEAD
+=======
+        } else if (_currentMarketingTab === 'packages') {
+            return await renderPackagesTab();
+>>>>>>> claude/festive-kapitsa
         } else if (_currentMarketingTab === 'promotions') {
             return await renderMonthlyPromotionsTab();
         }
@@ -35425,7 +35433,11 @@ const exportKPIReport = async (format) => {
                 <div style="display: flex; gap: 15px; margin-bottom: 20px;">
                     <div style="position: relative; flex: 1;">
                         <i class="fas fa-search" style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--gray-400);"></i>
+<<<<<<< HEAD
                         <input type="text" id="promo-search" class="form-control" placeholder="Search by promotion name or package..." style="padding-left: 35px;" oninput="app.debounceCall('promo-search', app.filterMonthlyPromotions, 220)">
+=======
+                        <input type="text" id="promo-search" class="form-control" placeholder="Search by promotion name or package..." style="padding-left: 35px;" onkeyup="app.filterMonthlyPromotions()">
+>>>>>>> claude/festive-kapitsa
                     </div>
                     <select id="promo-status-filter" class="form-control" style="width: 170px;" onchange="app.filterMonthlyPromotions()">
                         <option value="all">All Status</option>
@@ -35440,6 +35452,7 @@ const exportKPIReport = async (format) => {
                     <table class="data-table" style="width: 100%; border-collapse: collapse; min-width: 900px;">
                         <thead>
                             <tr style="background: var(--gray-100); text-align: left;">
+<<<<<<< HEAD
                                 <th scope="col" style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Promotion Name</th>
                                 <th scope="col" style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Month/Year</th>
                                 <th scope="col" style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Time Frame</th>
@@ -35449,6 +35462,17 @@ const exportKPIReport = async (format) => {
                                 <th scope="col" style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Entitlement Req.</th>
                                 <th scope="col" style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Status</th>
                                 <th scope="col" style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Actions</th>
+=======
+                                <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Promotion Name</th>
+                                <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Month/Year</th>
+                                <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Time Frame</th>
+                                <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Special Package</th>
+                                <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Payment Mode</th>
+                                <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Target Customer</th>
+                                <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Entitlement Req.</th>
+                                <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Status</th>
+                                <th style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Actions</th>
+>>>>>>> claude/festive-kapitsa
                             </tr>
                         </thead>
                         <tbody id="monthly-promotions-tbody">
@@ -35583,6 +35607,10 @@ const exportKPIReport = async (format) => {
                     <span class="status-badge ${statusClass}" style="font-size: 13px; padding: 5px 12px;">${p.status || 'Draft'}</span>
                     <span style="color: var(--gray-500);">${monthYear}</span>
                 </div>
+<<<<<<< HEAD
+=======
+
+>>>>>>> claude/festive-kapitsa
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
                     <div>
                         <label style="font-size: 11px; font-weight: 600; color: var(--gray-500); text-transform: uppercase;">Time Frame</label>
@@ -35593,12 +35621,20 @@ const exportKPIReport = async (format) => {
                         <p style="margin: 4px 0;"><i class="fas fa-gift" style="color: var(--primary); margin-right: 6px;"></i>${p.special_package || '—'}</p>
                     </div>
                 </div>
+<<<<<<< HEAD
+=======
+
+>>>>>>> claude/festive-kapitsa
                 <div style="margin-bottom: 16px;">
                     <label style="font-size: 11px; font-weight: 600; color: var(--gray-500); text-transform: uppercase; display: block; margin-bottom: 8px;">Package Product Details</label>
                     <div style="background: var(--gray-50); border: 1px solid var(--gray-200); border-radius: 6px; padding: 12px;">
                         ${productList}
                     </div>
                 </div>
+<<<<<<< HEAD
+=======
+
+>>>>>>> claude/festive-kapitsa
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
                     <div>
                         <label style="font-size: 11px; font-weight: 600; color: var(--gray-500); text-transform: uppercase; display: block; margin-bottom: 6px;">Payment Mode</label>
@@ -35609,10 +35645,18 @@ const exportKPIReport = async (format) => {
                         <p style="margin: 4px 0;"><i class="fas fa-bullseye" style="color: var(--primary); margin-right: 6px;"></i>${p.target_customer || '—'}</p>
                     </div>
                 </div>
+<<<<<<< HEAD
+=======
+
+>>>>>>> claude/festive-kapitsa
                 <div style="margin-bottom: 16px;">
                     <label style="font-size: 11px; font-weight: 600; color: var(--gray-500); text-transform: uppercase;">Entitlement Requirement</label>
                     <p style="margin: 4px 0;"><i class="fas fa-check-circle" style="color: var(--primary); margin-right: 6px;"></i>${p.entitlement_requirement || '—'}</p>
                 </div>
+<<<<<<< HEAD
+=======
+
+>>>>>>> claude/festive-kapitsa
                 ${p.promotion_script ? `
                 <div style="margin-bottom: 16px;">
                     <label style="font-size: 11px; font-weight: 600; color: var(--gray-500); text-transform: uppercase; display: block; margin-bottom: 8px;">Promotion Script (WhatsApp)</label>
@@ -35620,6 +35664,10 @@ const exportKPIReport = async (format) => {
                         ${p.promotion_script.replace(/</g, '&lt;').replace(/>/g, '&gt;')}
                     </div>
                 </div>` : ''}
+<<<<<<< HEAD
+=======
+
+>>>>>>> claude/festive-kapitsa
                 <div style="font-size: 11px; color: var(--gray-400); margin-top: 16px;">
                     Created: ${p.created_at ? new Date(p.created_at).toLocaleDateString('en-MY', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
                     ${p.updated_at && p.updated_at !== p.created_at ? ` · Updated: ${new Date(p.updated_at).toLocaleDateString('en-MY', { day: '2-digit', month: 'short', year: 'numeric' })}` : ''}
@@ -35666,6 +35714,10 @@ const exportKPIReport = async (format) => {
                 <label>Promotion Name <span class="required">*</span></label>
                 <input type="text" id="promo-name" class="form-control" value="${(p.name || '').replace(/"/g, '&quot;')}" placeholder="e.g. CNY Prosperity Pack">
             </div>
+<<<<<<< HEAD
+=======
+
+>>>>>>> claude/festive-kapitsa
             <div class="form-row">
                 <div class="form-group half">
                     <label>Month <span class="required">*</span></label>
@@ -35680,6 +35732,10 @@ const exportKPIReport = async (format) => {
                     </select>
                 </div>
             </div>
+<<<<<<< HEAD
+=======
+
+>>>>>>> claude/festive-kapitsa
             <div class="form-row">
                 <div class="form-group half">
                     <label>Start Date</label>
@@ -35690,10 +35746,18 @@ const exportKPIReport = async (format) => {
                     <input type="date" id="promo-end" class="form-control" value="${p.end_date || ''}">
                 </div>
             </div>
+<<<<<<< HEAD
+=======
+
+>>>>>>> claude/festive-kapitsa
             <div class="form-group">
                 <label>Special Package Name</label>
                 <input type="text" id="promo-package" class="form-control" value="${(p.special_package || '').replace(/"/g, '&quot;')}" placeholder="e.g. Ultimate Prosperity Bundle">
             </div>
+<<<<<<< HEAD
+=======
+
+>>>>>>> claude/festive-kapitsa
             <div class="form-group">
                 <label>Package Product Details</label>
                 <div id="promo-products-container" style="margin-bottom: 8px;"></div>
@@ -35701,6 +35765,10 @@ const exportKPIReport = async (format) => {
                     <i class="fas fa-plus"></i> Add Product Item
                 </button>
             </div>
+<<<<<<< HEAD
+=======
+
+>>>>>>> claude/festive-kapitsa
             <div class="form-group">
                 <label>Payment Mode</label>
                 <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; border: 1px solid var(--gray-300); border-radius: 4px; padding: 10px;">
@@ -35711,14 +35779,26 @@ const exportKPIReport = async (format) => {
                     `).join('')}
                 </div>
             </div>
+<<<<<<< HEAD
+=======
+
+>>>>>>> claude/festive-kapitsa
             <div class="form-group">
                 <label>Target Customer</label>
                 <input type="text" id="promo-target" class="form-control" value="${(p.target_customer || '').replace(/"/g, '&quot;')}" placeholder="e.g. All customers, New sign-ups, Zodiac=Horse">
             </div>
+<<<<<<< HEAD
+=======
+
+>>>>>>> claude/festive-kapitsa
             <div class="form-group">
                 <label>Entitlement Requirement</label>
                 <input type="text" id="promo-entitlement" class="form-control" value="${(p.entitlement_requirement || '').replace(/"/g, '&quot;')}" placeholder="e.g. Min spend RM150, First 50 customers">
             </div>
+<<<<<<< HEAD
+=======
+
+>>>>>>> claude/festive-kapitsa
             <div class="form-group">
                 <label>Promotion Script (WhatsApp)</label>
                 <div style="margin-bottom: 8px;">
@@ -35729,6 +35809,10 @@ const exportKPIReport = async (format) => {
                 </div>
                 <textarea id="promo-script" class="form-control" rows="5" placeholder="Hi {{name}}, enjoy our exclusive promotion this month...">${(p.promotion_script || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>
             </div>
+<<<<<<< HEAD
+=======
+
+>>>>>>> claude/festive-kapitsa
             <div class="form-group">
                 <label>Status</label>
                 <select id="promo-status" class="form-control">
@@ -47463,7 +47547,11 @@ JB 星期二到
         viewPackageCustomers,
         filterPackages,
 
+<<<<<<< HEAD
         // Monthly Promotions ledger
+=======
+        // Monthly Promotions
+>>>>>>> claude/festive-kapitsa
         renderMonthlyPromotionsTab,
         renderMonthlyPromotionRow,
         filterMonthlyPromotions,
