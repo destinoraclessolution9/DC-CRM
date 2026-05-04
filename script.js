@@ -7228,13 +7228,20 @@ function _wireLoginBtn() {
             let profile = null;
             if (profileMatches.length > 0) {
                 profileMatches.sort((a, b) => {
+                    // 1. Prefer profiles with a team_id (explicitly admin-configured)
                     const aTeam = a.team_id ? 0 : 1;
                     const bTeam = b.team_id ? 0 : 1;
                     if (aTeam !== bTeam) return aTeam - bTeam;
-                    const aLvl = parseInt(a.role?.match(/Level\s*(\d+)/i)?.[1] ?? 99);
-                    const bLvl = parseInt(b.role?.match(/Level\s*(\d+)/i)?.[1] ?? 99);
+                    // 2. Prefer lower role level — use full mapping so named roles
+                    //    (e.g. "Consultant") resolve correctly instead of falling
+                    //    back to 99 and losing to a ghost "Level 12 Agent" profile.
+                    const aLvl = _getUserLevel(a);
+                    const bLvl = _getUserLevel(b);
                     if (aLvl !== bLvl) return aLvl - bLvl;
-                    return (b.id ?? 0) - (a.id ?? 0); // prefer newer (higher id)
+                    // 3. Prefer lower id — admin-created profiles have small sequential
+                    //    ids (1-999); auto-created ghost profiles use Date.now() ids
+                    //    (~1 700 000 000 000) and must never win the tiebreak.
+                    return (a.id ?? 0) - (b.id ?? 0);
                 });
                 profile = profileMatches[0];
             }
