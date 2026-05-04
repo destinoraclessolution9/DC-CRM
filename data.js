@@ -2030,6 +2030,10 @@ class DataStore {
         const m = publicUrl.match(/\/storage\/v1\/object\/public\/attachments\/(.+?)(?:\?|$)/);
         return m ? decodeURIComponent(m[1]) : null;
     }
+
+    // Aliases used throughout script.js
+    async getById(tableName, id) { return this.get(tableName, id); }
+    async create(tableName, record) { return this.add(tableName, record); }
 }
 
 // Create and protect the global instance
