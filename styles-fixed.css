@@ -1,4 +1,17 @@
 /* Feng Shui CRM V8.7 - Core Styles */
+
+/* Accessibility: visually hidden but readable by screen readers */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+}
 :root {
     --primary: #8B0000;
     --primary-dark: #5C0A0A;

@@ -11788,8 +11788,8 @@ function _wireLoginBtn() {
                     <div class="calendar-title-nav">
                         <h2 id="calendar-month-title" onclick="app.openMonthPicker()" style="cursor:pointer;" title="Click to select month">Month Year</h2>
                         <div class="nav-arrows">
-                            <button class="btn-nav" onclick="app.goToPrevious()"><i class="fas fa-chevron-left"></i></button>
-                            <button class="btn-nav" onclick="app.goToNext()"><i class="fas fa-chevron-right"></i></button>
+                            <button class="btn-nav" onclick="app.goToPrevious()" aria-label="Previous month"><i class="fas fa-chevron-left" aria-hidden="true"></i></button>
+                            <button class="btn-nav" onclick="app.goToNext()" aria-label="Next month"><i class="fas fa-chevron-right" aria-hidden="true"></i></button>
                         </div>
                         <button class="btn secondary btn-sm" onclick="app.goToToday()">Today</button>
                     </div>
@@ -27043,15 +27043,18 @@ const openAddSolutionModal = async (prospectId) => {
                         <i class="fas fa-search" style="color:var(--gray-400);"></i>
                         <input type="text" id="agent-search" placeholder="Search agents by name, code, or phone" oninput="app.debounceCall('agent-search', app.filterAgents, 220)" style="border:none; background:transparent; outline:none; width:100%;">
                     </div>
-                    <select id="filter-agent-team" onchange="app.filterAgents()" class="form-control" style="width:140px;">
+                    <label for="filter-agent-team" class="sr-only">Filter by team</label>
+                    <select id="filter-agent-team" aria-label="Filter by team" onchange="app.filterAgents()" class="form-control" style="width:140px;">
                         <option value="">All Teams</option>
                         ${Array.from({length: 26}, (_, i) => String.fromCharCode(65 + i)).map(L => `<option value="Team ${L}">Team ${L}</option>`).join('')}
                     </select>
-                    <select id="filter-agent-role" onchange="app.filterAgents()" class="form-control" style="width:160px;">
+                    <label for="filter-agent-role" class="sr-only">Filter by role</label>
+                    <select id="filter-agent-role" aria-label="Filter by role" onchange="app.filterAgents()" class="form-control" style="width:160px;">
                         <option value="">All Roles</option>
                         ${USER_ROLES.map(r => `<option value="${r}">${r}</option>`).join('')}
                     </select>
-                    <select id="filter-agent-status" onchange="app.filterAgents()" class="form-control" style="width:140px;">
+                    <label for="filter-agent-status" class="sr-only">Filter by status</label>
+                    <select id="filter-agent-status" aria-label="Filter by status" onchange="app.filterAgents()" class="form-control" style="width:140px;">
                         <option value="">All Status</option>
                         <option value="active">Active</option>
                         <option value="probation">Probation</option>
@@ -29143,7 +29146,8 @@ const deactivateAgent = async (agentId) => {
 
     // ---- Referral bonus: +20% if prospect was referred by a customer with a purchase
     // in the last N days (default 180) ----
-    const checkReferralBonus = async (prospect, config) => {
+    // allReferrals / allPurchases are optional pre-fetched arrays (avoids N+1 in bulk calcs).
+    const checkReferralBonus = async (prospect, config, allReferrals, allPurchases) => {
         const windowDays = config.constants?.referral_customer_purchase_window_days || 180;
         const bonusPct = config.constants?.referral_customer_bonus_pct || 20;
         const result = { applied: false, bonusPct, reason: '' };
@@ -29151,7 +29155,12 @@ const deactivateAgent = async (agentId) => {
         // Path A: structured referrals table
         let referrerCustomerId = null;
         try {
-            const referrals = await AppDataStore.query('referrals', { referred_prospect_id: prospect.id });
+            let referrals;
+            if (allReferrals) {
+                referrals = allReferrals.filter(r => String(r.referred_prospect_id) === String(prospect.id));
+            } else {
+                referrals = await AppDataStore.query('referrals', { referred_prospect_id: prospect.id });
+            }
             const customerRef = (referrals || []).find(r => r.referrer_type === 'customer');
             if (customerRef) referrerCustomerId = customerRef.referrer_id;
         } catch (_) {}
@@ -29181,7 +29190,11 @@ const deactivateAgent = async (agentId) => {
         // Verify at least one purchase within the purchase window
         let purchases = [];
         try {
-            purchases = await AppDataStore.query('purchases', { customer_id: referrerCustomerId });
+            if (allPurchases) {
+                purchases = allPurchases.filter(p => String(p.customer_id) === String(referrerCustomerId));
+            } else {
+                purchases = await AppDataStore.query('purchases', { customer_id: referrerCustomerId });
+            }
         } catch (_) {}
         if (!purchases.length) {
             result.reason = 'Referrer has no purchases';
@@ -29204,7 +29217,8 @@ const deactivateAgent = async (agentId) => {
 
     // ---- MAIN: calculate pipeline entry for one prospect ----
     // Returns an object with qualified flag, probability, category, breakdown, referral info
-    const calcPipelineEntry = async (prospect, prospectActivities) => {
+    // prefetched: optional { allReferrals, allPurchases, allSolutions } to avoid N+1 in bulk calcs
+    const calcPipelineEntry = async (prospect, prospectActivities, prefetched) => {
         const config = await loadPipelineConfig();
         const eventsMap = await _getPipelineEventsMap();
         const now = new Date();
@@ -29313,7 +29327,7 @@ const deactivateAgent = async (agentId) => {
         let probability = Math.min(100, Math.round(bestScore * K));
 
         // Apply customer referral bonus
-        const referralInfo = await checkReferralBonus(prospect, config);
+        const referralInfo = await checkReferralBonus(prospect, config, prefetched?.allReferrals, prefetched?.allPurchases);
         if (referralInfo.applied) {
             probability = Math.min(100, probability + referralInfo.bonusPct);
         }
@@ -29424,8 +29438,14 @@ const deactivateAgent = async (agentId) => {
         return 'Open';
     };
 
-    const getPipelineAmount = async (prospect, category) => {
-        const solutions = await AppDataStore.query('proposed_solutions', { prospect_id: prospect.id });
+    // allSolutions: optional pre-fetched array to avoid N+1 in bulk calcs
+    const getPipelineAmount = async (prospect, category, allSolutions) => {
+        let solutions;
+        if (allSolutions) {
+            solutions = allSolutions.filter(s => String(s.prospect_id) === String(prospect.id));
+        } else {
+            solutions = await AppDataStore.query('proposed_solutions', { prospect_id: prospect.id });
+        }
         if (solutions.length > 0 && solutions[0].amount) return solutions[0].amount;
         if (prospect.estimated_value_max) return prospect.estimated_value_max;
         if (prospect.estimated_value_min) return prospect.estimated_value_min;
@@ -29701,7 +29721,7 @@ const deactivateAgent = async (agentId) => {
 
         const focusRows = _isArchiveView
             ? (await Promise.all(focusList.map((arc, idx) => renderArchiveFocusRow(arc, idx)))).join('')
-            : (await Promise.all(focusList.map((rec, idx) => renderFocusRow(rec, idx, allActivities, probBadge)))).join('');
+            : (await Promise.all(focusList.map((rec, idx) => renderFocusRow(rec, idx, allActivities, probBadge, false, _plPrefetched)))).join('');
 
         // Fill focus section — visible before expensive table 2 loads
         const _plFocusSection = document.getElementById('pl-focus-section');
@@ -29751,9 +29771,17 @@ const deactivateAgent = async (agentId) => {
         }
 
         // ── STEP 6: Expensive enrichment — Table 2 tbody has skeleton, fill after ──
+        // Pre-fetch relational tables once so calcPipelineEntry doesn't fire N+1 requests.
+        const [_plAllReferrals, _plAllPurchases, _plAllSolutions] = await Promise.all([
+            AppDataStore.getAll('referrals').catch(() => []),
+            AppDataStore.getAll('purchases').catch(() => []),
+            AppDataStore.getAll('proposed_solutions').catch(() => []),
+        ]);
+        const _plPrefetched = { allReferrals: _plAllReferrals, allPurchases: _plAllPurchases, allSolutions: _plAllSolutions };
+
         const enrichedRaw = await Promise.all(activeProspects.map(async (p) => {
             const acts = allActivities.filter(a => a.prospect_id === p.id);
-            const pipeline = await calcPipelineEntry(p, acts);
+            const pipeline = await calcPipelineEntry(p, acts, _plPrefetched);
             // Also qualify prospects with explicit potential data set (manual override)
             if (!pipeline.qualified && (p.close_probability > 0 || p.potential_level)) {
                 const potentialProb = p.close_probability > 0
@@ -29780,7 +29808,7 @@ const deactivateAgent = async (agentId) => {
                 return (a.name || a.full_name || '').localeCompare(b.name || b.full_name || '');
             });
 
-        const systemRows = (await Promise.all(enriched.map(p => renderSystemRow(p, probBadge)))).join('');
+        const systemRows = (await Promise.all(enriched.map(p => renderSystemRow(p, probBadge, _plPrefetched)))).join('');
 
         // Fill table 2 — replaces skeleton rows
         const _tbody2 = document.getElementById('pipeline-list-body');
@@ -29810,7 +29838,7 @@ const deactivateAgent = async (agentId) => {
                     .sort((a, b) => a.priority_order - b.priority_order);
                 if (subFocus.length === 0) continue;
                 agentCount++;
-                const subRows = (await Promise.all(subFocus.map((rec, idx) => renderFocusRow(rec, idx, allActivities, probBadge, true)))).join('');
+                const subRows = (await Promise.all(subFocus.map((rec, idx) => renderFocusRow(rec, idx, allActivities, probBadge, true, _plPrefetched)))).join('');
                 _teamAgentSections += `
                     <div style="margin-top:12px;">
                         <div onclick="app.toggleAgentFocusSection(this)" style="cursor:pointer;display:flex;align-items:center;gap:8px;padding:12px 16px;background:#F0F4FF;border-radius:8px;border:1px solid #DBEAFE;user-select:none;">
@@ -29848,13 +29876,13 @@ const deactivateAgent = async (agentId) => {
         }
     };
 
-    const renderFocusRow = async (rec, idx, allActivities, probBadge, readOnly = false) => {
+    const renderFocusRow = async (rec, idx, allActivities, probBadge, readOnly = false, prefetched) => {
         const prospect = await AppDataStore.getById('prospects', rec.prospect_id);
         if (!prospect) return '';
 
         const acts = allActivities.filter(a => a.prospect_id === prospect.id);
-        const entry = await calcPipelineEntry(prospect, acts);
-        const systemAmount = await getPipelineAmount(prospect, entry.category);
+        const entry = await calcPipelineEntry(prospect, acts, prefetched);
+        const systemAmount = await getPipelineAmount(prospect, entry.category, prefetched?.allSolutions);
         const noteCount = await getNoteCount(prospect.id);
 
         // Use custom override if agent set one, otherwise system value
@@ -29933,9 +29961,9 @@ const deactivateAgent = async (agentId) => {
             </tr>`;
     };
 
-    const renderSystemRow = async (prospect, probBadge) => {
+    const renderSystemRow = async (prospect, probBadge, prefetched) => {
         const entry = prospect._pipeline;
-        const amount = await getPipelineAmount(prospect, entry.category);
+        const amount = await getPipelineAmount(prospect, entry.category, prefetched?.allSolutions);
         const noteCount = await getNoteCount(prospect.id);
 
         // v6: show top-3 contributing activities instead of prereq pills
@@ -31792,9 +31820,11 @@ container.innerHTML = `
                         </select>
                     </div>
                     <div class="date-range-picker" style="margin-left: auto;">
-                        <input type="date" id="kpi-date-from" value="${_customDateFrom}" onchange="app.setCustomDateRange(this.value, document.getElementById('kpi-date-to').value)">
-                        <span>to</span>
-                        <input type="date" id="kpi-date-to" value="${_customDateTo}" onchange="app.setCustomDateRange(document.getElementById('kpi-date-from').value, this.value)">
+                        <label for="kpi-date-from" class="sr-only">From date</label>
+                        <input type="date" id="kpi-date-from" aria-label="From date" value="${_customDateFrom}" onchange="app.setCustomDateRange(this.value, document.getElementById('kpi-date-to').value)">
+                        <span aria-hidden="true">to</span>
+                        <label for="kpi-date-to" class="sr-only">To date</label>
+                        <input type="date" id="kpi-date-to" aria-label="To date" value="${_customDateTo}" onchange="app.setCustomDateRange(document.getElementById('kpi-date-from').value, this.value)">
                     </div>
                 </div>
 

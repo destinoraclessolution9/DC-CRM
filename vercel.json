@@ -94,6 +94,14 @@
     {
       "source": "/terms",
       "destination": "/terms.html"
+    },
+    {
+      "source": "/package.json",
+      "destination": "/404.html"
+    },
+    {
+      "source": "/package-lock.json",
+      "destination": "/404.html"
     }
   ],
   "cleanUrls": true,
