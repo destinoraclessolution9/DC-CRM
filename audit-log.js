@@ -264,10 +264,17 @@ const sendAuditToServer = (auditEntry) => {
     console.log('Sending audit log to server mock endpoint:', auditEntry.id);
 };
 
+// In-memory audit sync queue — entries are flushed to audit_logs table when online
+const _auditSyncQueue = [];
 const queueAuditForSync = (auditEntry) => {
-    const queue = JSON.parse(localStorage.getItem('audit_sync_queue') || '[]');
-    queue.push(auditEntry);
-    localStorage.setItem('audit_sync_queue', JSON.stringify(queue));
+    _auditSyncQueue.push(auditEntry);
+    // Try to flush to Supabase immediately
+    if (window.AppDataStore) {
+        AppDataStore.create('audit_logs', auditEntry).then(() => {
+            const idx = _auditSyncQueue.indexOf(auditEntry);
+            if (idx >= 0) _auditSyncQueue.splice(idx, 1);
+        }).catch(() => {});
+    }
 };
 
 // Security incident detection

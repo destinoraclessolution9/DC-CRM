@@ -286,21 +286,25 @@ const SecureDataStore = {
 
 // Get encryption key for current user/tenant
 const getEncryptionKey = async () => {
-    // In production, this would fetch from secure key management service
-    // For demo, we'll use a stored key or generate one
+    // Fetch encryption key from Supabase encryption_keys table
+    try {
+        const keys = await AppDataStore.getAll('encryption_keys');
+        const activeKey = keys.find(k => k.status === 'active' || k.is_active);
+        if (activeKey?.key_data) return activeKey.key_data;
+    } catch (_) {}
 
-    let keyData = localStorage.getItem('encryption_key');
+    // No key found — generate and store in Supabase
+    const { exportedKey } = await Encryption.generateKey();
+    try {
+        await AppDataStore.create('encryption_keys', {
+            key_data: exportedKey,
+            status: 'active',
+            is_active: true,
+            created_at: new Date().toISOString()
+        });
+    } catch (_) {}
 
-    if (!keyData) {
-        // Generate new key
-        const { exportedKey } = await Encryption.generateKey();
-        keyData = exportedKey;
-
-        // Store encrypted with user's password
-        localStorage.setItem('encryption_key', keyData);
-    }
-
-    return keyData;
+    return exportedKey;
 };
 
 // Base64 helpers (needed for Web Crypto interactions)
