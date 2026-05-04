@@ -4,8 +4,8 @@
 // Same approach Instagram uses for the feed: show cached content first,
 // then quietly replace with fresh data when it arrives. Repeat visits feel
 // instant because we never block on the network for assets we already have.
-const CACHE_NAME = 'crm-cache-v10';
-const RUNTIME_CACHE = 'crm-runtime-v10';
+const CACHE_NAME = 'crm-cache-v11';
+const RUNTIME_CACHE = 'crm-runtime-v11';
 
 // Minimal precache. We skip heavy files (script.js is 2.5 MB) to avoid
 // breaking install if any single asset 404s — runtime cache picks them up
