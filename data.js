@@ -1542,16 +1542,17 @@ class DataStore {
         const fullSelect    = this._lightSelects['prospects'] || '*';
 
         try {
+            const dormantFilter = `last_activity_date.gte.${cutoff},last_activity_date.is.null`;
             let { data, error } = await this._readClient()
                 .from('prospects')
                 .select(listingSelect)
-                .gte('last_activity_date', cutoff)
+                .or(dormantFilter)
                 .limit(limit);
             if (error && listingSelect !== fullSelect) {
                 ({ data, error } = await this._readClient()
                     .from('prospects')
                     .select(fullSelect)
-                    .gte('last_activity_date', cutoff)
+                    .or(dormantFilter)
                     .limit(limit));
             }
             // Final fallback: bare * so nothing is blocked by a stale column list
@@ -1559,7 +1560,7 @@ class DataStore {
                 ({ data, error } = await this._readClient()
                     .from('prospects')
                     .select('*')
-                    .gte('last_activity_date', cutoff)
+                    .or(dormantFilter)
                     .limit(limit));
             }
             if (error) throw error;
