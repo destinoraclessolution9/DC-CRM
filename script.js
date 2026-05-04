@@ -7296,6 +7296,17 @@ function _wireLoginBtn() {
             }
             
             _currentUser = profile;
+            // Flush stale SWR snapshots on every login so the user always
+            // sees fresh prospect/customer data rather than a cached view
+            // from a previous session that may pre-date admin reassignments.
+            ['prospects', '__prospects_active_500', 'customers', 'users'].forEach(k => {
+                try { localStorage.removeItem(`fs_crm_${k}`); } catch (_) {}
+                try { localStorage.removeItem(`fs_crm_${k}_last_sync`); } catch (_) {}
+            });
+            AppDataStore.invalidateCache('prospects');
+            AppDataStore.invalidateCache('__prospects_active_500');
+            AppDataStore.invalidateCache('customers');
+            AppDataStore.invalidateCache('users');
             await UserPreferences.load(profile.id);
             // Save "remember me" preference before leaving login screen
             const _rememberChk = document.getElementById('rememberMe');
