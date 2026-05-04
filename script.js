@@ -47169,7 +47169,6 @@ JB 星期二到
         sendWhatsApp,
         viewMessageDetails,
         resendMessage,
-        executeResendMessage,
         replyToMessage,
         forwardMessage,
         createTaskFromMessage,
