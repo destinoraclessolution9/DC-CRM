@@ -29497,6 +29497,11 @@ const deactivateAgent = async (agentId) => {
 
         // Filter prospects
         let prospects = allProspects ? [...allProspects] : [];
+        // Warn if data failed to load (timeout / stale SWR cache) — guide user to Refresh
+        if (prospects.length === 0 && (allActivities || []).length === 0) {
+            console.warn('[Pipeline] Both prospects and activities returned empty — possible stale cache. Click Refresh.');
+            UI.toast.error('Pipeline data could not load. Click <strong>Refresh</strong> to retry.', { duration: 6000 });
+        }
         if (_pipelineAgentFilter !== 'all') prospects = prospects.filter(p => p.responsible_agent_id == _pipelineAgentFilter);
         if (_pipelineStatusFilter !== 'all') prospects = prospects.filter(p => p.status === _pipelineStatusFilter);
         const activeProspects = prospects.filter(p => p.status !== 'converted' && p.status !== 'lost' && !p.unable_to_serve);
@@ -29944,6 +29949,11 @@ const deactivateAgent = async (agentId) => {
     };
 
     const refreshPipeline = async () => {
+        // Bust in-memory + SWR caches for the three tables the pipeline depends on
+        // so stale/empty data never causes a "0 qualified" phantom empty state.
+        AppDataStore.invalidateCache('activities');
+        AppDataStore.invalidateCache('prospects');
+        AppDataStore.invalidateCache('users');
         const container = document.getElementById('content-viewport');
         if (container) await showPipelineView(container);
     };
