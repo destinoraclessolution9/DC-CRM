@@ -30,7 +30,6 @@ class DataStore {
             'performance_warnings', 'backups', 'backup_schedules', 'deployments', 'system_config',
             'system_logs', 'maintenance_windows', 'audit_logs_archive',
             'event_attendees', 'agent_event_attendees', 'case_studies',
-<<<<<<< HEAD
             'promotion_packages', 'products', 'promotions', 'appointment_locations', 'venues',
             // New features
             'booking_slots', 'booking_appointments', 'booking_pages',
@@ -56,10 +55,6 @@ class DataStore {
             'refill_reminders',
             // Egg Purchasing system (Super Admin only)
             'egg_processed_orders', 'egg_urgent_orders', 'egg_config', 'egg_run_history'
-=======
-            'promotion_packages', 'products', 'promotions', 'appointment_locations',
-            'monthly_promotions'
->>>>>>> claude/festive-kapitsa
         ];
         this.initialized = false;
         this._events = {};
