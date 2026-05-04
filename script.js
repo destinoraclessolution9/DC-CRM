@@ -19100,25 +19100,62 @@ function _wireLoginBtn() {
     };
 
     const searchEntities = async () => {
-        const searchTerm = document.getElementById('entity-search')?.value.toLowerCase();
+        const raw = document.getElementById('entity-search')?.value || '';
+        const searchTerm = raw.toLowerCase().trim();
         const resultsDiv = document.getElementById('search-results');
         if (!searchTerm || searchTerm.length < 2) {
             if (resultsDiv) resultsDiv.style.display = 'none';
             return;
         }
 
-        const prospects = await getVisibleProspects();
-        const customers = await getVisibleCustomers();
-        const all = [...prospects.map(p => ({ ...p, type: 'Prospect' })), ...customers.map(c => ({ ...c, type: 'Customer' }))];
+        // Use all prospects/customers visible to the user PLUS any whose
+        // responsible_agent_id is null/unset — those fall through the visibility
+        // filter but the agent may still legitimately log an activity for them.
+        const [visibleProspects, visibleCustomers, allProspectsRaw, allCustomersRaw] = await Promise.all([
+            getVisibleProspects(),
+            getVisibleCustomers(),
+            AppDataStore.getAll('prospects'),
+            AppDataStore.getAll('customers'),
+        ]);
+        const unownedProspects = allProspectsRaw.filter(p => !p.responsible_agent_id && !visibleProspects.find(vp => vp.id === p.id));
+        const unownedCustomers = allCustomersRaw.filter(c => !c.responsible_agent_id && !c.agent_id && !visibleCustomers.find(vc => vc.id === c.id));
 
-        const matches = all.filter(e => e.full_name ? e.full_name.toLowerCase().includes(searchTerm) : false).slice(0, 5);
+        const all = [
+            ...visibleProspects.map(p => ({ ...p, type: 'Prospect' })),
+            ...unownedProspects.map(p => ({ ...p, type: 'Prospect' })),
+            ...visibleCustomers.map(c => ({ ...c, type: 'Customer' })),
+            ...unownedCustomers.map(c => ({ ...c, type: 'Customer' })),
+        ];
+
+        // Normalise phone digits for phone-number queries
+        const termDigits = searchTerm.replace(/\D/g, '');
+
+        const matches = all.filter(e => {
+            const name  = (e.full_name  || '').toLowerCase();
+            const nick  = (e.nickname   || '').toLowerCase();
+            const email = (e.email      || '').toLowerCase();
+            const phone = (e.phone      || '').replace(/\D/g, '');
+            return name.includes(searchTerm)
+                || nick.includes(searchTerm)
+                || email.includes(searchTerm)
+                || (termDigits.length >= 4 && phone.includes(termDigits));
+        }).slice(0, 10);
 
         if (resultsDiv) {
-            resultsDiv.innerHTML = matches.map(m => `
-                <div class="search-result-item" onclick="app.selectEntity(${m.id}, '${m.type}')">
-                    <strong>${m.full_name}</strong> (${m.type})
-                </div>
-            `).join('') || '<div class="search-result-item">No results</div>';
+            if (matches.length) {
+                resultsDiv.innerHTML = matches.map(m => `
+                    <div class="search-result-item" onclick="app.selectEntity(${m.id}, '${m.type}')">
+                        <strong>${escapeHtml(m.full_name || '')}</strong>
+                        <span style="color:#888;font-size:11px;margin-left:6px;">${m.type}${m.phone ? ' · ' + escapeHtml(m.phone) : ''}</span>
+                    </div>
+                `).join('');
+            } else {
+                resultsDiv.innerHTML = `
+                    <div class="search-result-item" style="color:#888;cursor:default;">
+                        No results found for "<strong>${escapeHtml(raw)}</strong>".<br>
+                        <span style="font-size:11px;">Check spelling, or go to <em>Prospects</em> to add them first.</span>
+                    </div>`;
+            }
             resultsDiv.style.display = 'block';
         }
     };
