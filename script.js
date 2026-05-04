@@ -19108,23 +19108,15 @@ function _wireLoginBtn() {
             return;
         }
 
-        // Use all prospects/customers visible to the user PLUS any whose
-        // responsible_agent_id is null/unset — those fall through the visibility
-        // filter but the agent may still legitimately log an activity for them.
-        const [visibleProspects, visibleCustomers, allProspectsRaw, allCustomersRaw] = await Promise.all([
+        // Only show prospects/customers that belong to this agent or their team.
+        const [visibleProspects, visibleCustomers] = await Promise.all([
             getVisibleProspects(),
             getVisibleCustomers(),
-            AppDataStore.getAll('prospects'),
-            AppDataStore.getAll('customers'),
         ]);
-        const unownedProspects = allProspectsRaw.filter(p => !p.responsible_agent_id && !visibleProspects.find(vp => vp.id === p.id));
-        const unownedCustomers = allCustomersRaw.filter(c => !c.responsible_agent_id && !c.agent_id && !visibleCustomers.find(vc => vc.id === c.id));
 
         const all = [
             ...visibleProspects.map(p => ({ ...p, type: 'Prospect' })),
-            ...unownedProspects.map(p => ({ ...p, type: 'Prospect' })),
             ...visibleCustomers.map(c => ({ ...c, type: 'Customer' })),
-            ...unownedCustomers.map(c => ({ ...c, type: 'Customer' })),
         ];
 
         // Normalise phone digits for phone-number queries
