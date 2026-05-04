@@ -74,10 +74,7 @@ LANGUAGE sql STABLE SECURITY INVOKER AS $$
         a.closing_amount, a.is_closing, a.solution_sold,
         a.venue, a.location_address, a.status,
         u.full_name                          AS lead_agent_name,
-        -- COALESCE: old events stored title in `event_title` column (pre-rename),
-        -- new events use `title`. Accept either so activities linked to old events
-        -- are not silently dropped by the orphan filter.
-        COALESCE(e.title, e.event_title)     AS event_title,
+        e.title                              AS event_title,
         e.location                           AS event_location,
         p.full_name                          AS prospect_name,
         c.full_name                          AS customer_name
