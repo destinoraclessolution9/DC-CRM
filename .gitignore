@@ -3,3 +3,5 @@ Website Requirements Document V 8.6.txt
 node_modules/
 test_report.md
 test_screenshots/
+
+.vercel
