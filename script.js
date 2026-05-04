@@ -7299,6 +7299,7 @@ function _wireLoginBtn() {
             // Flush stale SWR snapshots on every login so the user always
             // sees fresh prospect/customer data rather than a cached view
             // from a previous session that may pre-date admin reassignments.
+            _visibleUserIdsCache.clear();
             ['prospects', '__prospects_active_500', 'customers', 'users'].forEach(k => {
                 try { localStorage.removeItem(`fs_crm_${k}`); } catch (_) {}
                 try { localStorage.removeItem(`fs_crm_${k}_last_sync`); } catch (_) {}
@@ -7463,20 +7464,31 @@ function _wireLoginBtn() {
                 }
                 let profile = null;
                 if (profileMatches && profileMatches.length > 0) {
-                    // If duplicates exist, prefer: 1) has team_id, 2) lowest level, 3) highest id (newest)
+                    // If duplicates exist, prefer: 1) has team_id, 2) lowest level, 3) lowest id (admin-created)
                     profileMatches.sort((a, b) => {
                         const aTeam = a.team_id ? 0 : 1;
                         const bTeam = b.team_id ? 0 : 1;
                         if (aTeam !== bTeam) return aTeam - bTeam;
-                        const aLvl = parseInt(a.role?.match(/Level\s*(\d+)/i)?.[1] ?? 99);
-                        const bLvl = parseInt(b.role?.match(/Level\s*(\d+)/i)?.[1] ?? 99);
+                        const aLvl = _getUserLevel(a);
+                        const bLvl = _getUserLevel(b);
                         if (aLvl !== bLvl) return aLvl - bLvl;
-                        return (b.id ?? 0) - (a.id ?? 0); // prefer newer (higher id)
+                        return (a.id ?? 0) - (b.id ?? 0); // prefer lower id (admin-created, not ghost)
                     });
                     profile = profileMatches[0];
                 }
                 if (profile) {
                     _currentUser = profile;
+                    // Flush stale SWR snapshots so the user always sees fresh data,
+                    // not a cached view from a previous session that may pre-date reassignments.
+                    _visibleUserIdsCache.clear();
+                    ['prospects', '__prospects_active_500', 'customers', 'users'].forEach(k => {
+                        try { localStorage.removeItem(`fs_crm_${k}`); } catch (_) {}
+                        try { localStorage.removeItem(`fs_crm_${k}_last_sync`); } catch (_) {}
+                    });
+                    AppDataStore.invalidateCache('prospects');
+                    AppDataStore.invalidateCache('__prospects_active_500');
+                    AppDataStore.invalidateCache('customers');
+                    AppDataStore.invalidateCache('users');
                     await UserPreferences.load(profile.id);
                     // Background-validate the token is still accepted server-side.
                     // Only force logout on explicit auth errors (401/403), never on network failures.
@@ -21233,7 +21245,8 @@ function _wireLoginBtn() {
             if (visibleIds === 'all') {
                 prospects = allProspects;
             } else {
-                prospects = allProspects.filter(p => visibleIds.includes(p.responsible_agent_id));
+                const visibleIdSet = new Set(visibleIds.map(String));
+                prospects = allProspects.filter(p => visibleIdSet.has(String(p.responsible_agent_id)));
             }
         }
 
