@@ -13519,10 +13519,17 @@ function _wireLoginBtn() {
             for (const a of hotRes.data) _hotActivityCache.set(String(a.id), a);
         }
 
-        // Orphan EVENT filter: server returns event_title NULL when the linked
-        // event row is missing. Drop those (mirrors the previous client filter).
+        // Orphan EVENT filter: drop activities of type EVENT that have an event_id
+        // but NO resolvable title. Two title sources exist:
+        //   a.event_title  — returned by the RPC via JOIN on events.title (new column)
+        //   a.activity_title — set at save time from ev.event_title || ev.title
+        // Old events were created before the `title` column was added, so they only
+        // have `event_title` in the DB. The RPC JOIN (e.title) returns null for those,
+        // but saveActivity() always writes the resolved title into activity_title, so
+        // checking activity_title covers old-event links without dropping real orphans.
         activities = activities.filter(a =>
-            a.activity_type !== 'EVENT' || !a.event_id || a.event_title != null
+            a.activity_type !== 'EVENT' || !a.event_id ||
+            a.event_title != null || a.activity_title != null
         );
 
         // Phase 21: Case Status filter (Closed/Open) — kept client-side (computed)
