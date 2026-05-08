@@ -169,6 +169,8 @@ window.addEventListener('beforeinstallprompt', function (e) {
         { section: 'Navigate', label: 'Integrations',                     icon: 'fa-plug',                view: 'integrations' },
         { section: 'Navigate', label: 'Setting - Account',                icon: 'fa-gear',                view: 'settings' },
         { section: 'Navigate', label: 'Protection Monitoring',            icon: 'fa-shield-halved',       view: 'protection' },
+        { section: 'Navigate', label: 'Knowledge HQ',                     icon: 'fa-brain',               view: 'knowledge' },
+        { section: 'Action',   label: 'Quick Capture (new entry)',        icon: 'fa-bolt',                action: function () { window.app && window.app.openCaptureModal && window.app.openCaptureModal(); }, meta: 'Ctrl+Shift+N' },
         { section: 'Action',   label: 'Toggle Light / Dark Theme',        icon: 'fa-circle-half-stroke',  action: function () { window._toggleTheme && window._toggleTheme(); }, meta: 'Ctrl+Shift+L' },
         { section: 'Action',   label: 'Logout',                           icon: 'fa-right-from-bracket',  action: function () { window.app && window.app.logout && window.app.logout(); } },
     ];
@@ -245,6 +247,10 @@ window.addEventListener('beforeinstallprompt', function (e) {
     document.addEventListener('keydown', function (e) {
         const isCmdK = (e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K');
         if (isCmdK) { e.preventDefault(); open(); return; }
+        // Ctrl+Shift+N — Quick capture for Knowledge HQ (works from anywhere)
+        if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'N' || e.key === 'n')) {
+            if (window.app && window.app.openCaptureModal) { e.preventDefault(); window.app.openCaptureModal(); return; }
+        }
         const overlay = document.getElementById('cmdk-overlay');
         if (!overlay || !overlay.classList.contains('active')) return;
         if (e.key === 'Escape')       { e.preventDefault(); close(); }

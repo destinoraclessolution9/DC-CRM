@@ -10191,6 +10191,7 @@ function _wireLoginBtn() {
             formula_purchaser: 'Formula Purchaser', purchases_history: 'Purchases History',
             stock_take: 'Stock Take', ai: 'AI Insights', security: 'Security', admin: 'Admin',
             risk: 'Attrition Risk', nps: 'NPS Surveys',
+            knowledge: 'Knowledge HQ',
         };
         document.title = `${VIEW_TITLES[viewId] || viewId} — 悅客匯 CRM`;
 
@@ -10309,6 +10310,9 @@ function _wireLoginBtn() {
         } else if (viewId === 'purchases_history') {
             _currentView = 'purchases_history';
             await showPurchasesHistoryView(viewport);
+        } else if (viewId === 'knowledge') {
+            _currentView = 'knowledge';
+            await showKnowledgeView(viewport);
         } else if (viewId === 'stock_take') {
             if (!isSystemAdmin(_currentUser)) {
                 UI.toast.error('Super Admin only');
@@ -47971,10 +47975,662 @@ JB 星期二到
     // Placeholder — export-data flow needs product scoping before full impl
     const exportKPIDashboard = () => todo('Export KPI Dashboard');
 
+    // ========== KNOWLEDGE HQ — Personal Knowledge Hub ==========
+    let _kbSegment = 'dashboard';
+    let _kbCurrentEntryId = null;
+    let _kbAllFilter = 'all';
+    let _kbDailyDate = null;
+    let _kbAutosaveTimer = null;
+
+    const _kbOwnerId = async () => {
+        try {
+            const { data: { session } } = await window.supabase.auth.getSession();
+            return session?.user?.id || null;
+        } catch (_) { return null; }
+    };
+
+    const _kbTodayISO = () => {
+        const d = new Date();
+        return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    };
+
+    const _kbFmtDate = (iso) => {
+        if (!iso) return '';
+        try { return new Date(iso).toLocaleDateString(); } catch (_) { return iso; }
+    };
+
+    const _kbTypeLabel = (t) => ({
+        idea: 'Idea', task: 'Task', case_study: 'Case Study',
+        note: 'Note', reference: 'Reference'
+    })[t] || 'Inbox';
+
+    const _kbTypeIcon = (t) => ({
+        idea: 'fa-lightbulb', task: 'fa-check-square', case_study: 'fa-flask',
+        note: 'fa-note-sticky', reference: 'fa-bookmark'
+    })[t] || 'fa-inbox';
+
+    const _kbStatusLabel = (s) => ({
+        draft: 'Draft', active: 'Active', waiting: 'Waiting',
+        done: 'Done', archived: 'Archived'
+    })[s] || s || '';
+
+    const showKnowledgeView = async (container) => {
+        _currentView = 'knowledge';
+        if (!_kbSegment) _kbSegment = 'dashboard';
+        container.innerHTML = `
+            <div class="kb-view">
+                <div class="kb-header">
+                    <div>
+                        <h1><i class="fas fa-brain" style="color:var(--primary);"></i> Knowledge HQ</h1>
+                        <div class="kb-subtitle">Capture first. Classify later. Connect anytime.</div>
+                    </div>
+                    <div class="kb-segments">
+                        <button class="kb-seg ${_kbSegment==='dashboard'?'active':''}" onclick="app.switchKnowledgeSegment('dashboard')"><i class="fas fa-gauge"></i> Dashboard</button>
+                        <button class="kb-seg ${_kbSegment==='capture'?'active':''}" onclick="app.switchKnowledgeSegment('capture')"><i class="fas fa-feather"></i> Capture</button>
+                        <button class="kb-seg ${_kbSegment==='all'?'active':''}" onclick="app.switchKnowledgeSegment('all')"><i class="fas fa-list"></i> All Entries</button>
+                        <button class="kb-seg ${_kbSegment==='daily'?'active':''}" onclick="app.switchKnowledgeSegment('daily')"><i class="far fa-calendar"></i> Daily Notes</button>
+                    </div>
+                </div>
+                <div id="kb-slot" class="kb-slot"></div>
+            </div>
+        `;
+        await _kbRenderSegment();
+    };
+
+    const switchKnowledgeSegment = async (seg) => {
+        _kbSegment = seg;
+        _kbCurrentEntryId = null;
+        document.querySelectorAll('.kb-seg').forEach(b => b.classList.remove('active'));
+        const btn = Array.from(document.querySelectorAll('.kb-seg')).find(b => b.textContent.trim().toLowerCase().includes(seg === 'all' ? 'all entries' : seg));
+        if (btn) btn.classList.add('active');
+        await _kbRenderSegment();
+    };
+
+    const _kbRenderSegment = async () => {
+        const slot = document.getElementById('kb-slot');
+        if (!slot) return;
+        if (_kbCurrentEntryId) return showKnowledgeDetail(_kbCurrentEntryId);
+        if (_kbSegment === 'dashboard') return showKnowledgeDashboard(slot);
+        if (_kbSegment === 'capture')   return showKnowledgeCapture(slot);
+        if (_kbSegment === 'all')       return showKnowledgeAllEntries(slot);
+        if (_kbSegment === 'daily')     return showKnowledgeDailyNotes(slot);
+    };
+
+    const showKnowledgeDashboard = async (slot) => {
+        slot.innerHTML = `
+            <div class="kb-quick-capture">
+                <input type="text" id="kb-qc-title" class="kb-input" placeholder="What's on your mind? (title)" maxlength="200">
+                <textarea id="kb-qc-content" class="kb-textarea" rows="3" placeholder="Optional notes... (Ctrl+Enter to save)"></textarea>
+                <div class="kb-qc-actions">
+                    <span class="kb-qc-hint">No type required — classify later during review.</span>
+                    <button class="btn primary" onclick="app.saveQuickCapture()"><i class="fas fa-bolt"></i> Capture</button>
+                </div>
+            </div>
+            <div class="kb-dash-grid">
+                <div class="kb-card" id="kb-card-inbox"><div class="kb-card-h"><i class="fas fa-inbox"></i> Inbox <span class="kb-count" id="kb-cnt-inbox">·</span></div><div class="kb-card-body" id="kb-list-inbox"><div class="kb-empty">Loading…</div></div></div>
+                <div class="kb-card" id="kb-card-tasks"><div class="kb-card-h"><i class="fas fa-check-square"></i> Today's Tasks <span class="kb-count" id="kb-cnt-tasks">·</span></div><div class="kb-card-body" id="kb-list-tasks"><div class="kb-empty">Loading…</div></div></div>
+                <div class="kb-card" id="kb-card-ideas"><div class="kb-card-h"><i class="fas fa-lightbulb"></i> Recent Ideas <span class="kb-count" id="kb-cnt-ideas">·</span></div><div class="kb-card-body" id="kb-list-ideas"><div class="kb-empty">Loading…</div></div></div>
+                <div class="kb-card" id="kb-card-cases"><div class="kb-card-h"><i class="fas fa-flask"></i> In-progress Case Studies <span class="kb-count" id="kb-cnt-cases">·</span></div><div class="kb-card-body" id="kb-list-cases"><div class="kb-empty">Loading…</div></div></div>
+            </div>
+        `;
+        // Wire Ctrl+Enter on the quick-capture textarea
+        const ta = document.getElementById('kb-qc-content');
+        if (ta) ta.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); saveQuickCapture(); }
+        });
+        await _kbReloadDashboard();
+    };
+
+    const _kbReloadDashboard = async () => {
+        const owner = await _kbOwnerId();
+        if (!owner) {
+            const slot = document.getElementById('kb-slot');
+            if (slot) slot.innerHTML = '<div class="kb-empty" style="padding:40px;">Sign in to use Knowledge HQ.</div>';
+            return;
+        }
+        let all = [];
+        try {
+            all = await AppDataStore.query('knowledge_entries', { owner_id: owner }) || [];
+        } catch (e) {
+            const slot = document.getElementById('kb-slot');
+            if (slot) slot.innerHTML = `<div class="kb-empty" style="padding:40px;">Knowledge HQ tables not yet provisioned. Run <code>migrations/knowledge_hub_2026-05-09.sql</code> in Supabase SQL editor, then reload.</div>`;
+            return;
+        }
+        const today = _kbTodayISO();
+        const inbox  = all.filter(e => !e.type).sort((a,b)=> (b.created_at||'').localeCompare(a.created_at||'')).slice(0, 8);
+        const tasks  = all.filter(e => e.type==='task' && ['draft','active','waiting'].includes(e.status||'draft') && e.due_date===today).sort((a,b)=> (a.priority||'').localeCompare(b.priority||''));
+        const ideas  = all.filter(e => e.type==='idea').sort((a,b)=> (b.created_at||'').localeCompare(a.created_at||'')).slice(0, 5);
+        const cases  = all.filter(e => e.type==='case_study' && (e.status||'')!=='done').slice(0, 8);
+        _kbRenderList('kb-list-inbox', 'kb-cnt-inbox', inbox, 'No uncategorized entries. Inbox zero.');
+        _kbRenderList('kb-list-tasks', 'kb-cnt-tasks', tasks, 'No tasks due today.');
+        _kbRenderList('kb-list-ideas', 'kb-cnt-ideas', ideas, 'No ideas yet.');
+        _kbRenderList('kb-list-cases', 'kb-cnt-cases', cases, 'No active case studies.');
+    };
+
+    const _kbRenderList = (slotId, cntId, rows, emptyMsg) => {
+        const slot = document.getElementById(slotId);
+        const cnt  = document.getElementById(cntId);
+        if (cnt) cnt.textContent = rows.length;
+        if (!slot) return;
+        if (!rows.length) { slot.innerHTML = `<div class="kb-empty">${escapeHtml(emptyMsg)}</div>`; return; }
+        slot.innerHTML = rows.map(r => `
+            <div class="kb-row" onclick="app.showKnowledgeDetail('${r.id}')">
+                <i class="fas ${_kbTypeIcon(r.type)} kb-row-icon" title="${_kbTypeLabel(r.type)}"></i>
+                <div class="kb-row-main">
+                    <div class="kb-row-title">${escapeHtml(r.title || '(untitled)')}</div>
+                    ${r.tags && r.tags.length ? `<div class="kb-row-tags">${r.tags.map(t=>`<span class="kb-tag">${escapeHtml(t)}</span>`).join('')}</div>` : ''}
+                </div>
+                <div class="kb-row-meta">${_kbFmtDate(r.due_date || r.created_at)}</div>
+            </div>
+        `).join('');
+    };
+
+    const saveQuickCapture = async () => {
+        const titleEl = document.getElementById('kb-qc-title');
+        const contentEl = document.getElementById('kb-qc-content');
+        const title = (titleEl?.value || '').trim();
+        const content = (contentEl?.value || '').trim();
+        if (!title) { UI.toast.error('Title required'); titleEl?.focus(); return; }
+        const owner = await _kbOwnerId();
+        if (!owner) { UI.toast.error('Sign in first'); return; }
+        try {
+            await AppDataStore.create('knowledge_entries', {
+                owner_id: owner, title, content, type: null, status: 'draft', tags: []
+            });
+            if (titleEl)   titleEl.value = '';
+            if (contentEl) contentEl.value = '';
+            UI.toast.success('Captured');
+            await _kbReloadDashboard();
+        } catch (e) {
+            UI.toast.error('Save failed: ' + (e?.message || e));
+        }
+    };
+
+    const showKnowledgeCapture = async (slot) => {
+        slot.innerHTML = `
+            <div class="kb-capture-full">
+                <input type="text" id="kb-cap-title" class="kb-input kb-input-lg" placeholder="Title (short)" maxlength="200">
+                <textarea id="kb-cap-content" class="kb-textarea kb-textarea-lg" rows="14" placeholder="Free text or markdown...&#10;&#10;Ctrl+Enter to save."></textarea>
+                <div class="kb-cap-actions">
+                    <button class="btn primary" onclick="app.saveCaptureFull()"><i class="fas fa-save"></i> Save</button>
+                    <button class="btn secondary" onclick="app.saveCaptureFull('task')"><i class="fas fa-check-square"></i> Save as Task</button>
+                    <button class="btn secondary" onclick="app.saveCaptureFull('case_study')"><i class="fas fa-flask"></i> Save as Case Study</button>
+                    <button class="btn secondary" onclick="app.saveCaptureFull('idea')"><i class="fas fa-lightbulb"></i> Save as Idea</button>
+                </div>
+                <p class="kb-qc-hint" style="margin-top:8px;">Tip: leave type blank to land in Inbox and classify later.</p>
+            </div>
+        `;
+        const ta = document.getElementById('kb-cap-content');
+        if (ta) ta.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); saveCaptureFull(); }
+        });
+    };
+
+    const saveCaptureFull = async (type = null) => {
+        const title = (document.getElementById('kb-cap-title')?.value || '').trim();
+        const content = (document.getElementById('kb-cap-content')?.value || '').trim();
+        if (!title) { UI.toast.error('Title required'); return; }
+        const owner = await _kbOwnerId();
+        if (!owner) { UI.toast.error('Sign in first'); return; }
+        try {
+            const row = await AppDataStore.create('knowledge_entries', {
+                owner_id: owner, title, content, type, status: 'draft', tags: []
+            });
+            UI.toast.success(type ? `Saved as ${_kbTypeLabel(type)}` : 'Saved to Inbox');
+            const id = row?.id || (Array.isArray(row) ? row[0]?.id : null);
+            if (id) showKnowledgeDetail(id); else { _kbSegment = 'dashboard'; await showKnowledgeView(document.getElementById('content-viewport')); }
+        } catch (e) {
+            UI.toast.error('Save failed: ' + (e?.message || e));
+        }
+    };
+
+    const showKnowledgeAllEntries = async (slot) => {
+        slot.innerHTML = `
+            <div class="kb-all-bar">
+                <div class="kb-chips">
+                    ${['all','inbox','idea','task','case_study','note','reference','done','archived'].map(f =>
+                        `<button class="kb-chip ${_kbAllFilter===f?'active':''}" onclick="app.filterKnowledgeEntries('${f}')">${
+                            f==='all'?'All':f==='inbox'?'Inbox':f==='case_study'?'Case Studies':f==='idea'?'Ideas':f==='task'?'Tasks':f==='note'?'Notes':f==='reference'?'References':f==='done'?'Done':'Archived'
+                        }</button>`).join('')}
+                </div>
+                <div class="kb-search">
+                    <i class="fas fa-search"></i>
+                    <input type="text" id="kb-search-input" placeholder="Search title + content..." oninput="app.debounceCall('kb-search', () => app.searchKnowledgeEntries(this.value), 250)">
+                </div>
+            </div>
+            <div id="kb-all-list" class="kb-all-list"><div class="kb-empty">Loading…</div></div>
+        `;
+        await _kbReloadAll('');
+    };
+
+    const filterKnowledgeEntries = async (f) => {
+        _kbAllFilter = f;
+        document.querySelectorAll('.kb-chip').forEach(c => c.classList.remove('active'));
+        const btn = Array.from(document.querySelectorAll('.kb-chip')).find(c => c.getAttribute('onclick')?.includes(`'${f}'`));
+        if (btn) btn.classList.add('active');
+        const q = document.getElementById('kb-search-input')?.value || '';
+        await _kbReloadAll(q);
+    };
+
+    const searchKnowledgeEntries = async (q) => { await _kbReloadAll(q || ''); };
+
+    const _kbReloadAll = async (q) => {
+        const slot = document.getElementById('kb-all-list');
+        if (!slot) return;
+        const owner = await _kbOwnerId();
+        if (!owner) { slot.innerHTML = '<div class="kb-empty">Sign in first.</div>'; return; }
+        let rows = [];
+        try {
+            if (q && q.trim()) {
+                const { data, error } = await window.supabase.rpc('knowledge_search', { q: q.trim() });
+                if (error) throw error;
+                rows = data || [];
+            } else {
+                rows = await AppDataStore.query('knowledge_entries', { owner_id: owner }) || [];
+            }
+        } catch (e) {
+            slot.innerHTML = `<div class="kb-empty">Cannot load entries (${escapeHtml(e?.message||'unknown')}). Did you run the migration?</div>`;
+            return;
+        }
+        const f = _kbAllFilter;
+        if (f === 'inbox')                       rows = rows.filter(r => !r.type);
+        else if (f === 'idea')                   rows = rows.filter(r => r.type === 'idea');
+        else if (f === 'task')                   rows = rows.filter(r => r.type === 'task');
+        else if (f === 'case_study')             rows = rows.filter(r => r.type === 'case_study');
+        else if (f === 'note')                   rows = rows.filter(r => r.type === 'note');
+        else if (f === 'reference')              rows = rows.filter(r => r.type === 'reference');
+        else if (f === 'done')                   rows = rows.filter(r => r.status === 'done');
+        else if (f === 'archived')               rows = rows.filter(r => r.status === 'archived');
+        rows.sort((a,b) => (b.created_at||'').localeCompare(a.created_at||''));
+        if (!rows.length) { slot.innerHTML = '<div class="kb-empty">No entries match.</div>'; return; }
+        slot.innerHTML = `
+            <table class="kb-table">
+                <thead><tr><th>Title</th><th>Type</th><th>Tags</th><th>Status</th><th>Created</th><th>Due</th></tr></thead>
+                <tbody>
+                    ${rows.map(r => `
+                        <tr onclick="app.showKnowledgeDetail('${r.id}')">
+                            <td><i class="fas ${_kbTypeIcon(r.type)} kb-row-icon"></i> ${escapeHtml(r.title||'(untitled)')}</td>
+                            <td>${_kbTypeLabel(r.type)}</td>
+                            <td>${(r.tags||[]).map(t=>`<span class="kb-tag">${escapeHtml(t)}</span>`).join(' ')}</td>
+                            <td><span class="kb-status kb-status-${r.status||'draft'}">${_kbStatusLabel(r.status)}</span></td>
+                            <td>${_kbFmtDate(r.created_at)}</td>
+                            <td>${r.due_date ? _kbFmtDate(r.due_date) : ''}</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        `;
+    };
+
+    const showKnowledgeDetail = async (id) => {
+        _kbCurrentEntryId = id;
+        const slot = document.getElementById('kb-slot');
+        if (!slot) return;
+        slot.innerHTML = '<div class="kb-empty">Loading…</div>';
+        let entry = null;
+        try { entry = await AppDataStore.getById('knowledge_entries', id); } catch (e) { slot.innerHTML = `<div class="kb-empty">Not found.</div>`; return; }
+        if (!entry) { slot.innerHTML = `<div class="kb-empty">Entry not found.</div>`; return; }
+        const owner = await _kbOwnerId();
+        let backlinks = [], outlinks = [];
+        try { backlinks = await AppDataStore.query('knowledge_links', { to_entry_id: id }) || []; } catch (_) {}
+        try { outlinks  = await AppDataStore.query('knowledge_links', { from_entry_id: id }) || []; } catch (_) {}
+        const linkedIds = [...backlinks.map(l=>l.from_entry_id), ...outlinks.map(l=>l.to_entry_id)];
+        let linkedRows = [];
+        if (linkedIds.length) {
+            try {
+                const all = await AppDataStore.query('knowledge_entries', { owner_id: owner }) || [];
+                const idx = new Map(all.map(r=>[r.id, r]));
+                linkedRows = linkedIds.map(lid => idx.get(lid)).filter(Boolean);
+            } catch (_) {}
+        }
+        slot.innerHTML = `
+            <div class="kb-detail">
+                <div class="kb-detail-back">
+                    <button class="btn secondary" onclick="app.kbBackToSegment()"><i class="fas fa-arrow-left"></i> Back</button>
+                </div>
+                <div class="kb-detail-grid">
+                    <div class="kb-detail-main">
+                        <input type="text" id="kb-d-title" class="kb-input kb-input-lg" value="${escapeHtml(entry.title||'')}" maxlength="200" oninput="app.scheduleKnowledgeAutosave()">
+                        <textarea id="kb-d-content" class="kb-textarea kb-textarea-lg" rows="20" placeholder="Markdown content..." oninput="app.scheduleKnowledgeAutosave()">${escapeHtml(entry.content||'')}</textarea>
+                        <div class="kb-autosave-status" id="kb-autosave-status">Saved · ${_kbFmtDate(entry.updated_at)}</div>
+                    </div>
+                    <div class="kb-detail-side">
+                        <div class="kb-prop"><label>Type</label>
+                            <select id="kb-d-type" onchange="app.saveKnowledgeEntry()">
+                                <option value="">Inbox (no type)</option>
+                                <option value="idea"${entry.type==='idea'?' selected':''}>Idea</option>
+                                <option value="task"${entry.type==='task'?' selected':''}>Task</option>
+                                <option value="case_study"${entry.type==='case_study'?' selected':''}>Case Study</option>
+                                <option value="note"${entry.type==='note'?' selected':''}>Note</option>
+                                <option value="reference"${entry.type==='reference'?' selected':''}>Reference</option>
+                            </select>
+                        </div>
+                        <div class="kb-prop"><label>Status</label>
+                            <select id="kb-d-status" onchange="app.saveKnowledgeEntry()">
+                                ${['draft','active','waiting','done','archived'].map(s=>`<option value="${s}"${(entry.status||'draft')===s?' selected':''}>${_kbStatusLabel(s)}</option>`).join('')}
+                            </select>
+                        </div>
+                        <div class="kb-prop" id="kb-prop-priority" style="${entry.type==='task'?'':'display:none;'}"><label>Priority</label>
+                            <select id="kb-d-priority" onchange="app.saveKnowledgeEntry()">
+                                <option value="">—</option>
+                                <option value="low"${entry.priority==='low'?' selected':''}>Low</option>
+                                <option value="med"${entry.priority==='med'?' selected':''}>Medium</option>
+                                <option value="high"${entry.priority==='high'?' selected':''}>High</option>
+                            </select>
+                        </div>
+                        <div class="kb-prop" id="kb-prop-due" style="${entry.type==='task'?'':'display:none;'}"><label>Due date</label>
+                            <input type="date" id="kb-d-due" value="${entry.due_date||''}" onchange="app.saveKnowledgeEntry()">
+                        </div>
+                        <div class="kb-prop"><label>Tags (comma-separated)</label>
+                            <input type="text" id="kb-d-tags" value="${(entry.tags||[]).join(', ')}" oninput="app.scheduleKnowledgeAutosave()" placeholder="strategy, q2-2026">
+                        </div>
+                        <div class="kb-prop"><label>Convert</label>
+                            <div class="kb-convert">
+                                <button class="btn secondary" onclick="app.convertKnowledgeEntry('task')"><i class="fas fa-check-square"></i> → Task</button>
+                                <button class="btn secondary" onclick="app.convertKnowledgeEntry('case_study')"><i class="fas fa-flask"></i> → Case Study</button>
+                                <button class="btn secondary" onclick="app.convertKnowledgeEntry('idea')"><i class="fas fa-lightbulb"></i> → Idea</button>
+                            </div>
+                        </div>
+                        <div class="kb-prop"><label>Linked entries</label>
+                            <div class="kb-links" id="kb-links-list">
+                                ${linkedRows.length ? linkedRows.map(l=>`
+                                    <div class="kb-link-row">
+                                        <span onclick="app.showKnowledgeDetail('${l.id}')"><i class="fas ${_kbTypeIcon(l.type)}"></i> ${escapeHtml(l.title||'(untitled)')}</span>
+                                        <button class="kb-link-rm" onclick="app.removeKnowledgeLink('${id}','${l.id}')" title="Remove link"><i class="fas fa-times"></i></button>
+                                    </div>
+                                `).join('') : '<div class="kb-empty kb-empty-sm">No links yet.</div>'}
+                            </div>
+                            <div class="kb-link-add">
+                                <input type="text" id="kb-link-search" placeholder="Find an entry to link..." oninput="app.debounceCall('kb-link-search', () => app.searchKnowledgeLinkTargets('${id}', this.value), 250)">
+                                <div id="kb-link-results" class="kb-link-results"></div>
+                            </div>
+                        </div>
+                        <div class="kb-prop kb-meta">
+                            <div>Created: ${_kbFmtDate(entry.created_at)}</div>
+                            <div>Updated: ${_kbFmtDate(entry.updated_at)}</div>
+                        </div>
+                        <div class="kb-prop">
+                            <button class="btn danger" onclick="app.deleteKnowledgeEntry('${id}')"><i class="fas fa-trash"></i> Delete entry</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    };
+
+    const kbBackToSegment = async () => {
+        _kbCurrentEntryId = null;
+        await showKnowledgeView(document.getElementById('content-viewport'));
+    };
+
+    const scheduleKnowledgeAutosave = () => {
+        const status = document.getElementById('kb-autosave-status');
+        if (status) status.textContent = 'Saving…';
+        if (_kbAutosaveTimer) clearTimeout(_kbAutosaveTimer);
+        _kbAutosaveTimer = setTimeout(() => { saveKnowledgeEntry().catch(()=>{}); }, 800);
+    };
+
+    const saveKnowledgeEntry = async () => {
+        if (!_kbCurrentEntryId) return;
+        const id = _kbCurrentEntryId;
+        const title = (document.getElementById('kb-d-title')?.value || '').trim();
+        const content = document.getElementById('kb-d-content')?.value || '';
+        const type = document.getElementById('kb-d-type')?.value || null;
+        const status = document.getElementById('kb-d-status')?.value || 'draft';
+        const priority = document.getElementById('kb-d-priority')?.value || null;
+        const due_date = document.getElementById('kb-d-due')?.value || null;
+        const tagsRaw = document.getElementById('kb-d-tags')?.value || '';
+        const tags = tagsRaw.split(',').map(s=>s.trim()).filter(Boolean);
+        const propPri = document.getElementById('kb-prop-priority');
+        const propDue = document.getElementById('kb-prop-due');
+        if (propPri) propPri.style.display = type === 'task' ? '' : 'none';
+        if (propDue) propDue.style.display = type === 'task' ? '' : 'none';
+        if (!title) { UI.toast.error('Title required'); return; }
+        try {
+            await AppDataStore.update('knowledge_entries', id, {
+                title, content, type: type || null, status, priority: priority || null,
+                due_date: due_date || null, tags
+            });
+            const s = document.getElementById('kb-autosave-status');
+            if (s) s.textContent = 'Saved · ' + new Date().toLocaleTimeString();
+        } catch (e) {
+            UI.toast.error('Save failed: ' + (e?.message || e));
+        }
+    };
+
+    const convertKnowledgeEntry = async (toType) => {
+        const sel = document.getElementById('kb-d-type');
+        if (sel) sel.value = toType;
+        await saveKnowledgeEntry();
+        UI.toast.success(`Converted to ${_kbTypeLabel(toType)}`);
+        if (_kbCurrentEntryId) await showKnowledgeDetail(_kbCurrentEntryId);
+    };
+
+    const deleteKnowledgeEntry = async (id) => {
+        UI.showModal('Delete entry?', '<p>This permanently removes the entry and all links to/from it.</p>', [
+            { text: 'Cancel', cls: 'btn secondary', action: 'UI.hideModal()' },
+            { text: 'Delete', cls: 'btn danger', action: `(async () => { await app._kbDoDelete('${id}'); })()` }
+        ]);
+    };
+
+    const _kbDoDelete = async (id) => {
+        try {
+            await AppDataStore.delete('knowledge_entries', id);
+            UI.hideModal();
+            UI.toast.success('Deleted');
+            await kbBackToSegment();
+        } catch (e) {
+            UI.toast.error('Delete failed: ' + (e?.message || e));
+        }
+    };
+
+    const searchKnowledgeLinkTargets = async (currentId, q) => {
+        const box = document.getElementById('kb-link-results');
+        if (!box) return;
+        if (!q || q.trim().length < 2) { box.innerHTML = ''; return; }
+        const owner = await _kbOwnerId();
+        try {
+            const all = await AppDataStore.query('knowledge_entries', { owner_id: owner }) || [];
+            const needle = q.trim().toLowerCase();
+            const hits = all.filter(r => r.id !== currentId && (r.title||'').toLowerCase().includes(needle)).slice(0, 8);
+            if (!hits.length) { box.innerHTML = '<div class="kb-empty kb-empty-sm">No matches.</div>'; return; }
+            box.innerHTML = hits.map(h => `<div class="kb-link-hit" onclick="app.addKnowledgeLink('${currentId}','${h.id}')"><i class="fas ${_kbTypeIcon(h.type)}"></i> ${escapeHtml(h.title||'(untitled)')}</div>`).join('');
+        } catch (e) {
+            box.innerHTML = `<div class="kb-empty kb-empty-sm">Error: ${escapeHtml(e?.message||'')}</div>`;
+        }
+    };
+
+    const addKnowledgeLink = async (fromId, toId) => {
+        const owner = await _kbOwnerId();
+        try {
+            await AppDataStore.create('knowledge_links', { from_entry_id: fromId, to_entry_id: toId, owner_id: owner });
+            UI.toast.success('Linked');
+            await showKnowledgeDetail(fromId);
+        } catch (e) {
+            UI.toast.error('Link failed: ' + (e?.message || e));
+        }
+    };
+
+    const removeKnowledgeLink = async (fromId, otherId) => {
+        try {
+            const owner = await _kbOwnerId();
+            const all = await AppDataStore.query('knowledge_links', { owner_id: owner }) || [];
+            const match = all.find(l =>
+                (l.from_entry_id === fromId && l.to_entry_id === otherId) ||
+                (l.from_entry_id === otherId && l.to_entry_id === fromId)
+            );
+            if (match) {
+                // composite PK delete via direct supabase (AppDataStore.delete uses single id)
+                await window.supabase.from('knowledge_links')
+                    .delete()
+                    .eq('from_entry_id', match.from_entry_id)
+                    .eq('to_entry_id', match.to_entry_id);
+            }
+            UI.toast.success('Link removed');
+            await showKnowledgeDetail(fromId);
+        } catch (e) {
+            UI.toast.error('Remove failed: ' + (e?.message || e));
+        }
+    };
+
+    const showKnowledgeDailyNotes = async (slot) => {
+        if (!_kbDailyDate) _kbDailyDate = _kbTodayISO();
+        slot.innerHTML = `
+            <div class="kb-daily">
+                <div class="kb-daily-bar">
+                    <button class="btn secondary" onclick="app.kbShiftDailyDate(-1)"><i class="fas fa-chevron-left"></i></button>
+                    <input type="date" id="kb-daily-date" value="${_kbDailyDate}" onchange="app.kbSetDailyDate(this.value)">
+                    <button class="btn secondary" onclick="app.kbShiftDailyDate(1)"><i class="fas fa-chevron-right"></i></button>
+                    <button class="btn secondary" onclick="app.kbSetDailyDate('${_kbTodayISO()}')">Today</button>
+                    <span class="kb-daily-actions">
+                        <button class="btn primary" onclick="app.promoteSelectionToEntry()"><i class="fas fa-arrow-up-right-from-square"></i> Promote selection to Entry</button>
+                    </span>
+                </div>
+                <textarea id="kb-daily-content" class="kb-textarea kb-textarea-daily" rows="22" placeholder="Dump raw, unfiltered thoughts here. Select a chunk and click Promote to turn it into a real Entry."></textarea>
+                <div class="kb-autosave-status" id="kb-daily-status">Loading…</div>
+            </div>
+        `;
+        await _kbLoadDaily();
+        const ta = document.getElementById('kb-daily-content');
+        if (ta) ta.addEventListener('input', () => {
+            const s = document.getElementById('kb-daily-status'); if (s) s.textContent = 'Saving…';
+            if (_kbAutosaveTimer) clearTimeout(_kbAutosaveTimer);
+            _kbAutosaveTimer = setTimeout(() => saveDailyNote().catch(()=>{}), 800);
+        });
+    };
+
+    const kbSetDailyDate = async (iso) => { _kbDailyDate = iso; await showKnowledgeDailyNotes(document.getElementById('kb-slot')); };
+    const kbShiftDailyDate = async (delta) => {
+        const d = new Date(_kbDailyDate || _kbTodayISO());
+        d.setDate(d.getDate() + delta);
+        _kbDailyDate = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        await showKnowledgeDailyNotes(document.getElementById('kb-slot'));
+    };
+
+    const _kbLoadDaily = async () => {
+        const owner = await _kbOwnerId();
+        if (!owner) return;
+        try {
+            const rows = await AppDataStore.query('knowledge_daily_notes', { owner_id: owner, note_date: _kbDailyDate }) || [];
+            const ta = document.getElementById('kb-daily-content');
+            if (ta) ta.value = rows[0]?.content || '';
+            const s = document.getElementById('kb-daily-status');
+            if (s) s.textContent = rows[0] ? 'Saved · ' + _kbFmtDate(rows[0].updated_at) : 'New entry — start typing.';
+        } catch (e) {
+            const s = document.getElementById('kb-daily-status');
+            if (s) s.textContent = 'Error: ' + (e?.message || 'load failed');
+        }
+    };
+
+    const saveDailyNote = async () => {
+        const owner = await _kbOwnerId();
+        if (!owner || !_kbDailyDate) return;
+        const content = document.getElementById('kb-daily-content')?.value || '';
+        try {
+            const rows = await AppDataStore.query('knowledge_daily_notes', { owner_id: owner, note_date: _kbDailyDate }) || [];
+            if (rows[0]) {
+                await AppDataStore.update('knowledge_daily_notes', rows[0].id, { content });
+            } else {
+                await AppDataStore.create('knowledge_daily_notes', { owner_id: owner, note_date: _kbDailyDate, content });
+            }
+            const s = document.getElementById('kb-daily-status');
+            if (s) s.textContent = 'Saved · ' + new Date().toLocaleTimeString();
+        } catch (e) {
+            const s = document.getElementById('kb-daily-status');
+            if (s) s.textContent = 'Save failed: ' + (e?.message || e);
+        }
+    };
+
+    const promoteSelectionToEntry = async () => {
+        const ta = document.getElementById('kb-daily-content');
+        if (!ta) return;
+        const start = ta.selectionStart, end = ta.selectionEnd;
+        const sel = ta.value.substring(start, end).trim();
+        if (!sel) { UI.toast.error('Select some text first'); return; }
+        const lines = sel.split('\n');
+        const title = (lines.shift() || 'Untitled').trim().slice(0, 200);
+        const content = lines.join('\n').trim();
+        const owner = await _kbOwnerId();
+        try {
+            await AppDataStore.create('knowledge_entries', {
+                owner_id: owner, title, content, type: null, status: 'draft', tags: []
+            });
+            UI.toast.success('Promoted to Inbox');
+        } catch (e) {
+            UI.toast.error('Promote failed: ' + (e?.message || e));
+        }
+    };
+
+    // Quick-capture modal — wired to Ctrl+Shift+N + the cmdk palette
+    const openCaptureModal = () => {
+        UI.showModal('Quick capture', `
+            <div class="kb-modal-cap">
+                <input type="text" id="kb-modal-title" class="kb-input" placeholder="Title" maxlength="200" autofocus>
+                <textarea id="kb-modal-content" class="kb-textarea" rows="6" placeholder="Optional notes (Ctrl+Enter to save)"></textarea>
+            </div>
+        `, [
+            { text: 'Cancel', cls: 'btn secondary', action: 'UI.hideModal()' },
+            { text: 'Capture', cls: 'btn primary', action: '(async () => { await app.saveCaptureModal(); })()' }
+        ]);
+        setTimeout(() => {
+            const ta = document.getElementById('kb-modal-content');
+            if (ta) ta.addEventListener('keydown', (e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); saveCaptureModal(); }
+            });
+        }, 50);
+    };
+
+    const saveCaptureModal = async () => {
+        const title = (document.getElementById('kb-modal-title')?.value || '').trim();
+        const content = (document.getElementById('kb-modal-content')?.value || '').trim();
+        if (!title) { UI.toast.error('Title required'); return; }
+        const owner = await _kbOwnerId();
+        try {
+            await AppDataStore.create('knowledge_entries', {
+                owner_id: owner, title, content, type: null, status: 'draft', tags: []
+            });
+            UI.hideModal();
+            UI.toast.success('Captured');
+            if (_currentView === 'knowledge') {
+                if (_kbSegment === 'dashboard') await _kbReloadDashboard();
+                else if (_kbSegment === 'all')  await _kbReloadAll('');
+            }
+        } catch (e) {
+            UI.toast.error('Save failed: ' + (e?.message || e));
+        }
+    };
+
     return {
         init,
         navigateTo,
         todo,
+        // Knowledge HQ
+        showKnowledgeView,
+        switchKnowledgeSegment,
+        showKnowledgeDashboard,
+        showKnowledgeCapture,
+        showKnowledgeAllEntries,
+        showKnowledgeDetail,
+        showKnowledgeDailyNotes,
+        saveQuickCapture,
+        saveCaptureFull,
+        filterKnowledgeEntries,
+        searchKnowledgeEntries,
+        scheduleKnowledgeAutosave,
+        saveKnowledgeEntry,
+        convertKnowledgeEntry,
+        deleteKnowledgeEntry,
+        _kbDoDelete,
+        addKnowledgeLink,
+        removeKnowledgeLink,
+        searchKnowledgeLinkTargets,
+        kbSetDailyDate,
+        kbShiftDailyDate,
+        saveDailyNote,
+        promoteSelectionToEntry,
+        kbBackToSegment,
+        openCaptureModal,
+        saveCaptureModal,
         // Stub implementations (2026-04-11) — replace app.todo() placeholders
         showRoadmap,
         exportRelationshipTree,

@@ -54,7 +54,9 @@ class DataStore {
             // Formula Healthcare refill reminder system
             'refill_reminders',
             // Egg Purchasing system (Super Admin only)
-            'egg_processed_orders', 'egg_urgent_orders', 'egg_config', 'egg_run_history'
+            'egg_processed_orders', 'egg_urgent_orders', 'egg_config', 'egg_run_history',
+            // Knowledge HQ — personal knowledge hub
+            'knowledge_entries', 'knowledge_links', 'knowledge_daily_notes'
         ];
         this.initialized = false;
         this._events = {};
