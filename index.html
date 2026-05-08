@@ -60,7 +60,7 @@
          it before the parser reaches the <script> tag near </body>.
          script.js is ~2.5 MB so getting it in flight ASAP is the single
          biggest perceived-load win on first visit. -->
-    <link rel="preload" href="script.js?v=20260508c" as="script">
+    <link rel="preload" href="script.js?v=20260508d" as="script">
     <link rel="preload" href="data.js?v=20260504b" as="script">
     <link rel="preload" href="styles-fixed.css?v=20260503a" as="style">
 
@@ -76,7 +76,7 @@
          overlay would default to display:block on desktop, covering the
          page. Keep it unconditional. -->
     <link rel="stylesheet" href="styles-mobile.css?v=20260424b">
-    <link rel="stylesheet" href="styles-mobile-v2.css?v=20260508b">
+    <link rel="stylesheet" href="styles-mobile-v2.css?v=20260508e">
     <link rel="stylesheet" href="styles-theme.css?v=20260503a">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#800020">
@@ -141,34 +141,95 @@
 <body>
     <noscript><div style="position:fixed;top:0;left:0;right:0;z-index:99999;background:#b91c1c;color:#fff;text-align:center;padding:12px 16px;font-size:14px;font-weight:600;">⚠️ 悅客匯 CRM requires JavaScript to be enabled. Please enable JavaScript in your browser to continue.</div></noscript>
     <a href="#content-viewport" class="skip-to-content" style="position:absolute;left:-9999px;top:4px;z-index:9999;padding:8px 16px;background:var(--primary,#800020);color:#fff;border-radius:4px;font-size:14px;font-weight:600;text-decoration:none;" onfocus="this.style.left='4px'" onblur="this.style.left='-9999px'">Skip to main content</a>
-    <div id="login-container" class="login-container">
-        <div class="login-box">
-            <div class="login-logo">
-                <i class="fas fa-dharmachakra fa-3x" style="color: var(--primary);" aria-hidden="true"></i>
-                <h1 style="margin-top: 12px; font-size: 22px; font-weight: 700;">悅客匯</h1>
+    <div id="login-container" class="login-container login-v2">
+        <!-- Background mesh + decorations -->
+        <div class="lv2-bg" aria-hidden="true">
+            <span class="lv2-blob b1"></span>
+            <span class="lv2-blob b2"></span>
+            <span class="lv2-blob b3"></span>
+            <span class="lv2-blob b4"></span>
+            <div class="lv2-ring-deco"></div>
+            <span class="lv2-big-bloom bb1">🌸</span>
+            <span class="lv2-big-bloom bb2">🌸</span>
+            <span class="lv2-petal p1">🌸</span><span class="lv2-petal p2">🌸</span><span class="lv2-petal p3">🌸</span>
+            <span class="lv2-petal p4">🌸</span><span class="lv2-petal p5">🌸</span><span class="lv2-petal p6">🌸</span><span class="lv2-petal p7">🌸</span>
+            <span class="lv2-spk s1">✦</span><span class="lv2-spk s2">✧</span><span class="lv2-spk s3">✦</span>
+            <span class="lv2-spk s4">✦</span><span class="lv2-spk s5">✧</span><span class="lv2-spk s6">✦</span><span class="lv2-spk s7">✧</span>
+        </div>
+        <!-- Cherry blossom branch across the top -->
+        <div class="lv2-branch" aria-hidden="true">
+            <span class="lv2-blossom b1">🌸</span>
+            <span class="lv2-blossom b2">🌸</span>
+            <span class="lv2-blossom b3">🌸</span>
+            <span class="lv2-blossom b4">🌸</span>
+            <span class="lv2-blossom b5">🌸</span>
+            <span class="lv2-blossom b6">🌸</span>
+            <span class="lv2-leaf l1">🍃</span>
+            <span class="lv2-leaf l2">🍃</span>
+        </div>
+        <!-- Bottom flower clusters -->
+        <div class="lv2-cluster bl" aria-hidden="true">
+            <span class="f1">🌸</span><span class="f2">🌸</span><span class="f3">🌸</span><span class="lf">🍃</span>
+        </div>
+        <div class="lv2-cluster br" aria-hidden="true">
+            <span class="f1">🌸</span><span class="f2">🌸</span><span class="f3">🌸</span><span class="lf">🍃</span>
+        </div>
+        <!-- Top welcome ribbon -->
+        <div class="lv2-ribbon" aria-hidden="true">✧ Welcome ✧</div>
+
+        <div class="login-box lv2-card">
+            <div class="lv2-seal" aria-hidden="true">悅</div>
+            <div class="login-logo lv2-logo-wrap">
+                <div class="lv2-aura" aria-hidden="true"></div>
+                <div class="lv2-wreath" aria-hidden="true">
+                    <span class="lv2-w-flower f1">🌸</span><span class="lv2-w-flower f2">🌸</span>
+                    <span class="lv2-w-flower f3">🌸</span><span class="lv2-w-flower f4">🌸</span>
+                    <span class="lv2-w-flower f5">🌸</span><span class="lv2-w-flower f6">🌸</span>
+                    <span class="lv2-w-flower f7">🌸</span><span class="lv2-w-flower f8">🌸</span>
+                </div>
+                <div class="lv2-logo-circle">
+                    <i class="fas fa-dharmachakra" aria-hidden="true"></i>
+                </div>
+                <div class="lv2-brand-cn">悅客匯</div>
+                <div class="lv2-brand-en">DestinOraclesSolution</div>
             </div>
+            <div class="lv2-flourish" aria-hidden="true"><i class="fas fa-feather-pointed"></i></div>
             <div class="login-form">
-                <label for="loginEmail" style="display:block;font-size:13px;font-weight:500;margin-bottom:4px;color:var(--text-secondary);">Email</label>
-                <input type="email" id="loginEmail" class="form-control" placeholder="Email" required aria-required="true" aria-describedby="loginEmailErr" autocomplete="email" style="margin-bottom: 4px;">
-                <span id="loginEmailErr" role="alert" aria-live="polite" style="display:none;font-size:11px;color:#ef4444;margin-bottom:8px;display:block;min-height:16px;"></span>
-                <label for="loginPassword" style="display:block;font-size:13px;font-weight:500;margin-bottom:4px;color:var(--text-secondary);">Password</label>
-                <input type="password" id="loginPassword" class="form-control" placeholder="Password" required aria-required="true" aria-describedby="loginPasswordErr" autocomplete="current-password" style="margin-bottom: 4px;">
-                <span id="loginPasswordErr" role="alert" aria-live="polite" style="display:none;font-size:11px;color:#ef4444;margin-bottom:8px;display:block;min-height:16px;"></span>
-                <label style="display:flex;align-items:center;gap:8px;margin-bottom:16px;font-size:14px;color:var(--text-secondary);cursor:pointer;user-select:none;">
-                    <input type="checkbox" id="rememberMe" style="width:16px;height:16px;accent-color:var(--primary);cursor:pointer;">
-                    Keep me logged in
-                </label>
-                <button id="loginBtn" class="btn primary" style="width: 100%;">Login</button>
+                <div class="lv2-field">
+                    <label class="lv2-label" for="loginEmail"><span class="lv2-lbl-deco" aria-hidden="true">●</span>Email</label>
+                    <div class="lv2-input-wrap">
+                        <i class="lv2-ico fas fa-envelope" aria-hidden="true"></i>
+                        <input type="email" id="loginEmail" class="form-control lv2-input" placeholder="you@example.com" required aria-required="true" aria-describedby="loginEmailErr" autocomplete="email">
+                    </div>
+                    <span id="loginEmailErr" role="alert" aria-live="polite" class="lv2-err"></span>
+                </div>
+                <div class="lv2-field">
+                    <label class="lv2-label" for="loginPassword"><span class="lv2-lbl-deco" aria-hidden="true">●</span>Password</label>
+                    <div class="lv2-input-wrap">
+                        <i class="lv2-ico fas fa-lock" aria-hidden="true"></i>
+                        <input type="password" id="loginPassword" class="form-control lv2-input" placeholder="••••••••" required aria-required="true" aria-describedby="loginPasswordErr" autocomplete="current-password">
+                    </div>
+                    <span id="loginPasswordErr" role="alert" aria-live="polite" class="lv2-err"></span>
+                </div>
+                <div class="lv2-remember-row">
+                    <label class="lv2-remember">
+                        <input type="checkbox" id="rememberMe">
+                        Keep me logged in
+                    </label>
+                </div>
+                <button id="loginBtn" class="btn primary lv2-login-btn">
+                    <i class="fas fa-arrow-right-to-bracket" aria-hidden="true"></i>
+                    <span>LOGIN</span>
+                </button>
             </div>
-            <p class="login-hint">Enter your email and password to continue</p>
-            <p style="margin-top:12px;font-size:11px;text-align:center;color:var(--text-secondary);">
-                <a href="/privacy" style="color:var(--text-secondary);">隐私政策</a>
-                &nbsp;·&nbsp;
-                <a href="/terms" style="color:var(--text-secondary);">服务条款</a>
-                &nbsp;·&nbsp;
-                <a href="/privacy#cookies" style="color:var(--text-secondary);">Cookie 政策</a>
+            <p class="login-hint lv2-hint">Enter your email and password to continue</p>
+            <p class="lv2-legal">
+                <a href="/privacy">隐私政策</a> ·
+                <a href="/terms">服务条款</a> ·
+                <a href="/privacy#cookies">Cookie 政策</a>
             </p>
         </div>
+        <div class="lv2-credit" aria-hidden="true">DESTIN&nbsp;ORACLES&nbsp;SOLUTION</div>
     </div>
     <!-- Mobile Side Drawer -->
     <div class="mobile-drawer-overlay" id="mobile-drawer-overlay" onclick="window.app && window.app.closeMobileDrawer && window.app.closeMobileDrawer()"></div>
@@ -432,7 +493,7 @@
     <script defer src="auth.js?v=20260501a"></script>
     <script defer src="ui.js?v=20260424a"></script>
     <script defer src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js" integrity="sha512-dfX5uYVXzyU8+KHqj8bjo7UkOdg18PaOtpa48djpNbZHwExddghZ+ZmzWT06R5v6NSk3ZUfsH6FNEDepLx9hPQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-    <script defer src="script.js?v=20260508c"></script>
+    <script defer src="script.js?v=20260508d"></script>
 
     <!--
       The following libraries are loaded on-demand via window._loadScriptOnce()

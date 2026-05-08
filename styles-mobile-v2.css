@@ -1298,3 +1298,365 @@
     .content-viewport.mcal-active .calendar-header,
     .content-viewport.mcal-active .calendar-toolbar { display:none !important; }
 }
+
+/* =======================================================================
+   M13 — Login screen v2 (floral, applies on all viewports)
+   Wrapped under .login-v2 so it doesn't bleed into the rest of the app.
+   ======================================================================= */
+.login-v2 {
+    --lv-red:#C5252B; --lv-red-deep:#8B1A20;
+    --lv-pink:#F9D5D5; --lv-pink-warm:#F4B1B1;
+    --lv-wood:#B8794A; --lv-wood-warm:#D89A6A;
+    --lv-ink:#2A1B17; --lv-ink-soft:#6B5A55; --lv-ink-mute:#9B8A85;
+    position:fixed; inset:0; z-index:9999;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    padding:30px 22px; min-height:100vh;
+    background:
+        radial-gradient(ellipse 320px 280px at 80% 5%, rgba(255,170,170,0.6) 0%, transparent 60%),
+        radial-gradient(ellipse 380px 380px at 8% 95%, rgba(255,205,170,0.55) 0%, transparent 60%),
+        radial-gradient(ellipse 240px 220px at 95% 70%, rgba(255,180,210,0.4) 0%, transparent 65%),
+        radial-gradient(circle at 50% 50%, rgba(255,238,230,0.5) 0%, transparent 60%),
+        linear-gradient(160deg, #FFE0DA 0%, #FFCFCC 30%, #F8B4B4 60%, #E89999 100%);
+    font-family:'Inter','Noto Sans SC','PingFang SC','Microsoft YaHei',-apple-system,sans-serif;
+    color:var(--lv-ink); overflow:auto;
+}
+/* Beat the legacy .login-container maroon gradient with a more-specific
+   selector that re-applies our floral mesh. Using `background:initial`
+   here would (and did) kill the gradient declared on `.login-v2`. */
+.login-v2.login-container {
+    background:
+        radial-gradient(ellipse 320px 280px at 80% 5%, rgba(255,170,170,0.6) 0%, transparent 60%),
+        radial-gradient(ellipse 380px 380px at 8% 95%, rgba(255,205,170,0.55) 0%, transparent 60%),
+        radial-gradient(ellipse 240px 220px at 95% 70%, rgba(255,180,210,0.4) 0%, transparent 65%),
+        radial-gradient(circle at 50% 50%, rgba(255,238,230,0.5) 0%, transparent 60%),
+        linear-gradient(160deg, #FFE0DA 0%, #FFCFCC 30%, #F8B4B4 60%, #E89999 100%);
+}
+
+/* Background decorations */
+.login-v2 .lv2-bg { position:absolute; inset:0; overflow:hidden; pointer-events:none; }
+.login-v2 .lv2-blob { position:absolute; border-radius:50%; filter:blur(28px); animation:lv2-floatBlob 12s ease-in-out infinite; }
+.login-v2 .lv2-blob.b1 { top:-50px; left:-60px; width:220px; height:220px; background:radial-gradient(circle,rgba(255,200,200,0.55),transparent 70%); }
+.login-v2 .lv2-blob.b2 { bottom:60px; right:-80px; width:260px; height:260px; background:radial-gradient(circle,rgba(255,170,140,0.45),transparent 70%); animation-delay:3s; }
+.login-v2 .lv2-blob.b3 { top:42%; left:-50px; width:160px; height:160px; background:radial-gradient(circle,rgba(255,220,220,0.55),transparent 70%); animation-delay:6s; }
+.login-v2 .lv2-blob.b4 { top:18%; right:30%; width:140px; height:140px; background:radial-gradient(circle,rgba(255,170,200,0.35),transparent 70%); animation-delay:9s; }
+@keyframes lv2-floatBlob { 0%,100%{transform:translate(0,0) scale(1)} 50%{transform:translate(10px,-10px) scale(1.1)} }
+
+.login-v2 .lv2-ring-deco { position:absolute; top:-50px; right:-60px; width:200px; height:200px; border-radius:50%; border:1.5px solid rgba(255,255,255,0.35); pointer-events:none; }
+.login-v2 .lv2-ring-deco::before { content:''; position:absolute; inset:24px; border:1.5px dashed rgba(255,255,255,0.28); border-radius:50%; animation:lv2-rotate 30s linear infinite; }
+.login-v2 .lv2-ring-deco::after { content:''; position:absolute; inset:48px; border:1.5px solid rgba(255,255,255,0.22); border-radius:50%; }
+@keyframes lv2-rotate { to { transform:rotate(360deg); } }
+
+.login-v2 .lv2-big-bloom { position:absolute; line-height:1; pointer-events:none; opacity:0.18; color:#fff; filter:drop-shadow(0 4px 12px rgba(255,180,200,0.4)); }
+.login-v2 .lv2-big-bloom.bb1 { top:-30px; left:-40px; transform:rotate(-15deg); font-size:140px; }
+.login-v2 .lv2-big-bloom.bb2 { bottom:-20px; right:-30px; transform:rotate(25deg); font-size:130px; }
+
+.login-v2 .lv2-petal { position:absolute; font-size:16px; line-height:1; pointer-events:none; animation:lv2-fall 14s linear infinite; opacity:0.9; filter:drop-shadow(0 2px 6px rgba(255,140,160,0.3)); }
+.login-v2 .lv2-petal.p1 { top:-20px; left:8%; animation-duration:16s; }
+.login-v2 .lv2-petal.p2 { top:-20px; left:28%; animation-delay:3s; animation-duration:13s; font-size:14px; }
+.login-v2 .lv2-petal.p3 { top:-20px; left:50%; animation-delay:6s; animation-duration:18s; font-size:18px; }
+.login-v2 .lv2-petal.p4 { top:-20px; left:72%; animation-delay:1.5s; animation-duration:15s; font-size:12px; }
+.login-v2 .lv2-petal.p5 { top:-20px; left:88%; animation-delay:8s; animation-duration:17s; }
+.login-v2 .lv2-petal.p6 { top:-20px; left:18%; animation-delay:10s; animation-duration:14s; font-size:13px; }
+.login-v2 .lv2-petal.p7 { top:-20px; left:62%; animation-delay:4.5s; animation-duration:19s; font-size:15px; }
+@keyframes lv2-fall {
+    0%{transform:translateY(0) translateX(0) rotate(0); opacity:0}
+    10%{opacity:1}
+    50%{transform:translateY(360px) translateX(20px) rotate(180deg)}
+    90%{opacity:1}
+    100%{transform:translateY(720px) translateX(-15px) rotate(360deg); opacity:0}
+}
+
+.login-v2 .lv2-spk { position:absolute; color:#fff; pointer-events:none; animation:lv2-twinkle 3s ease-in-out infinite; text-shadow:0 0 8px rgba(255,255,255,0.6); }
+.login-v2 .lv2-spk.s1 { top:80px; right:30px; font-size:13px; }
+.login-v2 .lv2-spk.s2 { top:130px; right:90px; font-size:8px; animation-delay:0.5s; }
+.login-v2 .lv2-spk.s3 { top:200px; left:24px; font-size:11px; animation-delay:1s; }
+.login-v2 .lv2-spk.s4 { bottom:160px; left:30px; font-size:9px; animation-delay:1.6s; }
+.login-v2 .lv2-spk.s5 { bottom:230px; right:38px; font-size:7px; animation-delay:2.2s; }
+.login-v2 .lv2-spk.s6 { bottom:120px; right:70px; font-size:10px; animation-delay:0.8s; }
+.login-v2 .lv2-spk.s7 { top:260px; right:18px; font-size:6px; animation-delay:1.3s; }
+@keyframes lv2-twinkle { 0%,100%{opacity:0.3; transform:scale(0.8)} 50%{opacity:1; transform:scale(1.15)} }
+
+/* Cherry blossom branch — top */
+.login-v2 .lv2-branch { position:absolute; top:30px; left:-20px; right:-20px; height:60px; pointer-events:none; z-index:2; }
+.login-v2 .lv2-branch .lv2-blossom { position:absolute; line-height:1; filter:drop-shadow(0 2px 6px rgba(255,140,160,0.4)); }
+.login-v2 .lv2-branch .lv2-blossom.b1 { top:5px; left:8%; font-size:22px; transform:rotate(-15deg); }
+.login-v2 .lv2-branch .lv2-blossom.b2 { top:18px; left:24%; font-size:16px; transform:rotate(20deg); }
+.login-v2 .lv2-branch .lv2-blossom.b3 { top:0; left:38%; font-size:14px; opacity:0.85; }
+.login-v2 .lv2-branch .lv2-blossom.b4 { top:8px; right:32%; font-size:18px; transform:rotate(-12deg); }
+.login-v2 .lv2-branch .lv2-blossom.b5 { top:22px; right:18%; font-size:24px; transform:rotate(8deg); }
+.login-v2 .lv2-branch .lv2-blossom.b6 { top:0; right:6%; font-size:14px; transform:rotate(30deg); opacity:0.85; }
+.login-v2 .lv2-branch .lv2-leaf { position:absolute; font-size:14px; opacity:0.75; }
+.login-v2 .lv2-branch .lv2-leaf.l1 { top:24px; left:18%; transform:rotate(-30deg); }
+.login-v2 .lv2-branch .lv2-leaf.l2 { top:30px; right:24%; transform:rotate(25deg); }
+
+/* Bottom flower clusters */
+.login-v2 .lv2-cluster { position:absolute; bottom:50px; pointer-events:none; z-index:2; width:80px; height:80px; }
+.login-v2 .lv2-cluster.bl { left:-10px; }
+.login-v2 .lv2-cluster.br { right:-15px; bottom:90px; }
+.login-v2 .lv2-cluster span { position:absolute; line-height:1; filter:drop-shadow(0 2px 6px rgba(255,140,160,0.35)); }
+.login-v2 .lv2-cluster.bl .f1 { font-size:26px; bottom:20px; left:0; transform:rotate(-12deg); }
+.login-v2 .lv2-cluster.bl .f2 { font-size:18px; bottom:0; left:18px; transform:rotate(20deg); }
+.login-v2 .lv2-cluster.bl .f3 { font-size:14px; bottom:35px; left:22px; transform:rotate(-25deg); opacity:0.85; }
+.login-v2 .lv2-cluster.bl .lf { font-size:14px; opacity:0.7; bottom:14px; left:30px; transform:rotate(40deg); }
+.login-v2 .lv2-cluster.br .f1 { font-size:24px; bottom:0; right:8px; transform:rotate(15deg); }
+.login-v2 .lv2-cluster.br .f2 { font-size:16px; bottom:18px; right:24px; transform:rotate(-20deg); }
+.login-v2 .lv2-cluster.br .f3 { font-size:12px; bottom:30px; right:8px; transform:rotate(28deg); opacity:0.8; }
+.login-v2 .lv2-cluster.br .lf { font-size:13px; opacity:0.7; bottom:8px; right:28px; transform:rotate(-30deg); }
+
+/* Welcome ribbon */
+.login-v2 .lv2-ribbon { position:absolute; top:46px; left:50%; transform:translateX(-50%); display:flex; align-items:center; gap:8px; font-size:9px; font-weight:700; letter-spacing:3px; text-transform:uppercase; color:rgba(140,30,30,0.5); z-index:3; }
+.login-v2 .lv2-ribbon::before, .login-v2 .lv2-ribbon::after { content:''; width:34px; height:1px; background:linear-gradient(90deg,transparent,rgba(140,30,30,0.4),transparent); }
+
+/* Card */
+.login-v2 .lv2-card {
+    width:100%; max-width:300px; position:relative; z-index:2;
+    background:linear-gradient(180deg,rgba(255,255,255,0.95),rgba(255,238,234,0.92)) !important;
+    backdrop-filter:blur(16px);
+    border:1px solid rgba(255,255,255,0.6) !important;
+    border-radius:28px !important;
+    padding:36px 26px 24px !important;
+    box-shadow:
+        0 30px 60px rgba(140,30,30,0.22),
+        0 8px 18px rgba(140,30,30,0.12),
+        inset 0 1px 0 rgba(255,255,255,0.85),
+        inset 0 -1px 0 rgba(255,200,200,0.3) !important;
+    margin:0 !important;
+}
+.login-v2 .lv2-card::before {
+    content:''; position:absolute; inset:-2px; border-radius:30px; z-index:-1;
+    background:linear-gradient(135deg,#FFB8B8,#F8A06A,#FFB8B8,#F8C8A0);
+    background-size:300% 300%;
+    animation:lv2-borderShift 6s ease-in-out infinite;
+    opacity:0.6; filter:blur(2px);
+}
+@keyframes lv2-borderShift { 0%,100%{background-position:0% 50%} 50%{background-position:100% 50%} }
+
+/* Chinese seal stamp */
+.login-v2 .lv2-seal {
+    position:absolute; top:14px; right:14px;
+    width:34px; height:34px; border-radius:6px;
+    background:linear-gradient(135deg, var(--lv-red), #7A0E14);
+    color:#FFD8D0; font-weight:900; font-size:18px;
+    display:flex; align-items:center; justify-content:center;
+    font-family:'Ma Shan Zheng','Noto Sans SC',serif;
+    box-shadow:0 4px 10px rgba(140,30,30,0.32), inset 0 1px 0 rgba(255,255,255,0.18);
+    transform:rotate(-8deg);
+    border:1.5px solid rgba(255,255,255,0.18);
+}
+.login-v2 .lv2-seal::before { content:''; position:absolute; inset:3px; border:1px dashed rgba(255,255,255,0.35); border-radius:4px; pointer-events:none; }
+
+/* Logo */
+.login-v2 .lv2-logo-wrap { text-align:center; margin-bottom:20px !important; position:relative; height:128px; padding-top:6px; }
+.login-v2 .lv2-aura { position:absolute; top:-6px; left:50%; transform:translateX(-50%); width:110px; height:110px; border-radius:50%; background:radial-gradient(circle, rgba(255,170,170,0.5), transparent 65%); filter:blur(8px); animation:lv2-pulse 3s ease-in-out infinite; }
+@keyframes lv2-pulse { 0%,100%{opacity:0.6; transform:translateX(-50%) scale(1)} 50%{opacity:1; transform:translateX(-50%) scale(1.1)} }
+
+.login-v2 .lv2-wreath { position:absolute; top:-6px; left:50%; transform:translateX(-50%); width:118px; height:118px; border-radius:50%; pointer-events:none; animation:lv2-rotate 32s linear infinite; }
+.login-v2 .lv2-wreath .lv2-w-flower { position:absolute; width:18px; height:18px; line-height:18px; top:50%; left:50%; font-size:18px; text-align:center; filter:drop-shadow(0 2px 4px rgba(255,140,160,0.4)); }
+.login-v2 .lv2-wreath .lv2-w-flower.f1 { transform:translate(-50%,-50%) rotate(0deg) translateY(-58px) rotate(0deg); }
+.login-v2 .lv2-wreath .lv2-w-flower.f2 { transform:translate(-50%,-50%) rotate(45deg) translateY(-58px) rotate(-45deg); font-size:14px; }
+.login-v2 .lv2-wreath .lv2-w-flower.f3 { transform:translate(-50%,-50%) rotate(90deg) translateY(-58px) rotate(-90deg); font-size:16px; }
+.login-v2 .lv2-wreath .lv2-w-flower.f4 { transform:translate(-50%,-50%) rotate(135deg) translateY(-58px) rotate(-135deg); font-size:13px; }
+.login-v2 .lv2-wreath .lv2-w-flower.f5 { transform:translate(-50%,-50%) rotate(180deg) translateY(-58px) rotate(-180deg); font-size:18px; }
+.login-v2 .lv2-wreath .lv2-w-flower.f6 { transform:translate(-50%,-50%) rotate(225deg) translateY(-58px) rotate(-225deg); font-size:14px; }
+.login-v2 .lv2-wreath .lv2-w-flower.f7 { transform:translate(-50%,-50%) rotate(270deg) translateY(-58px) rotate(-270deg); font-size:16px; }
+.login-v2 .lv2-wreath .lv2-w-flower.f8 { transform:translate(-50%,-50%) rotate(315deg) translateY(-58px) rotate(-315deg); font-size:13px; }
+
+.login-v2 .lv2-logo-circle {
+    width:72px; height:72px; border-radius:50%;
+    background:linear-gradient(135deg,#FBE0D8,#F8C9C9 60%,#F4A8A8);
+    display:inline-flex; align-items:center; justify-content:center;
+    position:relative; margin-bottom:10px;
+    box-shadow:
+        0 10px 24px rgba(140,30,30,0.25),
+        inset 0 2px 0 rgba(255,255,255,0.85),
+        inset 0 -2px 0 rgba(180,80,80,0.15);
+}
+.login-v2 .lv2-logo-circle::before { content:''; position:absolute; inset:-6px; border-radius:50%; border:1.5px dashed rgba(197,37,43,0.32); animation:lv2-rotate 22s linear infinite; }
+.login-v2 .lv2-logo-circle::after { content:''; position:absolute; inset:-12px; border-radius:50%; border:1px solid rgba(197,37,43,0.18); }
+.login-v2 .lv2-logo-circle i {
+    font-size:38px;
+    background:linear-gradient(135deg, var(--lv-red), #5C0E14);
+    -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+    filter:drop-shadow(0 2px 6px rgba(140,30,30,0.32));
+}
+.login-v2 .lv2-brand-cn {
+    font-family:'Ma Shan Zheng','Noto Sans SC','PingFang SC',serif;
+    font-size:28px; font-weight:700; color:var(--lv-red); letter-spacing:3px; line-height:1;
+    margin-top:6px;
+    text-shadow:0 2px 4px rgba(140,30,30,0.15);
+}
+.login-v2 .lv2-brand-en {
+    font-size:9px; color:var(--lv-ink-mute); font-weight:700;
+    letter-spacing:2.5px; text-transform:uppercase; margin-top:6px;
+    display:flex; align-items:center; justify-content:center; gap:8px;
+}
+.login-v2 .lv2-brand-en::before, .login-v2 .lv2-brand-en::after { content:''; width:18px; height:1px; background:linear-gradient(90deg,transparent,rgba(140,30,30,0.3),transparent); }
+
+.login-v2 .lv2-flourish { display:flex; align-items:center; justify-content:center; gap:8px; margin:14px 0 18px; color:rgba(197,37,43,0.4); }
+.login-v2 .lv2-flourish::before, .login-v2 .lv2-flourish::after { content:''; flex:1; height:1px; background:linear-gradient(90deg,transparent,rgba(197,37,43,0.25),transparent); }
+.login-v2 .lv2-flourish i { font-size:11px; }
+
+/* Form */
+.login-v2 .login-form { display:block !important; }
+.login-v2 .lv2-field { margin-bottom:14px; }
+.login-v2 .lv2-label { display:block !important; font-size:11.5px !important; font-weight:700 !important; color:var(--lv-ink-soft) !important; margin-bottom:6px !important; letter-spacing:0.4px; text-transform:uppercase; }
+.login-v2 .lv2-label .lv2-lbl-deco { color:var(--lv-red); margin-right:4px; font-size:9px; vertical-align:middle; }
+.login-v2 .lv2-input-wrap { position:relative; }
+.login-v2 .lv2-input-wrap .lv2-ico { position:absolute; left:14px; top:50%; transform:translateY(-50%); color:var(--lv-red); font-size:12px; opacity:0.65; pointer-events:none; }
+.login-v2 input.lv2-input.form-control,
+.login-v2 .form-control.lv2-input {
+    width:100% !important; background:rgba(255,243,238,0.85) !important;
+    border:1.5px solid transparent !important;
+    border-radius:14px !important; padding:13px 14px 13px 38px !important;
+    font-size:13px !important; color:var(--lv-ink) !important; font-weight:500 !important;
+    transition:all 0.2s !important;
+    box-shadow:inset 0 1px 2px rgba(0,0,0,0.03) !important;
+    margin:0 !important;
+}
+.login-v2 .lv2-input::placeholder { color:var(--lv-ink-mute); font-weight:400; }
+.login-v2 .lv2-input:focus {
+    outline:none !important; background:#fff !important;
+    border-color:rgba(197,37,43,0.4) !important;
+    box-shadow:0 0 0 4px rgba(197,37,43,0.10), inset 0 1px 2px rgba(0,0,0,0.02) !important;
+}
+.login-v2 .lv2-err { display:block; min-height:16px; font-size:11px; color:#ef4444; margin-top:4px; }
+
+.login-v2 .lv2-remember-row { display:flex; justify-content:space-between; align-items:center; margin:10px 0 18px; }
+.login-v2 .lv2-remember { display:flex; align-items:center; gap:8px; margin:0; font-size:12px; color:var(--lv-ink-soft); font-weight:500; cursor:pointer; user-select:none; }
+.login-v2 .lv2-remember input { appearance:none; -webkit-appearance:none; width:18px !important; height:18px !important; border-radius:5px; border:1.5px solid rgba(197,37,43,0.4); background:rgba(255,255,255,0.7); cursor:pointer; position:relative; flex-shrink:0; transition:all 0.2s; margin:0; }
+.login-v2 .lv2-remember input:checked { background:var(--lv-red); border-color:var(--lv-red); box-shadow:0 3px 8px rgba(197,37,43,0.3); }
+.login-v2 .lv2-remember input:checked::after { content:''; position:absolute; top:2px; left:5px; width:5px; height:9px; border:solid #fff; border-width:0 2px 2px 0; transform:rotate(45deg); }
+
+/* Login button — overrides .btn.primary defaults */
+.login-v2 #loginBtn.btn.primary,
+.login-v2 .lv2-login-btn {
+    width:100% !important;
+    background:linear-gradient(135deg, #A8131A 0%, #C5252B 30%, #E26F47 70%, #D89A6A 100%) !important;
+    color:#fff !important; border:none !important;
+    border-radius:16px !important; padding:15px !important;
+    font-family:inherit !important;
+    font-weight:800 !important; font-size:14px !important; letter-spacing:2px !important;
+    box-shadow:0 10px 24px rgba(197,37,43,0.36), 0 3px 6px rgba(184,121,74,0.22), inset 0 1px 0 rgba(255,255,255,0.3) !important;
+    transition:transform 0.15s, box-shadow 0.15s !important;
+    position:relative; overflow:hidden;
+    display:flex !important; align-items:center; justify-content:center; gap:8px;
+    cursor:pointer;
+}
+.login-v2 .lv2-login-btn::before {
+    content:''; position:absolute; top:0; left:-30%; width:50%; height:100%;
+    background:linear-gradient(90deg,transparent,rgba(255,255,255,0.28),transparent);
+    animation:lv2-shine 3s ease-in-out infinite;
+}
+@keyframes lv2-shine { 0%{left:-30%} 100%{left:130%} }
+.login-v2 .lv2-login-btn:active { transform:translateY(1px) !important; box-shadow:0 4px 12px rgba(197,37,43,0.32) !important; }
+.login-v2 .lv2-login-btn i, .login-v2 .lv2-login-btn span { position:relative; z-index:2; }
+
+.login-v2 .lv2-hint { text-align:center !important; font-size:10.5px !important; color:var(--lv-ink-mute) !important; font-weight:500; margin-top:14px !important; line-height:1.4; }
+.login-v2 .lv2-legal { text-align:center; font-size:10px; margin-top:10px !important; color:var(--lv-ink-mute); }
+.login-v2 .lv2-legal a { color:var(--lv-ink-soft); text-decoration:none; font-weight:500; margin:0 4px; }
+.login-v2 .lv2-legal a:hover { color:var(--lv-red); text-decoration:underline; }
+
+.login-v2 .lv2-credit { position:absolute; bottom:16px; left:50%; transform:translateX(-50%); font-size:9px; color:rgba(140,30,30,0.4); font-weight:600; letter-spacing:1.5px; z-index:2; pointer-events:none; }
+
+/* Hide legacy h1 brand if some style still inserts it */
+.login-v2 .login-logo h1 { display:none !important; }
+
+/* =======================================================================
+   M14 — Mobile Prospects / Clients view
+   ======================================================================= */
+@media (max-width: 768px) {
+    .content-viewport.mprospects-active { background:#FAF6F0; }
+    .mp {
+        --mp-red:#C5252B; --mp-red-deep:#8B1A20; --mp-red-soft:#FCE7E7;
+        --mp-pink:#F9D5D5; --mp-pink-warm:#F4B1B1;
+        --mp-beige:#FAF6F0; --mp-beige-deep:#F2EAD8;
+        --mp-purple:#7C5CD9; --mp-purple-soft:#E9DEFB;
+        --mp-wood:#B8794A; --mp-wood-soft:#F0DCC2;
+        --mp-green:#1FA855;
+        --mp-ink:#2A1B17; --mp-ink-soft:#6B5A55; --mp-ink-mute:#9B8A85;
+        --mp-line:rgba(40,20,15,0.07);
+        --mp-shadow:0 6px 20px rgba(70,15,15,0.07);
+        padding:6px 14px 100px; background:var(--mp-beige); min-height:100%;
+        font-family:'Inter','Noto Sans SC','PingFang SC','Microsoft YaHei',-apple-system,sans-serif;
+        color:var(--mp-ink);
+    }
+
+    /* Top bar */
+    .mp-top { display:flex; align-items:flex-start; justify-content:space-between; gap:8px; margin-bottom:14px; position:relative; }
+    .mp-burger { width:34px; height:34px; border-radius:10px; background:#fff; border:1px solid var(--mp-line); display:flex; align-items:center; justify-content:center; color:var(--mp-ink); font-size:14px; cursor:pointer; flex-shrink:0; }
+    .mp-title-wrap { flex:1; min-width:0; padding:2px 0 0 6px; }
+    .mp-title { font-size:21px; font-weight:800; color:var(--mp-red); letter-spacing:-0.4px; line-height:1.1; }
+    .mp-sub { font-size:12px; color:var(--mp-ink-soft); margin-top:3px; line-height:1.2; }
+    .mp-actions { display:flex; align-items:center; gap:8px; flex-shrink:0; }
+    .mp-search-btn { width:34px; height:34px; border-radius:50%; background:var(--mp-pink); color:var(--mp-red); display:flex; align-items:center; justify-content:center; font-size:14px; cursor:pointer; border:none; }
+    .mp-avatar { width:34px; height:34px; border-radius:50%; border:2px solid #fff; background-size:cover; background-position:center; background-color:#8B0000; box-shadow:0 2px 8px rgba(0,0,0,0.1); cursor:pointer; }
+
+    /* Tabs */
+    .mp-tabs { background:#fff; border-radius:24px; padding:5px; display:grid; grid-template-columns:repeat(2,1fr); gap:2px; margin-bottom:12px; box-shadow:var(--mp-shadow); }
+    .mp-tab { padding:9px 4px; font-size:13px; font-weight:600; color:var(--mp-ink-soft); text-align:center; border-radius:18px; cursor:pointer; background:none; border:none; font-family:inherit; transition:all 0.2s; }
+    .mp-tab.active { background:var(--mp-red); color:#fff; box-shadow:0 4px 12px rgba(197,37,43,0.32); }
+
+    /* Search */
+    .mp-search-row { margin-bottom:14px; }
+    .mp-search-input-wrap { position:relative; }
+    .mp-search-input-wrap > i { position:absolute; left:14px; top:50%; transform:translateY(-50%); color:var(--mp-ink-mute); font-size:13px; }
+    .mp-search-input { width:100%; background:#fff; border:1px solid var(--mp-line); border-radius:14px; padding:11px 14px 11px 38px; font-size:13px; font-family:inherit; box-shadow:var(--mp-shadow); transition:all 0.2s; }
+    .mp-search-input:focus { outline:none; border-color:rgba(197,37,43,0.4); box-shadow:0 0 0 4px rgba(197,37,43,0.1); }
+
+    /* List */
+    .mp-list { display:flex; flex-direction:column; gap:10px; }
+    .mp-empty { text-align:center; padding:40px 16px; color:var(--mp-ink-soft); font-size:13px; }
+    .mp-empty-flower { font-size:32px; display:block; margin-bottom:8px; opacity:0.7; }
+
+    /* Card */
+    .mp-card {
+        display:flex; align-items:center; gap:11px;
+        background:#fff; border:none; border-radius:16px;
+        padding:12px 14px; cursor:pointer;
+        box-shadow:var(--mp-shadow); transition:transform 0.15s, box-shadow 0.15s;
+        text-align:left; font-family:inherit; width:100%;
+        border-left:4px solid var(--mp-red);
+    }
+    .mp-card:active { transform:translateY(1px); box-shadow:0 2px 8px rgba(70,15,15,0.05); }
+    .mp-card.pal-red    { border-left-color:var(--mp-red); }
+    .mp-card.pal-purple { border-left-color:var(--mp-purple); }
+    .mp-card.pal-pink   { border-left-color:#F8A6B5; }
+    .mp-card.pal-peach  { border-left-color:#E89060; }
+    .mp-card.pal-wood   { border-left-color:var(--mp-wood); }
+
+    .mp-card-avatar { width:42px; height:42px; border-radius:50%; flex-shrink:0; display:flex; align-items:center; justify-content:center; color:#fff; font-weight:700; font-size:14px; box-shadow:0 3px 8px rgba(0,0,0,0.12); }
+    .mp-card.pal-red .mp-card-avatar    { background:linear-gradient(135deg,var(--mp-red),#7C1A1A); }
+    .mp-card.pal-purple .mp-card-avatar { background:linear-gradient(135deg,var(--mp-purple),#5C3FB8); }
+    .mp-card.pal-pink .mp-card-avatar   { background:linear-gradient(135deg,#F08296,#E55A75); }
+    .mp-card.pal-peach .mp-card-avatar  { background:linear-gradient(135deg,#E89060,#C0683D); }
+    .mp-card.pal-wood .mp-card-avatar   { background:linear-gradient(135deg,#CD8B5A,var(--mp-wood)); }
+
+    .mp-card-text { flex:1; min-width:0; }
+    .mp-card-name { font-size:14px; font-weight:700; color:var(--mp-ink); line-height:1.2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .mp-card-sub { font-size:11.5px; color:var(--mp-ink-soft); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .mp-card-meta { display:flex; align-items:center; gap:6px; margin-top:5px; flex-wrap:wrap; }
+    .mp-chip { display:inline-flex; align-items:center; gap:3px; padding:2px 8px; border-radius:10px; font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.3px; }
+    .mp-chip.status { background:var(--mp-pink-warm); color:var(--mp-red-deep); }
+    .mp-chip.score { background:var(--mp-purple-soft); color:#5C3FB8; }
+    .mp-card-actions { display:flex; align-items:center; gap:8px; flex-shrink:0; }
+    .mp-card-act { width:32px; height:32px; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:13px; color:#fff; cursor:pointer; border:none; box-shadow:0 3px 8px rgba(0,0,0,0.12); }
+    .mp-card-act.wa { background:var(--mp-green); }
+    .mp-card-chev { color:var(--mp-ink-mute); font-size:11px; }
+
+    /* Floating add button */
+    .mp-fab {
+        position:fixed; bottom:88px; right:18px; z-index:100;
+        width:54px; height:54px; border-radius:50%; border:none;
+        background:linear-gradient(135deg,var(--mp-red),#7C1A1A);
+        color:#fff; font-size:22px; cursor:pointer;
+        box-shadow:0 12px 28px rgba(197,37,43,0.5), 0 4px 8px rgba(140,30,30,0.25);
+        display:flex; align-items:center; justify-content:center;
+        transition:transform 0.15s;
+    }
+    .mp-fab:active { transform:translateY(2px) scale(0.96); }
+
+    /* Hide legacy desktop prospects header when mobile shell is present */
+    .content-viewport.mprospects-active .prospects-view .prospects-header,
+    .content-viewport.mprospects-active .prospects-view .filter-bar,
+    .content-viewport.mprospects-active .prospects-view .tab-navigation { display:none !important; }
+}

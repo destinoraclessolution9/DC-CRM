@@ -4673,6 +4673,146 @@ In a production system, this would show the actual file contents.
         window.open('https://web.whatsapp.com', '_blank', 'noopener');
     };
 
+    // ── Mobile Prospects / Clients view ──────────────────────
+    // Card-based mobile-only listing matching the home/calendar brand
+    // language. Shares data with the desktop prospects/customers views.
+    let _mpTab = 'prospects';   // 'prospects' | 'customers'
+    let _mpSearch = '';
+    const showMobileProspectsView = async (viewport) => {
+        if (!viewport) return;
+        viewport.classList.add('mprospects-active');
+
+        const userName = (_currentUser?.preferred_name || _currentUser?.full_name || 'there').split(' ')[0];
+        const avatarUrl = _currentUser?.avatar_url
+            || `https://ui-avatars.com/api/?name=${encodeURIComponent(_currentUser?.full_name || 'U')}&background=8B0000&color=fff`;
+
+        viewport.innerHTML = `
+        <div class="mp">
+            <div class="mp-top">
+                <button class="mp-burger" onclick="app.openMobileDrawer()" aria-label="Menu"><i class="fas fa-bars"></i></button>
+                <div class="mp-title-wrap">
+                    <div class="mp-title">Clients</div>
+                    <div class="mp-sub">Hi ${_mhomeEsc(userName)}, your community awaits 🌸</div>
+                </div>
+                <div class="mp-actions">
+                    <button class="mp-search-btn" onclick="document.getElementById('mp-search-input')?.focus()" aria-label="Search"><i class="fas fa-search"></i></button>
+                    <div class="mp-avatar" onclick="app.openMobileDrawer()" role="button" aria-label="Profile" style="background-image:url('${_mhomeEsc(avatarUrl)}')"></div>
+                </div>
+            </div>
+
+            <div class="mp-tabs">
+                <button class="mp-tab ${_mpTab === 'prospects' ? 'active' : ''}" onclick="app.mpSwitchTab('prospects', this)">Prospects</button>
+                <button class="mp-tab ${_mpTab === 'customers' ? 'active' : ''}" onclick="app.mpSwitchTab('customers', this)">Customers</button>
+            </div>
+
+            <div class="mp-search-row">
+                <div class="mp-search-input-wrap">
+                    <i class="fas fa-search"></i>
+                    <input type="text" id="mp-search-input" class="mp-search-input" placeholder="Search by name, phone or email…" oninput="app.mpSearchInput(this.value)" value="${_mhomeEsc(_mpSearch)}">
+                </div>
+            </div>
+
+            <div id="mp-list" class="mp-list"></div>
+        </div>
+        <button class="mp-fab" onclick="app.mpAdd()" aria-label="Add"><i class="fas fa-plus"></i></button>`;
+
+        await _mpRenderList();
+    };
+
+    const _mpRenderList = async () => {
+        const listHost = document.getElementById('mp-list');
+        if (!listHost) return;
+        listHost.innerHTML = '<div class="mp-empty"><i class="fas fa-spinner fa-spin"></i> Loading…</div>';
+
+        const table = _mpTab === 'customers' ? 'customers' : 'prospects';
+        const visibleIds = (typeof getVisibleUserIds === 'function')
+            ? await getVisibleUserIds(_currentUser).catch(() => 'all') : 'all';
+
+        let rows = [];
+        try {
+            rows = await AppDataStore.getAll(table) || [];
+        } catch (_) { rows = []; }
+
+        // Scope by visibility for non-admins
+        if (typeof isSystemAdmin === 'function' && !isSystemAdmin(_currentUser) && visibleIds !== 'all') {
+            const setIds = new Set(visibleIds.map(String));
+            rows = rows.filter(r => !r.responsible_agent_id || setIds.has(String(r.responsible_agent_id)));
+        }
+
+        // Search filter
+        const q = (_mpSearch || '').trim().toLowerCase();
+        if (q) {
+            rows = rows.filter(r => {
+                const blob = `${r.full_name || ''} ${r.phone || ''} ${r.email || ''} ${r.nickname || ''}`.toLowerCase();
+                return blob.includes(q);
+            });
+        }
+
+        // Sort: most recent first
+        rows.sort((a, b) => {
+            const at = new Date(a.updated_at || a.created_at || 0).getTime();
+            const bt = new Date(b.updated_at || b.created_at || 0).getTime();
+            return bt - at;
+        });
+
+        if (!rows.length) {
+            listHost.innerHTML = `<div class="mp-empty"><span class="mp-empty-flower">🌸</span> No ${_mhomeEsc(_mpTab)} yet. Tap + to add the first one.</div>`;
+            return;
+        }
+
+        const isCust = _mpTab === 'customers';
+        const palettes = ['red','purple','pink','peach','wood'];
+        const html = rows.slice(0, 60).map((p, i) => {
+            const init = _mhomeInitials(p.full_name);
+            const pal = palettes[(p.id || i) % palettes.length];
+            const phone = _mhomeEsc(p.phone || '');
+            const status = p.status || (isCust ? 'active' : 'new');
+            const score = p.score || '';
+            const sub = p.email || p.phone || (p.city ? p.city : '—');
+            const fn = isCust ? 'showCustomerDetail' : 'showProspectDetail';
+            return `
+            <button class="mp-card pal-${pal}" onclick="app.${fn}(${p.id})">
+                <div class="mp-card-avatar">${_mhomeEsc(init)}</div>
+                <div class="mp-card-text">
+                    <div class="mp-card-name">${_mhomeEsc(p.full_name || 'Unknown')}</div>
+                    <div class="mp-card-sub">${_mhomeEsc(sub)}</div>
+                    <div class="mp-card-meta">
+                        <span class="mp-chip status">${_mhomeEsc(status)}</span>
+                        ${score ? `<span class="mp-chip score">${_mhomeEsc(String(score))}</span>` : ''}
+                    </div>
+                </div>
+                <div class="mp-card-actions">
+                    ${phone ? `<button class="mp-card-act wa" onclick="event.stopPropagation();app.mhomeWa(${p.id ?? 'null'},'${phone}')" aria-label="WhatsApp"><i class="fab fa-whatsapp"></i></button>` : ''}
+                    <i class="fas fa-chevron-right mp-card-chev"></i>
+                </div>
+            </button>`;
+        }).join('');
+
+        listHost.innerHTML = html;
+    };
+
+    const mpSwitchTab = async (tab, btn) => {
+        _mpTab = tab;
+        document.querySelectorAll('.mp-tab').forEach(t => t.classList.remove('active'));
+        if (btn) btn.classList.add('active');
+        await _mpRenderList();
+    };
+    let _mpSearchTimer = null;
+    const mpSearchInput = (v) => {
+        _mpSearch = v || '';
+        clearTimeout(_mpSearchTimer);
+        _mpSearchTimer = setTimeout(() => { _mpRenderList(); }, 220);
+    };
+    const mpAdd = () => {
+        if (_mpTab === 'customers' && typeof openAddCustomerModal === 'function') {
+            try { openAddCustomerModal(); return; } catch (_) {}
+        }
+        if (typeof openAddProspectModal === 'function') {
+            try { openAddProspectModal(); return; } catch (_) {}
+        }
+        UI.toast.success('Add');
+    };
+
     // ── Table data-label injection ───────────────────────────
     // Run after every table render so mobile cards show column labels
     const applyMobileTableLabels = () => {
@@ -10022,6 +10162,9 @@ function _wireLoginBtn() {
         if (viewId !== 'calendar' && viewId !== 'month') {
             document.getElementById('content-viewport')?.classList.remove('mcal-active');
         }
+        if (viewId !== 'prospects' && viewId !== 'customers') {
+            document.getElementById('content-viewport')?.classList.remove('mprospects-active');
+        }
         // Stamp the navigation time so initSync can suppress the SWR
         // revalidation refresh that would otherwise blow away the DOM 1–3s
         // after the page paints (visible flash / lost scroll position).
@@ -10065,7 +10208,11 @@ function _wireLoginBtn() {
             }
         } else if (viewId === 'prospects') {
             _currentView = 'prospects';
-            await showProspectsView(viewport);
+            if (isMobile()) {
+                await showMobileProspectsView(viewport);
+            } else {
+                await showProspectsView(viewport);
+            }
         } else if (viewId === 'pipeline') {
             _currentView = 'pipeline';
             await showPipelineView(viewport);
@@ -48511,6 +48658,10 @@ JB 星期二到
         mcalFilter,
         mcalAdd,
         mcalWa,
+        showMobileProspectsView,
+        mpSwitchTab,
+        mpSearchInput,
+        mpAdd,
         initSwipeActions,
         initPullToRefresh,
 
