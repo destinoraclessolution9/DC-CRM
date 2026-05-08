@@ -4374,6 +4374,303 @@ In a production system, this would show the actual file contents.
         }
     };
 
+    // ── Mobile Calendar (month grid) ─────────────────────────
+    // Custom mobile-only month-grid layout that matches the Home dashboard's
+    // brand palette. Uses the same activity dataset as the desktop calendar.
+    let _mcalYear = null;
+    let _mcalMonth = null;
+    const _mcalColorForType = (type) => {
+        const t = String(type || '').toLowerCase();
+        if (t.includes('birthday') || t.includes('all day') || t.includes('all-day')) return 'allday';
+        if (t.includes('client meeting') || t.includes('client mtg') || t.includes('meeting')) return 'red';
+        if (t.includes('cps') || t.includes('consult') || t.includes('follow')) return 'purple';
+        if (t.includes('team')) return 'pink';
+        if (t.includes('review')) return 'peach';
+        if (t.includes('training') || t.includes('product') || t.includes('workshop')) return 'green';
+        const palette = ['red','purple','pink','peach','green'];
+        let h = 0; for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) | 0;
+        return palette[Math.abs(h) % palette.length];
+    };
+    const _mcalShortTitle = (a, personMap) => {
+        const pid = a.prospect_id || a.customer_id;
+        const person = pid ? personMap.get(String(pid)) : null;
+        if (person?.full_name) {
+            const parts = String(person.full_name).split(/\s+/);
+            return parts[0]; // first name fits the cell
+        }
+        const t = String(a.activity_type || a.title || 'Event');
+        const w = t.split(/\s+/);
+        return w.length >= 2 ? `${w[0]} ${w[1].charAt(0)}` : t;
+    };
+
+    const showMobileCalendarView = async (viewport) => {
+        if (!viewport) return;
+        viewport.classList.add('mcal-active');
+
+        const todayD = new Date();
+        if (_mcalYear == null) { _mcalYear = todayD.getFullYear(); _mcalMonth = todayD.getMonth(); }
+
+        const firstDay = new Date(_mcalYear, _mcalMonth, 1);
+        const daysInMonth = new Date(_mcalYear, _mcalMonth + 1, 0).getDate();
+        const prevMonthLastDay = new Date(_mcalYear, _mcalMonth, 0).getDate();
+        // Convert Sun=0..Sat=6 to Mon=0..Sun=6
+        const startOffset = (firstDay.getDay() + 6) % 7;
+        const monthName = firstDay.toLocaleDateString('en-US', { month: 'long' });
+
+        const userName = (_currentUser?.preferred_name || _currentUser?.full_name || 'there').split(' ')[0];
+        const avatarUrl = _currentUser?.avatar_url
+            || `https://ui-avatars.com/api/?name=${encodeURIComponent(_currentUser?.full_name || 'U')}&background=8B0000&color=fff`;
+
+        // Initial shell + skeleton grid
+        viewport.innerHTML = `
+        <div class="mcal">
+            <div class="mcal-top">
+                <div class="mcal-blossom"><span class="b1">🌸</span><span class="b2">🌸</span><span class="b3">🌸</span></div>
+                <button class="mcal-burger" onclick="app.openMobileDrawer()" aria-label="Menu"><i class="fas fa-bars"></i></button>
+                <div class="mcal-title-wrap">
+                    <div class="mcal-title" onclick="app.mcalNextMonth()">${_mhomeEsc(monthName)} ${_mcalYear} <i class="fas fa-chevron-down"></i></div>
+                    <div class="mcal-sub">Let's make today count, ${_mhomeEsc(userName)}! <span class="spk">✨</span></div>
+                </div>
+                <div class="mcal-actions">
+                    <button class="mcal-search" onclick="(window._cmd=document.getElementById('cmdk-trigger'))&&_cmd.click()" aria-label="Search"><i class="fas fa-search"></i></button>
+                    <div class="mcal-avatar" onclick="app.openMobileDrawer()" role="button" aria-label="Profile" style="background-image:url('${_mhomeEsc(avatarUrl)}')"></div>
+                </div>
+            </div>
+            <div class="mcal-tabs">
+                <button class="mcal-tab active" onclick="app.mcalTab('month', this)">Month</button>
+                <button class="mcal-tab" onclick="app.mcalTab('week', this)">Week</button>
+                <button class="mcal-tab" onclick="app.mcalTab('day', this)">Day</button>
+                <button class="mcal-tab" onclick="app.mcalTab('list', this)">List</button>
+            </div>
+            <div class="mcal-filter-row">
+                <button class="mcal-filter" onclick="app.mcalFilter()"><i class="fas fa-sliders"></i> All Events <i class="fas fa-chevron-down"></i></button>
+                <div class="mcal-quick">
+                    <button class="mcal-quick-btn wa" onclick="app.mcalWa()" aria-label="WhatsApp"><i class="fab fa-whatsapp"></i></button>
+                    <button class="mcal-quick-btn add" onclick="app.mcalAdd()" aria-label="Add activity"><i class="fas fa-plus"></i></button>
+                </div>
+                <button class="mcal-today" onclick="app.mcalToday()">Today</button>
+            </div>
+            <div class="mcal-grid-wrap">
+                <div class="mcal-dow"><span>MON</span><span>TUE</span><span>WED</span><span>THU</span><span>FRI</span><span>SAT</span><span>SUN</span></div>
+                <div class="mcal-grid" id="mcal-grid">
+                    ${Array.from({length: 42}).map(() => '<div class="mcal-cell muted"></div>').join('')}
+                </div>
+            </div>
+            <div id="mcal-coming-host"></div>
+        </div>`;
+
+        // ── Fetch month activities + supporting data ─────────────
+        const monthStartStr = `${_mcalYear}-${String(_mcalMonth+1).padStart(2,'0')}-01`;
+        const monthEndStr = `${_mcalYear}-${String(_mcalMonth+1).padStart(2,'0')}-${String(daysInMonth).padStart(2,'0')}`;
+        const visibleIds = (typeof getVisibleUserIds === 'function')
+            ? await getVisibleUserIds(_currentUser).catch(() => 'all') : 'all';
+
+        // Build the date range as scopeValues so we get a single IN query.
+        const monthDates = [];
+        for (let d = 1; d <= daysInMonth; d++) {
+            monthDates.push(`${_mcalYear}-${String(_mcalMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`);
+        }
+        const actQueryOpts = {
+            scopeField: 'activity_date',
+            scopeValues: monthDates,
+            sort: 'start_time', sortDir: 'asc',
+            limit: 1000, offset: 0, countMode: null,
+        };
+        if (typeof isSystemAdmin === 'function' && !isSystemAdmin(_currentUser) && visibleIds !== 'all') {
+            actQueryOpts.scopeFields = [
+                { field: 'lead_agent_id', values: visibleIds },
+                { field: 'visibility', values: ['open', 'public'] }
+            ];
+        }
+
+        const [actResult, allProspectsR, allCustomersR, draftsR, refillsR] = await Promise.all([
+            AppDataStore.queryAdvanced('activities', actQueryOpts).catch(() => ({ data: [] })),
+            AppDataStore.getAll('prospects').catch(() => []),
+            AppDataStore.getAll('customers').catch(() => []),
+            AppDataStore.getAll('follow_up_drafts').catch(() => []),
+            AppDataStore.query('refill_reminders', { status: 'pending' }).catch(() => []),
+        ]);
+
+        const activities = (actResult.data || []).filter(a => a.activity_type !== 'EVENT');
+        const allPeople = [...(allProspectsR || []), ...(allCustomersR || [])];
+        const personMap = new Map(allPeople.map(p => [String(p.id), p]));
+
+        // Group activities by date (YYYY-MM-DD)
+        const byDate = new Map();
+        for (const a of activities) {
+            const k = a.activity_date;
+            if (!k) continue;
+            if (!byDate.has(k)) byDate.set(k, []);
+            byDate.get(k).push(a);
+        }
+        // Inject birthdays into matching dates within this month
+        const mmdd = (m, d) => `${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+        for (const p of allPeople) {
+            const dob = p.date_of_birth || '';
+            if (!dob || dob.length < 10) continue;
+            const md = dob.slice(5, 10); // MM-DD
+            // Find the date in this month with this MM-DD
+            const [_pm, _pd] = md.split('-').map(n => parseInt(n));
+            if (_pm - 1 !== _mcalMonth) continue;
+            if (_pd < 1 || _pd > daysInMonth) continue;
+            const k = `${_mcalYear}-${String(_mcalMonth+1).padStart(2,'0')}-${String(_pd).padStart(2,'0')}`;
+            if (!byDate.has(k)) byDate.set(k, []);
+            byDate.get(k).push({ activity_type: 'All Day Birthday', _isBirthday: true, _person: p });
+        }
+
+        // ── Render grid cells ───────────────────────────────────
+        const todayY = todayD.getFullYear();
+        const todayM = todayD.getMonth();
+        const todayDay = todayD.getDate();
+        const cells = [];
+
+        // Prev month spillover
+        for (let i = startOffset; i > 0; i--) {
+            const d = prevMonthLastDay - i + 1;
+            cells.push(`<div class="mcal-cell muted"><span class="num">${d}</span></div>`);
+        }
+
+        // Current month
+        for (let d = 1; d <= daysInMonth; d++) {
+            const k = `${_mcalYear}-${String(_mcalMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+            const isToday = (_mcalYear === todayY && _mcalMonth === todayM && d === todayDay);
+            const dayActs = byDate.get(k) || [];
+            const visibleActs = dayActs.slice(0, 3);
+            const overflow = Math.max(0, dayActs.length - 3);
+            const evtsHtml = visibleActs.map(a => {
+                if (a._isBirthday) {
+                    const p = a._person;
+                    return `<div class="mcal-evt allday" onclick="event.stopPropagation();app.mcalDayClick('${k}')">🎂 ${_mhomeEsc(String(p.full_name||'').split(' ')[0])}</div>`;
+                }
+                const time = (a.start_time || '00:00').slice(0, 5);
+                const color = _mcalColorForType(a.activity_type);
+                const short = _mcalShortTitle(a, personMap);
+                return `<div class="mcal-evt ${color}" onclick="event.stopPropagation();app.mcalDayClick('${k}')"><span class="t">${_mhomeEsc(time)}</span>${_mhomeEsc(short)}</div>`;
+            }).join('');
+            const moreLink = overflow > 0 ? `<span class="more" onclick="event.stopPropagation();app.mcalDayClick('${k}')">+${overflow} more</span>` : '';
+            cells.push(`
+                <div class="mcal-cell ${isToday ? 'today' : ''}" onclick="app.mcalDayClick('${k}')">
+                    <span class="num">${d}</span>
+                    <div class="events">${evtsHtml}${moreLink}</div>
+                </div>`);
+        }
+
+        // Next month spillover to fill grid (multiple of 7)
+        const used = startOffset + daysInMonth;
+        const trail = (7 - (used % 7)) % 7;
+        for (let i = 1; i <= trail; i++) {
+            cells.push(`<div class="mcal-cell muted"><span class="num">${i}</span></div>`);
+        }
+        // Pad to 6 rows (42) for consistent height
+        while (cells.length < 42) {
+            const d = (cells.length - startOffset - daysInMonth) + 1;
+            cells.push(`<div class="mcal-cell muted"><span class="num">${d > 0 ? d : ''}</span></div>`);
+        }
+
+        const grid = document.getElementById('mcal-grid');
+        if (grid) grid.innerHTML = cells.join('');
+
+        // ── Coming-up strip ─────────────────────────────────────
+        const todayStr = `${todayY}-${String(todayM+1).padStart(2,'0')}-${String(todayDay).padStart(2,'0')}`;
+        const tom = new Date(todayD); tom.setDate(tom.getDate()+1);
+        const todayMD = mmdd(todayM+1, todayDay);
+        const tomMD = mmdd(tom.getMonth()+1, tom.getDate());
+        const bdayCount = allPeople.filter(p => {
+            const dob = p.date_of_birth || ''; if (dob.length < 10) return false;
+            const md = dob.slice(5, 10); return md === todayMD || md === tomMD;
+        }).length;
+        const refillCount = (refillsR || []).length;
+        const overdueFollowups = (draftsR || []).filter(d =>
+            d.status === 'pending' && (d.due_date || '') < todayStr &&
+            (!d.agent_id || String(d.agent_id) === String(_currentUser?.id))
+        ).length;
+
+        const comingHost = document.getElementById('mcal-coming-host');
+        if (comingHost) {
+            comingHost.innerHTML = `
+            <div class="mcal-coming">
+                <div class="mcal-coming-head">
+                    <div class="mcal-coming-title"><span class="ico"><i class="fas fa-clock"></i></span> Here's what's coming up</div>
+                    <button class="mcal-coming-link" onclick="app.navigateTo('home')">View All ›</button>
+                </div>
+                <div class="mcal-coming-list">
+                    <button class="mcal-coming-item bday" onclick="app.navigateTo('home')">
+                        <div class="ico"><i class="fas fa-cake-candles"></i></div>
+                        <div class="mcal-coming-text">
+                            <div class="mcal-coming-num">${bdayCount}<small>Birthday${bdayCount===1?'':'s'}</small></div>
+                            <div class="mcal-coming-lbl">Tomorrow</div>
+                        </div>
+                    </button>
+                    <button class="mcal-coming-item refill" onclick="app.navigateTo('home')">
+                        <div class="ico"><i class="fas fa-prescription-bottle-medical"></i></div>
+                        <div class="mcal-coming-text">
+                            <div class="mcal-coming-num">${refillCount}<small>Refills</small></div>
+                            <div class="mcal-coming-lbl">This Week</div>
+                        </div>
+                    </button>
+                    <button class="mcal-coming-item followup" onclick="app.navigateTo('home')">
+                        <div class="ico"><i class="fas fa-user-clock"></i></div>
+                        <div class="mcal-coming-text">
+                            <div class="mcal-coming-num">${overdueFollowups}<small>Follow-ups</small></div>
+                            <div class="mcal-coming-lbl">Overdue</div>
+                        </div>
+                    </button>
+                </div>
+            </div>`;
+        }
+    };
+
+    // ── Mobile calendar control handlers ─────────────────────
+    const mcalPrevMonth = async () => {
+        _mcalMonth--;
+        if (_mcalMonth < 0) { _mcalMonth = 11; _mcalYear--; }
+        await showMobileCalendarView(document.getElementById('content-viewport'));
+    };
+    const mcalNextMonth = async () => {
+        _mcalMonth++;
+        if (_mcalMonth > 11) { _mcalMonth = 0; _mcalYear++; }
+        await showMobileCalendarView(document.getElementById('content-viewport'));
+    };
+    const mcalToday = async () => {
+        const t = new Date();
+        _mcalYear = t.getFullYear();
+        _mcalMonth = t.getMonth();
+        await showMobileCalendarView(document.getElementById('content-viewport'));
+    };
+    const mcalDayClick = (dateStr) => {
+        // Day view delegation: fall back to opening the add activity prefilled
+        // for that day. Detail-of-day view can come later.
+        if (typeof openAddActivityModal === 'function') {
+            try { openAddActivityModal({ date: dateStr }); return; } catch (_) {}
+        }
+        UI.toast.success(`${dateStr}`);
+    };
+    const mcalTab = (tab, btn) => {
+        document.querySelectorAll('.mcal-tab').forEach(t => t.classList.remove('active'));
+        if (btn) btn.classList.add('active');
+        if (tab !== 'month') {
+            UI.toast.success(`${tab.charAt(0).toUpperCase() + tab.slice(1)} view coming soon`);
+            // Re-activate Month tab visually
+            setTimeout(() => {
+                document.querySelectorAll('.mcal-tab').forEach((t, i) => {
+                    t.classList.toggle('active', i === 0);
+                });
+            }, 600);
+        }
+    };
+    const mcalFilter = () => {
+        UI.toast.success('Filter options coming soon');
+    };
+    const mcalAdd = () => {
+        if (typeof openAddActivityModal === 'function') {
+            try { openAddActivityModal(); return; } catch (_) {}
+        }
+        UI.toast.success('Add activity');
+    };
+    const mcalWa = () => {
+        window.open('https://web.whatsapp.com', '_blank', 'noopener');
+    };
+
     // ── Table data-label injection ───────────────────────────
     // Run after every table render so mobile cards show column labels
     const applyMobileTableLabels = () => {
@@ -9715,10 +10012,13 @@ function _wireLoginBtn() {
     const navigateTo = async (viewId) => {
         UI.hideModal();
         _currentDetailView = null; // leaving any detail page — pull-to-refresh goes back to list
-        // Strip mobile-home page background when leaving the home view so the
-        // beige fill doesn't bleed into other screens.
+        // Strip mobile-home / mobile-calendar page backgrounds when leaving so
+        // the beige fill doesn't bleed into other screens.
         if (viewId !== 'home') {
             document.getElementById('content-viewport')?.classList.remove('mhome-active');
+        }
+        if (viewId !== 'calendar' && viewId !== 'month') {
+            document.getElementById('content-viewport')?.classList.remove('mcal-active');
         }
         // Stamp the navigation time so initSync can suppress the SWR
         // revalidation refresh that would otherwise blow away the DOM 1–3s
@@ -9756,7 +10056,11 @@ function _wireLoginBtn() {
             await showMobileHomeView(viewport);
         } else if (viewId === 'calendar' || viewId === 'month') {
             _currentView = 'month';
-            await showCalendarView(viewport);
+            if (isMobile()) {
+                await showMobileCalendarView(viewport);
+            } else {
+                await showCalendarView(viewport);
+            }
         } else if (viewId === 'prospects') {
             _currentView = 'prospects';
             await showProspectsView(viewport);
@@ -48196,6 +48500,15 @@ JB 星期二到
         showMobileMenu,
         showMobileHomeView,
         mhomeWa,
+        showMobileCalendarView,
+        mcalPrevMonth,
+        mcalNextMonth,
+        mcalToday,
+        mcalDayClick,
+        mcalTab,
+        mcalFilter,
+        mcalAdd,
+        mcalWa,
         initSwipeActions,
         initPullToRefresh,
 
