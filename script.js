@@ -4638,12 +4638,13 @@ In a production system, this would show the actual file contents.
         await showMobileCalendarView(document.getElementById('content-viewport'));
     };
     const mcalDayClick = (dateStr) => {
-        // Day view delegation: fall back to opening the add activity prefilled
-        // for that day. Detail-of-day view can come later.
-        if (typeof openAddActivityModal === 'function') {
-            try { openAddActivityModal({ date: dateStr }); return; } catch (_) {}
+        // Tapping a day opens the activity modal pre-filled for that date.
+        // Detail-of-day view (full read-only list of the day's items) can
+        // come later — for now reuse the existing add-activity entry point.
+        if (typeof openActivityModal === 'function') {
+            try { openActivityModal(dateStr); return; } catch (_) {}
         }
-        UI.toast.success(`${dateStr}`);
+        UI.toast.success(dateStr);
     };
     const mcalTab = (tab, btn) => {
         document.querySelectorAll('.mcal-tab').forEach(t => t.classList.remove('active'));
@@ -4662,8 +4663,9 @@ In a production system, this would show the actual file contents.
         UI.toast.success('Filter options coming soon');
     };
     const mcalAdd = () => {
-        if (typeof openAddActivityModal === 'function') {
-            try { openAddActivityModal(); return; } catch (_) {}
+        // Open the activity creation modal — pre-fills with today's date by default.
+        if (typeof openActivityModal === 'function') {
+            try { openActivityModal(); return; } catch (_) {}
         }
         UI.toast.success('Add activity');
     };
@@ -4761,7 +4763,7 @@ In a production system, this would show the actual file contents.
                 } else if (_currentDetailView?.type === 'customer') {
                     await showCustomerDetail(_currentDetailView.id);
                 } else {
-                    await navigateTo(_currentView || 'calendar');
+                    await navigateTo(_currentView || (isMobile() ? 'home' : 'calendar'));
                 }
                 refreshEl.classList.remove('show');
                 refreshEl.innerHTML = '<i class="fas fa-arrow-down"></i> Pull to refresh';
@@ -8255,7 +8257,7 @@ function _wireLoginBtn() {
                     _ptrCount = 0;
                     clearTimeout(_ptrTimer);
                     UI.toast.success('Refreshing…');
-                    setTimeout(() => navigateTo(_currentView || 'calendar').catch(() => {}), 200);
+                    setTimeout(() => navigateTo(_currentView || (isMobile() ? 'home' : 'calendar')).catch(() => {}), 200);
                 }
             }, { passive: true });
         }
