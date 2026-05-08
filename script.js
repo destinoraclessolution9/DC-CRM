@@ -4028,35 +4028,351 @@ In a production system, this would show the actual file contents.
         bottomNav.className = 'mobile-bottom-nav';
         bottomNav.id = 'mobile-bottom-nav';
         bottomNav.innerHTML = `
-            <button class="mobile-nav-item" id="bnav-calendar" onclick="app.navigateTo('calendar')">
-                <i class="fas fa-calendar-alt"></i>
-                <span>Calendar</span>
-            </button>
-            <button class="mobile-nav-item" id="bnav-prospects" onclick="app.navigateTo('prospects')">
-                <i class="fas fa-users"></i>
-                <span>Prospects</span>
-            </button>
-            <button class="mobile-nav-item" id="bnav-pipeline" onclick="app.navigateTo('pipeline')">
-                <i class="fas fa-filter"></i>
-                <span>Pipeline</span>
-            </button>
-            <button class="mobile-nav-item" id="bnav-menu" onclick="app.openMobileDrawer()">
-                <i class="fas fa-th-large"></i>
-                <span>Menu</span>
-            </button>
+            <a class="mobile-bottom-nav-item" data-view="home" href="#" onclick="event.preventDefault(); app.navigateTo('home')">
+                <i class="fas fa-house"></i><span>Home</span>
+            </a>
+            <a class="mobile-bottom-nav-item" data-view="calendar" href="#" onclick="event.preventDefault(); app.navigateTo('calendar')">
+                <i class="far fa-calendar"></i><span>Calendar</span>
+            </a>
+            <a class="mobile-bottom-nav-item" data-view="prospects" href="#" onclick="event.preventDefault(); app.navigateTo('prospects')">
+                <i class="fas fa-user-group"></i><span>Clients</span>
+            </a>
+            <a class="mobile-bottom-nav-item" data-view="reports" href="#" onclick="event.preventDefault(); app.navigateTo('reports')">
+                <i class="fas fa-chart-column"></i><span>Insights</span>
+            </a>
+            <a class="mobile-bottom-nav-item" id="mobile-more" href="#" onclick="event.preventDefault(); app.openMobileDrawer()">
+                <i class="fas fa-ellipsis"></i><span>More</span>
+            </a>
         `;
         document.body.appendChild(bottomNav);
     };
 
     const updateBottomNavActive = (viewId) => {
-        const map = { calendar: 'bnav-calendar', prospects: 'bnav-prospects', pipeline: 'bnav-pipeline' };
-        document.querySelectorAll('.mobile-nav-item').forEach(el => el.classList.remove('active'));
-        const activeId = map[viewId];
-        if (activeId) document.getElementById(activeId)?.classList.add('active');
+        // Calendar/month share the same tab; prospects + customers both highlight Clients.
+        const tabFor = (v) => {
+            if (v === 'home') return 'home';
+            if (v === 'month' || v === 'calendar') return 'calendar';
+            if (v === 'prospects' || v === 'customers') return 'prospects';
+            if (v === 'reports') return 'reports';
+            return null;
+        };
+        const target = tabFor(viewId);
+        document.querySelectorAll('.mobile-bottom-nav-item, .mobile-nav-item').forEach(el => el.classList.remove('active'));
+        if (!target) return;
+        document.querySelectorAll(`.mobile-bottom-nav-item[data-view="${target}"]`).forEach(el => el.classList.add('active'));
     };
 
     // Legacy — kept for any callers
     const showMobileMenu = () => openMobileDrawer();
+
+    // ── Mobile Home dashboard ────────────────────────────────
+    // AI Assistant landing for mobile users. Aggregates today's appointments,
+    // pending follow-ups, birthdays and refill reminders into one card-based
+    // view. Tablet/desktop continue to land on the calendar.
+    const _mhomeIcon = (type) => {
+        const t = String(type || '').toLowerCase();
+        if (t.includes('whatsapp') || t.includes('call') || t.includes('phone')) return 'fab fa-whatsapp';
+        if (t.includes('meeting') || t.includes('client') || t.includes('visit')) return 'fas fa-user-friends';
+        return 'fas fa-clipboard-list';
+    };
+    const _mhomeEsc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const _mhomeInitials = (name) => {
+        const parts = String(name || '').trim().split(/\s+/).slice(0, 2);
+        return parts.map(p => p.charAt(0).toUpperCase()).join('') || '?';
+    };
+    const _mhomeWaPhone = (raw) => {
+        const digits = String(raw || '').replace(/[^0-9+]/g, '').replace(/^\+/, '');
+        if (!digits) return '';
+        if (digits.startsWith('60')) return digits;
+        if (digits.startsWith('0')) return '6' + digits;
+        return digits;
+    };
+
+    const showMobileHomeView = async (viewport) => {
+        if (!viewport) return;
+        viewport.classList.add('mhome-active');
+
+        const now = new Date();
+        const hour = now.getHours();
+        const greetWord = hour < 12 ? 'Good Morning' : hour < 18 ? 'Good Afternoon' : 'Good Evening';
+        const fullName = _currentUser?.preferred_name || _currentUser?.full_name || 'there';
+        const userName = String(fullName).split(' ')[0];
+        const dateStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+        const avatarUrl = _currentUser?.avatar_url
+            || `https://ui-avatars.com/api/?name=${encodeURIComponent(_currentUser?.full_name || 'U')}&background=8B0000&color=fff`;
+
+        // Initial paint with placeholder counts so the layout shows instantly.
+        viewport.innerHTML = `
+        <div class="mhome">
+            <div class="mhome-greet">
+                <div class="mhome-greet-text">
+                    <p class="mhome-greet-hi">${_mhomeEsc(greetWord)}, <span class="name">${_mhomeEsc(userName)}</span> <span class="wave">👋</span></p>
+                    <div class="mhome-greet-date">${_mhomeEsc(dateStr)}</div>
+                </div>
+                <div class="mhome-greet-actions">
+                    <div class="mhome-bell" onclick="(window._notifBellEl=document.querySelector('.notif-bell'))&&_notifBellEl.click()" role="button" aria-label="Notifications">
+                        <i class="far fa-bell"></i><span class="dot"></span>
+                    </div>
+                    <div class="mhome-avatar" onclick="app.openMobileDrawer()" role="button" aria-label="Profile" style="background-image:url('${_mhomeEsc(avatarUrl)}')"></div>
+                </div>
+            </div>
+            <div id="mhome-body">
+                <div class="mhome-ai-card"><div class="mhome-ai-top" style="min-height:160px;">
+                    <span class="mhome-arc"></span>
+                    <span class="mhome-orb o1"></span><span class="mhome-orb o2"></span><span class="mhome-orb o3"></span>
+                    <div class="mhome-ai-head">
+                        <div class="mhome-ai-icon"><i class="fas fa-wand-magic-sparkles"></i></div>
+                        <div><div class="mhome-ai-title">AI Assistant</div><div class="mhome-ai-sub">Loading today's snapshot…</div></div>
+                    </div>
+                </div></div>
+            </div>
+        </div>`;
+
+        // ── Data ─────────────────────────────────────────────────
+        const todayStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+        const tom = new Date(now); tom.setDate(tom.getDate()+1);
+        const mmdd = (d) => `${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        const todayMD = mmdd(now);
+        const tomMD = mmdd(tom);
+
+        const visibleIds = (typeof getVisibleUserIds === 'function')
+            ? await getVisibleUserIds(_currentUser).catch(() => 'all')
+            : 'all';
+
+        const actQueryOpts = {
+            filters: { activity_date: todayStr },
+            sort: 'start_time', sortDir: 'asc', limit: 50, offset: 0, countMode: null,
+        };
+        if (typeof isSystemAdmin === 'function' && !isSystemAdmin(_currentUser) && visibleIds !== 'all') {
+            actQueryOpts.scopeFields = [
+                { field: 'lead_agent_id', values: visibleIds },
+                { field: 'visibility', values: ['open', 'public'] }
+            ];
+        }
+
+        const [actResult, allProspectsR, allCustomersR, draftsR, refillsR] = await Promise.all([
+            AppDataStore.queryAdvanced('activities', actQueryOpts).catch(() => ({ data: [] })),
+            AppDataStore.getAll('prospects').catch(() => []),
+            AppDataStore.getAll('customers').catch(() => []),
+            AppDataStore.getAll('follow_up_drafts').catch(() => []),
+            AppDataStore.query('refill_reminders', { status: 'pending' }).catch(() => []),
+        ]);
+
+        const activities = (actResult.data || []).filter(a => a.activity_type !== 'EVENT');
+        const allPeople = [...(allProspectsR || []), ...(allCustomersR || [])];
+        const personMap = new Map(allPeople.map(p => [String(p.id), p]));
+        const _isMine = (d) => !d.agent_id || String(d.agent_id) === String(_currentUser?.id);
+        const visibleDrafts = (draftsR || []).filter(d =>
+            d.status === 'pending' && (d.due_date || '') <= todayStr && _isMine(d)
+        );
+        const birthdays = allPeople.filter(p => {
+            const dob = p.date_of_birth || '';
+            if (!dob || dob.length < 5) return false;
+            const md = dob.slice(5, 10);
+            return md === todayMD || md === tomMD;
+        });
+        const refills = refillsR || [];
+
+        const apptCount = activities.length;
+        const followCount = visibleDrafts.length;
+        const bdayCount = birthdays.length;
+        const refillCount = refills.length;
+
+        const oldestDraft = [...visibleDrafts].sort((a, b) => (a.due_date || '').localeCompare(b.due_date || ''))[0];
+        const draftPerson = (d) => {
+            if (!d) return null;
+            if (d.prospect_id) return personMap.get(String(d.prospect_id));
+            if (d.customer_id) return personMap.get(String(d.customer_id));
+            return null;
+        };
+        const oldestPerson = draftPerson(oldestDraft);
+        const suggestedName = oldestPerson?.full_name || (birthdays[0]?.full_name) || '—';
+        const suggestedAction = oldestPerson
+            ? `app.mhomeWa(${oldestPerson.id ?? 'null'}, '${_mhomeEsc(oldestPerson.phone || '')}')`
+            : (birthdays[0]
+                ? `app.mhomeWa(${birthdays[0].id ?? 'null'}, '${_mhomeEsc(birthdays[0].phone || '')}')`
+                : `app.navigateTo('calendar')`);
+
+        const scheduleRows = activities.slice(0, 4).map(a => {
+            const personId = a.prospect_id || a.customer_id;
+            const person = personId ? personMap.get(String(personId)) : null;
+            const time = (a.start_time || '00:00').slice(0, 5);
+            const title = a.activity_type || 'Activity';
+            const sub = person ? person.full_name : (a.notes || a.title || '—');
+            return `
+                <div class="mhome-sched-row" onclick="app.navigateTo('calendar')">
+                    <div class="mhome-sched-time">${_mhomeEsc(time)}</div>
+                    <div class="mhome-sched-text">
+                        <div class="mhome-sched-t1">${_mhomeEsc(title)}</div>
+                        <div class="mhome-sched-t2">${_mhomeEsc(sub)}</div>
+                    </div>
+                    <div class="mhome-sched-act"><i class="${_mhomeIcon(title)}"></i></div>
+                </div>`;
+        }).join('') || `<div class="mhome-sched-empty">No activities scheduled today.</div>`;
+
+        // Days since last contact (best-effort using activity_date if a draft links to a person)
+        const daysAgo = (dateLike) => {
+            if (!dateLike) return null;
+            const t = new Date(dateLike).getTime();
+            if (isNaN(t)) return null;
+            return Math.floor((Date.now() - t) / 86400000);
+        };
+        const _attBuild = () => {
+            const rows = [];
+            if (oldestPerson) {
+                const d = daysAgo(oldestDraft.due_date);
+                const sub = (d != null && d >= 0) ? `Last contact ${d} day${d === 1 ? '' : 's'} ago` : 'Awaiting follow-up';
+                const phone = _mhomeEsc(oldestPerson.phone || '');
+                rows.push(`
+                <div class="mhome-att-row followup">
+                    <div class="mhome-att-avatar">${_mhomeEsc(_mhomeInitials(oldestPerson.full_name))}</div>
+                    <div class="mhome-att-text">
+                        <div class="mhome-att-name">${_mhomeEsc(oldestPerson.full_name || '—')}</div>
+                        <div class="mhome-att-need">Needs follow-up</div>
+                        <div class="mhome-att-sub">${_mhomeEsc(sub)}</div>
+                    </div>
+                    <button class="mhome-att-btn wa" onclick="app.mhomeWa(${oldestPerson.id ?? 'null'}, '${phone}')">
+                        <i class="fab fa-whatsapp"></i> Send WhatsApp
+                    </button>
+                </div>`);
+            }
+            const bday = birthdays[0];
+            if (bday) {
+                const isToday = (bday.date_of_birth || '').slice(5,10) === todayMD;
+                const phone = _mhomeEsc(bday.phone || '');
+                rows.push(`
+                <div class="mhome-att-row birthday">
+                    <div class="mhome-att-avatar"><i class="fas fa-gift"></i></div>
+                    <div class="mhome-att-text">
+                        <div class="mhome-att-name">${_mhomeEsc(bday.full_name || '—')}</div>
+                        <div class="mhome-att-need">${isToday ? 'Birthday today' : 'Birthday tomorrow'}</div>
+                        <div class="mhome-att-sub">Send your wishes</div>
+                    </div>
+                    <button class="mhome-att-btn wish" onclick="app.mhomeWa(${bday.id ?? 'null'}, '${phone}')">
+                        <i class="fas fa-heart"></i> Send Wish
+                    </button>
+                </div>`);
+            }
+            if (rows.length === 0) return '';
+            return `
+            <div class="mhome-card">
+                <div class="mhome-card-head">
+                    <div class="mhome-card-title"><span class="ico purple"><i class="fas fa-circle-exclamation"></i></span> Needs Your Attention</div>
+                    <button class="mhome-card-link" onclick="app.openMobileDrawer()">View All ›</button>
+                </div>
+                ${rows.join('')}
+            </div>`;
+        };
+
+        // Inactive: customers with last_contact_date older than 60 days, OR no contact ever.
+        const inactiveCount = (() => {
+            const sixtyAgo = Date.now() - 60 * 86400000;
+            return (allCustomersR || []).filter(c => {
+                if (c.status === 'inactive') return true;
+                const lc = c.last_contact_date || c.updated_at || c.created_at;
+                if (!lc) return false;
+                const t = new Date(lc).getTime();
+                return !isNaN(t) && t < sixtyAgo;
+            }).length;
+        })();
+        const overdueFollowups = visibleDrafts.filter(d => (d.due_date || '') < todayStr).length;
+
+        // ── Compose body ─────────────────────────────────────────
+        const body = document.getElementById('mhome-body');
+        if (!body) return;
+        body.innerHTML = `
+        <div class="mhome-ai-card">
+            <div class="mhome-ai-top">
+                <span class="mhome-arc"></span>
+                <span class="mhome-orb o1"></span><span class="mhome-orb o2"></span><span class="mhome-orb o3"></span>
+                <span class="mhome-ring r1"></span><span class="mhome-ring r2"></span>
+                <span class="mhome-spk s1">✦</span><span class="mhome-spk s2">✧</span><span class="mhome-spk s3">✦</span>
+                <span class="mhome-spk s4">✦</span><span class="mhome-spk s5">✧</span><span class="mhome-spk s6">✦</span><span class="mhome-spk s7">✧</span>
+                <span class="mhome-dot d1"></span><span class="mhome-dot d2"></span><span class="mhome-dot d3"></span>
+                <span class="mhome-cross c1">＋</span><span class="mhome-cross c2">＋</span>
+                <div class="mhome-ai-head">
+                    <div class="mhome-ai-icon"><i class="fas fa-wand-magic-sparkles"></i></div>
+                    <div>
+                        <div class="mhome-ai-title">AI Assistant</div>
+                        <div class="mhome-ai-sub">Here's what's happening today.</div>
+                    </div>
+                </div>
+                <div class="mhome-ai-stats">
+                    <div class="mhome-ai-stat ais-red">
+                        <div class="mhome-ai-stat-ico"><i class="far fa-calendar"></i></div>
+                        <div class="mhome-ai-stat-num">${apptCount}</div>
+                        <div class="mhome-ai-stat-lbl">Appointments</div>
+                    </div>
+                    <div class="mhome-ai-stat ais-purple">
+                        <div class="mhome-ai-stat-ico"><i class="fas fa-check"></i></div>
+                        <div class="mhome-ai-stat-num">${followCount}</div>
+                        <div class="mhome-ai-stat-lbl">Follow-ups</div>
+                    </div>
+                    <div class="mhome-ai-stat ais-pink">
+                        <div class="mhome-ai-stat-ico"><i class="fas fa-cake-candles"></i></div>
+                        <div class="mhome-ai-stat-num">${bdayCount}</div>
+                        <div class="mhome-ai-stat-lbl">Birthday</div>
+                    </div>
+                    <div class="mhome-ai-stat ais-wood">
+                        <div class="mhome-ai-stat-ico"><i class="fas fa-prescription-bottle-medical"></i></div>
+                        <div class="mhome-ai-stat-num">${refillCount}</div>
+                        <div class="mhome-ai-stat-lbl">Refill Due</div>
+                    </div>
+                </div>
+            </div>
+            <div class="mhome-ai-bot">
+                <div class="mhome-ai-bot-text">
+                    <div class="mhome-ai-bot-l1">Suggested next action</div>
+                    <div class="mhome-ai-bot-l2">${_mhomeEsc(suggestedName === '—' ? 'All caught up' : 'Follow up with ' + suggestedName)}</div>
+                </div>
+                <button class="mhome-ai-bot-btn" onclick="${suggestedAction}">
+                    <i class="fab fa-whatsapp"></i> Send Message
+                </button>
+            </div>
+        </div>
+
+        <div class="mhome-card">
+            <div class="mhome-card-head">
+                <div class="mhome-card-title"><span class="ico"><i class="far fa-calendar"></i></span> Today's Schedule</div>
+                <button class="mhome-card-link" onclick="app.navigateTo('calendar')">View Calendar ›</button>
+            </div>
+            <div class="mhome-sched">${scheduleRows}</div>
+        </div>
+
+        ${_attBuild()}
+
+        <div class="mhome-tiles">
+            <button class="mhome-tile red" onclick="app.navigateTo('calendar')">
+                <div class="mhome-tile-ico"><i class="fas fa-user-clock"></i></div>
+                <div class="mhome-tile-lbl">Overdue Follow-ups</div>
+                <div class="mhome-tile-num">${overdueFollowups}</div>
+                <div class="mhome-tile-arrow"><i class="fas fa-chevron-right"></i></div>
+            </button>
+            <button class="mhome-tile wood" onclick="app.navigateTo('prospects')">
+                <div class="mhome-tile-ico"><i class="fas fa-prescription-bottle-medical"></i></div>
+                <div class="mhome-tile-lbl">Refills Due</div>
+                <div class="mhome-tile-num">${refillCount}</div>
+                <div class="mhome-tile-arrow"><i class="fas fa-chevron-right"></i></div>
+            </button>
+            <button class="mhome-tile purple" onclick="app.navigateTo('prospects')">
+                <div class="mhome-tile-ico"><i class="fas fa-chart-column"></i></div>
+                <div class="mhome-tile-lbl">Inactive Clients</div>
+                <div class="mhome-tile-num">${inactiveCount}</div>
+                <div class="mhome-tile-arrow"><i class="fas fa-chevron-right"></i></div>
+            </button>
+        </div>`;
+    };
+
+    // Quick handler — open WhatsApp for the given phone, or fall back to
+    // navigating to the customer/prospect detail when no phone is on file.
+    const mhomeWa = (id, phone) => {
+        const num = _mhomeWaPhone(phone);
+        if (num) {
+            window.open(`https://wa.me/${num}`, '_blank', 'noopener');
+        } else if (id) {
+            navigateTo('prospects').catch(() => {});
+        }
+    };
 
     // ── Table data-label injection ───────────────────────────
     // Run after every table render so mobile cards show column labels
@@ -7565,9 +7881,11 @@ function _wireLoginBtn() {
 
         // Await pre-render work and kick off first render in parallel — both
         // complete before we hand control back to the user.
+        // Mobile users land on the AI Home dashboard; desktop on calendar.
+        const _initialView = _initLevel >= 13 ? 'fude' : (isMobile() ? 'home' : 'calendar');
         await Promise.all([
             _preRenderWork,
-            navigateTo(_initLevel >= 13 ? 'fude' : 'calendar'),
+            navigateTo(_initialView),
         ]);
 
         // Phase 14: Offline & mobile features (sync)
@@ -9397,6 +9715,11 @@ function _wireLoginBtn() {
     const navigateTo = async (viewId) => {
         UI.hideModal();
         _currentDetailView = null; // leaving any detail page — pull-to-refresh goes back to list
+        // Strip mobile-home page background when leaving the home view so the
+        // beige fill doesn't bleed into other screens.
+        if (viewId !== 'home') {
+            document.getElementById('content-viewport')?.classList.remove('mhome-active');
+        }
         // Stamp the navigation time so initSync can suppress the SWR
         // revalidation refresh that would otherwise blow away the DOM 1–3s
         // after the page paints (visible flash / lost scroll position).
@@ -9409,6 +9732,7 @@ function _wireLoginBtn() {
         // hangs or throws, the browser tab title still reflects the user's
         // last click — previously the title would lag on the prior view.
         const VIEW_TITLES = {
+            home: 'Home',
             calendar: 'Calendar', month: 'Calendar', prospects: 'Prospects & Customers',
             pipeline: 'Pipeline', agents: 'Consultants', promotions: 'Monthly Promotion',
             marketing_automation: 'Marketing Automation', reports: 'Reporting KPI',
@@ -9427,7 +9751,10 @@ function _wireLoginBtn() {
 
         const viewport = document.getElementById('content-viewport');
 
-        if (viewId === 'calendar' || viewId === 'month') {
+        if (viewId === 'home') {
+            _currentView = 'home';
+            await showMobileHomeView(viewport);
+        } else if (viewId === 'calendar' || viewId === 'month') {
             _currentView = 'month';
             await showCalendarView(viewport);
         } else if (viewId === 'prospects') {
@@ -38107,12 +38434,12 @@ const simulateCampaignSending = async (campaignId) => {
             if (shellEl) shellEl.style.display = 'block';
             updateUserDisplay();
             updateNavVisibility();
-            // L13 (Customer) / L14 (Referrer) land on 福德; everyone else on calendar
+            // L13 (Customer) / L14 (Referrer) land on 福德; everyone else on calendar (desktop) or home (mobile)
             const _laLevel = (() => {
                 const m = (user.role || '').match(/Level\s+(\d+)/i);
                 return m ? parseInt(m[1]) : 0;
             })();
-            await navigateTo(_laLevel >= 13 ? 'fude' : 'calendar');
+            await navigateTo(_laLevel >= 13 ? 'fude' : (isMobile() ? 'home' : 'calendar'));
             UI.hideModal();
             UI.toast.success(`Welcome back, ${user.full_name} !`);
         } else {
@@ -47867,6 +48194,8 @@ JB 星期二到
         updateBottomNavActive,
         applyMobileTableLabels,
         showMobileMenu,
+        showMobileHomeView,
+        mhomeWa,
         initSwipeActions,
         initPullToRefresh,
 
