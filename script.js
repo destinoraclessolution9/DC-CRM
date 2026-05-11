@@ -24165,6 +24165,31 @@ function _wireLoginBtn() {
                             <div class="meet-lbl">Core Problem</div>
                             <div class="meet-txt">${a.core_problem || a.summary}</div>
                         </div>` : ''}
+                        ${a.note_key_points ? `
+                        <div class="meet-section">
+                            <div class="meet-lbl">Key Points</div>
+                            <div class="meet-txt">${a.note_key_points}</div>
+                        </div>` : ''}
+                        ${a.note_needs ? `
+                        <div class="meet-section">
+                            <div class="meet-lbl">Customer Needs</div>
+                            <div class="meet-txt">${a.note_needs}</div>
+                        </div>` : ''}
+                        ${a.note_pain_points ? `
+                        <div class="meet-section">
+                            <div class="meet-lbl">Pain Points</div>
+                            <div class="meet-txt">${a.note_pain_points}</div>
+                        </div>` : ''}
+                        ${a.note_outcome ? `
+                        <div class="meet-section">
+                            <div class="meet-lbl">Outcome</div>
+                            <div class="meet-txt">${a.note_outcome}</div>
+                        </div>` : ''}
+                        ${a.note_next_steps ? `
+                        <div class="meet-section">
+                            <div class="meet-lbl">Next Steps</div>
+                            <div class="meet-txt" style="color:var(--primary);font-weight:500;">${a.note_next_steps}</div>
+                        </div>` : ''}
                         ${a.opportunity_potential ? `
                         <div class="meet-section">
                             <div class="meet-lbl">Opportunity Potential</div>
@@ -24174,20 +24199,6 @@ function _wireLoginBtn() {
                         <div class="meet-section">
                             <div class="meet-lbl">Next Action</div>
                             <div class="meet-txt" style="color:var(--primary);font-weight:500;">${a.next_action}</div>
-                        </div>` : ''}
-                        ${(a.note_key_points || a.note_outcome || a.note_needs || a.note_pain_points || a.note_next_steps) ? `
-                        <div style="margin:4px 0 6px;">
-                            <button class="btn btn-sm secondary" style="font-size:11px;width:100%;text-align:left;display:flex;justify-content:space-between;align-items:center;" onclick="event.stopPropagation();const n=document.getElementById('inl-notes-${a.id}');const open=n.style.display!=='none';n.style.display=open?'none':'block';this.querySelector('.fa-chevron-down').style.transform=open?'':'rotate(180deg)';">
-                                <span><i class="fas fa-sticky-note" style="color:var(--primary);margin-right:4px;"></i> Meeting Notes</span>
-                                <i class="fas fa-chevron-down" style="font-size:10px;transition:transform .2s;"></i>
-                            </button>
-                            <div id="inl-notes-${a.id}" style="display:none;margin-top:6px;padding:10px 12px;background:var(--surface-alt,#fafaf8);border-radius:6px;border-left:3px solid var(--primary,#800020);">
-                                ${a.note_key_points ? `<div style="margin-bottom:8px;"><div style="font-size:10px;color:var(--gray-400);font-weight:700;text-transform:uppercase;letter-spacing:.6px;margin-bottom:2px;">Key Points</div><div style="font-size:13px;">${a.note_key_points}</div></div>` : ''}
-                                ${a.note_outcome ? `<div style="margin-bottom:8px;"><div style="font-size:10px;color:var(--gray-400);font-weight:700;text-transform:uppercase;letter-spacing:.6px;margin-bottom:2px;">Outcome</div><div style="font-size:13px;">${a.note_outcome}</div></div>` : ''}
-                                ${a.note_needs ? `<div style="margin-bottom:8px;"><div style="font-size:10px;color:var(--gray-400);font-weight:700;text-transform:uppercase;letter-spacing:.6px;margin-bottom:2px;">Needs Identified</div><div style="font-size:13px;">${a.note_needs}</div></div>` : ''}
-                                ${a.note_pain_points ? `<div style="margin-bottom:8px;"><div style="font-size:10px;color:var(--gray-400);font-weight:700;text-transform:uppercase;letter-spacing:.6px;margin-bottom:2px;">Pain Points</div><div style="font-size:13px;">${a.note_pain_points}</div></div>` : ''}
-                                ${a.note_next_steps ? `<div><div style="font-size:10px;color:var(--gray-400);font-weight:700;text-transform:uppercase;letter-spacing:.6px;margin-bottom:2px;">Next Steps</div><div style="font-size:13px;color:var(--primary);font-weight:500;">${a.note_next_steps}</div></div>` : ''}
-                            </div>
                         </div>` : ''}
                         ${a.score_value ? `<div style="margin-bottom:6px;"><span class="badge success" style="font-size:11px;">+${a.score_value} pts</span></div>` : ''}
                         <div class="meet-actions">
