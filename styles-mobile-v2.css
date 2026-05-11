@@ -1253,8 +1253,8 @@
     /* Calendar grid */
     .mcal-grid-wrap { background:#fff; border-radius:18px; padding:10px 6px 6px; margin-bottom:12px; box-shadow:var(--mc-shadow); position:relative; overflow:hidden; }
     .mcal-dow { display:grid; grid-template-columns:repeat(7,1fr); font-size:9.5px; font-weight:700; color:var(--mc-ink-mute); letter-spacing:0.5px; text-align:center; padding-bottom:6px; border-bottom:1px dashed var(--mc-line); margin-bottom:4px; }
-    .mcal-grid { display:grid; grid-template-columns:repeat(7,1fr); grid-auto-rows:88px; gap:3px; }
-    .mcal-cell { position:relative; padding:5px 3px 3px; font-size:11px; border-radius:7px; overflow:hidden; cursor:pointer; }
+    .mcal-grid { display:grid; grid-template-columns:repeat(7,1fr); grid-auto-rows:auto; gap:3px; }
+    .mcal-cell { position:relative; padding:5px 3px 3px; font-size:11px; border-radius:7px; overflow:visible; cursor:pointer; min-height:72px; }
     .mcal-cell:active { background:rgba(0,0,0,0.03); }
     .mcal-cell .num { font-size:12px; font-weight:600; color:var(--mc-ink); display:inline-block; width:20px; height:20px; line-height:20px; text-align:center; }
     .mcal-cell.muted .num { color:var(--mc-ink-mute); }
