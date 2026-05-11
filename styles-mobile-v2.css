@@ -1260,7 +1260,7 @@
     .mcal-cell.muted .num { color:var(--mc-ink-mute); }
     .mcal-cell.today .num { background:var(--mc-red); color:#fff; border-radius:50%; width:24px; height:24px; line-height:24px; font-weight:800; font-size:13px; box-shadow:0 4px 10px rgba(197,37,43,0.4); position:relative; z-index:2; }
     .mcal-cell .events { display:flex; flex-direction:column; gap:3px; margin-top:3px; }
-    .mcal-evt { font-size:9.5px; font-weight:600; padding:3px 4px; border-radius:5px; line-height:1.2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .mcal-evt { font-size:9.5px; font-weight:600; padding:3px 4px; border-radius:5px; line-height:1.3; word-break:break-word; overflow:hidden; }
     .mcal-evt .t { font-weight:800; display:block; font-size:9px; letter-spacing:-0.1px; margin-bottom:1px; }
     .mcal-evt.red    { background:#FFE0E0; color:var(--mc-red-deep); border-left:2px solid var(--mc-red); }
     .mcal-evt.purple { background:#EDE2FB; color:#5C3FB8; border-left:2px solid var(--mc-purple); }
