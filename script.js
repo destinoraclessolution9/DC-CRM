@@ -4379,6 +4379,8 @@ In a production system, this would show the actual file contents.
     // brand palette. Uses the same activity dataset as the desktop calendar.
     let _mcalYear = null;
     let _mcalMonth = null;
+    let _mcalByDate = new Map();
+    let _mcalPersonMap = new Map();
     const _mcalColorForType = (type) => {
         const t = String(type || '').toLowerCase();
         if (t.includes('birthday') || t.includes('all day') || t.includes('all-day')) return 'allday';
@@ -4494,6 +4496,7 @@ In a production system, this would show the actual file contents.
         const activities = (actResult.data || []).filter(a => a.activity_type !== 'EVENT');
         const allPeople = [...(allProspectsR || []), ...(allCustomersR || [])];
         const personMap = new Map(allPeople.map(p => [String(p.id), p]));
+        _mcalPersonMap = personMap;
 
         // Group activities by date (YYYY-MM-DD)
         const byDate = new Map();
@@ -4517,6 +4520,7 @@ In a production system, this would show the actual file contents.
             if (!byDate.has(k)) byDate.set(k, []);
             byDate.get(k).push({ activity_type: 'All Day Birthday', _isBirthday: true, _person: p });
         }
+        _mcalByDate = byDate;
 
         // ── Render grid cells ───────────────────────────────────
         const todayY = todayD.getFullYear();
@@ -4638,13 +4642,42 @@ In a production system, this would show the actual file contents.
         await showMobileCalendarView(document.getElementById('content-viewport'));
     };
     const mcalDayClick = (dateStr) => {
-        // Tapping a day opens the activity modal pre-filled for that date.
-        // Detail-of-day view (full read-only list of the day's items) can
-        // come later — for now reuse the existing add-activity entry point.
-        if (typeof openActivityModal === 'function') {
-            try { openActivityModal(dateStr); return; } catch (_) {}
-        }
-        UI.toast.success(dateStr);
+        const dayActs = (_mcalByDate.get(dateStr) || []).filter(a => !a._isBirthday);
+        const sorted = [...dayActs].sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
+
+        const d = new Date(dateStr + 'T00:00:00');
+        const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+        const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        const dateLabel = `${days[d.getDay()]}, ${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
+
+        const rows = sorted.map(a => {
+            const time = (a.start_time || '').slice(0, 5);
+            const type = a.activity_type || '';
+            const pid = a.prospect_id || a.customer_id;
+            const person = pid ? _mcalPersonMap.get(String(pid)) : null;
+            const name = person?.full_name || a.activity_title || '—';
+            const venue = a.venue_name || a.venue || a.location_address || '';
+            const color = _mcalColorForType(type);
+            return `
+                <div style="display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--gray-100);cursor:pointer;" onclick="UI.hideModal();app.viewActivityDetails(${a.id})">
+                    <div style="min-width:42px;font-size:13px;font-weight:600;color:var(--gray-700);">${_mhomeEsc(time)}</div>
+                    <span class="mcal-evt ${color}" style="white-space:nowrap;font-size:11px;padding:2px 7px;border-radius:4px;flex-shrink:0;">${_mhomeEsc(type)}</span>
+                    <div style="flex:1;min-width:0;">
+                        <div style="font-size:14px;font-weight:500;color:var(--gray-800);">${_mhomeEsc(name)}</div>
+                        ${venue ? `<div style="font-size:12px;color:var(--gray-500);margin-top:2px;"><i class="fas fa-map-marker-alt" style="font-size:10px;margin-right:3px;"></i>${_mhomeEsc(venue)}</div>` : ''}
+                    </div>
+                    <i class="fas fa-chevron-right" style="color:var(--gray-300);font-size:12px;flex-shrink:0;"></i>
+                </div>`;
+        }).join('');
+
+        UI.showModal(dateLabel, `
+            <div style="margin:-8px -4px;">
+                ${sorted.length > 0 ? rows : '<div style="text-align:center;padding:28px;color:var(--gray-400);font-size:13px;">No activities on this day</div>'}
+            </div>
+        `, [
+            { label: '+ Add Meet Up', type: 'primary', action: `UI.hideModal();if(typeof openActivityModal==='function')openActivityModal('${dateStr}')` },
+            { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
+        ]);
     };
     const mcalTab = (tab, btn) => {
         document.querySelectorAll('.mcal-tab').forEach(t => t.classList.remove('active'));
