@@ -10529,6 +10529,54 @@ input:checked+.slider:before {
 .fude-rewards-detail { display: none; margin-top: 8px; overflow-x: auto; }
 .fude-rewards-detail.open { display: block; }
 
+/* ---- Appbar: logo + avatar ---- */
+.fude-appbar-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.fude-appbar-logo {
+    width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0;
+    background: linear-gradient(135deg, #be185d, #e91e8c);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 0.95rem;
+}
+.fude-appbar-avatar {
+    width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
+    background: linear-gradient(135deg, #f9a8d4, #e91e8c);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 0.75rem; font-weight: 800;
+}
+
+/* ---- Points notification banner ---- */
+.fude-points-banner {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    background: linear-gradient(135deg, #fce7f3, #fdf2f8);
+    border: 1px solid #fbcfe8;
+    border-radius: 10px; padding: 10px 14px; margin-bottom: 14px;
+}
+.fude-points-banner-text { font-size: 0.82rem; color: #9d174d; line-height: 1.45; flex: 1; }
+.fude-points-banner-text strong { color: #be185d; }
+.fude-points-banner-cta {
+    flex-shrink: 0; background: var(--accent, #e91e8c); color: #fff;
+    border: none; border-radius: 20px; padding: 6px 14px;
+    font-size: 0.78rem; font-weight: 700; cursor: pointer; white-space: nowrap;
+    transition: opacity 0.15s;
+}
+.fude-points-banner-cta:hover { opacity: 0.88; }
+
+/* ---- Story card: tags on top, author/date row ---- */
+.fude-story-card-tags {
+    display: flex; gap: 4px; flex-wrap: wrap;
+    padding: 8px 12px 0;
+}
+.fude-story-card-meta {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 0.72rem; color: #9ca3af;
+}
+.fude-story-card-avatar {
+    width: 20px; height: 20px; border-radius: 50%; flex-shrink: 0;
+    background: linear-gradient(135deg, #f9a8d4, #e91e8c);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 0.6rem; font-weight: 800;
+}
+
 @media (max-width: 620px) {
     .fude-story-grid { grid-template-columns: repeat(2, 1fr); }
     .fude-tips-row { grid-template-columns: 1fr; }

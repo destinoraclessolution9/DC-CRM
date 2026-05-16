@@ -43283,6 +43283,7 @@ const initImportDemoData = async () => {
                 <div class="fude-section">
                     <div class="fude-sec-bar" style="justify-content:space-between;">
                         <div style="display:flex;align-items:center;gap:12px;"><div class="fude-sec-bar-icon news">📰</div><h2>Highlights &amp; News</h2></div>
+                        <a class="fude-sec-link">See all news →</a>
                     </div>
                     <div class="fude-carousel-wrap">
                         ${arrows}
@@ -43320,11 +43321,15 @@ const initImportDemoData = async () => {
                 return `<div class="fude-story-card">
                     ${imgEl}${ph}
                     <div class="fude-story-card-body">
+                        ${tags ? `<div class="fude-story-card-tags">${tags}</div>` : ''}
                         <h3>${s.title}</h3>
                         ${s.content ? `<p>${s.content}</p>` : '<p style="flex:1"></p>'}
                         <div class="fude-story-card-footer">
-                            <div class="fude-story-tags">${tags}</div>
-                            <button class="fude-story-readmore">Read Story →</button>
+                            <div class="fude-story-card-meta">
+                                <div class="fude-story-card-avatar">${(s.title || 'D')[0].toUpperCase()}</div>
+                                <span>${fmtDate(s.created_at)}</span>
+                            </div>
+                            <button class="fude-story-readmore">Read More →</button>
                         </div>
                     </div>
                 </div>`;
@@ -43380,7 +43385,7 @@ const initImportDemoData = async () => {
                 <div class="fude-tips-section">
                     <div class="fude-tips-header">
                         <span class="fude-tips-header-icon">💡</span>
-                        <h2>小贴士 Tips</h2>
+                        <h2>今日 Tips</h2>
                     </div>
                     <div class="fude-tips-row">${tipCols.join('')}</div>
                 </div>`;
@@ -43430,18 +43435,27 @@ const initImportDemoData = async () => {
         container.innerHTML = `
             <div class="fude-tab">
                 <div class="fude-appbar">
-                    <span class="fude-appbar-title">Manage Rewards &amp; 客户Points</span>
+                    <div class="fude-appbar-left">
+                        <div class="fude-appbar-logo"><i class="fas fa-yin-yang"></i></div>
+                        <span class="fude-appbar-title">Manage Rewards &amp; 客户Points</span>
+                    </div>
                     <div class="fude-appbar-right">
                         ${isAdmin
                             ? `<button class="fude-appbar-btn" onclick="app.openRewardModal()"><i class="fas fa-plus"></i> Record Points</button>`
-                            : ''}
+                            : isL1314 ? `<button class="fude-appbar-btn" onclick="app.todo('Redeem Points')">Redeem Points</button>` : ''}
                         <button class="fude-appbar-bell" title="Notifications">
                             🔔<span class="fude-appbar-bell-dot"></span>
                         </button>
+                        <div class="fude-appbar-avatar">${(currentUser.full_name || 'U')[0].toUpperCase()}</div>
                     </div>
                 </div>
                 <div class="fude-inner">
                     ${summaryBanner}
+                    ${isL1314 && totalPoints > 0 ? `
+                    <div class="fude-points-banner">
+                        <span class="fude-points-banner-text">🎉 当前累积 <strong>${totalPoints}</strong> 福气积分，可兑换精选奖励！</span>
+                        <button class="fude-points-banner-cta" onclick="app.todo('Redeem Points')">立即兑换 →</button>
+                    </div>` : ''}
                     ${leaderboardSection}
                     ${adminHighlightsSection}
                     ${adminRewardsSection}
