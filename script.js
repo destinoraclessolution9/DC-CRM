@@ -4695,7 +4695,7 @@ In a production system, this would show the actual file contents.
                 ${sorted.length > 0 ? rows : '<div style="text-align:center;padding:28px;color:var(--gray-400);font-size:13px;">No activities on this day</div>'}
             </div>
         `, [
-            { label: '+ Add Meet Up', type: 'primary', action: `UI.hideModal();if(typeof openActivityModal==='function')openActivityModal('${dateStr}')` },
+            { label: '+ Add Meet Up', type: 'primary', action: `UI.hideModal();app.openActivityModal('${dateStr}')` },
             { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
         ]);
     };
