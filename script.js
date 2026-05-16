@@ -4101,7 +4101,20 @@ In a production system, this would show the actual file contents.
         const avatarUrl = _currentUser?.avatar_url
             || `https://ui-avatars.com/api/?name=${encodeURIComponent(_currentUser?.full_name || 'U')}&background=8B0000&color=fff`;
 
-        // Initial paint with placeholder counts so the layout shows instantly.
+        // Instant snapshot restore — paint last session's body immediately
+        const _mhomeSnapKey = `mhome-snap-${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
+        let _mhomeCached;
+        try { _mhomeCached = sessionStorage.getItem(_mhomeSnapKey); } catch(_) {}
+        const _mhomeInitBody = _mhomeCached || `
+                <div class="mhome-ai-card"><div class="mhome-ai-top" style="min-height:160px;">
+                    <span class="mhome-arc"></span>
+                    <span class="mhome-orb o1"></span><span class="mhome-orb o2"></span><span class="mhome-orb o3"></span>
+                    <div class="mhome-ai-head">
+                        <div class="mhome-ai-icon"><i class="fas fa-wand-magic-sparkles"></i></div>
+                        <div><div class="mhome-ai-title">AI Assistant</div><div class="mhome-ai-sub">Loading today's snapshot…</div></div>
+                    </div>
+                </div></div>`;
+
         viewport.innerHTML = `
         <div class="mhome">
             <div class="mhome-greet">
@@ -4116,16 +4129,7 @@ In a production system, this would show the actual file contents.
                     <div class="mhome-avatar" onclick="app.openMobileDrawer()" role="button" aria-label="Profile" style="background-image:url('${_mhomeEsc(avatarUrl)}')"></div>
                 </div>
             </div>
-            <div id="mhome-body">
-                <div class="mhome-ai-card"><div class="mhome-ai-top" style="min-height:160px;">
-                    <span class="mhome-arc"></span>
-                    <span class="mhome-orb o1"></span><span class="mhome-orb o2"></span><span class="mhome-orb o3"></span>
-                    <div class="mhome-ai-head">
-                        <div class="mhome-ai-icon"><i class="fas fa-wand-magic-sparkles"></i></div>
-                        <div><div class="mhome-ai-title">AI Assistant</div><div class="mhome-ai-sub">Loading today's snapshot…</div></div>
-                    </div>
-                </div></div>
-            </div>
+            <div id="mhome-body">${_mhomeInitBody}</div>
         </div>`;
 
         // ── Data ─────────────────────────────────────────────────
@@ -4280,6 +4284,8 @@ In a production system, this would show the actual file contents.
         // ── Compose body ─────────────────────────────────────────
         const body = document.getElementById('mhome-body');
         if (!body) return;
+        // Track so we can save snapshot after render
+        const _mhomeSaveSnap = (html) => { try { sessionStorage.setItem(_mhomeSnapKey, html); } catch(_) {} };
         body.innerHTML = `
         <div class="mhome-ai-card">
             <div class="mhome-ai-top">
@@ -4361,6 +4367,7 @@ In a production system, this would show the actual file contents.
                 <div class="mhome-tile-arrow"><i class="fas fa-chevron-right"></i></div>
             </button>
         </div>`;
+        _mhomeSaveSnap(body.innerHTML);
     };
 
     // Quick handler — open WhatsApp for the given phone, or fall back to
@@ -4423,7 +4430,16 @@ In a production system, this would show the actual file contents.
         const avatarUrl = _currentUser?.avatar_url
             || `https://ui-avatars.com/api/?name=${encodeURIComponent(_currentUser?.full_name || 'U')}&background=8B0000&color=fff`;
 
-        // Initial shell + skeleton grid
+        // Instant snapshot restore — paint last session's grid immediately
+        const _mcalSnapKey = `mcal-snap-${_mcalYear}-${_mcalMonth}`;
+        let _mcalCachedGrid, _mcalCachedComing;
+        try {
+            _mcalCachedGrid = sessionStorage.getItem(_mcalSnapKey);
+            _mcalCachedComing = sessionStorage.getItem(_mcalSnapKey + '-coming');
+        } catch(_) {}
+        const _mcalInitGrid = _mcalCachedGrid
+            || Array.from({length: 42}).map(() => '<div class="mcal-cell muted"></div>').join('');
+
         viewport.innerHTML = `
         <div class="mcal">
             <div class="mcal-top">
@@ -4455,10 +4471,10 @@ In a production system, this would show the actual file contents.
             <div class="mcal-grid-wrap">
                 <div class="mcal-dow"><span>MON</span><span>TUE</span><span>WED</span><span>THU</span><span>FRI</span><span>SAT</span><span>SUN</span></div>
                 <div class="mcal-grid" id="mcal-grid">
-                    ${Array.from({length: 42}).map(() => '<div class="mcal-cell muted"></div>').join('')}
+                    ${_mcalInitGrid}
                 </div>
             </div>
-            <div id="mcal-coming-host"></div>
+            <div id="mcal-coming-host">${_mcalCachedComing || ''}</div>
         </div>`;
 
         // ── Fetch month activities + supporting data ─────────────
@@ -4572,7 +4588,10 @@ In a production system, this would show the actual file contents.
         }
 
         const grid = document.getElementById('mcal-grid');
-        if (grid) grid.innerHTML = cells.join('');
+        if (grid) {
+            grid.innerHTML = cells.join('');
+            try { sessionStorage.setItem(_mcalSnapKey, cells.join('')); } catch(_) {}
+        }
 
         // ── Coming-up strip ─────────────────────────────────────
         const todayStr = `${todayY}-${String(todayM+1).padStart(2,'0')}-${String(todayDay).padStart(2,'0')}`;
@@ -4592,7 +4611,7 @@ In a production system, this would show the actual file contents.
         const comingHost = document.getElementById('mcal-coming-host');
         if (comingHost) {
             comingHost.innerHTML = `
-            <div class="mcal-coming">
+            <div class="mcal-coming" data-snap="1">
                 <div class="mcal-coming-head">
                     <div class="mcal-coming-title"><span class="ico"><i class="fas fa-clock"></i></span> Here's what's coming up</div>
                     <button class="mcal-coming-link" onclick="app.navigateTo('home')">View All ›</button>
@@ -4621,6 +4640,7 @@ In a production system, this would show the actual file contents.
                     </button>
                 </div>
             </div>`;
+            try { sessionStorage.setItem(_mcalSnapKey + '-coming', comingHost.innerHTML); } catch(_) {}
         }
     };
 
