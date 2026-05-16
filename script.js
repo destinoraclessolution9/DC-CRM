@@ -21288,6 +21288,8 @@ function _wireLoginBtn() {
     // ── Pagination state for prospects table ──
     let _prospectPage = 0;
     const _prospectPageSize = 50;
+    let _prospectViewMode = 'table';
+    const _selectedProspects = new Set();
 
     const sortProspects = async (field) => {
         if (_sortField === field) {
@@ -21316,7 +21318,7 @@ function _wireLoginBtn() {
                         </div>
                         <div class="header-actions">
                             <button class="btn secondary" onclick="app.openImportWizard()">
-                                <i class="fas fa-file-import"></i> Bulk Import
+                                <i class="fas fa-file-import"></i> Import
                             </button>
                             <button class="btn primary" onclick="app.openAddProspectModal()">
                                 <i class="fas fa-plus"></i> Add Prospect
@@ -21324,13 +21326,30 @@ function _wireLoginBtn() {
                         </div>
                     </div>
 
+                    <!-- Stats row -->
+                    <div class="prospect-stats-row" id="prospect-stats-row"></div>
+
                 <div class="filter-bar">
-                    <div style="display:flex;gap:8px;align-items:center;">
-                        <div class="search-group" style="flex:1;">
+                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                        <div class="search-group" style="flex:1;min-width:180px;">
                             <i class="fas fa-search"></i>
                             <input type="text" id="prospect-search" placeholder="Search by name, phone, email, or ID..." oninput="app.debounceCall('prospect-search', app.filterProspects, 220)">
                         </div>
-                        <button class="btn secondary btn-sm" onclick="(function(btn){var p=document.getElementById('prospect-adv-filters');var open=p.style.display!=='none';p.style.display=open?'none':'block';btn.innerHTML=open?'<i class=\\'fas fa-sliders-h\\'></i> Filters':'<i class=\\'fas fa-sliders-h\\'></i> Filters <i class=\\'fas fa-chevron-up\\'></i>';})(this)" style="white-space:nowrap;"><i class="fas fa-sliders-h"></i> Filters</button>
+                        <button id="prospect-filter-btn" class="btn secondary btn-sm" onclick="app.toggleProspectFilters(this)" style="white-space:nowrap;position:relative;">
+                            <i class="fas fa-sliders-h"></i> Filters
+                        </button>
+                        <div class="prospect-view-toggle">
+                            <button id="prospect-view-table" class="active" onclick="app.toggleProspectView('table')" title="Table view"><i class="fas fa-table"></i> Table</button>
+                            <button id="prospect-view-card" onclick="app.toggleProspectView('card')" title="Card view"><i class="fas fa-th-large"></i> Card</button>
+                        </div>
+                        <select id="prospect-sort-select" class="form-control" style="width:auto;font-size:13px;padding:6px 10px;" onchange="app.sortProspectsBySelect(this.value)">
+                            <option value="score_desc">Sort: Score (High → Low)</option>
+                            <option value="score_asc">Sort: Score (Low → High)</option>
+                            <option value="name_asc">Sort: Name (A → Z)</option>
+                            <option value="name_desc">Sort: Name (Z → A)</option>
+                            <option value="activity_desc">Sort: Recent Activity</option>
+                            <option value="protection_asc">Sort: Protection (Urgent first)</option>
+                        </select>
                     </div>
                     <div id="prospect-adv-filters" style="display:none;margin-top:10px;">
                         <div class="filter-group">
@@ -21373,26 +21392,41 @@ function _wireLoginBtn() {
                     </div>
                 </div>
 
-                <div class="prospects-table-container">
+                <!-- Bulk action bar -->
+                <div class="prospect-bulk-bar" id="prospect-bulk-bar" style="display:none;">
+                    <span class="bulk-count" id="prospect-bulk-count">0</span>&nbsp;selected
+                    <button class="btn-bulk" onclick="app.bulkReassignProspects()"><i class="fas fa-user-tag"></i> Reassign</button>
+                    <button class="btn-bulk danger" id="prospect-bulk-delete-btn" onclick="app.bulkDeleteProspects()"><i class="fas fa-trash"></i> Delete</button>
+                    <button class="btn-bulk ml-auto" onclick="app.clearProspectSelection()"><i class="fas fa-times"></i> Clear</button>
+                </div>
+
+                <div class="prospects-table-container" id="prospects-table-view">
                     <table class="prospects-table" id="prospects-table">
                         <thead>
                             <tr>
-                                <th scope="col" onclick="app.sortProspects('name')" style="cursor: pointer;">Name ${_sortField === 'name' ? (_sortDirection === 'asc' ? '↑' : '↓') : ''}</th>
-                                <th scope="col">Agent</th>
-                                <th scope="col" onclick="app.sortProspects('score')" style="cursor: pointer;">Score ${_sortField === 'score' ? (_sortDirection === 'asc' ? '↑' : '↓') : ''}</th>
-                                <th scope="col">Ming Gua</th>
-                                <th scope="col">Occupation/Company</th>
-                                <th scope="col" onclick="app.sortProspects('activity')" style="cursor: pointer;">Last Activity ${_sortField === 'activity' ? (_sortDirection === 'asc' ? '↑' : '↓') : ''}</th>
-                                <th scope="col" onclick="app.sortProspects('protection')" style="cursor: pointer;">Protection ${_sortField === 'protection' ? (_sortDirection === 'asc' ? '↑' : '↓') : ''}</th>
-                                <th scope="col">Actions</th>
+                                <th scope="col" class="prospect-select-cell"><input type="checkbox" id="prospect-select-all" onclick="app.toggleProspectSelectAll()" title="Select all"></th>
+                                <th scope="col" data-sort-field="name" onclick="app.sortProspects('name')" style="cursor:pointer;">PROSPECT <i class="fas fa-sort sort-icon"></i></th>
+                                <th scope="col">AGENT</th>
+                                <th scope="col" data-sort-field="score" onclick="app.sortProspects('score')" style="cursor:pointer;">SCORE <i class="fas fa-sort sort-icon active"></i></th>
+                                <th scope="col">MING GUA</th>
+                                <th scope="col">OCCUPATION/COMPANY</th>
+                                <th scope="col" data-sort-field="activity" onclick="app.sortProspects('activity')" style="cursor:pointer;">LAST ACTIVITY <i class="fas fa-sort sort-icon"></i></th>
+                                <th scope="col" data-sort-field="protection" onclick="app.sortProspects('protection')" style="cursor:pointer;">PROTECTION <i class="fas fa-sort sort-icon"></i></th>
+                                <th scope="col">ACTIONS</th>
                             </tr>
-
                         </thead>
                         <tbody id="prospects-table-body">
-                            <!-- Populated by await renderProspectsTable() -->
+                            <!-- Populated by renderProspectsTable() -->
                         </tbody>
                     </table>
                 </div>
+
+                <!-- Card view container -->
+                <div id="prospects-card-view" style="display:none;">
+                    <div class="prospect-cards-grid" id="prospect-cards-container"></div>
+                    <div id="prospects-card-pagination"></div>
+                </div>
+
                 </div>
                 <div id="customers-tab-content" style="display: none;">
                     <!-- Customer view content will be injected here -->
@@ -22284,18 +22318,28 @@ function _wireLoginBtn() {
         let html = '';
         for (const p of pageProspects) {
             const grade = getScoreGrade(p.score);
-            // Show date immediately; type fills in after background fetch.
-            const lastActivityText = p.last_activity_date || 'No activity';
             const daysLeft = calculateProtectionDays(p);
             const protectionStatus = getProtectionStatus(daysLeft);
+            const protFillClass = daysLeft <= 0 ? 'expired' : protectionStatus;
+            const daysClass = daysLeft <= 0 ? 'days-expired' : (daysLeft <= 7 ? 'days-critical' : (daysLeft <= 14 ? 'days-warning' : 'days-normal'));
+            const daysLabel = daysLeft <= 0 ? 'Expired' : `${daysLeft}d left`;
+            const relTime = timeAgo(p.last_activity_date);
+            const lastActivityHtml = p.last_activity_date
+                ? `<span style="font-weight:600;color:var(--text-primary);">${relTime}</span><br><span class="la-date" style="font-size:11px;color:var(--text-secondary);">${p.last_activity_date}</span>`
+                : '<span style="color:var(--text-secondary);font-style:italic;">No activity</span>';
             const agent = userById.get(String(p.responsible_agent_id));
             const agentName = agent ? agent.full_name : '—';
+            const isSelected = _selectedProspects.has(p.id);
 
             html += `
-                <tr onclick="app.showProspectDetail(${p.id})" ${p.unable_to_serve ? 'style="opacity:0.5;background:#f1f5f9;"' : ''}>
+                <tr onclick="app.showProspectDetail(${p.id})" class="${p.unable_to_serve ? 'row-unable' : ''}">
+                    <td class="prospect-select-cell" onclick="event.stopPropagation()">
+                        <input type="checkbox" data-pid="${p.id}" ${isSelected ? 'checked' : ''} onchange="app.toggleProspectSelect(${p.id})">
+                    </td>
                     <td data-label="Name">
-                        <strong>${p.full_name || '(No Name)'}</strong>
-                        ${p.unable_to_serve ? `<br><span style="font-size:10px;background:#94a3b8;color:#fff;padding:1px 7px;border-radius:10px;font-weight:600;letter-spacing:.3px;">Unable to Serve</span>` : ''}
+                        <strong class="${p.unable_to_serve ? 'name-unable' : ''}">${p.full_name || '(No Name)'}</strong>
+                        ${p.phone ? `<br><span style="font-size:12px;color:var(--text-secondary);">${escapeHtml(p.phone)}</span>` : ''}
+                        ${p.unable_to_serve ? `<br><span class="badge-unable">Unable to Serve</span>` : ''}
                     </td>
                     <td data-label="Agent" onclick="event.stopPropagation()">${canReassign
                         ? `<select class="form-control" style="padding:2px 6px;font-size:12px;min-width:120px;border:1px solid var(--border);border-radius:4px;background:var(--surface);cursor:pointer;" onchange="app.quickReassign(${p.id}, this.value)" title="Reassign agent">${(() => {
@@ -22316,11 +22360,11 @@ function _wireLoginBtn() {
                     </td>
                     <td data-label="Ming Gua">${p.ming_gua || 'MG4'}</td>
                     <td data-label="Occupation">${p.occupation || ''}${p.company_name ? ' · ' + p.company_name : ''}</td>
-                    <td data-label="Last Activity" data-la-id="${p.id}">${lastActivityText}</td>
+                    <td data-label="Last Activity" data-la-id="${p.id}">${lastActivityHtml}</td>
                     <td data-label="Protection">
-                        <div>${daysLeft} days left</div>
+                        <div class="${daysClass}">${daysLabel}</div>
                         <div class="protection-bar">
-                            <div class="protection-fill ${protectionStatus}" style="width: ${Math.min(100, (daysLeft / 30) * 100)}%"></div>
+                            <div class="protection-fill ${protFillClass}" style="width:${Math.min(100, daysLeft <= 0 ? 100 : (daysLeft / 30) * 100)}%"></div>
                         </div>
                     </td>
                     <td onclick="event.stopPropagation()">
@@ -22344,10 +22388,69 @@ function _wireLoginBtn() {
                 : (includeDormantToggle
                     ? 'No prospects found. Click "Add Prospect" to create one.'
                     : 'No active prospects. Check "Include dormant" or type a name/phone to search older records.');
-            html = `<tr><td colspan="8" style="text-align:center; padding:40px;">${hint}</td></tr>`;
+            html = `<tr><td colspan="9" style="text-align:center; padding:40px;">${hint}</td></tr>`;
         }
 
         tbody.innerHTML = html;
+
+        // ── Stats row ──────────────────────────────────────────────────────
+        const statsEl = document.getElementById('prospect-stats-row');
+        if (statsEl) {
+            const totalAll = prospects.length;
+            const highScore = prospects.filter(p => (p.score || 0) >= 70).length;
+            const now = Date.now();
+            const active30 = prospects.filter(p => {
+                if (!p.last_activity_date) return false;
+                return (now - new Date(p.last_activity_date).getTime()) <= 30 * 86400000;
+            }).length;
+            const avgScore = totalAll ? Math.round(prospects.reduce((s, p) => s + (p.score || 0), 0) / totalAll) : 0;
+            statsEl.innerHTML = `
+                <div class="prospect-stat-card">
+                    <div class="prospect-stat-icon pink"><i class="fas fa-users"></i></div>
+                    <div><div class="prospect-stat-value">${totalAll}</div><div class="prospect-stat-label">Total Prospects</div></div>
+                </div>
+                <div class="prospect-stat-card">
+                    <div class="prospect-stat-icon star"><i class="fas fa-star"></i></div>
+                    <div><div class="prospect-stat-value">${highScore}</div><div class="prospect-stat-label">High Score (70+)</div></div>
+                </div>
+                <div class="prospect-stat-card">
+                    <div class="prospect-stat-icon green"><i class="fas fa-bolt"></i></div>
+                    <div><div class="prospect-stat-value">${active30}</div><div class="prospect-stat-label">Active (Last 30 Days)</div></div>
+                </div>
+                <div class="prospect-stat-card">
+                    <div class="prospect-stat-icon blue"><i class="fas fa-chart-line"></i></div>
+                    <div><div class="prospect-stat-value">${avgScore}</div><div class="prospect-stat-label">Avg. Score</div></div>
+                </div>
+                <div class="prospect-stat-card">
+                    <div class="prospect-stat-icon rose"><i class="fas fa-filter"></i></div>
+                    <div><div class="prospect-stat-value">${totalCount}</div><div class="prospect-stat-label">Filtered Results</div></div>
+                </div>
+            `;
+        }
+
+        // ── Update sort icons in thead ─────────────────────────────────────
+        document.querySelectorAll('#prospects-table thead th[data-sort-field]').forEach(th => {
+            const field = th.dataset.sortField;
+            const icon = th.querySelector('.sort-icon');
+            if (!icon) return;
+            if (_sortField === field) {
+                icon.className = `fas fa-sort-${_sortDirection === 'asc' ? 'up' : 'down'} sort-icon active`;
+            } else {
+                icon.className = 'fas fa-sort sort-icon';
+            }
+        });
+
+        // ── Sync sort dropdown ─────────────────────────────────────────────
+        const sortSel = document.getElementById('prospect-sort-select');
+        if (sortSel) sortSel.value = `${_sortField}_${_sortDirection}`;
+
+        // ── Card view ──────────────────────────────────────────────────────
+        if (_prospectViewMode === 'card') {
+            renderProspectCards(pageProspects, userById, canReassign, activeAgents);
+        }
+
+        // ── Bulk bar visibility ────────────────────────────────────────────
+        updateProspectBulkBar();
 
         // ── Background activity-type fill-in ───────────────────────────────
         // Table is already visible with dates. Now fetch the activity TYPE
@@ -22361,10 +22464,11 @@ function _wireLoginBtn() {
                     for (const [pid, act] of latestMap) {
                         const cell = document.querySelector(`td[data-la-id="${pid}"]`);
                         if (cell) {
-                            const text = act.activity_type
-                                ? `${act.activity_date} ${act.activity_type}`
-                                : act.activity_date;
-                            cell.textContent = text;
+                            const datePart = act.activity_date || '';
+                            const suffix = act.activity_type ? ` ${act.activity_type}` : '';
+                            cell.innerHTML = datePart
+                                ? `<span style="font-weight:600;color:var(--text-primary);">${timeAgo(datePart)}</span><br><span class="la-date" style="font-size:11px;color:var(--text-secondary);">${datePart}${suffix}</span>`
+                                : '<span style="color:var(--text-secondary);font-style:italic;">No activity</span>';
                         }
                     }
                 })
@@ -22403,7 +22507,10 @@ function _wireLoginBtn() {
             paginationEl = document.createElement('div');
             paginationEl.id = 'prospects-pagination';
             paginationEl.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:8px;padding:16px 0;flex-wrap:wrap;';
-            tbody.closest('.prospects-table-container')?.appendChild(paginationEl);
+            const pgParent = _prospectViewMode === 'card'
+                ? (document.getElementById('prospects-card-pagination') || tbody.closest('.prospects-table-container'))
+                : tbody.closest('.prospects-table-container');
+            pgParent?.appendChild(paginationEl);
         }
         if (totalPages <= 1) {
             paginationEl.innerHTML = `<span style="color:var(--text-secondary);font-size:13px;">${totalCount} prospect${totalCount !== 1 ? 's' : ''}</span>${dormantNote}`;
@@ -22563,6 +22670,225 @@ function _wireLoginBtn() {
         if (days > 7) return 'normal';
         if (days > 0) return 'warning';
         return 'critical';
+    };
+
+    const calculateDaysLeft = (deadline) => {
+        if (!deadline) return 30;
+        const diff = new Date(deadline) - new Date();
+        const d = Math.ceil(diff / 86400000);
+        return d > 0 ? d : 0;
+    };
+
+    const timeAgo = (dateStr) => {
+        if (!dateStr) return '—';
+        const diffMs = Date.now() - new Date(dateStr).getTime();
+        const d = Math.floor(diffMs / 86400000);
+        if (d < 0) return 'Today';
+        if (d === 0) return 'Today';
+        if (d === 1) return 'Yesterday';
+        if (d < 7)  return `${d}d ago`;
+        if (d < 30) return `${Math.floor(d / 7)}w ago`;
+        if (d < 365) return `${Math.floor(d / 30)}mo ago`;
+        return `${Math.floor(d / 365)}y ago`;
+    };
+
+    const _avatarColors = ['#ef4444','#f97316','#f59e0b','#10b981','#14b8a6','#3b82f6','#8b5cf6','#ec4899','#be185d','#0d9488'];
+    const getAvatarColor = (name) => {
+        let h = 0;
+        for (const c of (name || '?')) h = (h * 31 + c.charCodeAt(0)) & 0xffff;
+        return _avatarColors[h % _avatarColors.length];
+    };
+    const getInitials = (name) => {
+        if (!name) return '?';
+        return name.trim().split(/\s+/).map(w => w[0]?.toUpperCase() || '').slice(0, 2).join('');
+    };
+
+    const toggleProspectView = (mode) => {
+        _prospectViewMode = mode;
+        const tableView = document.getElementById('prospects-table-view');
+        const cardView  = document.getElementById('prospects-card-view');
+        const btnTable  = document.getElementById('prospect-view-table');
+        const btnCard   = document.getElementById('prospect-view-card');
+        if (tableView) tableView.style.display = mode === 'table' ? '' : 'none';
+        if (cardView)  cardView.style.display  = mode === 'card'  ? '' : 'none';
+        if (btnTable) btnTable.classList.toggle('active', mode === 'table');
+        if (btnCard)  btnCard.classList.toggle('active', mode === 'card');
+        // Remove cached pagination so it re-attaches in the right container
+        document.getElementById('prospects-pagination')?.remove();
+        renderProspectsTable();
+    };
+
+    const renderProspectCards = (pageProspects, userById, canReassign, activeAgents) => {
+        const container = document.getElementById('prospect-cards-container');
+        if (!container) return;
+        if (pageProspects.length === 0) {
+            container.innerHTML = '<p style="text-align:center;padding:40px;color:var(--text-secondary);">No prospects found.</p>';
+            return;
+        }
+        container.innerHTML = pageProspects.map(p => {
+            const grade = getScoreGrade(p.score);
+            const daysLeft = calculateProtectionDays(p);
+            const protFillClass = daysLeft <= 0 ? 'expired' : getProtectionStatus(daysLeft);
+            const daysClass = daysLeft <= 0 ? 'days-expired' : (daysLeft <= 7 ? 'days-critical' : (daysLeft <= 14 ? 'days-warning' : 'days-normal'));
+            const daysLabel = daysLeft <= 0 ? 'Expired' : `${daysLeft}d left`;
+            const agent = userById.get(String(p.responsible_agent_id));
+            const agentName = agent ? agent.full_name : '—';
+            const relTime = timeAgo(p.last_activity_date);
+            const color = getAvatarColor(p.full_name);
+            const initials = getInitials(p.full_name);
+            const pct = Math.min(100, daysLeft <= 0 ? 100 : (daysLeft / 30) * 100);
+            return `
+                <div class="prospect-card${p.unable_to_serve ? ' row-unable' : ''}" onclick="app.showProspectDetail(${p.id})">
+                    <div class="prospect-card-header">
+                        <div class="prospect-card-avatar" style="background:${color};">${initials}</div>
+                        <div style="flex:1;min-width:0;">
+                            <div class="prospect-card-name${p.unable_to_serve ? ' name-unable' : ''}">${escapeHtml(p.full_name || '(No Name)')}</div>
+                            ${p.phone ? `<div class="prospect-card-phone">${escapeHtml(p.phone)}</div>` : ''}
+                            ${p.unable_to_serve ? `<span class="badge-unable">Unable to Serve</span>` : ''}
+                        </div>
+                        <div class="prospect-card-score"><span class="score-badge score-${grade.replace('+','-plus')}">${p.score || 0} (${grade})</span></div>
+                    </div>
+                    <div class="prospect-card-row"><span>Ming Gua</span><span class="val">${p.ming_gua || '—'}</span></div>
+                    <div class="prospect-card-row"><span>Agent</span><span class="val">${escapeHtml(agentName)}</span></div>
+                    <div class="prospect-card-row"><span>Last Activity</span><span class="val">${p.last_activity_date ? relTime : '—'}</span></div>
+                    ${p.occupation || p.company_name ? `<div class="prospect-card-row"><span>Company</span><span class="val">${escapeHtml((p.occupation || '') + (p.company_name ? ' · ' + p.company_name : ''))}</span></div>` : ''}
+                    <div class="prospect-card-protection">
+                        <div class="${daysClass}" style="font-size:12px;margin-bottom:4px;">${daysLabel}</div>
+                        <div class="protection-bar" style="width:100%;"><div class="protection-fill ${protFillClass}" style="width:${pct}%"></div></div>
+                    </div>
+                </div>`;
+        }).join('');
+    };
+
+    const toggleProspectSelect = (id) => {
+        if (_selectedProspects.has(id)) {
+            _selectedProspects.delete(id);
+        } else {
+            _selectedProspects.add(id);
+        }
+        updateProspectBulkBar();
+    };
+
+    const toggleProspectSelectAll = () => {
+        const master = document.getElementById('prospect-select-all');
+        const checked = master?.checked;
+        document.querySelectorAll('#prospects-table-body input[type="checkbox"]').forEach(cb => {
+            const idAttr = cb.dataset.pid;
+            if (!idAttr) return;
+            const id = parseInt(idAttr, 10);
+            cb.checked = !!checked;
+            if (checked) _selectedProspects.add(id);
+            else _selectedProspects.delete(id);
+        });
+        updateProspectBulkBar();
+    };
+
+    const updateProspectBulkBar = () => {
+        const bar = document.getElementById('prospect-bulk-bar');
+        const countEl = document.getElementById('prospect-bulk-count');
+        if (!bar) return;
+        const n = _selectedProspects.size;
+        bar.style.display = n > 0 ? 'flex' : 'none';
+        if (countEl) countEl.textContent = n;
+        const delBtn = document.getElementById('prospect-bulk-delete-btn');
+        if (delBtn) {
+            const lvl = _getUserLevel(_currentUser);
+            delBtn.style.display = lvl <= 5 ? '' : 'none';
+        }
+    };
+
+    const clearProspectSelection = () => {
+        _selectedProspects.clear();
+        document.querySelectorAll('#prospects-table-body input[type="checkbox"]').forEach(cb => cb.checked = false);
+        const master = document.getElementById('prospect-select-all');
+        if (master) master.checked = false;
+        updateProspectBulkBar();
+    };
+
+    const bulkDeleteProspects = async () => {
+        const lvl = _getUserLevel(_currentUser);
+        if (lvl > 5) { UI.toast.error('You do not have permission to delete prospects.'); return; }
+        const n = _selectedProspects.size;
+        if (!n) return;
+        if (!confirm(`Delete ${n} selected prospect${n > 1 ? 's' : ''}? This cannot be undone.`)) return;
+        let errors = 0;
+        for (const id of _selectedProspects) {
+            try { await AppDataStore.delete('prospects', id); }
+            catch { errors++; }
+        }
+        _selectedProspects.clear();
+        if (errors) UI.toast.error(`${errors} prospect${errors > 1 ? 's' : ''} could not be deleted.`);
+        else UI.toast.success(`${n} prospect${n > 1 ? 's' : ''} deleted.`);
+        await renderProspectsTable();
+    };
+
+    const bulkReassignProspects = async () => {
+        const n = _selectedProspects.size;
+        if (!n) return;
+        const allUsers = await AppDataStore.getAll('users');
+        const agents = allUsers.filter(u => { const lvl = _getUserLevel(u); return lvl >= 3 && lvl <= 11 && u.status !== 'deleted'; })
+            .sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''));
+        const content = `
+            <div style="padding:4px 0 8px;">
+                <p style="margin-bottom:12px;color:var(--text-secondary);">Reassigning <strong>${n}</strong> prospect${n > 1 ? 's' : ''} to:</p>
+                <select id="bulk-reassign-agent" class="form-control">
+                    <option value="">— Select agent —</option>
+                    ${agents.map(a => `<option value="${a.id}">${escapeHtml(a.full_name || 'Agent')}</option>`).join('')}
+                </select>
+            </div>`;
+        UI.showModal('Bulk Reassign', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Reassign', type: 'primary', action: '(async () => { await app.confirmBulkReassign(); })()' }
+        ]);
+    };
+
+    const confirmBulkReassign = async () => {
+        const agentId = document.getElementById('bulk-reassign-agent')?.value;
+        if (!agentId) { UI.toast.error('Please select an agent.'); return; }
+        UI.hideModal();
+        let errors = 0;
+        for (const id of _selectedProspects) {
+            try { await AppDataStore.update('prospects', id, { responsible_agent_id: agentId }); }
+            catch { errors++; }
+        }
+        _selectedProspects.clear();
+        if (errors) UI.toast.error(`${errors} could not be reassigned.`);
+        else UI.toast.success('Prospects reassigned.');
+        await renderProspectsTable();
+    };
+
+    const toggleProspectFilters = (btn) => {
+        const panel = document.getElementById('prospect-adv-filters');
+        if (!panel) return;
+        const open = panel.style.display !== 'none';
+        panel.style.display = open ? 'none' : 'block';
+        btn.innerHTML = open
+            ? '<i class="fas fa-sliders-h"></i> Filters'
+            : '<i class="fas fa-sliders-h"></i> Filters <i class="fas fa-chevron-up"></i>';
+        updateProspectFilterBadge();
+    };
+
+    const updateProspectFilterBadge = () => {
+        const btn = document.getElementById('prospect-filter-btn');
+        if (!btn) return;
+        const score  = document.getElementById('filter-score')?.value || '';
+        const gua    = document.getElementById('filter-gua')?.value || '';
+        const status = document.getElementById('filter-status')?.value || '';
+        const agent  = document.getElementById('filter-agent')?.value || '';
+        const count  = [score, gua, status, agent].filter(Boolean).length;
+        const existing = btn.querySelector('.filter-count-badge');
+        if (existing) existing.remove();
+        if (count > 0) {
+            btn.insertAdjacentHTML('beforeend', `<span class="filter-count-badge">${count}</span>`);
+        }
+    };
+
+    const sortProspectsBySelect = async (val) => {
+        const [field, dir] = val.split('_');
+        _sortField = field;
+        _sortDirection = dir;
+        _prospectPage = 0;
+        await renderProspectsTable();
     };
 
     const openProspectModal = async (prospectId = null) => {
@@ -22824,7 +23150,8 @@ function _wireLoginBtn() {
 
 
     const filterProspects = async () => {
-        _prospectPage = 0; // reset to first page when filters change
+        _prospectPage = 0;
+        updateProspectFilterBadge();
         await renderProspectsTable();
     };
 
@@ -48948,6 +49275,17 @@ JB 星期二到
         customerPageNav,
         exportData,
         sortProspects,
+        sortProspectsBySelect,
+        toggleProspectView,
+        toggleProspectSelect,
+        toggleProspectSelectAll,
+        clearProspectSelection,
+        updateProspectBulkBar,
+        bulkDeleteProspects,
+        bulkReassignProspects,
+        confirmBulkReassign,
+        toggleProspectFilters,
+        updateProspectFilterBadge,
         switchProspectTab,
         toggleAccordion,
         toggleCustomerAccordion,
