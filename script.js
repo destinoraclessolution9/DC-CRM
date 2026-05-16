@@ -7874,8 +7874,11 @@ In a production system, this would show the actual file contents.
         allNavIds.forEach(id => {
             const el = document.getElementById(`nav-${id}`);
             if (el) {
-                // Use flex for better alignment if it was block before, but none if hidden
                 el.style.display = allowed.includes(id) ? '' : 'none';
+            }
+            const sbEl = document.getElementById(`sb-nav-${id}`);
+            if (sbEl) {
+                sbEl.style.display = allowed.includes(id) ? '' : 'none';
             }
         });
     }
@@ -10204,6 +10207,9 @@ function _wireLoginBtn() {
         _lastNavigatedAt = Date.now();
         document.querySelectorAll('.nav-links li').forEach(li => {
             li.classList.toggle('active', li.getAttribute('data-view') === viewId);
+        });
+        document.querySelectorAll('.sb-nav-item[data-view]').forEach(btn => {
+            btn.classList.toggle('active', btn.getAttribute('data-view') === viewId);
         });
 
         // Update document title BEFORE awaiting the view render. If the render
@@ -12708,95 +12714,194 @@ function _wireLoginBtn() {
     // ========== PHASE 1: FULL CALENDAR IMPLEMENTATION ==========
 
     const showCalendarView = async (container) => {
+        const userName = _currentUser?.display_name || _currentUser?.name || _currentUser?.email?.split('@')[0] || 'there';
+        const hour = new Date().getHours();
+        const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+
         container.innerHTML = `
-            <div class="calendar-view-container">
-                <!-- Section 1.1: Header -->
-                <div class="calendar-header-toolbar">
-                    <div class="calendar-title-nav">
-                        <h2 id="calendar-month-title" onclick="app.openMonthPicker()" style="cursor:pointer;" title="Click to select month">Month Year</h2>
-                        <div class="nav-arrows">
-                            <button class="btn-nav" onclick="app.goToPrevious()" aria-label="Previous month"><i class="fas fa-chevron-left" aria-hidden="true"></i></button>
-                            <button class="btn-nav" onclick="app.goToNext()" aria-label="Next month"><i class="fas fa-chevron-right" aria-hidden="true"></i></button>
+            <div class="calendar-page-layout">
+
+                <!-- ── Left: main calendar content ── -->
+                <div class="calendar-main">
+
+                    <!-- Welcome banner -->
+                    <div class="cal-welcome-banner">
+                        <div class="cal-welcome-text">
+                            <h2>${greeting}, <span class="welcome-name">${userName}!</span> 👋</h2>
+                            <p>Stay on top of your schedule and never miss an important follow-up.</p>
                         </div>
-                        <button class="btn secondary btn-sm" onclick="app.goToToday()">Today</button>
+                        <div class="cal-welcome-illus" aria-hidden="true">📅</div>
                     </div>
-                    <div class="calendar-controls">
-                        <div class="cal-controls-pill">
-                            <button class="cal-icon-btn cal-btn-filter" onclick="app.openCalendarFilterModal()" title="Filter">
-                                <i class="fas fa-search"></i>
-                            </button>
-                            <button class="cal-icon-btn cal-btn-wa" onclick="app.openShareCpsIntakeLinkModal()" title="Share CPS Intake Link">
-                                <i class="fab fa-whatsapp"></i>
-                            </button>
-                            <button class="cal-icon-btn cal-btn-add" onclick="app.openActivityModal()" title="Quick Add Activity">
-                                <i class="fas fa-plus"></i>
-                            </button>
+
+                    <div class="calendar-view-container">
+                        <!-- Section 1.1: Header -->
+                        <div class="calendar-header-toolbar">
+                            <div class="calendar-title-nav">
+                                <h2 id="calendar-month-title" onclick="app.openMonthPicker()" style="cursor:pointer;" title="Click to select month">Month Year</h2>
+                                <div class="nav-arrows">
+                                    <button class="btn-nav" onclick="app.goToPrevious()" aria-label="Previous month"><i class="fas fa-chevron-left" aria-hidden="true"></i></button>
+                                    <button class="btn-nav" onclick="app.goToNext()" aria-label="Next month"><i class="fas fa-chevron-right" aria-hidden="true"></i></button>
+                                </div>
+                                <button class="btn secondary btn-sm" onclick="app.goToToday()">Today</button>
+                            </div>
+                            <div class="calendar-controls">
+                                <div class="cal-controls-pill">
+                                    <button class="cal-icon-btn cal-btn-filter" onclick="app.openCalendarFilterModal()" title="Filter">
+                                        <i class="fas fa-search"></i>
+                                    </button>
+                                    <button class="cal-icon-btn cal-btn-wa" onclick="app.openShareCpsIntakeLinkModal()" title="Share CPS Intake Link">
+                                        <i class="fab fa-whatsapp"></i>
+                                    </button>
+                                    <button class="cal-icon-btn cal-btn-add" onclick="app.openActivityModal()" title="Quick Add Activity">
+                                        <i class="fas fa-plus"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Section 1.2: Grid -->
+                        <div class="calendar-monthly-wrapper">
+                            <div class="calendar-days-header" id="calendar-days-header"></div>
+                            <div class="calendar-grid-main" id="calendar-grid"></div>
+                        </div>
+
+                        <!-- Pending CPS Intake Approvals -->
+                        <div id="pending-cps-intakes" style="display:none; margin-top:16px;"></div>
+
+                        <!-- Follow-Up Reminders -->
+                        <div id="follow-up-reminders" style="display:none;"></div>
+
+                        <!-- Pending Proposed Solutions widget -->
+                        <div id="pending-solutions-widget" style="display:none;"></div>
+
+                        <!-- Section 1.3: Today's Activities -->
+                        <div class="today-activities-section">
+                            <h3>📅 TODAY'S ACTIVITIES</h3>
+                            <div class="activity-cards-grid" id="today-activities-grid"></div>
+                        </div>
+
+                        <!-- Section 1.4: Birthdays -->
+                        <div class="birthday-section">
+                            <h3>🎂 BIRTHDAY REMINDERS</h3>
+                            <div class="birthday-columns">
+                                <div class="birthday-col">
+                                    <div id="bday-today-header" style="display:flex;align-items:center;gap:10px;margin-bottom:15px;">
+                                        <div class="bday-badge today" style="width:30px;height:30px;border-radius:50%;background:#3b82f6;color:white;display:flex;align-items:center;justify-content:center;font-weight:bold;">0</div>
+                                        <h4 style="margin:0;">Today</h4>
+                                    </div>
+                                    <div class="bday-list" id="bday-today-list"></div>
+                                </div>
+                                <div class="birthday-col">
+                                    <div id="bday-upcoming-header" style="display:flex;align-items:center;gap:10px;margin-bottom:15px;">
+                                        <div class="bday-badge upcoming" style="width:30px;height:30px;border-radius:50%;background:#f59e0b;color:white;display:flex;align-items:center;justify-content:center;font-weight:bold;">0</div>
+                                        <h4 style="margin:0;">Upcoming (Next 2 Days)</h4>
+                                    </div>
+                                    <div class="bday-list" id="bday-upcoming-list"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Section 1.5: Health Product Refills -->
+                        <div class="birthday-section">
+                            <h3>💊 HEALTH PRODUCT REFILLS</h3>
+                            <div class="birthday-columns">
+                                <div class="birthday-col">
+                                    <div style="display:flex;align-items:center;gap:10px;margin-bottom:15px;">
+                                        <div id="refill-overdue-badge" class="bday-badge" style="width:30px;height:30px;border-radius:50%;background:#dc2626;color:white;display:flex;align-items:center;justify-content:center;font-weight:bold;">0</div>
+                                        <h4 style="margin:0;">Overdue</h4>
+                                    </div>
+                                    <div class="bday-list" id="refill-overdue-list"></div>
+                                </div>
+                                <div class="birthday-col">
+                                    <div style="display:flex;align-items:center;gap:10px;margin-bottom:15px;">
+                                        <div id="refill-soon-badge" class="bday-badge" style="width:30px;height:30px;border-radius:50%;background:#f59e0b;color:white;display:flex;align-items:center;justify-content:center;font-weight:bold;">0</div>
+                                        <h4 style="margin:0;">Due This Week</h4>
+                                    </div>
+                                    <div class="bday-list" id="refill-soon-list"></div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- Section 1.2: Grid -->
-                <div class="calendar-monthly-wrapper">
-                    <div class="calendar-days-header" id="calendar-days-header"></div>
-                    <div class="calendar-grid-main" id="calendar-grid"></div>
-                </div>
-
-                <!-- Pending CPS Intake Approvals (populated by renderPendingCpsIntakes) -->
-                <div id="pending-cps-intakes" style="display:none; margin-top:16px;"></div>
-
-                <!-- Follow-Up Reminders (populated by renderFollowUpReminders) -->
-                <div id="follow-up-reminders" style="display:none;"></div>
-
-                <!-- Pending Proposed Solutions widget (populated by renderPendingSolutionsWidget) -->
-                <div id="pending-solutions-widget" style="display:none;"></div>
-
-                <!-- Section 1.3: Today's Activities -->
-                <div class="today-activities-section">
-                    <h3>📅 TODAY'S ACTIVITIES</h3>
-                    <div class="activity-cards-grid" id="today-activities-grid"></div>
-                </div>
-
-                <!-- Section 1.4: Birthdays -->
-                <div class="birthday-section">
-                    <h3>🎂 BIRTHDAY REMINDERS</h3>
-                    <div class="birthday-columns">
-                        <div class="birthday-col">
-                            <div id="bday-today-header" style="display: flex; align-items: center; gap: 10px; margin-bottom: 15px;">
-                                <div class="bday-badge today" style="width: 30px; height: 30px; border-radius: 50%; background: #3b82f6; color: white; display: flex; align-items: center; justify-content: center; font-weight: bold;">0</div>
-                                <h4 style="margin: 0;">Today</h4>
+                <!-- ── Right panel: Today at a Glance ── -->
+                <aside class="cal-right-panel" id="cal-right-panel">
+                    <!-- Glance stats -->
+                    <div class="cal-panel-card">
+                        <h4>Today at a Glance</h4>
+                        <div class="glance-stat" onclick="document.getElementById('follow-up-reminders')?.scrollIntoView({behavior:'smooth'})">
+                            <div class="glance-icon pink"><i class="fas fa-bell"></i></div>
+                            <div class="glance-info">
+                                <div class="glance-count" id="glance-followup-count">—</div>
+                                <div class="glance-label">Follow-up Reminders</div>
                             </div>
-                            <div class="bday-list" id="bday-today-list"></div>
                         </div>
-                        <div class="birthday-col">
-                            <div id="bday-upcoming-header" style="display: flex; align-items: center; gap: 10px; margin-bottom: 15px;">
-                                <div class="bday-badge upcoming" style="width: 30px; height: 30px; border-radius: 50%; background: #f59e0b; color: white; display: flex; align-items: center; justify-content: center; font-weight: bold;">0</div>
-                                <h4 style="margin: 0;">Upcoming (Next 2 Days)</h4>
+                        <div class="glance-stat" onclick="document.getElementById('today-activities-grid')?.scrollIntoView({behavior:'smooth'})">
+                            <div class="glance-icon green"><i class="fas fa-calendar-check"></i></div>
+                            <div class="glance-info">
+                                <div class="glance-count" id="glance-activity-count">—</div>
+                                <div class="glance-label">Activities</div>
                             </div>
-                            <div class="bday-list" id="bday-upcoming-list"></div>
+                        </div>
+                        <div class="glance-stat" onclick="document.getElementById('bday-today-list')?.scrollIntoView({behavior:'smooth'})">
+                            <div class="glance-icon amber"><i class="fas fa-cake-candles"></i></div>
+                            <div class="glance-info">
+                                <div class="glance-count" id="glance-bday-count">—</div>
+                                <div class="glance-label">Birthdays</div>
+                            </div>
+                        </div>
+                        <div class="glance-stat" onclick="document.getElementById('bday-upcoming-list')?.scrollIntoView({behavior:'smooth'})">
+                            <div class="glance-icon blue"><i class="fas fa-clock"></i></div>
+                            <div class="glance-info">
+                                <div class="glance-count" id="glance-upcoming-count">—</div>
+                                <div class="glance-label">Upcoming</div>
+                            </div>
                         </div>
                     </div>
-                </div>
 
-                <!-- Section 1.5: Health Product Refills -->
-                <div class="birthday-section">
-                    <h3>💊 HEALTH PRODUCT REFILLS</h3>
-                    <div class="birthday-columns">
-                        <div class="birthday-col">
-                            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 15px;">
-                                <div id="refill-overdue-badge" class="bday-badge" style="width: 30px; height: 30px; border-radius: 50%; background: #dc2626; color: white; display: flex; align-items: center; justify-content: center; font-weight: bold;">0</div>
-                                <h4 style="margin: 0;">Overdue</h4>
+                    <!-- Pipeline promo -->
+                    <div class="cal-pipeline-card">
+                        <h4>Keep your pipeline moving forward!</h4>
+                        <p>Add activities, follow-ups and never miss a customer touchpoint.</p>
+                        <button class="btn-add-activity" onclick="app.openActivityModal()">
+                            <i class="fas fa-plus"></i> Add Activity
+                        </button>
+                    </div>
+
+                    <!-- Quick actions -->
+                    <div class="cal-panel-card">
+                        <h4>Quick Actions</h4>
+                        <div class="quick-action-row" onclick="app.openFollowUpModal && app.openFollowUpModal()">
+                            <div class="qa-left">
+                                <div class="qa-icon pink"><i class="fas fa-bell"></i></div>
+                                <div><div class="qa-title">Add Follow-up</div><div class="qa-sub">Schedule a follow-up</div></div>
                             </div>
-                            <div class="bday-list" id="refill-overdue-list"></div>
+                            <i class="fas fa-chevron-right qa-arrow"></i>
                         </div>
-                        <div class="birthday-col">
-                            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 15px;">
-                                <div id="refill-soon-badge" class="bday-badge" style="width: 30px; height: 30px; border-radius: 50%; background: #f59e0b; color: white; display: flex; align-items: center; justify-content: center; font-weight: bold;">0</div>
-                                <h4 style="margin: 0;">Due This Week</h4>
+                        <div class="quick-action-row" onclick="app.openActivityModal()">
+                            <div class="qa-left">
+                                <div class="qa-icon green"><i class="fas fa-calendar-plus"></i></div>
+                                <div><div class="qa-title">Add Activity</div><div class="qa-sub">Log a new activity</div></div>
                             </div>
-                            <div class="bday-list" id="refill-soon-list"></div>
+                            <i class="fas fa-chevron-right qa-arrow"></i>
+                        </div>
+                        <div class="quick-action-row" onclick="app.openReminderModal && app.openReminderModal()">
+                            <div class="qa-left">
+                                <div class="qa-icon amber"><i class="fas fa-bookmark"></i></div>
+                                <div><div class="qa-title">Add Reminder</div><div class="qa-sub">Set a reminder</div></div>
+                            </div>
+                            <i class="fas fa-chevron-right qa-arrow"></i>
+                        </div>
+                        <div class="quick-action-row" onclick="app.openCreateProspectModal && app.openCreateProspectModal()">
+                            <div class="qa-left">
+                                <div class="qa-icon purple"><i class="fas fa-user-plus"></i></div>
+                                <div><div class="qa-title">Add Prospect</div><div class="qa-sub">Create new prospect</div></div>
+                            </div>
+                            <i class="fas fa-chevron-right qa-arrow"></i>
                         </div>
                     </div>
-                </div>
+                </aside>
+
             </div>
         `;
 
@@ -13853,6 +13958,9 @@ function _wireLoginBtn() {
             console.warn('renderFollowUpReminders failed:', e);
         }
 
+        const _gfc = document.getElementById('glance-followup-count');
+        if (_gfc) _gfc.textContent = drafts.length;
+
         if (drafts.length === 0) {
             container.style.display = 'none';
             return;
@@ -14825,8 +14933,11 @@ function _wireLoginBtn() {
         const prospectMapRTA = new Map(pRes.data.map(p => [String(p.id), p]));
         const customerMapRTA = new Map(cRes.data.map(c => [String(c.id), c]));
 
+        const _gac = document.getElementById('glance-activity-count');
+        if (_gac) _gac.textContent = activities.length;
+
         if (activities.length === 0) {
-            grid.innerHTML = '<div style="padding:20px; text-align:center; color:var(--gray-500);">No activities scheduled for today.</div>';
+            grid.innerHTML = '<div style="padding:20px; text-align:center; color:var(--gray-500);">No activities scheduled for today. Enjoy your day! 🎉</div>';
             return;
         }
 
@@ -14969,6 +15080,11 @@ function _wireLoginBtn() {
 
         const upcomingBadge = document.querySelector('#bday-upcoming-header .upcoming');
         if (upcomingBadge) upcomingBadge.textContent = upcomingBdays.length;
+
+        const _gbc = document.getElementById('glance-bday-count');
+        if (_gbc) _gbc.textContent = todayBdays.length;
+        const _guc = document.getElementById('glance-upcoming-count');
+        if (_guc) _guc.textContent = upcomingBdays.length;
 
         todayList.innerHTML = renderBday(todayBdays);
         upcomingList.innerHTML = renderBday(upcomingBdays);

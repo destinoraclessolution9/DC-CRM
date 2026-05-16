@@ -286,6 +286,7 @@
     <div class="app-shell" id="app-shell" role="application" aria-label="悅客匯 CRM" style="display: none;">
         <!-- Top Navigation -->
         <nav class="top-bar">
+            <!-- Brand visible on mobile only (sidebar hidden on mobile) -->
             <div class="brand" id="brand-logo">
                 <i class="fas fa-dharmachakra" aria-hidden="true"></i>
                 <span class="brand-name">悅客匯</span>
@@ -457,15 +458,72 @@
 
         <div class="main-layout">
             <!-- Fixed Sidebar -->
-            <aside class="sidebar">
-                <div class="sidebar-top">
-                    <button class="search-trigger" id="sidebar-search-btn" aria-label="Open search">
-                        <i class="fas fa-search" aria-hidden="true"></i>
-                    </button>
-                    <div class="search-tooltip">Click to search</div>
+            <aside class="sidebar" id="main-sidebar">
+                <!-- Brand (desktop) -->
+                <div class="sidebar-brand" onclick="app.navigateTo('calendar')" role="button" tabindex="0" aria-label="Go to calendar">
+                    <i class="fas fa-dharmachakra" aria-hidden="true"></i>
+                    <span class="sidebar-brand-name">悅客匯</span>
                 </div>
-                <div class="sidebar-menu"></div>
-                <div class="sidebar-bottom"></div>
+
+                <!-- Nav items -->
+                <div class="sidebar-menu">
+                    <button class="sb-nav-item" id="sb-nav-calendar" data-view="calendar" onclick="app.navigateTo('calendar')">
+                        <i class="fas fa-calendar-days sb-icon" aria-hidden="true"></i><span class="sb-label">Calendar</span>
+                    </button>
+                    <button class="sb-nav-item" id="sb-nav-prospects" data-view="prospects" onclick="app.navigateTo('prospects')">
+                        <i class="fas fa-users sb-icon" aria-hidden="true"></i><span class="sb-label">Prospect / Customer</span>
+                    </button>
+                    <button class="sb-nav-item" id="sb-nav-referrals" data-view="referrals" onclick="app.navigateTo('referrals')">
+                        <i class="fas fa-share-nodes sb-icon" aria-hidden="true"></i><span class="sb-label">Referral Relationship</span>
+                    </button>
+                    <button class="sb-nav-item" id="sb-nav-pipeline" data-view="pipeline" onclick="app.navigateTo('pipeline')">
+                        <i class="fas fa-chart-line sb-icon" aria-hidden="true"></i><span class="sb-label">Potential Pipeline</span>
+                    </button>
+                    <button class="sb-nav-item" id="sb-nav-promotions" data-view="promotions" onclick="app.navigateTo('promotions')">
+                        <i class="fas fa-bullhorn sb-icon" aria-hidden="true"></i><span class="sb-label">Monthly Promotion</span>
+                    </button>
+                    <button class="sb-nav-item" id="sb-nav-marketing-automation" data-view="marketing_automation" onclick="app.navigateTo('marketing_automation')">
+                        <i class="fas fa-robot sb-icon" aria-hidden="true"></i><span class="sb-label">Marketing Automation</span>
+                    </button>
+                    <button class="sb-nav-item" id="sb-nav-cases" data-view="cases" onclick="app.navigateTo('cases')">
+                        <i class="fas fa-book-open sb-icon" aria-hidden="true"></i><span class="sb-label">Success Case Library</span>
+                    </button>
+                    <button class="sb-nav-item" id="sb-nav-purchases_history" data-view="purchases_history" onclick="app.navigateTo('purchases_history')" style="display:none;">
+                        <i class="fas fa-shopping-bag sb-icon" aria-hidden="true"></i><span class="sb-label">Purchases History</span>
+                    </button>
+                    <button class="sb-nav-item" id="sb-nav-agents" data-view="agents" onclick="app.navigateTo('agents')">
+                        <i class="fas fa-user-tie sb-icon" aria-hidden="true"></i><span class="sb-label">Consultant</span>
+                    </button>
+                    <button class="sb-nav-item" id="sb-nav-marketing-lists" data-view="marketing_lists" onclick="app.navigateTo('marketing_lists')" style="display:none;">
+                        <i class="fas fa-flask sb-icon" aria-hidden="true"></i><span class="sb-label">Marketing Labs</span>
+                    </button>
+                    <button class="sb-nav-item" id="sb-nav-performance" data-view="performance" onclick="app.navigateTo('performance')">
+                        <i class="fas fa-trophy sb-icon" aria-hidden="true"></i><span class="sb-label">Ranking Performance</span>
+                    </button>
+                    <button class="sb-nav-item" id="sb-nav-reports" data-view="reports" onclick="app.navigateTo('reports')">
+                        <i class="fas fa-chart-pie sb-icon" aria-hidden="true"></i><span class="sb-label">Reporting KPI</span>
+                    </button>
+                    <button class="sb-nav-item" id="sb-nav-knowledge" data-view="knowledge" onclick="app.navigateTo('knowledge')">
+                        <i class="fas fa-brain sb-icon" aria-hidden="true"></i><span class="sb-label">Knowledge HQ</span>
+                    </button>
+                    <button class="sb-nav-item" id="sb-nav-documents" data-view="documents" onclick="app.navigateTo('documents')">
+                        <i class="fas fa-folder-open sb-icon" aria-hidden="true"></i><span class="sb-label">Document Management</span>
+                    </button>
+                    <button class="sb-nav-item" id="sb-nav-admin" data-view="admin" onclick="app.showAdminDashboard()">
+                        <i class="fas fa-gear sb-icon" aria-hidden="true"></i><span class="sb-label">Admin</span>
+                    </button>
+                    <button class="sb-nav-item" id="sb-nav-protection" data-view="protection" onclick="app.navigateTo('protection')">
+                        <i class="fas fa-shield-halved sb-icon" aria-hidden="true"></i><span class="sb-label">Protection Monitoring</span>
+                    </button>
+                </div>
+
+                <!-- Collapse toggle -->
+                <div class="sidebar-bottom">
+                    <button class="sidebar-collapse-btn" id="sidebar-collapse-btn" onclick="toggleSidebar()" aria-label="Collapse sidebar">
+                        <i class="fas fa-chevron-left sb-icon" id="sidebar-collapse-icon" aria-hidden="true"></i>
+                        <span class="sb-collapse-label">Collapse</span>
+                    </button>
+                </div>
             </aside>
 
             <!-- Content Area -->

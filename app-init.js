@@ -103,6 +103,23 @@ window.addEventListener('load', function () {
     }
 });
 
+// ── Sidebar collapse toggle ───────────────────────────────────────────────
+window.toggleSidebar = function () {
+    var sidebar = document.getElementById('main-sidebar');
+    if (!sidebar) return;
+    var collapsed = sidebar.classList.toggle('collapsed');
+    try { localStorage.setItem('sidebar-collapsed', collapsed ? '1' : '0'); } catch (e) {}
+};
+
+// Restore sidebar state on load
+document.addEventListener('DOMContentLoaded', function () {
+    var sidebar = document.getElementById('main-sidebar');
+    if (!sidebar) return;
+    try {
+        if (localStorage.getItem('sidebar-collapsed') === '1') sidebar.classList.add('collapsed');
+    } catch (e) {}
+});
+
 // ── PWA: Service Worker ────────────────────────────────────────────────────
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {
