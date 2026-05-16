@@ -43124,16 +43124,19 @@ const initImportDemoData = async () => {
         const totalReturns = myRewards.reduce((s, r) => s + (parseFloat(r.sharing_return) || 0), 0);
         if (myRewards.length > 0) { try { await syncFudiSummary(currentUser.id, totalPoints, totalReturns); } catch(e) {} }
 
-        // --- 福气 summary banner (L13/L14 only) ---
+        // --- Helper: pre-signed image src attr ---
+        const imgSrc = (h) => h._signedUrl ? `src="${h._signedUrl}"` : '';
+
+        // --- Summary tiles (L13/14) ---
         const summaryBanner = isL1314 ? `
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px;">
-                <div style="background:linear-gradient(135deg,#8B0000,#c0392b);color:white;border-radius:12px;padding:20px;text-align:center;">
-                    <div style="font-size:2rem;font-weight:700;">${totalPoints}</div>
-                    <div style="font-size:0.85rem;opacity:0.85;margin-top:4px;">福气 Points</div>
+            <div class="fude-summary-grid">
+                <div class="fude-summary-tile" style="background:linear-gradient(135deg,#be185d,#e91e8c);">
+                    <div class="fude-summary-tile-val">${totalPoints}</div>
+                    <div class="fude-summary-tile-label">福气 Points</div>
                 </div>
-                <div style="background:linear-gradient(135deg,#065f46,#10b981);color:white;border-radius:12px;padding:20px;text-align:center;">
-                    <div style="font-size:2rem;font-weight:700;">RM ${totalReturns.toFixed(2)}</div>
-                    <div style="font-size:0.85rem;opacity:0.85;margin-top:4px;">Sharing Returns</div>
+                <div class="fude-summary-tile" style="background:linear-gradient(135deg,#065f46,#10b981);">
+                    <div class="fude-summary-tile-val">RM ${totalReturns.toFixed(2)}</div>
+                    <div class="fude-summary-tile-label">Sharing Returns</div>
                 </div>
             </div>` : '';
 
@@ -43231,9 +43234,141 @@ const initImportDemoData = async () => {
                 </tr></thead><tbody>${rows}</tbody></table></div></div></div>`;
         }
 
-        // --- My rewards table ---
-        const rewardsHtml = myRewards.length === 0
-            ? '<p style="color:var(--gray-500,#6b7280);margin:0;">No recommendations or rewards yet.</p>'
+        // --- News carousel HTML ---
+        const carouselSection = (() => {
+            if (!publicNews.length) return `
+                <div class="fude-section">
+                    <div class="fude-sec-bar"><div class="fude-sec-bar-icon news">📰</div><h2>Highlights &amp; News</h2></div>
+                    <div class="fude-sec-body"><p style="color:var(--gray-500,#6b7280);margin:0;">No highlights yet.</p></div>
+                </div>`;
+            const slides = publicNews.map((n, i) => `
+                <div class="fude-carousel-slide">
+                    ${n._signedUrl ? `<img loading="lazy" decoding="async" ${imgSrc(n)} alt="" onerror="this.style.display='none'">` : ''}
+                    <div class="fude-carousel-overlay">
+                        <span class="fude-carousel-badge">${i === 0 ? 'Latest News' : 'News'}</span>
+                        <h3>${n.title}</h3>
+                        ${n.content ? `<p>${n.content}</p>` : ''}
+                        <span class="fude-carousel-date">📅 ${fmtDate(n.created_at)}</span>
+                        <button class="fude-carousel-readmore">Read More</button>
+                    </div>
+                </div>`).join('');
+            const dots = publicNews.length > 1
+                ? `<div class="fude-carousel-dots">${publicNews.map((_, i) => `<button class="fude-carousel-dot${i === 0 ? ' active' : ''}" data-idx="${i}"></button>`).join('')}</div>`
+                : '';
+            const arrows = publicNews.length > 1
+                ? `<button class="fude-carousel-arrow prev" onclick="event.stopPropagation();(function(){var w=this.closest('.fude-carousel-wrap');var t=w.querySelector('.fude-carousel-track');var n=parseInt(t.dataset.idx||0);var tot=t.children.length;var ni=(n-1+tot)%tot;t.dataset.idx=ni;t.style.transform='translateX(-'+ni*100+'%)';w.querySelectorAll('.fude-carousel-dot').forEach(function(d,i){d.classList.toggle('active',i===ni);});}).call(this)">&#8249;</button>
+                  <button class="fude-carousel-arrow next" onclick="event.stopPropagation();(function(){var w=this.closest('.fude-carousel-wrap');var t=w.querySelector('.fude-carousel-track');var n=parseInt(t.dataset.idx||0);var tot=t.children.length;var ni=(n+1)%tot;t.dataset.idx=ni;t.style.transform='translateX(-'+ni*100+'%)';w.querySelectorAll('.fude-carousel-dot').forEach(function(d,i){d.classList.toggle('active',i===ni);});}).call(this)">&#8250;</button>`
+                : '';
+            return `
+                <div class="fude-section">
+                    <div class="fude-sec-bar" style="justify-content:space-between;">
+                        <div style="display:flex;align-items:center;gap:12px;"><div class="fude-sec-bar-icon news">📰</div><h2>Highlights &amp; News</h2></div>
+                    </div>
+                    <div class="fude-carousel-wrap">
+                        ${arrows}
+                        <div class="fude-carousel-track" data-idx="0">${slides}</div>
+                    </div>
+                    ${dots}
+                </div>`;
+        })();
+
+        // --- Success Stories grid ---
+        const storiesSection = (() => {
+            const PREVIEW = 6;
+            const shown = successStories.slice(0, PREVIEW);
+            const hasMore = successStories.length > PREVIEW;
+            if (!successStories.length) return `
+                <div class="fude-section fude-stories-section">
+                    <div class="fude-stories-masthead">
+                        <div class="fude-stories-masthead-line"></div>
+                        <div class="fude-stories-masthead-center">
+                            <div class="fude-stories-masthead-icon">🏆</div>
+                            <div class="fude-stories-title">成功案例分享</div>
+                            <div class="fude-stories-subtitle">Success&nbsp;&nbsp;Stories</div>
+                        </div>
+                        <div class="fude-stories-masthead-line"></div>
+                    </div>
+                    <div style="padding:20px;color:var(--gray-500,#6b7280);">No success stories yet.</div>
+                </div>`;
+            const cards = shown.map((s) => {
+                const imgEl = s._signedUrl
+                    ? `<img loading="lazy" decoding="async" class="fude-story-card-img" ${imgSrc(s)} alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+                    : '';
+                const ph = `<div class="fude-story-card-img-ph" style="display:${s._signedUrl ? 'none' : 'flex'};">📖</div>`;
+                const tags = (s.tags || '').split(',').filter(Boolean).slice(0, 2)
+                    .map(t => `<span class="fude-story-tag">${t.trim()}</span>`).join('');
+                return `<div class="fude-story-card">
+                    ${imgEl}${ph}
+                    <div class="fude-story-card-body">
+                        <h3>${s.title}</h3>
+                        ${s.content ? `<p>${s.content}</p>` : '<p style="flex:1"></p>'}
+                        <div class="fude-story-card-footer">
+                            <div class="fude-story-tags">${tags}</div>
+                            <button class="fude-story-readmore">Read Story →</button>
+                        </div>
+                    </div>
+                </div>`;
+            }).join('');
+            return `
+                <div class="fude-section fude-stories-section">
+                    <div class="fude-stories-masthead">
+                        <div class="fude-stories-masthead-line"></div>
+                        <div class="fude-stories-masthead-center">
+                            <div class="fude-stories-masthead-icon">🏆</div>
+                            <div class="fude-stories-title">成功案例分享</div>
+                            <div class="fude-stories-subtitle">Success&nbsp;&nbsp;Stories</div>
+                        </div>
+                        <div class="fude-stories-masthead-line"></div>
+                    </div>
+                    <div class="fude-story-grid">${cards}</div>
+                    ${hasMore ? `<button class="fude-stories-more-btn">✦ Explore More Success Stories</button>` : ''}
+                </div>`;
+        })();
+
+        // --- Tips row (dynamic + 2 static) ---
+        const dynamicTips = recommendationTips.slice(0, 1);
+        const tipsSection = (() => {
+            const tipCols = [];
+            if (dynamicTips.length) {
+                tipCols.push(`<div class="fude-tip-col">
+                    <div class="fude-tip-icon">💡</div>
+                    <h3>${dynamicTips[0].title}</h3>
+                    ${dynamicTips[0].content ? `<p>${dynamicTips[0].content}</p>` : ''}
+                    <button class="fude-tip-link">Learn More →</button>
+                </div>`);
+            } else {
+                tipCols.push(`<div class="fude-tip-col">
+                    <div class="fude-tip-icon">🛡️</div>
+                    <h3>账户安全</h3>
+                    <p>定期更新密码，避免使用常见密码，并开启双重验证，防止账户被盗用。</p>
+                    <button class="fude-tip-link">Learn More →</button>
+                </div>`);
+            }
+            tipCols.push(`<div class="fude-tip-col">
+                <div class="fude-tip-icon">🎁</div>
+                <h3>积分攻略</h3>
+                <p>每日签到、参与活动、分享推荐好友，都能累积积分！</p>
+                <button class="fude-tip-link">Learn More →</button>
+            </div>`);
+            tipCols.push(`<div class="fude-tip-col">
+                <div class="fude-tip-icon" style="background:#fee2e2;">🎧</div>
+                <h3>需要帮助?</h3>
+                <p>遇到问题？我们的客服团队随时为您提供支持。</p>
+                <button class="fude-tip-link">Contact Us →</button>
+            </div>`);
+            return `
+                <div class="fude-tips-section">
+                    <div class="fude-tips-header">
+                        <span class="fude-tips-header-icon">💡</span>
+                        <h2>小贴士 Tips</h2>
+                    </div>
+                    <div class="fude-tips-row">${tipCols.join('')}</div>
+                </div>`;
+        })();
+
+        // --- My Recommendations & Returns ---
+        const rewardsTableHtml = myRewards.length === 0
+            ? '<p style="color:var(--gray-500,#6b7280);margin:8px 0 0;">No recommendations or rewards yet.</p>'
             : `<div style="overflow-x:auto;"><table class="data-table"><thead><tr>
                 <th scope="col">Action</th><th scope="col">福气 Points</th><th scope="col">Sharing Return (RM)</th><th scope="col">Description</th><th scope="col">Date</th>
                </tr></thead><tbody>
@@ -43246,80 +43381,68 @@ const initImportDemoData = async () => {
                 </tr>`).join('')}
                </tbody></table></div>`;
 
-        // --- Render ---
-        // Use pre-signed URL (_signedUrl) so images render immediately without DOM resolver
-        const imgSrc = (h) => h._signedUrl ? `src="${h._signedUrl}"` : '';
+        const returnsSection = `
+            <div class="fude-returns-section">
+                <div class="fude-returns-header">
+                    <h2>My Recommendations &amp; Returns</h2>
+                    <button class="fude-returns-viewall" onclick="(function(btn){var d=btn.closest('.fude-returns-section').querySelector('.fude-rewards-detail');var ic=btn.closest('.fude-returns-section').querySelector('.fude-rewards-toggle');d.classList.toggle('open');ic.querySelector('.fude-rewards-toggle-icon').classList.toggle('open');btn.textContent=d.classList.contains('open')?'View less':'View all →';}).call(this, this)">View all →</button>
+                </div>
+                <div class="fude-returns-cards">
+                    <div class="fude-returns-card">
+                        <div class="fude-returns-card-img-ph pink">🎀</div>
+                        <div class="fude-returns-card-body">
+                            <h3>推荐奖励</h3>
+                            <p>推荐好友加入，双方都能获得积分奖励！</p>
+                            <button class="fude-returns-card-cta">Learn More →</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="fude-rewards-table-wrap">
+                    <button class="fude-rewards-toggle">
+                        <span class="fude-rewards-toggle-icon">▾</span>
+                        积分 &amp; 推荐记录 (${myRewards.length})
+                    </button>
+                    <div class="fude-rewards-detail">${rewardsTableHtml}</div>
+                </div>
+            </div>`;
 
+        // --- Render ---
         container.innerHTML = `
             <div class="fude-tab">
-                <div class="fude-page-header">
-                    <div class="fude-page-header-icon">🌸</div>
-                    <div>
-                        <h1>福德</h1>
-                        <p>福运相随 · Blessings &amp; Abundance</p>
+                <div class="fude-appbar">
+                    <span class="fude-appbar-title">Manage Rewards &amp; 客户Points</span>
+                    <div class="fude-appbar-right">
+                        ${isAdmin
+                            ? `<button class="fude-appbar-btn" onclick="app.openRewardModal()"><i class="fas fa-plus"></i> Record Points</button>`
+                            : ''}
+                        <button class="fude-appbar-bell" title="Notifications">
+                            🔔<span class="fude-appbar-bell-dot"></span>
+                        </button>
                     </div>
                 </div>
-                ${summaryBanner}
-                ${leaderboardSection}
-                ${adminHighlightsSection}
-                ${adminRewardsSection}
-                <div class="fude-section">
-                    <div class="fude-sec-bar"><div class="fude-sec-bar-icon news">📰</div><h2>Highlights &amp; News</h2></div>
-                    ${publicNews.length === 0
-                        ? '<div class="fude-sec-body"><p style="color:var(--gray-500,#6b7280);margin:0;">No highlights yet.</p></div>'
-                        : (() => {
-                            const [hero, ...rest] = publicNews;
-                            const heroBg = hero._signedUrl
-                                ? `<img loading="lazy" decoding="async" class="fude-hero-card-bg" ${imgSrc(hero)} alt="" onerror="this.style.display='none'">`
-                                : '';
-                            const heroCard = `<div class="fude-hero-card">${heroBg}<div class="fude-hero-card-overlay"><span class="fude-hero-badge">Latest</span><h3>${hero.title}</h3>${hero.content ? `<p>${hero.content}</p>` : ''}<span class="fude-hero-date">${fmtDate(hero.created_at)}</span></div></div>`;
-                            const grid = rest.length
-                                ? `<div class="fude-news-grid">${rest.map(n => `<div class="fude-card">${n._signedUrl ? `<img loading="lazy" decoding="async" class="fude-card-img" ${imgSrc(n)} alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="fude-card-img-placeholder" style="display:none;">📰</div>` : `<div class="fude-card-img-placeholder">📰</div>`}<div class="fude-card-body"><span class="fude-card-tag">News</span><h3>${n.title}</h3>${n.content ? `<p>${n.content}</p>` : ''}<div class="fude-card-date">${fmtDate(n.created_at)}</div></div></div>`).join('')}</div>`
-                                : '';
-                            return heroCard + grid;
-                          })()
-                    }
+                <div class="fude-inner">
+                    ${summaryBanner}
+                    ${leaderboardSection}
+                    ${adminHighlightsSection}
+                    ${adminRewardsSection}
                 </div>
-                <div class="fude-section fude-mag-section">
-                    <div class="fude-mag-masthead">
-                        <div class="fude-mag-masthead-line"></div>
-                        <div class="fude-mag-masthead-center">
-                            <div class="fude-mag-title">成功案例分享</div>
-                            <div class="fude-mag-subtitle">SUCCESS&nbsp;&nbsp;STORY</div>
-                        </div>
-                        <div class="fude-mag-masthead-line"></div>
-                    </div>
-                    ${successStories.length === 0
-                        ? '<div class="fude-sec-body"><p style="color:var(--gray-500,#6b7280);margin:0;">No success stories yet.</p></div>'
-                        : successStories.map((s, i) => `<div class="fude-mag-story${i === 0 ? ' fude-mag-story--first' : ''}">
-                            <div class="fude-mag-story-header">
-                                <span class="fude-mag-story-num">${i + 1}</span>
-                                <h3 class="fude-mag-story-title">${s.title}</h3>
-                            </div>
-                            ${s._signedUrl ? `<img loading="lazy" decoding="async" class="fude-mag-story-photo" ${imgSrc(s)} alt="" onerror="this.style.display='none'">` : ''}
-                            ${s.content ? `<p class="fude-mag-story-text">${s.content}</p>` : ''}
-                        </div>`).join('')
-                    }
-                </div>
-                ${recommendationTips.length ? `
-                <div class="fude-section fude-mag-tips-section">
-                    <div class="fude-mag-tips-header">
-                        <span class="fude-mag-tip-badge">💡</span>
-                        <h2>成功推荐技巧</h2>
-                    </div>
-                    ${recommendationTips.map(t => `
-                        <div class="fude-mag-tip-item">
-                            <h3>${t.title}</h3>
-                            ${t.content ? `<p>${t.content}</p>` : ''}
-                        </div>`).join('')}
-                </div>` : ''}
+                ${carouselSection}
+                ${storiesSection}
+                ${tipsSection}
                 ${purchasesSection}
-                <div class="fude-section">
-                    <div class="fude-sec-bar"><div class="fude-sec-bar-icon gem">💎</div><h2>My Recommendations &amp; Returns</h2></div>
-                    <div class="fude-sec-body">${rewardsHtml}</div>
-                </div>
+                ${returnsSection}
             </div>
         `;
+
+        // Wire carousel dot clicks
+        container.querySelectorAll('.fude-carousel-dot').forEach((dot, i) => {
+            dot.addEventListener('click', () => {
+                const track = dot.closest('.fude-carousel-wrap').querySelector('.fude-carousel-track');
+                track.dataset.idx = i;
+                track.style.transform = `translateX(-${i * 100}%)`;
+                dot.closest('.fude-carousel-dots').querySelectorAll('.fude-carousel-dot').forEach((d, j) => d.classList.toggle('active', j === i));
+            });
+        });
     };
 
     // ========== LEVEL 13/14: Highlight CRUD (Admin only) ==========
