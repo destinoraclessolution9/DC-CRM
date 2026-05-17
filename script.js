@@ -4575,7 +4575,8 @@ In a production system, this would show the actual file contents.
             const evtsHtml = visibleActs.map(a => {
                 if (a._isBirthday) {
                     const p = a._person;
-                    return `<div class="mcal-evt allday" onclick="event.stopPropagation();app.mcalDayClick('${k}')">🎂 ${_mhomeEsc(String(p.full_name||'').split(' ')[0])}</div>`;
+                    const fname = String(p.full_name || '').split(' ')[0];
+                    return `<div class="mcal-evt allday" title="🎂 ${_mhomeEsc(p.full_name||fname)}'s Birthday" onclick="event.stopPropagation();app.mcalDayClick('${k}')">🎂 ${_mhomeEsc(fname)}</div>`;
                 }
                 const time = (a.start_time || '00:00').slice(0, 5);
                 const color = _mcalColorForType(a.activity_type);
