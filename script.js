@@ -4832,7 +4832,8 @@ In a production system, this would show the actual file contents.
             rows = tableRows || [];
             if (agentRows) {
                 _mpAgentMap = new Map(
-                    agentRows.filter(u => u.agent_code).map(u => [String(u.id), u.agent_code])
+                    agentRows.filter(u => u.agent_code || u.full_name)
+                             .map(u => [String(u.id), { code: u.agent_code || '', name: u.full_name || '' }])
                 );
             }
         } catch (_) { rows = []; }
@@ -4870,9 +4871,13 @@ In a production system, this would show the actual file contents.
             const init = _mhomeInitials(p.full_name);
             const pal = palettes[(p.id || i) % palettes.length];
             const phone = _mhomeEsc(p.phone || '');
-            const status = p.status || (isCust ? 'active' : 'new');
-            const score = p.score || '';
-            const agentCode = p.responsible_agent_id ? (_mpAgentMap?.get(String(p.responsible_agent_id)) || '') : '';
+            const agentEntry = p.responsible_agent_id ? (_mpAgentMap?.get(String(p.responsible_agent_id)) || null) : null;
+            const agentCode = agentEntry?.code || '';
+            const agentName = agentEntry?.name || '';
+            const lastActRaw = p.last_activity_date || '';
+            const lastAct = lastActRaw
+                ? new Date(lastActRaw).toLocaleDateString('en-MY', { day: 'numeric', month: 'short' })
+                : '';
             const fn = isCust ? 'showCustomerDetail' : 'showProspectDetail';
             return `
             <button class="mp-card pal-${pal}" onclick="app.${fn}(${p.id})">
@@ -4883,8 +4888,8 @@ In a production system, this would show the actual file contents.
                         ${agentCode ? `<span class="mp-card-agent">${_mhomeEsc(agentCode)}</span>` : ''}
                     </div>
                     <div class="mp-card-meta">
-                        <span class="mp-chip status">${_mhomeEsc(status)}</span>
-                        ${score ? `<span class="mp-chip score">${_mhomeEsc(String(score))}</span>` : ''}
+                        ${lastAct ? `<span class="mp-chip date">${_mhomeEsc(lastAct)}</span>` : ''}
+                        ${agentName ? `<span class="mp-chip agent">${_mhomeEsc(agentName)}</span>` : ''}
                     </div>
                 </div>
                 <div class="mp-card-actions">
