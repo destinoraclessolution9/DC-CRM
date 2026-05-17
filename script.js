@@ -28898,7 +28898,7 @@ const showAgentProfile = async (agentId) => {
                     </div>
                     <div class="stat-row">
                         <span class="stat-label">Comm. Rate:</span>
-                        <span class="stat-value">${agent.commission_rate}%</span>
+                        <span class="stat-value">${agent.commission_rate != null ? agent.commission_rate + '%' : 'N/A'}</span>
                     </div>
                     <div class="stat-row">
                         <span class="stat-label">Reporting To:</span>
@@ -29081,7 +29081,7 @@ const showAgentDetail = showAgentProfile;
                             </div>
                             <div class="stat-row">
                                 <span class="stat-label">Comm. Rate:</span>
-                                <span class="stat-value">${agent.commission_rate}%</span>
+                                <span class="stat-value">${agent.commission_rate != null ? agent.commission_rate + '%' : 'N/A'}</span>
                             </div>
                             <div class="stat-row">
                                 <span class="stat-label">Reporting To:</span>
