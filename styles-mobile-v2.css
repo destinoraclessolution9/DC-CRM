@@ -1267,7 +1267,7 @@
     .mcal-evt.pink   { background:#FFE0E6; color:#A91C42; border-left:2px solid var(--mc-pink-hot); }
     .mcal-evt.peach  { background:#FFE5D0; color:#A0522D; border-left:2px solid #E89060; }
     .mcal-evt.green  { background:var(--mc-green-soft); color:#0E7935; border-left:2px solid var(--mc-green); }
-    .mcal-evt.allday { background:linear-gradient(135deg,#FFD9C2,#FFE5D0); color:#9A4A1F; border-left:2px solid #E89060; font-weight:700; }
+    .mcal-evt.allday { background:linear-gradient(135deg,#FCE7F3,#FBCFE8); color:#9D174D; border-left:2px solid #EC4899; font-weight:800; font-size:10px; letter-spacing:0.1px; }
     .mcal-cell .more { font-size:9.5px; color:var(--mc-red); font-weight:700; display:inline-block; margin-top:2px; cursor:pointer; }
     .mcal-cell .pip { position:absolute; bottom:6px; left:50%; transform:translateX(-50%); width:4px; height:4px; border-radius:50%; background:var(--mc-red); }
     .mcal-cell .pip.purple { background:var(--mc-purple); }
