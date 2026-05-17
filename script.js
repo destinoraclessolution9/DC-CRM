@@ -4678,15 +4678,37 @@ In a production system, this would show the actual file contents.
         await showMobileCalendarView(document.getElementById('content-viewport'));
     };
     const mcalDayClick = (dateStr) => {
-        const dayActs = (_mcalByDate.get(dateStr) || []).filter(a => !a._isBirthday);
-        const sorted = [...dayActs].sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
+        const allDay    = _mcalByDate.get(dateStr) || [];
+        const dayBdays  = allDay.filter(a => a._isBirthday);
+        const dayActs   = allDay.filter(a => !a._isBirthday);
+        const sorted    = [...dayActs].sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
 
         const d = new Date(dateStr + 'T00:00:00');
-        const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+        const days   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
         const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
         const dateLabel = `${days[d.getDay()]}, ${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
 
-        const rows = sorted.map(a => {
+        // Birthday cards — shown at the top of the modal
+        const bdayRows = dayBdays.map(a => {
+            const p = a._person;
+            const dob = p.date_of_birth || '';
+            let ageStr = '';
+            if (dob.length >= 4) {
+                const age = d.getFullYear() - parseInt(dob.slice(0, 4));
+                if (age > 0 && age < 120) ageStr = ` · Turning ${age}`;
+            }
+            return `
+                <div style="display:flex;align-items:center;gap:12px;padding:12px 10px;margin-bottom:6px;background:linear-gradient(90deg,#FDF2F8,#fff);border-radius:10px;border:1px solid #FBCFE8;">
+                    <div style="font-size:26px;flex-shrink:0;">🎂</div>
+                    <div style="flex:1;min-width:0;">
+                        <div style="font-size:15px;font-weight:700;color:#9D174D;">${_mhomeEsc(p.full_name || '—')}</div>
+                        <div style="font-size:12px;color:#BE185D;margin-top:2px;">Birthday${ageStr}</div>
+                    </div>
+                </div>`;
+        }).join('');
+
+        // Regular activity rows
+        const actRows = sorted.map(a => {
             const time = (a.start_time || '').slice(0, 5);
             const type = a.activity_type || '';
             const pid = a.prospect_id || a.customer_id;
@@ -4706,9 +4728,12 @@ In a production system, this would show the actual file contents.
                 </div>`;
         }).join('');
 
+        const isEmpty = dayBdays.length === 0 && sorted.length === 0;
         UI.showModal(dateLabel, `
             <div style="margin:-8px -4px;">
-                ${sorted.length > 0 ? rows : '<div style="text-align:center;padding:28px;color:var(--gray-400);font-size:13px;">No activities on this day</div>'}
+                ${bdayRows}
+                ${actRows}
+                ${isEmpty ? '<div style="text-align:center;padding:28px;color:var(--gray-400);font-size:13px;">No activities on this day</div>' : ''}
             </div>
         `, [
             { label: '+ Add Meet Up', type: 'primary', action: `UI.hideModal();app.openActivityModal('${dateStr}')` },
