@@ -4430,13 +4430,24 @@ In a production system, this would show the actual file contents.
         const avatarUrl = _currentUser?.avatar_url
             || `https://ui-avatars.com/api/?name=${encodeURIComponent(_currentUser?.full_name || 'U')}&background=8B0000&color=fff`;
 
-        // Instant snapshot restore — paint last session's grid immediately
+        // ── Persistent cache helpers (survive tab-close unlike sessionStorage) ──
+        const _lsGet = (key, ttl) => {
+            try {
+                const raw = localStorage.getItem(key);
+                if (!raw) return null;
+                const { ts, val } = JSON.parse(raw);
+                if (Date.now() - ts > ttl) { localStorage.removeItem(key); return null; }
+                return val;
+            } catch(_) { return null; }
+        };
+        const _lsSet = (key, val) => {
+            try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), val })); } catch(_) {}
+        };
+
+        // A: Instant snapshot restore — persists 15 min across sessions
         const _mcalSnapKey = `mcal-snap-${_mcalYear}-${_mcalMonth}`;
-        let _mcalCachedGrid, _mcalCachedComing;
-        try {
-            _mcalCachedGrid = sessionStorage.getItem(_mcalSnapKey);
-            _mcalCachedComing = sessionStorage.getItem(_mcalSnapKey + '-coming');
-        } catch(_) {}
+        const _mcalCachedGrid   = _lsGet(_mcalSnapKey,           15 * 60 * 1000);
+        const _mcalCachedComing = _lsGet(_mcalSnapKey + '-coming', 15 * 60 * 1000);
         const _mcalInitGrid = _mcalCachedGrid
             || Array.from({length: 42}).map(() => '<div class="mcal-cell muted"></div>').join('');
 
@@ -4483,14 +4494,10 @@ In a production system, this would show the actual file contents.
         const visibleIds = (typeof getVisibleUserIds === 'function')
             ? await getVisibleUserIds(_currentUser).catch(() => 'all') : 'all';
 
-        // Build the date range as scopeValues so we get a single IN query.
-        const monthDates = [];
-        for (let d = 1; d <= daysInMonth; d++) {
-            monthDates.push(`${_mcalYear}-${String(_mcalMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`);
-        }
+        // C: gte/lte range replaces 31-item IN list — faster Postgres plan
         const actQueryOpts = {
-            scopeField: 'activity_date',
-            scopeValues: monthDates,
+            gte: { activity_date: monthStartStr },
+            lte: { activity_date: monthEndStr },
             sort: 'start_time', sortDir: 'asc',
             limit: 1000, offset: 0, countMode: null,
         };
@@ -4501,16 +4508,24 @@ In a production system, this would show the actual file contents.
             ];
         }
 
+        // B: Serve prospects + customers from 60-min localStorage cache
+        const _PEOPLE_KEY = 'mcal-people-v1';
+        let allPeople = _lsGet(_PEOPLE_KEY, 60 * 60 * 1000);
+        const _needPeople = !allPeople;
+
         const [actResult, allProspectsR, allCustomersR, draftsR, refillsR] = await Promise.all([
             AppDataStore.queryAdvanced('activities', actQueryOpts).catch(() => ({ data: [] })),
-            AppDataStore.getAll('prospects').catch(() => []),
-            AppDataStore.getAll('customers').catch(() => []),
+            _needPeople ? AppDataStore.getAll('prospects').catch(() => []) : Promise.resolve([]),
+            _needPeople ? AppDataStore.getAll('customers').catch(() => []) : Promise.resolve([]),
             AppDataStore.getAll('follow_up_drafts').catch(() => []),
             AppDataStore.query('refill_reminders', { status: 'pending' }).catch(() => []),
         ]);
 
+        if (_needPeople) {
+            allPeople = [...(allProspectsR || []), ...(allCustomersR || [])];
+            _lsSet(_PEOPLE_KEY, allPeople);
+        }
         const activities = (actResult.data || []).filter(a => a.activity_type !== 'EVENT');
-        const allPeople = [...(allProspectsR || []), ...(allCustomersR || [])];
         const personMap = new Map(allPeople.map(p => [String(p.id), p]));
         _mcalPersonMap = personMap;
 
@@ -4590,7 +4605,7 @@ In a production system, this would show the actual file contents.
         const grid = document.getElementById('mcal-grid');
         if (grid) {
             grid.innerHTML = cells.join('');
-            try { sessionStorage.setItem(_mcalSnapKey, cells.join('')); } catch(_) {}
+            _lsSet(_mcalSnapKey, cells.join(''));
         }
 
         // ── Coming-up strip ─────────────────────────────────────
@@ -4640,7 +4655,7 @@ In a production system, this would show the actual file contents.
                     </button>
                 </div>
             </div>`;
-            try { sessionStorage.setItem(_mcalSnapKey + '-coming', comingHost.innerHTML); } catch(_) {}
+            _lsSet(_mcalSnapKey + '-coming', comingHost.innerHTML);
         }
     };
 
