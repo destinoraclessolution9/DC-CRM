@@ -24368,6 +24368,14 @@ function _wireLoginBtn() {
                     .meet-txt{font-size:13px;color:var(--gray-700);line-height:1.5;}
                     .meet-actions{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;}
                     .meet-photos{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;}
+                    .meet-summary{padding:10px 0 4px;border-top:1px solid var(--gray-100);margin-top:2px;}
+                    .meet-summary-hdr{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--gray-400);margin-bottom:10px;}
+                    .msf{margin-bottom:10px;}
+                    .msf:last-child{margin-bottom:4px;}
+                    .msf-lbl{display:block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--primary);margin-bottom:3px;}
+                    .msf-txt{margin:0;font-size:13px;line-height:1.6;color:var(--gray-700);white-space:pre-wrap;word-break:break-word;}
+                    .msf-txt.action{color:var(--primary);font-weight:500;}
+                    .msf-empty{font-size:12.5px;color:var(--gray-400);font-style:italic;text-align:center;padding:4px 0 10px;}
                     .na-item{display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--gray-100);}
                     .na-item:last-child{border-bottom:none;}
                     .na-item input[type=checkbox]{width:18px;height:18px;margin-top:1px;flex-shrink:0;accent-color:var(--primary);cursor:pointer;}
@@ -24714,46 +24722,24 @@ function _wireLoginBtn() {
                             </div>
                             <button class="btn btn-sm secondary" style="font-size:12px;padding:4px 8px;" onclick="event.stopPropagation();app.viewActivityDetails(${a.id})">Details</button>
                         </div>
-                        ${(a.core_problem || a.summary) ? `
-                        <div class="meet-section">
-                            <div class="meet-lbl">Core Problem</div>
-                            <div class="meet-txt">${a.core_problem || a.summary}</div>
-                        </div>` : ''}
-                        ${a.note_key_points ? `
-                        <div class="meet-section">
-                            <div class="meet-lbl">Key Points</div>
-                            <div class="meet-txt">${a.note_key_points}</div>
-                        </div>` : ''}
-                        ${a.note_needs ? `
-                        <div class="meet-section">
-                            <div class="meet-lbl">Customer Needs</div>
-                            <div class="meet-txt">${a.note_needs}</div>
-                        </div>` : ''}
-                        ${a.note_pain_points ? `
-                        <div class="meet-section">
-                            <div class="meet-lbl">Pain Points</div>
-                            <div class="meet-txt">${a.note_pain_points}</div>
-                        </div>` : ''}
-                        ${a.note_outcome ? `
-                        <div class="meet-section">
-                            <div class="meet-lbl">Outcome</div>
-                            <div class="meet-txt">${a.note_outcome}</div>
-                        </div>` : ''}
-                        ${a.note_next_steps ? `
-                        <div class="meet-section">
-                            <div class="meet-lbl">Next Steps</div>
-                            <div class="meet-txt" style="color:var(--primary);font-weight:500;">${a.note_next_steps}</div>
-                        </div>` : ''}
-                        ${a.opportunity_potential ? `
-                        <div class="meet-section">
-                            <div class="meet-lbl">Opportunity Potential</div>
-                            <div class="meet-txt">${a.opportunity_potential}</div>
-                        </div>` : ''}
-                        ${a.next_action ? `
-                        <div class="meet-section">
-                            <div class="meet-lbl">Next Action</div>
-                            <div class="meet-txt" style="color:var(--primary);font-weight:500;">${a.next_action}</div>
-                        </div>` : ''}
+                        ${(() => {
+                            const _esc = s => s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : '';
+                            const fields = [
+                                { lbl: 'Core Problem',            val: a.core_problem || a.summary },
+                                { lbl: 'Key Points Discussed',    val: a.note_key_points },
+                                { lbl: 'Customer Needs',          val: a.note_needs },
+                                { lbl: 'Pain Points',             val: a.note_pain_points },
+                                { lbl: 'Opportunity / Potential', val: a.opportunity_potential },
+                                { lbl: 'Next Steps',              val: a.note_next_steps,  action: true },
+                                { lbl: 'Next Action',             val: a.next_action,      action: true },
+                                { lbl: 'Outcome',                 val: a.note_outcome },
+                            ].filter(f => f.val);
+                            if (!fields.length) return `<div class="meet-summary"><div class="msf-empty">No discussion notes yet — tap <b>Notes</b> to add.</div></div>`;
+                            return `<div class="meet-summary">
+                                <div class="meet-summary-hdr"><i class="fas fa-file-alt"></i>&nbsp; Discussion Notes</div>
+                                ${fields.map(f => `<div class="msf"><span class="msf-lbl">${f.lbl}</span><p class="msf-txt${f.action ? ' action' : ''}">${_esc(f.val)}</p></div>`).join('')}
+                            </div>`;
+                        })()}
                         ${a.score_value ? `<div style="margin-bottom:6px;"><span class="badge success" style="font-size:11px;">+${a.score_value} pts</span></div>` : ''}
                         <div class="meet-actions">
                             <button class="btn btn-sm secondary" onclick="event.stopPropagation();app.attachActivityPhoto(${a.id})"><i class="fas fa-camera"></i> Photo</button>
