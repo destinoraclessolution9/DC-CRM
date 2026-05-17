@@ -28825,7 +28825,10 @@ const showAgentProfile = async (agentId) => {
     const reportingToName = reportingToUser ? reportingToUser.full_name : '—';
     const calculateDaysDiff = (expiryDate) => {
         if (!expiryDate) return 0;
-        const diff = Math.ceil((new Date(expiryDate) - new Date()) / (1000 * 60 * 60 * 24));
+        const today = new Date(); today.setHours(0, 0, 0, 0);
+        const expiry = new Date(expiryDate + 'T00:00:00');
+        if (isNaN(expiry.getTime())) return 0;
+        const diff = Math.ceil((expiry - today) / (1000 * 60 * 60 * 24));
         return diff > 0 ? diff : 0;
     };
 
@@ -28877,7 +28880,7 @@ const showAgentProfile = async (agentId) => {
                     <span class="status-badge status-${agent.status}">${agent.status?.toUpperCase() || 'ACTIVE'}</span>
                 </div>
                 <div style="display:flex; gap:12px; color:var(--gray-500); font-size:14px;">
-                    <span>Agent ID: ${agent.agent_code}</span>
+                    <span>Agent ID: ${agent.agent_code || '—'}</span>
                     <span><i class="fas fa-user-tie"></i> ${agent.role || 'Consultant'}</span>
                     <span><i class="fas fa-users"></i> ${agent.team || 'Sales'}</span>
                 </div>
@@ -29058,7 +29061,7 @@ const showAgentDetail = showAgentProfile;
                             <span class="status-badge status-${agent.status}">${agent.status.toUpperCase()}</span>
                         </div>
                         <div style="display:flex; gap:12px; color:var(--gray-500); font-size:14px;">
-                            <span>Agent ID: ${agent.agent_code}</span>
+                            <span>Agent ID: ${agent.agent_code || '—'}</span>
                             <span><i class="fas fa-user-tie"></i> Senior Consultant</span>
                             <span><i class="fas fa-users"></i> ${agent.team}</span>
                         </div>
@@ -29084,7 +29087,7 @@ const showAgentDetail = showAgentProfile;
                     <div class="license-stats">
                         <div class="license-stat">
                             <span class="license-stat-label">License Expiry</span>
-                            <span class="license-stat-value">${agent.license_expiry}</span>
+                            <span class="license-stat-value">${agent.license_expiry || '—'}</span>
                         </div>
                         <div class="license-stat">
                             <span class="license-stat-label">Days Remaining</span>
@@ -29121,7 +29124,7 @@ const showAgentDetail = showAgentProfile;
                             </div>
                             <div class="stat-row">
                                 <span class="stat-label">Comm. Rate:</span>
-                                <span class="stat-value">${agent.commission_rate}%</span>
+                                <span class="stat-value">${agent.commission_rate != null ? agent.commission_rate + '%' : '—'}</span>
                             </div>
                             <div class="stat-row">
                                 <span class="stat-label">Reporting To:</span>
@@ -29279,10 +29282,11 @@ const html = `
 
     const calculateDaysDiff = (dateStr) => {
         if (!dateStr) return 0;
-        const expiry = new Date(dateStr);
-        const today = new Date();
-        const diff = expiry - today;
-        return Math.ceil(diff / (1000 * 60 * 60 * 24));
+        const today = new Date(); today.setHours(0, 0, 0, 0);
+        const expiry = new Date(dateStr + 'T00:00:00');
+        if (isNaN(expiry.getTime())) return 0;
+        const diff = Math.ceil((expiry - today) / (1000 * 60 * 60 * 24));
+        return diff > 0 ? diff : 0;
     };
 
     const renderFollowupStats = async (agentId) => {
