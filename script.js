@@ -4123,7 +4123,7 @@ In a production system, this would show the actual file contents.
                     <div class="mhome-greet-date">${_mhomeEsc(dateStr)}</div>
                 </div>
                 <div class="mhome-greet-actions">
-                    <div class="mhome-bell" onclick="(window._notifBellEl=document.querySelector('.notif-bell'))&&_notifBellEl.click()" role="button" aria-label="Notifications">
+                    <div class="mhome-bell" onclick="app.toggleNotifPanel()" role="button" aria-label="Notifications">
                         <i class="far fa-bell"></i><span class="dot"></span>
                     </div>
                     <div class="mhome-avatar" onclick="app.openMobileDrawer()" role="button" aria-label="Profile" style="background-image:url('${_mhomeEsc(avatarUrl)}')"></div>
@@ -8974,7 +8974,6 @@ function _wireLoginBtn() {
         const bell = document.querySelector('.notif-bell');
         if (!bell || bell._notifWired) return;
         bell._notifWired = true;
-        bell.addEventListener('click', e => { e.stopPropagation(); toggleNotifPanel(); });
 
         const refreshIfVisible = () => { if (!document.hidden) _refreshNotifBadge(); };
         // Initial load
@@ -28894,7 +28893,7 @@ const showAgentProfile = async (agentId) => {
                 </div>
                 <div class="license-stat">
                     <span class="license-stat-label">Days Remaining</span>
-                    <span class="license-stat-value" style="color:${calculateDaysDiff(agent.license_expiry) < 30 ? '#ef4444' : '#0369a1'}">${calculateDaysDiff(agent.license_expiry)} Days</span>
+                    <span class="license-stat-value" style="color:${calculateDaysDiff(agent.license_expiry || '2026-12-31') < 30 ? '#ef4444' : '#0369a1'}">${calculateDaysDiff(agent.license_expiry || '2026-12-31')} Days</span>
                 </div>
                 <div class="license-stat">
                     <span class="license-stat-label">Renewal Status</span>
@@ -28902,7 +28901,7 @@ const showAgentProfile = async (agentId) => {
                 </div>
             </div>
             <div class="license-actions">
-                <button class="btn primary" onclick="app.renewLicense(${agent.id})" ${calculateDaysDiff(agent.license_expiry) > 60 ? 'disabled' : ''}>Renew Now</button>
+                <button class="btn primary" onclick="app.renewLicense(${agent.id})" ${calculateDaysDiff(agent.license_expiry || '2026-12-31') > 60 ? 'disabled' : ''}>Renew Now</button>
                 <button class="btn secondary" onclick="app.sendRenewalReminder(${agent.id})">Send Reminder</button>
             </div>
         </div>
@@ -28926,7 +28925,7 @@ const showAgentProfile = async (agentId) => {
                     </div>
                     <div class="stat-row">
                         <span class="stat-label">Comm. Rate:</span>
-                        <span class="stat-value">${agent.commission_rate}%</span>
+                        <span class="stat-value">${agent.commission_rate != null ? agent.commission_rate + '%' : '—'}</span>
                     </div>
                     <div class="stat-row">
                         <span class="stat-label">Reporting To:</span>
@@ -29076,7 +29075,7 @@ const showAgentDetail = showAgentProfile;
                         </div>
                         <div class="license-stat">
                             <span class="license-stat-label">Days Remaining</span>
-                            <span class="license-stat-value" style="color:${calculateDaysDiff(agent.license_expiry) < 30 ? '#ef4444' : '#0369a1'}">${calculateDaysDiff(agent.license_expiry)} Days</span>
+                            <span class="license-stat-value" style="color:${calculateDaysDiff(agent.license_expiry || '2026-12-31') < 30 ? '#ef4444' : '#0369a1'}">${calculateDaysDiff(agent.license_expiry || '2026-12-31')} Days</span>
                         </div>
                         <div class="license-stat">
                             <span class="license-stat-label">Renewal Status</span>
@@ -29084,7 +29083,7 @@ const showAgentDetail = showAgentProfile;
                         </div>
                     </div>
                     <div class="license-actions">
-                        <button class="btn primary" onclick="app.renewLicense(${agent.id})" ${calculateDaysDiff(agent.license_expiry) > 60 ? 'disabled' : ''}>Renew Now</button>
+                        <button class="btn primary" onclick="app.renewLicense(${agent.id})" ${calculateDaysDiff(agent.license_expiry || '2026-12-31') > 60 ? 'disabled' : ''}>Renew Now</button>
                         <button class="btn secondary" onclick="app.sendRenewalReminder(${agent.id})">Send Reminder</button>
                     </div>
                 </div>
@@ -49653,6 +49652,7 @@ JB 星期二到
         renewLicense,
         executeRenewal,
         sendRenewalReminder,
+        toggleNotifPanel,
         updateAgentTargets,
         saveAgentTargets,
         deactivateAgent,
