@@ -207,6 +207,23 @@ window.UI = (() => {
         }
     };
 
+    // --- Confirm dialog ---
+    const confirm = (title, message, onConfirm) => {
+        window._uiConfirmCb = async () => {
+            hideModal();
+            delete window._uiConfirmCb;
+            if (typeof onConfirm === 'function') await onConfirm();
+        };
+        showModal(
+            title,
+            `<p style="margin:0;line-height:1.6;">${message}</p>`,
+            [
+                { label: 'Confirm', type: 'primary', action: 'window._uiConfirmCb && window._uiConfirmCb()' },
+                { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }
+            ]
+        );
+    };
+
     // --- Formatters ---
     const formatDate = (d) => {
         if (!d) return '—';
@@ -225,6 +242,7 @@ window.UI = (() => {
         toast,
         showModal,
         hideModal,
+        confirm,
         formatDate,
         formatNumber,
         escapeHtml,

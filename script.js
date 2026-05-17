@@ -28821,7 +28821,7 @@ const showAgentProfile = async (agentId) => {
                     <span class="status-badge status-${agent.status}">${agent.status?.toUpperCase() || 'ACTIVE'}</span>
                 </div>
                 <div style="display:flex; gap:12px; color:var(--gray-500); font-size:14px;">
-                    <span>Agent ID: ${agent.agent_code}</span>
+                    <span>Agent ID: ${agent.agent_code || 'AG-' + String(agent.id).padStart(4, '0')}</span>
                     <span><i class="fas fa-user-tie"></i> ${agent.role || 'Consultant'}</span>
                     <span><i class="fas fa-users"></i> ${agent.team || 'Sales'}</span>
                 </div>
@@ -28850,7 +28850,7 @@ const showAgentProfile = async (agentId) => {
                 </div>
                 <div class="license-stat">
                     <span class="license-stat-label">Days Remaining</span>
-                    <span class="license-stat-value" style="color:${calculateDaysDiff(agent.license_expiry) < 30 ? '#ef4444' : '#0369a1'}">${calculateDaysDiff(agent.license_expiry)} Days</span>
+                    <span class="license-stat-value" style="color:${calculateDaysDiff(agent.license_expiry || '2026-12-31') < 30 ? '#ef4444' : '#0369a1'}">${calculateDaysDiff(agent.license_expiry || '2026-12-31')} Days</span>
                 </div>
                 <div class="license-stat">
                     <span class="license-stat-label">Renewal Status</span>
@@ -28858,7 +28858,7 @@ const showAgentProfile = async (agentId) => {
                 </div>
             </div>
             <div class="license-actions">
-                <button class="btn primary" onclick="app.renewLicense(${agent.id})" ${calculateDaysDiff(agent.license_expiry) > 60 ? 'disabled' : ''}>Renew Now</button>
+                <button class="btn primary" onclick="app.renewLicense(${agent.id})" ${calculateDaysDiff(agent.license_expiry || '2026-12-31') > 60 ? 'disabled' : ''}>Renew Now</button>
                 <button class="btn secondary" onclick="app.sendRenewalReminder(${agent.id})">Send Reminder</button>
             </div>
         </div>
@@ -29002,7 +29002,7 @@ const showAgentDetail = showAgentProfile;
                             <span class="status-badge status-${agent.status}">${agent.status.toUpperCase()}</span>
                         </div>
                         <div style="display:flex; gap:12px; color:var(--gray-500); font-size:14px;">
-                            <span>Agent ID: ${agent.agent_code}</span>
+                            <span>Agent ID: ${agent.agent_code || 'AG-' + String(agent.id).padStart(4, '0')}</span>
                             <span><i class="fas fa-user-tie"></i> Senior Consultant</span>
                             <span><i class="fas fa-users"></i> ${agent.team}</span>
                         </div>
@@ -29028,11 +29028,11 @@ const showAgentDetail = showAgentProfile;
                     <div class="license-stats">
                         <div class="license-stat">
                             <span class="license-stat-label">License Expiry</span>
-                            <span class="license-stat-value">${agent.license_expiry}</span>
+                            <span class="license-stat-value">${agent.license_expiry || '2026-12-31'}</span>
                         </div>
                         <div class="license-stat">
                             <span class="license-stat-label">Days Remaining</span>
-                            <span class="license-stat-value" style="color:${calculateDaysDiff(agent.license_expiry) < 30 ? '#ef4444' : '#0369a1'}">${calculateDaysDiff(agent.license_expiry)} Days</span>
+                            <span class="license-stat-value" style="color:${calculateDaysDiff(agent.license_expiry || '2026-12-31') < 30 ? '#ef4444' : '#0369a1'}">${calculateDaysDiff(agent.license_expiry || '2026-12-31')} Days</span>
                         </div>
                         <div class="license-stat">
                             <span class="license-stat-label">Renewal Status</span>
@@ -29040,7 +29040,7 @@ const showAgentDetail = showAgentProfile;
                         </div>
                     </div>
                     <div class="license-actions">
-                        <button class="btn primary" onclick="app.renewLicense(${agent.id})" ${calculateDaysDiff(agent.license_expiry) > 60 ? 'disabled' : ''}>Renew Now</button>
+                        <button class="btn primary" onclick="app.renewLicense(${agent.id})" ${calculateDaysDiff(agent.license_expiry || '2026-12-31') > 60 ? 'disabled' : ''}>Renew Now</button>
                         <button class="btn secondary" onclick="app.sendRenewalReminder(${agent.id})">Send Reminder</button>
                     </div>
                 </div>
