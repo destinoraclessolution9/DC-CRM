@@ -373,14 +373,16 @@ Deno.serve(async (req: Request) => {
         if (!seenEventIds.has(eid)) { seenEventIds.add(eid); dedupedEvents.push(e); }
       }
 
-      // Today's birthdays from prospects and customers
-      const [bdayProspects, bdayCustomers]: [any[], any[]] = await Promise.all([
+      // Today's birthdays from prospects, customers, and agents
+      const [bdayProspects, bdayCustomers, bdayAgents]: [any[], any[], any[]] = await Promise.all([
         pgSelect("prospects", `select=full_name&date_of_birth=like.*-${todayMMDD}&status=neq.inactive`),
         pgSelect("customers", `select=full_name&date_of_birth=like.*-${todayMMDD}`),
+        pgSelect("users", `select=full_name&date_of_birth=like.*-${todayMMDD}&status=eq.active`),
       ]);
       const birthdayNames = [
         ...bdayProspects.map((p: any) => p.full_name),
         ...bdayCustomers.map((c: any) => c.full_name),
+        ...bdayAgents.map((u: any) => u.full_name ? `${u.full_name} (Agent)` : null),
       ].filter(Boolean);
 
       // --- Per-user notification ---

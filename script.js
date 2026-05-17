@@ -4154,12 +4154,13 @@ In a production system, this would show the actual file contents.
             ];
         }
 
-        const [actResult, allProspectsR, allCustomersR, draftsR, refillsR] = await Promise.all([
+        const [actResult, allProspectsR, allCustomersR, draftsR, refillsR, allUsersR] = await Promise.all([
             AppDataStore.queryAdvanced('activities', actQueryOpts).catch(() => ({ data: [] })),
             AppDataStore.getAll('prospects').catch(() => []),
             AppDataStore.getAll('customers').catch(() => []),
             AppDataStore.getAll('follow_up_drafts').catch(() => []),
             AppDataStore.query('refill_reminders', { status: 'pending' }).catch(() => []),
+            AppDataStore.getAll('users').catch(() => []),
         ]);
 
         const activities = (actResult.data || []).filter(a => a.activity_type !== 'EVENT');
@@ -4169,7 +4170,7 @@ In a production system, this would show the actual file contents.
         const visibleDrafts = (draftsR || []).filter(d =>
             d.status === 'pending' && (d.due_date || '') <= todayStr && _isMine(d)
         );
-        const birthdays = allPeople.filter(p => {
+        const birthdays = [...allPeople, ...(allUsersR || [])].filter(p => {
             const dob = p.date_of_birth || '';
             if (!dob || dob.length < 5) return false;
             const md = dob.slice(5, 10);
@@ -4244,11 +4245,12 @@ In a production system, this would show the actual file contents.
             if (bday) {
                 const isToday = (bday.date_of_birth || '').slice(5,10) === todayMD;
                 const phone = _mhomeEsc(bday.phone || '');
+                const isAgent = !!bday.role;
                 rows.push(`
                 <div class="mhome-att-row birthday">
                     <div class="mhome-att-avatar"><i class="fas fa-gift"></i></div>
                     <div class="mhome-att-text">
-                        <div class="mhome-att-name">${_mhomeEsc(bday.full_name || '—')}</div>
+                        <div class="mhome-att-name">${_mhomeEsc(bday.full_name || '—')}${isAgent ? ' <span style="font-size:10px;color:var(--gray-400);">Agent</span>' : ''}</div>
                         <div class="mhome-att-need">${isToday ? 'Birthday today' : 'Birthday tomorrow'}</div>
                         <div class="mhome-att-sub">Send your wishes</div>
                     </div>
@@ -8818,10 +8820,10 @@ function _wireLoginBtn() {
             const todayMD = mmdd(today);
             const tom = new Date(today); tom.setDate(tom.getDate()+1);
             const tomMD = mmdd(tom);
-            const [allProspects, allCustomers] = await Promise.all([
-                AppDataStore.getAll('prospects'), AppDataStore.getAll('customers')
+            const [allProspects, allCustomers, allUsers] = await Promise.all([
+                AppDataStore.getAll('prospects'), AppDataStore.getAll('customers'), AppDataStore.getAll('users')
             ]);
-            const birthdayPeople = [...allProspects, ...allCustomers].filter(p => {
+            const birthdayPeople = [...allProspects, ...allCustomers, ...allUsers].filter(p => {
                 const dob = p.date_of_birth || '';
                 if (!dob || dob.length < 5) return false;
                 const md = dob.slice(5, 10); // MM-DD
@@ -8878,9 +8880,10 @@ function _wireLoginBtn() {
         }
 
         // Birthdays
-        const [allProspects, allCustomers] = await Promise.all([
-            AppDataStore.getAll('prospects'), AppDataStore.getAll('customers')
+        const [allProspects, allCustomers, allUsers] = await Promise.all([
+            AppDataStore.getAll('prospects'), AppDataStore.getAll('customers'), AppDataStore.getAll('users')
         ]);
+        const bdayClientSet = new Set();
         [...allProspects, ...allCustomers].forEach(p => {
             const dob = p.date_of_birth || '';
             if (!dob || dob.length < 5) return;
@@ -8889,6 +8892,16 @@ function _wireLoginBtn() {
             const isTom   = md === tomMD;
             if (!isToday && !isTom) return;
             items.push({ icon: '🎂', title: `${p.full_name || 'Someone'}'s Birthday`, sub: isToday ? 'Today!' : 'Tomorrow' });
+            bdayClientSet.add(p.id);
+        });
+        allUsers.forEach(u => {
+            const dob = u.date_of_birth || '';
+            if (!dob || dob.length < 5) return;
+            const md = dob.slice(5, 10);
+            const isToday = md === todayMD;
+            const isTom   = md === tomMD;
+            if (!isToday && !isTom) return;
+            items.push({ icon: '🎂', title: `${u.full_name || 'Agent'}'s Birthday`, sub: (isToday ? 'Today!' : 'Tomorrow') + ' · Agent' });
         });
 
         // Refill reminders
