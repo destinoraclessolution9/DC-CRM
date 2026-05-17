@@ -3915,6 +3915,7 @@ In a production system, this would show the actual file contents.
             items: [
                 { view: 'protection',         label: 'Protection Monitor',  icon: 'fas fa-shield-alt' },
                 { view: 'integrations',       label: 'Integrations',        icon: 'fas fa-plug' },
+                { view: 'egg_purchasing',     label: 'Egg Purchasing',      icon: 'fas fa-egg' },
                 { view: 'formula_purchaser',  label: 'Formula Purchaser',   icon: 'fas fa-flask' },
                 { view: 'stock_take',         label: 'Stock Take',          icon: 'fas fa-boxes' },
             ]
@@ -3922,7 +3923,7 @@ In a production system, this would show the actual file contents.
     ];
 
     // Map drawer view names → nav ID suffix (only where they differ)
-    const _drawerViewToNavId = { 'marketing_automation': 'marketing-automation', 'formula_purchaser': 'formula-purchaser', 'stock_take': 'stock-take' };
+    const _drawerViewToNavId = { 'marketing_automation': 'marketing-automation', 'egg_purchasing': 'egg-purchasing', 'formula_purchaser': 'formula-purchaser', 'stock_take': 'stock-take' };
 
     // Returns the set of allowed nav IDs for the current user (mirrors updateNavVisibility logic)
     const _getAllowedNavIds = () => {
