@@ -4771,6 +4771,7 @@ In a production system, this would show the actual file contents.
     // Card-based mobile-only listing matching the home/calendar brand
     // language. Shares data with the desktop prospects/customers views.
     let _mpTab = 'prospects';   // 'prospects' | 'customers'
+    let _mpAgentMap = null;     // id → agent_code, loaded once per session
     let _mpSearch = '';
     const showMobileProspectsView = async (viewport) => {
         if (!viewport) return;
@@ -4824,7 +4825,16 @@ In a production system, this would show the actual file contents.
 
         let rows = [];
         try {
-            rows = await AppDataStore.getAll(table) || [];
+            const [tableRows, agentRows] = await Promise.all([
+                AppDataStore.getAll(table),
+                _mpAgentMap ? Promise.resolve(null) : AppDataStore.getAll('users').catch(() => []),
+            ]);
+            rows = tableRows || [];
+            if (agentRows) {
+                _mpAgentMap = new Map(
+                    agentRows.filter(u => u.agent_code).map(u => [String(u.id), u.agent_code])
+                );
+            }
         } catch (_) { rows = []; }
 
         // Scope by visibility for non-admins
@@ -4862,14 +4872,16 @@ In a production system, this would show the actual file contents.
             const phone = _mhomeEsc(p.phone || '');
             const status = p.status || (isCust ? 'active' : 'new');
             const score = p.score || '';
-            const sub = p.email || p.phone || (p.city ? p.city : '—');
+            const agentCode = p.responsible_agent_id ? (_mpAgentMap?.get(String(p.responsible_agent_id)) || '') : '';
             const fn = isCust ? 'showCustomerDetail' : 'showProspectDetail';
             return `
             <button class="mp-card pal-${pal}" onclick="app.${fn}(${p.id})">
                 <div class="mp-card-avatar">${_mhomeEsc(init)}</div>
                 <div class="mp-card-text">
-                    <div class="mp-card-name">${_mhomeEsc(p.full_name || 'Unknown')}</div>
-                    <div class="mp-card-sub">${_mhomeEsc(sub)}</div>
+                    <div class="mp-card-name-row">
+                        <div class="mp-card-name">${_mhomeEsc(p.full_name || 'Unknown')}</div>
+                        ${agentCode ? `<span class="mp-card-agent">${_mhomeEsc(agentCode)}</span>` : ''}
+                    </div>
                     <div class="mp-card-meta">
                         <span class="mp-chip status">${_mhomeEsc(status)}</span>
                         ${score ? `<span class="mp-chip score">${_mhomeEsc(String(score))}</span>` : ''}
