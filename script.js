@@ -8952,25 +8952,29 @@ function _wireLoginBtn() {
     };
 
     const toggleNotifPanel = async () => {
-        const existing = document.querySelector('.notif-panel');
-        if (existing) { existing.remove(); return; }
-        const panel = document.createElement('div');
-        panel.className = 'notif-panel';
-        panel.innerHTML = `<div class="notif-panel-header"><i class="fas fa-spinner fa-spin"></i> Loading…</div>`;
-        document.body.appendChild(panel);
-        // Close on outside click
-        setTimeout(() => {
-            document.addEventListener('click', function handler(e) {
-                if (!panel.contains(e.target) && !e.target.closest('.notif-bell')) {
-                    panel.remove();
-                    document.removeEventListener('click', handler);
-                }
-            });
-        }, 10);
         try {
-            panel.innerHTML = await _buildNotifPanel();
-        } catch (e) {
-            panel.innerHTML = '<div class="notif-panel-empty">Failed to load notifications.</div>';
+            const existing = document.querySelector('.notif-panel');
+            if (existing) { existing.remove(); return; }
+            const panel = document.createElement('div');
+            panel.className = 'notif-panel';
+            panel.innerHTML = `<div class="notif-panel-header"><i class="fas fa-spinner fa-spin"></i> Loading…</div>`;
+            document.body.appendChild(panel);
+            // Close on outside click
+            setTimeout(() => {
+                document.addEventListener('click', function handler(e) {
+                    if (!panel.contains(e.target) && !e.target.closest('.notif-bell')) {
+                        panel.remove();
+                        document.removeEventListener('click', handler);
+                    }
+                });
+            }, 10);
+            try {
+                panel.innerHTML = await _buildNotifPanel();
+            } catch (e) {
+                panel.innerHTML = '<div class="notif-panel-empty">Failed to load notifications.</div>';
+            }
+        } catch (outerErr) {
+            console.error('[notif] toggleNotifPanel failed:', outerErr);
         }
     };
 
@@ -28791,7 +28795,7 @@ const openAddSolutionModal = async (prospectId) => {
                     <td data-label="Follow-up">
                         <div class="followup-rate">
                             <span class="rate-indicator ${rateClass}"></span>
-                            <span>${stats.followup_rate}%</span>
+                            <span>${stats.followup_rate ?? 0}%</span>
                         </div>
                     </td>
                     <td onclick="event.stopPropagation()">
@@ -28826,7 +28830,8 @@ const showAgentProfile = async (agentId) => {
     const calculateDaysDiff = (expiryDate) => {
         if (!expiryDate) return 0;
         const today = new Date(); today.setHours(0, 0, 0, 0);
-        const expiry = new Date(expiryDate + 'T00:00:00');
+        const datePart = String(expiryDate).slice(0, 10);
+        const expiry = new Date(datePart + 'T00:00:00');
         if (isNaN(expiry.getTime())) return 0;
         const diff = Math.ceil((expiry - today) / (1000 * 60 * 60 * 24));
         return diff > 0 ? diff : 0;
@@ -28941,7 +28946,7 @@ const showAgentProfile = async (agentId) => {
                     </div>
                     <div class="stat-row">
                         <span class="stat-label">Comm. Rate:</span>
-                        <span class="stat-value">${agent.commission_rate != null ? agent.commission_rate + '%' : '—'}</span>
+                        <span class="stat-value">${(agent.commission_rate != null && !isNaN(parseFloat(agent.commission_rate))) ? parseFloat(agent.commission_rate) + '%' : '—'}</span>
                     </div>
                     <div class="stat-row">
                         <span class="stat-label">Reporting To:</span>
@@ -29124,7 +29129,7 @@ const showAgentDetail = showAgentProfile;
                             </div>
                             <div class="stat-row">
                                 <span class="stat-label">Comm. Rate:</span>
-                                <span class="stat-value">${agent.commission_rate != null ? agent.commission_rate + '%' : '—'}</span>
+                                <span class="stat-value">${(agent.commission_rate != null && !isNaN(parseFloat(agent.commission_rate))) ? parseFloat(agent.commission_rate) + '%' : '—'}</span>
                             </div>
                             <div class="stat-row">
                                 <span class="stat-label">Reporting To:</span>
