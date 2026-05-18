@@ -14611,10 +14611,10 @@ function _wireLoginBtn() {
         const _calSnapKey = `cal-snap-${_currentDate.getFullYear()}-${_currentDate.getMonth()}`;
         const _calSnap = (() => {
             try {
-                const raw = sessionStorage.getItem(_calSnapKey);
+                const raw = localStorage.getItem(_calSnapKey);
                 if (!raw) return null;
                 const { ts, html } = JSON.parse(raw);
-                if (!ts || Date.now() - ts > 10 * 60 * 1000) return null; // 10-min TTL
+                if (!ts || Date.now() - ts > 30 * 60 * 1000) return null; // 30-min TTL
                 return html;
             } catch (_) { return null; }
         })();
@@ -14928,10 +14928,10 @@ function _wireLoginBtn() {
         if (myToken !== _renderCalendarToken) return;
         grid.innerHTML = html;
 
-        // Persist this render to sessionStorage so future navigations back to
-        // this month paint instantly (see snapshot restore near top of function).
+        // Persist this render to localStorage so future navigations back to
+        // this month paint instantly — survives tab close on Android.
         try {
-            sessionStorage.setItem(_calSnapKey, JSON.stringify({ ts: Date.now(), html }));
+            localStorage.setItem(_calSnapKey, JSON.stringify({ ts: Date.now(), html }));
         } catch (_) {}
 
         // Warm the activity-modal lookup caches in the background so the first
