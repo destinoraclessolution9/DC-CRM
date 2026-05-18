@@ -3923,7 +3923,7 @@ In a production system, this would show the actual file contents.
     ];
 
     // Map drawer view names → nav ID suffix (only where they differ)
-    const _drawerViewToNavId = { 'marketing_automation': 'marketing-automation', 'egg_purchasing': 'egg-purchasing', 'formula_purchaser': 'formula-purchaser', 'stock_take': 'stock-take' };
+    const _drawerViewToNavId = { 'marketing_automation': 'marketing-automation', 'egg_purchasing': 'egg-purchasing', 'formula_purchaser': 'formula-purchaser', 'stock_take': 'stock-take', 'boss_report': 'boss-report' };
 
     // Returns the set of allowed nav IDs for the current user (mirrors updateNavVisibility logic)
     const _getAllowedNavIds = () => {
@@ -7909,7 +7909,7 @@ In a production system, this would show the actual file contents.
         // Map Level 1-14 to visible nav IDs (suffix after 'nav-')
         const _l12 = ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'reports', 'documents', 'settings', 'fude', 'milestones'];
         const levelPermissions = {
-            1: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'purchases_history', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'import', 'integrations', 'settings', 'fude', 'milestones', 'custom_fields', 'egg-purchasing', 'standard-functions', 'formula-purchaser', 'stock-take'],
+            1: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'purchases_history', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'import', 'integrations', 'settings', 'fude', 'milestones', 'custom_fields', 'egg-purchasing', 'standard-functions', 'formula-purchaser', 'stock-take', 'boss-report'],
             2: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'import', 'integrations', 'settings', 'fude', 'milestones', 'custom_fields'],
             3: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'performance', 'reports', 'protection', 'documents', 'settings', 'fude'],
             4: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'performance', 'reports', 'protection', 'documents', 'settings', 'fude'],
@@ -7949,7 +7949,7 @@ In a production system, this would show the actual file contents.
             'performance', 'reports', 'risk', 'admin',
             'integrations', 'settings', 'milestones', 'fude',
             'custom_fields', 'egg-purchasing', 'standard-functions', 'formula-purchaser',
-            'purchases_history', 'stock-take'
+            'purchases_history', 'stock-take', 'boss-report'
         ];
 
         allNavIds.forEach(id => {
@@ -10323,7 +10323,7 @@ function _wireLoginBtn() {
             custom_fields: 'Custom Fields', settings: 'Settings', milestones: 'Milestones',
             fude: '福运相随', egg_purchasing: 'Egg Purchasing', standard_functions: 'Standard Functions',
             formula_purchaser: 'Formula Purchaser', purchases_history: 'Purchases History',
-            stock_take: 'Stock Take', ai: 'AI Insights', security: 'Security', admin: 'Admin',
+            stock_take: 'Stock Take', boss_report: 'Boss Report', ai: 'AI Insights', security: 'Security', admin: 'Admin',
             risk: 'Attrition Risk', nps: 'NPS Surveys',
             knowledge: 'Knowledge HQ',
         };
@@ -10455,6 +10455,14 @@ function _wireLoginBtn() {
             }
             _currentView = 'stock_take';
             await showStockTakeView(viewport);
+        } else if (viewId === 'boss_report') {
+            if (!isSystemAdmin(_currentUser)) {
+                UI.toast.error('Super Admin only');
+                await navigateTo('calendar');
+                return;
+            }
+            _currentView = 'boss_report';
+            await showBossReportView(viewport);
         } else {
             viewport.innerHTML = `
                 <div class="placeholder-view">
@@ -45837,6 +45845,414 @@ JB 星期二到
 
     // ==================== /EGG PURCHASING ====================
 
+    // ==================== BOSS REPORT (Super Admin only) ====================
+
+    let _brState = {
+        selectedRun: null,
+        salesFile: null, salesFileName: null,
+        trackingFile: null, trackingFileName: null,
+        skusMap: null,
+        reportText: null,
+    };
+
+    const _brGetSkus   = () => { try { const r = localStorage.getItem('br_skus');          return r ? JSON.parse(r) : null; } catch { return null; } };
+    const _brGetBals   = () => { try { const r = localStorage.getItem('br_balances');       return r ? JSON.parse(r) : {}; }  catch { return {}; }  };
+    const _brGetTgts   = (mk) => { try { const r = localStorage.getItem(`br_targets_${mk}`); return r ? JSON.parse(r) : {}; } catch { return {}; } };
+    const _brIsEgg     = (c) => { const s = String(c||'').toUpperCase(); return s.startsWith('FMLEGG')||s.startsWith('FMLENX')||s.startsWith('FWHEGG'); };
+
+    const _brMonthKey  = () => { const n=new Date(); return `${n.getFullYear()}_${String(n.getMonth()+1).padStart(2,'0')}`; };
+    const _brMonthBounds = () => {
+        const n = new Date();
+        const y = n.getFullYear(), m = String(n.getMonth()+1).padStart(2,'0');
+        return { start: `${y}-${m}-01`, end: `${y}-${m}-31` };
+    };
+
+    const _brParseSkusXlsx = async (buf) => {
+        await window._ensureXlsx();
+        const wb = XLSX.read(buf, { type: 'array' });
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(sheet);
+        const map = {};
+        for (const row of rows) {
+            const code = String(row['Product Code']||'').trim();
+            const group = String(row['Group']||'').trim();
+            const qty = Number(row['Quantities'])||1;
+            if (code && group) map[code] = { group, qty };
+        }
+        return map;
+    };
+
+    const _brParseSalesXlsx = async (buf, skusMap) => {
+        await window._ensureXlsx();
+        const wb = XLSX.read(buf, { type: 'array' });
+        const sheet = wb.Sheets['Itemised'];
+        if (!sheet) throw new Error('"Itemised" sheet not found in FORMULA Sales file');
+        const rows = XLSX.utils.sheet_to_json(sheet);
+        const sold = { KL: {}, PG: {} };
+        for (const row of rows) {
+            const pNum = String(row['Purchase Number']||'');
+            const code = String(row['Product Code']||'').trim();
+            const qty  = Number(row['Quantity'])||0;
+            if (_brIsEgg(code)) continue;
+            const region = pNum.startsWith('F') ? 'KL' : pNum.startsWith('P') ? 'PG' : null;
+            if (!region) continue;
+            const sku = skusMap[code];
+            if (!sku) continue;
+            const g = sku.group.trim();
+            sold[region][g] = (sold[region][g]||0) + qty * sku.qty;
+        }
+        return sold;
+    };
+
+    const _brParseTrackingCsv = (csvText, skusMap) => {
+        const rows = (typeof Papa!=='undefined')
+            ? Papa.parse(csvText, { header:true, skipEmptyLines:true }).data
+            : [];
+        const sold = { KL: {}, PG: {} };
+        for (const row of rows) {
+            const code    = String(row['Product Code']||'').trim();
+            const qty     = Number(row['Quantity'])||0;
+            const selfCol = String(row['Self Collection']||'');
+            const state   = String(row['States']||row['State']||'');
+            if (_brIsEgg(code)) continue;
+            let region;
+            if (selfCol.includes('Bay Avenue, PG')) region = 'PG';
+            else if (/johor/i.test(state)) continue; // JB not tracked in balance
+            else region = 'KL';
+            const sku = skusMap[code];
+            if (!sku) continue;
+            const g = sku.group.trim();
+            sold[region][g] = (sold[region][g]||0) + qty * sku.qty;
+        }
+        return sold;
+    };
+
+    const showBossReportView = async (container) => {
+        _currentView = 'boss_report';
+        if (!isSystemAdmin(_currentUser)) {
+            container.innerHTML = `<div class="placeholder-view"><h1>Access Denied</h1><p>Boss Report is restricted to Super Admin only.</p></div>`;
+            return;
+        }
+
+        const runs = (await AppDataStore.query('egg_run_history', {})||[])
+            .sort((a,b) => new Date(b.run_at)-new Date(a.run_at));
+
+        const bals = _brGetBals();
+        const mk   = _brMonthKey();
+        const tgts = _brGetTgts(mk);
+        const now  = new Date();
+        const monthLabel = now.toLocaleString('default', { month:'long', year:'numeric' });
+
+        _brState.skusMap = _brGetSkus();
+        const skusDate = localStorage.getItem('br_skus_date');
+
+        const runOpts = runs.map(r => {
+            const cartons = (r.totals?.KL?.GOLD||0)+(r.totals?.KL?.KING||0)+(r.totals?.PG?.GOLD||0)+(r.totals?.PG?.KING||0);
+            const label = `Week ${r.week_start_date} • ${r.run_at ? new Date(r.run_at).toLocaleString() : ''} • ${cartons} cartons`;
+            return `<option value="${r.id}">${label}</option>`;
+        }).join('');
+
+        const balGroups = [
+            { key:'oceanSold', label:'Ocean sold' },
+            { key:'yangPower', label:'Yang power sold' },
+            { key:'d3k2',      label:'D3k2 Sold' },
+            { key:'eyePlus',   label:'Eye+' },
+        ];
+        const tgtGroups = [
+            { key:'klCheras',  label:'KL Cheras + SG Puchong & Sunway' },
+            { key:'klKepong',  label:'KL Kepong' },
+            { key:'pgCenter',  label:'PG Center' },
+            { key:'pgMainland',label:'PG Mainland' },
+            { key:'pgSouth',   label:'PG South' },
+        ];
+
+        const balInputs = balGroups.map(g=>`
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+                <label style="width:160px;font-size:13px;color:var(--gray-700);">${g.label}</label>
+                <input type="number" id="br-bal-${g.key}" class="form-control" style="width:110px;"
+                    value="${bals[g.key]||''}" placeholder="0" min="0">
+            </div>`).join('');
+
+        const tgtInputs = tgtGroups.map(g=>`
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+                <label style="width:260px;font-size:13px;color:var(--gray-700);">${g.label}</label>
+                <input type="number" id="br-tgt-${g.key}" class="form-control" style="width:110px;"
+                    value="${tgts[g.key]||''}" placeholder="0" min="0">
+            </div>`).join('');
+
+        container.innerHTML = `
+        <div style="padding:24px;max-width:860px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+                <div>
+                    <h1 style="margin:0;display:flex;align-items:center;gap:10px;">
+                        <i class="fas fa-chart-bar" style="color:#8b5cf6;"></i> Boss Report
+                    </h1>
+                    <div style="color:var(--gray-500);font-size:13px;margin-top:4px;">Weekly boss summary generator • Super Admin only</div>
+                </div>
+            </div>
+
+            <!-- 1. Egg Run -->
+            <div style="background:white;padding:20px;border-radius:12px;border:1px solid var(--gray-200);margin-bottom:16px;">
+                <h3 style="margin-top:0;margin-bottom:6px;">1. Select Egg Purchase Run</h3>
+                <p style="color:var(--gray-500);font-size:13px;margin:0 0 12px;">Egg KL/PG/JB totals and wholesales group data are read directly from the committed run.</p>
+                ${runs.length===0
+                    ? '<p style="color:#ef4444;margin:0;">No committed egg runs found.</p>'
+                    : `<select id="br-run-select" class="form-control" style="max-width:620px;">
+                           <option value="">— Select a run —</option>${runOpts}
+                       </select>`}
+            </div>
+
+            <!-- 2. Product Balance Files -->
+            <div style="background:white;padding:20px;border-radius:12px;border:1px solid var(--gray-200);margin-bottom:16px;">
+                <h3 style="margin-top:0;margin-bottom:6px;">2. Product Balance Files</h3>
+                <p style="color:var(--gray-500);font-size:13px;margin:0 0 16px;">Upload both sales files each week. SKUs mapping is one-time and auto-cached.</p>
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px;">
+                    <div style="border:2px dashed var(--gray-300);border-radius:8px;padding:14px;text-align:center;cursor:pointer;" onclick="document.getElementById('br-inp-sales').click()">
+                        <i class="fas fa-file-excel" style="font-size:22px;color:#16a34a;display:block;margin-bottom:6px;"></i>
+                        <div style="font-weight:600;font-size:13px;">FORMULA Sales</div>
+                        <div style="font-size:11px;color:var(--gray-500);">POS retail (.xlsx)</div>
+                        <div id="br-lbl-sales" style="font-size:11px;color:#059669;margin-top:4px;min-height:14px;"></div>
+                        <input type="file" id="br-inp-sales" accept=".xlsx" style="display:none;" onchange="app.brLoadSales(this)">
+                    </div>
+                    <div style="border:2px dashed var(--gray-300);border-radius:8px;padding:14px;text-align:center;cursor:pointer;" onclick="document.getElementById('br-inp-track').click()">
+                        <i class="fas fa-file-csv" style="font-size:22px;color:#2563eb;display:block;margin-bottom:6px;"></i>
+                        <div style="font-weight:600;font-size:13px;">Order Tracking</div>
+                        <div style="font-size:11px;color:var(--gray-500);">Online sales (.csv)</div>
+                        <div id="br-lbl-track" style="font-size:11px;color:#059669;margin-top:4px;min-height:14px;"></div>
+                        <input type="file" id="br-inp-track" accept=".csv" style="display:none;" onchange="app.brLoadTracking(this)">
+                    </div>
+                    <div style="border:2px dashed var(--gray-300);border-radius:8px;padding:14px;text-align:center;cursor:pointer;" onclick="document.getElementById('br-inp-skus').click()">
+                        <i class="fas fa-table" style="font-size:22px;color:#f59e0b;display:block;margin-bottom:6px;"></i>
+                        <div style="font-weight:600;font-size:13px;">SKUs Mapping</div>
+                        <div style="font-size:11px;color:var(--gray-500);">One-time (.xlsx)</div>
+                        <div id="br-lbl-skus" style="font-size:11px;color:#059669;margin-top:4px;min-height:14px;">${_brState.skusMap ? `Cached ${skusDate||''}` : 'Not loaded'}</div>
+                        <input type="file" id="br-inp-skus" accept=".xlsx" style="display:none;" onchange="app.brLoadSkus(this)">
+                    </div>
+                </div>
+                <div style="font-weight:600;font-size:13px;margin-bottom:10px;">Last week's balances</div>
+                ${balInputs}
+            </div>
+
+            <!-- 3. Monthly Targets -->
+            <div style="background:white;padding:20px;border-radius:12px;border:1px solid var(--gray-200);margin-bottom:20px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                    <h3 style="margin:0;">3. Monthly Targets — ${monthLabel}</h3>
+                    <button class="btn secondary" style="font-size:12px;" onclick="app.brSaveTargets()"><i class="fas fa-save"></i> Save</button>
+                </div>
+                <p style="color:var(--gray-500);font-size:13px;margin:0 0 14px;">Set once on the 1st of each month. Carton targets per wholesale group.</p>
+                ${tgtInputs}
+            </div>
+
+            <button class="btn primary" style="width:100%;padding:14px;font-size:15px;margin-bottom:20px;" onclick="app.brGenerate()">
+                <i class="fas fa-magic"></i> Generate Boss Report
+            </button>
+
+            <!-- Output -->
+            <div id="br-output" style="display:none;background:white;padding:20px;border-radius:12px;border:1px solid var(--gray-200);">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+                    <h3 style="margin:0;">Report</h3>
+                    <button class="btn secondary" onclick="app.brCopy()"><i class="fas fa-copy"></i> Copy</button>
+                </div>
+                <textarea id="br-text" class="form-control" style="width:100%;min-height:520px;font-family:monospace;font-size:13px;" readonly></textarea>
+            </div>
+        </div>`;
+    };
+
+    const brLoadSales = (input) => {
+        const file = input.files[0]; if (!file) return;
+        const lbl = document.getElementById('br-lbl-sales');
+        if (lbl) lbl.textContent = 'Loading…';
+        const fr = new FileReader();
+        fr.onload = e => { _brState.salesFile = e.target.result; _brState.salesFileName = file.name; if (lbl) lbl.textContent = '✓ '+file.name; };
+        fr.readAsArrayBuffer(file);
+    };
+
+    const brLoadTracking = (input) => {
+        const file = input.files[0]; if (!file) return;
+        const lbl = document.getElementById('br-lbl-track');
+        if (lbl) lbl.textContent = 'Loading…';
+        const fr = new FileReader();
+        fr.onload = e => { _brState.trackingFile = e.target.result; _brState.trackingFileName = file.name; if (lbl) lbl.textContent = '✓ '+file.name; };
+        fr.readAsText(file, 'utf-8');
+    };
+
+    const brLoadSkus = (input) => {
+        const file = input.files[0]; if (!file) return;
+        const lbl = document.getElementById('br-lbl-skus');
+        if (lbl) lbl.textContent = 'Loading…';
+        const fr = new FileReader();
+        fr.onload = async e => {
+            try {
+                const map = await _brParseSkusXlsx(e.target.result);
+                _brState.skusMap = map;
+                const dateStr = new Date().toLocaleDateString();
+                localStorage.setItem('br_skus', JSON.stringify(map));
+                localStorage.setItem('br_skus_date', dateStr);
+                if (lbl) lbl.textContent = `✓ Cached ${dateStr} (${Object.keys(map).length} codes)`;
+                UI.toast.success('SKUs mapping cached');
+            } catch(err) { if (lbl) lbl.textContent = 'Error: '+err.message; UI.toast.error('SKUs parse failed'); }
+        };
+        fr.readAsArrayBuffer(file);
+    };
+
+    const brSaveTargets = () => {
+        const mk = _brMonthKey();
+        const groups = ['klCheras','klKepong','pgCenter','pgMainland','pgSouth'];
+        const tgts = {};
+        for (const g of groups) { const el = document.getElementById(`br-tgt-${g}`); if (el) tgts[g] = Number(el.value)||0; }
+        localStorage.setItem(`br_targets_${mk}`, JSON.stringify(tgts));
+        UI.toast.success('Targets saved for '+mk.replace('_','/'));
+    };
+
+    const brGenerate = async () => {
+        const runId = Number(document.getElementById('br-run-select')?.value);
+        if (!runId) { UI.toast.error('Select an egg run first'); return; }
+
+        const runRows = await AppDataStore.query('egg_run_history', { id: runId });
+        const run = runRows?.[0];
+        if (!run) { UI.toast.error('Run not found'); return; }
+        const totals = run.totals || {};
+
+        // Date from week_start_date
+        const fmtDate = (iso) => {
+            const d = new Date(iso); const dd=String(d.getDate()).padStart(2,'0'); const mm=String(d.getMonth()+1).padStart(2,'0'); const yy=String(d.getFullYear()).slice(2);
+            return `${dd}/${mm}/${yy}`;
+        };
+        const weekDate = run.week_start_date ? fmtDate(run.week_start_date) : '??/??/??';
+
+        // ── SECTION 1: EGGS (read directly from stored totals) ──
+        const klKing=totals.KL?.KING||0, klGold=totals.KL?.GOLD||0;
+        const pgKing=totals.PG?.KING||0, pgGold=totals.PG?.GOLD||0;
+        const jbKing=totals.JB?.KING||0, jbGold=totals.JB?.GOLD||0;
+        const totKin=klKing+pgKing+jbKing, totGold=klGold+pgGold+jbGold;
+
+        const eggSection =
+`老板好，
+
+${weekDate}
+KL
+KINGEGGS 高鮮帝王蛋- ${klKing} carton
+GOLD FRESH HEALTH PLUS EGG 高鮮蛋 - ${klGold} cartons
+
+PG
+KINGEGGS 高鮮帝王蛋- ${pgKing} carton
+GOLD FRESH HEALTH PLUS EGG 高鮮蛋 - ${pgGold} cartons
+
+JB
+KINGEGGS 高鮮帝王蛋- ${jbKing} carton
+GOLD FRESH HEALTH PLUS EGG 高鮮蛋 - ${jbGold} cartons
+
+Total -
+Kin-${totKin}
+Gold-${totGold}`;
+
+        // ── SECTION 2: WHOLESALES (read from by_group in stored totals) ──
+        const mk = _brMonthKey();
+        const now2 = new Date();
+        const monthLabel = now2.toLocaleString('default', { month:'long', year:'numeric' });
+        const tgts = _brGetTgts(mk);
+        const byGroup = totals.by_group || {};
+
+        // Month totals: sum latest run per week_start_date within current month
+        let monthByGroup = {};
+        try {
+            const allRuns = (await AppDataStore.query('egg_run_history', {})||[]);
+            const { start, end } = _brMonthBounds();
+            const monthRuns = allRuns.filter(r => r.week_start_date >= start && r.week_start_date <= end);
+            const latestPerWeek = {};
+            for (const r of monthRuns) {
+                const w = r.week_start_date;
+                if (!latestPerWeek[w] || new Date(r.run_at) > new Date(latestPerWeek[w].run_at)) latestPerWeek[w] = r;
+            }
+            for (const r of Object.values(latestPerWeek)) {
+                for (const [g, q] of Object.entries(r.totals?.by_group||{})) monthByGroup[g]=(monthByGroup[g]||0)+q;
+            }
+        } catch(e) { monthByGroup = { ...byGroup }; }
+
+        const wsGroups = [
+            { key:'klCheras',   src:['KL Cheras','SG Puchong & Sunway'], label:'KL Cheras + SG Puchong & Sunway' },
+            { key:'klKepong',   src:['KL Kepong'],                       label:'KL Kepong' },
+            { key:'pgCenter',   src:['PG Center'],                       label:'PG Center' },
+            { key:'pgMainland', src:['PG Mainland'],                     label:'PG Mainland' },
+            { key:'pgSouth',    src:['PG South'],                        label:'PG South' },
+        ];
+        const wsLines = wsGroups.map(g => {
+            const wk = g.src.reduce((s,k)=>s+(byGroup[k]||0),0);
+            const mo = g.src.reduce((s,k)=>s+(monthByGroup[k]||0),0);
+            const tg = tgts[g.key]||0;
+            return `${g.label} - ${wk} / ${mo} / ${tg||'N/A'}`;
+        }).join('\n');
+        const wsSection = `Wholesales ${monthLabel}\n${wsLines}`;
+
+        // ── SECTION 3: PRODUCT BALANCE (from uploaded files) ──
+        const skusMap = _brState.skusMap;
+        const balGroups = [
+            { key:'oceanSold', skuGroup:'Ocean sold',      label:'Ocean sold' },
+            { key:'yangPower', skuGroup:'Yang power sold', label:'Yang power sold' },
+            { key:'d3k2',      skuGroup:'D3k2 Sold',       label:'D3k2 Sold' },
+            { key:'eyePlus',   skuGroup:'Eye+',            label:'Eye+' },
+        ];
+
+        let balSection = '';
+        if (!skusMap) {
+            balSection = 'Product Balance\n[Upload SKUs mapping file to enable this section]';
+        } else if (!_brState.salesFile && !_brState.trackingFile) {
+            balSection = 'Product Balance\n[Upload FORMULA Sales and/or Order Tracking files to enable this section]';
+        } else {
+            const sold = { KL:{}, PG:{} };
+
+            if (_brState.salesFile) {
+                try {
+                    const s = await _brParseSalesXlsx(_brState.salesFile, skusMap);
+                    for (const rg of ['KL','PG']) for (const [g,q] of Object.entries(s[rg]||{})) sold[rg][g]=(sold[rg][g]||0)+q;
+                } catch(e) { UI.toast.error('FORMULA Sales: '+e.message); }
+            }
+            if (_brState.trackingFile) {
+                try {
+                    const s = _brParseTrackingCsv(_brState.trackingFile, skusMap);
+                    for (const rg of ['KL','PG']) for (const [g,q] of Object.entries(s[rg]||{})) sold[rg][g]=(sold[rg][g]||0)+q;
+                } catch(e) { UI.toast.error('Order Tracking: '+e.message); }
+            }
+
+            const prevBals = {};
+            for (const g of balGroups) {
+                const el = document.getElementById(`br-bal-${g.key}`);
+                prevBals[g.key] = Number(el?.value)||0;
+            }
+            const newBals = {};
+            let balLines = `Product Balance\n${weekDate}`;
+            for (const g of balGroups) {
+                const sg = g.skuGroup;
+                const klSold = Math.round(sold.KL[sg]||0);
+                const pgSold = Math.round(sold.PG[sg]||0);
+                const prev   = prevBals[g.key]||0;
+                const bal    = Math.max(0, prev - klSold - pgSold);
+                newBals[g.key] = bal;
+                balLines += `\n${g.label}\nKL-${klSold}\nPG-${pgSold}\nBalance - ${bal}\n`;
+            }
+            localStorage.setItem('br_balances', JSON.stringify(newBals));
+            balSection = balLines;
+        }
+
+        const sep = '\n________________________________________\n';
+        const report = [eggSection, wsSection, balSection].join(sep);
+        _brState.reportText = report;
+
+        const outEl = document.getElementById('br-output');
+        const txtEl = document.getElementById('br-text');
+        if (outEl) outEl.style.display = '';
+        if (txtEl) txtEl.value = report;
+        outEl?.scrollIntoView({ behavior:'smooth', block:'start' });
+    };
+
+    const brCopy = () => {
+        const text = document.getElementById('br-text')?.value || _brState.reportText || '';
+        if (!text.trim()) { UI.toast.error('Generate report first'); return; }
+        navigator.clipboard.writeText(text).then(()=>UI.toast.success('Copied!')).catch(()=>UI.toast.error('Copy failed'));
+    };
+
+    // ==================== /BOSS REPORT ====================
+
     // ==================== FORMULA PURCHASER ====================
     // Stock replenishment & multi-outlet distribution system.
     // Super Admin only. See formula_purchaser_schema.sql for backing tables.
@@ -50311,6 +50727,15 @@ JB 星期二到
         eggSaveConfigFromTextarea,
         eggResetConfigToDefault,
         eggResyncGroupData,
+
+        // ========== BOSS REPORT (Super Admin only) ==========
+        showBossReportView,
+        brLoadSales,
+        brLoadTracking,
+        brLoadSkus,
+        brSaveTargets,
+        brGenerate,
+        brCopy,
 
         // ========== FORMULA PURCHASER (Super Admin only) ==========
         showFormulaPurchaserView,
