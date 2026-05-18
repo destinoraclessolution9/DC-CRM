@@ -45924,6 +45924,10 @@ JB 星期二到
             const sku = skusMap[code];
             if (!sku) continue;
             const g = sku.group.trim();
+            if (g === 'Ocean sold') {
+                const src = String(row['Source']||row['Order Source']||row['Channel']||row['Platform']||row['Payment Method']||row['Fulfillment']||'').toLowerCase();
+                if (/order self collect|formula2u|mbb/.test(src)) continue;
+            }
             sold[region][g] = (sold[region][g]||0) + qty * sku.qty;
         }
         return sold;
@@ -46149,12 +46153,18 @@ JB 星期二到
         if (!run) { UI.toast.error('Run not found'); return; }
         const totals = run.totals || {};
 
-        // Date from week_start_date
         const fmtDate = (iso) => {
             const d = new Date(iso); const dd=String(d.getDate()).padStart(2,'0'); const mm=String(d.getMonth()+1).padStart(2,'0'); const yy=String(d.getFullYear()).slice(2);
             return `${dd}/${mm}/${yy}`;
         };
-        const weekDate = run.week_start_date ? fmtDate(run.week_start_date) : '??/??/??';
+        // Eggs date = run_at (actual purchase commit date)
+        const weekDate = run.run_at ? fmtDate(run.run_at) : (run.week_start_date ? fmtDate(run.week_start_date) : '??/??/??');
+        // Product Balance date = last Sunday on or before run_at
+        const balDate = (() => {
+            const d = new Date(run.run_at || run.week_start_date);
+            d.setDate(d.getDate() - d.getDay()); // d.getDay()=0 on Sun, so Sun stays, Mon→Sun-1, Fri→Sun-5
+            return fmtDate(d);
+        })();
 
         // ── SECTION 1: EGGS (read directly from stored totals) ──
         const klKing=totals.KL?.KING||0, klGold=totals.KL?.GOLD||0;
@@ -46189,12 +46199,15 @@ Gold-${totGold}`;
         const tgts = _brGetTgts(mk);
         const byGroup = totals.by_group || {};
 
-        // Month totals: sum latest run per week_start_date within current month
+        // Month totals: sum latest run per week_start_date where run_at is within current month
         let monthByGroup = {};
         try {
             const allRuns = (await AppDataStore.query('egg_run_history', {})||[]);
-            const { start, end } = _brMonthBounds();
-            const monthRuns = allRuns.filter(r => r.week_start_date >= start && r.week_start_date <= end);
+            const monthRuns = allRuns.filter(r => {
+                if (!r.run_at) return false;
+                const d = new Date(r.run_at);
+                return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}` === mk;
+            });
             const latestPerWeek = {};
             for (const r of monthRuns) {
                 const w = r.week_start_date;
@@ -46256,7 +46269,7 @@ Gold-${totGold}`;
                 prevBals[g.key] = Number(el?.value)||0;
             }
             const newBals = {};
-            let balLines = `Product Balance\n${weekDate}`;
+            let balLines = `Product Balance\n${balDate}`;
             for (const g of balGroups) {
                 const sg = g.skuGroup;
                 const klSold = Math.round(sold.KL[sg]||0);
