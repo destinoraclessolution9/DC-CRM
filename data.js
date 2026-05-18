@@ -74,7 +74,7 @@ class DataStore {
         // that navigates through 100+ distinct entities can't grow unbounded.
         this._cache = new Map();
         this._cacheTTL = 300_000; // 5 min (was 30s — too aggressive for 500 concurrent users)
-        this._cacheMaxEntries = 64; // LRU eviction threshold
+        this._cacheMaxEntries = 256; // LRU eviction threshold (app has 70+ tables; 64 was too aggressive)
         this._staticTables = new Set([
             'users', 'roles', 'teams', 'event_categories', 'event_templates',
             'products', 'appointment_locations', 'venues', 'ai_models',

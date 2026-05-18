@@ -4155,17 +4155,39 @@ In a production system, this would show the actual file contents.
             ];
         }
 
+        // 1-hour people cache — prospects+customers rarely change mid-session and
+        // are only needed for birthday lookup + activity name display on this view.
+        const _mhomePeopleKey = 'mhome-people-v1';
+        const _mhomeLsGet = (key, ttl) => {
+            try {
+                const raw = localStorage.getItem(key);
+                if (!raw) return null;
+                const { ts, val } = JSON.parse(raw);
+                if (Date.now() - ts > ttl) { localStorage.removeItem(key); return null; }
+                return val;
+            } catch(_) { return null; }
+        };
+        const _mhomeLsSet = (key, val) => {
+            try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), val })); } catch(_) {}
+        };
+        let cachedPeople = _mhomeLsGet(_mhomePeopleKey, 60 * 60 * 1000);
+        const _needPeople = !cachedPeople;
+
         const [actResult, allProspectsR, allCustomersR, draftsR, refillsR, allUsersR] = await Promise.all([
             AppDataStore.queryAdvanced('activities', actQueryOpts).catch(() => ({ data: [] })),
-            AppDataStore.getAll('prospects').catch(() => []),
-            AppDataStore.getAll('customers').catch(() => []),
+            _needPeople ? AppDataStore.getAll('prospects').catch(() => []) : Promise.resolve([]),
+            _needPeople ? AppDataStore.getAll('customers').catch(() => []) : Promise.resolve([]),
             AppDataStore.getAll('follow_up_drafts').catch(() => []),
             AppDataStore.query('refill_reminders', { status: 'pending' }).catch(() => []),
             AppDataStore.getAll('users').catch(() => []),
         ]);
 
         const activities = (actResult.data || []).filter(a => a.activity_type !== 'EVENT');
-        const allPeople = [...(allProspectsR || []), ...(allCustomersR || [])];
+        if (_needPeople) {
+            cachedPeople = [...(allProspectsR || []), ...(allCustomersR || [])];
+            _mhomeLsSet(_mhomePeopleKey, cachedPeople);
+        }
+        const allPeople = cachedPeople;
         const personMap = new Map(allPeople.map(p => [String(p.id), p]));
         const _isMine = (d) => !d.agent_id || String(d.agent_id) === String(_currentUser?.id);
         const visibleDrafts = (draftsR || []).filter(d =>
@@ -8421,13 +8443,11 @@ function _wireLoginBtn() {
         initGoogleIntegration();
         initWhatsAppIntegration();
 
-        // Run the two independent async preloads in parallel. Previously these
-        // ran sequentially in a waterfall (expire → initAIAnalytics), blocking
-        // navigateTo for ~2× the latency of either call.
-        const _preRenderWork = Promise.all([
-            expireOldOverrides().catch(e => console.warn('expireOldOverrides failed:', e)),
-            initAIAnalytics().catch(e => console.warn('initAIAnalytics failed:', e)),
-        ]);
+        // Fire-and-forget: these don't affect what the first view renders.
+        // Decoupled from navigateTo so the user sees the first screen without
+        // waiting for expireOldOverrides (N writes) or AI model bootstrap.
+        expireOldOverrides().catch(e => console.warn('expireOldOverrides failed:', e));
+        initAIAnalytics().catch(e => console.warn('initAIAnalytics failed:', e));
 
         // L13 (Customer) and L14 (Referrer) land on 福德; everyone else on calendar
         const _initLevel = (() => {
@@ -8435,14 +8455,19 @@ function _wireLoginBtn() {
             return m ? parseInt(m[1]) : 0;
         })();
 
-        // Await pre-render work and kick off first render in parallel — both
-        // complete before we hand control back to the user.
         // Mobile users land on the AI Home dashboard; desktop on calendar.
         const _initialView = _initLevel >= 13 ? 'fude' : (isMobile() ? 'home' : 'calendar');
-        await Promise.all([
-            _preRenderWork,
-            navigateTo(_initialView),
-        ]);
+        await navigateTo(_initialView);
+
+        // Background pre-warm: silently fetch the most-navigated tables 2 seconds
+        // after first paint so every subsequent page navigation serves from
+        // in-memory cache instead of hitting Supabase. The 2s delay keeps startup
+        // bandwidth available for the first view's own SWR revalidation.
+        setTimeout(() => {
+            ['activities', 'prospects', 'customers', 'users',
+             'products', 'events', 'names', 'referrals', 'purchases']
+                .forEach(t => AppDataStore.getAll(t).catch(() => {}));
+        }, 2000);
 
         // Phase 14: Offline & mobile features (sync)
         initOfflineSupport();
@@ -9474,10 +9499,10 @@ function _wireLoginBtn() {
 
         let intakes = [];
         try {
-            // Always fetch fresh from Supabase — the prospect submits via cps-intake.html
-            // which updates Supabase directly, so the local SWR cache stays stale until
-            // forced. Without { fresh: true } the widget never sees 'submitted' rows.
-            const all = await AppDataStore.getAll('cps_intake_requests', { fresh: true });
+            // SWR serves the cached snapshot instantly; background revalidation picks
+            // up new submissions within 5 min. Removed { fresh: true } which forced a
+            // Supabase round-trip on EVERY calendar render, blocking re-paints.
+            const all = await AppDataStore.getAll('cps_intake_requests');
             const pendingStatuses = new Set(['submitted', 'pending', 'awaiting_approval', 'new']);
             intakes = (all || []).filter(r => pendingStatuses.has(r.status));
         } catch (_) { intakes = []; }
@@ -14539,13 +14564,27 @@ function _wireLoginBtn() {
         const grid = document.getElementById('calendar-grid');
         if (!grid) return;
 
-        // Dim the grid as visual feedback while the parallel Supabase fetches
-        // resolve. NOTE: do NOT set pointerEvents: 'none' here — that blocks
-        // legitimate day-cell taps during the 1-3 s render on mobile and was
-        // the root cause of the "hard to click, no response" complaint.
-        // Prev/next month buttons live outside the grid, so race-prevention is
-        // handled by _renderCalendarToken below, not by blocking pointer input.
-        grid.style.opacity = '0.55';
+        // Snapshot restore — if we already rendered this month, show the cached
+        // HTML instantly so the user sees their calendar with zero wait.
+        // The RPC fetch continues below; if fresh data differs we swap quietly.
+        const _calSnapKey = `cal-snap-${_currentDate.getFullYear()}-${_currentDate.getMonth()}`;
+        const _calSnap = (() => {
+            try {
+                const raw = sessionStorage.getItem(_calSnapKey);
+                if (!raw) return null;
+                const { ts, html } = JSON.parse(raw);
+                if (!ts || Date.now() - ts > 10 * 60 * 1000) return null; // 10-min TTL
+                return html;
+            } catch (_) { return null; }
+        })();
+        if (_calSnap) {
+            grid.innerHTML = _calSnap; // instant paint — no dim needed
+        } else {
+            // First-ever render of this month: dim while loading.
+            // NOTE: do NOT set pointerEvents: 'none' here — that blocks
+            // legitimate day-cell taps during the 1-3 s render on mobile.
+            grid.style.opacity = '0.55';
+        }
 
         try {
 
@@ -14847,6 +14886,12 @@ function _wireLoginBtn() {
         // Discard if a newer render started while this one's fetches were in flight.
         if (myToken !== _renderCalendarToken) return;
         grid.innerHTML = html;
+
+        // Persist this render to sessionStorage so future navigations back to
+        // this month paint instantly (see snapshot restore near top of function).
+        try {
+            sessionStorage.setItem(_calSnapKey, JSON.stringify({ ts: Date.now(), html }));
+        } catch (_) {}
 
         // Warm the activity-modal lookup caches in the background so the first
         // tap on a day cell opens instantly instead of waiting on two fetches.
@@ -39413,18 +39458,17 @@ const simulateCampaignSending = async (campaignId) => {
     const expireOldOverrides = async () => {
         const overrides = await AppDataStore.getAll('manual_overrides');
         const now = new Date();
-        let expiredCount = 0;
+        const expiredIds = overrides
+            .filter(o => o.status === 'active' && o.expires_at && new Date(o.expires_at) < now)
+            .map(o => o.id);
 
-        for (const o of overrides) {
-            if (o.status === 'active' && o.expires_at && new Date(o.expires_at) < now) {
-                await AppDataStore.update('manual_overrides', o.id, { status: 'expired' });
-                expiredCount++;
-            }
-        }
+        if (expiredIds.length === 0) return;
 
-        if (expiredCount > 0) {
-            // expired overrides cleaned up
-        }
+        // One bulk UPDATE instead of N sequential round-trips.
+        await window.supabase.from('manual_overrides')
+            .update({ status: 'expired' })
+            .in('id', expiredIds);
+        AppDataStore.invalidateCache('manual_overrides');
     };
 
     // ========== MISSING STUB FUNCTIONS (confirm variants not defined elsewhere) ==========
