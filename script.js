@@ -46052,11 +46052,15 @@ JB 星期二到
 
             <!-- Output -->
             <div id="br-output" style="display:none;background:white;padding:20px;border-radius:12px;border:1px solid var(--gray-200);">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
                     <h3 style="margin:0;">Report</h3>
-                    <button class="btn secondary" onclick="app.brCopy()"><i class="fas fa-copy"></i> Copy</button>
+                    <div style="display:flex;gap:8px;">
+                        <button class="btn secondary" onclick="app.brCopy()"><i class="fas fa-copy"></i> Copy</button>
+                        <button class="btn primary" onclick="app.brSaveFinal()"><i class="fas fa-save"></i> Save Final</button>
+                    </div>
                 </div>
-                <textarea id="br-text" class="form-control" style="width:100%;min-height:520px;font-family:monospace;font-size:13px;" readonly></textarea>
+                <p style="color:var(--gray-500);font-size:12px;margin:0 0 10px;">Edit any values below, then click <strong>Save Final</strong>. Next week's balance fields will pre-fill from what you save here.</p>
+                <textarea id="br-text" class="form-control" style="width:100%;min-height:520px;font-family:monospace;font-size:13px;"></textarea>
             </div>
         </div>`;
     };
@@ -46105,6 +46109,36 @@ JB 星期二到
         for (const g of groups) { const el = document.getElementById(`br-tgt-${g}`); if (el) tgts[g] = Number(el.value)||0; }
         localStorage.setItem(`br_targets_${mk}`, JSON.stringify(tgts));
         UI.toast.success('Targets saved for '+mk.replace('_','/'));
+    };
+
+    const _brParseFinalBalances = (text) => {
+        const groups = [
+            { key:'oceanSold', label:'Ocean sold' },
+            { key:'yangPower', label:'Yang power sold' },
+            { key:'d3k2',      label:'D3k2 Sold' },
+            { key:'eyePlus',   label:'Eye\\+' },
+        ];
+        const bals = {};
+        for (const g of groups) {
+            const re = new RegExp(g.label + '[\\s\\S]*?Balance\\s*-\\s*(\\d+)');
+            const m = text.match(re);
+            if (m) bals[g.key] = Number(m[1]);
+        }
+        return bals;
+    };
+
+    const brSaveFinal = () => {
+        const ta = document.getElementById('br-text');
+        const text = ta ? ta.value : (_brState.reportText || '');
+        if (!text.trim()) { UI.toast.error('Nothing to save'); return; }
+        _brState.reportText = text;
+        localStorage.setItem('br_final_report', text);
+        const bals = _brParseFinalBalances(text);
+        if (Object.keys(bals).length > 0) {
+            const existing = _brGetBals();
+            localStorage.setItem('br_balances', JSON.stringify({ ...existing, ...bals }));
+        }
+        UI.toast.success('Final report saved — balances updated for next week');
     };
 
     const brGenerate = async () => {
@@ -50738,6 +50772,7 @@ Gold-${totGold}`;
         brLoadSkus,
         brSaveTargets,
         brGenerate,
+        brSaveFinal,
         brCopy,
 
         // ========== FORMULA PURCHASER (Super Admin only) ==========
