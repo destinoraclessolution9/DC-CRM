@@ -4173,13 +4173,23 @@ In a production system, this would show the actual file contents.
         let cachedPeople = _mhomeLsGet(_mhomePeopleKey, 60 * 60 * 1000);
         const _needPeople = !cachedPeople;
 
+        const _mhomeDraftsKey  = 'mhome-drafts-v1';
+        const _mhomeRefillsKey = 'mhome-refills-v1';
+        const _mhomeUsersKey   = 'mhome-users-v1';
+        let cachedDrafts  = _mhomeLsGet(_mhomeDraftsKey,  5 * 60 * 1000);
+        let cachedRefills = _mhomeLsGet(_mhomeRefillsKey, 5 * 60 * 1000);
+        let cachedUsers   = _mhomeLsGet(_mhomeUsersKey,   60 * 60 * 1000);
+        const _needDrafts  = !cachedDrafts;
+        const _needRefills = !cachedRefills;
+        const _needUsers   = !cachedUsers;
+
         const [actResult, allProspectsR, allCustomersR, draftsR, refillsR, allUsersR] = await Promise.all([
             AppDataStore.queryAdvanced('activities', actQueryOpts).catch(() => ({ data: [] })),
-            _needPeople ? AppDataStore.getAll('prospects').catch(() => []) : Promise.resolve([]),
-            _needPeople ? AppDataStore.getAll('customers').catch(() => []) : Promise.resolve([]),
-            AppDataStore.getAll('follow_up_drafts').catch(() => []),
-            AppDataStore.query('refill_reminders', { status: 'pending' }).catch(() => []),
-            AppDataStore.getAll('users').catch(() => []),
+            _needPeople  ? AppDataStore.getAll('prospects').catch(() => [])                          : Promise.resolve([]),
+            _needPeople  ? AppDataStore.getAll('customers').catch(() => [])                          : Promise.resolve([]),
+            _needDrafts  ? AppDataStore.getAll('follow_up_drafts').catch(() => [])                   : Promise.resolve([]),
+            _needRefills ? AppDataStore.query('refill_reminders', { status: 'pending' }).catch(() => []) : Promise.resolve([]),
+            _needUsers   ? AppDataStore.getAll('users').catch(() => [])                              : Promise.resolve([]),
         ]);
 
         const activities = (actResult.data || []).filter(a => a.activity_type !== 'EVENT');
@@ -4187,19 +4197,23 @@ In a production system, this would show the actual file contents.
             cachedPeople = [...(allProspectsR || []), ...(allCustomersR || [])];
             _mhomeLsSet(_mhomePeopleKey, cachedPeople);
         }
+        if (_needDrafts)  { cachedDrafts  = draftsR  || []; _mhomeLsSet(_mhomeDraftsKey,  cachedDrafts);  }
+        if (_needRefills) { cachedRefills = refillsR || []; _mhomeLsSet(_mhomeRefillsKey, cachedRefills); }
+        if (_needUsers)   { cachedUsers   = allUsersR || []; _mhomeLsSet(_mhomeUsersKey,  cachedUsers);   }
+
         const allPeople = cachedPeople;
         const personMap = new Map(allPeople.map(p => [String(p.id), p]));
         const _isMine = (d) => !d.agent_id || String(d.agent_id) === String(_currentUser?.id);
-        const visibleDrafts = (draftsR || []).filter(d =>
+        const visibleDrafts = cachedDrafts.filter(d =>
             d.status === 'pending' && (d.due_date || '') <= todayStr && _isMine(d)
         );
-        const birthdays = [...allPeople, ...(allUsersR || [])].filter(p => {
+        const birthdays = [...allPeople, ...cachedUsers].filter(p => {
             const dob = p.date_of_birth || '';
             if (!dob || dob.length < 5) return false;
             const md = dob.slice(5, 10);
             return md === todayMD || md === tomMD;
         });
-        const refills = refillsR || [];
+        const refills = cachedRefills;
 
         const apptCount = activities.length;
         const followCount = visibleDrafts.length;
