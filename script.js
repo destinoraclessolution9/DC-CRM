@@ -16687,7 +16687,6 @@ function _wireLoginBtn() {
         const input = document.createElement('input');
         input.type = 'file';
         input.accept = 'image/*,application/pdf';
-        input.capture = 'environment'; // prefer rear camera on mobile
         input.style.display = 'none';
         document.body.appendChild(input);
         input.onchange = async () => {
@@ -26289,7 +26288,7 @@ NOTIFY pgrst, 'reload schema';`;
         const content = `
             <div class="form-group">
                 <label>Attach or take a photo of APU</label>
-                <input type="file" id="apu-form-upload" class="form-control" accept="image/*" capture="environment">
+                <input type="file" id="apu-form-upload" class="form-control" accept="image/*">
                 <p style="color:var(--gray-500);font-size:12px;margin-top:6px;">JPG/PNG, max 5MB. Use camera or choose a file.</p>
             </div>
             ${existing.length > 0 ? `
