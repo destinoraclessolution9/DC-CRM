@@ -10704,12 +10704,16 @@ function _wireLoginBtn() {
             document.head.appendChild(style);
         }
 
-        await renderReferralSummaryAndLeaderboard();
+        // Yield so navigateTo returns with the page structure visible, then
+        // load data in the background — same pattern as pipeline/calendar.
+        await new Promise(r => setTimeout(r, 0));
+
+        renderReferralSummaryAndLeaderboard().catch(e => console.warn('referral summary failed:', e));
 
         // Every user sees themselves as the first node of their own tree
         const user = _currentUser;
         if (user) {
-            await app.showReferralTree(user.id, 'user');
+            app.showReferralTree(user.id, 'user').catch(e => console.warn('referral tree failed:', e));
         }
     };
 
@@ -31242,7 +31246,13 @@ const deactivateAgent = async (agentId) => {
     </div>
 </div>`;
 
-        // ── STEP 2: Fire ALL big queries in parallel ──────────────────────────
+        // ── STEP 2: Yield to caller so navigateTo returns with skeleton visible ──
+        // The skeleton is already painted above. By yielding here, the browser
+        // repaints and navigateTo resolves — user sees the skeleton instantly
+        // instead of waiting 8+ seconds for all pipeline scoring to finish.
+        await new Promise(r => setTimeout(r, 0));
+
+        // ── STEP 3: Fire ALL big queries in parallel ──────────────────────────
         // Each query gets a 15s timeout so a slow Supabase call no longer
         // leaves the page on a permanent skeleton. On timeout we render with
         // empty data and the user can hit Refresh to retry.
