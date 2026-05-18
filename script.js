@@ -4494,10 +4494,10 @@ In a production system, this would show the actual file contents.
             try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), val })); } catch(_) {}
         };
 
-        // A: Instant snapshot restore — persists 15 min across sessions
+        // A: Instant snapshot restore — 8hr TTL survives app close on Android
         const _mcalSnapKey = `mcal-snap-${_mcalYear}-${_mcalMonth}`;
-        const _mcalCachedGrid   = _lsGet(_mcalSnapKey,           15 * 60 * 1000);
-        const _mcalCachedComing = _lsGet(_mcalSnapKey + '-coming', 15 * 60 * 1000);
+        const _mcalCachedGrid   = _lsGet(_mcalSnapKey,           8 * 60 * 60 * 1000);
+        const _mcalCachedComing = _lsGet(_mcalSnapKey + '-coming', 8 * 60 * 60 * 1000);
         const _mcalInitGrid = _mcalCachedGrid
             || Array.from({length: 42}).map(() => '<div class="mcal-cell muted"></div>').join('');
 
