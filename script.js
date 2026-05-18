@@ -10444,7 +10444,9 @@ function _wireLoginBtn() {
             await showMarketingAutomationView(viewport);
         } else if (viewId === 'reports') {
             _currentView = 'reports';
-            await showKPIDashboard(viewport);
+            // Shell is painted synchronously before the first await inside
+            // showKPIDashboard; navigateTo returns after shell paint.
+            showKPIDashboard(viewport).catch(e => console.warn('KPI dashboard failed:', e));
         } else if (viewId === 'documents') {
             _currentView = 'documents';
             await showDocumentManagementView(viewport);
@@ -33702,6 +33704,19 @@ container.innerHTML = `
             </div>
 `;
 
+        // Inject cached stats instantly so the grid isn't blank while data loads
+        const _kpiSnapKey = `kpi-stats-snap-${_currentUser?.id || 'anon'}-${_currentTimeFilter}`;
+        try {
+            const _kpiRaw = localStorage.getItem(_kpiSnapKey);
+            if (_kpiRaw) {
+                const { ts, val } = JSON.parse(_kpiRaw);
+                if (Date.now() - ts < 60 * 60 * 1000) {
+                    const _sg = document.getElementById('kpi-stats-grid');
+                    if (_sg) _sg.innerHTML = val;
+                } else { localStorage.removeItem(_kpiSnapKey); }
+            }
+        } catch(_) {}
+
         // Fill agent dropdown after shell is painted (non-blocking)
         AppDataStore.getAll('users').then(allUsers => {
             const sel = document.getElementById('kpi-agent-filter');
@@ -33888,6 +33903,14 @@ container.innerHTML = `
         const perfKpis = isQuarterlyView ? kpis : quarterlyKpis;
 
         renderKPIStats(kpis, prevKpis);
+        // Persist stats grid so next open is instant
+        try {
+            const _sg = document.getElementById('kpi-stats-grid');
+            if (_sg) {
+                const _k = `kpi-stats-snap-${_currentUser?.id || 'anon'}-${_currentTimeFilter}`;
+                localStorage.setItem(_k, JSON.stringify({ ts: Date.now(), val: _sg.innerHTML }));
+            }
+        } catch(_) {}
         // These four renders are independent — they paint into different
         // DOM containers and don't read each other's results. Awaiting
         // them sequentially serialized ~4 separate getAll() round trips
