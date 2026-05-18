@@ -17718,6 +17718,8 @@ function _wireLoginBtn() {
                         <option value="CALL">📞 Call</option>
                         <option value="EMAIL">📧 Email</option>
                         <option value="WHATSAPP">💬 WhatsApp</option>
+                        <option value="PERSONAL">🏠 Personal</option>
+                        <option value="OTHERS">📌 Others</option>
                     </select>
                 </div>
                 
@@ -17789,6 +17791,13 @@ function _wireLoginBtn() {
                             <option value="">-- Select Venue --</option>
                             ${_venueOptions}
                         </select>
+                    </div>
+                </div>
+
+                <div class="form-section">
+                    <h4>📝 Remarks</h4>
+                    <div class="form-group">
+                        <textarea id="activity-remarks" class="form-control" rows="3" placeholder="Add any notes or remarks..."></textarea>
                     </div>
                 </div>
 
@@ -20774,6 +20783,7 @@ function _wireLoginBtn() {
         activity.note_next_steps = document.getElementById('note-next-steps')?.value || '';
         activity.note_needs = document.getElementById('note-needs')?.value || '';
         activity.note_pain_points = document.getElementById('note-pain-points')?.value || '';
+        activity.remarks = document.getElementById('activity-remarks')?.value || '';
 
         // CPS attachment upload — store the file in Supabase storage so it's viewable everywhere.
         // We stash it here and upload AFTER the activity row exists so the path can reference the activity id.
