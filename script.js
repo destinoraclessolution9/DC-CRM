@@ -45925,10 +45925,7 @@ JB 星期二到
             const sku = skusMap[code];
             if (!sku) continue;
             const g = sku.group.trim();
-            if (g === 'Ocean sold') {
-                const src = String(row['Source']||row['Order Source']||row['Channel']||row['Platform']||row['Payment Method']||row['Fulfillment']||'').toLowerCase();
-                if (/order self collect|formula2u|mbb/.test(src)) continue;
-            }
+            if (g === 'Ocean sold' && /formula2u|mbb/i.test(selfCol)) continue;
             sold[region][g] = (sold[region][g]||0) + qty * sku.qty;
         }
         return sold;
