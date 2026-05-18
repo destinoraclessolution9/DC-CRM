@@ -46228,7 +46228,7 @@ Gold-${totGold}`;
             const tg = tgts[g.key]||0;
             return `${g.label} - ${wk} / ${mo} / ${tg||'N/A'}`;
         }).join('\n');
-        const wsSection = `Wholesales ${monthLabel}\n${wsLines}`;
+        const wsSection = `Wholesales Week/ Month/ Target (${monthLabel})\n${wsLines}`;
 
         // ── SECTION 3: PRODUCT BALANCE (from uploaded files) ──
         const skusMap = _brState.skusMap;
