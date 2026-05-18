@@ -4530,8 +4530,24 @@ In a production system, this would show the actual file contents.
         // ── Fetch month activities + supporting data ─────────────
         const monthStartStr = `${_mcalYear}-${String(_mcalMonth+1).padStart(2,'0')}-01`;
         const monthEndStr = `${_mcalYear}-${String(_mcalMonth+1).padStart(2,'0')}-${String(daysInMonth).padStart(2,'0')}`;
-        const visibleIds = (typeof getVisibleUserIds === 'function')
-            ? await getVisibleUserIds(_currentUser).catch(() => 'all') : 'all';
+
+        // Start visibleIds resolution early (non-blocking) so it runs
+        // concurrently with cache reads below.
+        const _visibleIdsP = (typeof getVisibleUserIds === 'function')
+            ? getVisibleUserIds(_currentUser).catch(() => 'all') : Promise.resolve('all');
+
+        // B: Serve prospects + customers from 60-min localStorage cache
+        const _PEOPLE_KEY  = 'mcal-people-v1';
+        const _DRAFTS_KEY  = 'mcal-drafts-v1';
+        const _REFILLS_KEY = 'mcal-refills-v1';
+        let allPeople     = _lsGet(_PEOPLE_KEY,  60 * 60 * 1000);
+        let cachedDrafts  = _lsGet(_DRAFTS_KEY,   5 * 60 * 1000);
+        let cachedRefills = _lsGet(_REFILLS_KEY,  5 * 60 * 1000);
+        const _needPeople  = !allPeople;
+        const _needDrafts  = !cachedDrafts;
+        const _needRefills = !cachedRefills;
+
+        const visibleIds = await _visibleIdsP;
 
         // C: gte/lte range replaces 31-item IN list — faster Postgres plan
         const actQueryOpts = {
@@ -4547,23 +4563,19 @@ In a production system, this would show the actual file contents.
             ];
         }
 
-        // B: Serve prospects + customers from 60-min localStorage cache
-        const _PEOPLE_KEY = 'mcal-people-v1';
-        let allPeople = _lsGet(_PEOPLE_KEY, 60 * 60 * 1000);
-        const _needPeople = !allPeople;
-
-        const [actResult, allProspectsR, allCustomersR, draftsR, refillsR] = await Promise.all([
+        const [actResult, allProspectsR, allCustomersR, draftsRaw, refillsRaw] = await Promise.all([
             AppDataStore.queryAdvanced('activities', actQueryOpts).catch(() => ({ data: [] })),
-            _needPeople ? AppDataStore.getAll('prospects').catch(() => []) : Promise.resolve([]),
-            _needPeople ? AppDataStore.getAll('customers').catch(() => []) : Promise.resolve([]),
-            AppDataStore.getAll('follow_up_drafts').catch(() => []),
-            AppDataStore.query('refill_reminders', { status: 'pending' }).catch(() => []),
+            _needPeople  ? AppDataStore.getAll('prospects').catch(() => [])                          : Promise.resolve([]),
+            _needPeople  ? AppDataStore.getAll('customers').catch(() => [])                          : Promise.resolve([]),
+            _needDrafts  ? AppDataStore.getAll('follow_up_drafts').catch(() => [])                   : Promise.resolve([]),
+            _needRefills ? AppDataStore.query('refill_reminders', { status: 'pending' }).catch(() => []) : Promise.resolve([]),
         ]);
 
-        if (_needPeople) {
-            allPeople = [...(allProspectsR || []), ...(allCustomersR || [])];
-            _lsSet(_PEOPLE_KEY, allPeople);
-        }
+        if (_needPeople)  { allPeople = [...(allProspectsR || []), ...(allCustomersR || [])]; _lsSet(_PEOPLE_KEY, allPeople); }
+        if (_needDrafts)  { cachedDrafts  = draftsRaw  || []; _lsSet(_DRAFTS_KEY,  cachedDrafts);  }
+        if (_needRefills) { cachedRefills = refillsRaw || []; _lsSet(_REFILLS_KEY, cachedRefills); }
+        const draftsR  = cachedDrafts;
+        const refillsR = cachedRefills;
         const activities = (actResult.data || []).filter(a => a.activity_type !== 'EVENT');
         const personMap = new Map(allPeople.map(p => [String(p.id), p]));
         _mcalPersonMap = personMap;
