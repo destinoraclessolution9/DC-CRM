@@ -56,7 +56,9 @@ class DataStore {
             // Egg Purchasing system (Super Admin only)
             'egg_processed_orders', 'egg_urgent_orders', 'egg_config', 'egg_run_history',
             // Knowledge HQ — personal knowledge hub
-            'knowledge_entries', 'knowledge_links', 'knowledge_daily_notes'
+            'knowledge_entries', 'knowledge_links', 'knowledge_daily_notes',
+            // Product price history
+            'product_price_history'
         ];
         this.initialized = false;
         this._events = {};

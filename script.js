@@ -35571,6 +35571,8 @@ const exportKPIReport = async (format) => {
                 <table class="data-table">
                     <thead>
                         <tr>
+                            <th scope="col" style="width:54px;">Photo</th>
+                            <th scope="col" style="width:54px;">Poster</th>
                             <th scope="col">Name</th>
                             <th scope="col">Category</th>
                             <th scope="col">Functions Description</th>
@@ -35586,11 +35588,24 @@ const exportKPIReport = async (format) => {
                     <tbody>
                         ${data.map(item => `
                             <tr style="${!item.is_active ? 'opacity: 0.6; background: #f9fafb;' : ''}">
+                                <td style="text-align:center;">
+                                    ${item.photo_url
+                                        ? `<img src="${item.photo_url}" style="width:40px;height:40px;object-fit:cover;border-radius:4px;cursor:pointer;" onclick="app.viewProductImage('${item.photo_url}','Photo')" title="View photo">`
+                                        : `<span style="color:var(--gray-300);font-size:18px;" title="No photo">📷</span>`}
+                                </td>
+                                <td style="text-align:center;">
+                                    ${item.poster_url
+                                        ? `<img src="${item.poster_url}" style="width:40px;height:40px;object-fit:cover;border-radius:4px;cursor:pointer;" onclick="app.viewProductImage('${item.poster_url}','Poster')" title="View poster">`
+                                        : `<span style="color:var(--gray-300);font-size:18px;" title="No poster">🖼️</span>`}
+                                </td>
                                 <td><strong>${item.name}</strong><br><small class="text-muted">${item.remarks || ''}</small></td>
                                 <td>${item.category || '-'}</td>
                                 <td>${item.functions_description || '-'}</td>
                                 <td>${item.description || '-'}</td>
-                                <td>${item.price || 0}</td>
+                                <td>
+                                    <span style="font-weight:600;">RM ${item.price || 0}</span>
+                                    <button class="btn-icon" style="margin-left:4px;opacity:0.6;" onclick="app.showProductPriceHistory(${item.id})" title="Price history"><i class="fas fa-history"></i></button>
+                                </td>
                                 <td>${item.delivery_lead_time || '-'}</td>
                                 <td>${item.product_dimension || '-'}</td>
                                 <td>${item.product_weight || '-'}</td>
@@ -35789,12 +35804,18 @@ const exportKPIReport = async (format) => {
         const type = _currentMarketingListTab;
 
         if (type === 'products') {
+            const _today = new Date().toISOString().split('T')[0];
             content = `
                 <div class="form-group"><label>Name*</label><input type="text" id="mkt-name" class="form-control"></div>
                 <div class="form-group"><label>Category</label><input type="text" id="mkt-category" class="form-control" placeholder="e.g. Power Ring, 画作, 风水方案"></div>
                 <div class="form-group"><label>Functions Description</label><textarea id="mkt-functions-desc" class="form-control" placeholder="Describe functions..."></textarea></div>
                 <div class="form-group"><label>Product Description</label><textarea id="mkt-desc" class="form-control" placeholder="Describe the product..."></textarea></div>
-                <div class="form-group"><label>Price (RM)</label><input type="number" id="mkt-price" class="form-control" value="0"></div>
+                <div class="form-row">
+                    <div class="form-group half"><label>Price (RM)</label><input type="number" id="mkt-price" class="form-control" value="0"></div>
+                    <div class="form-group half"><label>Price Effective Date</label><input type="date" id="mkt-price-date" class="form-control" value="${_today}"></div>
+                </div>
+                <div class="form-group"><label>Product Photo</label><input type="file" id="mkt-photo" class="form-control" accept="image/*"></div>
+                <div class="form-group"><label>Product Poster</label><input type="file" id="mkt-poster" class="form-control" accept="image/*"></div>
                 <div class="form-group"><label>Remarks</label><input type="text" id="mkt-remarks" class="form-control"></div>
                 <div class="form-group"><label>Delivery Lead Time</label><input type="text" id="mkt-lead" class="form-control" placeholder="e.g. 3-5 days"></div>
                 <div class="form-group"><label>Product Dimension</label><input type="text" id="mkt-dimension" class="form-control" placeholder="e.g. 30cm x 20cm x 10cm"></div>
@@ -35884,12 +35905,26 @@ const exportKPIReport = async (format) => {
         const type = _currentMarketingListTab;
 
         if (type === 'products') {
+            const _today = new Date().toISOString().split('T')[0];
             content = `
                 <div class="form-group"><label>Name*</label><input type="text" id="mkt-name" class="form-control" value="${item.name}"></div>
                 <div class="form-group"><label>Category</label><input type="text" id="mkt-category" class="form-control" value="${item.category || ''}" placeholder="e.g. Power Ring, 画作, 风水方案"></div>
                 <div class="form-group"><label>Functions Description</label><textarea id="mkt-functions-desc" class="form-control" placeholder="Describe functions...">${item.functions_description || ''}</textarea></div>
                 <div class="form-group"><label>Product Description</label><textarea id="mkt-desc" class="form-control" placeholder="Describe the product...">${item.description || ''}</textarea></div>
-                <div class="form-group"><label>Price (RM)</label><input type="number" id="mkt-price" class="form-control" value="${item.price || 0}"></div>
+                <div class="form-row">
+                    <div class="form-group half"><label>Price (RM)</label><input type="number" id="mkt-price" class="form-control" value="${item.price || 0}"></div>
+                    <div class="form-group half"><label>Price Effective Date</label><input type="date" id="mkt-price-date" class="form-control" value="${_today}"></div>
+                </div>
+                <div class="form-group">
+                    <label>Product Photo</label>
+                    ${item.photo_url ? `<div style="margin-bottom:6px;"><img src="${item.photo_url}" style="height:64px;border-radius:4px;object-fit:cover;"> <small class="text-muted">Current photo</small></div>` : ''}
+                    <input type="file" id="mkt-photo" class="form-control" accept="image/*">
+                </div>
+                <div class="form-group">
+                    <label>Product Poster</label>
+                    ${item.poster_url ? `<div style="margin-bottom:6px;"><img src="${item.poster_url}" style="height:64px;border-radius:4px;object-fit:cover;"> <small class="text-muted">Current poster</small></div>` : ''}
+                    <input type="file" id="mkt-poster" class="form-control" accept="image/*">
+                </div>
                 <div class="form-group"><label>Remarks</label><input type="text" id="mkt-remarks" class="form-control" value="${item.remarks || ''}"></div>
                 <div class="form-group"><label>Delivery Lead Time</label><input type="text" id="mkt-lead" class="form-control" value="${item.delivery_lead_time || ''}"></div>
                 <div class="form-group"><label>Product Dimension</label><input type="text" id="mkt-dimension" class="form-control" value="${item.product_dimension || ''}" placeholder="e.g. 30cm x 20cm x 10cm"></div>
@@ -35997,6 +36032,56 @@ const exportKPIReport = async (format) => {
             data.product_dimension = document.getElementById('mkt-dimension')?.value || '';
             data.product_weight = document.getElementById('mkt-weight')?.value || '';
             if (!data.name) return UI.toast.error('Name is required');
+
+            const _priceDate = document.getElementById('mkt-price-date')?.value || new Date().toISOString().split('T')[0];
+            const _photoFile = document.getElementById('mkt-photo')?.files[0];
+            const _posterFile = document.getElementById('mkt-poster')?.files[0];
+
+            try {
+                let _savedId = id;
+                if (id) {
+                    const _existing = await AppDataStore.getById('products', id);
+                    if (_existing && parseFloat(_existing.price) !== data.price) {
+                        await AppDataStore.create('product_price_history', { product_id: parseInt(id), price: data.price, effective_date: _priceDate });
+                    }
+                    const result = await AppDataStore.update('products', id, data);
+                    if (result === null) {
+                        UI.toast.error('This record was deleted and could not be updated.');
+                        UI.hideModal();
+                        await showMarketingListsView(document.getElementById('content-viewport'));
+                        return;
+                    }
+                } else {
+                    data.created_by = _currentUser ? _currentUser.id : null;
+                    const _newRec = await AppDataStore.create('products', data);
+                    _savedId = _newRec?.id;
+                    if (_savedId && data.price > 0) {
+                        await AppDataStore.create('product_price_history', { product_id: parseInt(_savedId), price: data.price, effective_date: _priceDate });
+                    }
+                }
+                if (_savedId && (_photoFile || _posterFile)) {
+                    const _sb = window.supabase || window.supabaseClient;
+                    const _urlUpdates = {};
+                    if (_photoFile) {
+                        const _path = `products/photo/${_savedId}_${Date.now()}`;
+                        const { error: _pe } = await _sb.storage.from('attachments').upload(_path, _photoFile, { upsert: true, contentType: _photoFile.type });
+                        if (!_pe) { const { data: _ud } = _sb.storage.from('attachments').getPublicUrl(_path); _urlUpdates.photo_url = _ud.publicUrl; }
+                    }
+                    if (_posterFile) {
+                        const _path = `products/poster/${_savedId}_${Date.now()}`;
+                        const { error: _pe } = await _sb.storage.from('attachments').upload(_path, _posterFile, { upsert: true, contentType: _posterFile.type });
+                        if (!_pe) { const { data: _ud } = _sb.storage.from('attachments').getPublicUrl(_path); _urlUpdates.poster_url = _ud.publicUrl; }
+                    }
+                    if (Object.keys(_urlUpdates).length > 0) await AppDataStore.update('products', _savedId, _urlUpdates);
+                }
+                UI.toast.success(id ? 'Product updated' : 'Product added');
+                UI.hideModal();
+                await showMarketingListsView(document.getElementById('content-viewport'));
+            } catch (_err) {
+                console.error('saveMarketingListItem (products) error:', _err);
+                UI.toast.error('Save failed: ' + (_err.message || _err));
+            }
+            return;
         } else if (type === 'bujishu') {
             data.name = document.getElementById('mkt-name').value.trim();
             data.category = document.getElementById('mkt-category').value.trim();
@@ -36088,6 +36173,33 @@ const exportKPIReport = async (format) => {
             console.error('saveMarketingListItem error:', err);
             UI.toast.error('Save failed: ' + (err.message || err));
         }
+    };
+
+    const showProductPriceHistory = async (productId) => {
+        const history = await AppDataStore.query('product_price_history', { product_id: parseInt(productId) });
+        const sorted = (history || []).sort((a, b) => new Date(b.effective_date) - new Date(a.effective_date));
+        const rows = sorted.length
+            ? sorted.map(h => `
+                <tr>
+                    <td style="padding:8px 12px;">${h.effective_date}</td>
+                    <td style="padding:8px 12px;font-weight:600;">RM ${parseFloat(h.price).toLocaleString('en-MY', { minimumFractionDigits: 2 })}</td>
+                </tr>`).join('')
+            : '<tr><td colspan="2" style="padding:12px;text-align:center;color:var(--gray-400);">No price history recorded yet.</td></tr>';
+        UI.showModal('Price History', `
+            <table style="width:100%;border-collapse:collapse;">
+                <thead><tr style="background:var(--gray-100);">
+                    <th style="padding:8px 12px;text-align:left;">Effective Date</th>
+                    <th style="padding:8px 12px;text-align:left;">Price</th>
+                </tr></thead>
+                <tbody>${rows}</tbody>
+            </table>
+            <p style="font-size:11px;color:var(--gray-400);margin-top:10px;">Most recent first. Price is recorded whenever it changes.</p>
+        `, [{ label: 'Close', type: 'secondary', action: 'UI.hideModal()' }]);
+    };
+
+    const viewProductImage = (url, label) => {
+        UI.showModal(label, `<div style="text-align:center;"><img src="${url}" style="max-width:100%;max-height:70vh;border-radius:6px;"></div>`,
+            [{ label: 'Close', type: 'secondary', action: 'UI.hideModal()' }]);
     };
 
     const saveVenue = async (id = null) => {
@@ -50971,6 +51083,8 @@ Gold-${totGold}`;
         openMarketingListAddModal,
         openMarketingListEditModal,
         saveMarketingListItem,
+        showProductPriceHistory,
+        viewProductImage,
         saveVenue,
         updateVenueSequence,
         deleteMarketingListItem,
