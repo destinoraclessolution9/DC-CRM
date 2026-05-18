@@ -4102,10 +4102,17 @@ In a production system, this would show the actual file contents.
         const avatarUrl = _currentUser?.avatar_url
             || `https://ui-avatars.com/api/?name=${encodeURIComponent(_currentUser?.full_name || 'U')}&background=8B0000&color=fff`;
 
-        // Instant snapshot restore — paint last session's body immediately
+        // Instant snapshot restore — localStorage persists across app close (8hr TTL)
         const _mhomeSnapKey = `mhome-snap-${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
         let _mhomeCached;
-        try { _mhomeCached = sessionStorage.getItem(_mhomeSnapKey); } catch(_) {}
+        try {
+            const _snapRaw = localStorage.getItem(_mhomeSnapKey);
+            if (_snapRaw) {
+                const { ts, val } = JSON.parse(_snapRaw);
+                if (Date.now() - ts < 8 * 60 * 60 * 1000) _mhomeCached = val;
+                else localStorage.removeItem(_mhomeSnapKey);
+            }
+        } catch(_) {}
         const _mhomeInitBody = _mhomeCached || `
                 <div class="mhome-ai-card"><div class="mhome-ai-top" style="min-height:160px;">
                     <span class="mhome-arc"></span>
@@ -4328,7 +4335,7 @@ In a production system, this would show the actual file contents.
         const body = document.getElementById('mhome-body');
         if (!body) return;
         // Track so we can save snapshot after render
-        const _mhomeSaveSnap = (html) => { try { sessionStorage.setItem(_mhomeSnapKey, html); } catch(_) {} };
+        const _mhomeSaveSnap = (html) => { try { localStorage.setItem(_mhomeSnapKey, JSON.stringify({ ts: Date.now(), val: html })); } catch(_) {} };
         body.innerHTML = `
         <div class="mhome-ai-card">
             <div class="mhome-ai-top">
