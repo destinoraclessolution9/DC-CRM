@@ -44311,11 +44311,15 @@ const initImportDemoData = async () => {
     // --- Aggregate for farm order text ---
     const eggAggregate = (rows) => {
         const sum = { KL: { GOLD: 0, KING: 0 }, PG: { GOLD: 0, KING: 0 } };
+        const byGroup = {};
         for (const r of rows) {
             if (!sum[r.region]) continue;
             if (!sum[r.region][r.product]) sum[r.region][r.product] = 0;
             sum[r.region][r.product] += Number(r.quantity) || 0;
+            const g = r.group_name || (r.region === 'PG' ? 'PG (unclassified)' : 'KL (unclassified)');
+            byGroup[g] = (byGroup[g] || 0) + (Number(r.quantity) || 0);
         }
+        sum.by_group = byGroup;
         return sum;
     };
 
@@ -44411,12 +44415,64 @@ JB 星期二到
                     </table>
                 </div>
             `;
-        }).join('');
+        }).join('') + eggRenderGroupBreakdownHtml(eggGroupBreakdownFromRows(rows));
+    };
+
+    const eggRenderGroupBreakdownHtml = (byGroup) => {
+        if (!byGroup || !Object.keys(byGroup).length) return '';
+        const order = _EGG_WHOLESALE_GROUP_ORDER;
+        const seen = new Set();
+        const rows = [];
+        for (const g of order) {
+            if (byGroup[g] !== undefined) { rows.push([g, byGroup[g]]); seen.add(g); }
+        }
+        for (const [g, qty] of Object.entries(byGroup)) {
+            if (!seen.has(g)) rows.push([g, qty]);
+        }
+        const cells = rows.map(([g, qty]) => `
+            <div style="display:flex;justify-content:space-between;padding:7px 12px;border-bottom:1px solid var(--gray-100);">
+                <span style="font-size:13px;">${g}</span>
+                <strong style="font-size:13px;">${qty} cartons</strong>
+            </div>`).join('');
+        return `
+            <div style="margin-bottom:14px;border:1px solid #d1fae5;border-radius:8px;overflow:hidden;">
+                <div style="background:#ecfdf5;padding:8px 12px;font-weight:600;font-size:13px;color:#065f46;">
+                    <i class="fas fa-layer-group"></i> Wholesales Group Summary
+                </div>
+                ${cells}
+            </div>`;
     };
 
     // Text version — used for clipboard copy, .txt download, and run history.
     // Keeps the totals line + lists each row underneath so downstream tools
     // (e.g. WhatsApp, email) still have a readable per-row breakdown.
+    const _EGG_WHOLESALE_GROUP_ORDER = [
+        'KL Cheras', 'SG Puchong & Sunway', 'KL Kepong',
+        'PG Center', 'PG Mainland', 'PG South'
+    ];
+
+    const eggGroupBreakdownFromRows = (rows) => {
+        const byGroup = {};
+        for (const r of rows) {
+            const g = r.group_name;
+            if (g) byGroup[g] = (byGroup[g] || 0) + (Number(r.quantity) || 0);
+        }
+        return byGroup;
+    };
+
+    const eggRenderGroupBreakdownText = (byGroup) => {
+        if (!byGroup || !Object.keys(byGroup).length) return '';
+        let out = '\n=== Wholesales Group Summary ===\n';
+        const seen = new Set();
+        for (const g of _EGG_WHOLESALE_GROUP_ORDER) {
+            if (byGroup[g] !== undefined) { out += `${g}: ${byGroup[g]} cartons\n`; seen.add(g); }
+        }
+        for (const [g, qty] of Object.entries(byGroup)) {
+            if (!seen.has(g)) out += `${g}: ${qty} cartons\n`;
+        }
+        return out;
+    };
+
     const eggRenderChannelBreakdownText = (rows) => {
         let out = '=== 批发 / 线上分类汇总 ===\n';
         for (const sec of _EGG_CHANNEL_SECTIONS) {
@@ -44434,6 +44490,7 @@ JB 星期二到
                 out += `  ${agent} ${date} ${ordNo} ${code} ${prod} ${r.quantity}\n`;
             }
         }
+        out += eggRenderGroupBreakdownText(eggGroupBreakdownFromRows(rows));
         return out;
     };
 
@@ -45672,6 +45729,20 @@ JB 星期二到
                     <pre style="background:#f8fafc;padding:16px;border-radius:6px;font-family:monospace;font-size:13px;white-space:pre-wrap;">${r.farm_order_text || ''}</pre>
                     <h4>Channel Breakdown</h4>
                     <pre style="background:#f8fafc;padding:16px;border-radius:6px;font-family:monospace;font-size:13px;white-space:pre-wrap;">${r.channel_breakdown_text || ''}</pre>
+                    ${(() => {
+                        const byGroup = r.totals?.by_group;
+                        if (!byGroup || !Object.keys(byGroup).length) return '';
+                        const groupOrder = ['KL Cheras','SG Puchong & Sunway','KL Kepong','PG Center','PG Mainland','PG South'];
+                        const seen = new Set();
+                        let rows = '';
+                        for (const g of groupOrder) {
+                            if (byGroup[g] !== undefined) { rows += `<div style="display:flex;justify-content:space-between;padding:7px 12px;border-bottom:1px solid var(--gray-100);"><span>${g}</span><strong>${byGroup[g]} cartons</strong></div>`; seen.add(g); }
+                        }
+                        for (const [g, qty] of Object.entries(byGroup)) {
+                            if (!seen.has(g)) rows += `<div style="display:flex;justify-content:space-between;padding:7px 12px;border-bottom:1px solid var(--gray-100);"><span>${g}</span><strong>${qty} cartons</strong></div>`;
+                        }
+                        return `<h4>Wholesales Group Summary</h4><div style="border:1px solid #d1fae5;border-radius:8px;overflow:hidden;margin-bottom:16px;"><div style="background:#ecfdf5;padding:8px 12px;font-weight:600;font-size:13px;color:#065f46;"><i class="fas fa-layer-group"></i> Wholesales Group Summary</div>${rows}</div>`;
+                    })()}
                 </div>
             `;
             UI.showModal(`Run ${r.id} — ${r.run_at ? new Date(r.run_at).toLocaleString() : ''}`, content, [
@@ -45689,7 +45760,7 @@ JB 星期二到
         const cfg = _eggState.config;
         const json = JSON.stringify(cfg, null, 2);
         host.innerHTML = `
-            <div style="background:white;padding:20px;border-radius:12px;border:1px solid var(--gray-200);">
+            <div style="background:white;padding:20px;border-radius:12px;border:1px solid var(--gray-200);margin-bottom:16px;">
                 <h3 style="margin-top:0;">Configuration</h3>
                 <p style="color:var(--gray-500);font-size:13px;">
                     Edit the JSON configuration for region rules, product mapping, and wholesale groups.
@@ -45699,6 +45770,17 @@ JB 星期二到
                     <button class="btn primary" onclick="app.eggSaveConfigFromTextarea()"><i class="fas fa-save"></i> Save</button>
                     <button class="btn secondary" onclick="app.eggResetConfigToDefault()"><i class="fas fa-undo"></i> Reset to Defaults</button>
                 </div>
+            </div>
+            <div style="background:white;padding:20px;border-radius:12px;border:1px solid var(--gray-200);">
+                <h3 style="margin-top:0;">Wholesales Group Data</h3>
+                <p style="color:var(--gray-500);font-size:13px;">
+                    Patch historical runs that are missing the wholesales group breakdown (by_group).
+                    Safe to run multiple times — only updates runs that are missing the data.
+                </p>
+                <button class="btn secondary" onclick="app.eggResyncGroupData()">
+                    <i class="fas fa-sync-alt"></i> Re-sync Group Data on All Runs
+                </button>
+                <div id="egg-resync-status" style="margin-top:10px;font-size:13px;"></div>
             </div>
         `;
     };
@@ -45718,6 +45800,39 @@ JB 星期二到
         if (!confirm('Reset configuration to defaults? Current values will be overwritten.')) return;
         await eggSaveConfig(eggDefaultConfig());
         await eggRenderConfigTab(document.getElementById('egg-tab-content'));
+    };
+
+    const eggResyncGroupData = async () => {
+        const statusEl = document.getElementById('egg-resync-status');
+        if (statusEl) statusEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Loading runs…';
+        try {
+            const runs = await AppDataStore.query('egg_run_history', {}) || [];
+            const toSync = runs.filter(r => !r.totals?.by_group);
+            if (toSync.length === 0) {
+                if (statusEl) statusEl.innerHTML = '<span style="color:#10b981;">✓ All runs already have group data.</span>';
+                return;
+            }
+            if (statusEl) statusEl.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Syncing ${toSync.length} run(s)…`;
+            let done = 0;
+            for (const run of toSync) {
+                const orders = await AppDataStore.query('egg_processed_orders', { run_id: run.id }) || [];
+                const kept = orders.filter(o => !o.excluded_reason);
+                const byGroup = {};
+                for (const r of kept) {
+                    const g = r.group_name;
+                    if (g) byGroup[g] = (byGroup[g] || 0) + (Number(r.quantity) || 0);
+                }
+                const updatedTotals = { ...(run.totals || {}), by_group: byGroup };
+                await AppDataStore.update('egg_run_history', run.id, { totals: updatedTotals });
+                done++;
+                if (statusEl) statusEl.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Syncing… ${done}/${toSync.length}`;
+            }
+            if (statusEl) statusEl.innerHTML = `<span style="color:#10b981;">✓ Synced ${done} run(s) successfully.</span>`;
+            UI.toast.success(`Group data synced for ${done} run(s)`);
+        } catch (err) {
+            if (statusEl) statusEl.innerHTML = `<span style="color:#ef4444;">Error: ${err.message}</span>`;
+            UI.toast.error('Re-sync failed: ' + err.message);
+        }
     };
 
     // ==================== /EGG PURCHASING ====================
@@ -50195,6 +50310,7 @@ JB 星期二到
         // Tab 4 — Config
         eggSaveConfigFromTextarea,
         eggResetConfigToDefault,
+        eggResyncGroupData,
 
         // ========== FORMULA PURCHASER (Super Admin only) ==========
         showFormulaPurchaserView,
