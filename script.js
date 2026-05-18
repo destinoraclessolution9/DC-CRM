@@ -44324,8 +44324,10 @@ const initImportDemoData = async () => {
             if (!sum[r.region]) continue;
             if (!sum[r.region][r.product]) sum[r.region][r.product] = 0;
             sum[r.region][r.product] += Number(r.quantity) || 0;
-            const g = r.group_name || (r.region === 'PG' ? 'PG (unclassified)' : 'KL (unclassified)');
-            byGroup[g] = (byGroup[g] || 0) + (Number(r.quantity) || 0);
+            // Only wholesale-channel rows carry geographic group names (KL Cheras, PG Center, etc.)
+            if (r.channel === 'Wholesale' && r.group_name) {
+                byGroup[r.group_name] = (byGroup[r.group_name] || 0) + (Number(r.quantity) || 0);
+            }
         }
         sum.by_group = byGroup;
         return sum;
@@ -44462,6 +44464,7 @@ JB 星期二到
     const eggGroupBreakdownFromRows = (rows) => {
         const byGroup = {};
         for (const r of rows) {
+            if (r.channel !== 'Wholesale') continue;
             const g = r.group_name;
             if (g) byGroup[g] = (byGroup[g] || 0) + (Number(r.quantity) || 0);
         }
@@ -45827,6 +45830,7 @@ JB 星期二到
                 const kept = orders.filter(o => !o.excluded_reason);
                 const byGroup = {};
                 for (const r of kept) {
+                    if (r.channel !== 'Wholesale') continue;
                     const g = r.group_name;
                     if (g) byGroup[g] = (byGroup[g] || 0) + (Number(r.quantity) || 0);
                 }
