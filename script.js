@@ -10375,7 +10375,10 @@ function _wireLoginBtn() {
             }
         } else if (viewId === 'pipeline') {
             _currentView = 'pipeline';
-            await showPipelineView(viewport);
+            // Skeleton is painted synchronously before the first await inside
+            // showPipelineView, so the user sees it instantly. Heavy scoring
+            // runs in the background; navigateTo returns after skeleton paint.
+            showPipelineView(viewport).catch(e => console.warn('pipeline failed:', e));
         } else if (viewId === 'agents') {
             _currentView = 'agents';
             await showAgentsView(viewport);
@@ -10402,7 +10405,8 @@ function _wireLoginBtn() {
             await showIntegrationHub(viewport);
         } else if (viewId === 'referrals') {
             _currentView = 'referrals';
-            await showReferralsView(viewport);
+            // Same pattern as pipeline — skeleton paints synchronously, data loads async.
+            showReferralsView(viewport).catch(e => console.warn('referrals failed:', e));
         } else if (viewId === 'cases') {
             _currentView = 'cases';
             await showCasesView(viewport);
@@ -10703,10 +10707,6 @@ function _wireLoginBtn() {
             `;
             document.head.appendChild(style);
         }
-
-        // Yield so navigateTo returns with the page structure visible, then
-        // load data in the background — same pattern as pipeline/calendar.
-        await new Promise(r => setTimeout(r, 0));
 
         renderReferralSummaryAndLeaderboard().catch(e => console.warn('referral summary failed:', e));
 
@@ -31246,13 +31246,7 @@ const deactivateAgent = async (agentId) => {
     </div>
 </div>`;
 
-        // ── STEP 2: Yield to caller so navigateTo returns with skeleton visible ──
-        // The skeleton is already painted above. By yielding here, the browser
-        // repaints and navigateTo resolves — user sees the skeleton instantly
-        // instead of waiting 8+ seconds for all pipeline scoring to finish.
-        await new Promise(r => setTimeout(r, 0));
-
-        // ── STEP 3: Fire ALL big queries in parallel ──────────────────────────
+        // ── STEP 2: Fire ALL big queries in parallel ──────────────────────────
         // Each query gets a 15s timeout so a slow Supabase call no longer
         // leaves the page on a permanent skeleton. On timeout we render with
         // empty data and the user can hit Refresh to retry.
