@@ -17806,7 +17806,7 @@ function _wireLoginBtn() {
                     <h4>🧑‍💼 Appointment's Consultant</h4>
                     <div class="form-group">
                         <div class="search-with-results" style="position:relative;">
-                            <input type="text" id="consultant-search-input" class="form-control" placeholder="Search consultant..." onkeyup="app.searchConsultants()">
+                            <input type="text" id="consultant-search-input" class="form-control" placeholder="Search consultant..." oninput="app.searchConsultants()">
                             <div id="consultant-search-results" class="search-results-dropdown"></div>
                         </div>
                         <div id="selected-consultants-list" style="margin-top:8px;"></div>
@@ -17827,7 +17827,7 @@ function _wireLoginBtn() {
                     <div class="form-group">
                         <label>Search and Add Co-Agents</label>
                         <div class="co-agent-search" style="position:relative;">
-                            <input type="text" id="co-agent-search-input" class="form-control" placeholder="Type consultant name..." onkeyup="app.searchAgents()">
+                            <input type="text" id="co-agent-search-input" class="form-control" placeholder="Type consultant name..." oninput="app.searchAgents()">
                             <div id="agent-search-results" class="search-results-dropdown"></div>
                         </div>
                     </div>
@@ -18365,7 +18365,7 @@ function _wireLoginBtn() {
         const useLunar = ['lunar','both'].includes(d.life_chart_type) || !data;
         const readOnly = prefix === 'preview';
         const disabled = readOnly ? 'disabled' : '';
-        const searchHandler = readOnly ? '' : `onkeyup="app.debounceCall('${prefix}-referrer', () => app.searchBasicInfoReferrers('${prefix}'), 250)"`;
+        const searchHandler = readOnly ? '' : `oninput="app.debounceCall('${prefix}-referrer', () => app.searchBasicInfoReferrers('${prefix}'), 250)"`;
         const clearHandler = readOnly ? '' : `onclick="app.clearBasicInfoReferrer('${prefix}')"`;
 
         return `
@@ -19334,14 +19334,15 @@ function _wireLoginBtn() {
             case 'FTF':
             case 'GR':
             case 'XG':
+            case 'EMAIL':
             case 'CALL':
             case 'WHATSAPP':
                 html = `
                     <div class="form-section">
-                        <h4>🔍 Select ${type === 'CALL' || type === 'WHATSAPP' ? 'Prospect/Customer' : 'Existing Prospect/Customer'}</h4>
+                        <h4>🔍 Select ${type === 'CALL' || type === 'WHATSAPP' || type === 'EMAIL' ? 'Prospect/Customer' : 'Existing Prospect/Customer'}</h4>
                         <div class="form-group">
                             <div class="search-with-results">
-                                <input type="text" id="entity-search" class="form-control" placeholder="Type name, phone, or email..." onkeyup="app.searchEntities()">
+                                <input type="text" id="entity-search" class="form-control" placeholder="Type name, phone, or email..." oninput="app.searchEntities()">
                                 <div id="search-results" class="search-results-dropdown"></div>
                             </div>
                         </div>
@@ -19354,6 +19355,26 @@ function _wireLoginBtn() {
                 `;
                 break;
 
+            case 'PERSONAL':
+            case 'OTHERS':
+                html = `
+                    <div class="form-section">
+                        <h4>🔍 Link to Prospect/Customer (Optional)</h4>
+                        <div class="form-group">
+                            <div class="search-with-results">
+                                <input type="text" id="entity-search" class="form-control" placeholder="Type name, phone, or email..." oninput="app.searchEntities()">
+                                <div id="search-results" class="search-results-dropdown"></div>
+                            </div>
+                        </div>
+                        <div id="selected-entity-info" class="selected-entity-info"></div>
+                        <div class="form-group">
+                            <label>Title/Purpose</label>
+                            <input type="text" id="meeting-title" class="form-control" placeholder="e.g., Personal errand, Other activity">
+                        </div>
+                    </div>
+                `;
+                break;
+
             case 'FSA':
             case 'SITE':
                 html = `
@@ -19361,7 +19382,7 @@ function _wireLoginBtn() {
                         <h4>🔍 Select Existing Prospect/Customer</h4>
                         <div class="form-group">
                             <div class="search-with-results">
-                                <input type="text" id="entity-search" class="form-control" placeholder="Type name, phone, or email..." onkeyup="app.searchEntities()">
+                                <input type="text" id="entity-search" class="form-control" placeholder="Type name, phone, or email..." oninput="app.searchEntities()">
                                 <div id="search-results" class="search-results-dropdown"></div>
                             </div>
                         </div>
@@ -19426,7 +19447,7 @@ function _wireLoginBtn() {
                         <div class="form-group" style="margin-top: 15px;">
                             <label>Add Attendees (${type.includes('AGENT') ? 'Agents' : 'Clients/Agents'})</label>
                             <div class="search-with-results">
-                                <input type="text" id="attendee-search" class="form-control" placeholder="Search to add..." onkeyup="app.searchAttendees()">
+                                <input type="text" id="attendee-search" class="form-control" placeholder="Search to add..." oninput="app.searchAttendees()">
                                 <div id="attendee-search-results" class="search-results-dropdown" style="display: none;"></div>
                             </div>
                             <div id="selected-attendees" style="margin-top: 10px;"></div>
@@ -20794,6 +20815,10 @@ function _wireLoginBtn() {
             }
             activity.location_address = address;
             activity.activity_title = type === 'FSA' ? 'Feng Shui Analysis' : 'Site Visit';
+            if (_selectedEntity) {
+                if (_selectedEntity.type === 'Prospect') activity.prospect_id = _selectedEntity.id;
+                else activity.customer_id = _selectedEntity.id;
+            }
         } else if (type === 'EVENT' || type === 'AGENT_MEETING' || type === 'AGENT_TRAINING') {
             const visibility = document.querySelector('input[name="event-visibility"]:checked')?.value || 'closed';
             const eventId = document.getElementById('existing-event')?.value;
@@ -20814,13 +20839,17 @@ function _wireLoginBtn() {
 
             // Attendees saved after activity is created (below) so activity_id is available
         } else {
-            if (!_selectedEntity) {
+            const entityRequired = !['PERSONAL', 'OTHERS'].includes(type);
+            if (entityRequired && !_selectedEntity) {
                 UI.toast.error('Please select a prospect or customer.');
                 return;
             }
-            activity.activity_title = document.getElementById('meeting-title')?.value || 'Meeting';
-            if (_selectedEntity.type === 'Prospect') activity.prospect_id = _selectedEntity.id;
-            else activity.customer_id = _selectedEntity.id;
+            activity.activity_title = document.getElementById('meeting-title')?.value
+                || (type === 'PERSONAL' ? 'Personal' : type === 'OTHERS' ? 'Others' : 'Meeting');
+            if (_selectedEntity) {
+                if (_selectedEntity.type === 'Prospect') activity.prospect_id = _selectedEntity.id;
+                else activity.customer_id = _selectedEntity.id;
+            }
         }
 
         if (document.getElementById('is-closing')?.checked) {
