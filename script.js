@@ -45962,8 +45962,8 @@ JB 星期二到
             { key:'eyePlus',   label:'Eye+' },
         ];
         const tgtGroups = [
-            { key:'klCheras',  label:'KL Cheras + SG Puchong & Sunway' },
-            { key:'klKepong',  label:'KL Kepong' },
+            { key:'klKepong',  label:'KL Kepong + SG Puchong & Sunway' },
+            { key:'klCheras',  label:'KL Cheras' },
             { key:'pgCenter',  label:'PG Center' },
             { key:'pgMainland',label:'PG Mainland' },
             { key:'pgSouth',   label:'PG South' },
@@ -46216,8 +46216,8 @@ Gold-${totGold}`;
         } catch(e) { monthByGroup = { ...byGroup }; }
 
         const wsGroups = [
-            { key:'klCheras',   src:['KL Cheras','SG Puchong & Sunway'], label:'KL Cheras + SG Puchong & Sunway' },
-            { key:'klKepong',   src:['KL Kepong'],                       label:'KL Kepong' },
+            { key:'klKepong',   src:['KL Kepong','SG Puchong & Sunway'], label:'KL Kepong + SG Puchong & Sunway' },
+            { key:'klCheras',   src:['KL Cheras'],                       label:'KL Cheras' },
             { key:'pgCenter',   src:['PG Center'],                       label:'PG Center' },
             { key:'pgMainland', src:['PG Mainland'],                     label:'PG Mainland' },
             { key:'pgSouth',    src:['PG South'],                        label:'PG South' },
