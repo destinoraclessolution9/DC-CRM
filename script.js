@@ -45921,7 +45921,6 @@ JB 星期二到
             if (_brIsEgg(code)) continue;
             let region;
             if (selfCol.includes('Bay Avenue, PG')) region = 'PG';
-            else if (/johor/i.test(state)) continue; // JB not tracked in balance
             else region = 'KL';
             const sku = skusMap[code];
             if (!sku) continue;
