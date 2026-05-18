@@ -46157,12 +46157,7 @@ JB 星期二到
         };
         // Eggs date = run_at (actual purchase commit date)
         const weekDate = run.run_at ? fmtDate(run.run_at) : (run.week_start_date ? fmtDate(run.week_start_date) : '??/??/??');
-        // Product Balance date = last Sunday on or before run_at
-        const balDate = (() => {
-            const d = new Date(run.run_at || run.week_start_date);
-            d.setDate(d.getDate() - d.getDay()); // d.getDay()=0 on Sun, so Sun stays, Mon→Sun-1, Fri→Sun-5
-            return fmtDate(d);
-        })();
+        const balDate = fmtDate(new Date());
 
         // ── SECTION 1: EGGS (read directly from stored totals) ──
         const klKing=totals.KL?.KING||0, klGold=totals.KL?.GOLD||0;
