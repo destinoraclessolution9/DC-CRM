@@ -4843,6 +4843,20 @@ In a production system, this would show the actual file contents.
         const avatarUrl = _currentUser?.avatar_url
             || `https://ui-avatars.com/api/?name=${encodeURIComponent(_currentUser?.full_name || 'U')}&background=8B0000&color=fff`;
 
+        // Instant snapshot restore — localStorage persists across app close (5-min TTL)
+        const _mpSnapKey = `mp-list-snap-${_mpTab}`;
+        let _mpSnapHtml;
+        try {
+            const _raw = localStorage.getItem(_mpSnapKey);
+            if (_raw) {
+                const { ts, val } = JSON.parse(_raw);
+                if (Date.now() - ts < 5 * 60 * 1000) _mpSnapHtml = val;
+                else localStorage.removeItem(_mpSnapKey);
+            }
+        } catch(_) {}
+        // Only use snapshot when there's no active search (search results shouldn't be cached)
+        const _mpHasSnap = !!_mpSnapHtml && !_mpSearch;
+
         viewport.innerHTML = `
         <div class="mp">
             <div class="mp-top">
@@ -4869,17 +4883,17 @@ In a production system, this would show the actual file contents.
                 </div>
             </div>
 
-            <div id="mp-list" class="mp-list"></div>
+            <div id="mp-list" class="mp-list">${_mpHasSnap ? _mpSnapHtml : ''}</div>
         </div>
         <button class="mp-fab" onclick="app.mpAdd()" aria-label="Add"><i class="fas fa-plus"></i></button>`;
 
-        await _mpRenderList();
+        await _mpRenderList(!_mpHasSnap);
     };
 
-    const _mpRenderList = async () => {
+    const _mpRenderList = async (silent = false) => {
         const listHost = document.getElementById('mp-list');
         if (!listHost) return;
-        listHost.innerHTML = '<div class="mp-empty"><i class="fas fa-spinner fa-spin"></i> Loading…</div>';
+        if (!silent) listHost.innerHTML = '<div class="mp-empty"><i class="fas fa-spinner fa-spin"></i> Loading…</div>';
 
         const table = _mpTab === 'customers' ? 'customers' : 'prospects';
         const visibleIds = (typeof getVisibleUserIds === 'function')
@@ -4962,6 +4976,9 @@ In a production system, this would show the actual file contents.
         }).join('');
 
         listHost.innerHTML = html;
+        if (!_mpSearch) {
+            try { localStorage.setItem(`mp-list-snap-${_mpTab}`, JSON.stringify({ ts: Date.now(), val: html })); } catch(_) {}
+        }
     };
 
     const mpSwitchTab = async (tab, btn) => {
