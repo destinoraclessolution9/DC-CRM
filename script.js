@@ -4170,36 +4170,40 @@ In a production system, this would show the actual file contents.
         const _mhomeLsSet = (key, val) => {
             try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), val })); } catch(_) {}
         };
-        let cachedPeople = _mhomeLsGet(_mhomePeopleKey, 60 * 60 * 1000);
+        let cachedPeople    = _mhomeLsGet(_mhomePeopleKey,        60 * 60 * 1000);
         const _needPeople = !cachedPeople;
 
-        const _mhomeDraftsKey  = 'mhome-drafts-v1';
-        const _mhomeRefillsKey = 'mhome-refills-v1';
-        const _mhomeUsersKey   = 'mhome-users-v1';
-        let cachedDrafts  = _mhomeLsGet(_mhomeDraftsKey,  5 * 60 * 1000);
-        let cachedRefills = _mhomeLsGet(_mhomeRefillsKey, 5 * 60 * 1000);
-        let cachedUsers   = _mhomeLsGet(_mhomeUsersKey,   60 * 60 * 1000);
-        const _needDrafts  = !cachedDrafts;
-        const _needRefills = !cachedRefills;
-        const _needUsers   = !cachedUsers;
+        const _mhomeDraftsKey     = 'mhome-drafts-v1';
+        const _mhomeRefillsKey    = 'mhome-refills-v1';
+        const _mhomeUsersKey      = 'mhome-users-v1';
+        const _mhomeCustomersKey  = 'mhome-customers-v1';
+        let cachedDrafts     = _mhomeLsGet(_mhomeDraftsKey,     5 * 60 * 1000);
+        let cachedRefills    = _mhomeLsGet(_mhomeRefillsKey,    5 * 60 * 1000);
+        let cachedUsers      = _mhomeLsGet(_mhomeUsersKey,      60 * 60 * 1000);
+        let cachedCustomers  = _mhomeLsGet(_mhomeCustomersKey,  60 * 60 * 1000);
+        const _needDrafts    = !cachedDrafts;
+        const _needRefills   = !cachedRefills;
+        const _needUsers     = !cachedUsers;
 
         const [actResult, allProspectsR, allCustomersR, draftsR, refillsR, allUsersR] = await Promise.all([
             AppDataStore.queryAdvanced('activities', actQueryOpts).catch(() => ({ data: [] })),
-            _needPeople  ? AppDataStore.getAll('prospects').catch(() => [])                          : Promise.resolve([]),
-            _needPeople  ? AppDataStore.getAll('customers').catch(() => [])                          : Promise.resolve([]),
-            _needDrafts  ? AppDataStore.getAll('follow_up_drafts').catch(() => [])                   : Promise.resolve([]),
+            _needPeople  ? AppDataStore.getAll('prospects').catch(() => [])                              : Promise.resolve([]),
+            _needPeople  ? AppDataStore.getAll('customers').catch(() => [])                              : Promise.resolve([]),
+            _needDrafts  ? AppDataStore.getAll('follow_up_drafts').catch(() => [])                       : Promise.resolve([]),
             _needRefills ? AppDataStore.query('refill_reminders', { status: 'pending' }).catch(() => []) : Promise.resolve([]),
-            _needUsers   ? AppDataStore.getAll('users').catch(() => [])                              : Promise.resolve([]),
+            _needUsers   ? AppDataStore.getAll('users').catch(() => [])                                  : Promise.resolve([]),
         ]);
 
         const activities = (actResult.data || []).filter(a => a.activity_type !== 'EVENT');
         if (_needPeople) {
-            cachedPeople = [...(allProspectsR || []), ...(allCustomersR || [])];
-            _mhomeLsSet(_mhomePeopleKey, cachedPeople);
+            cachedPeople   = [...(allProspectsR || []), ...(allCustomersR || [])];
+            cachedCustomers = allCustomersR || [];
+            _mhomeLsSet(_mhomePeopleKey,       cachedPeople);
+            _mhomeLsSet(_mhomeCustomersKey,    cachedCustomers);
         }
-        if (_needDrafts)  { cachedDrafts  = draftsR  || []; _mhomeLsSet(_mhomeDraftsKey,  cachedDrafts);  }
-        if (_needRefills) { cachedRefills = refillsR || []; _mhomeLsSet(_mhomeRefillsKey, cachedRefills); }
-        if (_needUsers)   { cachedUsers   = allUsersR || []; _mhomeLsSet(_mhomeUsersKey,  cachedUsers);   }
+        if (_needDrafts)  { cachedDrafts  = draftsR   || []; _mhomeLsSet(_mhomeDraftsKey,  cachedDrafts);  }
+        if (_needRefills) { cachedRefills = refillsR  || []; _mhomeLsSet(_mhomeRefillsKey, cachedRefills); }
+        if (_needUsers)   { cachedUsers   = allUsersR  || []; _mhomeLsSet(_mhomeUsersKey,  cachedUsers);   }
 
         const allPeople = cachedPeople;
         const personMap = new Map(allPeople.map(p => [String(p.id), p]));
@@ -4310,7 +4314,7 @@ In a production system, this would show the actual file contents.
         // Inactive: customers with last_contact_date older than 60 days, OR no contact ever.
         const inactiveCount = (() => {
             const sixtyAgo = Date.now() - 60 * 86400000;
-            return (allCustomersR || []).filter(c => {
+            return (cachedCustomers || []).filter(c => {
                 if (c.status === 'inactive') return true;
                 const lc = c.last_contact_date || c.updated_at || c.created_at;
                 if (!lc) return false;
@@ -15592,10 +15596,10 @@ function _wireLoginBtn() {
     const viewRefillProspect = async (prospectId, customerId) => {
         if (prospectId) {
             await navigateTo('prospects');
-            setTimeout(() => { try { showProspectProfile(prospectId); } catch(_) {} }, 200);
+            setTimeout(() => { try { showProspectDetail(prospectId); } catch(_) {} }, 200);
         } else if (customerId) {
-            await navigateTo('customers');
-            setTimeout(() => { try { showCustomerProfile(customerId); } catch(_) {} }, 200);
+            await navigateTo('prospects');
+            setTimeout(() => { try { showCustomerDetail(customerId); } catch(_) {} }, 200);
         }
     };
 
