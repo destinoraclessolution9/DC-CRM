@@ -18092,9 +18092,12 @@ function _wireLoginBtn() {
                             setF('cps-ic', prospect.ic_number);
                             setF('cps-email', prospect.email);
                             setF('cps-dob', prospect.date_of_birth);
-                            if (prospect.date_of_birth) {
+                            {
+                                const lct = prospect.life_chart_type;
                                 const dobChk = document.getElementById('cps-use-dob');
-                                if (dobChk) dobChk.checked = true;
+                                const lunarChk = document.getElementById('cps-use-lunar');
+                                if (dobChk) dobChk.checked = ['solar','both'].includes(lct);
+                                if (lunarChk) lunarChk.checked = ['lunar','both'].includes(lct);
                             }
                             setF('cps-lunar', prospect.lunar_birth);
                             setF('cps-minggua', prospect.ming_gua);
@@ -18238,9 +18241,12 @@ function _wireLoginBtn() {
                         setField('cps-ic', prospect.ic_number);
                         setField('cps-email', prospect.email);
                         setField('cps-dob', prospect.date_of_birth);
-                        if (prospect.date_of_birth) {
+                        {
+                            const lct = prospect.life_chart_type;
                             const dobChk = document.getElementById('cps-use-dob');
-                            if (dobChk) dobChk.checked = true;
+                            const lunarChk = document.getElementById('cps-use-lunar');
+                            if (dobChk) dobChk.checked = ['solar','both'].includes(lct);
+                            if (lunarChk) lunarChk.checked = ['lunar','both'].includes(lct);
                         }
                         setField('cps-lunar', prospect.lunar_birth);
                         setField('cps-minggua', prospect.ming_gua);
