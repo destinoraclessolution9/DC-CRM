@@ -20482,15 +20482,19 @@ function _wireLoginBtn() {
             return;
         }
 
-        // Only show prospects/customers that belong to this agent or their team.
-        const [visibleProspects, visibleCustomers] = await Promise.all([
+        // Search prospects, customers, and agents
+        const [visibleProspects, visibleCustomers, allUsers] = await Promise.all([
             getVisibleProspects(),
             getVisibleCustomers(),
+            AppDataStore.getAll('users'),
         ]);
+
+        const visibleAgents = allUsers.filter(u => isAgent(u));
 
         const all = [
             ...visibleProspects.map(p => ({ ...p, type: 'Prospect' })),
             ...visibleCustomers.map(c => ({ ...c, type: 'Customer' })),
+            ...visibleAgents.map(a => ({ ...a, type: 'Agent' })),
         ];
 
         // Normalise phone digits for phone-number queries
@@ -20530,7 +20534,9 @@ function _wireLoginBtn() {
         _selectedEntity = { id, type };
         const entity = type === 'Prospect'
             ? await AppDataStore.getById('prospects', id)
-            : await AppDataStore.getById('customers', id);
+            : type === 'Customer'
+            ? await AppDataStore.getById('customers', id)
+            : await AppDataStore.getById('users', id);
 
         const infoDiv = document.getElementById('selected-entity-info');
         if (infoDiv) {
