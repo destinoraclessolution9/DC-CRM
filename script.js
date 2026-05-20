@@ -16455,17 +16455,38 @@ function _wireLoginBtn() {
                 <div class="detail-section act-actions-section">
                     <h4>Actions</h4>
                     <div class="act-actions-list">
-                        ${activity.prospect_id ? `<button class="act-action-btn act-btn-profile" onclick="(async()=>{ const p=await AppDataStore.getById('prospects',${activity.prospect_id}); if(!p){UI.toast.error('Prospect record not found');return;} UI.hideModal(); app.showProspectDetail(${activity.prospect_id}); })()"><span class="act-icon"><i class="fas fa-user"></i></span><span class="act-label">Prospect</span></button>` : ''}
-                        ${activity.activity_type === 'CPS' && activity.prospect_id
-                            ? `<button class="act-action-btn act-btn-doc" onclick="app.uploadCPSForm(${activityId}, ${activity.prospect_id})"><span class="act-icon"><i class="fas fa-file-upload"></i></span><span class="act-label">Upload CPS</span></button>
-                               <button class="act-action-btn act-btn-doc" onclick="app.uploadAPUForm(${activityId}, ${activity.prospect_id})"><span class="act-icon"><i class="fas fa-file-alt"></i></span><span class="act-label">APU</span></button>`
-                            : ``
-                        }
-                        <button class="act-action-btn act-btn-edit" onclick="app.editActivityTiming(${activityId})"><span class="act-icon"><i class="fas fa-pen"></i></span><span class="act-label">Edit</span></button>
-                        ${activity.activity_type !== 'EVENT' && activity.prospect_id ? `<button class="act-action-btn act-btn-outcome" onclick="(async () => { await app.openMeetingOutcomeModal(${activityId}); })()"><span class="act-icon"><i class="fas fa-clipboard-check"></i></span><span class="act-label">Outcome</span></button>` : ''}
-                        ${activity.prospect_id ? `<button class="act-action-btn act-btn-notes" onclick="(async () => { await app.openPostMeetupNotesModal(${activityId}, ${activity.prospect_id}); })()"><span class="act-icon"><i class="fas fa-sticky-note"></i></span><span class="act-label">Notes</span></button>` : ''}
-                        ${'CPS,FTF,GR,XG,AGENT_TRAINING'.includes(activity.activity_type) ? `<button class="act-action-btn act-btn-edit" onclick="(async()=>{ UI.hideModal(); await app.openMeetingCapture(${activityId}); })()"><span class="act-icon"><i class="fas fa-microphone-alt"></i></span><span class="act-label">Live Notes</span></button>` : ''}
-                        <button class="act-action-btn act-action-delete" onclick="(async () => { await app.deleteActivity(${activityId}); })()"><i class="fas fa-trash-alt"></i> Delete</button>
+                        ${(() => {
+                            const _MEETUP_TYPES = ['CPS','FTF','FSA','GR','XG','CALL','EMAIL','WHATSAPP'];
+                            const _isMeetup = _MEETUP_TYPES.includes(activity.activity_type);
+                            const _entityId = activity.prospect_id || activity.customer_id;
+                            const _isProspect = !!activity.prospect_id;
+                            const _entityKind = _isProspect ? 'prospect' : 'customer';
+                            const _entityLabel = _isProspect ? 'Prospect' : 'Customer';
+                            const _profileBtn = (_isMeetup && _entityId)
+                                ? `<button class="act-action-btn act-btn-profile" onclick="(async()=>{ const p=await AppDataStore.getById('${_entityKind}s',${_entityId}); if(!p){UI.toast.error('${_entityLabel} record not found');return;} UI.hideModal(); app.${_isProspect ? 'showProspectDetail' : 'showCustomerDetail'}(${_entityId}); })()"><span class="act-icon"><i class="fas fa-user"></i></span><span class="act-label">${_entityLabel}</span></button>`
+                                : '';
+                            const _cpsBtns = (activity.activity_type === 'CPS' && activity.prospect_id)
+                                ? `<button class="act-action-btn act-btn-doc" onclick="app.uploadCPSForm(${activityId}, ${activity.prospect_id})"><span class="act-icon"><i class="fas fa-file-upload"></i></span><span class="act-label">Upload CPS</span></button>
+                                   <button class="act-action-btn act-btn-doc" onclick="app.uploadAPUForm(${activityId}, ${activity.prospect_id})"><span class="act-icon"><i class="fas fa-file-alt"></i></span><span class="act-label">APU</span></button>`
+                                : '';
+                            const _outcomeBtn = (_isMeetup && _entityId)
+                                ? `<button class="act-action-btn act-btn-outcome" onclick="(async () => { await app.openMeetingOutcomeModal(${activityId}); })()"><span class="act-icon"><i class="fas fa-clipboard-check"></i></span><span class="act-label">Outcome</span></button>`
+                                : '';
+                            const _notesBtn = (_isMeetup && _entityId)
+                                ? `<button class="act-action-btn act-btn-notes" onclick="(async () => { await app.openPostMeetupNotesModal(${activityId}, ${_entityId}); })()"><span class="act-icon"><i class="fas fa-sticky-note"></i></span><span class="act-label">Notes</span></button>`
+                                : '';
+                            const _liveBtn = (_isMeetup || activity.activity_type === 'AGENT_TRAINING')
+                                ? `<button class="act-action-btn act-btn-edit" onclick="(async()=>{ UI.hideModal(); await app.openMeetingCapture(${activityId}); })()"><span class="act-icon"><i class="fas fa-microphone-alt"></i></span><span class="act-label">Live Notes</span></button>`
+                                : '';
+                            return `
+                            ${_profileBtn}
+                            ${_cpsBtns}
+                            <button class="act-action-btn act-btn-edit" onclick="app.editActivityTiming(${activityId})"><span class="act-icon"><i class="fas fa-pen"></i></span><span class="act-label">Edit</span></button>
+                            ${_outcomeBtn}
+                            ${_notesBtn}
+                            ${_liveBtn}
+                            <button class="act-action-btn act-action-delete" onclick="(async () => { await app.deleteActivity(${activityId}); })()"><i class="fas fa-trash-alt"></i> Delete</button>`;
+                        })()}
                     </div>
                 </div>
             </div>
@@ -17368,22 +17389,32 @@ function _wireLoginBtn() {
         UI.hideModal();
         UI.toast.success('Post-meetup notes saved');
         if (prospectId) {
-            await showProspectDetail(prospectId);
-            setTimeout(async () => {
-                for (const tab of ['potential', 'nextactions']) {
-                    const itemEl = document.getElementById(`acc-${tab}-${prospectId}`);
-                    const bodyEl = document.getElementById(`acc-body-${tab}-${prospectId}`);
-                    if (itemEl && bodyEl && !itemEl.classList.contains('open')) {
-                        itemEl.classList.add('open');
-                        bodyEl.style.display = 'block';
-                        if (bodyEl.dataset.loaded === 'false') {
-                            bodyEl.dataset.loaded = 'true';
-                            await switchProspectTab(tab, prospectId, null, bodyEl);
+            // Entity may be a prospect or a customer — detect before routing.
+            let isProspect = true;
+            try {
+                const p = await AppDataStore.getById('prospects', prospectId);
+                if (!p) isProspect = false;
+            } catch (_) { isProspect = false; }
+            if (isProspect) {
+                await showProspectDetail(prospectId);
+                setTimeout(async () => {
+                    for (const tab of ['potential', 'nextactions']) {
+                        const itemEl = document.getElementById(`acc-${tab}-${prospectId}`);
+                        const bodyEl = document.getElementById(`acc-body-${tab}-${prospectId}`);
+                        if (itemEl && bodyEl && !itemEl.classList.contains('open')) {
+                            itemEl.classList.add('open');
+                            bodyEl.style.display = 'block';
+                            if (bodyEl.dataset.loaded === 'false') {
+                                bodyEl.dataset.loaded = 'true';
+                                await switchProspectTab(tab, prospectId, null, bodyEl);
+                            }
                         }
                     }
-                }
-                document.getElementById(`acc-potential-${prospectId}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }, 400);
+                    document.getElementById(`acc-potential-${prospectId}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }, 400);
+            } else if (typeof showCustomerDetail === 'function') {
+                await showCustomerDetail(prospectId);
+            }
         }
     };
 
