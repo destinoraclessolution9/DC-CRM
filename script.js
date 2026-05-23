@@ -4177,17 +4177,22 @@ In a production system, this would show the actual file contents.
         const _mhomeLsSet = (key, val) => {
             try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), val })); } catch(_) {}
         };
-        let cachedPeople    = _mhomeLsGet(_mhomePeopleKey,        60 * 60 * 1000);
+        // Pull-to-refresh forces a one-time bypass of every cold cache below.
+        const _mhomeForce = _mobileForceFresh; _mobileForceFresh = false;
+        // Cold reference data (people/customers/users) is held for 8h and only
+        // refetched when edited or force-refreshed — it's rarely reviewed anew.
+        // Today's activities + drafts + refills stay hot (fetched fresh on load).
+        let cachedPeople    = _mhomeForce ? null : _mhomeLsGet(_mhomePeopleKey,    8 * 60 * 60 * 1000);
         const _needPeople = !cachedPeople;
 
         const _mhomeDraftsKey     = 'mhome-drafts-v1';
         const _mhomeRefillsKey    = 'mhome-refills-v1';
         const _mhomeUsersKey      = 'mhome-users-v1';
         const _mhomeCustomersKey  = 'mhome-customers-v1';
-        let cachedDrafts     = _mhomeLsGet(_mhomeDraftsKey,     5 * 60 * 1000);
-        let cachedRefills    = _mhomeLsGet(_mhomeRefillsKey,    5 * 60 * 1000);
-        let cachedUsers      = _mhomeLsGet(_mhomeUsersKey,      60 * 60 * 1000);
-        let cachedCustomers  = _mhomeLsGet(_mhomeCustomersKey,  60 * 60 * 1000);
+        let cachedDrafts     = _mhomeForce ? null : _mhomeLsGet(_mhomeDraftsKey,     5 * 60 * 1000);
+        let cachedRefills    = _mhomeForce ? null : _mhomeLsGet(_mhomeRefillsKey,    5 * 60 * 1000);
+        let cachedUsers      = _mhomeForce ? null : _mhomeLsGet(_mhomeUsersKey,      8 * 60 * 60 * 1000);
+        let cachedCustomers  = _mhomeForce ? null : _mhomeLsGet(_mhomeCustomersKey,  8 * 60 * 60 * 1000);
         const _needDrafts    = !cachedDrafts;
         const _needRefills   = !cachedRefills;
         const _needUsers     = !cachedUsers;
@@ -4438,6 +4443,25 @@ In a production system, this would show the actual file contents.
     let _mcalMonth = null;
     let _mcalByDate = new Map();
     let _mcalPersonMap = new Map();
+
+    // Set by pull-to-refresh; consumed (and reset) by the mobile Home/Calendar
+    // render so a manual refresh bypasses every localStorage cache once.
+    let _mobileForceFresh = false;
+
+    // Wipe persisted mobile snapshots/caches so the next render refetches.
+    // Called on data mutations (create/edit/delete) — implements the
+    // "cold data stays cached until edited" rule for Home + Calendar + Clients.
+    const _clearMobileSnapshots = () => {
+        try {
+            const toRemove = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const k = localStorage.key(i);
+                if (!k) continue;
+                if (k.startsWith('mcal-') || k.startsWith('mhome-') || k.startsWith('mp-list-snap-')) toRemove.push(k);
+            }
+            toRemove.forEach(k => { try { localStorage.removeItem(k); } catch(_) {} });
+        } catch(_) {}
+    };
     const _mcalColorForType = (type) => {
         const t = String(type || '').toLowerCase();
         if (t.includes('birthday') || t.includes('all day') || t.includes('all-day')) return 'allday';
@@ -4542,40 +4566,70 @@ In a production system, this would show the actual file contents.
         const monthStartStr = `${_mcalYear}-${String(_mcalMonth+1).padStart(2,'0')}-01`;
         const monthEndStr = `${_mcalYear}-${String(_mcalMonth+1).padStart(2,'0')}-${String(daysInMonth).padStart(2,'0')}`;
 
+        // Hot window — only this date range is fetched fresh on every load
+        // (past 3 days + today + next 7 days). Every other date is served from
+        // the persistent per-month activity cache until an edit invalidates it.
+        // Cold months (no overlap with the hot window) do zero network once cached.
+        const _fmtD = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        const _hotStartD = new Date(todayD); _hotStartD.setDate(_hotStartD.getDate() - 3);
+        const _hotEndD   = new Date(todayD); _hotEndD.setDate(_hotEndD.getDate() + 7);
+        const _hotStartStr = _fmtD(_hotStartD);
+        const _hotEndStr   = _fmtD(_hotEndD);
+        const _monthOverlapsHot = !(monthEndStr < _hotStartStr || monthStartStr > _hotEndStr);
+
+        // Pull-to-refresh forces a full refetch once.
+        const _forceFresh = _mobileForceFresh; _mobileForceFresh = false;
+
+        // Persistent raw-activity cache for this month (no TTL — until edited).
+        const _mcalActsKey = `mcal-acts-${_mcalYear}-${_mcalMonth}`;
+        const _lsGetRaw = (key) => { try { const r = localStorage.getItem(key); if (!r) return null; return JSON.parse(r).val; } catch(_) { return null; } };
+        const _cachedActs = _forceFresh ? null : _lsGetRaw(_mcalActsKey);
+
         // Start visibleIds resolution early (non-blocking) so it runs
         // concurrently with cache reads below.
         const _visibleIdsP = (typeof getVisibleUserIds === 'function')
             ? getVisibleUserIds(_currentUser).catch(() => 'all') : Promise.resolve('all');
 
-        // B: Serve prospects + customers from 60-min localStorage cache
+        // B: Serve prospects + customers from localStorage cache (cold reference
+        // data — birthdays/names rarely change; invalidated on edit).
         const _PEOPLE_KEY  = 'mcal-people-v1';
         const _DRAFTS_KEY  = 'mcal-drafts-v1';
         const _REFILLS_KEY = 'mcal-refills-v1';
-        let allPeople     = _lsGet(_PEOPLE_KEY,  60 * 60 * 1000);
-        let cachedDrafts  = _lsGet(_DRAFTS_KEY,   5 * 60 * 1000);
-        let cachedRefills = _lsGet(_REFILLS_KEY,  5 * 60 * 1000);
+        let allPeople     = _forceFresh ? null : _lsGet(_PEOPLE_KEY,  8 * 60 * 60 * 1000);
+        let cachedDrafts  = _forceFresh ? null : _lsGet(_DRAFTS_KEY,   5 * 60 * 1000);
+        let cachedRefills = _forceFresh ? null : _lsGet(_REFILLS_KEY,  5 * 60 * 1000);
         const _needPeople  = !allPeople;
         const _needDrafts  = !cachedDrafts;
         const _needRefills = !cachedRefills;
 
         const visibleIds = await _visibleIdsP;
 
-        // C: gte/lte range replaces 31-item IN list — faster Postgres plan
-        const actQueryOpts = {
-            gte: { activity_date: monthStartStr },
-            lte: { activity_date: monthEndStr },
-            sort: 'start_time', sortDir: 'asc',
-            limit: 1000, offset: 0, countMode: null,
+        const _scopeFields = (typeof isSystemAdmin === 'function' && !isSystemAdmin(_currentUser) && visibleIds !== 'all')
+            ? [ { field: 'lead_agent_id', values: visibleIds }, { field: 'visibility', values: ['open', 'public'] } ]
+            : null;
+        // gte/lte range replaces 31-item IN list — faster Postgres plan
+        const _buildActOpts = (gteStr, lteStr) => {
+            const o = { gte: { activity_date: gteStr }, lte: { activity_date: lteStr }, sort: 'start_time', sortDir: 'asc', limit: 1000, offset: 0, countMode: null };
+            if (_scopeFields) o.scopeFields = _scopeFields;
+            return o;
         };
-        if (typeof isSystemAdmin === 'function' && !isSystemAdmin(_currentUser) && visibleIds !== 'all') {
-            actQueryOpts.scopeFields = [
-                { field: 'lead_agent_id', values: visibleIds },
-                { field: 'visibility', values: ['open', 'public'] }
-            ];
+
+        // Decide what to fetch: hot-window only (current period, already cached),
+        // full month (never cached / forced), or nothing (cold cached month).
+        let _actMode, _actsP;
+        if (_monthOverlapsHot && _cachedActs && !_forceFresh) {
+            _actMode = 'hot';
+            _actsP = AppDataStore.queryAdvanced('activities', _buildActOpts(_hotStartStr, _hotEndStr)).catch(() => ({ data: [] }));
+        } else if (_cachedActs && !_forceFresh) {
+            _actMode = 'cache';
+            _actsP = Promise.resolve(null);
+        } else {
+            _actMode = 'full';
+            _actsP = AppDataStore.queryAdvanced('activities', _buildActOpts(monthStartStr, monthEndStr)).catch(() => ({ data: [] }));
         }
 
         const [actResult, allProspectsR, allCustomersR, draftsRaw, refillsRaw] = await Promise.all([
-            AppDataStore.queryAdvanced('activities', actQueryOpts).catch(() => ({ data: [] })),
+            _actsP,
             _needPeople  ? AppDataStore.getAll('prospects').catch(() => [])                          : Promise.resolve([]),
             _needPeople  ? AppDataStore.getAll('customers').catch(() => [])                          : Promise.resolve([]),
             _needDrafts  ? AppDataStore.getAll('follow_up_drafts').catch(() => [])                   : Promise.resolve([]),
@@ -4587,7 +4641,27 @@ In a production system, this would show the actual file contents.
         if (_needRefills) { cachedRefills = refillsRaw || []; _lsSet(_REFILLS_KEY, cachedRefills); }
         const draftsR  = cachedDrafts;
         const refillsR = cachedRefills;
-        const activities = (actResult.data || []).filter(a => a.activity_type !== 'EVENT');
+
+        // Resolve this month's activity set from hot/full/cache and persist it.
+        let activities;
+        if (_actMode === 'cache') {
+            activities = (_cachedActs || []).filter(a => a.activity_type !== 'EVENT');
+        } else if (_actMode === 'hot') {
+            const hotRows = (actResult?.data || []).filter(a => a.activity_type !== 'EVENT');
+            const base = (_cachedActs || []).filter(a => {
+                const d = a.activity_date || '';
+                return d < _hotStartStr || d > _hotEndStr;
+            });
+            const hotThisMonth = hotRows.filter(a => {
+                const d = a.activity_date || '';
+                return d >= monthStartStr && d <= monthEndStr;
+            });
+            activities = [...base, ...hotThisMonth];
+            _lsSet(_mcalActsKey, activities);
+        } else {
+            activities = (actResult?.data || []).filter(a => a.activity_type !== 'EVENT');
+            _lsSet(_mcalActsKey, activities);
+        }
         const personMap = new Map(allPeople.map(p => [String(p.id), p]));
         _mcalPersonMap = personMap;
 
@@ -4843,17 +4917,24 @@ In a production system, this would show the actual file contents.
         const avatarUrl = _currentUser?.avatar_url
             || `https://ui-avatars.com/api/?name=${encodeURIComponent(_currentUser?.full_name || 'U')}&background=8B0000&color=fff`;
 
-        // Instant snapshot restore — localStorage persists across app close (5-min TTL)
+        // Pull-to-refresh forces a one-time fresh fetch past the snapshot.
+        const _mpForce = _mobileForceFresh; _mobileForceFresh = false;
+        // Instant snapshot restore — localStorage persists across app close (30-min TTL).
+        // Client lists rarely change between visits, so a fresh snapshot is served
+        // as-is with no background refetch; it refreshes only on edit, pull-to-
+        // refresh, or after the TTL expires.
         const _mpSnapKey = `mp-list-snap-${_mpTab}`;
         let _mpSnapHtml;
-        try {
-            const _raw = localStorage.getItem(_mpSnapKey);
-            if (_raw) {
-                const { ts, val } = JSON.parse(_raw);
-                if (Date.now() - ts < 5 * 60 * 1000) _mpSnapHtml = val;
-                else localStorage.removeItem(_mpSnapKey);
-            }
-        } catch(_) {}
+        if (!_mpForce) {
+            try {
+                const _raw = localStorage.getItem(_mpSnapKey);
+                if (_raw) {
+                    const { ts, val } = JSON.parse(_raw);
+                    if (Date.now() - ts < 30 * 60 * 1000) _mpSnapHtml = val;
+                    else localStorage.removeItem(_mpSnapKey);
+                }
+            } catch(_) {}
+        }
         // Only use snapshot when there's no active search (search results shouldn't be cached)
         const _mpHasSnap = !!_mpSnapHtml && !_mpSearch;
 
@@ -4887,6 +4968,8 @@ In a production system, this would show the actual file contents.
         </div>
         <button class="mp-fab" onclick="app.mpAdd()" aria-label="Add"><i class="fas fa-plus"></i></button>`;
 
+        // Fresh snapshot → show it and stop (no background fetch). Otherwise load.
+        if (_mpHasSnap && !_mpForce) return;
         await _mpRenderList(!_mpHasSnap);
     };
 
@@ -5087,6 +5170,10 @@ In a production system, this would show the actual file contents.
                     AppDataStore.invalidateCache('prospects');
                     AppDataStore.invalidateCache('customers');
                 } catch (_) {}
+                // Bypass the mobile localStorage snapshots once so the manual
+                // refresh actually pulls live data for Home/Calendar/Clients.
+                _mobileForceFresh = true;
+                _clearMobileSnapshots();
                 // If inside a prospect/customer profile, reload that profile — not the list.
                 if (_currentDetailView?.type === 'prospect') {
                     await showProspectDetail(_currentDetailView.id);
@@ -51221,6 +51308,15 @@ Gold-${totGold}`;
             window.addEventListener('dataChanged', (e) => {
                 const { table, action } = e.detail;
                 const view = _currentView;
+
+                // "Cold data stays cached until edited": a real mutation to any
+                // table the mobile Home/Calendar/Clients snapshots depend on wipes
+                // those snapshots so the next render refetches. SWR revalidate
+                // pings are skipped (they aren't user edits).
+                if (action && action !== 'revalidate' &&
+                    ['activities', 'events', 'prospects', 'customers', 'follow_up_drafts', 'refill_reminders', 'users'].includes(table)) {
+                    _clearMobileSnapshots();
+                }
 
                 // Map tables to views that need refresh. Must include every
                 // table each view reads so SWR revalidation + mutations auto-
