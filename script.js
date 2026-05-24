@@ -8217,6 +8217,29 @@ const Auth = {
         _wireLoginBtn();
     }
 
+    // Switch account: same as logout but also clears the remembered email and
+    // pre-filled login field so the next person starts from a clean login form.
+    // Used by the "not you? Switch account" banner that appears when a saved
+    // session is auto-restored on a shared device.
+    async function switchAccount() {
+        try {
+            await Auth.logout();
+        } catch (_) { /* sign out even if the network call fails */ }
+        _currentUser = null;
+        localStorage.removeItem('remember_me');
+        localStorage.removeItem('remember_me_email');
+        const emailField = document.getElementById('loginEmail') || document.getElementById('email');
+        if (emailField) emailField.value = '';
+        const pwField = document.getElementById('loginPassword') || document.getElementById('password');
+        if (pwField) pwField.value = '';
+        document.getElementById('app-shell').style.display = 'none';
+        document.getElementById('login-container').style.display = 'flex';
+        UI.hideModal();
+        UI.toast.info('Signed out — please log in with your own account.');
+        _wireLoginBtn();
+        emailField?.focus();
+    }
+
 function _wireLoginBtn() {
     const btn = document.getElementById('loginBtn');
     if (!btn || btn._supabaseSetup) return;
@@ -13042,6 +13065,7 @@ function _wireLoginBtn() {
 
     const showCalendarView = async (container) => {
         const userName = _currentUser?.display_name || _currentUser?.name || _currentUser?.email?.split('@')[0] || 'there';
+        const userEmail = _currentUser?.email || '';
         const hour = new Date().getHours();
         const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
 
@@ -13056,6 +13080,10 @@ function _wireLoginBtn() {
                         <div class="cal-welcome-text">
                             <h2>${greeting}, <span class="welcome-name">${userName}!</span> 👋</h2>
                             <p>Stay on top of your schedule and never miss an important follow-up.</p>
+                            ${userEmail ? `<p class="cal-account-line" style="margin-top:6px;font-size:12px;color:#9ca3af;">
+                                Logged in as <strong style="color:#6b7280;">${userEmail}</strong> —
+                                <a href="#" onclick="event.preventDefault(); app.switchAccount();" style="color:#dc2626;font-weight:600;text-decoration:underline;cursor:pointer;">not you? Switch account</a>
+                            </p>` : ''}
                         </div>
                         <div class="cal-welcome-illus" aria-hidden="true">📅</div>
                     </div>
@@ -50386,6 +50414,7 @@ Gold-${totGold}`;
         toggleUserMenu,
         loginAs,
         logout,
+        switchAccount,
         _wireLoginBtn,
 
         // Helpers
