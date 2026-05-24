@@ -45229,7 +45229,13 @@ JB 星期二到
             const currentWeekIso = eggFormatDateIso(_eggState.weekStartDate || eggGetCurrentMonday());
             const prevRun = runs
                 .filter(r => r.week_start_date && r.week_start_date < currentWeekIso)
-                .sort((a, b) => (b.week_start_date || '').localeCompare(a.week_start_date || ''))[0];
+                .sort((a, b) => {
+                    const wk = (b.week_start_date || '').localeCompare(a.week_start_date || '');
+                    if (wk !== 0) return wk;
+                    // Same week committed more than once — newest run_at wins so the
+                    // reference panel reflects the latest re-commit, not a stale version.
+                    return String(b.run_at || '').localeCompare(String(a.run_at || ''));
+                })[0];
             if (prevRun) {
                 const prevOrders = await AppDataStore.query('egg_processed_orders', { run_id: prevRun.id }) || [];
                 prevOrders.sort((a, b) => (a.order_date || '').localeCompare(b.order_date || ''));
