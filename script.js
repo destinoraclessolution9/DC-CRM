@@ -45684,27 +45684,36 @@ JB 星期二到
         try {
             await window._ensureXlsx();
             const keep = (_eggState.newRows || []).filter(r => !_eggState.excludedKeys.has(r.unique_key));
-            const headerCols = ['Section', 'Agent', 'Order Date', 'Order No', 'Product', 'Qty'];
+            const headerCols = ['Section', 'Agent', 'Order Date', 'Order No', 'Product Code', 'Product', 'Qty'];
             const aoa = [headerCols];
             for (const sec of _EGG_CHANNEL_SECTIONS) {
                 const sectionRows = keep.filter(r => r.region === sec.region && r.channel === sec.channel);
                 const totalGold = sectionRows.filter(r => r.product === 'GOLD').reduce((s, r) => s + Number(r.quantity||0), 0);
                 const totalKing = sectionRows.filter(r => r.product === 'KING').reduce((s, r) => s + Number(r.quantity||0), 0);
-                aoa.push([sec.title, '', '', '', `GOLD ${totalGold}`, `KING ${totalKing}`]);
+                aoa.push([sec.title, '', '', '', '', `GOLD ${totalGold}`, `KING ${totalKing}`]);
                 if (sectionRows.length === 0) {
-                    aoa.push(['', 'No orders', '', '', '', '']);
+                    aoa.push(['', 'No orders', '', '', '', '', '']);
                 } else {
                     for (const r of sectionRows) {
                         const dateStr = r.order_date_parsed ? eggFormatDateShort(r.order_date_parsed) : '-';
-                        aoa.push(['', r.agent_name || '-', dateStr, r.order_no || '-', r.product || '', Number(r.quantity)||0]);
+                        aoa.push(['', r.agent_name || '-', dateStr, r.order_no || '-', r.product_code || '-', r.product || '', Number(r.quantity)||0]);
                     }
                 }
-                aoa.push(['', '', '', '', 'FMLENX068 Gold', totalGold]);
-                aoa.push(['', '', '', '', 'FMLEGG002 King', totalKing]);
-                aoa.push(['', '', '', '', '', '']); // blank separator row
+                // Subtotal by ACTUAL product code (was hard-coded to FMLENX068/FMLEGG002,
+                // which silently merged a 3rd code such as AGENTFMLENX060 into the GOLD line).
+                const byCode = {};
+                for (const r of sectionRows) {
+                    const code = r.product_code || '(no code)';
+                    if (!byCode[code]) byCode[code] = { qty: 0, product: r.product || '' };
+                    byCode[code].qty += Number(r.quantity) || 0;
+                }
+                for (const [code, info] of Object.entries(byCode)) {
+                    aoa.push(['', '', '', '', code, info.product, info.qty]);
+                }
+                aoa.push(['', '', '', '', '', '', '']); // blank separator row
             }
             const ws = XLSX.utils.aoa_to_sheet(aoa);
-            ws['!cols'] = [{ wch: 18 }, { wch: 22 }, { wch: 12 }, { wch: 16 }, { wch: 10 }, { wch: 10 }];
+            ws['!cols'] = [{ wch: 18 }, { wch: 22 }, { wch: 12 }, { wch: 16 }, { wch: 16 }, { wch: 10 }, { wch: 10 }];
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, ws, 'Channel Breakdown');
             const weekIso = eggFormatDateIso(_eggState.weekStartDate || eggGetCurrentMonday());
