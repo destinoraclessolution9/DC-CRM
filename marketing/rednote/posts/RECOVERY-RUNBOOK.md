@@ -45,10 +45,11 @@ See `apps_script_post_log.gs` header for the 2-minute deploy. After deploying, p
 **Inputs you keep regardless:** this repo (`git pull`), the Google Sheet, the Drive folder. Nothing is lost.
 
 1. **Create a new RedNote account** — *you* must do this (Claude can't create accounts). Use a fresh handle.
-2. **Restore the profile** (Claude drives via ADB, or manually in-app):
-   - **Avatar:** `C:\Users\DC\Desktop\Diamond and Jeweler\Logo.png` (gold D&J diamond logo)
-   - **Name:** `DNJ 被低估的天赋`  *(RedNote rejects the "·" middle dot — use a space)*
-   - **Bio:** see `marketing/rednote/README.md` (no external URL — RedNote strips links in bio)
+2. **Restore the profile** from `posts/profile/` (Claude drives via ADB, or manually in-app):
+   - **Avatar:** `posts/profile/avatar.png` (gold D&J diamond logo)
+   - **Name:** `posts/profile/name.txt` → `DNJ 被低估的天赋`  *(no "·" — RedNote rejects it; use a space)*
+   - **Bio:** `posts/profile/bio.txt` (3 lines, no URL — RedNote strips links in bio)
+   - Full record + edit-limit notes: `posts/profile/profile.json`
 3. **Connect the phone** (USB) → enable **Developer options → USB debugging** → plug in → tap **Allow**. Quit the **Honor Suite** PC app first (it runs its own adb and fights ours).
 4. **One-time tools** (if not present): `adb` (Google platform-tools) + `ADBKeyboard.apk` (for Chinese typing). Both already in `C:\Users\DC\platform-tools\`.
 5. **Re-post everything** — from a **clean gallery** on the recovery device:
@@ -79,4 +80,5 @@ repost_from_log.py         re-posts everything from the log via ADB (recovery)
 apps_script_post_log.gs    Google Sheet + Drive endpoint (deploy once)
 RECOVERY-RUNBOOK.md        this file
 dayNN/                     per-post: images + title/body/hashtags.txt + meta.json (+ live.png)
+profile/                   account identity: name.txt + bio.txt + avatar.png + profile.json
 ```
