@@ -4197,27 +4197,30 @@ In a production system, this would show the actual file contents.
         const _needRefills   = !cachedRefills;
         const _needUsers     = !cachedUsers;
 
-        const [actResult, allProspectsR, allCustomersR, draftsR, refillsR, allUsersR] = await Promise.all([
+        // Foreground: only HOT, small data — today's activities, pending
+        // follow-ups, pending refills, and the (small) users table when needed.
+        // The heavy prospect/customer base is served from cache or loaded in the
+        // background below, so the card paints without waiting on a full-table scan.
+        const [actResult, draftsR, refillsR, allUsersR] = await Promise.all([
             AppDataStore.queryAdvanced('activities', actQueryOpts).catch(() => ({ data: [] })),
-            _needPeople  ? AppDataStore.getAll('prospects').catch(() => [])                              : Promise.resolve([]),
-            _needPeople  ? AppDataStore.getAll('customers').catch(() => [])                              : Promise.resolve([]),
-            _needDrafts  ? AppDataStore.getAll('follow_up_drafts').catch(() => [])                       : Promise.resolve([]),
+            _needDrafts  ? AppDataStore.query('follow_up_drafts', { status: 'pending' }).catch(() => []) : Promise.resolve([]),
             _needRefills ? AppDataStore.query('refill_reminders', { status: 'pending' }).catch(() => []) : Promise.resolve([]),
             _needUsers   ? AppDataStore.getAll('users').catch(() => [])                                  : Promise.resolve([]),
         ]);
 
         const activities = (actResult.data || []).filter(a => a.activity_type !== 'EVENT');
-        if (_needPeople) {
-            cachedPeople   = [...(allProspectsR || []), ...(allCustomersR || [])];
-            cachedCustomers = allCustomersR || [];
-            _mhomeLsSet(_mhomePeopleKey,       cachedPeople);
-            _mhomeLsSet(_mhomeCustomersKey,    cachedCustomers);
-        }
         if (_needDrafts)  { cachedDrafts  = draftsR   || []; _mhomeLsSet(_mhomeDraftsKey,  cachedDrafts);  }
         if (_needRefills) { cachedRefills = refillsR  || []; _mhomeLsSet(_mhomeRefillsKey, cachedRefills); }
         if (_needUsers)   { cachedUsers   = allUsersR  || []; _mhomeLsSet(_mhomeUsersKey,  cachedUsers);   }
 
-        const allPeople = cachedPeople;
+        // Single source of truth for the dashboard HTML. Called once when the
+        // people base is warm, or twice on a cold load (fast partial pass with
+        // peoplePending=true, then a full pass from the background fetch).
+        const _composeBody = (allPeople, cachedUsers, cachedCustomers, peoplePending) => {
+        allPeople = allPeople || [];
+        cachedUsers = cachedUsers || [];
+        cachedCustomers = cachedCustomers || [];
+        const _pendNum = '<i class="fas fa-spinner fa-spin" style="font-size:11px;opacity:.55"></i>';
         const personMap = new Map(allPeople.map(p => [String(p.id), p]));
         const _isMine = (d) => !d.agent_id || String(d.agent_id) === String(_currentUser?.id);
         const visibleDrafts = cachedDrafts.filter(d =>
@@ -4233,7 +4236,7 @@ In a production system, this would show the actual file contents.
 
         const apptCount = activities.length;
         const followCount = visibleDrafts.length;
-        const bdayCount = birthdays.length;
+        const bdayCount = peoplePending ? _pendNum : birthdays.length;
         const refillCount = refills.length;
 
         const oldestDraft = [...visibleDrafts].sort((a, b) => (a.due_date || '').localeCompare(b.due_date || ''))[0];
@@ -4418,11 +4421,56 @@ In a production system, this would show the actual file contents.
             <button class="mhome-tile purple" onclick="app.navigateTo('prospects')">
                 <div class="mhome-tile-ico"><i class="fas fa-chart-column"></i></div>
                 <div class="mhome-tile-lbl">Inactive Clients</div>
-                <div class="mhome-tile-num">${inactiveCount}</div>
+                <div class="mhome-tile-num">${peoplePending ? _pendNum : inactiveCount}</div>
                 <div class="mhome-tile-arrow"><i class="fas fa-chevron-right"></i></div>
             </button>
         </div>`;
-        _mhomeSaveSnap(body.innerHTML);
+        // Only persist a complete render — never cache the partial pending state.
+        if (!peoplePending) _mhomeSaveSnap(body.innerHTML);
+        }; // end _composeBody
+
+        if (cachedPeople) {
+            // Warm base → render everything in one pass.
+            _composeBody(cachedPeople, cachedUsers, cachedCustomers, false);
+        } else {
+            // Cold base: paint immediately using only the people referenced by
+            // today's activities + pending drafts (correct names), with birthday
+            // and inactive numbers shown as pending; then fill from the full base.
+            const refIds = new Set();
+            activities.forEach(a => { if (a.prospect_id) refIds.add(a.prospect_id); if (a.customer_id) refIds.add(a.customer_id); });
+            (cachedDrafts || []).forEach(d => { if (d.prospect_id) refIds.add(d.prospect_id); if (d.customer_id) refIds.add(d.customer_id); });
+            let partialPeople = [];
+            if (refIds.size) {
+                const idArr = [...refIds];
+                const [pp, cc] = await Promise.all([
+                    AppDataStore.queryAdvanced('prospects', { scopeField: 'id', scopeValues: idArr, countMode: null, limit: idArr.length }).catch(() => ({ data: [] })),
+                    AppDataStore.queryAdvanced('customers', { scopeField: 'id', scopeValues: idArr, countMode: null, limit: idArr.length }).catch(() => ({ data: [] })),
+                ]);
+                partialPeople = [...(pp.data || []), ...(cc.data || [])];
+            }
+            _composeBody(partialPeople, cachedUsers, cachedCustomers || [], true);
+
+            // Background: load the full base for birthdays + inactive count, then
+            // repaint and persist the snapshot. Does not block first paint.
+            (async () => {
+                const [allP, allC] = await Promise.all([
+                    AppDataStore.getAll('prospects').catch(() => []),
+                    AppDataStore.getAll('customers').catch(() => []),
+                ]);
+                cachedPeople    = [...(allP || []), ...(allC || [])];
+                cachedCustomers = allC || [];
+                // Don't poison the 8h cache with an empty result (transient
+                // error / offline) — leave it cold so the next load retries.
+                if (cachedPeople.length) {
+                    _mhomeLsSet(_mhomePeopleKey,    cachedPeople);
+                    _mhomeLsSet(_mhomeCustomersKey, cachedCustomers);
+                }
+                // Repaint only if the user is still on Home.
+                if (_currentView === 'home' && document.getElementById('mhome-body')) {
+                    _composeBody(cachedPeople, cachedUsers, cachedCustomers, false);
+                }
+            })();
+        }
     };
 
     // Quick handler — open WhatsApp for the given phone, or fall back to
@@ -4451,13 +4499,17 @@ In a production system, this would show the actual file contents.
     // Wipe persisted mobile snapshots/caches so the next render refetches.
     // Called on data mutations (create/edit/delete) — implements the
     // "cold data stays cached until edited" rule for Home + Calendar + Clients.
-    const _clearMobileSnapshots = () => {
+    // `prefixes` scopes WHICH caches to clear; omitting it clears everything
+    // (used by pull-to-refresh). Scoping matters because the prospect/customer
+    // base is expensive to refetch — an activity edit must NOT evict it.
+    const _clearMobileSnapshots = (prefixes) => {
+        const pfx = prefixes && prefixes.length ? prefixes : ['mcal-', 'mhome-', 'mp-list-snap-'];
         try {
             const toRemove = [];
             for (let i = 0; i < localStorage.length; i++) {
                 const k = localStorage.key(i);
                 if (!k) continue;
-                if (k.startsWith('mcal-') || k.startsWith('mhome-') || k.startsWith('mp-list-snap-')) toRemove.push(k);
+                if (pfx.some(p => k.startsWith(p))) toRemove.push(k);
             }
             toRemove.forEach(k => { try { localStorage.removeItem(k); } catch(_) {} });
         } catch(_) {}
@@ -51309,13 +51361,23 @@ Gold-${totGold}`;
                 const { table, action } = e.detail;
                 const view = _currentView;
 
-                // "Cold data stays cached until edited": a real mutation to any
-                // table the mobile Home/Calendar/Clients snapshots depend on wipes
-                // those snapshots so the next render refetches. SWR revalidate
-                // pings are skipped (they aren't user edits).
-                if (action && action !== 'revalidate' &&
-                    ['activities', 'events', 'prospects', 'customers', 'follow_up_drafts', 'refill_reminders', 'users'].includes(table)) {
-                    _clearMobileSnapshots();
+                // "Cold data stays cached until edited": a real mutation wipes only
+                // the snapshots that depend on the changed table. SWR revalidate
+                // pings are skipped (they aren't user edits). Scoping is critical —
+                // the prospect/customer base is slow to refetch, so an activity
+                // edit must NOT evict the Home/Calendar people caches.
+                if (action && action !== 'revalidate') {
+                    if (table === 'activities' || table === 'events') {
+                        // Rendered views change; people caches stay warm.
+                        _clearMobileSnapshots(['mcal-snap-', 'mcal-acts-', 'mhome-snap-']);
+                    } else if (table === 'prospects' || table === 'customers') {
+                        // Everything people-derived must refresh.
+                        _clearMobileSnapshots(['mp-list-snap-', 'mhome-', 'mcal-people', 'mcal-snap-', 'mcal-acts-']);
+                    } else if (table === 'users') {
+                        _clearMobileSnapshots(['mhome-users', 'mhome-snap-', 'mcal-people', 'mp-list-snap-']);
+                    } else if (table === 'follow_up_drafts' || table === 'refill_reminders') {
+                        _clearMobileSnapshots(['mhome-drafts', 'mhome-refills', 'mhome-snap-']);
+                    }
                 }
 
                 // Map tables to views that need refresh. Must include every
