@@ -9,6 +9,15 @@ Pair with `content-calendar-60day.md`. Each entry: caption + 11 hashtags. Rotate
 
 ---
 
+## ⚡ 2026 SEO + hashtag rules (read first)
+Instagram now ranks captions like search text. For best reach:
+1. **Open every caption with one SEO keyword line** — what your ideal follower would *type into search*. Examples: `Job search tips for fresh graduates in Malaysia 🇲🇾` · `Interview tips Malaysia` · `Resume tips for job seekers`. Then the emotional line, then the CTA. *(Ready-made SEO lines are tagged `SEO:` on the upcoming entries below — add the same pattern to any entry before posting.)*
+2. **CTA every post** — prompt **shares/saves**, not likes: "Save this 📌", "Send to a friend who's job-hunting", "Follow for Part 2".
+3. **Hashtags — reels:** 3–5 niche tags (50K–300K) in the **first comment**, not the caption. Reel niche pool: `#freshgraduatemalaysia #kerjakosong #careermalaysia #jobseekersmalaysia #interviewtipsmalaysia #graduatejobsmy`.
+4. **Hashtags — carousels/quotes:** keep the 11-tag Sets A/B/C below for now (we A/B reels-vs-carousels over 2 weeks, then standardize on the winner).
+
+---
+
 ## WEEK 1
 **Day 1 — Carousel (LIVE):** ✅ "Some people are not untalented" — already posted.
 **Day 2 — Carousel (LIVE):** ✅ "Why Diamond & Jeweler" — already posted.
@@ -146,6 +155,7 @@ Set A · *(swap in a real tester/user story when you have one)*
 Set B
 
 **Day 25 — Quote (`q-day25-jeweler.png`):**
+> *SEO: How AI job matching works in Malaysia 🇲🇾*
 > A diamond never finds its jeweler by accident.
 > That's the gap we close — connecting hidden talent with the leaders who bring out their shine.
 
@@ -187,6 +197,7 @@ Set B
 Set B
 
 **Day 32 — Quote (`q-day32-underpaid.png`):**
+> *SEO: Underpaid in Malaysia — how to find a better-paying job*
 > Being underpaid doesn't mean you're undervalued. It means you're in the wrong room.
 > Find the one that sees your worth. 💎
 
@@ -198,6 +209,7 @@ Set A
 Set B
 
 **Day 34 — Carousel (`day34-salary-negotiation-1..7.png`):**
+> *SEO: How to negotiate salary in Malaysia 🇲🇾*
 > How to negotiate salary in 5 steps — most people skip step 4. 📌
 > Research → let them anchor → counter with value → negotiate the package → get it in writing.
 
@@ -215,6 +227,7 @@ Set B
 Set C
 
 **Day 37 — Carousel (HR angle — reuse Post B style):**
+> *SEO: AI recruitment tool for hiring managers in Malaysia*
 > For hiring managers: your top 3 candidates, pre-vetted, free.
 > No flood of CVs. No card needed. Post one role, see 3 matches in 48h.
 
@@ -227,6 +240,7 @@ Set C
 Set C
 
 **Day 39 — Quote (`q-day39-reveal.png`):**
+> *SEO: How great companies hire top talent in Malaysia*
 > Great companies don't just find talent. They reveal it.
 > The right leader turns potential into performance. 💎
 
@@ -252,6 +266,7 @@ Set A
 Set A
 
 **Day 44 — Carousel (Career Reality #1):**
+> *SEO: How to deal with job rejection and ghosting in Malaysia*
 > Career Reality: ghosting hurts more than rejection. Here's how to protect your confidence through the search. 📌
 
 Set B

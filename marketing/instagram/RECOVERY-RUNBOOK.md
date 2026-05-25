@@ -17,7 +17,7 @@
 
 ### Step 2 — Rebuild the profile (EXACT live values)
 - **Username:** `dnj.ai` (use closest available on the new account)
-- **Display name (live):** `KensonOo`  ·  **Recommended:** `DNJ | Hidden Talent`
+- **Display name — use the SEO target:** `DNJ | AI Job Matching 🇲🇾` (set in the mobile app → Edit profile → Name). *(Old live value was `KensonOo`.)*
 - **Category:** `Recruiter` (Professional account)
 - **Profile photo:** `launch/profile-photo.png`
 - **Website/Link:** `https://diamondandjeweler.com` (set in bio — links are mobile-app only)

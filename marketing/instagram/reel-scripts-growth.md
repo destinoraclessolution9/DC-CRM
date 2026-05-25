@@ -1,6 +1,9 @@
-# DNJ Growth Reel Scripts (Week 2–3 priority)
+# DNJ Growth Reel Scripts (Weeks 2–5 priority)
 
-Format for all: vertical 9:16 (1080×1920) · hook in 1.5s · subtitles always · trending audio · end frame = D&J + diamondandjeweler.com · cuts under 2s.
+Format for all: vertical 9:16 (1080×1920) · hook in 1.5s · subtitles always · trending audio · keep ≤15s · aim 60–80% completion · end frame = D&J + diamondandjeweler.com · cuts under 2s.
+
+**Hashtags:** put **3–5 niche tags in the FIRST COMMENT** (not the caption). Suggested DNJ niche pool (50K–300K size — verify in-app before posting): `#freshgraduatemalaysia #kerjakosong #careermalaysia #jobseekersmalaysia #interviewtipsmalaysia #graduatejobsmy`.
+**Caption SEO:** open with one searchable keyword line, then the emotional line, then CTA (save/share/follow).
 
 ---
 
@@ -75,6 +78,95 @@ Format for all: vertical 9:16 (1080×1920) · hook in 1.5s · subtitles always �
 | 2–6 | Quiet person delivering results | "Then the results came in." |
 | 6–10 | Reveal — they get recognized | "Talent doesn't need to be loud. It needs the right room." |
 | 10–14 | Logo + URL | "Everyone is a diamond. 💎" |
+
+---
+
+## Reel G — "CGPA can't measure hunger" (Day 17)
+**Audio:** bold/underdog anthem
+| Sec | Shot | On-screen text |
+|--|--|--|
+| 0–2 | Close-up, direct to camera | "Your CGPA can't measure this." |
+| 2–5 | Flash: late-night work, side hustle | "Hunger. Grit. The will to figure it out." |
+| 5–8 | Someone average-on-paper crushing real work | "Some of the most driven people had average grades." |
+| 8–12 | DNJ UI — profile beyond the GPA | "We match on potential, not just a number." |
+| 12–14 | Logo + URL | "You're more than your transcript. 💎" |
+**Caption SEO line:** "Fresh graduate jobs in Malaysia 🇲🇾" · **CTA:** "Tag someone who's more than their grades 👇"
+
+---
+
+## Reel H — "Why your CV gets ignored in 6 seconds" (Day 20)
+**Audio:** fast tutorial/ticking sound
+| Sec | Shot | Text |
+|--|--|--|
+| 0–2 | Recruiter scanning, timer overlay | "Recruiters spend 6 seconds on your CV." |
+| 2–5 | Red-circle the clutter | "Here's why yours gets skipped:" |
+| 5–8 | Quick list builds | "Wall of text · no numbers · duties not wins" |
+| 8–11 | Clean fixed CV | "Fix: lead with results + 1 metric per line." |
+| 11–14 | DNJ UI + URL | "Or let AI match you on more than a CV. 💎" |
+**Caption SEO line:** "Resume tips for job seekers in Malaysia" · **CTA:** "Save this before you apply 📌"
+
+---
+
+## Reel I — "The most talented person is usually the quietest" (Day 22)
+**Audio:** reflective → uplifting
+| Sec | Shot | Text |
+|--|--|--|
+| 0–2 | Loud person dominating a meeting | "Loudest ≠ most capable." |
+| 2–5 | Quiet person observing, taking notes | "The most talented person is often the quietest." |
+| 5–9 | Quiet person ships great work | "They don't need volume. They need the right room." |
+| 9–14 | Logo + URL | "Everyone is a diamond. 💎 diamondandjeweler.com" |
+**Caption SEO line:** "Career growth for introverts in Malaysia" · **CTA:** "Send this to a quiet genius you know 👇"
+
+---
+
+## Reel J — "You're not behind. You're undiscovered." (Day 24)
+**Audio:** emotional anthem (high share-potential)
+| Sec | Shot | Text |
+|--|--|--|
+| 0–2 | Person comparing themselves on phone | "Everyone else looks 'ahead.'" |
+| 2–5 | Slow exhale | "You're not behind." |
+| 5–8 | Look up, lighter | "You're undiscovered. There's a difference." |
+| 8–12 | DNJ — "3 matches found" | "The right match changes the whole story." |
+| 12–14 | Logo + URL | "💎 diamondandjeweler.com" |
+**Caption SEO line:** "Job search motivation Malaysia" · **CTA:** "Share this with someone who needs it today 🤍"
+
+---
+
+## Reel K — "Signs you're in the wrong place (not the wrong person)" (Day 26)
+**Audio:** relatable storytime
+| Sec | Shot | Text |
+|--|--|--|
+| 0–2 | Dreading Monday, alarm off | "It might not be you. It's the fit." |
+| 2–5 | List builds | "1. You dread Mondays" |
+| 5–8 | | "2. Your ideas get ignored" |
+| 8–11 | | "3. You've stopped growing" |
+| 11–14 | DNJ + URL | "Right place > trying harder in the wrong one. 💎" |
+**Caption SEO line:** "Signs to quit your job Malaysia" · **CTA:** "Which one hit hardest? 👇"
+
+---
+
+## Reel L — "Say THIS in your next interview" (Day 30)
+**Audio:** confident tip sound
+| Sec | Shot | Text |
+|--|--|--|
+| 0–2 | Direct to camera | "Say this in your next interview 👇" |
+| 2–6 | Text card | "'Here's a problem I solved that's like what your team faces…'" |
+| 6–10 | Then mini-story gesture | "Then tell the story. Show, don't claim." |
+| 10–14 | DNJ + URL | "Capability speaks louder than confidence. 💎" |
+**Caption SEO line:** "Interview tips for fresh graduates Malaysia" · **CTA:** "Save before your next interview 📌"
+
+---
+
+## Reel M — "How to answer 'Tell me about yourself'" (Day 33)
+**Audio:** clean tutorial sound
+| Sec | Shot | Text |
+|--|--|--|
+| 0–2 | Interviewer asks | "'Tell me about yourself.'" |
+| 2–4 | Don't-do | "Don't recite your CV." |
+| 4–7 | Framework card | "Present → Past → Why this role." |
+| 7–10 | Timer | "Keep it under 90 seconds." |
+| 10–14 | DNJ + URL | "Nail the open, own the room. 💎" |
+**Caption SEO line:** "Tell me about yourself answer example Malaysia" · **CTA:** "Follow for Part 2: 'What's your weakness?' 👇"
 
 ---
 
