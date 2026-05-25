@@ -44,9 +44,11 @@ def main():
     if len(sys.argv) < 2:
         print("usage: python log_post.py <day> [--no-web]")
         sys.exit(1)
-    day = int(sys.argv[1])
+    arg = sys.argv[1]
+    day = int(arg) if arg.isdigit() else arg
+    folname = ("day%02d" % day) if isinstance(day, int) else arg
     do_web = "--no-web" not in sys.argv
-    folder = os.path.join(POSTS_DIR, "day%02d" % day)
+    folder = os.path.join(POSTS_DIR, folname)
     if not os.path.isdir(folder):
         print("ERROR: folder not found: " + folder)
         sys.exit(1)
@@ -75,7 +77,7 @@ def main():
         "image_count": len(imgs),
         "status": info.get("status", "posted"),
         "note_url": info.get("note_url", ""),
-        "folder": "posts/day%02d" % day,
+        "folder": "posts/" + folname,
         "logged_at": datetime.datetime.now().isoformat(timespec="seconds"),
     }
 
@@ -97,13 +99,13 @@ def main():
         "folder": meta["folder"], "logged_at": meta["logged_at"],
     }
     rows.append(row)
-    rows.sort(key=lambda r: int(r["day"]))
+    rows.sort(key=lambda r: (0, int(r["day"])) if str(r["day"]).isdigit() else (1, str(r["day"])))
     with open(LOG_CSV, "w", encoding="utf-8-sig", newline="") as f:
         w = csv.DictWriter(f, fieldnames=COLUMNS)
         w.writeheader()
         w.writerows(rows)
 
-    print("OK day%02d: meta.json + post-log.csv updated (%d images)" % (day, len(imgs)))
+    print("OK %s: meta.json + post-log.csv updated (%d images)" % (folname, len(imgs)))
 
     # 3. optional webhook -> Google Sheet + Drive
     if do_web and WEBHOOK_URL:
