@@ -11044,3 +11044,49 @@ html, body {
     .kb-search { min-width: 0; width: 100%; }
 }
 /* ── End Knowledge HQ ─────────────────────────────────────────────────── */
+
+/* ── Phase J + K: Optimistic activity rows ──────────────────────────── */
+.calendar-appointment.optimistic-pending {
+    opacity: 0.78;
+    background: linear-gradient(90deg, rgba(245,158,11,0.12), rgba(245,158,11,0.05));
+    border-left: 3px solid #f59e0b;
+    animation: opt-pulse 1.6s ease-in-out infinite;
+}
+.calendar-appointment.optimistic-failed {
+    opacity: 0.95;
+    background: rgba(239,68,68,0.10);
+    border-left: 3px solid #ef4444;
+}
+.calendar-appointment .opt-badge {
+    display: inline-block;
+    margin-left: 4px;
+    font-size: 11px;
+    line-height: 1;
+}
+.calendar-appointment .opt-badge.fail {
+    color: #b91c1c;
+    font-weight: 700;
+}
+@keyframes opt-pulse {
+    0%, 100% { opacity: 0.78; }
+    50%      { opacity: 1; }
+}
+/* ── End Phase J + K ─────────────────────────────────────────────────── */
+
+/* ── Phase N: Calendar skeleton placeholders ────────────────────────── */
+.calendar-cell.skel-cell {
+    pointer-events: none;
+    padding: 6px;
+}
+.skel-cell-num {
+    width: 18px;
+    height: 12px;
+    margin-bottom: 8px;
+}
+.skel-cell-row {
+    height: 10px;
+    width: 80%;
+    margin: 4px 0;
+}
+.skel-cell-row.short { width: 50%; }
+/* ── End Phase N ─────────────────────────────────────────────────────── */

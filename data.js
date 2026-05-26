@@ -996,6 +996,14 @@ class DataStore {
             } catch (_) { /* non-fatal */ }
         }
 
+        // Phase J: optimistic UI for activities — push the row into the calendar
+        // overlay BEFORE we hit the network, so the user sees their appointment
+        // instantly. Cleared on success; flagged 'failed' on error.
+        const _isActivityInsert = tableName === 'activities' && dataToInsert.client_request_id;
+        if (_isActivityInsert && typeof window._addOptimisticActivity === 'function') {
+            try { window._addOptimisticActivity(dataToInsert); } catch (_) {}
+        }
+
         // Try inserting, stripping unknown columns one-by-one on schema errors
         // so data reaches Supabase even when the table schema is missing new columns.
         let insertData = { ...dataToInsert };
@@ -1017,6 +1025,10 @@ class DataStore {
                 this._writeAudit('insert', tableName, data.id || insertData.id, null, data);
                 this.invalidateCache(tableName);
                 this.emit('dataChanged', { action: 'add', table: tableName, record: data });
+                // Phase J: confirm optimistic row — clears the ⏳ overlay.
+                if (_isActivityInsert && typeof window._confirmOptimisticActivity === 'function') {
+                    try { window._confirmOptimisticActivity(dataToInsert.client_request_id); } catch (_) {}
+                }
                 return data;
             } catch (e) {
                 const col = this._extractUnknownCol(e);
@@ -1055,6 +1067,11 @@ class DataStore {
         } catch (_) {}
         this.invalidateCache(tableName);
         this.emit('dataChanged', { action: 'add', table: tableName, record: dataToInsert });
+        // Phase J: mark optimistic row as failed so the calendar shows ⚠.
+        // The row stays in the overlay until the sync queue drains successfully.
+        if (_isActivityInsert && typeof window._failOptimisticActivity === 'function') {
+            try { window._failOptimisticActivity(dataToInsert.client_request_id, 'Offline — will retry'); } catch (_) {}
+        }
         return dataToInsert;
     }
 

@@ -1,6 +1,6 @@
 // CRM Service Worker — Phase D performance: stale-while-revalidate for static assets.
 // Cache version is keyed by date so a deploy invalidates old caches.
-const CACHE_VERSION = 'crm-v2026-05-26-1';
+const CACHE_VERSION = 'crm-v2026-05-26-2';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 

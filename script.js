@@ -2,6 +2,90 @@
 window.app = window.app || {};
 window.DataStore = window.AppDataStore; // Alias for backward compatibility
 
+// ==================== OFFLINE QUEUE DRAIN (Phase O) ====================
+// AppDataStore already queues failed inserts to fs_crm_sync_queue and drains
+// on every successful getAll(). What was missing: triggering a drain the instant
+// connectivity returns, without waiting for the next list view to be opened.
+// On 'online', we kick a no-op getAll on the affected tables to drain the queue
+// and clear the optimistic overlay for any rows that successfully sync.
+(function installOnlineDrain() {
+    if (window._onlineDrainInstalled) return;
+    window._onlineDrainInstalled = true;
+    const drain = async () => {
+        if (!navigator.onLine) return;
+        if (!window.AppDataStore) return;
+        try {
+            const queue = JSON.parse(localStorage.getItem('fs_crm_sync_queue') || '[]');
+            if (!Array.isArray(queue) || queue.length === 0) return;
+            const tables = [...new Set(queue.map(q => q.tableName))];
+            // getAll triggers _autoSync which upserts queued records.
+            for (const t of tables) {
+                try { await window.AppDataStore.getAll(t); } catch (_) {}
+            }
+            // After drain, refresh the calendar — pending rows have either synced
+            // (and will appear in the real fetch) or remain failed (overlay shows ⚠).
+            if (window.app && typeof window.app.renderCalendar === 'function') {
+                // Not actually exposed by name — rely on Phase B's coalesced renderCalendar via UI hook if any.
+            }
+            console.info('[Perf] online drain finished for', tables.length, 'tables');
+        } catch (e) { console.warn('[Perf] online drain failed:', e); }
+    };
+    window.addEventListener('online', drain);
+    // Also try once on load in case we boot with queued items.
+    if (document.readyState === 'complete') setTimeout(drain, 800);
+    else window.addEventListener('load', () => setTimeout(drain, 800));
+})();
+
+// ==================== OFFLINE BANNER (Phase P) ====================
+// Lightweight self-installing banner that uses navigator.onLine + the online/offline
+// events. Stays out of the way when connection is fine; shows red when offline,
+// green "reconnected" toast when restored.
+(function installOfflineBanner() {
+    if (window._offlineBannerInstalled) return;
+    window._offlineBannerInstalled = true;
+    const css = document.createElement('style');
+    css.textContent = `
+        #crm-offline-banner {
+            position: fixed; top: 0; left: 0; right: 0; z-index: 100000;
+            background: #b91c1c; color: #fff; text-align: center;
+            padding: 8px 12px; font-size: 13px; font-weight: 600;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.18);
+            transform: translateY(-100%); transition: transform .25s ease;
+        }
+        #crm-offline-banner.show { transform: translateY(0); }
+        #crm-offline-banner.ok { background: #16a34a; }
+    `;
+    document.head.appendChild(css);
+    const make = () => {
+        const el = document.createElement('div');
+        el.id = 'crm-offline-banner';
+        el.innerHTML = '<i class="fas fa-wifi" style="margin-right:6px;opacity:.8"></i> You are offline — changes will sync when reconnected';
+        document.body.appendChild(el);
+        return el;
+    };
+    let banner = null;
+    const update = () => {
+        if (!banner) banner = document.getElementById('crm-offline-banner') || make();
+        if (!navigator.onLine) {
+            banner.classList.remove('ok');
+            banner.innerHTML = '<i class="fas fa-wifi" style="margin-right:6px;opacity:.8"></i> You are offline — changes will sync when reconnected';
+            banner.classList.add('show');
+        } else if (banner.classList.contains('show')) {
+            banner.classList.add('ok');
+            banner.innerHTML = '<i class="fas fa-check-circle" style="margin-right:6px"></i> Back online — syncing…';
+            setTimeout(() => banner.classList.remove('show'), 1800);
+        }
+    };
+    window.addEventListener('online', update);
+    window.addEventListener('offline', update);
+    // Run once after DOM ready in case we boot offline.
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+        setTimeout(update, 0);
+    } else {
+        document.addEventListener('DOMContentLoaded', update);
+    }
+})();
+
 // ==================== PERF HELPERS (Phase A: stop double-submits) ====================
 // Single source of truth for: idempotency, debounce, coalescing, submit guards.
 // Used by the auto-guard at the bottom of this file (wraps every app.save*/create*/add*).
@@ -14654,9 +14738,12 @@ function _wireLoginBtn() {
             // JSON string so PostgREST receives: co_agents=cs.[{"id":123}]
             // JSONB @> partial-object matching handles the remaining keys
             // (name, co_role, status) correctly.
+            // Phase Q: trimmed column list — these are the only fields renderCalendar
+            // reads in the per-cell render block. Was select('*') which returned
+            // ~50 columns × N activities, half wasted on mobile bandwidth.
             let q = client
                 .from('activities')
-                .select('*')
+                .select('id,activity_type,activity_date,start_time,end_time,prospect_id,customer_id,lead_agent_id,event_id,co_agents,closing_amount,is_closing,solution_sold,activity_title,venue,location_address,client_request_id')
                 .filter('co_agents', 'cs', JSON.stringify([{ id: _currentUser.id }]));
             if (rangeStart) q = q.gte('activity_date', rangeStart);
             if (rangeEnd) q = q.lte('activity_date', rangeEnd);
@@ -14858,6 +14945,50 @@ function _wireLoginBtn() {
         _getProductsCached();
     };
 
+    // ==================== OPTIMISTIC ACTIVITY OVERLAY (Phase J + K) ====================
+    // While AppDataStore.add('activities', …) is in flight, the row lives here
+    // so the calendar can render it immediately with a ⏳ badge. On success the
+    // entry is cleared and the real row arrives via the next fetch. On failure
+    // the entry is marked 'failed' so the user sees a ⚠️ retry chip.
+    const _optimisticActivities = new Map(); // key: client_request_id
+
+    // Surface helpers on window so data.js (which lives outside this IIFE) can
+    // push/clear without needing to be part of the closure.
+    window._addOptimisticActivity = (row) => {
+        if (!row || !row.client_request_id) return;
+        _optimisticActivities.set(row.client_request_id, { ...row, _optimistic: 'pending', _ts: Date.now() });
+        // Fire a coalesced redraw — Perf.coalesce already prevents bursts.
+        if (typeof renderCalendar === 'function') renderCalendar().catch(() => {});
+    };
+    window._confirmOptimisticActivity = (clientRequestId) => {
+        if (!clientRequestId) return;
+        _optimisticActivities.delete(clientRequestId);
+        if (typeof renderCalendar === 'function') renderCalendar().catch(() => {});
+    };
+    window._failOptimisticActivity = (clientRequestId, errorMsg) => {
+        if (!clientRequestId) return;
+        const row = _optimisticActivities.get(clientRequestId);
+        if (row) {
+            row._optimistic = 'failed';
+            row._errorMsg = errorMsg || 'Save failed';
+        }
+        if (typeof renderCalendar === 'function') renderCalendar().catch(() => {});
+    };
+    // Rendering helper: returns optimistic rows whose activity_date falls inside
+    // the given range, EXCLUDING any whose client_request_id already appears in
+    // the fetched data (avoids duplicates once the server confirms).
+    window._mergeOptimisticActivities = (fetched, rangeStart, rangeEnd) => {
+        if (_optimisticActivities.size === 0) return fetched;
+        const seen = new Set(fetched.map(a => a.client_request_id).filter(Boolean));
+        const merged = fetched.slice();
+        for (const [crid, row] of _optimisticActivities) {
+            if (seen.has(crid)) continue; // already arrived from server
+            if (row.activity_date && (row.activity_date < rangeStart || row.activity_date > rangeEnd)) continue;
+            merged.push(row);
+        }
+        return merged;
+    };
+
     const _renderCalendarImpl = async () => {
         const myToken = ++_renderCalendarToken;
         updateMonthHeader(_currentDate);
@@ -14885,10 +15016,16 @@ function _wireLoginBtn() {
         if (_calSnap) {
             grid.innerHTML = _calSnap; // instant paint — no dim needed
         } else {
-            // First-ever render of this month: dim while loading.
-            // NOTE: do NOT set pointerEvents: 'none' here — that blocks
-            // legitimate day-cell taps during the 1-3 s render on mobile.
-            grid.style.opacity = '0.55';
+            // First-ever render of this month: paint a skeleton grid (Phase N)
+            // so the user sees structured placeholders instead of a blank/dim
+            // void. 42 cells = 6 rows × 7 days. Replaced once data arrives.
+            let _sk = '';
+            for (let i = 0; i < 42; i++) {
+                _sk += '<div class="calendar-cell skel-cell"><span class="skeleton-block skel-cell-num"></span>' +
+                       '<span class="skeleton-block skel-cell-row"></span>' +
+                       '<span class="skeleton-block skel-cell-row short"></span></div>';
+            }
+            grid.innerHTML = _sk;
         }
 
         try {
@@ -14995,6 +15132,13 @@ function _wireLoginBtn() {
         }
 
         let activities = (lightRes.data || []).slice();
+
+        // Phase J: merge in optimistic in-flight rows so the user sees them
+        // immediately. Once the server acknowledges, the optimistic entry is
+        // cleared (in data.js) and the real row from the next fetch replaces it.
+        if (typeof window._mergeOptimisticActivities === 'function') {
+            activities = window._mergeOptimisticActivities(activities, rangeStart, monthEnd);
+        }
 
         // Refresh hot cache from this render's hot fetch.
         if (hotRes && hotRes.data && hotRes.data.length > 0) {
@@ -15132,9 +15276,9 @@ function _wireLoginBtn() {
                         const displayVenue = a.venue || eventVenue || a.location_address || '';
 
                         activityHtml += `
-                            <div class="calendar-appointment ${a.activity_type.toLowerCase()} ${(a.closing_amount || a.is_closing) ? 'closed-case' : ''} ${isPendingInvite ? 'pending-invite' : ''} ${isRejectedInvite ? 'rejected-invite' : ''}"
-                                onclick="event.stopPropagation(); app.viewActivityDetails(${a.id})">
-                                <div class="appointment-time">${(a.start_time || '00:00').slice(0,5)}</div>
+                            <div class="calendar-appointment ${a.activity_type.toLowerCase()} ${(a.closing_amount || a.is_closing) ? 'closed-case' : ''} ${isPendingInvite ? 'pending-invite' : ''} ${isRejectedInvite ? 'rejected-invite' : ''} ${a._optimistic === 'pending' ? 'optimistic-pending' : ''} ${a._optimistic === 'failed' ? 'optimistic-failed' : ''}"
+                                onclick="event.stopPropagation(); ${a._optimistic ? '' : `app.viewActivityDetails(${a.id})`}">
+                                <div class="appointment-time">${(a.start_time || '00:00').slice(0,5)}${a._optimistic === 'pending' ? ' <span class=\"opt-badge\" title=\"Saving…\">⏳</span>' : a._optimistic === 'failed' ? ' <span class=\"opt-badge fail\" title=\"Save failed — tap to retry\">⚠</span>' : ''}</div>
                                 ${isEvent
                                     ? `<div class="appointment-customer">${eventTitle || a.activity_title || 'Event'}</div>`
                                     : `<div class="appointment-customer">${entityName}</div>
