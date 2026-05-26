@@ -2,6 +2,84 @@
 window.app = window.app || {};
 window.DataStore = window.AppDataStore; // Alias for backward compatibility
 
+// ==================== PERF HELPERS (Phase A: stop double-submits) ====================
+// Single source of truth for: idempotency, debounce, coalescing, submit guards.
+// Used by the auto-guard at the bottom of this file (wraps every app.save*/create*/add*).
+window.Perf = window.Perf || (function () {
+    const inflight = new Set();
+    return {
+        uuid() {
+            if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+                const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        },
+        // Re-entrancy guard. Identical keys while in-flight are dropped (returns undefined).
+        // Also disables the active button for visual feedback.
+        guardAsync(key, fn) {
+            if (inflight.has(key)) {
+                if (window.UI && UI.toast && UI.toast.info) {
+                    try { UI.toast.info('Already saving — please wait…'); } catch (_) {}
+                }
+                console.debug('[Perf] duplicate suppressed:', key);
+                return Promise.resolve(undefined);
+            }
+            inflight.add(key);
+            const btn = document.activeElement;
+            const isBtn = btn && (btn.tagName === 'BUTTON' || btn.tagName === 'A');
+            const prevDisabled = isBtn ? btn.disabled : null;
+            const prevText = isBtn ? btn.innerText : null;
+            if (isBtn) {
+                btn.disabled = true;
+                if (prevText && !/saving|loading|please/i.test(prevText)) {
+                    btn.innerText = 'Saving…';
+                }
+            }
+            const release = () => {
+                inflight.delete(key);
+                if (isBtn) {
+                    btn.disabled = !!prevDisabled;
+                    if (prevText) btn.innerText = prevText;
+                }
+            };
+            try {
+                const r = fn();
+                if (r && typeof r.then === 'function') return r.finally(release);
+                release();
+                return r;
+            } catch (e) { release(); throw e; }
+        },
+        // Debounce: trailing call only.
+        debounce(fn, ms = 250) {
+            let t = null;
+            return function (...args) {
+                clearTimeout(t);
+                t = setTimeout(() => fn.apply(this, args), ms);
+            };
+        },
+        // Coalesce: while a call is in-flight, subsequent calls return the same promise.
+        // Use for expensive idempotent renderers (e.g. renderCalendar).
+        coalesce(fn, trailingMs = 0) {
+            let pending = null;
+            let trailing = null;
+            return function (...args) {
+                if (pending) {
+                    if (trailingMs > 0) {
+                        clearTimeout(trailing);
+                        trailing = setTimeout(() => { trailing = null; fn.apply(this, args); }, trailingMs);
+                    }
+                    return pending;
+                }
+                pending = Promise.resolve()
+                    .then(() => fn.apply(this, args))
+                    .finally(() => { pending = null; });
+                return pending;
+            };
+        }
+    };
+})();
+
 // ==================== ON-DEMAND SCRIPT LOADER ====================
 // Loads a CDN script once and caches the promise so repeated calls are free.
 // Used to defer D3, Chart.js, ExcelJS, XLSX off the critical path (~1.5 MB).
@@ -14780,7 +14858,7 @@ function _wireLoginBtn() {
         _getProductsCached();
     };
 
-    const renderCalendar = async () => {
+    const _renderCalendarImpl = async () => {
         const myToken = ++_renderCalendarToken;
         updateMonthHeader(_currentDate);
 
@@ -15134,6 +15212,13 @@ function _wireLoginBtn() {
             }
         }
     };
+
+    // Phase B: coalesce burst calls — back-to-back renderCalendar() invocations
+    // (e.g. save → attachListeners → view-switch) collapse into one network round-trip.
+    // The 200ms trailing window absorbs follow-ups while a render is in-flight.
+    const renderCalendar = (window.Perf && window.Perf.coalesce)
+        ? window.Perf.coalesce(_renderCalendarImpl, 200)
+        : _renderCalendarImpl;
 
     const getDotColor = (type) => {
         switch (type) {
@@ -19921,14 +20006,12 @@ function _wireLoginBtn() {
             UI.toast.error('Prospect not found');
             return;
         }
-        const current = prospect.life_chart_type || '';
+        // Mutually exclusive: ticking one auto-unticks the other.
         let newType;
-        if (dateType === 'solar') {
-            const lunarOn = current === 'lunar' || current === 'both';
-            newType = checked ? (lunarOn ? 'both' : 'solar') : (lunarOn ? 'lunar' : null);
+        if (checked) {
+            newType = dateType; // 'solar' or 'lunar'
         } else {
-            const solarOn = current === 'solar' || current === 'both';
-            newType = checked ? (solarOn ? 'both' : 'lunar') : (solarOn ? 'solar' : null);
+            newType = null;
         }
 
         let writeOk = false;
@@ -19957,8 +20040,12 @@ function _wireLoginBtn() {
         if (bodyEl) {
             bodyEl.querySelectorAll('input[type="checkbox"]').forEach(chk => {
                 const oc = chk.getAttribute('onchange') || '';
-                if (oc.includes("'solar'")) chk.checked = newType === 'solar' || newType === 'both';
-                else if (oc.includes("'lunar'")) chk.checked = newType === 'lunar' || newType === 'both';
+                const row = chk.closest('.pv-row');
+                const lbl = row ? row.querySelector('.pv-lbl') : null;
+                let isActive = false;
+                if (oc.includes("'solar'")) { isActive = newType === 'solar'; chk.checked = isActive; }
+                else if (oc.includes("'lunar'")) { isActive = newType === 'lunar'; chk.checked = isActive; }
+                if (lbl) lbl.style.fontWeight = isActive ? '700' : '';
             });
         }
     };
@@ -22659,7 +22746,12 @@ function _wireLoginBtn() {
             : AppDataStore.getActiveProspects({ includeDormant: includeDormantToggle || !!agentFilter });
         const [allProspects, allUsers] = await Promise.all([
             prospectsPromise,
-            AppDataStore.getAll('users'),
+            // includeDeleted: the active-users cache hides status='deleted'
+            // staff, but prospects may still reference them as owning agent.
+            // Merging deleted users into the lookup keeps the Agent column
+            // populated; activeAgents below stays restricted so the reassign
+            // dropdown options don't expose deleted records.
+            AppDataStore.getAll('users', { includeDeleted: true }),
         ]);
         _mark('prospects+users-loaded');
 
@@ -22680,6 +22772,21 @@ function _wireLoginBtn() {
         // Per-page latest-activity lookup; populated after pagination below.
         const latestActivityByProspect = new Map();
         const userById = new Map(allUsers.map(u => [String(u.id), u]));
+
+        // Safety net: any responsible_agent_id we still can't resolve gets a
+        // targeted fetch (covers users excluded from getAll for any reason,
+        // not just soft-deletes). Patches userById in place before render.
+        const missingAgentIds = [];
+        for (const p of allProspects) {
+            const aid = p.responsible_agent_id;
+            if (aid && !userById.has(String(aid))) missingAgentIds.push(aid);
+        }
+        if (missingAgentIds.length) {
+            try {
+                const extras = await AppDataStore.getUsersByIds(missingAgentIds);
+                for (const u of extras) userById.set(String(u.id), u);
+            } catch (_) { /* non-fatal — column just stays blank */ }
+        }
 
         // ── Populate agent filter dropdown (lazy — only when panel is open) ──
         // Rebuilding a 1000-option <select> on every render is expensive DOM
@@ -24990,8 +25097,8 @@ function _wireLoginBtn() {
         else if (tab === 'personal') {
             container.innerHTML = `
                 <div class="pv-sub">Birth &amp; Identity</div>
-                <div class="pv-row"><span class="pv-lbl">Date of Birth</span><span class="pv-val" style="display:flex;align-items:center;gap:8px;"><input type="checkbox" ${['solar','both'].includes(prospect.life_chart_type) ? 'checked' : ''} onchange="event.stopPropagation();app.toggleLifeChartType(${prospect.id},'solar',this.checked)" title="Use for life chart">${prospect.date_of_birth || '-'}</span></div>
-                <div class="pv-row"><span class="pv-lbl">Lunar Birth</span><span class="pv-val" style="display:flex;align-items:center;gap:8px;"><input type="checkbox" ${['lunar','both'].includes(prospect.life_chart_type) ? 'checked' : ''} onchange="event.stopPropagation();app.toggleLifeChartType(${prospect.id},'lunar',this.checked)" title="Use for life chart">${prospect.lunar_birth || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl" style="${prospect.life_chart_type === 'solar' ? 'font-weight:700;' : ''}">Date of Birth</span><span class="pv-val" style="display:flex;align-items:center;gap:8px;"><input type="checkbox" ${prospect.life_chart_type === 'solar' ? 'checked' : ''} onchange="event.stopPropagation();app.toggleLifeChartType(${prospect.id},'solar',this.checked)" title="Use for life chart">${prospect.date_of_birth || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl" style="${prospect.life_chart_type === 'lunar' ? 'font-weight:700;' : ''}">Lunar Birth</span><span class="pv-val" style="display:flex;align-items:center;gap:8px;"><input type="checkbox" ${prospect.life_chart_type === 'lunar' ? 'checked' : ''} onchange="event.stopPropagation();app.toggleLifeChartType(${prospect.id},'lunar',this.checked)" title="Use for life chart">${prospect.lunar_birth || '-'}</span></div>
                 <div class="pv-row"><span class="pv-lbl">IC Number</span><span class="pv-val">${prospect.ic_number || '-'}</span></div>
                 <div class="pv-row"><span class="pv-lbl">Ming Gua</span><span class="pv-val"><span class="badge info">${prospect.ming_gua || 'MG4'}</span></span></div>
                 <div class="pv-sub">Family</div>
@@ -51669,6 +51776,67 @@ Gold-${totGold}`;
 })();
 
 Object.assign(window.app, appLogic);
+
+// ==================== AUTO-GUARD SAVE/CREATE/ADD (Phase A) ====================
+// Wraps every app.save*/create*/add*/update*/submit* with Perf.guardAsync so
+// rapid double-taps on mobile cannot fire the same handler twice. The guard
+// key includes the function name and a stringified arg signature, so saving
+// two different rows in parallel still works — only IDENTICAL re-entrancy is
+// suppressed. Disables the clicked button and shows "Saving…" while in-flight.
+(function autoGuardAppMutations() {
+    if (!window.Perf || !window.app) return;
+    const prefixes = ['save', 'create', 'add', 'update', 'submit', 'send'];
+    // Skip pure UI / nav helpers that happen to start with these prefixes.
+    const skip = new Set([
+        'addPlanItemRow', 'addProspectChildRow', 'addPrePurchaseRow', 'addProductPurchaseRow',
+        'addAttendee', 'addCoAgent', 'addCoAgentToActivity',
+        'updateAttendeeStatus', 'updateCoAgentRole', 'updateConditionOperator',
+        'updateConditionValue', 'updateGroupLogic', 'updatePlanCheck', 'updateLunarBirth',
+        'updateActivity'
+    ]);
+    Object.keys(window.app).forEach(k => {
+        const fn = window.app[k];
+        if (typeof fn !== 'function' || fn._perfGuarded) return;
+        if (skip.has(k)) return;
+        if (!prefixes.some(p => k.startsWith(p))) return;
+        const wrapped = function (...args) {
+            // Stable signature: function name + scalar args (drop objects to avoid huge keys).
+            const sigArgs = args.map(a => (a == null || typeof a === 'object') ? '' : String(a)).join('|');
+            const key = 'app.' + k + ':' + sigArgs;
+            return window.Perf.guardAsync(key, () => fn.apply(this, args));
+        };
+        wrapped._perfGuarded = true;
+        window.app[k] = wrapped;
+    });
+    console.info('[Perf] auto-guard installed on app mutations');
+})();
+
+// ==================== AUTO-DEBOUNCE SEARCH/FILTER (Phase C: input lag) ====================
+// Inline oninput="app.searchEntities()" handlers fire on every keystroke. Wrap
+// known search/filter functions so they only run once typing stops (250ms).
+// Functions explicitly using debounceCall in their template stay unchanged.
+(function autoDebounceAppSearch() {
+    if (!window.Perf || !window.app) return;
+    const targets = [
+        'mpSearchInput', 'updateShareLinkPreview', 'handleCaseSearch',
+        'searchAgents', 'searchConsultants', 'searchEntities',
+        'searchProspectReferrers', 'searchBasicInfoReferrers', 'searchReferrers',
+        'filterProspects', 'filterCustomers', 'filterActivities', 'filterEvents',
+        'searchFiles', 'searchTreePerson', 'searchCaseEntities'
+    ];
+    let wrappedCount = 0;
+    targets.forEach(name => {
+        const fn = window.app[name];
+        if (typeof fn !== 'function' || fn._perfDebounced) return;
+        const debounced = window.Perf.debounce(function (...args) {
+            return fn.apply(this, args);
+        }, 250);
+        debounced._perfDebounced = true;
+        window.app[name] = debounced;
+        wrappedCount++;
+    });
+    console.info('[Perf] auto-debounce installed on', wrappedCount, 'search/filter handlers');
+})();
 
 
 // ========== SECURITY INITIALIZATION ==========
