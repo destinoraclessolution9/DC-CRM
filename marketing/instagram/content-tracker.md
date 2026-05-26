@@ -23,6 +23,7 @@ Update after each post. Watch **shares + saves** (reach drivers) and **net follo
 | 16 | 2026-05-25 | Carousel | Hiring truths nobody admits (p/DYv_6zqE1Qm) | | | | | | |
 | 19 | 2026-05-25 | Quote | Some bosses reject the talent they feel threatened by (p/DYwFvbcExw2) | | | | | | |
 | 29 | 2026-05-25 | Carousel | 5 interview answers that actually work (p/DYxKPm4E2Rm) | | | | | | |
+| 25 | 2026-05-26 | Quote | A diamond never finds its jeweler by accident (p/DYzyOJEEwg2) — first post w/ new SEO opening line | | | | | | |
 | ... | | | | | | | | | |
 
 *(extend rows as you post — copy the row format)*
