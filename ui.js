@@ -77,11 +77,58 @@ window.UI = (() => {
         if (isPrimary || isActionText) _startBtnLoad(btn);
     }, true);
 
+    // --- In-modal error banner ---
+    // When an error toast fires while a modal is open, also pin a banner at the
+    // top of the modal content. Toasts at bottom-right of the viewport auto-fade
+    // in 3s and on long scrollable modals (e.g. Quick Add Activity) users miss
+    // them — they then think the modal is "stuck" because clicking Save did
+    // nothing visible. The banner is persistent until dismissed or the modal
+    // closes, so the validation reason is always discoverable.
+    const _showModalErrorBanner = (message) => {
+        const overlay = document.getElementById('global-modal-overlay');
+        if (!overlay || !overlay.classList.contains('active')) return;
+        const modalBox = overlay.querySelector('.modal-box');
+        const modalContent = modalBox?.querySelector('.modal-content');
+        if (!modalContent) return;
+
+        let banner = modalBox.querySelector('.modal-error-banner');
+        if (!banner) {
+            banner = document.createElement('div');
+            banner.className = 'modal-error-banner';
+            banner.setAttribute('role', 'alert');
+            banner.setAttribute('aria-live', 'assertive');
+            modalContent.insertBefore(banner, modalContent.firstChild);
+        }
+        // Rebuild contents via DOM nodes (no innerHTML with raw message → XSS-safe).
+        banner.replaceChildren();
+        const icon = document.createElement('i');
+        icon.className = 'fas fa-exclamation-circle';
+        icon.setAttribute('aria-hidden', 'true');
+        const msgSpan = document.createElement('span');
+        msgSpan.className = 'modal-error-banner-msg';
+        msgSpan.textContent = String(message ?? '');
+        const closeBtn = document.createElement('button');
+        closeBtn.type = 'button';
+        closeBtn.className = 'modal-error-banner-close';
+        closeBtn.setAttribute('aria-label', 'Dismiss error');
+        closeBtn.textContent = '×';
+        closeBtn.addEventListener('click', () => banner.remove());
+        banner.append(icon, msgSpan, closeBtn);
+
+        // Scroll modal so the banner is in view (handles long forms where the
+        // user clicked Save while scrolled to the bottom). Smooth-scroll via
+        // scrollTo() is ignored on some flex children, so set scrollTop directly.
+        modalContent.scrollTop = 0;
+    };
+
     // --- Toasts ---
     const toast = {
         show: (message, type = 'info') => {
             // Restore loading buttons whenever feedback appears
             if (type !== 'info') _endAllBtnLoads();
+
+            // Mirror error toasts into any open modal so the user can't miss them.
+            if (type === 'error') _showModalErrorBanner(message);
 
             let container = document.getElementById('toast-container');
             if (!container) {
@@ -113,10 +160,13 @@ window.UI = (() => {
             toastEl.appendChild(span);
             container.appendChild(toastEl);
 
+            // Errors stick around longer than info/success — users need more time
+            // to read and act on them, especially on mobile.
+            const lifetimeMs = type === 'error' ? 6000 : 3000;
             setTimeout(() => {
                 toastEl.classList.add('fade-out');
                 setTimeout(() => toastEl.remove(), 500);
-            }, 3000);
+            }, lifetimeMs);
         },
         success: (msg) => toast.show(msg, 'success'),
         error: (msg) => toast.show(msg, 'error'),

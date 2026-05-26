@@ -310,6 +310,61 @@ body {
     flex-shrink: 0;
 }
 
+/* In-modal error banner — mirrors error toasts so users on long scrollable */
+/* modals (e.g. Quick Add Activity) can't miss the validation reason. */
+.modal-error-banner {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    background: #fee2e2;
+    border: 1px solid #fecaca;
+    color: #991b1b;
+    padding: 12px 14px;
+    border-radius: 8px;
+    margin: 0 0 14px 0;
+    font-size: 13.5px;
+    line-height: 1.45;
+    box-shadow: 0 2px 6px rgba(153, 27, 27, 0.08);
+    animation: modalErrorBannerIn 0.2s ease-out;
+}
+
+.modal-error-banner > i {
+    flex-shrink: 0;
+    font-size: 16px;
+    margin-top: 1px;
+}
+
+.modal-error-banner-msg {
+    flex: 1;
+    min-width: 0;
+    word-break: break-word;
+}
+
+.modal-error-banner-close {
+    flex-shrink: 0;
+    background: transparent;
+    border: none;
+    color: #991b1b;
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 4px;
+    margin: -2px -4px 0 0;
+    opacity: 0.7;
+}
+
+.modal-error-banner-close:hover {
+    opacity: 1;
+}
+
+@keyframes modalErrorBannerIn {
+    from { opacity: 0; transform: translateY(-6px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
 /* Toasts */
 .toast-container {
     position: fixed;
