@@ -469,6 +469,19 @@ class DataStore {
     }
 
     async getAll(tableName, options = {}) {
+        // Opt-in: include soft-deleted user rows in the result. _getAllImpl
+        // strips status='deleted' so list pickers don't show ex-staff, but
+        // some views (e.g. prospects table agent column) need to resolve
+        // an owning agent by id even if that agent has since been deleted.
+        // The deleted set is fetched once and merged on top of the cached
+        // active set; the cached active set is NOT mutated.
+        if (options && options.includeDeleted && tableName === 'users') {
+            const active = await this.getAll(tableName, { ...options, includeDeleted: false });
+            const deleted = await this._getDeletedUsers();
+            if (!deleted.length) return active;
+            const seen = new Set(active.map(r => String(r.id)));
+            return active.concat(deleted.filter(r => !seen.has(String(r.id))));
+        }
         // Opt-out of SWR: callers that need guaranteed-fresh data (e.g. a
         // duplicate check before an insert) can pass { fresh: true } to force
         // a full Supabase round trip and bypass both caches.
@@ -514,6 +527,48 @@ class DataStore {
         });
         this._inFlightGetAll.set(tableName, fetchPromise);
         return fetchPromise;
+    }
+
+    // One-shot fetch of soft-deleted users, memoized for the session so the
+    // prospect list can resolve an owning agent's name without bloating the
+    // shared users cache (which intentionally hides deleted staff).
+    async _getDeletedUsers() {
+        if (this._deletedUsersPromise) return this._deletedUsersPromise;
+        this._deletedUsersPromise = (async () => {
+            try {
+                const { data, error } = await this._readClient()
+                    .from('users')
+                    .select(this._selectClauseForGetAll('users'))
+                    .eq('status', 'deleted');
+                if (error) throw error;
+                return data || [];
+            } catch (e) {
+                console.warn('[DataStore] _getDeletedUsers failed:', e?.message);
+                this._deletedUsersPromise = null;
+                return [];
+            }
+        })();
+        return this._deletedUsersPromise;
+    }
+
+    // Targeted lookup: given a list of user ids, return any that aren't in
+    // the standard users cache (e.g. deleted, or otherwise excluded). Used
+    // by the prospect list to resolve owning-agent names as a safety net
+    // after the primary getAll('users') call.
+    async getUsersByIds(ids) {
+        const unique = Array.from(new Set((ids || []).map(String).filter(Boolean)));
+        if (!unique.length) return [];
+        try {
+            const { data, error } = await this._readClient()
+                .from('users')
+                .select(this._selectClauseForGetAll('users'))
+                .in('id', unique);
+            if (error) throw error;
+            return data || [];
+        } catch (e) {
+            console.warn('[DataStore] getUsersByIds failed:', e?.message);
+            return [];
+        }
     }
 
     // Paginated query — use this for ANY list view whose table may grow past
