@@ -983,6 +983,19 @@ class DataStore {
         const dataToInsert = { ...record };
         if (!dataToInsert.id) dataToInsert.id = this._generateId();
 
+        // Phase F: server-side idempotency. Stamp a UUID on inserts to tables
+        // that have a unique client_request_id index (see migrations/perf_indexes_2026-05-26.sql).
+        // If the column doesn't exist yet, the schema-error retry loop below strips it
+        // safely — so this is backward-compatible until the migration is applied.
+        const IDEMPOTENT_TABLES = new Set(['activities', 'prospects', 'customers']);
+        if (IDEMPOTENT_TABLES.has(tableName) && !dataToInsert.client_request_id) {
+            try {
+                dataToInsert.client_request_id = (window.Perf && window.Perf.uuid)
+                    ? window.Perf.uuid()
+                    : (crypto && crypto.randomUUID ? crypto.randomUUID() : null);
+            } catch (_) { /* non-fatal */ }
+        }
+
         // Try inserting, stripping unknown columns one-by-one on schema errors
         // so data reaches Supabase even when the table schema is missing new columns.
         let insertData = { ...dataToInsert };
