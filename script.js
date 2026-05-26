@@ -8406,10 +8406,19 @@ function _wireLoginBtn() {
     const btn = document.getElementById('loginBtn');
     if (!btn || btn._supabaseSetup) return;
     btn._supabaseSetup = true;
-    // Restore remembered checkbox state and pre-fill email
+    // Restore remembered checkbox state and pre-fill email.
+    // Default to CHECKED for first-time / explicitly-logged-out users so mobile
+    // sessions survive across app cold-boots. Only an explicit logout (which
+    // removes 'remember_me') flips this off — and even then we re-check it
+    // unless the user manually unticks before next login.
     const rememberChk = document.getElementById('rememberMe');
     const rememberedEmail = localStorage.getItem('remember_me_email');
-    if (rememberChk) rememberChk.checked = localStorage.getItem('remember_me') === '1';
+    if (rememberChk) {
+        const saved = localStorage.getItem('remember_me');
+        // saved === '0' → user explicitly opted OUT last time → keep unchecked
+        // saved === '1' OR null → check it (default-on for first-timers)
+        rememberChk.checked = saved !== '0';
+    }
     if (rememberedEmail) {
         const emailField = document.getElementById('email') || document.getElementById('loginEmail');
         if (emailField && !emailField.value) emailField.value = rememberedEmail;
@@ -8595,7 +8604,10 @@ function _wireLoginBtn() {
                     try { localStorage.setItem('remember_me', '1'); } catch (_) {}
                 }
             } else {
-                localStorage.removeItem('remember_me');
+                // User explicitly opted OUT. Record that so we don't auto-tick
+                // the checkbox next time — they get the original behavior they
+                // chose. Email is also cleared.
+                localStorage.setItem('remember_me', '0');
                 localStorage.removeItem('remember_me_email');
             }
             document.getElementById('login-container').style.display = 'none';
