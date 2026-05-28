@@ -1,5 +1,9 @@
 # DNJ 小红书 · 待发布队列（2026-05-27 起）
 
+> 🚨 **2026-05-28 PAUSED — RedNote 账号冻结** (see `posts/hot6/account-frozen-notice.png`, effective 2026-05-26 23:35:33). 
+> Trigger: 49 follows + 6 posts in one day on 4-day-old account.
+> **All 14 queued posts remain valid** — repost from these folders once account is unblocked OR migrated to a new account (with conservative caps: ≤2 posts/day, ≤15 follows/day for first 14 days).
+
 > 在 6 篇/day 后回到 **~1/day 节奏**。所有内容已渲染、文案+话题已写、文件已 staged 在 `posts/<folder>/`。
 > 每次发布：`python posts/log_post.py <folder>` → commit → push。
 > ⚠️ 红线（每一篇都已遵守）：匹配只说 AI 智能匹配，不出现 八字/命理/星座/缘分；广告法极限词避开；AI 生成内容自带「内容由 AI 生成」标。
