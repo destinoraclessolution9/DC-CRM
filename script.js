@@ -4658,6 +4658,30 @@ In a production system, this would show the actual file contents.
     // render so a manual refresh bypasses every localStorage cache once.
     let _mobileForceFresh = false;
 
+    // SWR revalidate guard — last-revalidated timestamp per `${year}-${month}`.
+    // Background refetch is skipped if the same month was revalidated < 30s ago,
+    // which prevents render-loop ping-pong when the background fetch resolves
+    // and triggers a re-render that would otherwise revalidate again.
+    const _mcalLastRevalidatedAt = new Map();
+    const _MCAL_REVALIDATE_TTL_MS = 30_000;
+
+    // Optimistic-insert tracking — keyed by tmp id, value is the activity row
+    // we inserted into the localStorage cache before the Supabase write
+    // resolved. Used to swap the tmp id for the real id on success, or to
+    // mark the row as failed-to-sync.
+    const _mcalOptimisticRows = new Map();
+
+    // Persistent retry queue for activity inserts that failed to reach
+    // Supabase. Each entry: { tmpId, table, data, attempts, lastAttemptAt }.
+    // Drained on page load, on `online` events, and on a slow backoff timer.
+    const _MCAL_RETRY_QUEUE_KEY = 'mcal-retry-queue-v1';
+    const _mcalRetryQueueRead = () => {
+        try { return JSON.parse(localStorage.getItem(_MCAL_RETRY_QUEUE_KEY) || '[]'); } catch(_) { return []; }
+    };
+    const _mcalRetryQueueWrite = (q) => {
+        try { localStorage.setItem(_MCAL_RETRY_QUEUE_KEY, JSON.stringify(q)); } catch(_) {}
+    };
+
     // Wipe persisted mobile snapshots/caches so the next render refetches.
     // Called on data mutations (create/edit/delete) — implements the
     // "cold data stays cached until edited" rule for Home + Calendar + Clients.
@@ -4784,12 +4808,13 @@ In a production system, this would show the actual file contents.
         const monthStartStr = `${_mcalYear}-${String(_mcalMonth+1).padStart(2,'0')}-01`;
         const monthEndStr = `${_mcalYear}-${String(_mcalMonth+1).padStart(2,'0')}-${String(daysInMonth).padStart(2,'0')}`;
 
-        // Past months are safe to serve from cache (their activities don't
-        // change). Current and future months MUST always refetch in full —
-        // a stale cache from a previous visit would hide newly added activities
-        // on dates outside today's neighbourhood (e.g. an activity created on
-        // a phone for a date 2 weeks out would never appear on this device
-        // until the cache expired or was manually cleared).
+        // Strategy: cache-first instant paint + background full-month revalidate.
+        //   - Past months are immutable → cache only, no network.
+        //   - Current/future months → render cache instantly, then quietly refetch
+        //     the FULL month in the background and re-render if anything differs.
+        //     This catches activities added from other devices/sessions without
+        //     making the user wait. Saves done in this session use the optimistic
+        //     insert path (see _mcalOptimisticInsert below) so they appear instantly.
         const _fmtD = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
         const _todayStr = _fmtD(todayD);
         const _isPastMonth = monthEndStr < _todayStr;
@@ -4831,14 +4856,20 @@ In a production system, this would show the actual file contents.
             return o;
         };
 
-        // Decide what to fetch:
-        //   - past month with a cache → no network (past activities don't change)
-        //   - anything else → full month refetch (current/future months must
-        //     pick up activities added from other devices or earlier sessions)
-        let _actMode, _actsP;
+        // Decide what to fetch RIGHT NOW (blocking) vs. what to revalidate
+        // in the background (non-blocking).
+        //   - past month + cache → render cache, no network at all
+        //   - any month + cache (not forced) → render cache instantly, refetch
+        //     full month in background; if data differs, silently re-render
+        //   - no cache or forced → must block on a full month fetch
+        let _actMode, _actsP, _shouldRevalidate = false;
         if (_isPastMonth && _cachedActs && !_forceFresh) {
             _actMode = 'cache';
             _actsP = Promise.resolve(null);
+        } else if (_cachedActs && !_forceFresh) {
+            _actMode = 'cache';
+            _actsP = Promise.resolve(null);
+            _shouldRevalidate = true;
         } else {
             _actMode = 'full';
             _actsP = AppDataStore.queryAdvanced('activities', _buildActOpts(monthStartStr, monthEndStr)).catch(() => ({ data: [] }));
@@ -4869,10 +4900,13 @@ In a production system, this would show the actual file contents.
         const personMap = new Map(allPeople.map(p => [String(p.id), p]));
         _mcalPersonMap = personMap;
 
-        // Group activities by date (YYYY-MM-DD)
+        // Group activities by date (YYYY-MM-DD). Normalize the date in case
+        // a row was saved with a full ISO timestamp ("2026-06-12T00:00:00+08:00")
+        // instead of a plain date — without this slice() the cell key wouldn't
+        // match the grid keys below and the activity would silently disappear.
         const byDate = new Map();
         for (const a of activities) {
-            const k = a.activity_date;
+            const k = String(a.activity_date || '').slice(0, 10);
             if (!k) continue;
             if (!byDate.has(k)) byDate.set(k, []);
             byDate.get(k).push(a);
@@ -4921,7 +4955,10 @@ In a production system, this would show the actual file contents.
                 const time = (a.start_time || '00:00').slice(0, 5);
                 const color = _mcalColorForType(a.activity_type);
                 const short = _mcalShortTitle(a, personMap);
-                return `<div class="mcal-evt ${color}" onclick="event.stopPropagation();app.mcalDayClick('${k}')"><span class="t">${_mhomeEsc(time)}</span>${_mhomeEsc(short)}</div>`;
+                // Pending optimistic insert → italic + opacity; failed sync → ⚠ icon
+                const pendingClass = a._syncFailed ? ' sync-failed' : (a._pending ? ' pending' : '');
+                const warnIcon = a._syncFailed ? '<i class="fas fa-exclamation-triangle" title="Not synced — will retry"></i> ' : '';
+                return `<div class="mcal-evt ${color}${pendingClass}" onclick="event.stopPropagation();app.mcalDayClick('${k}')">${warnIcon}<span class="t">${_mhomeEsc(time)}</span>${_mhomeEsc(short)}</div>`;
             }).join('');
             const moreLink = overflow > 0 ? `<span class="more" onclick="event.stopPropagation();app.mcalDayClick('${k}')">+${overflow} more</span>` : '';
             cells.push(`
@@ -4998,7 +5035,163 @@ In a production system, this would show the actual file contents.
             </div>`;
             _lsSet(_mcalSnapKey + '-coming', comingHost.innerHTML);
         }
+
+        // ── SWR background revalidate ──────────────────────────
+        // After the cached grid is painted, quietly re-fetch the FULL month
+        // from Supabase. If the row set differs from what we rendered, save
+        // the fresh data + trigger ONE re-render. The TTL guard prevents the
+        // re-rendered view from kicking off another revalidate immediately.
+        if (_shouldRevalidate) {
+            const _revKey = `${_mcalYear}-${_mcalMonth}`;
+            const _lastRev = _mcalLastRevalidatedAt.get(_revKey) || 0;
+            if (Date.now() - _lastRev > _MCAL_REVALIDATE_TTL_MS) {
+                _mcalLastRevalidatedAt.set(_revKey, Date.now());
+                const _capturedYear = _mcalYear, _capturedMonth = _mcalMonth;
+                const _sig = (rows) => (rows || [])
+                    .map(a => `${a.id}|${a.activity_date || ''}|${a.start_time || ''}|${a.updated_at || ''}|${a._pending ? 1 : 0}`)
+                    .sort()
+                    .join(';');
+                const _staleSig = _sig(activities);
+                AppDataStore.queryAdvanced('activities', _buildActOpts(monthStartStr, monthEndStr))
+                    .then(res => {
+                        const freshRaw = (res?.data || []).filter(a => a.activity_type !== 'EVENT');
+                        // Preserve any optimistic rows still pending — they're not
+                        // in Supabase yet but the user expects to see them.
+                        const cached = _lsGetRaw(_mcalActsKey) || [];
+                        const pending = cached.filter(a => a._pending && a.id && String(a.id).startsWith('tmp-'));
+                        const merged = [...freshRaw, ...pending];
+                        const freshSig = _sig(merged);
+                        if (freshSig === _staleSig) return; // no change, no re-render
+                        _lsSet(_mcalActsKey, merged);
+                        // Re-render only if the user is still on the same month
+                        // and the calendar view is still active.
+                        if (_capturedYear === _mcalYear && _capturedMonth === _mcalMonth) {
+                            const vp = document.getElementById('content-viewport');
+                            if (vp && vp.classList.contains('mcal-active')) {
+                                showMobileCalendarView(vp).catch(() => {});
+                            }
+                        }
+                    })
+                    .catch(() => {});
+            }
+        }
     };
+
+    // ── Optimistic mcal insert / swap / retry queue ─────────────
+    // Insert a draft activity row into the visible month's cache + grid so
+    // the user sees their save instantly. The real Supabase write happens
+    // in the background (see saveActivity); on success the tmp id is swapped
+    // for the real id via _mcalOptimisticSwap, on failure the row is marked
+    // pending and queued for retry.
+    const _mcalOptimisticInsert = (row) => {
+        if (!row || !row.activity_date || !row.id) return;
+        const dateStr = String(row.activity_date).slice(0, 10);
+        const [y, m] = dateStr.split('-').map(n => parseInt(n, 10));
+        if (!y || !m) return;
+        const key = `mcal-acts-${y}-${m - 1}`;
+        let cached = [];
+        try { cached = JSON.parse(localStorage.getItem(key) || '{}').val || []; } catch(_) {}
+        if (!Array.isArray(cached)) cached = [];
+        // Avoid double-insert if called twice with same tmp id
+        if (cached.some(a => String(a.id) === String(row.id))) return;
+        cached.push(row);
+        try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), val: cached })); } catch(_) {}
+        _mcalOptimisticRows.set(String(row.id), { key, row });
+        // If the calendar is currently showing this month, re-render now.
+        const vp = document.getElementById('content-viewport');
+        if (vp && vp.classList.contains('mcal-active') && _mcalYear === y && _mcalMonth === (m - 1)) {
+            showMobileCalendarView(vp).catch(() => {});
+        }
+    };
+
+    // Replace a tmp-id row with the real row Supabase returned. Keeps the
+    // cache and the grid consistent with what the server confirmed.
+    const _mcalOptimisticSwap = (tmpId, realRow) => {
+        const entry = _mcalOptimisticRows.get(String(tmpId));
+        _mcalOptimisticRows.delete(String(tmpId));
+        if (!entry || !realRow) return;
+        const { key } = entry;
+        let cached = [];
+        try { cached = JSON.parse(localStorage.getItem(key) || '{}').val || []; } catch(_) {}
+        if (!Array.isArray(cached)) return;
+        const idx = cached.findIndex(a => String(a.id) === String(tmpId));
+        if (idx >= 0) {
+            cached[idx] = { ...realRow, _pending: false };
+        } else {
+            cached.push({ ...realRow, _pending: false });
+        }
+        try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), val: cached })); } catch(_) {}
+        // No re-render needed — the visible cell already shows the activity;
+        // only the id changed under the hood.
+    };
+
+    // Mark an optimistic row as failed-to-sync. Keeps it visible (so the
+    // user doesn't think their save disappeared) but flags it for retry +
+    // a small warning indicator in the grid.
+    const _mcalOptimisticMarkFailed = (tmpId) => {
+        const entry = _mcalOptimisticRows.get(String(tmpId));
+        if (!entry) return;
+        const { key } = entry;
+        let cached = [];
+        try { cached = JSON.parse(localStorage.getItem(key) || '{}').val || []; } catch(_) {}
+        if (!Array.isArray(cached)) return;
+        const idx = cached.findIndex(a => String(a.id) === String(tmpId));
+        if (idx >= 0) {
+            cached[idx] = { ...cached[idx], _pending: true, _syncFailed: true };
+            try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), val: cached })); } catch(_) {}
+        }
+    };
+
+    // Push a failed save onto the persistent retry queue. Caller is expected
+    // to also invoke _mcalOptimisticMarkFailed so the UI shows the warning.
+    const _mcalEnqueueRetry = (tmpId, table, data) => {
+        const q = _mcalRetryQueueRead();
+        q.push({ tmpId: String(tmpId), table, data, attempts: 0, lastAttemptAt: 0, enqueuedAt: Date.now() });
+        _mcalRetryQueueWrite(q);
+    };
+
+    // Drain the retry queue. Each entry gets one attempt per call; on
+    // success the optimistic row is swapped + the entry removed, on failure
+    // attempts++ and the entry stays for a future drain.
+    const _mcalDrainRetryQueue = async () => {
+        const q = _mcalRetryQueueRead();
+        if (!q.length) return;
+        const remaining = [];
+        for (const entry of q) {
+            // Backoff: skip if attempted in the last 30s × 2^attempts
+            const backoff = Math.min(30_000 * Math.pow(2, entry.attempts), 10 * 60_000);
+            if (Date.now() - (entry.lastAttemptAt || 0) < backoff) {
+                remaining.push(entry);
+                continue;
+            }
+            try {
+                const saved = await AppDataStore.create(entry.table, entry.data);
+                if (saved && saved.id) {
+                    _mcalOptimisticSwap(entry.tmpId, saved);
+                    // success → drop from queue
+                    continue;
+                }
+                throw new Error('create returned no id');
+            } catch (_) {
+                entry.attempts = (entry.attempts || 0) + 1;
+                entry.lastAttemptAt = Date.now();
+                if (entry.attempts >= 8) {
+                    // Give up after ~8 tries (~30s + 60s + 2m + 4m + 8m + 10m + 10m).
+                    // Leave the row in cache marked as failed; user can edit/delete.
+                    _mcalOptimisticMarkFailed(entry.tmpId);
+                    continue;
+                }
+                remaining.push(entry);
+            }
+        }
+        _mcalRetryQueueWrite(remaining);
+    };
+
+    // Auto-drain triggers: page load (deferred so we don't compete with the
+    // initial render), network recovery, and a 60s backoff loop.
+    setTimeout(() => { _mcalDrainRetryQueue().catch(() => {}); }, 5_000);
+    window.addEventListener('online', () => { _mcalDrainRetryQueue().catch(() => {}); });
+    setInterval(() => { _mcalDrainRetryQueue().catch(() => {}); }, 60_000);
 
     // ── Mobile calendar control handlers ─────────────────────
     const mcalPrevMonth = async () => {
@@ -21425,12 +21618,46 @@ function _wireLoginBtn() {
             }
         }
 
+        // === Optimistic UI: mobile calendar only ===
+        // If the user is on the mobile calendar, drop the activity into the
+        // local cache + grid BEFORE we hit the network. This way the row is
+        // visible in the same tick the user tapped Save, instead of waiting
+        // for the round-trip. On success we swap the tmp id for the real
+        // one; on failure we mark the row pending and queue it for retry so
+        // the user doesn't lose their work.
+        const _mcalActiveForSave = !!document.querySelector('.mcal-active');
+        const _mcalTmpId = (_mcalActiveForSave && activity.activity_date)
+            ? ('tmp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8))
+            : null;
+        if (_mcalTmpId) {
+            _mcalOptimisticInsert({
+                ...activity,
+                id: _mcalTmpId,
+                _pending: true,
+                created_at: new Date().toISOString(),
+            });
+        }
+
         let savedActivity;
         try {
             savedActivity = await AppDataStore.create('activities', activity);
         } catch (err) {
-            UI.toast.error('Failed to save activity: ' + (err.message || 'Unknown error'));
+            if (_mcalTmpId) {
+                // Keep the optimistic row in the grid so the user doesn't lose
+                // sight of their save; flag it pending and queue for retry.
+                _mcalOptimisticMarkFailed(_mcalTmpId);
+                _mcalEnqueueRetry(_mcalTmpId, 'activities', activity);
+                UI.toast.error("Couldn't sync — saved locally, will retry automatically");
+            } else {
+                UI.toast.error('Failed to save activity: ' + (err.message || 'Unknown error'));
+            }
             return;
+        }
+
+        // Swap the tmp id for the real one returned by Supabase so any
+        // future edits target the actual row.
+        if (_mcalTmpId && savedActivity?.id) {
+            _mcalOptimisticSwap(_mcalTmpId, savedActivity);
         }
 
         // Sync unable_to_serve to prospect row when set via the activity form
