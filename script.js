@@ -44398,14 +44398,14 @@ const initImportDemoData = async () => {
                     <div class="fude-sec-body"><p style="color:var(--gray-500,#6b7280);margin:0;">No highlights yet.</p></div>
                 </div>`;
             const slides = publicNews.map((n, i) => `
-                <div class="fude-carousel-slide">
+                <div class="fude-carousel-slide" onclick="app.openStoryDetail(${n.id})" style="cursor:pointer;">
                     ${n._signedUrl ? `<img loading="lazy" decoding="async" ${imgSrc(n)} alt="" onerror="this.style.display='none'">` : ''}
                     <div class="fude-carousel-overlay">
                         <span class="fude-carousel-badge">${i === 0 ? 'Latest News' : 'News'}</span>
                         <h3>${n.title}</h3>
                         ${n.content ? `<p>${n.content}</p>` : ''}
                         <span class="fude-carousel-date">📅 ${fmtDate(n.created_at)}</span>
-                        <button class="fude-carousel-readmore">Read More</button>
+                        <button class="fude-carousel-readmore" onclick="event.stopPropagation(); app.openStoryDetail(${n.id})">Read More</button>
                     </div>
                 </div>`).join('');
             const dots = publicNews.length > 1
