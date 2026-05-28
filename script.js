@@ -44451,7 +44451,7 @@ const initImportDemoData = async () => {
                 const ph = `<div class="fude-story-card-img-ph" style="display:${s._signedUrl ? 'none' : 'flex'};">📖</div>`;
                 const tags = (s.tags || '').split(',').filter(Boolean).slice(0, 2)
                     .map(t => `<span class="fude-story-tag">${t.trim()}</span>`).join('');
-                return `<div class="fude-story-card">
+                return `<div class="fude-story-card" onclick="app.openStoryDetail(${s.id})" style="cursor:pointer;">
                     ${imgEl}${ph}
                     <div class="fude-story-card-body">
                         ${tags ? `<div class="fude-story-card-tags">${tags}</div>` : ''}
@@ -44462,7 +44462,7 @@ const initImportDemoData = async () => {
                                 <div class="fude-story-card-avatar">${(s.title || 'D')[0].toUpperCase()}</div>
                                 <span>${fmtDate(s.created_at)}</span>
                             </div>
-                            <button class="fude-story-readmore">Read More →</button>
+                            <button class="fude-story-readmore" onclick="event.stopPropagation(); app.openStoryDetail(${s.id})">Read More →</button>
                         </div>
                     </div>
                 </div>`;
@@ -44567,21 +44567,6 @@ const initImportDemoData = async () => {
         // --- Render ---
         container.innerHTML = `
             <div class="fude-tab">
-                <div class="fude-appbar">
-                    <div class="fude-appbar-left">
-                        <div class="fude-appbar-logo"><i class="fas fa-yin-yang"></i></div>
-                        <span class="fude-appbar-title">Manage Rewards &amp; 客户Points</span>
-                    </div>
-                    <div class="fude-appbar-right">
-                        ${isAdmin
-                            ? `<button class="fude-appbar-btn" onclick="app.openRewardModal()"><i class="fas fa-plus"></i> Record Points</button>`
-                            : isL1314 ? `<button class="fude-appbar-btn" onclick="app.todo('Redeem Points')">Redeem Points</button>` : ''}
-                        <button class="fude-appbar-bell" title="Notifications">
-                            🔔<span class="fude-appbar-bell-dot"></span>
-                        </button>
-                        <div class="fude-appbar-avatar">${(currentUser.full_name || 'U')[0].toUpperCase()}</div>
-                    </div>
-                </div>
                 <div class="fude-inner">
                     ${summaryBanner}
                     ${isL1314 && totalPoints > 0 ? `
@@ -44609,6 +44594,32 @@ const initImportDemoData = async () => {
                 dot.closest('.fude-carousel-dots').querySelectorAll('.fude-carousel-dot').forEach((d, j) => d.classList.toggle('active', j === i));
             });
         });
+    };
+
+    // ========== Story / Highlight detail viewer (everyone) ==========
+    const openStoryDetail = async (highlightId) => {
+        try {
+            const h = await AppDataStore.getById('news_highlights', highlightId);
+            if (!h) { UI.toast.error('Story not found'); return; }
+            let imgSrc = null;
+            try { imgSrc = h.image_url ? await AppDataStore.resolveAttachmentSrc(h.image_url) : null; } catch (_) {}
+            const fmtDate = d => { try { return new Date(d).toLocaleDateString(); } catch (e) { return d || ''; } };
+            const tags = (h.tags || '').split(',').filter(Boolean)
+                .map(t => `<span style="display:inline-block;background:var(--primary-50,#fef3c7);color:var(--primary-700,#92400e);border:1px solid var(--primary-200,#fde68a);border-radius:10px;padding:2px 8px;margin:2px 4px 2px 0;font-size:11px;">${t.trim()}</span>`).join('');
+            const content = `
+                <div style="max-height:75vh;overflow-y:auto;padding-right:4px;">
+                    ${imgSrc ? `<div style="margin:-4px -4px 16px;"><img src="${imgSrc}" style="width:100%;max-height:320px;object-fit:cover;border-radius:8px;display:block;"></div>` : ''}
+                    ${tags ? `<div style="margin-bottom:8px;">${tags}</div>` : ''}
+                    <h2 style="margin:0 0 8px;font-size:1.4rem;">${h.title || ''}</h2>
+                    <div style="font-size:12px;color:var(--gray-500,#6b7280);margin-bottom:14px;">📅 ${fmtDate(h.created_at)}</div>
+                    <div style="font-size:14px;line-height:1.7;color:var(--gray-700,#374151);white-space:pre-wrap;">${h.content || '<em>No content.</em>'}</div>
+                </div>`;
+            UI.showModal(h.title || 'Story', content, [
+                { label: 'Close', type: 'secondary', action: 'UI.hideModal()' }
+            ]);
+        } catch (err) {
+            UI.toast.error('Failed to open story: ' + (err.message || 'Unknown error'));
+        }
     };
 
     // ========== LEVEL 13/14: Highlight CRUD (Admin only) ==========
@@ -52172,6 +52183,7 @@ Gold-${totGold}`;
         showMilestonesView,
         showFudeView,
         markMilestoneCompleted,
+        openStoryDetail,
         openHighlightModal,
         saveHighlight,
         deleteHighlight,
