@@ -404,6 +404,142 @@ def reel_l_frame(i):
     return img
 
 
+# ============================================================
+#  REEL M — "How to answer 'Tell me about yourself'" (Day 33)
+# ============================================================
+def hook_frame_m(alpha):
+    img = gradient_bg()
+    draw_border(img)
+    d = ImageDraw.Draw(img)
+    # giant gold quote
+    f_q = ImageFont.truetype(FONT_SERIF, 380)
+    d.text((90, 80), "“", fill=GOLD, font=f_q)
+    # the question
+    lines = ["\"TELL ME ABOUT", "YOURSELF.\""]
+    f_main = fit_font_multi(lines, FONT_HEAD, max_size=108)
+    text_centered(d, lines[0], H // 2 - 130, f_main, OFFWHITE)
+    text_centered(d, lines[1], H // 2 + 0, f_main, GOLD)
+    # sub
+    f_sub = ImageFont.truetype(FONT_BODY, 44)
+    text_centered(d, "the question that breaks everyone.", H // 2 + 180, f_sub, DIM)
+    return fade_overlay(img, alpha)
+
+
+def dont_card_m(alpha):
+    img = gradient_bg()
+    draw_border(img)
+    d = ImageDraw.Draw(img)
+    # big DON'T in muted/red-ish
+    DONT_RED = (180, 70, 70)
+    f_dont = ImageFont.truetype(FONT_HEAD, 200)
+    text_centered(d, "DON'T", H // 2 - 280, f_dont, DONT_RED)
+    # action lines
+    lines = ["RECITE YOUR CV", "WORD-FOR-WORD."]
+    f_main = fit_font_multi(lines, FONT_HEAD, max_size=100)
+    text_centered(d, lines[0], H // 2 - 30, f_main, OFFWHITE)
+    text_centered(d, lines[1], H // 2 + 80, f_main, OFFWHITE)
+    # sub
+    f_sub = ImageFont.truetype(FONT_BODY, 42)
+    text_centered(d, "they already read it.", H // 2 + 240, f_sub, DIM)
+    return fade_overlay(img, alpha)
+
+
+def framework_card_m(alpha):
+    """The 3-step formula — the value payload."""
+    img = gradient_bg()
+    draw_border(img)
+    d = ImageDraw.Draw(img)
+    # heading
+    f_head = ImageFont.truetype(FONT_HEAD, 72)
+    text_centered(d, "USE THIS FORMULA:", 320, f_head, GOLD)
+    # 3 steps as stacked rows — auto-fit to safe width (text starts at x=340)
+    steps = ["PRESENT", "PAST", "WHY THIS ROLE"]
+    step_max_width = (SAFE_X + SAFE_W) - 340  # = 640
+    f_step = fit_font_multi(steps, FONT_HEAD, max_size=100, max_width=step_max_width)
+    f_num = ImageFont.truetype(FONT_HEAD, 80)
+    y_starts = [560, 820, 1080]
+    for i, step in enumerate(steps):
+        d.text((180, y_starts[i] + 10), str(i + 1) + ".", fill=GOLD, font=f_num)
+        col = GOLD if i == 2 else OFFWHITE
+        d.text((340, y_starts[i]), step, fill=col, font=f_step)
+    return fade_overlay(img, alpha)
+
+
+def timer_card_m(alpha):
+    img = gradient_bg()
+    draw_border(img)
+    d = ImageDraw.Draw(img)
+    # heading
+    f_head = ImageFont.truetype(FONT_HEAD, 80)
+    text_centered(d, "KEEP IT UNDER", 540, f_head, OFFWHITE)
+    # big 90 — the visual hero (smaller than before to clear room for SECONDS)
+    f_big = ImageFont.truetype(FONT_HEAD, 320)
+    text_centered(d, "90", 700, f_big, GOLD)
+    f_unit = ImageFont.truetype(FONT_HEAD, 110)
+    text_centered(d, "SECONDS.", 1180, f_unit, OFFWHITE)
+    return fade_overlay(img, alpha)
+
+
+def end_frame_m(alpha):
+    img = gradient_bg()
+    draw_border(img)
+    d = ImageDraw.Draw(img)
+    # diamond
+    draw_diamond(d, W // 2, H // 2 - 280, 80, GOLD, w=5)
+    # main lines
+    f_main = fit_font_multi(["NAIL THE OPEN.", "OWN THE ROOM."], FONT_HEAD, max_size=110)
+    text_centered(d, "NAIL THE OPEN.", H // 2 - 100, f_main, OFFWHITE)
+    text_centered(d, "OWN THE ROOM.", H // 2 + 20, f_main, GOLD)
+    # D&J wordmark + URL
+    f_dj = ImageFont.truetype(FONT_HEAD, 110)
+    f_url = ImageFont.truetype(FONT_BODY, 46)
+    text_centered(d, "D&J", H // 2 + 250, f_dj, GOLD)
+    text_centered(d, "diamondandjeweler.com", H // 2 + 390, f_url, OFFWHITE)
+    return fade_overlay(img, alpha)
+
+
+def reel_m_frame(i):
+    """Return PIL Image for frame i (0..419) of Reel M, 14s @ 30fps."""
+    t = i / FPS
+    sec = int(t)
+
+    if t < 2.0:
+        a = min(1.0, t / 0.4)
+        img = hook_frame_m(a)
+    elif t < 2.3:
+        a = 1.0 - (t - 2.0) / 0.3
+        img = hook_frame_m(max(0.0, a))
+    elif t < 4.5:
+        # 2.3-4.5s: DON'T card
+        a = min(1.0, (t - 2.3) / 0.4)
+        img = dont_card_m(a)
+    elif t < 4.8:
+        a = 1.0 - (t - 4.5) / 0.3
+        img = dont_card_m(max(0.0, a))
+    elif t < 8.5:
+        # 4.8-8.5s: formula card (the longest, value content)
+        a = min(1.0, (t - 4.8) / 0.4)
+        img = framework_card_m(a)
+    elif t < 8.8:
+        a = 1.0 - (t - 8.5) / 0.3
+        img = framework_card_m(max(0.0, a))
+    elif t < 10.8:
+        # 8.8-10.8s: timer card
+        a = min(1.0, (t - 8.8) / 0.4)
+        img = timer_card_m(a)
+    elif t < 11.1:
+        a = 1.0 - (t - 10.8) / 0.3
+        img = timer_card_m(max(0.0, a))
+    else:
+        a = min(1.0, (t - 11.1) / 0.4)
+        img = end_frame_m(a)
+
+    d = ImageDraw.Draw(img)
+    overlay_branding(d, sec)
+    return img
+
+
 if __name__ == "__main__":
     render("reel-d-things-they-dont-tell-you", reel_d_frame, duration_s=14)
     render("reel-l-say-this-in-your-interview", reel_l_frame, duration_s=14)
+    render("reel-m-tell-me-about-yourself", reel_m_frame, duration_s=14)
