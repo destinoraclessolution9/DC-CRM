@@ -4745,7 +4745,11 @@ In a production system, this would show the actual file contents.
                 <div class="mcal-blossom"><span class="b1">🌸</span><span class="b2">🌸</span><span class="b3">🌸</span></div>
                 <button class="mcal-burger" onclick="app.openMobileDrawer()" aria-label="Menu"><i class="fas fa-bars"></i></button>
                 <div class="mcal-title-wrap">
-                    <div class="mcal-title" onclick="app.mcalNextMonth()">${_mhomeEsc(monthName)} ${_mcalYear} <i class="fas fa-chevron-down"></i></div>
+                    <div class="mcal-title">
+                        <button class="mcal-nav-btn" onclick="event.stopPropagation();app.mcalPrevMonth()" aria-label="Previous month" type="button"><i class="fas fa-chevron-left"></i></button>
+                        <span class="mcal-title-text">${_mhomeEsc(monthName)} ${_mcalYear}</span>
+                        <button class="mcal-nav-btn" onclick="event.stopPropagation();app.mcalNextMonth()" aria-label="Next month" type="button"><i class="fas fa-chevron-right"></i></button>
+                    </div>
                     <div class="mcal-sub">Let's make today count, ${_mhomeEsc(userName)}! <span class="spk">✨</span></div>
                 </div>
                 <div class="mcal-actions">
@@ -4780,16 +4784,15 @@ In a production system, this would show the actual file contents.
         const monthStartStr = `${_mcalYear}-${String(_mcalMonth+1).padStart(2,'0')}-01`;
         const monthEndStr = `${_mcalYear}-${String(_mcalMonth+1).padStart(2,'0')}-${String(daysInMonth).padStart(2,'0')}`;
 
-        // Hot window — only this date range is fetched fresh on every load
-        // (past 3 days + today + next 7 days). Every other date is served from
-        // the persistent per-month activity cache until an edit invalidates it.
-        // Cold months (no overlap with the hot window) do zero network once cached.
+        // Past months are safe to serve from cache (their activities don't
+        // change). Current and future months MUST always refetch in full —
+        // a stale cache from a previous visit would hide newly added activities
+        // on dates outside today's neighbourhood (e.g. an activity created on
+        // a phone for a date 2 weeks out would never appear on this device
+        // until the cache expired or was manually cleared).
         const _fmtD = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-        const _hotStartD = new Date(todayD); _hotStartD.setDate(_hotStartD.getDate() - 3);
-        const _hotEndD   = new Date(todayD); _hotEndD.setDate(_hotEndD.getDate() + 7);
-        const _hotStartStr = _fmtD(_hotStartD);
-        const _hotEndStr   = _fmtD(_hotEndD);
-        const _monthOverlapsHot = !(monthEndStr < _hotStartStr || monthStartStr > _hotEndStr);
+        const _todayStr = _fmtD(todayD);
+        const _isPastMonth = monthEndStr < _todayStr;
 
         // Pull-to-refresh forces a full refetch once.
         const _forceFresh = _mobileForceFresh; _mobileForceFresh = false;
@@ -4828,13 +4831,12 @@ In a production system, this would show the actual file contents.
             return o;
         };
 
-        // Decide what to fetch: hot-window only (current period, already cached),
-        // full month (never cached / forced), or nothing (cold cached month).
+        // Decide what to fetch:
+        //   - past month with a cache → no network (past activities don't change)
+        //   - anything else → full month refetch (current/future months must
+        //     pick up activities added from other devices or earlier sessions)
         let _actMode, _actsP;
-        if (_monthOverlapsHot && _cachedActs && !_forceFresh) {
-            _actMode = 'hot';
-            _actsP = AppDataStore.queryAdvanced('activities', _buildActOpts(_hotStartStr, _hotEndStr)).catch(() => ({ data: [] }));
-        } else if (_cachedActs && !_forceFresh) {
+        if (_isPastMonth && _cachedActs && !_forceFresh) {
             _actMode = 'cache';
             _actsP = Promise.resolve(null);
         } else {
@@ -4856,22 +4858,10 @@ In a production system, this would show the actual file contents.
         const draftsR  = cachedDrafts;
         const refillsR = cachedRefills;
 
-        // Resolve this month's activity set from hot/full/cache and persist it.
+        // Resolve this month's activity set from cache or fresh fetch.
         let activities;
         if (_actMode === 'cache') {
             activities = (_cachedActs || []).filter(a => a.activity_type !== 'EVENT');
-        } else if (_actMode === 'hot') {
-            const hotRows = (actResult?.data || []).filter(a => a.activity_type !== 'EVENT');
-            const base = (_cachedActs || []).filter(a => {
-                const d = a.activity_date || '';
-                return d < _hotStartStr || d > _hotEndStr;
-            });
-            const hotThisMonth = hotRows.filter(a => {
-                const d = a.activity_date || '';
-                return d >= monthStartStr && d <= monthEndStr;
-            });
-            activities = [...base, ...hotThisMonth];
-            _lsSet(_mcalActsKey, activities);
         } else {
             activities = (actResult?.data || []).filter(a => a.activity_type !== 'EVENT');
             _lsSet(_mcalActsKey, activities);
@@ -8447,6 +8437,45 @@ function _wireLoginBtn() {
         return m.includes('exceeded the quota') || m.includes('quotaexceeded') || (m.includes('storage') && m.includes('quota'));
     };
 
+    // In-app webviews (WhatsApp, FB Messenger, Instagram, LINE, WeChat, TikTok, etc.)
+    // block third-party fetch / cookies and break Supabase auth. Detect and steer
+    // the user to the real browser instead of showing a generic network error.
+    const _detectInAppBrowser = () => {
+        const ua = (navigator.userAgent || '') + ' ' + (navigator.vendor || '');
+        const tests = [
+            { re: /WhatsApp/i,        name: 'WhatsApp' },
+            { re: /FBAN|FBAV|FB_IAB/, name: 'Facebook' },
+            { re: /Instagram/i,       name: 'Instagram' },
+            { re: /Line\//,           name: 'LINE' },
+            { re: /MicroMessenger/i,  name: 'WeChat' },
+            { re: /TikTok|musical_ly|BytedanceWebview/i, name: 'TikTok' },
+            { re: /Twitter|TwitterAndroid/i, name: 'X (Twitter)' },
+            { re: /Snapchat/i,        name: 'Snapchat' },
+        ];
+        for (const t of tests) if (t.re.test(ua)) return t.name;
+        return null;
+    };
+    const _inAppBrowser = _detectInAppBrowser();
+    if (_inAppBrowser) {
+        // Show a persistent banner on the login screen so the user fixes the
+        // environment BEFORE typing credentials and hitting the failure path.
+        const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+        const openHint = isIOS
+            ? 'Tap the share icon (□↑) at the bottom → "Open in Safari".'
+            : 'Tap the ⋮ menu in the top-right → "Open in Chrome" (or external browser).';
+        const banner = document.createElement('div');
+        banner.id = 'in-app-browser-banner';
+        banner.style.cssText = 'margin:10px 0;padding:12px 14px;background:#fff7ed;border:1px solid #fdba74;color:#9a3412;border-radius:8px;font-size:13px;line-height:1.45;text-align:left;';
+        const strong = document.createElement('strong');
+        strong.textContent = `You opened this page inside ${_inAppBrowser}'s in-app browser. `;
+        banner.appendChild(strong);
+        banner.appendChild(document.createTextNode(`Login will not work here. ${openHint}`));
+        const loginContainer = document.getElementById('loginBtn')?.parentElement;
+        if (loginContainer && !document.getElementById('in-app-browser-banner')) {
+            loginContainer.insertBefore(banner, loginContainer.firstChild);
+        }
+    }
+
     btn.onclick = async () => {
         const emailEl = document.getElementById('loginEmail');
         const passwordEl = document.getElementById('loginPassword');
@@ -8667,20 +8696,29 @@ function _wireLoginBtn() {
                 if (existing) existing.remove();
                 document.getElementById('loginBtn')?.insertAdjacentElement('afterend', resendMsg);
             } else if (msg === 'Load failed' || msg.toLowerCase().includes('load failed') || msg.toLowerCase().includes('failed to fetch')) {
-                // Network error. Run a quick no-cors probe to distinguish
-                // "can't reach server at all" from "server reachable but request blocked".
+                // Network error. If we're inside an in-app webview (WhatsApp, FB, IG…)
+                // skip the probe — that environment lies about reachability anyway —
+                // and tell the user exactly how to escape it.
                 const loginErrEl = document.getElementById('loginPasswordErr') || document.getElementById('loginEmailErr');
                 let networkErrText;
-                try {
-                    await Promise.race([
-                        fetch(window.SUPABASE_URL, { mode: 'no-cors' }),
-                        new Promise((_, r) => setTimeout(() => r(new Error('t')), 4000))
-                    ]);
-                    // Server is reachable — something else blocked the auth call
-                    networkErrText = 'Server is reachable but the login request was blocked. Try: close and reopen the app, or open in Safari instead of the home-screen icon.';
-                } catch (_) {
-                    // Can't reach the server at all
-                    networkErrText = 'Cannot reach the login server from this device. Try: switch between WiFi and mobile data, disable any VPN or content-blocker apps, then retry.';
+                if (_inAppBrowser) {
+                    const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+                    const openHint = isIOS
+                        ? 'tap the share icon (□↑) at the bottom and choose "Open in Safari"'
+                        : 'tap the ⋮ menu and choose "Open in Chrome" (or external browser)';
+                    networkErrText = `Login is blocked inside ${_inAppBrowser}'s in-app browser. Please ${openHint}, then log in again.`;
+                } else {
+                    try {
+                        await Promise.race([
+                            fetch(window.SUPABASE_URL, { mode: 'no-cors' }),
+                            new Promise((_, r) => setTimeout(() => r(new Error('t')), 4000))
+                        ]);
+                        // Server is reachable — something else blocked the auth call
+                        networkErrText = 'Server is reachable but the login request was blocked. Try: close and reopen the app, or open in Safari instead of the home-screen icon.';
+                    } catch (_) {
+                        // Can't reach the server at all
+                        networkErrText = 'Cannot reach the login server from this device. Try: switch between WiFi and mobile data, disable any VPN or content-blocker apps, then retry.';
+                    }
                 }
                 if (loginErrEl) {
                     loginErrEl.textContent = networkErrText;
@@ -36257,6 +36295,7 @@ const exportKPIReport = async (format) => {
                     <thead>
                         <tr>
                             <th scope="col" style="min-width:160px;">Categories</th>
+                            <th scope="col" style="width:54px;">Poster</th>
                             <th scope="col">Title</th>
                             <th scope="col">Price (RM)</th>
                             <th scope="col">Early Bird (RM)</th>
@@ -36280,6 +36319,11 @@ const exportKPIReport = async (format) => {
                             return `
                             <tr style="${!isActive ? 'opacity: 0.6; background: #f9fafb;' : ''}">
                                 <td>${catsHtml}</td>
+                                <td style="text-align:center;">
+                                    ${item.poster_url
+                                        ? `<img src="${item.poster_url}" style="width:40px;height:40px;object-fit:cover;border-radius:4px;cursor:pointer;" onclick="app.viewProductImage('${item.poster_url}','Poster')" title="View poster">`
+                                        : `<span style="color:var(--gray-300);font-size:18px;" title="No poster">🖼️</span>`}
+                                </td>
                                 <td><strong>${item.event_title || item.title || ''}</strong><br><small class="text-muted">${item.description || ''}</small></td>
                                 <td>${item.ticket_price || '-'}</td>
                                 <td>${item.early_bird_price || '-'}</td>
@@ -36462,6 +36506,7 @@ const exportKPIReport = async (format) => {
                 <div class="form-group"><label>Location</label><input type="text" id="mkt-location" class="form-control" placeholder="e.g. KL, Online"></div>
                 <div class="form-group"><label>Speaker</label><input type="text" id="mkt-speaker" class="form-control" placeholder="e.g. Master Tan"></div>
                 <div class="form-group"><label>Description</label><textarea id="mkt-desc" class="form-control"></textarea></div>
+                <div class="form-group"><label>Event Poster</label><input type="file" id="mkt-poster" class="form-control" accept="image/*"></div>
                 <div class="form-group"><label>Remarks</label><input type="text" id="mkt-remarks" class="form-control"></div>
                 <div class="form-group"><label><input type="checkbox" id="mkt-active" checked> Is Active</label></div>
 `;
@@ -36571,6 +36616,11 @@ const exportKPIReport = async (format) => {
                 <div class="form-group"><label>Location</label><input type="text" id="mkt-location" class="form-control" value="${item.location || ''}" placeholder="e.g. KL, Online"></div>
                 <div class="form-group"><label>Speaker</label><input type="text" id="mkt-speaker" class="form-control" value="${item.speaker || ''}" placeholder="e.g. Master Tan"></div>
                 <div class="form-group"><label>Description</label><textarea id="mkt-desc" class="form-control">${item.description || ''}</textarea></div>
+                <div class="form-group">
+                    <label>Event Poster</label>
+                    ${item.poster_url ? `<div style="margin-bottom:6px;"><img src="${item.poster_url}" style="height:64px;border-radius:4px;object-fit:cover;"> <small class="text-muted">Current poster</small></div>` : ''}
+                    <input type="file" id="mkt-poster" class="form-control" accept="image/*">
+                </div>
                 <div class="form-group"><label>Remarks</label><input type="text" id="mkt-remarks" class="form-control" value="${item.remarks || ''}"></div>
                 <div class="form-group"><label><input type="checkbox" id="mkt-active" ${(item.is_active || item.status === 'active' || item.status === 'Active') ? 'checked' : ''}> Is Active</label></div>
             `;
@@ -36766,6 +36816,40 @@ const exportKPIReport = async (format) => {
             data.categories = JSON.stringify(selectedCats);
             if (!data.title) return UI.toast.error('Title is required');
             if (!selectedCats.length) return UI.toast.error('At least one category is required');
+
+            const _posterFile = document.getElementById('mkt-poster')?.files[0];
+            try {
+                let _savedId = id;
+                if (id) {
+                    const result = await AppDataStore.update('events', id, data);
+                    if (result === null) {
+                        UI.toast.error('This record was deleted and could not be updated.');
+                        UI.hideModal();
+                        await showMarketingListsView(document.getElementById('content-viewport'));
+                        return;
+                    }
+                } else {
+                    data.created_by = _currentUser ? _currentUser.id : null;
+                    const _newRec = await AppDataStore.create('events', data);
+                    _savedId = _newRec?.id;
+                }
+                if (_savedId && _posterFile) {
+                    const _sb = window.supabase || window.supabaseClient;
+                    const _path = `events/poster/${_savedId}_${Date.now()}`;
+                    const { error: _pe } = await _sb.storage.from('attachments').upload(_path, _posterFile, { upsert: true, contentType: _posterFile.type });
+                    if (!_pe) {
+                        const { data: _ud } = _sb.storage.from('attachments').getPublicUrl(_path);
+                        await AppDataStore.update('events', _savedId, { poster_url: _ud.publicUrl });
+                    }
+                }
+                UI.toast.success(id ? 'Event updated' : 'Event added');
+                UI.hideModal();
+                await showMarketingListsView(document.getElementById('content-viewport'));
+            } catch (_err) {
+                console.error('saveMarketingListItem (events) error:', _err);
+                UI.toast.error('Save failed: ' + (_err.message || _err));
+            }
+            return;
         } else {
             data.package_name = document.getElementById('mkt-pkname').value.trim();
             data.price = parseFloat(document.getElementById('mkt-price').value) || 0;
