@@ -44260,9 +44260,12 @@ const initImportDemoData = async () => {
         const badge   = (txt, bg, col) => `<span style="padding:2px 8px;border-radius:12px;font-size:0.78rem;background:${bg};color:${col};">${txt}</span>`;
 
         // --- Content filters ---
-        const publicNews         = highlights.filter(h => h.type === 'highlight');
+        // Sort highlights/news by created_at desc so the newest one is slide 0
+        // (the user expects to see freshly-added highlights immediately, not
+        // hidden behind the carousel's next-arrow).
+        const publicNews         = highlights.filter(h => h.type === 'highlight').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
         const successStories     = highlights.filter(h => h.type === 'success_story').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-        const recommendationTips = highlights.filter(h => h.type === 'recommendation_tip');
+        const recommendationTips = highlights.filter(h => h.type === 'recommendation_tip').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
         // --- Pre-sign highlight images so render doesn't depend on DOM resolver ---
         const withImg = [...publicNews, ...successStories].filter(h => h.image_url);
