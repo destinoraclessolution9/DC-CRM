@@ -44583,7 +44583,6 @@ const initImportDemoData = async () => {
                 </div>
                 ${carouselSection}
                 ${storiesSection}
-                ${tipsSection}
                 ${purchasesSection}
             </div>
         `;
