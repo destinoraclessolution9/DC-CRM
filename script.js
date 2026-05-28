@@ -36256,12 +36256,12 @@ const exportKPIReport = async (format) => {
                             <tr style="${!item.is_active ? 'opacity: 0.6; background: #f9fafb;' : ''}">
                                 <td style="text-align:center;">
                                     ${item.photo_url
-                                        ? `<img src="${item.photo_url}" style="width:40px;height:40px;object-fit:cover;border-radius:4px;cursor:pointer;" onclick="app.viewProductImage('${item.photo_url}','Photo')" title="View photo">`
+                                        ? `<img src="${item.photo_url}" crossorigin="anonymous" style="width:40px;height:40px;object-fit:cover;border-radius:4px;cursor:pointer;" onclick="app.viewProductImage('${item.photo_url}','Photo')" title="View photo">`
                                         : `<span style="color:var(--gray-300);font-size:18px;" title="No photo">📷</span>`}
                                 </td>
                                 <td style="text-align:center;">
                                     ${item.poster_url
-                                        ? `<img src="${item.poster_url}" style="width:40px;height:40px;object-fit:cover;border-radius:4px;cursor:pointer;" onclick="app.viewProductImage('${item.poster_url}','Poster')" title="View poster">`
+                                        ? `<img src="${item.poster_url}" crossorigin="anonymous" style="width:40px;height:40px;object-fit:cover;border-radius:4px;cursor:pointer;" onclick="app.viewProductImage('${item.poster_url}','Poster')" title="View poster">`
                                         : `<span style="color:var(--gray-300);font-size:18px;" title="No poster">🖼️</span>`}
                                 </td>
                                 <td><strong>${item.name}</strong><br><small class="text-muted">${item.remarks || ''}</small></td>
@@ -36321,7 +36321,7 @@ const exportKPIReport = async (format) => {
                                 <td>${catsHtml}</td>
                                 <td style="text-align:center;">
                                     ${item.poster_url
-                                        ? `<img src="${item.poster_url}" style="width:40px;height:40px;object-fit:cover;border-radius:4px;cursor:pointer;" onclick="app.viewProductImage('${item.poster_url}','Poster')" title="View poster">`
+                                        ? `<img src="${item.poster_url}" crossorigin="anonymous" style="width:40px;height:40px;object-fit:cover;border-radius:4px;cursor:pointer;" onclick="app.viewProductImage('${item.poster_url}','Poster')" title="View poster">`
                                         : `<span style="color:var(--gray-300);font-size:18px;" title="No poster">🖼️</span>`}
                                 </td>
                                 <td><strong>${item.event_title || item.title || ''}</strong><br><small class="text-muted">${item.description || ''}</small></td>
@@ -36590,12 +36590,12 @@ const exportKPIReport = async (format) => {
                 </div>
                 <div class="form-group">
                     <label>Product Photo</label>
-                    ${item.photo_url ? `<div style="margin-bottom:6px;"><img src="${item.photo_url}" style="height:64px;border-radius:4px;object-fit:cover;"> <small class="text-muted">Current photo</small></div>` : ''}
+                    ${item.photo_url ? `<div style="margin-bottom:6px;"><img src="${item.photo_url}" crossorigin="anonymous" style="height:64px;border-radius:4px;object-fit:cover;"> <small class="text-muted">Current photo</small></div>` : ''}
                     <input type="file" id="mkt-photo" class="form-control" accept="image/*">
                 </div>
                 <div class="form-group">
                     <label>Product Poster</label>
-                    ${item.poster_url ? `<div style="margin-bottom:6px;"><img src="${item.poster_url}" style="height:64px;border-radius:4px;object-fit:cover;"> <small class="text-muted">Current poster</small></div>` : ''}
+                    ${item.poster_url ? `<div style="margin-bottom:6px;"><img src="${item.poster_url}" crossorigin="anonymous" style="height:64px;border-radius:4px;object-fit:cover;"> <small class="text-muted">Current poster</small></div>` : ''}
                     <input type="file" id="mkt-poster" class="form-control" accept="image/*">
                 </div>
                 <div class="form-group"><label>Remarks</label><input type="text" id="mkt-remarks" class="form-control" value="${item.remarks || ''}"></div>
@@ -36618,7 +36618,7 @@ const exportKPIReport = async (format) => {
                 <div class="form-group"><label>Description</label><textarea id="mkt-desc" class="form-control">${item.description || ''}</textarea></div>
                 <div class="form-group">
                     <label>Event Poster</label>
-                    ${item.poster_url ? `<div style="margin-bottom:6px;"><img src="${item.poster_url}" style="height:64px;border-radius:4px;object-fit:cover;"> <small class="text-muted">Current poster</small></div>` : ''}
+                    ${item.poster_url ? `<div style="margin-bottom:6px;"><img src="${item.poster_url}" crossorigin="anonymous" style="height:64px;border-radius:4px;object-fit:cover;"> <small class="text-muted">Current poster</small></div>` : ''}
                     <input type="file" id="mkt-poster" class="form-control" accept="image/*">
                 </div>
                 <div class="form-group"><label>Remarks</label><input type="text" id="mkt-remarks" class="form-control" value="${item.remarks || ''}"></div>
@@ -36910,7 +36910,7 @@ const exportKPIReport = async (format) => {
     };
 
     const viewProductImage = (url, label) => {
-        UI.showModal(label, `<div style="text-align:center;"><img src="${url}" style="max-width:100%;max-height:70vh;border-radius:6px;"></div>`,
+        UI.showModal(label, `<div style="text-align:center;"><img src="${url}" crossorigin="anonymous" style="max-width:100%;max-height:70vh;border-radius:6px;"></div>`,
             [{ label: 'Close', type: 'secondary', action: 'UI.hideModal()' }]);
     };
 
