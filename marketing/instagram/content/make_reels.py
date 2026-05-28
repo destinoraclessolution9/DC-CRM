@@ -284,5 +284,126 @@ def render(name, frame_fn, duration_s=14):
     return out_path
 
 
+# ============================================================
+#  REEL L — "Say THIS in your next interview" (Day 30)
+# ============================================================
+def hook_frame_l(alpha):
+    img = gradient_bg()
+    draw_border(img)
+    d = ImageDraw.Draw(img)
+    # opening quote
+    f_q = ImageFont.truetype(FONT_SERIF, 320)
+    d.text((90, 90), "“", fill=GOLD, font=f_q)
+    # hook text
+    lines = ["SAY THIS IN YOUR", "NEXT INTERVIEW:"]
+    f_main = fit_font_multi(lines, FONT_HEAD, max_size=96)
+    text_centered(d, lines[0], H // 2 - 160, f_main, OFFWHITE)
+    text_centered(d, lines[1], H // 2 - 30, f_main, GOLD)
+    # arrow dots
+    f_hint = ImageFont.truetype(FONT_HEAD, 80)
+    text_centered(d, ".  .  .", H // 2 + 180, f_hint, GOLD_LIGHT)
+    return fade_overlay(img, alpha)
+
+
+def quote_card_l(alpha):
+    """The magic interview line — the centerpiece."""
+    img = gradient_bg()
+    draw_border(img)
+    d = ImageDraw.Draw(img)
+    # large gold quote glyph (top-left)
+    f_q = ImageFont.truetype(FONT_SERIF, 260)
+    d.text((90, 240), "“", fill=GOLD, font=f_q)
+    # main line — split for readability
+    lines = [
+        "\"HERE'S A PROBLEM",
+        "I SOLVED THAT'S LIKE",
+        "WHAT YOUR TEAM",
+        "FACES…\"",
+    ]
+    f_main = fit_font_multi(lines, FONT_HEAD, max_size=80)
+    line_h = int(80 * 1.18)
+    start_y = H // 2 - (len(lines) * line_h) // 2 - 40
+    for i, ln in enumerate(lines):
+        # last line in gold for emphasis
+        col = GOLD if i == len(lines) - 1 else OFFWHITE
+        text_centered(d, ln, start_y + i * line_h, f_main, col)
+    return fade_overlay(img, alpha)
+
+
+def action_card_l(alpha):
+    """Then tell the story. Show, don't claim."""
+    img = gradient_bg()
+    draw_border(img)
+    d = ImageDraw.Draw(img)
+    # small label
+    f_label = ImageFont.truetype(FONT_HEAD, 56)
+    text_centered(d, "THEN —", H // 2 - 220, f_label, DIM)
+    # main lines
+    lines = ["TELL THE STORY.", "SHOW, DON'T CLAIM."]
+    f_main = fit_font_multi(lines, FONT_HEAD, max_size=100)
+    text_centered(d, lines[0], H // 2 - 80, f_main, OFFWHITE)
+    text_centered(d, lines[1], H // 2 + 40, f_main, GOLD)
+    return fade_overlay(img, alpha)
+
+
+def end_frame_l(alpha):
+    img = gradient_bg()
+    draw_border(img)
+    d = ImageDraw.Draw(img)
+    # diamond
+    draw_diamond(d, W // 2, H // 2 - 280, 80, GOLD, w=5)
+    # main lines
+    f_main = fit_font_multi(["CAPABILITY SPEAKS", "LOUDER THAN CONFIDENCE."], FONT_HEAD, max_size=80)
+    text_centered(d, "CAPABILITY SPEAKS", H // 2 - 100, f_main, OFFWHITE)
+    text_centered(d, "LOUDER THAN CONFIDENCE.", H // 2 + 0, f_main, GOLD)
+    # D&J wordmark + URL
+    f_dj = ImageFont.truetype(FONT_HEAD, 110)
+    f_url = ImageFont.truetype(FONT_BODY, 46)
+    text_centered(d, "D&J", H // 2 + 230, f_dj, GOLD)
+    text_centered(d, "diamondandjeweler.com", H // 2 + 370, f_url, OFFWHITE)
+    return fade_overlay(img, alpha)
+
+
+def reel_l_frame(i):
+    """Return PIL Image for frame i (0..419) of Reel L, 14s @ 30fps."""
+    t = i / FPS
+    sec = int(t)
+
+    if t < 2.0:
+        # 0-2s: hook
+        a = min(1.0, t / 0.4)
+        img = hook_frame_l(a)
+    elif t < 2.3:
+        # transition
+        a = 1.0 - (t - 2.0) / 0.3
+        img = hook_frame_l(max(0.0, a))
+    elif t < 6.0:
+        # 2.3-6s: quote card (the magic line, ~3.7s on screen)
+        a = min(1.0, (t - 2.3) / 0.4)
+        img = quote_card_l(a)
+    elif t < 6.3:
+        # transition
+        a = 1.0 - (t - 6.0) / 0.3
+        img = quote_card_l(max(0.0, a))
+    elif t < 10.5:
+        # 6.3-10.5s: action card
+        a = min(1.0, (t - 6.3) / 0.4)
+        img = action_card_l(a)
+    elif t < 10.8:
+        # transition
+        a = 1.0 - (t - 10.5) / 0.3
+        img = action_card_l(max(0.0, a))
+    else:
+        # 10.8-14s: end frame
+        a = min(1.0, (t - 10.8) / 0.4)
+        img = end_frame_l(a)
+
+    # branding overlay (always)
+    d = ImageDraw.Draw(img)
+    overlay_branding(d, sec)
+    return img
+
+
 if __name__ == "__main__":
     render("reel-d-things-they-dont-tell-you", reel_d_frame, duration_s=14)
+    render("reel-l-say-this-in-your-interview", reel_l_frame, duration_s=14)
