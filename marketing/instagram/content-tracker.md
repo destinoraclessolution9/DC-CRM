@@ -25,6 +25,7 @@ Update after each post. Watch **shares + saves** (reach drivers) and **net follo
 | 29 | 2026-05-25 | Carousel | 5 interview answers that actually work (p/DYxKPm4E2Rm) | | | | | | |
 | 25 | 2026-05-26 | Quote | A diamond never finds its jeweler by accident (p/DYzyOJEEwg2) — first post w/ new SEO opening line | | | | | | |
 | 32 | 2026-05-27 | Quote | Underpaid is not undervalued (p/DY3aXBpk_AK) | | | | | | |
+| 13 | 2026-05-28 | **REEL** | Nobody tells you this about job hunting (reel/DY4jbGWBDyK) — **FIRST REEL** (silent, no audio) | | | | | | |
 | ... | | | | | | | | | |
 
 *(extend rows as you post — copy the row format)*
