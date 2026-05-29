@@ -819,6 +819,13 @@ class DataStore {
                             // is treated as an external deletion, not a fresh sync attempt.
                             // We don't actually keep it in the queue (success path doesn't push to
                             // stillPending), but if a later code path re-queues, the flag persists.
+                            // Phase J followup: clear the ⚠ optimistic chip for activities so the
+                            // calendar drops the local overlay row now that the real row has landed.
+                            if (tableName === 'activities'
+                                && item.record.client_request_id
+                                && typeof window._confirmOptimisticActivity === 'function') {
+                                try { window._confirmOptimisticActivity(item.record.client_request_id); } catch (_) {}
+                            }
                         } else {
                             // Sync failed — include item locally but keep in queue for next attempt
                             if (!serverIds.has(String(item.record.id))) merged.push(item.record);
@@ -1007,6 +1014,7 @@ class DataStore {
         // Try inserting, stripping unknown columns one-by-one on schema errors
         // so data reaches Supabase even when the table schema is missing new columns.
         let insertData = { ...dataToInsert };
+        let lastError = null; // remember the final error so we can surface it on the ⚠ chip
         for (let attempt = 0; attempt < 15; attempt++) {
             try {
                 const { data, error } = await this._writeClient()
@@ -1031,6 +1039,7 @@ class DataStore {
                 }
                 return data;
             } catch (e) {
+                lastError = e;
                 const col = this._extractUnknownCol(e);
                 if (col && col in insertData) {
                     delete insertData[col];
@@ -1069,8 +1078,26 @@ class DataStore {
         this.emit('dataChanged', { action: 'add', table: tableName, record: dataToInsert });
         // Phase J: mark optimistic row as failed so the calendar shows ⚠.
         // The row stays in the overlay until the sync queue drains successfully.
+        // Pass through the real Postgres / network error so the tooltip surfaces
+        // WHY it failed (RLS deny vs offline vs FK violation) instead of a generic
+        // "Save failed". Without this the user only saw the code in DevTools.
         if (_isActivityInsert && typeof window._failOptimisticActivity === 'function') {
-            try { window._failOptimisticActivity(dataToInsert.client_request_id, 'Offline — will retry'); } catch (_) {}
+            const _rawMsg = lastError?.message || '';
+            const _code = lastError?.code || (lastError && /Failed to fetch|NetworkError/i.test(_rawMsg) ? 'OFFLINE' : null);
+            const _humanMsg = !lastError
+                ? 'Offline — will auto-sync when reconnected'
+                : (_code === 'OFFLINE' || /Failed to fetch|NetworkError/i.test(_rawMsg))
+                    ? 'Offline — will auto-sync when reconnected'
+                    : _code === '42501'
+                        ? 'Permission denied (RLS) — check your role'
+                        : _code === '23505'
+                            ? 'Duplicate — already saved'
+                            : _code === '23502'
+                                ? `Missing required field: ${(_rawMsg.match(/column "([^"]+)"/) || [])[1] || 'unknown'}`
+                                : _code === '23503'
+                                    ? 'Linked record no longer exists'
+                                    : (_rawMsg || 'Save failed') + (lastError.code ? ` (${lastError.code})` : '');
+            try { window._failOptimisticActivity(dataToInsert.client_request_id, _humanMsg, _code, _rawMsg); } catch (_) {}
         }
         return dataToInsert;
     }

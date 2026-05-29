@@ -18,6 +18,12 @@ window.DataStore = window.AppDataStore; // Alias for backward compatibility
             const queue = JSON.parse(localStorage.getItem('fs_crm_sync_queue') || '[]');
             if (!Array.isArray(queue) || queue.length === 0) return;
             const tables = [...new Set(queue.map(q => q.tableName))];
+            // Flip every ⚠ chip back to ⏳ so the user can see the auto-retry happening.
+            // _autoSync (inside getAll) will either confirm (chip disappears) or
+            // _failOptimisticActivity (chip goes back to ⚠ with a fresh error).
+            if (typeof window._markOptimisticRetrying === 'function') {
+                try { window._markOptimisticRetrying(); } catch (_) {}
+            }
             // getAll triggers _autoSync which upserts queued records.
             for (const t of tables) {
                 try { await window.AppDataStore.getAll(t); } catch (_) {}
@@ -15208,14 +15214,29 @@ function _wireLoginBtn() {
         _optimisticActivities.delete(clientRequestId);
         if (typeof renderCalendar === 'function') renderCalendar().catch(() => {});
     };
-    window._failOptimisticActivity = (clientRequestId, errorMsg) => {
+    window._failOptimisticActivity = (clientRequestId, errorMsg, errorCode, rawMsg) => {
         if (!clientRequestId) return;
         const row = _optimisticActivities.get(clientRequestId);
         if (row) {
             row._optimistic = 'failed';
             row._errorMsg = errorMsg || 'Save failed';
+            row._errorCode = errorCode || null;
+            row._errorRaw = rawMsg || null;
+            row._errorAt = Date.now();
         }
         if (typeof renderCalendar === 'function') renderCalendar().catch(() => {});
+    };
+    // Flip every currently-failed optimistic row back to 'pending' so the user sees
+    // the retry attempt as ⏳ instead of stale ⚠. Called when 'online' fires.
+    window._markOptimisticRetrying = () => {
+        let touched = 0;
+        for (const row of _optimisticActivities.values()) {
+            if (row._optimistic === 'failed') {
+                row._optimistic = 'pending';
+                touched++;
+            }
+        }
+        if (touched > 0 && typeof renderCalendar === 'function') renderCalendar().catch(() => {});
     };
     // Rendering helper: returns optimistic rows whose activity_date falls inside
     // the given range, EXCLUDING any whose client_request_id already appears in
@@ -15518,10 +15539,27 @@ function _wireLoginBtn() {
                         // (which IS persisted server-side) so other users see the venue too.
                         const displayVenue = a.venue || eventVenue || a.location_address || '';
 
+                        // Build the optimistic badge with a rich, captured error in the tooltip.
+                        // 'pending' = ⏳ Saving / Retrying; 'failed' = ⚠ + actual Postgres error.
+                        // navigator.onLine drives the wording so the user knows we *will* retry
+                        // automatically when WiFi/data returns — no manual action required.
+                        let _optBadge = '';
+                        if (a._optimistic === 'pending') {
+                            const _t = navigator.onLine ? 'Saving…' : 'Waiting for connection — will sync automatically';
+                            _optBadge = ` <span class="opt-badge" title="${escapeHtml(_t)}">⏳</span>`;
+                        } else if (a._optimistic === 'failed') {
+                            const _human = a._errorMsg || 'Save failed';
+                            const _code  = a._errorCode ? ` [${a._errorCode}]` : '';
+                            const _raw   = a._errorRaw && a._errorRaw !== a._errorMsg ? `\nDetails: ${a._errorRaw}` : '';
+                            const _hint  = navigator.onLine
+                                ? '\nWill keep retrying in background.'
+                                : '\nWaiting for connection — auto-syncs when you reconnect.';
+                            _optBadge = ` <span class="opt-badge fail" title="${escapeHtml(_human + _code + _raw + _hint)}">⚠</span>`;
+                        }
                         activityHtml += `
                             <div class="calendar-appointment ${a.activity_type.toLowerCase()} ${(a.closing_amount || a.is_closing) ? 'closed-case' : ''} ${isPendingInvite ? 'pending-invite' : ''} ${isRejectedInvite ? 'rejected-invite' : ''} ${a._optimistic === 'pending' ? 'optimistic-pending' : ''} ${a._optimistic === 'failed' ? 'optimistic-failed' : ''}"
                                 onclick="event.stopPropagation(); ${a._optimistic ? '' : `app.viewActivityDetails(${a.id})`}">
-                                <div class="appointment-time">${(a.start_time || '00:00').slice(0,5)}${a._optimistic === 'pending' ? ' <span class=\"opt-badge\" title=\"Saving…\">⏳</span>' : a._optimistic === 'failed' ? ' <span class=\"opt-badge fail\" title=\"Save failed — tap to retry\">⚠</span>' : ''}</div>
+                                <div class="appointment-time">${(a.start_time || '00:00').slice(0,5)}${_optBadge}</div>
                                 ${isEvent
                                     ? `<div class="appointment-customer">${eventTitle || a.activity_title || 'Event'}</div>`
                                     : `<div class="appointment-customer">${entityName}</div>
