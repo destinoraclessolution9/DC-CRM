@@ -20335,6 +20335,7 @@ function _wireLoginBtn() {
             // regardless of which column they prefer.
             title: title,
             event_title: title,
+            date: document.getElementById('mkt-event-date')?.value || null,
             event_date: document.getElementById('mkt-event-date')?.value || null,
             start_time: document.getElementById('mkt-start-time')?.value || null,
             end_time:   document.getElementById('mkt-end-time')?.value || null,
@@ -44326,18 +44327,23 @@ const initImportDemoData = async () => {
         //   - status === 'cancelled' → skipped
         //   - published_to_noticeboard === false → skipped (explicit hide)
         //   - everything else → shown
+        // The Postgres `events` table uses column `date` (NOT `event_date`) —
+        // older JS code wrote to `event_date` which the data layer stripped.
+        // Read `date` first, fall back to `event_date` for legacy in-memory rows.
+        const dateOf = (e) => e?.date || e?.event_date || null;
         const todayStr = new Date().toISOString().split('T')[0];
         let visible = events.filter(e => {
             if (!e) return false;
-            if (!e.event_date) return false;
-            const d = new Date(e.event_date);
-            if (isNaN(d.getTime())) return false;
-            if (e.event_date < todayStr) return false; // expired
+            const d = dateOf(e);
+            if (!d) return false;
+            const parsed = new Date(d);
+            if (isNaN(parsed.getTime())) return false;
+            if (d < todayStr) return false; // expired
             if ((e.status || 'upcoming') === 'cancelled') return false;
             if (e.published_to_noticeboard === false) return false; // explicit hide
             return true;
         });
-        visible.sort((a, b) => String(a.event_date || '').localeCompare(String(b.event_date || '')));
+        visible.sort((a, b) => String(dateOf(a) || '').localeCompare(String(dateOf(b) || '')));
 
         const grid = document.getElementById('noticeboard-grid');
         if (!grid) return;
@@ -44408,7 +44414,7 @@ const initImportDemoData = async () => {
                         <h3 class="nb-title">${esc(titleOf(e))}</h3>
                         ${tagline ? `<div class="nb-tagline">${esc(tagline)}</div>` : ''}
                         <div class="nb-info">
-                            <div class="nb-info-row"><i class="fas fa-calendar"></i> ${esc(fmtDate(e.event_date))}</div>
+                            <div class="nb-info-row"><i class="fas fa-calendar"></i> ${esc(fmtDate(dateOf(e)))}</div>
                             ${time ? `<div class="nb-info-row"><i class="fas fa-clock"></i> ${esc(time)}</div>` : ''}
                             ${e.location ? `<div class="nb-info-row"><i class="fas fa-map-marker-alt"></i> ${esc(e.location)}</div>` : ''}
                         </div>
@@ -44433,15 +44439,17 @@ const initImportDemoData = async () => {
         const esc = (s) => String(s || '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
         const fmtDate = (d) => { try { return new Date(d).toLocaleDateString('en-MY', { weekday:'long', day:'numeric', month:'long', year:'numeric' }); } catch(_) { return d || ''; } };
         const time = (e.start_time && e.end_time) ? `${e.start_time} – ${e.end_time}` : (e.start_time || e.end_time || '');
+        const evTitle = e.title || e.event_title || 'Event Details';
+        const evDate  = e.date  || e.event_date  || null;
 
         const content = `
             <div style="max-width:560px;">
                 ${posterSrc
-                    ? `<img src="${esc(posterSrc)}" alt="${esc(e.event_title)}" style="width:100%;max-height:360px;object-fit:contain;background:#f3f4f6;border-radius:8px;margin-bottom:16px;">`
+                    ? `<img src="${esc(posterSrc)}" alt="${esc(evTitle)}" style="width:100%;max-height:360px;object-fit:contain;background:#f3f4f6;border-radius:8px;margin-bottom:16px;">`
                     : `<div style="width:100%;height:200px;background:linear-gradient(135deg,#be185d,#e91e8c);color:white;display:flex;align-items:center;justify-content:center;font-size:4rem;border-radius:8px;margin-bottom:16px;">📅</div>`
                 }
                 <div style="display:grid;gap:10px;color:var(--gray-700,#374151);font-size:0.95rem;">
-                    <div><i class="fas fa-calendar" style="color:#be185d;width:20px;"></i> <strong>${esc(fmtDate(e.event_date))}</strong></div>
+                    <div><i class="fas fa-calendar" style="color:#be185d;width:20px;"></i> <strong>${esc(fmtDate(evDate))}</strong></div>
                     ${time ? `<div><i class="fas fa-clock" style="color:#be185d;width:20px;"></i> ${esc(time)}</div>` : ''}
                     ${e.location ? `<div><i class="fas fa-map-marker-alt" style="color:#be185d;width:20px;"></i> ${esc(e.location)}</div>` : ''}
                     ${e.capacity ? `<div><i class="fas fa-users" style="color:#be185d;width:20px;"></i> Capacity: ${esc(e.capacity)}</div>` : ''}
@@ -44450,7 +44458,7 @@ const initImportDemoData = async () => {
                 ${e.description ? `<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--gray-200,#e5e7eb);color:var(--gray-700,#374151);font-size:0.95rem;line-height:1.6;white-space:pre-wrap;">${esc(e.description)}</div>` : ''}
             </div>`;
 
-        UI.showModal(e.event_title || 'Event Details', content, [
+        UI.showModal(evTitle, content, [
             { label: 'Close', type: 'secondary', action: 'UI.hideModal()' }
         ]);
     };

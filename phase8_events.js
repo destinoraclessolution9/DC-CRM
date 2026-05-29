@@ -590,9 +590,17 @@ Object.assign(window.app, (() => {
             if (document.getElementById('tag-attendee').checked) autoTags.push('Event Attendee');
             if (document.getElementById('tag-course').checked) autoTags.push('Course Participant');
 
+            // The real DB schema uses `title`/`date` (NOT `event_title`/`event_date`).
+            // The data layer silently strips unknown columns, so the old field
+            // names landed nothing — events were inserted with NULL title/date.
+            // We write BOTH for backward compat: `title`+`date` land in Postgres,
+            // `event_title`+`event_date` get stripped harmlessly.
+            const _dateVal = document.getElementById('event-date').value;
             await AppDataStore.create('events', {
+                title: title,
                 event_title: title,
-                event_date: document.getElementById('event-date').value,
+                date: _dateVal,
+                event_date: _dateVal,
                 status: 'upcoming',
                 auto_tags: autoTags,
                 custom_multiplier: 1.0,
@@ -922,12 +930,12 @@ Object.assign(window.app, (() => {
                 <div class="form-section">
                     <h4>Event Details</h4>
                     <div class="form-row">
-                        <div class="form-group half"><label>Title *</label><input type="text" id="edit-event-title" class="form-control" value="${(e.event_title || '').replace(/"/g, '&quot;')}" required></div>
+                        <div class="form-group half"><label>Title *</label><input type="text" id="edit-event-title" class="form-control" value="${((e.title || e.event_title) || '').replace(/"/g, '&quot;')}" required></div>
                         <div class="form-group half"><label>Category</label><select id="edit-event-category" class="form-control">${catOptions}</select></div>
                     </div>
                     <div class="form-group"><label>Description</label><textarea id="edit-event-description" class="form-control">${e.description || ''}</textarea></div>
                     <div class="form-row">
-                        <div class="form-group half"><label>Date *</label><input type="date" id="edit-event-date" class="form-control" value="${e.event_date || ''}" required></div>
+                        <div class="form-group half"><label>Date *</label><input type="date" id="edit-event-date" class="form-control" value="${e.date || e.event_date || ''}" required></div>
                         <div class="form-group half"><label>Location / Venue</label><input type="text" id="edit-event-location" class="form-control" value="${(e.location || '').replace(/"/g, '&quot;')}"></div>
                     </div>
                     <div class="form-row">
@@ -979,11 +987,16 @@ Object.assign(window.app, (() => {
         const title = document.getElementById('edit-event-title')?.value?.trim();
         if (!title) { UI.toast.error('Event title is required.'); return; }
 
+        const _editDateVal = document.getElementById('edit-event-date').value;
         await AppDataStore.update('events', eventId, {
+            // Write both column names — see saveEvent comment. Postgres has
+            // `title`/`date`; `event_title`/`event_date` are stripped on send.
+            title: title,
             event_title: title,
+            date: _editDateVal,
+            event_date: _editDateVal,
             event_category_id: parseInt(document.getElementById('edit-event-category').value) || 1,
             description: document.getElementById('edit-event-description').value,
-            event_date: document.getElementById('edit-event-date').value,
             location: document.getElementById('edit-event-location').value,
             capacity: parseInt(document.getElementById('edit-event-capacity').value) || 0,
             ticket_price: parseFloat(document.getElementById('edit-ticket-price').value) || 0,
