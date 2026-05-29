@@ -20202,6 +20202,22 @@ function _wireLoginBtn() {
                             <div id="cps-new-event-preview" style="margin-top:8px;"></div>
                         </div>
 
+                        ${type === 'EVENT' ? `
+                        <!-- 📢 Noticeboard publishing — applies to whichever event (existing or new) is attached. -->
+                        <div class="form-group" style="margin-top: 15px; padding: 12px; background: #fdf2f8; border: 1px solid #fce7f3; border-radius: 8px;">
+                            <label style="font-weight:600; color:#be185d; display:flex; align-items:center; gap:8px; cursor:pointer;">
+                                <input type="checkbox" id="activity-publish-noticeboard" onchange="app.toggleActivityNoticeboardFields()">
+                                📢 Publish to Noticeboard
+                                <span style="color:#6b7280; font-weight:normal; font-size:0.85rem;">(visible to L12/13/14)</span>
+                            </label>
+                            <div id="activity-noticeboard-fields" style="display:none; margin-top:10px;">
+                                <label style="font-size:0.9rem; color:#374151;">Poster Image URL</label>
+                                <input type="url" id="activity-poster-url" class="form-control" placeholder="https://… or Supabase storage path" style="margin-top:4px;">
+                                <small style="color:#6b7280; font-size:0.8rem;">Leave blank to keep the event's existing poster (if any).</small>
+                            </div>
+                        </div>
+                        ` : ''}
+
                         <div class="form-group" style="margin-top: 15px;">
                             <label>Add Attendees (${type.includes('AGENT') ? 'Agents' : 'Clients/Agents'})</label>
                             <div class="search-with-results">
@@ -20248,6 +20264,14 @@ function _wireLoginBtn() {
         const next = document.getElementById('new-event-section');
         if (existing) existing.style.display = val === 'existing' ? 'block' : 'none';
         if (next) next.style.display = val === 'new' ? 'block' : 'none';
+    };
+
+    // Show/hide the poster URL input when the noticeboard checkbox is toggled
+    // inside the Quick Add Activity → EVENT modal.
+    const toggleActivityNoticeboardFields = () => {
+        const cb = document.getElementById('activity-publish-noticeboard');
+        const fields = document.getElementById('activity-noticeboard-fields');
+        if (fields) fields.style.display = cb?.checked ? 'block' : 'none';
     };
 
     const openCpsCreateEventModal = () => {
@@ -20339,6 +20363,18 @@ function _wireLoginBtn() {
         if (!eventId) { preview.innerHTML = ''; return; }
         const ev = await AppDataStore.getById('events', eventId);
         if (!ev) { preview.innerHTML = ''; return; }
+
+        // Reflect this event's current noticeboard state in the toggle so the
+        // user sees whether it's already published, and can update the poster
+        // URL without losing the existing value.
+        const ncb = document.getElementById('activity-publish-noticeboard');
+        const purl = document.getElementById('activity-poster-url');
+        if (ncb) {
+            ncb.checked = ev.published_to_noticeboard === true;
+            toggleActivityNoticeboardFields();
+        }
+        if (purl && !purl.value) purl.value = ev.poster_url || '';
+
         preview.innerHTML = `
             <div style="margin-top:12px; padding:12px; background:var(--gray-50,#faf9f7); border:1px solid var(--border,#e5e0d8); border-radius:8px; font-size:13px;">
                 <div style="font-weight:600; margin-bottom:8px; color:var(--primary);">Event Details</div>
@@ -21596,6 +21632,34 @@ function _wireLoginBtn() {
             activity.activity_title = ev ? (ev.event_title || ev.title) : 'Event';
             activity.event_id = parseInt(eventId);
             activity.visibility = visibility;
+
+            // 📢 Noticeboard publish toggle (EVENT type only). Syncs the
+            // selected/created event's publish flag and (optional) poster URL
+            // so the noticeboard tab picks it up immediately. Existing poster
+            // is preserved if the user leaves the URL field empty.
+            if (type === 'EVENT' && ev) {
+                const publishCb = document.getElementById('activity-publish-noticeboard');
+                if (publishCb) {
+                    const wantsPublished = publishCb.checked === true;
+                    const newPoster = document.getElementById('activity-poster-url')?.value?.trim() || null;
+                    const patch = { published_to_noticeboard: wantsPublished };
+                    if (newPoster) patch.poster_url = newPoster;
+                    // Only write if something actually changed (avoids extra
+                    // Supabase calls when the user just selected an event
+                    // without flipping the toggle).
+                    const changed = ev.published_to_noticeboard !== wantsPublished
+                                 || (newPoster && newPoster !== ev.poster_url);
+                    if (changed) {
+                        try {
+                            await AppDataStore.update('events', parseInt(eventId), patch);
+                            if (wantsPublished) UI.toast.success('Event published to Noticeboard 📢');
+                        } catch (err) {
+                            console.warn('[noticeboard] event publish update failed:', err);
+                            UI.toast.error('Activity saved, but noticeboard publish failed: ' + (err.message || 'unknown'));
+                        }
+                    }
+                }
+            }
 
             // Link to selected entity if present
             if (_selectedEntity) {
@@ -52384,6 +52448,7 @@ Gold-${totGold}`;
         // Level 12/13/14: Noticeboard (公告栏)
         showNoticeboardView,
         openNoticeboardDetail,
+        toggleActivityNoticeboardFields,
 
         // Level 13/14: Milestones & 福德
         showMilestonesView,
