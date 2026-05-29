@@ -26,6 +26,8 @@ Update after each post. Watch **shares + saves** (reach drivers) and **net follo
 | 25 | 2026-05-26 | Quote | A diamond never finds its jeweler by accident (p/DYzyOJEEwg2) — first post w/ new SEO opening line | | | | | | |
 | 32 | 2026-05-27 | Quote | Underpaid is not undervalued (p/DY3aXBpk_AK) | | | | | | |
 | 13 | 2026-05-28 | **REEL** | Nobody tells you this about job hunting (reel/DY4jbGWBDyK) — **FIRST REEL** (silent, no audio) | | | | | | |
+| 34 | 2026-05-29 | Carousel | Negotiate +RM800/mo in 5 moves (p/DY6gaSaEyfe) — **FIRST FRAMEWORK POST** (Chalette 4-step) | | | | | | |
+| 39 | 2026-05-29 | Quote | I sent 73 resumes. They never met me. (p/DY6h0uZk4dC) — resonance pattern | | | | | | |
 | ... | | | | | | | | | |
 
 *(extend rows as you post — copy the row format)*
