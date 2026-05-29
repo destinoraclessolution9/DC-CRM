@@ -469,11 +469,24 @@ Object.assign(window.app, (() => {
                     <div class="form-group"><label>Description</label><textarea id="event-description" class="form-control"></textarea></div>
                     <div class="form-row">
                         <div class="form-group half"><label>Date *</label><input type="date" id="event-date" class="form-control" ${isTemplate ? '' : 'required'}></div>
-                        <div class="form-group half"><label>Location</label><input type="text" id="event-location" class="form-control"></div>
+                        <div class="form-group half"><label>Location / Venue</label><input type="text" id="event-location" class="form-control"></div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group half"><label>Start Time</label><input type="time" id="event-start-time" class="form-control"></div>
+                        <div class="form-group half"><label>End Time</label><input type="time" id="event-end-time" class="form-control"></div>
                     </div>
                     <div class="form-row">
                         <div class="form-group half"><label>Capacity</label><input type="number" id="event-capacity" class="form-control" value="0"></div>
                         <div class="form-group half"><label>Ticket Price</label><input type="number" id="ticket-price" class="form-control" value="0"></div>
+                    </div>
+                    <div class="form-group">
+                        <label>Poster Image URL <span style="color:var(--gray-400);font-weight:normal;">(shown on Noticeboard)</span></label>
+                        <input type="url" id="event-poster-url" class="form-control" placeholder="https://… or Supabase storage path">
+                    </div>
+                    <div class="form-group">
+                        <label class="bonus-checkbox" style="font-weight:600;color:#be185d;">
+                            <input type="checkbox" id="event-publish-noticeboard"> 📢 Publish to Noticeboard (visible to L12/13/14)
+                        </label>
                     </div>
                 </div>
                 <div class="form-section scoring-section">
@@ -561,7 +574,11 @@ Object.assign(window.app, (() => {
             reminder_channel: document.getElementById('reminder-channel')?.value || 'Email',
             target_audience: document.getElementById('target-audience')?.value || 'All',
             send_thanks: document.getElementById('send-thanks')?.checked || false,
-            assign_followup: document.getElementById('assign-followup')?.checked || false
+            assign_followup: document.getElementById('assign-followup')?.checked || false,
+            start_time: document.getElementById('event-start-time')?.value || null,
+            end_time: document.getElementById('event-end-time')?.value || null,
+            poster_url: document.getElementById('event-poster-url')?.value?.trim() || null,
+            published_to_noticeboard: document.getElementById('event-publish-noticeboard')?.checked || false
         };
 
         if (isTemplate === true) {
@@ -905,11 +922,24 @@ Object.assign(window.app, (() => {
                     <div class="form-group"><label>Description</label><textarea id="edit-event-description" class="form-control">${e.description || ''}</textarea></div>
                     <div class="form-row">
                         <div class="form-group half"><label>Date *</label><input type="date" id="edit-event-date" class="form-control" value="${e.event_date || ''}" required></div>
-                        <div class="form-group half"><label>Location</label><input type="text" id="edit-event-location" class="form-control" value="${(e.location || '').replace(/"/g, '&quot;')}"></div>
+                        <div class="form-group half"><label>Location / Venue</label><input type="text" id="edit-event-location" class="form-control" value="${(e.location || '').replace(/"/g, '&quot;')}"></div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group half"><label>Start Time</label><input type="time" id="edit-event-start-time" class="form-control" value="${e.start_time || ''}"></div>
+                        <div class="form-group half"><label>End Time</label><input type="time" id="edit-event-end-time" class="form-control" value="${e.end_time || ''}"></div>
                     </div>
                     <div class="form-row">
                         <div class="form-group half"><label>Capacity</label><input type="number" id="edit-event-capacity" class="form-control" value="${e.capacity || 0}"></div>
                         <div class="form-group half"><label>Ticket Price (RM)</label><input type="number" id="edit-ticket-price" class="form-control" value="${e.ticket_price || 0}"></div>
+                    </div>
+                    <div class="form-group">
+                        <label>Poster Image URL <span style="color:var(--gray-400);font-weight:normal;">(shown on Noticeboard)</span></label>
+                        <input type="url" id="edit-event-poster-url" class="form-control" value="${(e.poster_url || '').replace(/"/g, '&quot;')}" placeholder="https://… or Supabase storage path">
+                    </div>
+                    <div class="form-group">
+                        <label class="bonus-checkbox" style="font-weight:600;color:#be185d;">
+                            <input type="checkbox" id="edit-event-publish-noticeboard" ${e.published_to_noticeboard ? 'checked' : ''}> 📢 Publish to Noticeboard (visible to L12/13/14)
+                        </label>
                     </div>
                 </div>
                 <div class="form-section scoring-section">
@@ -957,7 +987,11 @@ Object.assign(window.app, (() => {
             enable_question_bonus: document.getElementById('edit-question-bonus').checked,
             enable_stay_bonus: document.getElementById('edit-stay-bonus').checked,
             enable_purchase_bonus: document.getElementById('edit-purchase-bonus').checked,
-            status: document.getElementById('edit-event-status').value
+            status: document.getElementById('edit-event-status').value,
+            start_time: document.getElementById('edit-event-start-time')?.value || null,
+            end_time: document.getElementById('edit-event-end-time')?.value || null,
+            poster_url: document.getElementById('edit-event-poster-url')?.value?.trim() || null,
+            published_to_noticeboard: document.getElementById('edit-event-publish-noticeboard')?.checked || false
         });
 
         UI.toast.success('Event updated.');

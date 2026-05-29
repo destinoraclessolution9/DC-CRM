@@ -555,3 +555,19 @@ end $$;
 -- never strip these fields again, and all cross-user data sync bugs in this
 -- class are fixed.
 -- =============================================================================
+
+
+-- =============================================================================
+-- 2026-05-29 — Noticeboard tab (Level 12/13/14 公告栏)
+-- Adds poster_url, published_to_noticeboard, start_time, end_time to events.
+-- Run via Supabase SQL Editor (idempotent).
+-- =============================================================================
+ALTER TABLE events ADD COLUMN IF NOT EXISTS poster_url TEXT;
+ALTER TABLE events ADD COLUMN IF NOT EXISTS published_to_noticeboard BOOLEAN DEFAULT false;
+ALTER TABLE events ADD COLUMN IF NOT EXISTS start_time TEXT;  -- HH:MM, kept as text to match form input
+ALTER TABLE events ADD COLUMN IF NOT EXISTS end_time   TEXT;
+
+-- Helpful index for the noticeboard query (upcoming + published)
+CREATE INDEX IF NOT EXISTS idx_events_noticeboard
+    ON events (published_to_noticeboard, event_date)
+    WHERE published_to_noticeboard = true;

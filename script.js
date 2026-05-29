@@ -455,6 +455,11 @@ const appLogic = (() => {
         if (r === 'agent') return 10;
         if (r === 'customer') return 13;
         if (r === 'referrer') return 14;
+        // Chinese-only role names (no "Level X" prefix) for L12/13/14
+        const raw = String(user.role).trim();
+        if (raw === '传福大使')   return 12;
+        if (raw === '改命客户')   return 13;
+        if (raw === '准传福大使') return 14;
         return 99;
     };
     const isSystemAdmin = (user) => _getUserLevel(user) === 1;
@@ -8458,7 +8463,9 @@ In a production system, this would show the actual file contents.
         "Level 9 Senior Agent",
         "Level 10 Agent",
         "Level 11 Junior Agent",
-        "Level 12 Ambassador"
+        "传福大使",
+        "改命客户",
+        "准传福大使"
     ];
 
 
@@ -8473,38 +8480,26 @@ In a production system, this would show the actual file contents.
         if (!user) return;
 
         // Map Level 1-14 to visible nav IDs (suffix after 'nav-')
+        // Order in array = display order in nav (first item leftmost / top).
         const _l12 = ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'reports', 'documents', 'settings', 'fude', 'milestones'];
         const levelPermissions = {
-            1: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'purchases_history', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'import', 'integrations', 'settings', 'fude', 'milestones', 'custom_fields', 'egg-purchasing', 'standard-functions', 'formula-purchaser', 'stock-take', 'boss-report'],
-            2: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'import', 'integrations', 'settings', 'fude', 'milestones', 'custom_fields'],
+            1: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'purchases_history', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'import', 'integrations', 'settings', 'fude', 'milestones', 'noticeboard', 'custom_fields', 'egg-purchasing', 'standard-functions', 'formula-purchaser', 'stock-take', 'boss-report'],
+            2: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'import', 'integrations', 'settings', 'fude', 'milestones', 'noticeboard', 'custom_fields'],
             3: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'performance', 'reports', 'protection', 'documents', 'settings', 'fude'],
             4: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'performance', 'reports', 'protection', 'documents', 'settings', 'fude'],
             5: _l12, 6: _l12, 7: _l12, 8: _l12, 9: _l12, 10: _l12,
             11: ['calendar', 'prospects', 'referrals', 'promotions', 'cases', 'settings', 'fude', 'milestones'],
-            12: ['calendar', 'prospects', 'referrals', 'fude', 'milestones'],
-            13: ['calendar', 'prospects', 'fude', 'milestones'],   // Customer
-            14: ['calendar', 'prospects', 'fude', 'milestones']    // Referrer
+            12: ['noticeboard', 'fude', 'milestones', 'prospects', 'referrals'],          // 传福大使
+            13: ['noticeboard', 'fude', 'milestones', 'prospects'],                       // 改命客户
+            14: ['noticeboard', 'fude', 'milestones', 'prospects']                        // 准传福大使
         };
 
         // Determine level from role (e.g., "Level 1 Super Admin" -> 1)
-        let level = 12; // default to lowest level
-        if (user.role) {
-            const match = user.role.match(/Level\s+(\d+)/i);
-            if (match) {
-                level = parseInt(match[1]);
-            } else {
-                // Backward compatibility with old roles
-                const roleLower = user.role.toLowerCase();
-                if (roleLower === 'super_admin' || roleLower === 'admin') level = 1;
-                else if (roleLower === 'marketing_manager') level = 2;
-                else if (roleLower === 'manager') level = 4;
-                else if (roleLower === 'team_leader') level = 5;
-                else if (roleLower === 'consultant') level = 7;
-                else if (roleLower === 'agent') level = 10;
-                else if (roleLower === 'customer') level = 13;
-                else if (roleLower === 'referrer') level = 14;
-            }
-        }
+        // Delegates to the centralized _getUserLevel helper so legacy names
+        // ('customer'/'referrer') AND Chinese-only names ('传福大使'/'改命客户'/
+        // '准传福大使') resolve identically. Defaults to 12 (lowest staff tier).
+        let level = _getUserLevel(user);
+        if (level === 99) level = 12;
 
         const allowed = levelPermissions[level] || levelPermissions[12];
         
@@ -8513,7 +8508,7 @@ In a production system, this would show the actual file contents.
             'calendar', 'pipeline', 'protection', 'agents', 'prospects', 'referrals',
             'cases', 'documents', 'import', 'promotions', 'marketing-automation', 'marketing-lists',
             'performance', 'reports', 'risk', 'admin',
-            'integrations', 'settings', 'milestones', 'fude',
+            'integrations', 'settings', 'milestones', 'fude', 'noticeboard',
             'custom_fields', 'egg-purchasing', 'standard-functions', 'formula-purchaser',
             'purchases_history', 'stock-take', 'boss-report'
         ];
@@ -8528,6 +8523,21 @@ In a production system, this would show the actual file contents.
                 sbEl.style.display = allowed.includes(id) ? '' : 'none';
             }
         });
+
+        // For Level 12/13/14 (传福大使 / 改命客户 / 准传福大使), the array order
+        // in levelPermissions defines the *display* order — re-append visible nav
+        // items in that order so noticeboard sits leftmost. For admin levels we
+        // keep the existing DOM order so the dense menu doesn't shuffle.
+        if (level >= 12) {
+            const navParent = document.getElementById('nav-links');
+            const sbParent  = document.querySelector('.sidebar-nav') || document.getElementById('sb-nav-list');
+            allowed.forEach(id => {
+                const el = document.getElementById(`nav-${id}`);
+                if (el && navParent && el.parentElement === navParent) navParent.appendChild(el);
+                const sbEl = document.getElementById(`sb-nav-${id}`);
+                if (sbEl && sbParent && sbEl.parentElement === sbParent) sbParent.appendChild(sbEl);
+            });
+        }
     }
 
 // Simple Auth wrapper using Supabase
@@ -8794,7 +8804,7 @@ function _wireLoginBtn() {
                     email: user.email,
                     username: user.email.split('@')[0],
                     full_name: user.user_metadata?.full_name || user.email,
-                    role: 'Level 12 Agent',          // Default role
+                    role: '传福大使',                 // Default role (Level 12)
                     status: 'active',
                     created_at: new Date().toISOString()
                 };
@@ -9026,7 +9036,7 @@ function _wireLoginBtn() {
                         id: authUser.id,
                         email: authUser.email,
                         full_name: authUser.user_metadata?.full_name || authUser.email,
-                        role: 'Level 12 Agent', // safe default until real profile loads
+                        role: '传福大使', // safe default (Level 12) until real profile loads
                         status: 'active',
                         _placeholder: true,
                     };
@@ -10973,7 +10983,8 @@ function _wireLoginBtn() {
             workflows: 'Workflow Automation', booking_settings: 'Booking Scheduler',
             lead_forms: 'Lead Capture Forms', surveys: 'NPS Surveys', contracts: 'Contracts',
             custom_fields: 'Custom Fields', settings: 'Settings', milestones: 'Milestones',
-            fude: '福运相随', egg_purchasing: 'Egg Purchasing', standard_functions: 'Standard Functions',
+            fude: '福运相随', noticeboard: '公告栏 Noticeboard',
+            egg_purchasing: 'Egg Purchasing', standard_functions: 'Standard Functions',
             formula_purchaser: 'Formula Purchaser', purchases_history: 'Purchases History',
             stock_take: 'Stock Take', boss_report: 'Boss Report', ai: 'AI Insights', security: 'Security', admin: 'Admin',
             risk: 'Attrition Risk', nps: 'NPS Surveys',
@@ -11074,6 +11085,9 @@ function _wireLoginBtn() {
         } else if (viewId === 'fude') {
             _currentView = 'fude';
             await showFudeView(viewport);
+        } else if (viewId === 'noticeboard') {
+            _currentView = 'noticeboard';
+            await showNoticeboardView(viewport);
         } else if (viewId === 'egg_purchasing') {
             // Super Admin only gate — bounce non-admins to calendar
             if (!isSystemAdmin(_currentUser)) {
@@ -44124,6 +44138,154 @@ const initImportDemoData = async () => {
         return result;
     };
 
+    // ==================== NOTICEBOARD (公告栏) — L12/13/14 event feed ====================
+    // Read-only feed of upcoming events for 传福大使 / 改命客户 / 准传福大使.
+    // Sourced from the `events` table; admins publish via the Calendar event modal
+    // (poster_url + published_to_noticeboard checkbox).
+    const showNoticeboardView = async (container) => {
+        const currentUser = _currentUser;
+        if (!currentUser) return;
+
+        const userLevel = (() => {
+            const m = (currentUser.role || '').match(/Level\s+(\d+)/i);
+            return m ? parseInt(m[1]) : 12;
+        })();
+        const isAdmin = userLevel <= 2;
+
+        // Skeleton paint
+        container.innerHTML = `
+            <div class="noticeboard-wrap" style="padding:16px 16px 64px;max-width:1100px;margin:0 auto;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:12px;">
+                    <div>
+                        <h1 style="margin:0;font-size:1.6rem;color:var(--gray-900,#111827);">📢 公告栏 Noticeboard</h1>
+                        <div style="color:var(--gray-500,#6b7280);font-size:0.9rem;margin-top:4px;">Upcoming events &amp; activities</div>
+                    </div>
+                    ${isAdmin ? `<button class="btn primary" onclick="(async()=>{ if(app.openCreateEventModal) await app.openCreateEventModal(); })()"><i class="fas fa-plus"></i> Post Event</button>` : ''}
+                </div>
+                <div id="noticeboard-grid" style="display:grid;gap:18px;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));">
+                    <div style="grid-column:1/-1;text-align:center;color:var(--gray-400,#9ca3af);padding:40px 0;">Loading events…</div>
+                </div>
+            </div>`;
+
+        // Fetch events
+        let events = [];
+        try {
+            events = await AppDataStore.getAll('events');
+        } catch(err) {
+            console.warn('[noticeboard] events fetch failed:', err);
+        }
+        events = events || [];
+
+        // Filter: published + upcoming. If the column doesn't exist yet (pre-migration),
+        // fall back to status==='upcoming' so the page is still useful.
+        const todayStr = new Date().toISOString().split('T')[0];
+        const hasPublishedCol = events.some(e => 'published_to_noticeboard' in (e || {}));
+        let visible = events.filter(e => {
+            if (!e) return false;
+            const future = !e.event_date || e.event_date >= todayStr;
+            const notCancelled = (e.status || 'upcoming') !== 'cancelled';
+            if (hasPublishedCol) return future && notCancelled && e.published_to_noticeboard === true;
+            return future && notCancelled && (e.status === 'upcoming' || !e.status);
+        });
+        visible.sort((a, b) => String(a.event_date || '').localeCompare(String(b.event_date || '')));
+
+        const grid = document.getElementById('noticeboard-grid');
+        if (!grid) return;
+
+        if (!visible.length) {
+            grid.innerHTML = `
+                <div style="grid-column:1/-1;text-align:center;padding:60px 20px;color:var(--gray-500,#6b7280);">
+                    <div style="font-size:3rem;margin-bottom:12px;">📭</div>
+                    <div style="font-size:1.1rem;font-weight:600;margin-bottom:6px;">No events yet</div>
+                    <div style="font-size:0.9rem;">${isAdmin ? 'Tap "Post Event" to publish the first one.' : 'Check back soon — new events will appear here.'}</div>
+                </div>`;
+            return;
+        }
+
+        // Pre-sign poster images (best-effort)
+        const postered = visible.filter(e => e.poster_url);
+        if (postered.length && AppDataStore.resolveAttachmentSrc) {
+            await Promise.all(postered.map(async e => {
+                try { e._posterSigned = await AppDataStore.resolveAttachmentSrc(e.poster_url); }
+                catch(_) { e._posterSigned = e.poster_url; }
+            }));
+        } else {
+            postered.forEach(e => { e._posterSigned = e.poster_url; });
+        }
+
+        const esc = (s) => String(s || '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+        const fmtDate = (d) => { try { return new Date(d).toLocaleDateString('en-MY', { weekday:'short', day:'numeric', month:'short', year:'numeric' }); } catch(_) { return d || ''; } };
+        const fmtTime = (s, e) => {
+            if (!s && !e) return '';
+            if (s && e) return `${s} – ${e}`;
+            return s || e;
+        };
+
+        grid.innerHTML = visible.map(e => {
+            const posterHtml = e._posterSigned
+                ? `<img src="${esc(e._posterSigned)}" alt="${esc(e.event_title)} poster" style="width:100%;height:180px;object-fit:cover;display:block;" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+                   <div style="display:none;width:100%;height:180px;background:linear-gradient(135deg,#be185d,#e91e8c);color:white;align-items:center;justify-content:center;font-size:3rem;">📅</div>`
+                : `<div style="width:100%;height:180px;background:linear-gradient(135deg,#be185d,#e91e8c);color:white;display:flex;align-items:center;justify-content:center;font-size:3rem;">📅</div>`;
+            const time = fmtTime(e.start_time, e.end_time);
+            return `
+                <div class="noticeboard-card" onclick="app.openNoticeboardDetail(${e.id})"
+                     style="background:white;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);cursor:pointer;transition:transform 0.15s,box-shadow 0.15s;"
+                     onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 6px 18px rgba(0,0,0,0.12)';"
+                     onmouseout="this.style.transform='';this.style.boxShadow='0 2px 8px rgba(0,0,0,0.08)';">
+                    ${posterHtml}
+                    <div style="padding:14px;">
+                        <div style="font-size:1.05rem;font-weight:700;color:var(--gray-900,#111827);margin-bottom:8px;line-height:1.3;">${esc(e.event_title || 'Untitled Event')}</div>
+                        <div style="display:flex;align-items:center;gap:6px;color:var(--gray-600,#4b5563);font-size:0.88rem;margin-bottom:4px;">
+                            <i class="fas fa-calendar" style="color:#be185d;width:14px;"></i> ${esc(fmtDate(e.event_date))}
+                        </div>
+                        ${time ? `<div style="display:flex;align-items:center;gap:6px;color:var(--gray-600,#4b5563);font-size:0.88rem;margin-bottom:4px;">
+                            <i class="fas fa-clock" style="color:#be185d;width:14px;"></i> ${esc(time)}
+                        </div>` : ''}
+                        ${e.location ? `<div style="display:flex;align-items:center;gap:6px;color:var(--gray-600,#4b5563);font-size:0.88rem;margin-bottom:8px;">
+                            <i class="fas fa-map-marker-alt" style="color:#be185d;width:14px;"></i> ${esc(e.location)}
+                        </div>` : ''}
+                        ${e.description ? `<div style="color:var(--gray-500,#6b7280);font-size:0.86rem;line-height:1.4;max-height:42px;overflow:hidden;text-overflow:ellipsis;">${esc((e.description || '').substring(0, 120))}${(e.description || '').length > 120 ? '…' : ''}</div>` : ''}
+                    </div>
+                </div>`;
+        }).join('');
+    };
+
+    // Full event detail modal opened from a noticeboard card tap.
+    const openNoticeboardDetail = async (eventId) => {
+        const e = await AppDataStore.getById('events', eventId);
+        if (!e) { UI.toast.error('Event not found'); return; }
+
+        let posterSrc = '';
+        if (e.poster_url) {
+            try { posterSrc = AppDataStore.resolveAttachmentSrc ? await AppDataStore.resolveAttachmentSrc(e.poster_url) : e.poster_url; }
+            catch(_) { posterSrc = e.poster_url; }
+        }
+
+        const esc = (s) => String(s || '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+        const fmtDate = (d) => { try { return new Date(d).toLocaleDateString('en-MY', { weekday:'long', day:'numeric', month:'long', year:'numeric' }); } catch(_) { return d || ''; } };
+        const time = (e.start_time && e.end_time) ? `${e.start_time} – ${e.end_time}` : (e.start_time || e.end_time || '');
+
+        const content = `
+            <div style="max-width:560px;">
+                ${posterSrc
+                    ? `<img src="${esc(posterSrc)}" alt="${esc(e.event_title)}" style="width:100%;max-height:360px;object-fit:contain;background:#f3f4f6;border-radius:8px;margin-bottom:16px;">`
+                    : `<div style="width:100%;height:200px;background:linear-gradient(135deg,#be185d,#e91e8c);color:white;display:flex;align-items:center;justify-content:center;font-size:4rem;border-radius:8px;margin-bottom:16px;">📅</div>`
+                }
+                <div style="display:grid;gap:10px;color:var(--gray-700,#374151);font-size:0.95rem;">
+                    <div><i class="fas fa-calendar" style="color:#be185d;width:20px;"></i> <strong>${esc(fmtDate(e.event_date))}</strong></div>
+                    ${time ? `<div><i class="fas fa-clock" style="color:#be185d;width:20px;"></i> ${esc(time)}</div>` : ''}
+                    ${e.location ? `<div><i class="fas fa-map-marker-alt" style="color:#be185d;width:20px;"></i> ${esc(e.location)}</div>` : ''}
+                    ${e.capacity ? `<div><i class="fas fa-users" style="color:#be185d;width:20px;"></i> Capacity: ${esc(e.capacity)}</div>` : ''}
+                    ${e.ticket_price ? `<div><i class="fas fa-tag" style="color:#be185d;width:20px;"></i> RM ${esc(e.ticket_price)}</div>` : ''}
+                </div>
+                ${e.description ? `<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--gray-200,#e5e7eb);color:var(--gray-700,#374151);font-size:0.95rem;line-height:1.6;white-space:pre-wrap;">${esc(e.description)}</div>` : ''}
+            </div>`;
+
+        UI.showModal(e.event_title || 'Event Details', content, [
+            { label: 'Close', type: 'secondary', action: 'UI.hideModal()' }
+        ]);
+    };
+
     // showMilestonesView(container, targetUserId?)
     // If targetUserId is supplied (admin use), shows that user's progress instead of the current user's.
     const showMilestonesView = async (container, targetUserId = null) => {
@@ -52218,6 +52380,10 @@ Gold-${totGold}`;
 
         // Customer Self-Service Portal
         sendPortalLink,
+
+        // Level 12/13/14: Noticeboard (公告栏)
+        showNoticeboardView,
+        openNoticeboardDetail,
 
         // Level 13/14: Milestones & 福德
         showMilestonesView,
