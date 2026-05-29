@@ -20278,16 +20278,27 @@ function _wireLoginBtn() {
         const content = `
             ${buildEventCategoriesField([])}
             <div class="form-group"><label>Title*</label><input type="text" id="mkt-title" class="form-control"></div>
+            <div class="form-row" style="display:flex;gap:12px;">
+                <div class="form-group" style="flex:1;"><label>Date*</label><input type="date" id="mkt-event-date" class="form-control"></div>
+                <div class="form-group" style="flex:1;"><label>Start Time</label><input type="time" id="mkt-start-time" class="form-control"></div>
+                <div class="form-group" style="flex:1;"><label>End Time</label><input type="time" id="mkt-end-time" class="form-control"></div>
+            </div>
             <div class="form-group"><label>Ticket Price (RM)</label><input type="number" id="mkt-price" class="form-control" value="0"></div>
             <div class="form-group"><label>Early Bird Price (RM)</label><input type="text" id="mkt-early-bird-price" class="form-control" placeholder="e.g. 199"></div>
             <div class="form-group"><label>Group Purchase Price (RM)</label><input type="text" id="mkt-group-price" class="form-control" placeholder="e.g. 299 (min 5 pax)"></div>
-            <div class="form-group"><label>Duration</label><input type="text" id="mkt-duration" class="form-control" placeholder="e.g. 2 hours"></div>
+            <div class="form-group"><label>Duration (text fallback)</label><input type="text" id="mkt-duration" class="form-control" placeholder="e.g. 2 hours"></div>
             <div class="form-group"><label>Target Group</label><input type="text" id="mkt-target" class="form-control"></div>
-            <div class="form-group"><label>Location</label><input type="text" id="mkt-location" class="form-control" placeholder="e.g. KL, Online"></div>
+            <div class="form-group"><label>Location / Venue</label><input type="text" id="mkt-location" class="form-control" placeholder="e.g. KL, Online"></div>
             <div class="form-group"><label>Speaker</label><input type="text" id="mkt-speaker" class="form-control" placeholder="e.g. Master Tan"></div>
             <div class="form-group"><label>Description</label><textarea id="mkt-desc" class="form-control"></textarea></div>
+            <div class="form-group"><label>Poster Image URL <span style="color:var(--gray-400);font-weight:normal;">(shown on Noticeboard)</span></label><input type="url" id="mkt-poster-url" class="form-control" placeholder="https://… or Supabase storage path"></div>
             <div class="form-group"><label>Remarks</label><input type="text" id="mkt-remarks" class="form-control"></div>
             <div class="form-group"><label><input type="checkbox" id="mkt-active" checked> Is Active</label></div>
+            <div class="form-group" style="padding:10px 12px;background:#fdf2f8;border:1px solid #fce7f3;border-radius:8px;">
+                <label style="font-weight:600;color:#be185d;display:flex;align-items:center;gap:8px;cursor:pointer;">
+                    <input type="checkbox" id="mkt-publish-noticeboard"> 📢 Publish to Noticeboard <span style="color:#6b7280;font-weight:normal;font-size:0.85rem;">(visible to L12/13/14)</span>
+                </label>
+            </div>
         `;
         UI.showModal('Add New Event', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
@@ -20298,6 +20309,14 @@ function _wireLoginBtn() {
     const saveCpsNewEvent = async () => {
         const title = document.getElementById('mkt-title')?.value?.trim();
         if (!title) return UI.toast.error('Title is required');
+
+        // Date is required so the event has a valid timeline (otherwise the
+        // noticeboard would skip it and the calendar wouldn't know where to
+        // pin it). Earlier this field was missing entirely — events created
+        // here landed in the DB with no date and rendered as "Invalid Date"
+        // on the noticeboard.
+        const eventDate = document.getElementById('mkt-event-date')?.value;
+        if (!eventDate) return UI.toast.error('Event date is required');
 
         const catCheckboxes = document.querySelectorAll('#mkt-event-categories .mkt-event-category-cb:checked');
         const selectedCats = Array.from(catCheckboxes).map(cb => cb.value);
@@ -20311,9 +20330,14 @@ function _wireLoginBtn() {
         if (!selectedCats.length) return UI.toast.error('At least one category is required');
 
         const data = {
-            // `title` is the real DB column; older code reads `event_title`
-            // first and falls back, so writing `title` is sufficient.
+            // Write BOTH `title` and `event_title` so downstream consumers
+            // (calendar list, noticeboard, attendee modal) all find the name
+            // regardless of which column they prefer.
             title: title,
+            event_title: title,
+            event_date: document.getElementById('mkt-event-date')?.value || null,
+            start_time: document.getElementById('mkt-start-time')?.value || null,
+            end_time:   document.getElementById('mkt-end-time')?.value || null,
             ticket_price: parseFloat(document.getElementById('mkt-price')?.value) || 0,
             early_bird_price: document.getElementById('mkt-early-bird-price')?.value || '',
             group_purchase_price: document.getElementById('mkt-group-price')?.value || '',
@@ -20322,9 +20346,11 @@ function _wireLoginBtn() {
             location: document.getElementById('mkt-location')?.value || '',
             speaker: document.getElementById('mkt-speaker')?.value || '',
             description: document.getElementById('mkt-desc')?.value || '',
+            poster_url: document.getElementById('mkt-poster-url')?.value?.trim() || null,
+            published_to_noticeboard: document.getElementById('mkt-publish-noticeboard')?.checked || false,
             remarks: document.getElementById('mkt-remarks')?.value || '',
             is_active: document.getElementById('mkt-active')?.checked ?? true,
-            status: document.getElementById('mkt-active')?.checked ? 'active' : 'inactive',
+            status: document.getElementById('mkt-active')?.checked ? 'upcoming' : 'inactive',
             categories: JSON.stringify(selectedCats),
             created_by: _currentUser ? _currentUser.id : null,
             updated_at: new Date().toISOString()
@@ -44203,31 +44229,80 @@ const initImportDemoData = async () => {
     };
 
     // ==================== NOTICEBOARD (公告栏) — L12/13/14 event feed ====================
-    // Read-only feed of upcoming events for 传福大使 / 改命客户 / 准传福大使.
-    // Sourced from the `events` table; admins publish via the Calendar event modal
-    // (poster_url + published_to_noticeboard checkbox).
+    // Read-only one-glance feed of upcoming events for 传福大使 / 改命客户 / 准传福大使.
+    // Cards expose ALL info inline (no click-to-expand) — admin keeps descriptions
+    // concise so cards stay scannable. Past events auto-expire (filtered out once
+    // event_date < today). Sourced from the `events` table; admins publish via the
+    // Calendar event modal (poster_url + published_to_noticeboard checkbox) or
+    // from the Quick Add Activity → Event flow.
     const showNoticeboardView = async (container) => {
         const currentUser = _currentUser;
         if (!currentUser) return;
 
-        const userLevel = (() => {
-            const m = (currentUser.role || '').match(/Level\s+(\d+)/i);
-            return m ? parseInt(m[1]) : 12;
-        })();
+        const userLevel = _getUserLevel(currentUser);
         const isAdmin = userLevel <= 2;
+
+        // Inline <style> so the noticeboard is self-contained (independent of
+        // styles-fixed.css load order) and so card hover/responsive rules work
+        // without polluting the global stylesheet.
+        const styleBlock = `
+        <style id="noticeboard-styles">
+            .nb-page { background: linear-gradient(180deg, #fdf6ec 0%, #fdf2f8 100%); min-height: 100vh; padding: 0 0 64px; }
+            .nb-topbar { display: flex; align-items: center; justify-content: space-between; padding: 18px 28px; border-bottom: 1px solid rgba(128,0,32,0.12); background: rgba(255,255,255,0.6); backdrop-filter: blur(8px); flex-wrap: wrap; gap: 12px; }
+            .nb-topbar-brand { font-size: 1.15rem; font-weight: 700; color: #800020; display: flex; align-items: center; gap: 8px; letter-spacing: 0.02em; }
+            .nb-topbar-tagline { color: #9b1c4f; font-size: 0.95rem; font-style: italic; letter-spacing: 0.05em; }
+            .nb-hero { text-align: center; padding: 48px 20px 32px; max-width: 900px; margin: 0 auto; }
+            .nb-hero-title { font-size: 2.2rem; font-weight: 800; color: #800020; margin: 0 0 12px; letter-spacing: 0.05em; position: relative; display: inline-block; padding: 0 28px; }
+            .nb-hero-title::before, .nb-hero-title::after { content: ""; position: absolute; top: 50%; width: 32px; height: 1px; background: #be185d; }
+            .nb-hero-title::before { left: -16px; } .nb-hero-title::after { right: -16px; }
+            .nb-hero-sub { color: #6b7280; font-size: 0.95rem; letter-spacing: 0.08em; }
+            .nb-grid { display: grid; gap: 26px; grid-template-columns: repeat(3, 1fr); max-width: 1200px; margin: 0 auto; padding: 0 28px; }
+            @media (max-width: 1024px) { .nb-grid { grid-template-columns: repeat(2, 1fr); } }
+            @media (max-width: 640px)  { .nb-grid { grid-template-columns: 1fr; gap: 20px; padding: 0 16px; } .nb-hero-title { font-size: 1.6rem; } }
+            .nb-card { background: white; border-radius: 14px; overflow: hidden; box-shadow: 0 4px 16px rgba(128,0,32,0.10); display: flex; flex-direction: column; position: relative; transition: transform .18s ease, box-shadow .18s ease; }
+            .nb-card:hover { transform: translateY(-3px); box-shadow: 0 10px 28px rgba(128,0,32,0.16); }
+            .nb-num { position: absolute; top: 14px; left: 14px; z-index: 2; width: 38px; height: 38px; border-radius: 50%; background: #800020; color: white; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.95rem; letter-spacing: 0.05em; box-shadow: 0 2px 8px rgba(0,0,0,0.2); font-family: 'Inter', sans-serif; }
+            .nb-poster { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; display: block; background: linear-gradient(135deg, #800020, #be185d); }
+            .nb-poster-placeholder { width: 100%; aspect-ratio: 3 / 4; background: linear-gradient(135deg, #800020, #be185d); color: white; display: flex; align-items: center; justify-content: center; font-size: 4rem; }
+            .nb-body { padding: 18px 18px 20px; display: flex; flex-direction: column; gap: 10px; flex: 1; }
+            .nb-title { font-size: 1.2rem; font-weight: 800; color: #1f2937; line-height: 1.25; margin: 0; }
+            .nb-tagline { font-size: 0.88rem; color: #9b1c4f; font-style: italic; line-height: 1.3; min-height: 1.3em; }
+            .nb-info { background: #fdf2f8; border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; border: 1px solid #fce7f3; }
+            .nb-info-row { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: #4b5563; }
+            .nb-info-row i { color: #be185d; width: 14px; text-align: center; }
+            .nb-desc { color: #6b7280; font-size: 0.86rem; line-height: 1.55; display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden; }
+            .nb-price-badge { display: inline-block; padding: 3px 10px; background: #800020; color: white; border-radius: 12px; font-size: 0.78rem; font-weight: 600; align-self: flex-start; }
+            .nb-empty { grid-column: 1 / -1; text-align: center; padding: 80px 20px; color: #6b7280; }
+            .nb-empty-emoji { font-size: 4rem; margin-bottom: 16px; opacity: 0.6; }
+            .nb-footer { margin: 56px auto 0; padding: 22px 28px; max-width: 1200px; border-top: 1px solid rgba(128,0,32,0.12); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; color: #800020; font-size: 0.85rem; }
+            .nb-footer-brand { display: flex; align-items: center; gap: 10px; font-weight: 700; }
+            .nb-footer-brand-icon { width: 36px; height: 36px; border-radius: 50%; background: linear-gradient(135deg, #800020, #be185d); color: white; display: flex; align-items: center; justify-content: center; font-size: 1rem; }
+            .nb-footer-meta { color: #9b1c4f; font-size: 0.8rem; letter-spacing: 0.03em; }
+            .nb-admin-bar { max-width: 1200px; margin: 0 auto 18px; padding: 0 28px; display: flex; justify-content: flex-end; }
+        </style>`;
 
         // Skeleton paint
         container.innerHTML = `
-            <div class="noticeboard-wrap" style="padding:16px 16px 64px;max-width:1100px;margin:0 auto;">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:12px;">
-                    <div>
-                        <h1 style="margin:0;font-size:1.6rem;color:var(--gray-900,#111827);">📢 公告栏 Noticeboard</h1>
-                        <div style="color:var(--gray-500,#6b7280);font-size:0.9rem;margin-top:4px;">Upcoming events &amp; activities</div>
-                    </div>
-                    ${isAdmin ? `<button class="btn primary" onclick="(async()=>{ if(app.openCreateEventModal) await app.openCreateEventModal(); })()"><i class="fas fa-plus"></i> Post Event</button>` : ''}
+            ${styleBlock}
+            <div class="nb-page">
+                <div class="nb-topbar">
+                    <div class="nb-topbar-brand">📢 公告栏 · Noticeboard</div>
+                    <div class="nb-topbar-tagline">探索过去 · 启迪未来</div>
                 </div>
-                <div id="noticeboard-grid" style="display:grid;gap:18px;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));">
-                    <div style="grid-column:1/-1;text-align:center;color:var(--gray-400,#9ca3af);padding:40px 0;">Loading events…</div>
+                <div class="nb-hero">
+                    <h1 class="nb-hero-title">即将举行的活动</h1>
+                    <div class="nb-hero-sub">探索风水智慧与人文之美</div>
+                </div>
+                ${isAdmin ? `<div class="nb-admin-bar"><button class="btn primary" onclick="(async()=>{ if(app.openCreateEventModal) await app.openCreateEventModal(); })()"><i class="fas fa-plus"></i> Post Event</button></div>` : ''}
+                <div id="noticeboard-grid" class="nb-grid">
+                    <div class="nb-empty"><div style="opacity:0.5;">Loading events…</div></div>
+                </div>
+                <div class="nb-footer">
+                    <div class="nb-footer-brand">
+                        <div class="nb-footer-brand-icon">🏛️</div>
+                        <div>DestinOraclesSolution · 玄空风水博物馆</div>
+                    </div>
+                    <div class="nb-footer-meta">destinoraclessolution.com</div>
                 </div>
             </div>`;
 
@@ -44240,16 +44315,27 @@ const initImportDemoData = async () => {
         }
         events = events || [];
 
-        // Filter: published + upcoming. If the column doesn't exist yet (pre-migration),
-        // fall back to status==='upcoming' so the page is still useful.
+        // Filter: must be published + must have a valid future event_date.
+        // Events missing event_date are skipped (otherwise the buggy CPS-flow
+        // events with no date would linger forever as "Date TBD"). Once
+        // event_date passes, the card auto-disappears the next time the page
+        // loads — no admin action needed.
+        // Pre-migration fallback: if `published_to_noticeboard` doesn't exist
+        // on any row yet, show every upcoming status='upcoming' event.
         const todayStr = new Date().toISOString().split('T')[0];
         const hasPublishedCol = events.some(e => 'published_to_noticeboard' in (e || {}));
         let visible = events.filter(e => {
             if (!e) return false;
-            const future = !e.event_date || e.event_date >= todayStr;
-            const notCancelled = (e.status || 'upcoming') !== 'cancelled';
-            if (hasPublishedCol) return future && notCancelled && e.published_to_noticeboard === true;
-            return future && notCancelled && (e.status === 'upcoming' || !e.status);
+            // Date must exist AND be valid AND >= today
+            if (!e.event_date) return false;
+            const d = new Date(e.event_date);
+            if (isNaN(d.getTime())) return false;
+            if (e.event_date < todayStr) return false; // expired
+            // Not cancelled
+            if ((e.status || 'upcoming') === 'cancelled') return false;
+            // Published gate (with pre-migration fallback)
+            if (hasPublishedCol) return e.published_to_noticeboard === true;
+            return e.status === 'upcoming' || !e.status;
         });
         visible.sort((a, b) => String(a.event_date || '').localeCompare(String(b.event_date || '')));
 
@@ -44258,10 +44344,10 @@ const initImportDemoData = async () => {
 
         if (!visible.length) {
             grid.innerHTML = `
-                <div style="grid-column:1/-1;text-align:center;padding:60px 20px;color:var(--gray-500,#6b7280);">
-                    <div style="font-size:3rem;margin-bottom:12px;">📭</div>
-                    <div style="font-size:1.1rem;font-weight:600;margin-bottom:6px;">No events yet</div>
-                    <div style="font-size:0.9rem;">${isAdmin ? 'Tap "Post Event" to publish the first one.' : 'Check back soon — new events will appear here.'}</div>
+                <div class="nb-empty">
+                    <div class="nb-empty-emoji">📭</div>
+                    <div style="font-size:1.15rem;font-weight:700;color:#800020;margin-bottom:6px;">暂无活动 · No upcoming events</div>
+                    <div style="font-size:0.9rem;">${isAdmin ? 'Tap "Post Event" above to publish the first one.' : 'Check back soon — new events will appear here.'}</div>
                 </div>`;
             return;
         }
@@ -44278,39 +44364,58 @@ const initImportDemoData = async () => {
         }
 
         const esc = (s) => String(s || '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-        const fmtDate = (d) => { try { return new Date(d).toLocaleDateString('en-MY', { weekday:'short', day:'numeric', month:'short', year:'numeric' }); } catch(_) { return d || ''; } };
+        const titleOf = (e) => e.event_title || e.title || 'Untitled Event';
+        const fmtDate = (d) => {
+            const dt = new Date(d);
+            if (isNaN(dt.getTime())) return '日期待定 · Date TBD';
+            // 2026年6月15日 (星期六) style — closer to the reference design
+            try {
+                const opts = { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' };
+                return dt.toLocaleDateString('zh-CN', opts);
+            } catch(_) { return dt.toLocaleDateString(); }
+        };
         const fmtTime = (s, e) => {
             if (!s && !e) return '';
-            if (s && e) return `${s} – ${e}`;
-            return s || e;
+            const fmt = (t) => {
+                if (!t) return '';
+                // Accept "14:30" or "14:30:00" → "2:30 PM"
+                const [h, m] = String(t).split(':');
+                const hr = parseInt(h, 10);
+                if (isNaN(hr)) return t;
+                const ampm = hr >= 12 ? 'PM' : 'AM';
+                const h12 = hr % 12 || 12;
+                return `${h12}:${(m || '00').padStart(2, '0')} ${ampm}`;
+            };
+            if (s && e) return `${fmt(s)} – ${fmt(e)}`;
+            return fmt(s || e);
         };
 
-        grid.innerHTML = visible.map(e => {
+        grid.innerHTML = visible.map((e, idx) => {
+            const num = String(idx + 1).padStart(2, '0');
             const posterHtml = e._posterSigned
-                ? `<img src="${esc(e._posterSigned)}" alt="${esc(e.event_title)} poster" style="width:100%;height:180px;object-fit:cover;display:block;" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
-                   <div style="display:none;width:100%;height:180px;background:linear-gradient(135deg,#be185d,#e91e8c);color:white;align-items:center;justify-content:center;font-size:3rem;">📅</div>`
-                : `<div style="width:100%;height:180px;background:linear-gradient(135deg,#be185d,#e91e8c);color:white;display:flex;align-items:center;justify-content:center;font-size:3rem;">📅</div>`;
+                ? `<img class="nb-poster" src="${esc(e._posterSigned)}" alt="${esc(titleOf(e))}" onerror="this.outerHTML='<div class=&quot;nb-poster-placeholder&quot;>📅</div>';">`
+                : `<div class="nb-poster-placeholder">📅</div>`;
             const time = fmtTime(e.start_time, e.end_time);
+            const tagline = e.speaker ? `主讲 · ${e.speaker}` : (e.target_group || '');
+            const priceBadge = e.ticket_price && parseFloat(e.ticket_price) > 0
+                ? `<div class="nb-price-badge">RM ${parseFloat(e.ticket_price).toFixed(0)}${e.early_bird_price ? ` · 早鸟 RM ${esc(e.early_bird_price)}` : ''}</div>`
+                : (e.ticket_price === 0 || e.ticket_price === '0' ? `<div class="nb-price-badge" style="background:#10b981;">免费 · Free</div>` : '');
             return `
-                <div class="noticeboard-card" onclick="app.openNoticeboardDetail(${e.id})"
-                     style="background:white;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);cursor:pointer;transition:transform 0.15s,box-shadow 0.15s;"
-                     onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 6px 18px rgba(0,0,0,0.12)';"
-                     onmouseout="this.style.transform='';this.style.boxShadow='0 2px 8px rgba(0,0,0,0.08)';">
+                <article class="nb-card">
+                    <div class="nb-num">${num}</div>
                     ${posterHtml}
-                    <div style="padding:14px;">
-                        <div style="font-size:1.05rem;font-weight:700;color:var(--gray-900,#111827);margin-bottom:8px;line-height:1.3;">${esc(e.event_title || 'Untitled Event')}</div>
-                        <div style="display:flex;align-items:center;gap:6px;color:var(--gray-600,#4b5563);font-size:0.88rem;margin-bottom:4px;">
-                            <i class="fas fa-calendar" style="color:#be185d;width:14px;"></i> ${esc(fmtDate(e.event_date))}
+                    <div class="nb-body">
+                        <h3 class="nb-title">${esc(titleOf(e))}</h3>
+                        ${tagline ? `<div class="nb-tagline">${esc(tagline)}</div>` : ''}
+                        <div class="nb-info">
+                            <div class="nb-info-row"><i class="fas fa-calendar"></i> ${esc(fmtDate(e.event_date))}</div>
+                            ${time ? `<div class="nb-info-row"><i class="fas fa-clock"></i> ${esc(time)}</div>` : ''}
+                            ${e.location ? `<div class="nb-info-row"><i class="fas fa-map-marker-alt"></i> ${esc(e.location)}</div>` : ''}
                         </div>
-                        ${time ? `<div style="display:flex;align-items:center;gap:6px;color:var(--gray-600,#4b5563);font-size:0.88rem;margin-bottom:4px;">
-                            <i class="fas fa-clock" style="color:#be185d;width:14px;"></i> ${esc(time)}
-                        </div>` : ''}
-                        ${e.location ? `<div style="display:flex;align-items:center;gap:6px;color:var(--gray-600,#4b5563);font-size:0.88rem;margin-bottom:8px;">
-                            <i class="fas fa-map-marker-alt" style="color:#be185d;width:14px;"></i> ${esc(e.location)}
-                        </div>` : ''}
-                        ${e.description ? `<div style="color:var(--gray-500,#6b7280);font-size:0.86rem;line-height:1.4;max-height:42px;overflow:hidden;text-overflow:ellipsis;">${esc((e.description || '').substring(0, 120))}${(e.description || '').length > 120 ? '…' : ''}</div>` : ''}
+                        ${e.description ? `<div class="nb-desc">${esc(e.description)}</div>` : ''}
+                        ${priceBadge}
                     </div>
-                </div>`;
+                </article>`;
         }).join('');
     };
 
