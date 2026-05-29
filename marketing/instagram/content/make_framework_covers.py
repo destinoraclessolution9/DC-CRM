@@ -149,7 +149,97 @@ def render_day39_quote(path):
     print(f"OK -> {path}")
 
 
+# ---------- Day 44 slide 1 — career reality (method pattern) ----------
+def render_day44_slide1(path):
+    img = bg(); d = ImageDraw.Draw(img); border(d)
+
+    # ACCENT — red banner top with stat-style hook
+    banner_h = 110
+    d.rectangle([46, 100, S-46, 100+banner_h], fill=RED)
+    # auto-fit banner to width
+    banner_text = "70% OF GRADS GET GHOSTED  ·  MY 2026"
+    bsz = 50
+    while bsz > 28:
+        bf = ImageFont.truetype(FONT_HEAD, bsz)
+        bb = d.textbbox((0, 0), banner_text, font=bf)
+        if bb[2]-bb[0] <= S-160:
+            break
+        bsz -= 2
+    text_center(d, 100 + (banner_h-bsz)//2 - 4, banner_text, bf, OFFWHITE)
+
+    # MAIN HEADLINE — career reality, numbered
+    head = ["CAREER", "REALITY", "#1 — THE", "GHOST WALL"]
+    sz = fit(head, 130, S-150, minf=80)
+    f = ImageFont.truetype(FONT_HEAD, sz)
+    step = int(sz*1.05)
+    total = step*(len(head)-1)+sz
+    sy = 320
+    for i, ln in enumerate(head):
+        col = GOLD if "GHOST" in ln else OFFWHITE
+        text_center(d, sy+i*step, ln, f, col)
+
+    # SUBLINE — niche search keyword (compact)
+    sub = "ghosted by recruiter  ·  cari kerja  ·  MY"
+    sf = ImageFont.truetype(FONT_BODY, 30)
+    text_center(d, sy+total+50, sub, sf, GREY)
+
+    # CTA strip
+    sw_f = ImageFont.truetype(FONT_BODY, 30)
+    text_center(d, S-110, "SAVE  ·  SWIPE  ->", sw_f, GOLD_L)
+
+    img.save(path, "PNG", optimize=True)
+    print(f"OK -> {path}")
+
+
+# ---------- Day 46 quote — resonance pattern ----------
+def render_day46_quote(path):
+    img = bg(); d = ImageDraw.Draw(img); border(d)
+
+    # ACCENT — small yellow tag (top-left)
+    tag_text = "DIAMOND TRUTH  ·  MY 2026"
+    tagf = ImageFont.truetype(FONT_BODY, 26)
+    bb = d.textbbox((0, 0), tag_text, font=tagf)
+    tag_w = bb[2]-bb[0] + 36
+    tag_h = 48
+    d.rectangle([80, 110, 80+tag_w, 110+tag_h], fill=GOLD)
+    d.text((98, 110+(tag_h-26)//2 - 2), tag_text, fill=BLACK, font=tagf)
+
+    # OPENING quote mark
+    qf = ImageFont.truetype(FONT_HEAD, 130)
+    d.text((90, 175), '"', fill=GOLD, font=qf)
+
+    # RESONANCE LINE (offwhite) — the felt experience
+    res = ["I FELT INVISIBLE", "FOR 11 MONTHS.", "0 OFFERS."]
+    rsz = fit(res, 80, S-200, minf=50)
+    rf = ImageFont.truetype(FONT_HEAD, rsz)
+    rstep = int(rsz*1.06)
+    ry = 330
+    for i, ln in enumerate(res):
+        text_center(d, ry+i*rstep, ln, rf, OFFWHITE)
+
+    # REFRAME LINE (gold) — the reveal
+    re_lines = ["EVERYONE IS", "A DIAMOND.", "YOU JUST NEED", "THE RIGHT CUT."]
+    rfsz = fit(re_lines, 58, S-200, minf=38)
+    rff = ImageFont.truetype(FONT_HEAD, rfsz)
+    rfstep = int(rfsz*1.04)
+    rfy = ry + rstep*len(res) + 40
+    for i, ln in enumerate(re_lines):
+        col = GOLD if i == 3 else GOLD_L
+        text_center(d, rfy+i*rfstep, ln, rff, col)
+
+    # OUTCOME / brand strip — text-only
+    of = ImageFont.truetype(FONT_HEAD, 36)
+    text_center(d, S-140, "DNJ  ·  AI FINDS YOUR TOP 3", of, OFFWHITE)
+    uf = ImageFont.truetype(FONT_BODY, 24)
+    text_center(d, S-85, "diamondandjeweler.com  ·  Malaysia", uf, GREY)
+
+    img.save(path, "PNG", optimize=True)
+    print(f"OK -> {path}")
+
+
 if __name__ == "__main__":
     render_day34_slide1(os.path.join(OUT_CAR, "day34-salary-negotiation-1.png"))
     render_day39_quote(os.path.join(OUT_Q, "q-day39-reveal.png"))
+    render_day44_slide1(os.path.join(OUT_CAR, "day44-career-reality-1.png"))
+    render_day46_quote(os.path.join(OUT_Q, "q-day46-cut.png"))
     print("\nFramework-aligned covers regenerated.")
