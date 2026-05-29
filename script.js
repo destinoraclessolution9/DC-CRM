@@ -20206,11 +20206,11 @@ function _wireLoginBtn() {
                         <!-- 📢 Noticeboard publishing — applies to whichever event (existing or new) is attached. -->
                         <div class="form-group" style="margin-top: 15px; padding: 12px; background: #fdf2f8; border: 1px solid #fce7f3; border-radius: 8px;">
                             <label style="font-weight:600; color:#be185d; display:flex; align-items:center; gap:8px; cursor:pointer;">
-                                <input type="checkbox" id="activity-publish-noticeboard" onchange="app.toggleActivityNoticeboardFields()">
+                                <input type="checkbox" id="activity-publish-noticeboard" checked onchange="app.toggleActivityNoticeboardFields()">
                                 📢 Publish to Noticeboard
-                                <span style="color:#6b7280; font-weight:normal; font-size:0.85rem;">(visible to L12/13/14)</span>
+                                <span style="color:#6b7280; font-weight:normal; font-size:0.85rem;">(visible to L12/13/14 — untick to keep private)</span>
                             </label>
-                            <div id="activity-noticeboard-fields" style="display:none; margin-top:10px;">
+                            <div id="activity-noticeboard-fields" style="display:block; margin-top:10px;">
                                 <label style="font-size:0.9rem; color:#374151;">Poster Image URL</label>
                                 <input type="url" id="activity-poster-url" class="form-control" placeholder="https://… or Supabase storage path" style="margin-top:4px;">
                                 <small style="color:#6b7280; font-size:0.8rem;">Leave blank to keep the event's existing poster (if any).</small>
@@ -20296,7 +20296,7 @@ function _wireLoginBtn() {
             <div class="form-group"><label><input type="checkbox" id="mkt-active" checked> Is Active</label></div>
             <div class="form-group" style="padding:10px 12px;background:#fdf2f8;border:1px solid #fce7f3;border-radius:8px;">
                 <label style="font-weight:600;color:#be185d;display:flex;align-items:center;gap:8px;cursor:pointer;">
-                    <input type="checkbox" id="mkt-publish-noticeboard"> 📢 Publish to Noticeboard <span style="color:#6b7280;font-weight:normal;font-size:0.85rem;">(visible to L12/13/14)</span>
+                    <input type="checkbox" id="mkt-publish-noticeboard" checked> 📢 Publish to Noticeboard <span style="color:#6b7280;font-weight:normal;font-size:0.85rem;">(visible to L12/13/14 — untick to keep private)</span>
                 </label>
             </div>
         `;
@@ -44315,27 +44315,27 @@ const initImportDemoData = async () => {
         }
         events = events || [];
 
-        // Filter: must be published + must have a valid future event_date.
-        // Events missing event_date are skipped (otherwise the buggy CPS-flow
-        // events with no date would linger forever as "Date TBD"). Once
-        // event_date passes, the card auto-disappears the next time the page
-        // loads — no admin action needed.
-        // Pre-migration fallback: if `published_to_noticeboard` doesn't exist
-        // on any row yet, show every upcoming status='upcoming' event.
+        // Filter: must have a valid future event_date AND not be explicitly
+        // hidden from the noticeboard. Defaults are inclusive — a freshly-
+        // created event shows up unless the admin specifically unticks the
+        // "Publish to Noticeboard" checkbox. This avoids the previous footgun
+        // where admins forgot to tick the publish box and the event silently
+        // never appeared.
+        //   - Missing event_date → skipped (otherwise "Invalid Date" cards)
+        //   - event_date < today → skipped (auto-expire past events)
+        //   - status === 'cancelled' → skipped
+        //   - published_to_noticeboard === false → skipped (explicit hide)
+        //   - everything else → shown
         const todayStr = new Date().toISOString().split('T')[0];
-        const hasPublishedCol = events.some(e => 'published_to_noticeboard' in (e || {}));
         let visible = events.filter(e => {
             if (!e) return false;
-            // Date must exist AND be valid AND >= today
             if (!e.event_date) return false;
             const d = new Date(e.event_date);
             if (isNaN(d.getTime())) return false;
             if (e.event_date < todayStr) return false; // expired
-            // Not cancelled
             if ((e.status || 'upcoming') === 'cancelled') return false;
-            // Published gate (with pre-migration fallback)
-            if (hasPublishedCol) return e.published_to_noticeboard === true;
-            return e.status === 'upcoming' || !e.status;
+            if (e.published_to_noticeboard === false) return false; // explicit hide
+            return true;
         });
         visible.sort((a, b) => String(a.event_date || '').localeCompare(String(b.event_date || '')));
 

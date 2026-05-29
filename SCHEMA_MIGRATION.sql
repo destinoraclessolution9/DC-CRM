@@ -571,3 +571,19 @@ ALTER TABLE events ADD COLUMN IF NOT EXISTS end_time   TEXT;
 CREATE INDEX IF NOT EXISTS idx_events_noticeboard
     ON events (published_to_noticeboard, event_date)
     WHERE published_to_noticeboard = true;
+
+
+-- =============================================================================
+-- 2026-05-29 (round 2) — Noticeboard default-show fix
+-- Earlier rows were inserted with published_to_noticeboard = false (or NULL)
+-- because the checkbox in the create modal defaulted to OFF. The UX now
+-- defaults the checkbox to ON, but existing rows are still hidden.
+-- This one-time UPDATE flips all upcoming events to published so admins
+-- don't have to edit each one individually. Run AFTER the previous block.
+-- =============================================================================
+UPDATE events
+   SET published_to_noticeboard = true
+ WHERE event_date IS NOT NULL
+   AND event_date >= CURRENT_DATE
+   AND (published_to_noticeboard IS NULL OR published_to_noticeboard = false)
+   AND COALESCE(status, 'upcoming') <> 'cancelled';

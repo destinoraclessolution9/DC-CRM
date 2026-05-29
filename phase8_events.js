@@ -485,7 +485,7 @@ Object.assign(window.app, (() => {
                     </div>
                     <div class="form-group">
                         <label class="bonus-checkbox" style="font-weight:600;color:#be185d;">
-                            <input type="checkbox" id="event-publish-noticeboard"> 📢 Publish to Noticeboard (visible to L12/13/14)
+                            <input type="checkbox" id="event-publish-noticeboard" checked> 📢 Publish to Noticeboard (visible to L12/13/14)
                         </label>
                     </div>
                 </div>
@@ -598,7 +598,13 @@ Object.assign(window.app, (() => {
                 custom_multiplier: 1.0,
                 ...baseProps
             });
-            UI.toast.success('Event created.');
+            // Tell the admin whether this also landed on the noticeboard so
+            // they're not left guessing why the card may/may not appear.
+            if (baseProps.published_to_noticeboard) {
+                UI.toast.success('Event created & published to Noticeboard 📢');
+            } else {
+                UI.toast.success('Event created (not on Noticeboard).');
+            }
             await app.renderUpcomingEvents();
         }
         UI.hideModal();
@@ -994,7 +1000,10 @@ Object.assign(window.app, (() => {
             published_to_noticeboard: document.getElementById('edit-event-publish-noticeboard')?.checked || false
         });
 
-        UI.toast.success('Event updated.');
+        // Tell the admin where this event now lives so a missed checkbox tick
+        // isn't a silent surprise on the noticeboard tab.
+        const isPublished = document.getElementById('edit-event-publish-noticeboard')?.checked;
+        UI.toast.success(isPublished ? 'Event updated & on Noticeboard 📢' : 'Event updated (off Noticeboard).');
         UI.hideModal();
         await app.renderUpcomingEvents();
     };
