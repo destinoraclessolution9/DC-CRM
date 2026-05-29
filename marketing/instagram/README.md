@@ -4,6 +4,8 @@ The single source of truth for running **@dnj.ai**. Everything in this folder fe
 **Goal:** 0 → 10,000 followers in 90 days. **Engine:** **1 reel/day** + 2–3 carousels/week + daily Stories + collabs.
 
 > 📕 **Before drafting any post**, run it through `viral-framework-2026.md` (the Chalette 4-step model adapted for DNJ). Every caption must be Hook → Pain → Solve → CTA; every cover must have a number + Malaysia keyword + high-contrast accent.
+>
+> 📅 **Content runway:** `content-calendar-60day.md` (Days 1–60, foundation) + `content-calendar-180day.md` (Days 61–180, four themed phases). Captions in `caption-bank-60day.md` + `caption-bank-180day.md`.
 
 ---
 
