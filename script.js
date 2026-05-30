@@ -45541,7 +45541,11 @@ const initImportDemoData = async () => {
         },
         wholesale_groups: ['Kim','June','NDV','Liew','Hui Chin','Darren','Sampson'],
         default_region_fallback: 'KL',
-        watch_window_weeks: 4
+        watch_window_weeks: 4,
+        // Paste the Apps Script Web App deployment URL here. Leave blank to
+        // disable Google Sheets push. See apps_script_egg_sheets.gs in the
+        // project root for the script to deploy.
+        google_sheets_webhook_url: ''
     });
 
     const eggLoadConfig = async () => {
@@ -46639,6 +46643,45 @@ JB 星期二到
         }
     };
 
+    // Shared builder — emits the SAME 2D array that the Excel download uses,
+    // so the Google Sheets push and the .xlsx file are always byte-identical
+    // in structure. Pass region='KL' or 'PG' to limit to that region's sections;
+    // pass null/undefined to get all 4 sections (used by the Excel download).
+    const eggBuildChannelBreakdownAoa = (keep, region = null) => {
+        const sections = region
+            ? _EGG_CHANNEL_SECTIONS.filter(s => s.region === region)
+            : _EGG_CHANNEL_SECTIONS;
+        const headerCols = ['Section', 'Agent', 'Order Date', 'Order No', 'Product Code', 'Product', 'Qty'];
+        const aoa = [headerCols];
+        for (const sec of sections) {
+            const sectionRows = keep.filter(r => r.region === sec.region && r.channel === sec.channel);
+            const totalGold = sectionRows.filter(r => r.product === 'GOLD').reduce((s, r) => s + Number(r.quantity||0), 0);
+            const totalKing = sectionRows.filter(r => r.product === 'KING').reduce((s, r) => s + Number(r.quantity||0), 0);
+            aoa.push([sec.title, '', '', '', '', `GOLD ${totalGold}`, `KING ${totalKing}`]);
+            if (sectionRows.length === 0) {
+                aoa.push(['', 'No orders', '', '', '', '', '']);
+            } else {
+                for (const r of sectionRows) {
+                    const dateStr = r.order_date_parsed ? eggFormatDateShort(r.order_date_parsed) : '-';
+                    aoa.push(['', r.agent_name || '-', dateStr, r.order_no || '-', r.product_code || '-', r.product || '', Number(r.quantity)||0]);
+                }
+            }
+            // Subtotal by ACTUAL product code (was hard-coded to FMLENX068/FMLEGG002,
+            // which silently merged a 3rd code such as AGENTFMLENX060 into the GOLD line).
+            const byCode = {};
+            for (const r of sectionRows) {
+                const code = r.product_code || '(no code)';
+                if (!byCode[code]) byCode[code] = { qty: 0, product: r.product || '' };
+                byCode[code].qty += Number(r.quantity) || 0;
+            }
+            for (const [code, info] of Object.entries(byCode)) {
+                aoa.push(['', '', '', '', code, info.product, info.qty]);
+            }
+            aoa.push(['', '', '', '', '', '', '']); // blank separator row
+        }
+        return aoa;
+    };
+
     // Generate an .xlsx of the Channel Breakdown — same sections as the on-screen
     // table (PG Wholesale → PG Online → KL Wholesale → KL Online), with a
     // section-header row + totals row between each group so it prints cleanly.
@@ -46647,34 +46690,7 @@ JB 星期二到
         try {
             await window._ensureXlsx();
             const keep = (_eggState.newRows || []).filter(r => !_eggState.excludedKeys.has(r.unique_key));
-            const headerCols = ['Section', 'Agent', 'Order Date', 'Order No', 'Product Code', 'Product', 'Qty'];
-            const aoa = [headerCols];
-            for (const sec of _EGG_CHANNEL_SECTIONS) {
-                const sectionRows = keep.filter(r => r.region === sec.region && r.channel === sec.channel);
-                const totalGold = sectionRows.filter(r => r.product === 'GOLD').reduce((s, r) => s + Number(r.quantity||0), 0);
-                const totalKing = sectionRows.filter(r => r.product === 'KING').reduce((s, r) => s + Number(r.quantity||0), 0);
-                aoa.push([sec.title, '', '', '', '', `GOLD ${totalGold}`, `KING ${totalKing}`]);
-                if (sectionRows.length === 0) {
-                    aoa.push(['', 'No orders', '', '', '', '', '']);
-                } else {
-                    for (const r of sectionRows) {
-                        const dateStr = r.order_date_parsed ? eggFormatDateShort(r.order_date_parsed) : '-';
-                        aoa.push(['', r.agent_name || '-', dateStr, r.order_no || '-', r.product_code || '-', r.product || '', Number(r.quantity)||0]);
-                    }
-                }
-                // Subtotal by ACTUAL product code (was hard-coded to FMLENX068/FMLEGG002,
-                // which silently merged a 3rd code such as AGENTFMLENX060 into the GOLD line).
-                const byCode = {};
-                for (const r of sectionRows) {
-                    const code = r.product_code || '(no code)';
-                    if (!byCode[code]) byCode[code] = { qty: 0, product: r.product || '' };
-                    byCode[code].qty += Number(r.quantity) || 0;
-                }
-                for (const [code, info] of Object.entries(byCode)) {
-                    aoa.push(['', '', '', '', code, info.product, info.qty]);
-                }
-                aoa.push(['', '', '', '', '', '', '']); // blank separator row
-            }
+            const aoa = eggBuildChannelBreakdownAoa(keep);
             const ws = XLSX.utils.aoa_to_sheet(aoa);
             ws['!cols'] = [{ wch: 18 }, { wch: 22 }, { wch: 12 }, { wch: 16 }, { wch: 16 }, { wch: 10 }, { wch: 10 }];
             const wb = XLSX.utils.book_new();
@@ -46685,6 +46701,107 @@ JB 星期二到
         } catch (err) {
             console.error('egg: xlsx download failed', err);
             UI.toast.error('Excel download failed: ' + (err.message || 'unknown'));
+        }
+    };
+
+    // ==================== GOOGLE SHEETS PUSH ====================
+    // Posts the same 2D array `eggBuildChannelBreakdownAoa` produces to an Apps
+    // Script web app that appends it to the configured Google Sheet for the
+    // region (KL or PG). The Apps Script handles concurrent edits with
+    // LockService and finds the last filled row before writing — see
+    // apps_script_egg_sheets.gs in the project root for the script the user
+    // deploys.
+    const eggPushOneRegionToSheets = async (url, region, aoa, attempt = 1) => {
+        const payload = { region, rows: aoa };
+        try {
+            // Apps Script web apps redirect to googleusercontent for the response,
+            // which breaks CORS on a JSON POST. We use text/plain to dodge the
+            // preflight; Apps Script reads the raw body either way.
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify(payload),
+                redirect: 'follow'
+            });
+            const text = await res.text();
+            let json = null;
+            try { json = JSON.parse(text); } catch (_) { /* not JSON */ }
+            if (!res.ok || (json && json.ok === false)) {
+                const msg = (json && json.error) || `HTTP ${res.status}`;
+                // Retry once on lock-busy (Apps Script returns 503 when waitLock times out)
+                if (attempt === 1 && (res.status === 503 || /lock/i.test(msg))) {
+                    await new Promise(r => setTimeout(r, 2000));
+                    return eggPushOneRegionToSheets(url, region, aoa, 2);
+                }
+                throw new Error(msg);
+            }
+            return { region, ok: true, ...(json || {}) };
+        } catch (err) {
+            console.warn(`egg: sheets push failed for ${region}`, err);
+            return { region, ok: false, error: err.message || String(err) };
+        }
+    };
+
+    const eggPushToGoogleSheets = async (keep) => {
+        const url = _eggState.config?.google_sheets_webhook_url;
+        if (!url) return { skipped: true, reason: 'no webhook URL configured' };
+        const tasks = ['KL', 'PG'].map(region => {
+            const aoa = eggBuildChannelBreakdownAoa(keep, region);
+            // aoa[0] is always the header. The 4 section sections each emit at
+            // least 2 rows (title + body or no-orders) + N code subtotals + blank.
+            // If only the title rows are present with "No orders", we still
+            // push so the gap + headers act as the section separator the user
+            // wants. Skipping is only desired for entirely empty regions.
+            const hasAnyOrderRows = aoa.slice(1).some(row => row[1] && row[1] !== 'No orders' && row[1] !== '');
+            if (!hasAnyOrderRows) return { region, skipped: true };
+            return eggPushOneRegionToSheets(url, region, aoa);
+        });
+        return Promise.all(tasks);
+    };
+
+    // Re-push from a saved run (Run History → "Re-push to Sheets" button).
+    // Reconstructs the same `keep` shape from egg_processed_orders so the
+    // builder returns the identical 2D array we would have pushed on commit.
+    const eggRePushRunToSheets = async (runId) => {
+        const url = _eggState.config?.google_sheets_webhook_url;
+        if (!url) {
+            UI.toast.error('Google Sheets webhook URL not configured (Config tab).');
+            return;
+        }
+        if (!confirm('Re-push this run\'s Channel Breakdown to both Google Sheets? It will append below the current last row of each sheet.')) return;
+        try {
+            UI.toast.info('Pushing to Google Sheets...');
+            const orders = await AppDataStore.query('egg_processed_orders', { run_id: runId }) || [];
+            const keep = orders
+                .filter(o => !o.excluded_reason)
+                .map(o => ({
+                    region: o.region,
+                    channel: o.channel,
+                    product: o.product,
+                    product_code: o.product_code,
+                    quantity: o.quantity,
+                    agent_name: o.agent_name,
+                    order_no: o.order_no,
+                    order_date_parsed: o.order_date ? new Date(o.order_date) : null,
+                    group_name: o.group_name
+                }));
+            const results = await eggPushToGoogleSheets(keep);
+            if (results && results.skipped) {
+                UI.toast.error('Webhook URL not configured.');
+                return;
+            }
+            const failed = (results || []).filter(r => r && r.ok === false);
+            const skipped = (results || []).filter(r => r && r.skipped);
+            const ok = (results || []).filter(r => r && r.ok === true);
+            if (failed.length === 0) {
+                UI.toast.success(`Pushed: ${ok.map(r => r.region).join(', ') || 'nothing (regions empty)'}${skipped.length ? ` • Skipped (empty): ${skipped.map(r => r.region).join(', ')}` : ''}`);
+            } else {
+                const msg = failed.map(r => `${r.region}: ${r.error}`).join(' | ');
+                UI.toast.error(`Re-push failed — ${msg}`);
+            }
+        } catch (err) {
+            console.error('egg: re-push failed', err);
+            UI.toast.error('Re-push failed: ' + (err.message || 'unknown'));
         }
     };
 
@@ -46817,6 +46934,34 @@ JB 星期二到
             } else {
                 UI.toast.success(`Run committed. ${keep.length} rows saved, ${excluded.length} pushed up.`);
             }
+
+            // 4. Push the Channel Breakdown to Google Sheets (KL + PG).
+            //    Failures here do NOT roll back the commit — the Supabase data
+            //    is already safe. We surface failures via a sticky-style toast
+            //    and the user can re-push from Run History at any time.
+            try {
+                const pushResults = await eggPushToGoogleSheets(keep);
+                if (pushResults && pushResults.skipped) {
+                    UI.toast.info('Google Sheets push skipped — webhook URL not set (Config tab).');
+                } else if (Array.isArray(pushResults)) {
+                    const failed = pushResults.filter(r => r && r.ok === false);
+                    const ok = pushResults.filter(r => r && r.ok === true);
+                    const skipped = pushResults.filter(r => r && r.skipped);
+                    if (failed.length === 0) {
+                        const okMsg = ok.length ? `Synced to Google Sheets: ${ok.map(r => r.region).join(', ')}` : 'Google Sheets sync — both regions empty';
+                        const skipMsg = skipped.length ? ` • Skipped (no rows): ${skipped.map(r => r.region).join(', ')}` : '';
+                        UI.toast.success(okMsg + skipMsg);
+                    } else {
+                        const detail = failed.map(r => `${r.region}: ${r.error}`).join(' | ');
+                        UI.toast.error(`Google Sheets sync FAILED for ${failed.map(r => r.region).join(', ')} — re-push from Run History. (${detail})`);
+                        console.error('egg: sheets push failures', failed);
+                    }
+                }
+            } catch (sheetErr) {
+                console.error('egg: sheets push threw', sheetErr);
+                UI.toast.error(`Google Sheets sync threw: ${sheetErr.message || 'unknown'} — re-push from Run History.`);
+            }
+
             eggResetRun();
         } catch (err) {
             console.error('egg: commit failed', err);
@@ -47151,6 +47296,7 @@ JB 星期二到
                         <td style="padding:8px;">${r.run_by || '-'}</td>
                         <td style="padding:8px;">
                             <button class="btn-icon" title="View" onclick="app.eggViewRun(${r.id})"><i class="fas fa-eye"></i></button>
+                            <button class="btn-icon" title="Re-push to Google Sheets" onclick="app.eggRePushRunToSheets(${r.id})"><i class="fas fa-share-square" style="color:#0ea5e9;"></i></button>
                         </td>
                     </tr>
                 `;
@@ -52229,6 +52375,7 @@ Gold-${totGold}`;
         eggCompleteManualReconcile,
         // Tab 3 — History
         eggViewRun,
+        eggRePushRunToSheets,
         // Tab 4 — Config
         eggSaveConfigFromTextarea,
         eggResetConfigToDefault,
