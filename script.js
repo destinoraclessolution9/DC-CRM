@@ -46987,22 +46987,25 @@ JB 星期二到
         const sections = region
             ? _EGG_CHANNEL_SECTIONS.filter(s => s.region === region)
             : _EGG_CHANNEL_SECTIONS;
-        // Columns: Section | Agent | Group | Order Date | Order No | Product Code | Product | Qty
+        // Columns: Section | Agent | Group | Order Date | Order No | Product Code | Product | Qty | Collect by Name | Date Collect | Remarks
         // Group shows the agent's group_name (e.g. "KL Cheras", "PG Center" for Wholesale;
         // "Kim", "June" etc. for Online). Section title/subtotal/blank rows leave Group empty.
-        const headerCols = ['Section', 'Agent', 'Group', 'Order Date', 'Order No', 'Product Code', 'Product', 'Qty'];
+        // The last 3 columns (Collect by Name / Date Collect / Remarks) are intentionally
+        // left blank so the operations team can fill them in manually on the Google Sheet
+        // after the orders are collected.
+        const headerCols = ['Section', 'Agent', 'Group', 'Order Date', 'Order No', 'Product Code', 'Product', 'Qty', 'Collect by Name', 'Date Collect', 'Remarks'];
         const aoa = [headerCols];
         for (const sec of sections) {
             const sectionRows = keep.filter(r => r.region === sec.region && r.channel === sec.channel);
             const totalGold = sectionRows.filter(r => r.product === 'GOLD').reduce((s, r) => s + Number(r.quantity||0), 0);
             const totalKing = sectionRows.filter(r => r.product === 'KING').reduce((s, r) => s + Number(r.quantity||0), 0);
-            aoa.push([sec.title, '', '', '', '', '', `GOLD ${totalGold}`, `KING ${totalKing}`]);
+            aoa.push([sec.title, '', '', '', '', '', `GOLD ${totalGold}`, `KING ${totalKing}`, '', '', '']);
             if (sectionRows.length === 0) {
-                aoa.push(['', 'No orders', '', '', '', '', '', '']);
+                aoa.push(['', 'No orders', '', '', '', '', '', '', '', '', '']);
             } else {
                 for (const r of sectionRows) {
                     const dateStr = r.order_date_parsed ? eggFormatDateShort(r.order_date_parsed) : '-';
-                    aoa.push(['', r.agent_name || '-', r.group_name || '', dateStr, r.order_no || '-', r.product_code || '-', r.product || '', Number(r.quantity)||0]);
+                    aoa.push(['', r.agent_name || '-', r.group_name || '', dateStr, r.order_no || '-', r.product_code || '-', r.product || '', Number(r.quantity)||0, '', '', '']);
                 }
             }
             // Subtotal by ACTUAL product code (was hard-coded to FMLENX068/FMLEGG002,
@@ -47014,9 +47017,9 @@ JB 星期二到
                 byCode[code].qty += Number(r.quantity) || 0;
             }
             for (const [code, info] of Object.entries(byCode)) {
-                aoa.push(['', '', '', '', '', code, info.product, info.qty]);
+                aoa.push(['', '', '', '', '', code, info.product, info.qty, '', '', '']);
             }
-            aoa.push(['', '', '', '', '', '', '', '']); // blank separator row
+            aoa.push(['', '', '', '', '', '', '', '', '', '', '']); // blank separator row
         }
         return aoa;
     };
@@ -47031,7 +47034,7 @@ JB 星期二到
             const keep = (_eggState.newRows || []).filter(r => !_eggState.excludedKeys.has(r.unique_key));
             const aoa = eggBuildChannelBreakdownAoa(keep);
             const ws = XLSX.utils.aoa_to_sheet(aoa);
-            ws['!cols'] = [{ wch: 18 }, { wch: 22 }, { wch: 18 }, { wch: 12 }, { wch: 16 }, { wch: 16 }, { wch: 10 }, { wch: 10 }];
+            ws['!cols'] = [{ wch: 18 }, { wch: 22 }, { wch: 18 }, { wch: 12 }, { wch: 16 }, { wch: 16 }, { wch: 10 }, { wch: 10 }, { wch: 20 }, { wch: 14 }, { wch: 24 }];
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, ws, 'Channel Breakdown');
             const weekIso = eggFormatDateIso(_eggState.weekStartDate || eggGetCurrentMonday());
