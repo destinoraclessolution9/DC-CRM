@@ -52,6 +52,9 @@ profile — share with new hires on day one or pin in the team WhatsApp.
 29. [Noticeboard · 公告栏](#29-noticeboard--公告栏)
 30. [Profile & settings](#30-profile--settings)
 
+**Mobile & performance**
+31. [Mobile calendar — cold paint](#31-mobile-calendar--cold-paint)
+
 ---
 
 ## 1. Sign in & find your way around
@@ -468,6 +471,35 @@ sections:
 
 Changing password signs you out of every other session for safety.
 The strength meter turns green when the password is strong enough.
+
+## 31. Mobile calendar — cold paint
+
+![Mobile calendar cold paint](31-mobile-calendar-cold-paint.gif)
+
+**What the calendar looks like when you open it on your phone.** As of
+the Tier 1.1 perf fix (commit `dc74c81`), the cold-open paint runs in
+two phases instead of one big blocking fetch:
+
+- **Phase 1 (~400 ms)** — activities only. The grid renders chips
+  showing **when** stuff is happening (Booking / Birthday / Follow-up
+  type abbreviations). You can scroll and tap immediately.
+- **Phase 2 (~1.2 s)** — names + birthdays + the "Coming up" strip.
+  Silently re-renders when the data lands.
+
+**Net result:** first-interactive is ~5.8× faster than before
+(412 ms vs 2,400 ms). On 3G the difference is dramatic.
+
+**Verifying on your own phone:**
+1. Open Chrome on your phone, navigate to destinoraclessolution.com
+2. Connect to remote DevTools, filter console by `[mcal-perf]`
+3. Hard-reload — you should see two `phase…:done` log lines
+
+If Phase 1 is consistently > 1 second on a decent connection, ping
+the dev team — likely a Supabase region issue, not the CRM code.
+
+> **For the team:** if you swipe to a different month before Phase 2
+> finishes, the old month doesn't repaint over your new one. You'll
+> just see the new month's Phase 2 data fill in when it lands.
 
 ---
 

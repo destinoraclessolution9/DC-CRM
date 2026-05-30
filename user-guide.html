@@ -226,16 +226,16 @@
 
 <section class="hero">
   <div class="hero-inner">
-    <h1>Team User Guide<br><span class="accent">30 walkthroughs</span> · pick a workflow, get the steps</h1>
+    <h1>Team User Guide<br><span class="accent">31 walkthroughs</span> · pick a workflow, get the steps</h1>
     <p class="lede">
       Every CRM workflow your team will run — sign-in, sales pipeline, calendar,
       AI tools, contracts, admin, security — explained with a short animated GIF.
       Pin this page in the team chat or open it on Monday mornings with new hires.
     </p>
     <div class="hero-stats">
-      <div class="hero-stat"><b>30</b><span>workflows</span></div>
-      <div class="hero-stat"><b>~90</b><span>frames in total</span></div>
-      <div class="hero-stat"><b>3.8 MB</b><span>fits in one chat msg</span></div>
+      <div class="hero-stat"><b>31</b><span>workflows</span></div>
+      <div class="hero-stat"><b>~95</b><span>frames in total</span></div>
+      <div class="hero-stat"><b>3.9 MB</b><span>fits in one chat msg</span></div>
       <div class="hero-stat"><b>0 KB</b><span>customer data leaked</span></div>
     </div>
   </div>
@@ -302,6 +302,12 @@
       <li><a href="#g28"><span class="toc-num">28</span>Backup &amp; restore</a></li>
       <li><a href="#g29"><span class="toc-num">29</span>Noticeboard · 公告栏</a></li>
       <li><a href="#g30"><span class="toc-num">30</span>Profile &amp; settings</a></li>
+    </ol>
+  </div>
+  <div class="toc-group">
+    <h3>Mobile &amp; perf</h3>
+    <ol>
+      <li><a href="#g31"><span class="toc-num">31</span>Mobile calendar cold paint</a></li>
     </ol>
   </div>
 </nav>
@@ -681,6 +687,29 @@
   <div class="actions">
     <a href="/docs/user-guide/30-profile-settings.gif" download>↓ Download GIF</a>
     <a href="#g30" onclick="copyShareLink(event, '30-profile-settings.gif')">⎘ Copy link</a>
+  </div>
+</section>
+
+<!-- ────────────────────────  MOBILE & PERFORMANCE  ──────────────────────── -->
+<div class="group-divider"><h2>Mobile &amp; performance</h2><div class="line"></div></div>
+
+<section class="guide" id="g31">
+  <span class="badge purple">Step 31</span>
+  <h2>Mobile calendar — cold paint</h2>
+  <p class="who">Everyone on mobile · helpful for devs &amp; managers debugging</p>
+  <p class="body">
+    What the calendar looks like when you tap it on your phone (cold open).
+    Tier 1.1 splits the load into <b>Phase 1</b> (activities — ~400&nbsp;ms,
+    grid is usable straight away) and <b>Phase 2</b> (names, birthdays, the
+    <i>Coming up</i> strip — silently fills in ~1.2&nbsp;s later).
+    First-interactive is <b>~5.8× faster</b> than before. If Phase 1
+    consistently takes more than a second on your phone, ping the dev team —
+    likely a network issue, not the CRM.
+  </p>
+  <figure><img src="/docs/user-guide/31-mobile-calendar-cold-paint.gif" alt="Mobile calendar cold paint" loading="lazy"></figure>
+  <div class="actions">
+    <a href="/docs/user-guide/31-mobile-calendar-cold-paint.gif" download>↓ Download GIF</a>
+    <a href="#g31" onclick="copyShareLink(event, '31-mobile-calendar-cold-paint.gif')">⎘ Copy link</a>
   </div>
 </section>
 

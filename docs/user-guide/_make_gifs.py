@@ -4295,6 +4295,257 @@ def gif_profile_settings():
 
 
 # ══════════════════════════════════════════════════════════════════════════
+# GIF 31 — Mobile calendar · cold paint (Tier 1.1 two-phase render)
+# ══════════════════════════════════════════════════════════════════════════
+def gif_mobile_calendar():
+    """Show what the new mobile calendar cold-paint looks like.
+
+    Phase 1 (~400 ms) paints activities only — calendar grid is usable.
+    Phase 2 (~1.2 s) silently fills in person names, birthdays, and the
+    'Coming up' strip. Frame 4 shows the [mcal-perf] console markers
+    that developers can use to verify timing.
+    """
+    frames = []
+
+    def phone_frame(d, phase, with_perf=False):
+        """Draw a phone mockup at the canvas centre. phase ∈ {0,1,2}."""
+        # Canvas backdrop
+        d.rectangle([0, 0, W, H], fill=GRAY_100)
+        # Phone outer
+        pw, ph = 380, 660
+        px = (W - pw) // 2 - (220 if with_perf else 0)
+        py = (H - ph) // 2
+        # Rounded outer body
+        d.rounded_rectangle([px, py, px + pw, py + ph], radius=36,
+                            fill=GRAY_900)
+        # Screen
+        sx, sy, sw, sh = px + 10, py + 12, pw - 20, ph - 24
+        d.rounded_rectangle([sx, sy, sx + sw, sy + sh], radius=28,
+                            fill=WHITE)
+        # Notch
+        d.rounded_rectangle([sx + sw // 2 - 60, sy, sx + sw // 2 + 60, sy + 22],
+                            radius=11, fill=GRAY_900)
+        # Status bar
+        d.text((sx + 16, sy + 4), "9:41", fill=GRAY_900, font=F_TINY_B)
+        d.text((sx + sw - 60, sy + 4), "● ● ● ▮",
+               fill=GRAY_900, font=F_TINY_B)
+        # App header
+        ah_y = sy + 30
+        d.rectangle([sx, ah_y, sx + sw, ah_y + 50],
+                    fill=PRIMARY)
+        d.text((sx + 16, ah_y + 14), "Destin Oracles",
+               fill=WHITE, font=F_BODY_B)
+        d.text((sx + sw - 48, ah_y + 14), "≡",
+               fill=WHITE, font=F_BODY_B)
+        # Month strip
+        ms_y = ah_y + 60
+        d.text((sx + 16, ms_y), "May 2026",
+               fill=GRAY_900, font=F_H2)
+        d.text((sx + sw - 70, ms_y + 4), "‹  ›",
+               fill=GRAY_500, font=F_BODY_B)
+        # Day-of-week header
+        dw_y = ms_y + 40
+        days = ["M", "T", "W", "T", "F", "S", "S"]
+        cell_w = (sw - 24) // 7
+        for i, day in enumerate(days):
+            d.text((sx + 16 + i * cell_w + cell_w // 2 - 4, dw_y),
+                   day, fill=GRAY_500, font=F_TINY_B)
+        # Mobile calendar grid — compact 5x7
+        grid_y = dw_y + 20
+        # activity sample data — (day, activity_label, person_name, type)
+        # type: 'birthday', 'booking', 'followup'
+        all_acts = [
+            (3,  "Reading",      "Datin Sarah",   "booking"),
+            (7,  "BaZi taster",  "Kar Mun",       "booking"),
+            (10, "Birthday",     "Tan Mei Ling",  "birthday"),
+            (14, "Recharge",     "Datin Sarah",   "booking"),
+            (17, "Follow-up",    "Ahmad Rahman",  "followup"),
+            (21, "Couple sess.", "Lim Siew Hua",  "booking"),
+            (24, "Birthday",     "Brian Raj",     "birthday"),
+            (28, "Reading",      "Chong Kah Wai", "booking"),
+        ]
+        for r in range(5):
+            for c in range(7):
+                day_num = r * 7 + c + 1
+                if day_num > 31:
+                    continue
+                cx = sx + 16 + c * cell_w
+                cy = grid_y + r * 56
+                d.rounded_rectangle([cx, cy, cx + cell_w - 2, cy + 52],
+                                    radius=4, fill=GRAY_50,
+                                    outline=GRAY_200)
+                d.text((cx + 4, cy + 2), str(day_num),
+                       fill=GRAY_500, font=F_TINY_B)
+                # Find activities on this day
+                day_acts = [a for a in all_acts if a[0] == day_num]
+                for ai, (_, lbl, name, kind) in enumerate(day_acts):
+                    chip_y = cy + 18 + ai * 12
+                    if chip_y > cy + 46:
+                        break
+                    # Phase 0: no chips visible (just a faint loading dot)
+                    if phase == 0:
+                        d.ellipse([cx + cell_w // 2 - 3, cy + 26,
+                                   cx + cell_w // 2 + 3, cy + 32],
+                                  fill=GRAY_300)
+                        break
+                    # Phase 1: chip with activity label only (no person name)
+                    # Phase 2: chip with person name where applicable
+                    if kind == "birthday":
+                        chip_fill = ORANGE
+                        chip_fg = WHITE
+                    elif kind == "followup":
+                        chip_fill = BLUE
+                        chip_fg = WHITE
+                    else:
+                        chip_fill = PRIMARY
+                        chip_fg = WHITE
+                    d.rounded_rectangle([cx + 2, chip_y,
+                                         cx + cell_w - 4, chip_y + 10],
+                                        radius=2, fill=chip_fill)
+                    if phase == 1:
+                        # Just type abbreviation, no name
+                        text = {"birthday": "🎂",
+                                "followup": "↻",
+                                "booking":  "•"}[kind]
+                        # Use plain char (no emoji needed):
+                        text = {"birthday": "Bday",
+                                "followup": "F-up",
+                                "booking":  "Bkg"}[kind]
+                    else:
+                        # Phase 2: name visible (just first name to fit)
+                        text = name.split()[0][:8]
+                    d.text((cx + 4, chip_y - 1), text,
+                           fill=chip_fg, font=F_TINY_B)
+        # Bottom "Coming up" strip — only visible at Phase 2
+        cu_y = grid_y + 5 * 56 + 12
+        if phase >= 2:
+            d.rounded_rectangle([sx + 16, cu_y, sx + sw - 16, cu_y + 80],
+                                radius=8, fill=PRIMARY_BG)
+            d.text((sx + 24, cu_y + 6), "Coming up",
+                   fill=PRIMARY, font=F_SMALL_B)
+            d.text((sx + 24, cu_y + 26), "Today  ·  Datin Sarah",
+                   fill=GRAY_900, font=F_BODY_B)
+            d.text((sx + 24, cu_y + 46), "10:00 · Reading",
+                   fill=GRAY_700, font=F_SMALL)
+            d.text((sx + 24, cu_y + 60), "🎂 Tan Mei Ling — in 4 days",
+                   fill=ORANGE_HI, font=F_TINY_B)
+        else:
+            # placeholder skeleton
+            d.rounded_rectangle([sx + 16, cu_y, sx + sw - 16, cu_y + 80],
+                                radius=8, fill=GRAY_100)
+            d.rounded_rectangle([sx + 28, cu_y + 14, sx + 200, cu_y + 22],
+                                radius=4, fill=GRAY_200)
+            d.rounded_rectangle([sx + 28, cu_y + 36, sx + 240, cu_y + 44],
+                                radius=4, fill=GRAY_200)
+            d.rounded_rectangle([sx + 28, cu_y + 58, sx + 180, cu_y + 66],
+                                radius=4, fill=GRAY_200)
+        # Loading indicator while phase 1 is in flight
+        if phase == 0:
+            # tiny progress bar at top of grid
+            pbx, pby, pbw = sx + 16, grid_y - 8, sw - 32
+            d.rounded_rectangle([pbx, pby, pbx + pbw, pby + 3],
+                                radius=2, fill=GRAY_200)
+            d.rounded_rectangle([pbx, pby, pbx + pbw // 3, pby + 3],
+                                radius=2, fill=PRIMARY)
+        return px, py, pw, ph
+
+    # ── Frame 1: cold open — skeleton + loading ──────────────────────────
+    img, d = new_frame(bg=GRAY_100)
+    phone_frame(d, phase=0)
+    header(d, 1, "Cold open · first paint",
+           "Tap the calendar icon — the grid renders immediately, no data yet.")
+    footer(d, "Phase 1 fires the activities fetch on its own. No blocking on people / drafts / refills.")
+    frames.append(img)
+
+    # ── Frame 2: Phase 1 done — activities chips visible, no names ──────
+    img, d = new_frame(bg=GRAY_100)
+    phone_frame(d, phase=1)
+    # Small toast / timing chip floating off the phone
+    pw, ph = 380, 660
+    px = (W - pw) // 2
+    d.rounded_rectangle([px + pw + 20, (H - ph) // 2 + 80,
+                         px + pw + 240, (H - ph) // 2 + 130],
+                        radius=8, fill=GREEN_HI)
+    d.text((px + pw + 36, (H - ph) // 2 + 92),
+           "[mcal-perf]", fill=GREEN_BG, font=F_TINY_B)
+    d.text((px + pw + 36, (H - ph) // 2 + 108),
+           "phase1:activities:done +412ms",
+           fill=WHITE, font=F_SMALL_B)
+    header(d, 2, "Phase 1 done · activities painted (~400 ms)",
+           "Chips show the activity type. Calendar is usable — you can scroll and tap.")
+    footer(d, "Even without names yet, you can see WHEN stuff is happening. That's the win.")
+    frames.append(img)
+
+    # ── Frame 3: Phase 2 done — names + birthdays + Coming up ───────────
+    img, d = new_frame(bg=GRAY_100)
+    phone_frame(d, phase=2)
+    pw, ph = 380, 660
+    px = (W - pw) // 2
+    d.rounded_rectangle([px + pw + 20, (H - ph) // 2 + 80,
+                         px + pw + 240, (H - ph) // 2 + 162],
+                        radius=8, fill=GREEN_HI)
+    d.text((px + pw + 36, (H - ph) // 2 + 92),
+           "[mcal-perf]", fill=GREEN_BG, font=F_TINY_B)
+    d.text((px + pw + 36, (H - ph) // 2 + 108),
+           "phase2:people-drafts-",
+           fill=WHITE, font=F_SMALL_B)
+    d.text((px + pw + 36, (H - ph) // 2 + 124),
+           "refills:done +1183ms",
+           fill=WHITE, font=F_SMALL_B)
+    d.text((px + pw + 36, (H - ph) // 2 + 144),
+           "(silent re-render)",
+           fill=GREEN_BG, font=F_TINY_B)
+    header(d, 3, "Phase 2 done · names + birthdays fill in (~1.2 s)",
+           "Silent re-render swaps in person names + 'Coming up' strip below.")
+    footer(d, "If you swipe to a different month before Phase 2 lands, the old month doesn't repaint.")
+    frames.append(img)
+
+    # ── Frame 4: DevTools console showing the [mcal-perf] markers ──────
+    img, d = new_frame(bg=GRAY_900)
+    # Top header
+    d.rectangle([0, 0, W, 80], fill=GRAY_900)
+    d.text((24, 24), "Chrome DevTools · Console", fill=GRAY_300, font=F_BODY_B)
+    d.text((24, 50),
+           "Open with ⌥⌘J (Mac) or Ctrl-Shift-J (Windows). Filter: [mcal-perf]",
+           fill=GRAY_500, font=F_SMALL)
+    # Console output
+    panel_x, panel_y = 24, 100
+    panel_w, panel_h = W - 48, H - 170
+    d.rounded_rectangle([panel_x, panel_y, panel_x + panel_w, panel_y + panel_h],
+                        radius=8, fill=(20, 20, 28))
+    log_lines = [
+        ("ℹ", "[mcal-perf] mcal:start +0ms",                              GRAY_500),
+        ("ℹ", "[mcal-perf] phase1:activities:start +2ms",                 GRAY_400),
+        ("ℹ", "[mcal-perf] phase1:activities:done +412ms",                GREEN),
+        ("→", "  └─ calendar grid painted — user can interact",            PRIMARY),
+        ("", "", GRAY_500),
+        ("ℹ", "[mcal-perf] phase2:people-drafts-refills:done +1183ms",    GREEN),
+        ("→", "  └─ silent re-render: names + birthdays + Coming up",      PRIMARY),
+        ("", "", GRAY_500),
+        ("ℹ", "Total: 1183ms (was ~2400ms before Tier 1.1)",              ORANGE),
+        ("ℹ", "First interactive: 412ms (was ~2400ms — 5.8× faster)",     GREEN),
+    ]
+    for i, (icon, line, color) in enumerate(log_lines):
+        ly = panel_y + 24 + i * 32
+        if icon:
+            d.text((panel_x + 20, ly), icon, fill=color, font=F_BODY_B)
+        d.text((panel_x + 50, ly), line, fill=color, font=F_MONO)
+    # Bottom footer (regular footer)
+    d.rectangle([0, H - 50, W, H], fill=WHITE, outline=GRAY_200)
+    d.text((24, H - 38),
+           "If Phase 1 is > 1 second on your phone, ping the dev team — likely a bad mobile network.",
+           fill=GRAY_700, font=F_BODY)
+    # Header banner (translucent over the dark bg)
+    d.rectangle([0, 0, W, 90], fill=WHITE, outline=GRAY_200)
+    # restore step badge / title since header() draws on top of GRAY_900 bg
+    header(d, 4, "How to verify the timing yourself",
+           "Open DevTools console, filter by [mcal-perf]. Should see two phase-done lines.")
+    frames.append(img)
+
+    return frames
+
+
+# ══════════════════════════════════════════════════════════════════════════
 # Save GIF helper
 # ══════════════════════════════════════════════════════════════════════════
 def save_gif(frames, name):
@@ -4343,6 +4594,7 @@ def main():
     save_gif(gif_backup(),              "28-backup-manager.gif")
     save_gif(gif_noticeboard(),         "29-noticeboard.gif")
     save_gif(gif_profile_settings(),    "30-profile-settings.gif")
+    save_gif(gif_mobile_calendar(),     "31-mobile-calendar-cold-paint.gif")
 
 
 if __name__ == "__main__":
