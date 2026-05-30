@@ -204,6 +204,9 @@ window._ensureExcelJs = () => typeof ExcelJS !== 'undefined'
 window._ensureXlsx = () => typeof XLSX !== 'undefined'
     ? Promise.resolve()
     : window._loadScriptOnce('./libs/xlsx.full.min.js');
+window._ensureQrScanner = () => typeof Html5Qrcode !== 'undefined'
+    ? Promise.resolve()
+    : window._loadScriptOnce('./libs/html5-qrcode.min.js');
 
 // Patch to prevent the "undefined .call" error and map missing .create to .add
 if (!window.AppDataStore._patched) {
@@ -10265,6 +10268,274 @@ function _wireLoginBtn() {
         }
     };
 
+    // ========== CPS FORM PHOTO OCR (Gemini Flash via Edge Function) ==========
+    // Lets agents snap a photo of the paper "細解命盤" form and auto-fill the
+    // basic-info panel. Always shows a side-by-side review modal first so the
+    // agent can compare existing form values vs scanned values before applying.
+
+    // Map of scanned field → CRM form field id (suffix on `${prefix}-`)
+    const CPS_SCAN_FIELD_MAP = [
+        // [scannedKey, fieldSuffix, displayLabel, transformFn]
+        ['name',           'name',         'Full Name',          v => v],
+        ['gender',         'gender',       'Gender',             v => v],
+        ['dob_solar',      'dob',          'Date of Birth',      v => v],
+        ['dob_lunar',      'lunar',        'Lunar Birth',        v => v],
+        ['phone',          'phone',        'Phone',              v => v],
+        ['occupation',     'occupation',   'Occupation',         v => v],
+        ['email',          'email',        'Email',              v => v],
+        ['address',        'address',      'Address',            v => v],
+        // marital_status is a checkbox group, handled specially below
+        ['marital_status', '__marital__',  'Marital Status',     v => v],
+    ];
+
+    // Read the current value out of the form for a given field suffix
+    const _readCpsField = (prefix, suffix) => {
+        if (suffix === '__marital__') {
+            const cb = document.querySelector(`.${prefix}-marital-cb:checked`);
+            return cb ? cb.value : '';
+        }
+        const el = document.getElementById(`${prefix}-${suffix}`);
+        return el ? (el.value || '').trim() : '';
+    };
+
+    // Write a value into a form field
+    const _writeCpsField = (prefix, suffix, value) => {
+        if (suffix === '__marital__') {
+            document.querySelectorAll(`.${prefix}-marital-cb`).forEach(cb => {
+                cb.checked = (cb.value === value);
+            });
+            return;
+        }
+        const el = document.getElementById(`${prefix}-${suffix}`);
+        if (!el) return;
+        el.value = value || '';
+        // Trigger lunar recalc when DOB is set
+        if (suffix === 'dob' && typeof app !== 'undefined' && app.updateLunarBirth) {
+            try { app.updateLunarBirth(`${prefix}-dob`, `${prefix}-lunar`); } catch (e) {}
+        }
+    };
+
+    // Stash scan result so the review modal callbacks can read it
+    let _cpsScanCache = null;
+
+    const scanCpsForm = (prefix = 'cps') => {
+        const input = document.getElementById(`${prefix}-scan-input`);
+        if (!input) {
+            UI.toast.error('Scan input not found. Please reopen the form.');
+            return;
+        }
+        input.value = ''; // allow re-selecting the same file
+        input.click();
+    };
+
+    const handleCpsScanFile = async (input, prefix = 'cps') => {
+        const file = input.files && input.files[0];
+        if (!file) return;
+
+        if (!file.type.startsWith('image/')) {
+            UI.toast.error('Please select an image file.');
+            return;
+        }
+        if (file.size > 8 * 1024 * 1024) {
+            UI.toast.error('Image too large. Please use a photo under 8 MB.');
+            return;
+        }
+
+        // Show a "scanning…" toast / progress modal
+        UI.showModal('Scanning Form…', `
+            <div style="text-align:center; padding:20px 0;">
+                <i class="fas fa-spinner fa-spin" style="font-size:36px; color:#7c3aed; margin-bottom:14px;"></i>
+                <p style="color:var(--gray-600); margin:0;">Reading the form, please wait…</p>
+                <p style="color:var(--gray-400); font-size:12px; margin-top:6px;">(usually 3–6 seconds)</p>
+            </div>
+        `, []);
+
+        try {
+            // Convert image to base64 (avoids multipart edge cases)
+            const dataUrl = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = () => reject(new Error('Could not read file'));
+                reader.readAsDataURL(file);
+            });
+            const [meta, b64] = String(dataUrl).split(',');
+            const mime = (meta.match(/data:(.*?);base64/) || [])[1] || file.type || 'image/jpeg';
+
+            if (!window.supabase || !window.supabase.functions) {
+                throw new Error('Supabase client not available (offline mode?)');
+            }
+
+            const { data: res, error } = await window.supabase.functions.invoke('cps-form-ocr', {
+                body: { image_base64: b64, mime_type: mime },
+            });
+
+            if (error) throw new Error(error.message || 'Edge function call failed');
+            if (!res || res.ok === false) {
+                throw new Error(res?.detail || res?.error || 'OCR failed');
+            }
+
+            const scanned = res.fields || {};
+            const confidence = res.confidence || {};
+
+            // Snapshot the current form values BEFORE applying anything
+            const current = {};
+            CPS_SCAN_FIELD_MAP.forEach(([key, suffix]) => {
+                current[key] = _readCpsField(prefix, suffix);
+            });
+
+            _cpsScanCache = { prefix, scanned, confidence, current, rawText: res.raw_text || '' };
+            UI.hideModal();
+            renderCpsScanReview();
+        } catch (err) {
+            UI.hideModal();
+            console.error('CPS scan failed:', err);
+            UI.toast.error('Scan failed: ' + (err.message || 'Unknown error'));
+        }
+    };
+
+    const renderCpsScanReview = () => {
+        if (!_cpsScanCache) return;
+        const { scanned, confidence, current, rawText } = _cpsScanCache;
+
+        const norm = v => (v == null ? '' : String(v).trim());
+        const isEmpty = v => norm(v) === '';
+
+        const rows = CPS_SCAN_FIELD_MAP.map(([key, suffix, label]) => {
+            const cur = norm(current[key]);
+            const scn = norm(scanned[key]);
+            const conf = confidence[key] || null;
+
+            let status, defaultChecked;
+            if (isEmpty(scn)) {
+                status = 'no-scan';
+                defaultChecked = false;
+            } else if (isEmpty(cur)) {
+                status = 'fill-empty';
+                defaultChecked = true; // auto-fill empty fields
+            } else if (cur.toLowerCase() === scn.toLowerCase()) {
+                status = 'same';
+                defaultChecked = false; // already matches — no change needed
+            } else {
+                status = 'conflict';
+                defaultChecked = false; // agent must explicitly pick
+            }
+
+            return { key, suffix, label, cur, scn, conf, status, defaultChecked };
+        });
+
+        const statusBadge = (s) => {
+            if (s === 'same')       return '<span style="color:#10b981;font-size:11px;font-weight:600;">✓ MATCH</span>';
+            if (s === 'fill-empty') return '<span style="color:#7c3aed;font-size:11px;font-weight:600;">+ FILL</span>';
+            if (s === 'conflict')   return '<span style="color:#d97706;font-size:11px;font-weight:600;">⚠ CONFLICT</span>';
+            if (s === 'no-scan')    return '<span style="color:#9ca3af;font-size:11px;">— blank</span>';
+            return '';
+        };
+        const confBadge = (c) => {
+            if (!c) return '';
+            const color = c === 'high' ? '#10b981' : c === 'medium' ? '#f59e0b' : '#ef4444';
+            return `<span style="display:inline-block;padding:1px 6px;border-radius:10px;background:${color}1a;color:${color};font-size:10px;font-weight:600;text-transform:uppercase;">${c}</span>`;
+        };
+        const rowBg = (s) => {
+            if (s === 'conflict')   return '#fffbeb';
+            if (s === 'fill-empty') return '#f5f3ff';
+            if (s === 'same')       return '#f0fdf4';
+            return '#ffffff';
+        };
+
+        const html = `
+            <div style="max-height:60vh;overflow-y:auto;">
+                <p style="margin:0 0 14px;color:var(--gray-600);font-size:13px;">
+                    Review the scanned values below. Tick the ones you want to apply.
+                    <br><strong style="color:#d97706;">Conflicts</strong> need your explicit pick — nothing will overwrite without your tick.
+                </p>
+
+                <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                    <thead>
+                        <tr style="background:var(--gray-100);text-align:left;">
+                            <th style="padding:8px 6px;width:32px;"></th>
+                            <th style="padding:8px;">Field</th>
+                            <th style="padding:8px;">Currently in form</th>
+                            <th style="padding:8px;">Scanned</th>
+                            <th style="padding:8px;width:90px;">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.map((r, idx) => `
+                            <tr style="background:${rowBg(r.status)};border-bottom:1px solid #e5e7eb;">
+                                <td style="padding:8px 6px;text-align:center;">
+                                    ${r.status === 'no-scan' || r.status === 'same' ? '' : `
+                                        <input type="checkbox" class="cps-scan-pick" data-idx="${idx}" ${r.defaultChecked ? 'checked' : ''}>
+                                    `}
+                                </td>
+                                <td style="padding:8px;font-weight:500;color:var(--gray-700);">${r.label}</td>
+                                <td style="padding:8px;color:${r.cur ? 'var(--gray-700)' : 'var(--gray-400)'};">
+                                    ${r.cur ? escapeHtml(r.cur) : '<em style="font-size:12px;">(empty)</em>'}
+                                </td>
+                                <td style="padding:8px;color:${r.scn ? 'var(--gray-900)' : 'var(--gray-400)'};">
+                                    ${r.scn ? escapeHtml(r.scn) : '<em style="font-size:12px;">(blank)</em>'}
+                                    ${r.conf ? ' ' + confBadge(r.conf) : ''}
+                                </td>
+                                <td style="padding:8px;">${statusBadge(r.status)}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+
+                <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;">
+                    <button type="button" class="btn secondary btn-sm" onclick="app.toggleCpsScanAll(true)">
+                        <i class="fas fa-check-square"></i> Tick all available
+                    </button>
+                    <button type="button" class="btn secondary btn-sm" onclick="app.toggleCpsScanAll(false)">
+                        <i class="far fa-square"></i> Untick all
+                    </button>
+                </div>
+
+                ${rawText ? `
+                    <details style="margin-top:14px;font-size:12px;color:var(--gray-500);">
+                        <summary style="cursor:pointer;">Show raw OCR text</summary>
+                        <pre style="white-space:pre-wrap;background:var(--gray-100);padding:10px;border-radius:6px;margin-top:6px;font-size:11px;max-height:160px;overflow:auto;">${escapeHtml(rawText)}</pre>
+                    </details>
+                ` : ''}
+            </div>
+        `;
+
+        UI.showModal('Review Scanned Form', html, [
+            { text: 'Cancel', class: 'secondary', action: 'UI.hideModal()' },
+            { text: 'Apply Selected', class: 'primary', action: 'app.applyCpsScanSelection()' },
+        ]);
+    };
+
+    const toggleCpsScanAll = (checked) => {
+        document.querySelectorAll('.cps-scan-pick').forEach(cb => { cb.checked = !!checked; });
+    };
+
+    const applyCpsScanSelection = () => {
+        if (!_cpsScanCache) { UI.hideModal(); return; }
+        const { prefix, scanned } = _cpsScanCache;
+
+        const picked = Array.from(document.querySelectorAll('.cps-scan-pick:checked'))
+            .map(cb => parseInt(cb.dataset.idx, 10))
+            .filter(n => !isNaN(n));
+
+        let applied = 0;
+        picked.forEach(idx => {
+            const [key, suffix] = CPS_SCAN_FIELD_MAP[idx] || [];
+            if (!key) return;
+            const val = scanned[key];
+            if (val == null || String(val).trim() === '') return;
+            _writeCpsField(prefix, suffix, String(val).trim());
+            applied++;
+        });
+
+        UI.hideModal();
+        _cpsScanCache = null;
+        if (applied > 0) {
+            UI.toast.success(`Applied ${applied} field${applied === 1 ? '' : 's'} from scan. Please review before saving.`);
+        } else {
+            UI.toast.info('No fields were applied.');
+        }
+    };
+
     // ========== LEAD CAPTURE FORMS ==========
 
     const showLeadFormsView = async (container) => {
@@ -19126,8 +19397,24 @@ function _wireLoginBtn() {
         const searchHandler = readOnly ? '' : `oninput="app.debounceCall('${prefix}-referrer', () => app.searchBasicInfoReferrers('${prefix}'), 250)"`;
         const clearHandler = readOnly ? '' : `onclick="app.clearBasicInfoReferrer('${prefix}')"`;
 
+        const scanBtn = readOnly ? '' : `
+            <div class="cps-scan-toolbar" style="background:linear-gradient(135deg,#f5f3ff 0%,#ede9fe 100%);border:1px solid #ddd6fe;border-radius:10px;padding:12px 14px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+                <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+                    <div style="width:36px;height:36px;background:#7c3aed;border-radius:8px;display:flex;align-items:center;justify-content:center;color:white;font-size:16px;flex-shrink:0;"><i class="fas fa-camera"></i></div>
+                    <div style="min-width:0;">
+                        <div style="font-weight:600;font-size:14px;color:#111827;">Scan CPS Form</div>
+                        <div style="font-size:12px;color:#6b7280;">Snap a photo of the paper form to auto-fill</div>
+                    </div>
+                </div>
+                <button type="button" class="btn primary btn-sm" style="white-space:nowrap;" onclick="app.scanCpsForm('${prefix}')">
+                    <i class="fas fa-camera"></i> Take Photo
+                </button>
+                <input type="file" id="${prefix}-scan-input" accept="image/*" capture="environment" style="display:none;" onchange="app.handleCpsScanFile(this, '${prefix}')">
+            </div>`;
+
         return `
             <div class="form-section basic-info-block" data-prefix="${prefix}">
+                ${scanBtn}
                 <div class="form-row">
                     <div class="form-group half">
                         <label>Title</label>
@@ -37506,6 +37793,9 @@ const exportKPIReport = async (format) => {
                 </div>
 
                 <div class="marketing-tabs">
+                    <button class="marketing-tab ${_currentMarketingTab === 'forms' ? 'active' : ''}" onclick="app.switchMarketingTab('forms')">
+                        <i class="fas fa-clipboard-list"></i> Forms 表格
+                    </button>
                     <button class="marketing-tab ${_currentMarketingTab === 'templates' ? 'active' : ''}" onclick="app.switchMarketingTab('templates')">
                         <i class="fas fa-layer-group"></i> Message Templates
                     </button>
@@ -37584,7 +37874,8 @@ const exportKPIReport = async (format) => {
         // Update active tab styling
         document.querySelectorAll('.marketing-tab').forEach(t => {
             t.classList.remove('active');
-            if (t.textContent.includes(tab === 'templates' ? 'Message Templates' :
+            if (t.textContent.includes(tab === 'forms' ? 'Forms' :
+                tab === 'templates' ? 'Message Templates' :
                 tab === 'campaigns' ? 'Active Campaigns' :
                     tab === 'automation' ? 'Automation' :
                     tab === 'products' ? 'Products & Services' :
@@ -37600,7 +37891,9 @@ const exportKPIReport = async (format) => {
     };
 
     const renderMarketingTabContent = async () => {
-        if (_currentMarketingTab === 'templates') {
+        if (_currentMarketingTab === 'forms') {
+            return await renderFormsTab();
+        } else if (_currentMarketingTab === 'templates') {
             return await renderTemplatesTab();
         } else if (_currentMarketingTab === 'campaigns') {
             return await renderCampaignsTab();
@@ -49684,10 +49977,10 @@ Gold-${totGold}`;
                     <div id="st-session-chip"></div>
                 </div>
                 <div class="st-tabs" style="display:flex;gap:4px;border-bottom:2px solid var(--gray-200);margin-bottom:16px;overflow-x:auto;">
-                    ${['sessions','import','exclusions','count','bulk','reconcile','recount','summary'].map(t => `
+                    ${['sessions','shelves','import','exclusions','count','bulk','reconcile','recount','summary'].map(t => `
                         <button class="st-tab-btn" data-tab="${t}" onclick="app.stSwitchTab('${t}')"
                             style="padding:10px 16px;border:none;background:none;cursor:pointer;font-weight:600;white-space:nowrap;border-bottom:3px solid transparent;color:var(--gray-600);">
-                            ${({sessions:'Sessions',import:'System Stock',exclusions:'Exclusions',count:'Per-shelf Count',bulk:'Bulk Physical',reconcile:'Reconciliation',recount:'Recount',summary:'Final Summary'})[t]}
+                            ${({sessions:'Sessions',shelves:'Shelves (v2)',import:'System Stock',exclusions:'Exclusions',count:'Per-shelf Count',bulk:'Bulk Physical',reconcile:'Reconciliation',recount:'Recount',summary:'Final Summary'})[t]}
                         </button>
                     `).join('')}
                 </div>
@@ -49715,6 +50008,7 @@ Gold-${totGold}`;
         const body = document.getElementById('st-tab-body');
         if (!body) return;
         if (tab === 'sessions') body.innerHTML = _stRenderSessions();
+        else if (tab === 'shelves') body.innerHTML = _stRenderShelves();
         else if (tab === 'import') body.innerHTML = _stRenderImport();
         else if (tab === 'exclusions') body.innerHTML = _stRenderExclusions();
         else if (tab === 'count') body.innerHTML = _stRenderCount();
@@ -49801,21 +50095,44 @@ Gold-${totGold}`;
             { label: 'Create', type: 'primary', action: '(async () => { await app.stSaveNewSession(); })()' },
         ]);
     };
-    const stSaveNewSession = () => {
+    const stSaveNewSession = async () => {
         const id = (document.getElementById('st-new-id')?.value || '').trim();
         const locs = (document.getElementById('st-new-locs')?.value || '').split('\n').map(s => s.trim()).filter(Boolean);
         if (!id) return UI.toast.error('Session ID required');
         if (locs.length === 0) return UI.toast.error('Add at least one location');
         const sessions = _stSessions();
         if (sessions.some(s => s.id === id)) return UI.toast.error('Session ID already exists');
-        sessions.push({ id, locations: locs, createdAt: new Date().toISOString(), createdBy: _currentUser?.name || _currentUser?.email || 'admin', status: 'open' });
+        // Phase 3+4: also create an st_sessions row so other devices can join this
+        // session via Supabase. sbSessionId is stored on the local v1 record so
+        // QR scans + realtime stay correlated.
+        let sbSessionId = null;
+        const sb = _stSb();
+        if (sb) {
+            try {
+                const created = await sb.from('st_sessions').insert({
+                    session_code: id,
+                    created_by: _currentUser?.email || _currentUser?.name || 'admin',
+                }).select('id').single();
+                sbSessionId = created?.data?.id || null;
+            } catch (e) { console.warn('[stock-take v2] session insert failed:', e?.message); }
+        }
+        sessions.push({ id, locations: locs, createdAt: new Date().toISOString(), createdBy: _currentUser?.name || _currentUser?.email || 'admin', status: 'open', sbSessionId });
         _stSave('sessions', sessions);
         _stState.sessionId = id;
+        _stState.sbSessionId = sbSessionId;
+        if (sbSessionId) await stStartRealtime();
         UI.hideModal();
         UI.toast.success('Session created');
         stSwitchTab('import');
     };
-    const stActivateSession = (id) => { _stState.sessionId = id; UI.toast.success(`Activated ${id}`); stSwitchTab('count'); };
+    const stActivateSession = async (id) => {
+        _stState.sessionId = id;
+        const sess = _stSessions().find(s => s.id === id);
+        _stState.sbSessionId = sess?.sbSessionId || null;
+        if (_stState.sbSessionId) await stStartRealtime(); else await stStopRealtime();
+        UI.toast.success(`Activated ${id}`);
+        stSwitchTab('count');
+    };
     const stCloseSession = (id) => {
         const sessions = _stSessions();
         const s = sessions.find(x => x.id === id);
@@ -49882,8 +50199,11 @@ Gold-${totGold}`;
     };
 
     const _stParseRows = (rows) => {
-        // Expects array of objects with keys Location, SKU, System_Qty (case-insensitive)
+        // Expects array of objects with keys Location, SKU, System_Qty (case-insensitive).
+        // Phase 1: also captures Product_Name + Product_Attribute when present so the
+        // product master can be populated in one import pass.
         const out = [];
+        const productMeta = {};
         const seen = new Set();
         const dupes = [];
         for (const r of rows) {
@@ -49891,13 +50211,19 @@ Gold-${totGold}`;
             const loc = String(keys.location ?? '').trim();
             const sku = String(keys.sku ?? keys.productcode ?? '').trim();
             const qty = Number(keys.systemqty ?? keys.qty ?? keys.quantity ?? 0);
+            const productName = String(keys.productname ?? keys.name ?? '').trim();
+            const productAttribute = String(keys.productattribute ?? keys.attribute ?? '').trim();
             if (!loc || !sku) continue;
             const k = _stNormKey(loc, sku);
             if (seen.has(k)) { dupes.push(`${loc} / ${sku}`); continue; }
             seen.add(k);
             out.push({ Location: loc, SKU: sku, System_Qty: isFinite(qty) ? qty : 0 });
+            const skuUp = sku.toUpperCase();
+            if ((productName || productAttribute) && !productMeta[skuUp]) {
+                productMeta[skuUp] = { sku: skuUp, product_name: productName, product_attribute: productAttribute };
+            }
         }
-        return { rows: out, dupes };
+        return { rows: out, dupes, productMeta };
     };
 
     const stImportFile = async () => {
@@ -49912,9 +50238,11 @@ Gold-${totGold}`;
         const wb = XLSX.read(buf, { type: 'array' });
         const sheet = wb.Sheets[wb.SheetNames[0]];
         const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
-        const { rows: parsed, dupes } = _stParseRows(rows);
+        const { rows: parsed, dupes, productMeta } = _stParseRows(rows);
         if (parsed.length === 0) return UI.toast.error('No valid rows found (need Location, SKU, System_Qty)');
         _stSave(`systemStock.${sid}`, parsed);
+        _stMergeProductMaster(productMeta);
+        if (typeof _stV2SyncProductMaster === 'function') _stV2SyncProductMaster(productMeta).catch(() => {});
         UI.toast.success(`Imported ${parsed.length} rows${dupes.length ? ` (${dupes.length} dupes skipped)` : ''}`);
         stSwitchTab('import');
     };
@@ -49932,9 +50260,11 @@ Gold-${totGold}`;
             headers.forEach((h,i) => obj[h] = (cells[i] || '').trim());
             return obj;
         });
-        const { rows: parsed, dupes } = _stParseRows(rows);
+        const { rows: parsed, dupes, productMeta } = _stParseRows(rows);
         if (parsed.length === 0) return UI.toast.error('No valid rows parsed');
         _stSave(`systemStock.${sid}`, parsed);
+        _stMergeProductMaster(productMeta);
+        if (typeof _stV2SyncProductMaster === 'function') _stV2SyncProductMaster(productMeta).catch(() => {});
         UI.toast.success(`Imported ${parsed.length} rows${dupes.length ? ` (${dupes.length} dupes skipped)` : ''}`);
         stSwitchTab('import');
     };
@@ -49991,7 +50321,10 @@ Gold-${totGold}`;
         return `
             <div style="display:grid;grid-template-columns:1fr 1.3fr;gap:16px;">
                 <div style="background:white;padding:16px;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
-                    <h3 style="margin-top:0;font-size:16px;">Record Physical Count</h3>
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                        <h3 style="margin:0;font-size:16px;">Record Physical Count</h3>
+                        <button type="button" class="btn small" style="background:#7c3aed;color:white;" onclick="app.stScanShelfAndCount()" title="Scan a shelf QR — system shows expected SKUs for that shelf"><i class="fas fa-qrcode"></i> Scan Shelf</button>
+                    </div>
                     <div class="form-group" style="margin-bottom:10px;">
                         <label>Counter Name</label>
                         <input id="st-counter" type="text" value="${_stEsc(defaultCounter)}" style="width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:6px;">
@@ -50008,7 +50341,10 @@ Gold-${totGold}`;
                     </div>
                     <div class="form-group" style="margin-bottom:10px;">
                         <label>SKU</label>
-                        <input id="st-sku" type="text" placeholder="scan or type" onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('st-qty').focus();}" style="width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:6px;font-family:monospace;">
+                        <div style="display:flex;gap:6px;">
+                            <input id="st-sku" type="text" placeholder="scan or type" onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('st-qty').focus();}" style="flex:1;padding:8px;border:1px solid var(--gray-300);border-radius:6px;font-family:monospace;">
+                            <button type="button" class="btn small secondary" onclick="app.stOpenScanner('st-sku',{title:'Scan SKU'})" title="Open camera scanner"><i class="fas fa-camera"></i></button>
+                        </div>
                     </div>
                     <div class="form-group" style="margin-bottom:12px;">
                         <label>Counted Qty</label>
@@ -50044,12 +50380,22 @@ Gold-${totGold}`;
         if (!qtyRaw || !isFinite(qty) || qty < 0) return UI.toast.error('Valid qty required');
         if (_stIsExcluded(skuRaw)) return UI.toast.error(`${skuRaw.toUpperCase()} is on the exclusion list — counts are blocked. Remove from Exclusions tab if you want to count it.`);
         const counts = _stCounts(sid);
-        counts.push({
+        const newRow = {
             id: `c_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
             timestamp: new Date().toISOString(),
             counter, location, shelf, sku: skuRaw.toUpperCase(), qty,
-        });
+        };
+        counts.push(newRow);
         _stSave(`counts.${sid}`, counts);
+        // Phase 3+4: mirror into Supabase when this session is multi-device tracked.
+        const sb = _stSb();
+        if (sb && _stState.sbSessionId) {
+            sb.from('st_counts').insert({
+                session_id: _stState.sbSessionId,
+                sku: newRow.sku, qty,
+                counter, location_label: location, shelf_text: shelf,
+            }).then(() => {}).catch(() => {});
+        }
         // Clear SKU + qty so the next scan starts clean; keep counter, location,
         // and shelf (counter typically stays at the same shelf across SKUs).
         const skuEl = document.getElementById('st-sku');
@@ -50082,6 +50428,7 @@ Gold-${totGold}`;
         const exSet = _stExclusionSet();
         const physMap = {};
         for (const c of counts) {
+            if (c.superseded) continue;
             if (exSet.has(String(c.sku||'').trim().toUpperCase())) continue;
             const k = _stNormKey(c.location, c.sku);
             physMap[k] = (physMap[k] || 0) + Number(c.qty || 0);
@@ -50134,6 +50481,7 @@ Gold-${totGold}`;
         }
         const qrBySku = {};
         for (const c of counts) {
+            if (c.superseded) continue;
             const sku = String(c.sku||'').trim().toUpperCase();
             if (exSet.has(sku)) continue;
             qrBySku[sku] = (qrBySku[sku] || 0) + Number(c.qty || 0);
@@ -50160,6 +50508,12 @@ Gold-${totGold}`;
             const hasSys = sysBySku[sku] !== undefined;
             const physUsed = hasQr ? qrQty : (hasBulk ? bulkQty : 0);
             const variance = physUsed - sysQty;
+            // Phase 5: independent variances for full 3-way reconciliation.
+            // Without this, QR silently overrides Bulk and disagreements vanish.
+            const qrVsSys = hasQr ? qrQty - sysQty : null;
+            const bulkVsSys = hasBulk ? bulkQty - sysQty : null;
+            const qrVsBulk = hasQr && hasBulk ? qrQty - bulkQty : null;
+            const qrBulkDisagree = hasQr && hasBulk && Math.abs(qrQty - bulkQty) > tol;
             const source = hasQr && hasBulk ? 'qr+bulk' : hasQr ? 'qr' : hasBulk ? 'bulk' : 'none';
             let status;
             if (!hasSys && (hasQr || hasBulk)) status = 'Unregistered';
@@ -50172,6 +50526,10 @@ Gold-${totGold}`;
                 Bulk_Qty: bulkQty,
                 Physical_Used: physUsed,
                 Variance: variance,
+                QR_vs_System: qrVsSys,
+                Bulk_vs_System: bulkVsSys,
+                QR_vs_Bulk: qrVsBulk,
+                QR_vs_Bulk_Disagree: qrBulkDisagree,
                 Source: source,
                 Status: status,
                 ShelfCount: (sysShelves[sku]||[]).length,
@@ -50270,6 +50628,7 @@ Gold-${totGold}`;
                     <button class="btn secondary" onclick="app.stExportReconcile('csv')"><i class="fas fa-file-csv"></i> CSV</button>
                     <button class="btn secondary" onclick="app.stExportReconcile('xlsx')"><i class="fas fa-file-excel"></i> XLSX</button>
                     <button class="btn primary" onclick="app.stExportAdjustment()"><i class="fas fa-download"></i> Adjustment File</button>
+                    <button class="btn primary" style="background:#7c3aed;" onclick="app.stAcceptVariances()" title="Rewrite System Stock for this session so counted qty becomes the new baseline. Adjustment File is still exported for ERP sync."><i class="fas fa-check-double"></i> Accept Variances</button>
                 </div>
             </div>
             <div style="background:white;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.05);overflow:auto;max-height:600px;">
@@ -50362,10 +50721,18 @@ Gold-${totGold}`;
         const qty = Number(qtyRaw);
         if (!qtyRaw || !isFinite(qty) || qty < 0) return UI.toast.error('Valid qty required');
         const key = _stNormKey(location, sku);
-        const counts = _stCounts(sid).filter(c => _stNormKey(c.location, c.sku) !== key);
+        const nowIso = new Date().toISOString();
+        // Phase 1: soft-delete — mark prior counts for this (location, sku) as superseded
+        // rather than deleting them. The audit trail keeps original per-shelf scans;
+        // _stReconcile / _stReconcileBySku skip rows with superseded:true.
+        const counts = _stCounts(sid).map(c => {
+            if (_stNormKey(c.location, c.sku) !== key) return c;
+            if (c.superseded) return c;
+            return { ...c, superseded: true, supersededAt: nowIso };
+        });
         counts.push({
             id: `c_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
-            timestamp: new Date().toISOString(),
+            timestamp: nowIso,
             counter: _currentUser?.name || _currentUser?.email || 'admin',
             location, shelf: 'recount-total', sku: String(sku).toUpperCase(), qty, recount: true,
         });
@@ -50422,6 +50789,59 @@ Gold-${totGold}`;
             .filter(r => r.Status === 'Recount Required')
             .map(r => ({ Location: r.Location, SKU: r.SKU, New_System_Qty: r.Physical_Total }));
         _stDownload(`adjustment_${sid}.csv`, _stToCsv(rows, ['Location','SKU','New_System_Qty']), 'text/csv');
+    };
+
+    // Phase 1: rewrite System Stock for this session so counted qty becomes the new
+    // baseline. Useful when the ERP can't accept the Adjustment File and the user
+    // wants the next session to start from physical reality. Only acts on rows
+    // outside tolerance — matched rows keep their original System_Qty.
+    const stAcceptVariances = () => {
+        const sid = _stRequireOpenSession();
+        if (!sid) return;
+        const rec = _stReconcile(sid, _stGetThreshold());
+        const adjust = rec.filter(r => r.Status === 'Recount Required');
+        if (adjust.length === 0) return UI.toast.info('Nothing to accept — every row is within tolerance.');
+        if (!confirm(`Rewrite System Stock for ${adjust.length} (Location, SKU) row(s) using counted physical quantities?\n\nThis only mutates this session's localStorage record. The Adjustment File export still lets you sync back to your ERP.`)) return;
+        const adjMap = new Map();
+        for (const r of adjust) adjMap.set(_stNormKey(r.Location, r.SKU), r.Physical_Total);
+        const sys = _stSystemStock(sid).map(r => {
+            const k = _stNormKey(r.Location, r.SKU);
+            if (adjMap.has(k)) return { ...r, System_Qty: adjMap.get(k) };
+            return r;
+        });
+        // Unregistered SKUs (counted but not in system) — append them so they show up
+        // as system stock next session instead of silently dropping the data.
+        const sysKeys = new Set(sys.map(r => _stNormKey(r.Location, r.SKU)));
+        for (const r of rec) {
+            if (r.System_Qty === 0 && r.Variance > 0) {
+                const k = _stNormKey(r.Location, r.SKU);
+                if (!sysKeys.has(k)) {
+                    sys.push({ Location: r.Location, SKU: r.SKU, System_Qty: r.Physical_Total });
+                }
+            }
+        }
+        _stSave(`systemStock.${sid}`, sys);
+        UI.toast.success(`Updated System Stock for ${adjust.length} row(s). Re-run Reconciliation.`);
+        stSwitchTab('reconcile');
+    };
+
+    // ── Product master (Phase 1: side cache populated from System Stock imports) ──
+    // Survives session delete. Used by the v2 Shelf Master tab to seed the product
+    // catalog and by autocomplete in the Count form.
+    const _stProductMaster = () => _stLoad('productMaster', {});
+    const _stMergeProductMaster = (incoming) => {
+        if (!incoming || !Object.keys(incoming).length) return;
+        const master = _stProductMaster();
+        for (const sku of Object.keys(incoming)) {
+            const cur = master[sku] || {};
+            master[sku] = {
+                sku,
+                product_name: incoming[sku].product_name || cur.product_name || '',
+                product_attribute: incoming[sku].product_attribute || cur.product_attribute || '',
+                updated_at: new Date().toISOString(),
+            };
+        }
+        _stSave('productMaster', master);
     };
 
     // ── Exclusions tab ──────────────────────────────────────────
@@ -50762,17 +51182,19 @@ Gold-${totGold}`;
                         <th scope="col" style="padding:10px;text-align:right;" title="From bulk Excel upload">Bulk</th>
                         <th scope="col" style="padding:10px;text-align:right;" title="QR overrides Bulk if any QR scan exists for that SKU">Physical Used</th>
                         <th scope="col" style="padding:10px;text-align:right;">Variance</th>
+                        <th scope="col" style="padding:10px;text-align:right;" title="QR minus Bulk — flags when the two physical sources disagree, even if either agrees with System">QR vs Bulk</th>
                         <th scope="col" style="padding:10px;text-align:center;">Source</th>
                         <th scope="col" style="padding:10px;text-align:center;">Status</th>
                         <th scope="col" style="padding:10px;text-align:left;">Reason</th>
                     </tr></thead>
-                    <tbody>${bySku.map(r => `<tr style="border-top:1px solid var(--gray-100);">
+                    <tbody>${bySku.map(r => `<tr style="border-top:1px solid var(--gray-100);${r.QR_vs_Bulk_Disagree?'background:#fff7ed;':''}">
                         <td style="padding:8px 10px;font-family:monospace;">${_stEsc(r.SKU)}${r.ShelfCount > 1 ? ` <span style="background:#dbeafe;color:#1e40af;padding:1px 5px;border-radius:3px;font-size:10px;cursor:help;" title="On ${r.ShelfCount} shelves: ${(r.Shelves||[]).map(s => _stEsc(s.Location) + '=' + s.Qty).join(', ')}">×${r.ShelfCount}</span>` : ''}</td>
                         <td style="padding:8px 10px;text-align:right;">${r.System_Qty}</td>
                         <td style="padding:8px 10px;text-align:right;color:${r.QR_Qty?'#0ea5e9':'#94a3b8'};">${r.QR_Qty || '—'}</td>
                         <td style="padding:8px 10px;text-align:right;color:${r.Bulk_Qty?'#0ea5e9':'#94a3b8'};">${r.Bulk_Qty || '—'}</td>
                         <td style="padding:8px 10px;text-align:right;font-weight:600;">${r.Physical_Used}</td>
                         <td style="padding:8px 10px;text-align:right;color:${r.Variance===0?'inherit':(r.Variance>0?'#059669':'#dc2626')};font-weight:${r.Variance===0?400:600};">${r.Variance>0?'+':''}${r.Variance}</td>
+                        <td style="padding:8px 10px;text-align:right;color:${r.QR_vs_Bulk_Disagree?'#b45309':(r.QR_vs_Bulk===null?'#94a3b8':'inherit')};font-weight:${r.QR_vs_Bulk_Disagree?700:400};">${r.QR_vs_Bulk === null ? '—' : (r.QR_vs_Bulk > 0 ? '+' : '') + r.QR_vs_Bulk}${r.QR_vs_Bulk_Disagree ? ' <i class="fas fa-exclamation-triangle" title="QR and Bulk disagree beyond tolerance"></i>' : ''}</td>
                         <td style="padding:8px 10px;text-align:center;font-size:11px;color:var(--gray-600);">${_stEsc(r.Source)}</td>
                         <td style="padding:8px 10px;text-align:center;">
                             <span style="padding:3px 8px;border-radius:10px;font-size:11px;font-weight:600;background:${
@@ -50786,13 +51208,13 @@ Gold-${totGold}`;
                             };">${r.Status}</span>
                         </td>
                         <td style="padding:6px 10px;">
-                            ${r.Status === 'Recount Required' || r.Status === 'Unregistered' ? `
+                            ${r.Status === 'Recount Required' || r.Status === 'Unregistered' || r.QR_vs_Bulk_Disagree ? `
                                 <input type="text" value="${_stEsc(reasons[r.SKU]||'')}" placeholder="reason..."
                                     onblur="app.stSetReason('${_stAttr(r.SKU)}', this.value)"
                                     style="width:100%;padding:4px 6px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px;">
                             ` : ''}
                         </td>
-                    </tr>`).join('') || `<tr><td colspan="9" style="padding:30px;text-align:center;color:var(--gray-500);">No data — import System Stock or upload Bulk Physical first.</td></tr>`}</tbody>
+                    </tr>`).join('') || `<tr><td colspan="10" style="padding:30px;text-align:center;color:var(--gray-500);">No data — import System Stock or upload Bulk Physical first.</td></tr>`}</tbody>
                 </table>
             </div>
         `;
@@ -50827,13 +51249,418 @@ Gold-${totGold}`;
             Bulk_Qty: r.Bulk_Qty,
             Physical_Used: r.Physical_Used,
             Variance: r.Variance,
+            QR_vs_System: r.QR_vs_System === null ? '' : r.QR_vs_System,
+            Bulk_vs_System: r.Bulk_vs_System === null ? '' : r.Bulk_vs_System,
+            QR_vs_Bulk: r.QR_vs_Bulk === null ? '' : r.QR_vs_Bulk,
+            QR_vs_Bulk_Disagree: r.QR_vs_Bulk_Disagree ? 'YES' : '',
             Source: r.Source,
             Status: r.Status,
             Reason: reasons[r.SKU] || '',
         }));
-        const headers = ['Session','Counter','Method','Partial','Uncounted_Locations','SKU','On_Shelves','System_Total','QR_Qty','Bulk_Qty','Physical_Used','Variance','Source','Status','Reason'];
+        const headers = ['Session','Counter','Method','Partial','Uncounted_Locations','SKU','On_Shelves','System_Total','QR_Qty','Bulk_Qty','Physical_Used','Variance','QR_vs_System','Bulk_vs_System','QR_vs_Bulk','QR_vs_Bulk_Disagree','Source','Status','Reason'];
         if (fmt === 'csv') _stDownload(`summary_${sid}.csv`, _stToCsv(rows, headers), 'text/csv');
         else await _stToXlsx(rows, 'Summary', `summary_${sid}.xlsx`);
+    };
+
+    // ========================================================================
+    // STOCK TAKE v2 — Supabase-backed Shelf Master + QR camera scanner
+    // ------------------------------------------------------------------------
+    // v1 (above) persists in localStorage and stays as-is so existing sessions
+    // continue to work. v2 adds:
+    //   * Stores and Shelves entities backed by Supabase (st_stores, st_shelves)
+    //   * Per-shelf expected SKU/qty (st_shelf_expected)
+    //   * Camera-based QR scanner that resolves a shelf QR to expected products
+    //   * Realtime sync of QR scans across devices via st_counts table
+    //
+    // RLS is current_user_level() <= 2 on every st_* table — Super Admin only,
+    // matching the UI gate above. See migrations/stock_take_v2_2026-05-30.sql.
+    // ========================================================================
+    const _stV2 = {
+        stores: [],
+        shelves: [],
+        shelfByQr: new Map(),
+        productMaster: [],
+        loaded: false,
+        loading: null,
+    };
+
+    const _stSb = () => (typeof window !== 'undefined' && window.supabase) ? window.supabase : null;
+
+    const _stV2Available = () => !!_stSb();
+
+    const _stV2Load = async () => {
+        const sb = _stSb();
+        if (!sb) return null;
+        if (_stV2.loaded) return _stV2;
+        if (_stV2.loading) return _stV2.loading;
+        _stV2.loading = (async () => {
+            const [stores, shelves, master] = await Promise.all([
+                sb.from('st_stores').select('*').order('store_code'),
+                sb.from('st_shelves').select('*').order('shelf_code'),
+                sb.from('st_product_master').select('*').order('sku').limit(5000),
+            ]);
+            _stV2.stores = stores.data || [];
+            _stV2.shelves = shelves.data || [];
+            _stV2.productMaster = master.data || [];
+            _stV2.shelfByQr = new Map(_stV2.shelves.map(s => [String(s.qr_payload||'').trim().toUpperCase(), s]));
+            _stV2.loaded = true;
+            _stV2.loading = null;
+            return _stV2;
+        })();
+        return _stV2.loading;
+    };
+    const _stV2Reload = () => { _stV2.loaded = false; _stV2.loading = null; return _stV2Load(); };
+
+    const _stV2SyncProductMaster = async (productMeta) => {
+        const sb = _stSb();
+        if (!sb || !productMeta) return;
+        const rows = Object.values(productMeta).filter(r => r.sku);
+        if (!rows.length) return;
+        await sb.from('st_product_master').upsert(rows, { onConflict: 'sku' });
+    };
+
+    // ── QR camera scanner modal ───────────────────────────────────────────
+    // Mounts an html5-qrcode video stream into a temp <div>, writes the decoded
+    // string into the target input element, and closes the modal. Falls back to
+    // a clear error toast if camera access is denied — the hardware barcode-gun
+    // path still works via the same input element.
+    const _stQrInstance = { instance: null, divId: 'st-qr-reader' };
+    const _stStopQr = async () => {
+        if (_stQrInstance.instance) {
+            try { await _stQrInstance.instance.stop(); } catch {}
+            try { _stQrInstance.instance.clear(); } catch {}
+            _stQrInstance.instance = null;
+        }
+    };
+    const stOpenScanner = async (targetInputId, opts = {}) => {
+        await _stStopQr();
+        try {
+            await window._ensureQrScanner();
+        } catch (e) {
+            return UI.toast.error('QR scanner library failed to load: ' + (e?.message || e));
+        }
+        if (typeof Html5Qrcode === 'undefined') return UI.toast.error('QR scanner unavailable in this browser');
+        const title = opts.title || 'Scan code';
+        const sublabel = opts.sublabel || 'Point the camera at the QR / barcode.';
+        UI.showModal(title, `
+            <div style="text-align:center;">
+                <div style="color:var(--gray-600);font-size:13px;margin-bottom:8px;">${_stEsc(sublabel)}</div>
+                <div id="st-qr-reader" style="width:100%;max-width:420px;margin:0 auto;"></div>
+                <div id="st-qr-msg" style="color:#dc2626;font-size:12px;margin-top:8px;min-height:18px;"></div>
+            </div>
+        `, [
+            { label: 'Cancel', type: 'secondary', action: '(async () => { await app._stCancelScanner(); UI.hideModal(); })()' },
+        ]);
+        // Defer until modal DOM mounts.
+        await new Promise(r => setTimeout(r, 80));
+        try {
+            _stQrInstance.instance = new Html5Qrcode(_stQrInstance.divId);
+            const onScan = async (decodedText) => {
+                try { await _stStopQr(); } catch {}
+                const tgt = document.getElementById(targetInputId);
+                if (tgt) {
+                    tgt.value = decodedText;
+                    tgt.dispatchEvent(new Event('input', { bubbles: true }));
+                }
+                UI.hideModal();
+                UI.toast.success(`Scanned: ${decodedText}`);
+                if (typeof opts.onResult === 'function') opts.onResult(decodedText);
+            };
+            const onError = () => {}; // per-frame decode failures are noisy; ignore
+            await _stQrInstance.instance.start(
+                { facingMode: 'environment' },
+                { fps: 12, qrbox: { width: 240, height: 240 } },
+                onScan, onError
+            );
+        } catch (e) {
+            const msg = document.getElementById('st-qr-msg');
+            if (msg) msg.textContent = 'Camera access failed: ' + (e?.message || e);
+        }
+    };
+    const _stCancelScanner = () => _stStopQr();
+
+    // ── Shelf-aware Scan & Count modal ────────────────────────────────────
+    // Scans a shelf QR, resolves it to a known shelf, and renders the expected
+    // SKU list with one-tap qty entry. Each save inserts a row into the live
+    // v1 counts (so reconciliation still works) AND mirrors into Supabase
+    // st_counts when the session has a Supabase session id.
+    const stScanShelfAndCount = async () => {
+        if (!_stRequireOpenSession()) return;
+        await _stV2Load();
+        await stOpenScanner('st-scan-shelf-target', {
+            title: 'Scan shelf QR',
+            sublabel: 'Point at the shelf label. The system will show expected products.',
+            onResult: async (payload) => {
+                const key = String(payload || '').trim().toUpperCase();
+                const shelf = _stV2.shelfByQr.get(key);
+                if (!shelf) {
+                    UI.toast.error(`Shelf "${payload}" not in master. Add it in the Shelves tab first.`);
+                    return;
+                }
+                await _stOpenShelfCountSheet(shelf);
+            },
+        });
+        // Hidden input the scanner writes into; not used otherwise.
+        const hidden = document.createElement('input');
+        hidden.id = 'st-scan-shelf-target';
+        hidden.type = 'hidden';
+        document.body.appendChild(hidden);
+    };
+
+    const _stShelfExpected = async (shelfId) => {
+        const sb = _stSb();
+        if (!sb) return [];
+        const { data } = await sb
+            .from('st_shelf_expected')
+            .select('sku, expected_qty, st_product_master:sku(product_name, product_attribute)')
+            .eq('shelf_id', shelfId);
+        return data || [];
+    };
+
+    const _stOpenShelfCountSheet = async (shelf) => {
+        const expected = await _stShelfExpected(shelf.id);
+        const store = _stV2.stores.find(s => s.id === shelf.store_id);
+        const locLabel = `${store ? store.store_code : ''} / ${shelf.shelf_code}`.replace(/^\s*\//, '').trim();
+        const rowsHtml = expected.length === 0
+            ? `<tr><td colspan="3" style="padding:14px;text-align:center;color:var(--gray-500);">No expected products mapped to this shelf yet. Counts can still be entered manually below.</td></tr>`
+            : expected.map(e => `
+                <tr style="border-top:1px solid var(--gray-100);">
+                    <td style="padding:6px 8px;font-family:monospace;font-size:12px;">${_stEsc(e.sku)}
+                        ${e.st_product_master?.product_name ? `<div style="color:var(--gray-500);font-size:11px;font-family:inherit;">${_stEsc(e.st_product_master.product_name)}</div>` : ''}</td>
+                    <td style="padding:6px 8px;text-align:right;color:var(--gray-600);">${e.expected_qty}</td>
+                    <td style="padding:6px 8px;text-align:right;"><input type="number" min="0" step="1" data-sku="${_stAttr(e.sku)}" data-expected="${e.expected_qty}" class="st-shelf-count-input" style="width:80px;padding:4px;border:1px solid var(--gray-300);border-radius:4px;text-align:right;"></td>
+                </tr>
+            `).join('');
+        UI.showModal(`Count shelf: ${_stEsc(locLabel)}`, `
+            <div style="color:var(--gray-600);font-size:12px;margin-bottom:8px;">Shelf QR: <code>${_stEsc(shelf.qr_payload)}</code></div>
+            <div style="max-height:340px;overflow:auto;border:1px solid var(--gray-200);border-radius:6px;">
+                <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                    <thead style="background:var(--gray-50);position:sticky;top:0;"><tr>
+                        <th scope="col" style="padding:6px 8px;text-align:left;">SKU</th>
+                        <th scope="col" style="padding:6px 8px;text-align:right;">Expected</th>
+                        <th scope="col" style="padding:6px 8px;text-align:right;">Counted</th>
+                    </tr></thead>
+                    <tbody>${rowsHtml}</tbody>
+                </table>
+            </div>
+            <div style="margin-top:10px;display:flex;gap:6px;align-items:center;">
+                <input type="text" id="st-extra-sku" placeholder="Unexpected SKU…" style="flex:2;padding:6px;border:1px solid var(--gray-300);border-radius:4px;font-family:monospace;">
+                <input type="number" id="st-extra-qty" placeholder="qty" min="0" step="1" style="width:90px;padding:6px;border:1px solid var(--gray-300);border-radius:4px;">
+                <button type="button" class="btn small secondary" onclick="(async () => { const sku=document.getElementById('st-extra-sku')?.value?.trim().toUpperCase(); const q=Number(document.getElementById('st-extra-qty')?.value); if(!sku||!isFinite(q)||q<0) return UI.toast.error('SKU and qty required'); const tbody=document.querySelector('.st-shelf-count-input')?.closest('tbody'); if(!tbody) return; const tr=document.createElement('tr'); tr.style.borderTop='1px solid var(--gray-100)'; tr.style.background='#fff7ed'; tr.innerHTML='<td style=\\'padding:6px 8px;font-family:monospace;font-size:12px;\\'>'+sku+' <span style=\\'background:#fed7aa;color:#9a3412;font-size:10px;padding:1px 4px;border-radius:3px;\\'>UNEXPECTED</span></td><td style=\\'padding:6px 8px;text-align:right;color:var(--gray-600);\\'>0</td><td style=\\'padding:6px 8px;text-align:right;\\'><input type=\\'number\\' min=\\'0\\' step=\\'1\\' data-sku=\\''+sku+'\\' data-expected=\\'0\\' class=\\'st-shelf-count-input\\' value=\\''+q+'\\' style=\\'width:80px;padding:4px;border:1px solid var(--gray-300);border-radius:4px;text-align:right;\\'></td>'; tbody.appendChild(tr); document.getElementById('st-extra-sku').value=''; document.getElementById('st-extra-qty').value=''; })()">+ Add</button>
+            </div>
+        `, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save shelf counts', type: 'primary', action: `(async () => { await app.stSaveShelfCounts('${_stAttr(shelf.id)}','${_stAttr(shelf.qr_payload)}','${_stAttr(locLabel)}'); })()` },
+        ]);
+    };
+
+    const stSaveShelfCounts = async (shelfId, qrPayload, locLabel) => {
+        const sid = _stRequireOpenSession();
+        if (!sid) return;
+        const inputs = document.querySelectorAll('.st-shelf-count-input');
+        if (!inputs.length) { UI.hideModal(); return; }
+        const counter = _currentUser?.name || _currentUser?.email || 'admin';
+        const sb = _stSb();
+        const counts = _stCounts(sid);
+        const exSet = _stExclusionSet();
+        const nowIso = new Date().toISOString();
+        let added = 0;
+        const sbRows = [];
+        for (const input of inputs) {
+            const sku = String(input.dataset.sku || '').trim().toUpperCase();
+            const qtyRaw = String(input.value || '').trim();
+            if (!sku || qtyRaw === '') continue;
+            const qty = Number(qtyRaw);
+            if (!isFinite(qty) || qty < 0) continue;
+            if (exSet.has(sku)) continue;
+            counts.push({
+                id: `c_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
+                timestamp: nowIso,
+                counter, location: locLabel, shelf: qrPayload, sku, qty,
+                shelfId,
+            });
+            sbRows.push({ session_id: _stState.sbSessionId || null, shelf_id: shelfId, sku, qty, counter, location_label: locLabel, shelf_text: qrPayload });
+            added++;
+        }
+        if (!added) { UI.hideModal(); return UI.toast.info('No counts entered.'); }
+        _stSave(`counts.${sid}`, counts);
+        if (sb && _stState.sbSessionId) {
+            try { await sb.from('st_counts').insert(sbRows.filter(r => r.session_id)); }
+            catch (e) { console.warn('[stock-take v2] supabase count insert failed:', e?.message); }
+        }
+        UI.hideModal();
+        UI.toast.success(`+${added} count(s) on ${locLabel}`);
+        _stRefreshCountsList();
+    };
+
+    // ── Realtime: subscribe to st_counts for the current Supabase session ─
+    // When another device inserts a row, mirror it into local counts so the
+    // Recent Counts list and reconciliation pick it up without a manual refresh.
+    let _stRealtimeChannel = null;
+    const stStartRealtime = async () => {
+        const sb = _stSb();
+        if (!sb || !_stState.sbSessionId) return;
+        if (_stRealtimeChannel) { try { sb.removeChannel(_stRealtimeChannel); } catch {} _stRealtimeChannel = null; }
+        _stRealtimeChannel = sb
+            .channel(`st_counts_${_stState.sbSessionId}`)
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'st_counts', filter: `session_id=eq.${_stState.sbSessionId}` }, payload => {
+                const row = payload?.new; if (!row) return;
+                const local = _stCounts(_stState.sessionId);
+                if (local.some(c => c.id === row.id)) return;
+                local.push({
+                    id: row.id, timestamp: row.created_at, counter: row.counter || '',
+                    location: row.location_label || '', shelf: row.shelf_text || '',
+                    sku: row.sku, qty: row.qty, shelfId: row.shelf_id, fromRemote: true,
+                });
+                _stSave(`counts.${_stState.sessionId}`, local);
+                _stRefreshCountsList();
+            })
+            .subscribe();
+    };
+    const stStopRealtime = async () => {
+        const sb = _stSb();
+        if (sb && _stRealtimeChannel) { try { await sb.removeChannel(_stRealtimeChannel); } catch {} }
+        _stRealtimeChannel = null;
+    };
+
+    // ── Shelves master tab (Stores -> Shelves -> Expected SKUs) ───────────
+    const _stRenderShelves = () => {
+        if (!_stV2Available()) return `<div style="padding:40px;text-align:center;color:var(--gray-500);">Supabase client not available. Sign in and reload.</div>`;
+        // Trigger background load on first render
+        _stV2Load().then(() => stSwitchTab('shelves'));
+        if (!_stV2.loaded) return `<div style="padding:40px;text-align:center;color:var(--gray-500);"><i class="fas fa-spinner fa-spin"></i> Loading shelves master…</div>`;
+        const storesHtml = _stV2.stores.length === 0
+            ? `<div style="padding:20px;color:var(--gray-500);text-align:center;">No stores yet. Add one to get started.</div>`
+            : _stV2.stores.map(s => `
+                <tr style="border-top:1px solid var(--gray-100);">
+                    <td style="padding:8px 10px;font-family:monospace;">${_stEsc(s.store_code)}</td>
+                    <td style="padding:8px 10px;">${_stEsc(s.name)}</td>
+                    <td style="padding:8px 10px;text-align:right;">${_stV2.shelves.filter(sh => sh.store_id === s.id).length}</td>
+                    <td style="padding:8px 10px;text-align:right;"><button class="btn small" style="color:#dc2626;" onclick="app.stV2DeleteStore('${_stAttr(s.id)}')"><i class="fas fa-trash"></i></button></td>
+                </tr>`).join('');
+        const shelvesHtml = _stV2.shelves.length === 0
+            ? `<div style="padding:20px;color:var(--gray-500);text-align:center;">No shelves yet.</div>`
+            : _stV2.shelves.map(sh => {
+                const store = _stV2.stores.find(s => s.id === sh.store_id);
+                return `
+                <tr style="border-top:1px solid var(--gray-100);">
+                    <td style="padding:8px 10px;font-family:monospace;">${_stEsc(store?.store_code || '?')}</td>
+                    <td style="padding:8px 10px;font-family:monospace;">${_stEsc(sh.shelf_code)}</td>
+                    <td style="padding:8px 10px;font-family:monospace;font-size:11px;">${_stEsc(sh.qr_payload)}</td>
+                    <td style="padding:8px 10px;color:var(--gray-600);font-size:12px;">${_stEsc(sh.description||'')}</td>
+                    <td style="padding:8px 10px;text-align:right;white-space:nowrap;">
+                        <button class="btn small secondary" onclick="app.stV2EditExpected('${_stAttr(sh.id)}')"><i class="fas fa-list"></i> Expected</button>
+                        <button class="btn small" style="color:#dc2626;" onclick="app.stV2DeleteShelf('${_stAttr(sh.id)}')"><i class="fas fa-trash"></i></button>
+                    </td>
+                </tr>`;
+            }).join('');
+        return `
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+                <div style="background:white;padding:14px;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                    <h3 style="margin:0 0 10px;font-size:15px;"><i class="fas fa-store"></i> Add Store</h3>
+                    <div style="display:flex;gap:6px;">
+                        <input id="st-v2-store-code" placeholder="store code (e.g. PUCHONG)" style="flex:1;padding:6px;border:1px solid var(--gray-300);border-radius:4px;font-family:monospace;text-transform:uppercase;">
+                        <input id="st-v2-store-name" placeholder="name" style="flex:2;padding:6px;border:1px solid var(--gray-300);border-radius:4px;">
+                        <button class="btn small primary" onclick="app.stV2AddStore()"><i class="fas fa-plus"></i></button>
+                    </div>
+                </div>
+                <div style="background:white;padding:14px;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                    <h3 style="margin:0 0 10px;font-size:15px;"><i class="fas fa-th"></i> Add Shelf</h3>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                        <select id="st-v2-shelf-store" style="flex:1;padding:6px;border:1px solid var(--gray-300);border-radius:4px;min-width:120px;">
+                            <option value="">store…</option>
+                            ${_stV2.stores.map(s => `<option value="${_stEsc(s.id)}">${_stEsc(s.store_code)} — ${_stEsc(s.name)}</option>`).join('')}
+                        </select>
+                        <input id="st-v2-shelf-code" placeholder="shelf code (A1-01)" style="flex:1;padding:6px;border:1px solid var(--gray-300);border-radius:4px;font-family:monospace;text-transform:uppercase;min-width:100px;">
+                        <input id="st-v2-shelf-qr" placeholder="QR payload (e.g. PUCHONG-A1-01)" style="flex:2;padding:6px;border:1px solid var(--gray-300);border-radius:4px;font-family:monospace;min-width:200px;">
+                        <button class="btn small primary" onclick="app.stV2AddShelf()"><i class="fas fa-plus"></i></button>
+                    </div>
+                </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 2fr;gap:16px;">
+                <div style="background:white;padding:14px;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                    <h3 style="margin:0 0 10px;font-size:15px;">Stores (${_stV2.stores.length})</h3>
+                    <table style="width:100%;border-collapse:collapse;font-size:13px;"><thead style="background:var(--gray-50);"><tr><th scope="col" style="padding:8px 10px;text-align:left;">Code</th><th scope="col" style="padding:8px 10px;text-align:left;">Name</th><th scope="col" style="padding:8px 10px;text-align:right;">Shelves</th><th></th></tr></thead><tbody>${storesHtml}</tbody></table>
+                </div>
+                <div style="background:white;padding:14px;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                    <h3 style="margin:0 0 10px;font-size:15px;">Shelves (${_stV2.shelves.length})</h3>
+                    <div style="max-height:480px;overflow:auto;"><table style="width:100%;border-collapse:collapse;font-size:13px;"><thead style="background:var(--gray-50);position:sticky;top:0;"><tr><th scope="col" style="padding:8px 10px;text-align:left;">Store</th><th scope="col" style="padding:8px 10px;text-align:left;">Shelf</th><th scope="col" style="padding:8px 10px;text-align:left;">QR payload</th><th scope="col" style="padding:8px 10px;text-align:left;">Description</th><th></th></tr></thead><tbody>${shelvesHtml}</tbody></table></div>
+                </div>
+            </div>
+            <div style="margin-top:12px;background:#dbeafe;color:#1e40af;padding:10px 14px;border-radius:6px;font-size:12px;">
+                <i class="fas fa-info-circle"></i> Print the QR payload as a code label and stick it on the physical shelf. Scan it on the Count tab to bring up the expected SKU list.
+            </div>
+        `;
+    };
+
+    const stV2AddStore = async () => {
+        const sb = _stSb(); if (!sb) return UI.toast.error('Supabase unavailable');
+        const code = (document.getElementById('st-v2-store-code')?.value || '').trim().toUpperCase();
+        const name = (document.getElementById('st-v2-store-name')?.value || '').trim();
+        if (!code || !name) return UI.toast.error('Store code and name required');
+        const { error } = await sb.from('st_stores').insert({ store_code: code, name });
+        if (error) return UI.toast.error('Insert failed: ' + error.message);
+        UI.toast.success(`Store ${code} added`);
+        await _stV2Reload(); stSwitchTab('shelves');
+    };
+    const stV2DeleteStore = async (id) => {
+        if (!confirm('Delete this store and all its shelves?')) return;
+        const sb = _stSb(); if (!sb) return;
+        const { error } = await sb.from('st_stores').delete().eq('id', id);
+        if (error) return UI.toast.error('Delete failed: ' + error.message);
+        UI.toast.success('Store deleted');
+        await _stV2Reload(); stSwitchTab('shelves');
+    };
+    const stV2AddShelf = async () => {
+        const sb = _stSb(); if (!sb) return UI.toast.error('Supabase unavailable');
+        const storeId = (document.getElementById('st-v2-shelf-store')?.value || '').trim();
+        const code = (document.getElementById('st-v2-shelf-code')?.value || '').trim().toUpperCase();
+        let qr = (document.getElementById('st-v2-shelf-qr')?.value || '').trim();
+        if (!storeId) return UI.toast.error('Pick a store');
+        if (!code) return UI.toast.error('Shelf code required');
+        if (!qr) {
+            const store = _stV2.stores.find(s => s.id === storeId);
+            qr = `${store?.store_code || 'STORE'}-${code}`;
+        }
+        const { error } = await sb.from('st_shelves').insert({ store_id: storeId, shelf_code: code, qr_payload: qr });
+        if (error) return UI.toast.error('Insert failed: ' + error.message);
+        UI.toast.success(`Shelf ${code} added`);
+        await _stV2Reload(); stSwitchTab('shelves');
+    };
+    const stV2DeleteShelf = async (id) => {
+        if (!confirm('Delete this shelf and its expected SKU map?')) return;
+        const sb = _stSb(); if (!sb) return;
+        const { error } = await sb.from('st_shelves').delete().eq('id', id);
+        if (error) return UI.toast.error('Delete failed: ' + error.message);
+        UI.toast.success('Shelf deleted');
+        await _stV2Reload(); stSwitchTab('shelves');
+    };
+    const stV2EditExpected = async (shelfId) => {
+        const sb = _stSb(); if (!sb) return;
+        const shelf = _stV2.shelves.find(s => s.id === shelfId);
+        const expected = await _stShelfExpected(shelfId);
+        const rowsHtml = expected.map(e => `
+            <tr style="border-top:1px solid var(--gray-100);">
+                <td style="padding:6px;font-family:monospace;">${_stEsc(e.sku)}</td>
+                <td style="padding:6px;text-align:right;">${e.expected_qty}</td>
+                <td style="padding:6px;text-align:right;"><button class="btn small" style="color:#dc2626;" onclick="(async () => { const sb=window.supabase; await sb.from('st_shelf_expected').delete().eq('shelf_id','${_stAttr(shelfId)}').eq('sku','${_stAttr(e.sku)}'); app.stV2EditExpected('${_stAttr(shelfId)}'); })()"><i class="fas fa-trash"></i></button></td>
+            </tr>`).join('');
+        UI.showModal(`Expected SKUs · ${_stEsc(shelf?.shelf_code||'')}`, `
+            <div style="font-size:12px;color:var(--gray-600);margin-bottom:8px;">QR: <code>${_stEsc(shelf?.qr_payload||'')}</code></div>
+            <div style="display:flex;gap:6px;margin-bottom:10px;">
+                <input id="st-v2-exp-sku" placeholder="SKU" style="flex:2;padding:6px;border:1px solid var(--gray-300);border-radius:4px;font-family:monospace;text-transform:uppercase;">
+                <input id="st-v2-exp-qty" type="number" min="0" step="1" placeholder="expected qty" style="flex:1;padding:6px;border:1px solid var(--gray-300);border-radius:4px;">
+                <button class="btn small primary" onclick="(async () => { const sku=document.getElementById('st-v2-exp-sku')?.value?.trim().toUpperCase(); const q=Number(document.getElementById('st-v2-exp-qty')?.value); if(!sku||!isFinite(q)||q<0) return UI.toast.error('SKU and qty required'); const sb=window.supabase; await sb.from('st_product_master').upsert({sku,product_name:'',product_attribute:''},{onConflict:'sku'}); const r=await sb.from('st_shelf_expected').upsert({shelf_id:'${_stAttr(shelfId)}',sku,expected_qty:q},{onConflict:'shelf_id,sku'}); if(r.error) return UI.toast.error(r.error.message); UI.toast.success('Saved'); app.stV2EditExpected('${_stAttr(shelfId)}'); })()">Add / Update</button>
+            </div>
+            <div style="max-height:340px;overflow:auto;border:1px solid var(--gray-200);border-radius:6px;">
+                <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                    <thead style="background:var(--gray-50);position:sticky;top:0;"><tr><th scope="col" style="padding:6px;text-align:left;">SKU</th><th scope="col" style="padding:6px;text-align:right;">Expected qty</th><th></th></tr></thead>
+                    <tbody>${rowsHtml || '<tr><td colspan="3" style="padding:16px;text-align:center;color:var(--gray-500);">No expected products yet.</td></tr>'}</tbody>
+                </table>
+            </div>
+        `, [
+            { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
+        ]);
     };
 
     // ==================== /STOCK TAKE ====================
@@ -51489,6 +52316,956 @@ Gold-${totGold}`;
             }
         } catch (e) {
             UI.toast.error('Save failed: ' + (e?.message || e));
+        }
+    };
+
+    // =========================================================================
+    // CUSTOMER FORMS — Survey + CPS + APU (Marketing > Forms sub-tab)
+    // 3 official Destin Oracles forms with bilingual labels, bagua grids,
+    // canvas signatures, mobile-responsive, print-friendly.
+    // =========================================================================
+
+    // ── Signature pad: bare HTML5 canvas, no external lib (~120 lines covers it)
+    const _bindSignaturePad = (canvasId) => {
+        const c = document.getElementById(canvasId);
+        if (!c) return;
+        // Make the backing buffer match displayed size × DPR so strokes stay crisp on mobile.
+        const dpr = window.devicePixelRatio || 1;
+        const rect = c.getBoundingClientRect();
+        c.width = rect.width * dpr;
+        c.height = rect.height * dpr;
+        const ctx = c.getContext('2d');
+        ctx.scale(dpr, dpr);
+        ctx.lineWidth = 2.2;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.strokeStyle = '#0f172a';
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, c.width, c.height);
+
+        let drawing = false, last = null, hasInk = false;
+        const getXY = (e) => {
+            const r = c.getBoundingClientRect();
+            if (e.touches && e.touches[0]) {
+                return { x: e.touches[0].clientX - r.left, y: e.touches[0].clientY - r.top };
+            }
+            return { x: e.clientX - r.left, y: e.clientY - r.top };
+        };
+        const start = (e) => {
+            e.preventDefault();
+            drawing = true;
+            last = getXY(e);
+        };
+        const move = (e) => {
+            if (!drawing) return;
+            e.preventDefault();
+            const p = getXY(e);
+            ctx.beginPath();
+            ctx.moveTo(last.x, last.y);
+            ctx.lineTo(p.x, p.y);
+            ctx.stroke();
+            last = p;
+            hasInk = true;
+        };
+        const end = () => { drawing = false; last = null; };
+
+        c.addEventListener('mousedown', start);
+        c.addEventListener('mousemove', move);
+        c.addEventListener('mouseup', end);
+        c.addEventListener('mouseleave', end);
+        c.addEventListener('touchstart', start, { passive: false });
+        c.addEventListener('touchmove', move, { passive: false });
+        c.addEventListener('touchend', end);
+
+        c._hasInk = () => hasInk;
+        c._reset = () => {
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, c.width, c.height);
+            hasInk = false;
+        };
+
+        // If a saved signature was preloaded into c.dataset.preload, paint it.
+        if (c.dataset.preload) {
+            const img = new Image();
+            img.onload = () => {
+                ctx.drawImage(img, 0, 0, rect.width, rect.height);
+                hasInk = true;
+            };
+            img.src = c.dataset.preload;
+        }
+    };
+
+    const _clearSignaturePad = (canvasId) => {
+        const c = document.getElementById(canvasId);
+        if (c && c._reset) c._reset();
+    };
+    // Exposed as app.cfClearSignature for inline onclick handlers
+    const cfClearSignature = (canvasId) => _clearSignaturePad(canvasId);
+
+    const _getSignatureDataUrl = (canvasId) => {
+        const c = document.getElementById(canvasId);
+        if (!c || !c._hasInk || !c._hasInk()) return null;
+        return c.toDataURL('image/png');
+    };
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+    const _cfFmtDate = (iso) => {
+        if (!iso) return '';
+        try { return new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }); }
+        catch (_) { return iso; }
+    };
+    const _cfEscape = (s) => (s == null ? '' : String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])));
+
+    // ── Forms TAB main view ──────────────────────────────────────────────────
+    let _cfState = { prospectId: null, prospectQuery: '' };
+
+    const renderFormsTab = async () => {
+        // Wrap each fetch with a short timeout so a missing migration (the 3 new
+        // customer-form tables) doesn't hang the whole tab for 15+ seconds.
+        const _quickFetch = (table, ms = 4000) => Promise.race([
+            AppDataStore.getAll(table).catch(() => []),
+            new Promise(resolve => setTimeout(() => resolve([]), ms))
+        ]);
+        const [prospects, surveys, cps, apus] = await Promise.all([
+            _quickFetch('prospects', 6000),
+            _quickFetch('customer_surveys'),
+            _quickFetch('cps_analyses'),
+            _quickFetch('apu_appraisals')
+        ]);
+
+        // Build per-prospect status map
+        const byProspect = new Map();
+        prospects.forEach(p => byProspect.set(p.id, {
+            id: p.id,
+            name: p.full_name || p.nickname || '(no name)',
+            phone: p.phone || '',
+            survey: null, cps: null, apu: null
+        }));
+        surveys.forEach(s => { const e = byProspect.get(s.prospect_id); if (e) e.survey = s; });
+        cps.forEach(c => { const e = byProspect.get(c.prospect_id); if (e) e.cps = c; });
+        apus.forEach(a => { const e = byProspect.get(a.prospect_id); if (e) e.apu = a; });
+
+        const q = (_cfState.prospectQuery || '').toLowerCase();
+        const filtered = Array.from(byProspect.values())
+            .filter(p => !q || p.name.toLowerCase().includes(q) || (p.phone || '').includes(q))
+            .sort((a, b) => {
+                // Show prospects with any form filled in first, then by name
+                const ax = (a.survey || a.cps || a.apu) ? 0 : 1;
+                const bx = (b.survey || b.cps || b.apu) ? 0 : 1;
+                return ax - bx || a.name.localeCompare(b.name);
+            })
+            .slice(0, 200);
+
+        const badge = (val, label, color) => val
+            ? `<span class="cf-badge cf-badge-done" title="${_cfEscape(label)} · ${_cfFmtDate(val.created_at)}"><i class="fas fa-check"></i> ${label}</span>`
+            : `<span class="cf-badge cf-badge-pending">${label}</span>`;
+
+        return `
+            <style>
+                .cf-wrap{ max-width:1100px; margin:0 auto; padding:8px 4px; }
+                .cf-header{ display:flex; flex-wrap:wrap; gap:12px; justify-content:space-between; align-items:center; margin-bottom:18px; }
+                .cf-header h2{ margin:0 0 4px; font-size:20px; }
+                .cf-header p{ margin:0; color:#6B7280; font-size:13px; }
+                .cf-search{ flex:1; min-width:200px; max-width:340px; padding:9px 12px; border:1px solid #E5E7EB; border-radius:8px; font-size:14px; }
+                .cf-flow{ display:flex; gap:10px; align-items:center; background:#F9FAFB; border:1px dashed #D1D5DB; border-radius:10px; padding:12px 16px; margin-bottom:18px; color:#374151; font-size:13px; flex-wrap:wrap; }
+                .cf-flow .num{ display:inline-flex; width:22px; height:22px; border-radius:50%; background:#7C3AED; color:white; font-weight:700; font-size:12px; align-items:center; justify-content:center; }
+                .cf-list{ display:grid; gap:10px; }
+                .cf-row{ background:white; border:1px solid #E5E7EB; border-radius:10px; padding:14px 16px; display:flex; flex-wrap:wrap; gap:12px; align-items:center; }
+                .cf-name{ font-weight:600; font-size:15px; color:#111827; flex:1; min-width:160px; }
+                .cf-name .sub{ display:block; color:#6B7280; font-weight:400; font-size:12px; margin-top:2px; }
+                .cf-badges{ display:flex; gap:6px; flex-wrap:wrap; }
+                .cf-badge{ font-size:11px; font-weight:600; padding:3px 9px; border-radius:999px; white-space:nowrap; }
+                .cf-badge-done{ background:#D1FAE5; color:#065F46; }
+                .cf-badge-pending{ background:#F3F4F6; color:#9CA3AF; }
+                .cf-actions{ display:flex; gap:6px; flex-wrap:wrap; }
+                .cf-btn{ padding:7px 12px; border-radius:7px; border:1px solid #E5E7EB; background:white; cursor:pointer; font-size:12px; font-weight:600; color:#374151; display:inline-flex; align-items:center; gap:5px; }
+                .cf-btn:hover{ background:#F9FAFB; }
+                .cf-btn.cf-btn-survey{ background:#EEF2FF; color:#4338CA; border-color:#C7D2FE; }
+                .cf-btn.cf-btn-cps{ background:#FEF3C7; color:#92400E; border-color:#FCD34D; }
+                .cf-btn.cf-btn-apu{ background:#FCE7F3; color:#9D174D; border-color:#F9A8D4; }
+                .cf-empty{ padding:40px; text-align:center; color:#9CA3AF; background:white; border:1px dashed #E5E7EB; border-radius:10px; }
+
+                /* ── Form modal styling (shared by Survey/CPS/APU) ── */
+                .cf-form{ display:flex; flex-direction:column; gap:14px; }
+                .cf-form .cf-section-title{ font-weight:700; font-size:14px; color:#111827; border-bottom:2px solid #7C3AED; padding-bottom:6px; margin-top:8px; }
+                .cf-form .cf-section-title .zh{ color:#7C3AED; margin-left:6px; }
+                .cf-grid{ display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; }
+                .cf-grid-3{ display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:10px; }
+                @media (max-width: 640px){ .cf-grid, .cf-grid-3{ grid-template-columns:1fr; } }
+                .cf-field label{ display:block; font-size:12px; font-weight:600; color:#374151; margin-bottom:4px; }
+                .cf-field label .zh{ color:#7C3AED; font-weight:500; margin-left:4px; }
+                .cf-field input, .cf-field select, .cf-field textarea{
+                    width:100%; padding:8px 10px; border:1px solid #D1D5DB; border-radius:6px; font-size:14px; font-family:inherit;
+                }
+                .cf-field textarea{ resize:vertical; min-height:64px; }
+                .cf-radio-group{ display:flex; gap:14px; flex-wrap:wrap; margin-top:2px; }
+                .cf-radio-group label{ display:flex; align-items:center; gap:6px; font-size:13px; font-weight:500; color:#374151; cursor:pointer; }
+                .cf-radio-group input{ width:auto; margin:0; }
+
+                /* Bagua 3×3 grid (Lunar / Solar) */
+                .cf-bagua-wrap{ display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:18px; }
+                @media (max-width: 640px){ .cf-bagua-wrap{ grid-template-columns:1fr; } }
+                .cf-bagua{ background:#FAFAF9; border:1px solid #E5E7EB; border-radius:10px; padding:12px; }
+                .cf-bagua-title{ text-align:center; font-weight:700; font-size:14px; margin-bottom:10px; color:#111827; }
+                .cf-bagua-grid{ display:grid; grid-template-columns:repeat(3, 1fr); gap:4px; }
+                .cf-bagua-cell{ aspect-ratio:1; border:1px solid #D1D5DB; border-radius:6px; background:white; display:flex; flex-direction:column; align-items:stretch; padding:4px; position:relative; }
+                .cf-bagua-cell .tg{ font-size:18px; font-weight:700; color:#7C3AED; text-align:center; line-height:1; }
+                .cf-bagua-cell textarea{ flex:1; border:none; outline:none; resize:none; padding:2px 4px; font-size:12px; font-family:inherit; color:#111827; background:transparent; min-height:0; }
+                .cf-bagua-cell.cf-bagua-center{ background:#FEF3C7; }
+                .cf-bagua-cell.cf-bagua-center .tg{ color:#92400E; }
+
+                /* Signature canvas */
+                .cf-sig-wrap{ display:flex; flex-direction:column; gap:6px; }
+                .cf-sig-canvas{ width:100%; height:120px; border:1px dashed #9CA3AF; border-radius:6px; background:white; touch-action:none; }
+                .cf-sig-actions{ display:flex; justify-content:space-between; align-items:center; }
+                .cf-sig-actions small{ color:#6B7280; font-size:11px; }
+
+                /* Likert 5-point */
+                .cf-likert{ display:grid; grid-template-columns:repeat(5, 1fr); gap:6px; }
+                @media (max-width: 480px){ .cf-likert{ grid-template-columns:repeat(2, 1fr); } }
+                .cf-likert label{ display:flex; flex-direction:column; align-items:center; gap:4px; padding:8px 4px; border:1px solid #E5E7EB; border-radius:6px; background:white; cursor:pointer; font-size:11px; font-weight:600; color:#374151; text-align:center; line-height:1.2; }
+                .cf-likert label.cf-likert-on{ background:#7C3AED; border-color:#7C3AED; color:white; }
+                .cf-likert input{ display:none; }
+                .cf-likert .zh{ display:block; font-size:10px; opacity:0.85; }
+
+                /* Referral table (APU Q7) */
+                .cf-ref-table{ width:100%; border-collapse:collapse; font-size:13px; }
+                .cf-ref-table th, .cf-ref-table td{ border:1px solid #D1D5DB; padding:6px 8px; }
+                .cf-ref-table th{ background:#F3F4F6; font-weight:600; font-size:12px; }
+                .cf-ref-table input{ width:100%; border:none; outline:none; padding:4px 2px; font-size:13px; }
+                @media (max-width: 640px){
+                    .cf-ref-table thead{ display:none; }
+                    .cf-ref-table tr{ display:block; border:1px solid #D1D5DB; border-radius:8px; padding:8px; margin-bottom:10px; }
+                    .cf-ref-table td{ display:block; border:none; padding:4px 0; }
+                    .cf-ref-table td::before{ content:attr(data-label) ': '; font-weight:600; color:#6B7280; font-size:11px; }
+                }
+            </style>
+
+            <div class="cf-wrap">
+                <div class="cf-header">
+                    <div>
+                        <h2>Customer Forms 客户表格</h2>
+                        <p>Survey → CPS Analysis → APU Appraisal. Pick a prospect to start.</p>
+                    </div>
+                    <input type="search" class="cf-search" placeholder="Search by name or phone…"
+                        value="${_cfEscape(_cfState.prospectQuery)}"
+                        oninput="app.cfSearchProspects(this.value)">
+                </div>
+
+                <div class="cf-flow">
+                    <span><span class="num">1</span> 新客户调查表 Survey</span>
+                    <i class="fas fa-arrow-right" style="color:#9CA3AF;"></i>
+                    <span><span class="num">2</span> 細解命盤 CPS Form</span>
+                    <i class="fas fa-arrow-right" style="color:#9CA3AF;"></i>
+                    <span><span class="num">3</span> APU Appraisal 反馈</span>
+                </div>
+
+                ${filtered.length === 0 ? `
+                    <div class="cf-empty">
+                        <i class="fas fa-clipboard-list" style="font-size:42px; margin-bottom:10px;"></i>
+                        <div>No prospects match. Try a different search.</div>
+                    </div>
+                ` : `
+                    <div class="cf-list">
+                        ${filtered.map(p => `
+                            <div class="cf-row">
+                                <div class="cf-name">
+                                    ${_cfEscape(p.name)}
+                                    <span class="sub">${_cfEscape(p.phone || 'No phone')}</span>
+                                </div>
+                                <div class="cf-badges">
+                                    ${badge(p.survey, 'Survey')}
+                                    ${badge(p.cps, 'CPS')}
+                                    ${badge(p.apu, 'APU')}
+                                </div>
+                                <div class="cf-actions">
+                                    <button class="cf-btn cf-btn-survey" onclick="app.openCustomerSurveyModal(${p.id}${p.survey ? ',' + p.survey.id : ''})">
+                                        <i class="fas fa-edit"></i> ${p.survey ? 'Edit' : 'Fill'} Survey
+                                    </button>
+                                    <button class="cf-btn cf-btn-cps" onclick="app.openCpsAnalysisModal(${p.id}${p.cps ? ',' + p.cps.id : ''})">
+                                        <i class="fas fa-edit"></i> ${p.cps ? 'Edit' : 'Fill'} CPS
+                                    </button>
+                                    <button class="cf-btn cf-btn-apu" onclick="app.openApuAppraisalModal(${p.id}${p.apu ? ',' + p.apu.id : ''})">
+                                        <i class="fas fa-edit"></i> ${p.apu ? 'Edit' : 'Fill'} APU
+                                    </button>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                `}
+            </div>
+        `;
+    };
+
+    const cfSearchProspects = (val) => {
+        _cfState.prospectQuery = val || '';
+        // Debounce-light: re-render on next tick so user can keep typing
+        clearTimeout(_cfState._t);
+        _cfState._t = setTimeout(async () => {
+            const target = document.getElementById('marketing-tab-content');
+            if (target && _currentMarketingTab === 'forms') {
+                target.innerHTML = await renderFormsTab();
+            }
+        }, 220);
+    };
+
+    // ── Likert helper ────────────────────────────────────────────────────────
+    const _cfLikertHtml = (name, value, options) => `
+        <div class="cf-likert" data-likert="${name}">
+            ${options.map(o => `
+                <label class="${value === o.v ? 'cf-likert-on' : ''}" onclick="this.parentNode.querySelectorAll('label').forEach(l=>l.classList.remove('cf-likert-on'));this.classList.add('cf-likert-on');this.querySelector('input').checked=true;">
+                    <input type="radio" name="${name}" value="${o.v}" ${value === o.v ? 'checked' : ''}>
+                    <span>${o.en}</span>
+                    <span class="zh">${o.zh}</span>
+                </label>
+            `).join('')}
+        </div>
+    `;
+    const _cfReadLikert = (name) => {
+        const el = document.querySelector(`input[name="${name}"]:checked`);
+        return el ? parseInt(el.value, 10) : null;
+    };
+
+    // =========================================================================
+    // 1) NEW CUSTOMER SURVEY (新客户调查表) — 6 Qs + signature
+    // =========================================================================
+    const openCustomerSurveyModal = async (prospectId, surveyId = null) => {
+        const prospect = await AppDataStore.getById('prospects', prospectId).catch(() => null);
+        if (!prospect) { UI.toast.error('Prospect not found.'); return; }
+
+        let existing = null;
+        if (surveyId) {
+            existing = await AppDataStore.getById('customer_surveys', surveyId).catch(() => null);
+        }
+
+        const users = await AppDataStore.getAll('users').catch(() => []);
+        const consultantOpts = users
+            .filter(u => u.status !== 'inactive')
+            .map(u => `<option value="${u.id}" ${existing?.consultant_id == u.id ? 'selected' : ''}>${_cfEscape(u.full_name || u.email)}</option>`)
+            .join('');
+
+        const today = new Date().toISOString().slice(0, 10);
+        const data = existing || {};
+
+        const radio = (name, val, label, labelZh) => `
+            <label><input type="radio" name="${name}" value="${val}" ${data[name] === val ? 'checked' : ''}> ${label} <span style="color:#7C3AED;">${labelZh}</span></label>
+        `;
+
+        UI.showModal(`新客户调查表 New Customer Survey · ${_cfEscape(prospect.full_name || '')}`, `
+            <div class="cf-form">
+                <input type="hidden" id="cf-survey-prospect-id" value="${prospect.id}">
+                <input type="hidden" id="cf-survey-id" value="${surveyId || ''}">
+
+                <div class="cf-section-title">Customer Information <span class="zh">客户资料</span></div>
+                <div class="cf-grid">
+                    <div class="cf-field"><label>Consultant <span class="zh">顾问姓名</span></label>
+                        <select id="cf-survey-consultant"><option value="">--</option>${consultantOpts}</select>
+                    </div>
+                    <div class="cf-field"><label>Analysis Date <span class="zh">解盘日期</span></label>
+                        <input type="date" id="cf-survey-date" value="${data.analysis_date || today}">
+                    </div>
+                    <div class="cf-field"><label>Customer Name <span class="zh">客户姓名</span></label>
+                        <input type="text" id="cf-survey-name" value="${_cfEscape(data.customer_name || prospect.full_name || '')}">
+                    </div>
+                    <div class="cf-field"><label>Email <span class="zh">电邮</span></label>
+                        <input type="email" id="cf-survey-email" value="${_cfEscape(data.email || prospect.email || '')}">
+                    </div>
+                    <div class="cf-field"><label>Phone <span class="zh">联络电话</span></label>
+                        <input type="tel" id="cf-survey-phone" value="${_cfEscape(data.phone || prospect.phone || '')}">
+                    </div>
+                    <div class="cf-field"><label>Occupation <span class="zh">职业</span></label>
+                        <input type="text" id="cf-survey-occupation" value="${_cfEscape(data.occupation || prospect.occupation || '')}">
+                    </div>
+                </div>
+
+                <div class="cf-section-title">Survey Questions <span class="zh">调查问题</span> · 请在格子里打勾</div>
+
+                <div class="cf-field">
+                    <label>1) 请问您从哪里听闻及认识到DC? <span class="zh">How did you hear about DC?</span></label>
+                    <div class="cf-radio-group">
+                        ${radio('q1_source', 'family', 'Family', '亲属')}
+                        ${radio('q1_source', 'friend', 'Friend', '朋友')}
+                        ${radio('q1_source', 'other', 'Other', '其他')}
+                    </div>
+                    <input type="text" id="cf-survey-q1-other" placeholder="If other, specify…" value="${_cfEscape(data.q1_source_other || '')}" style="margin-top:6px;">
+                </div>
+
+                <div class="cf-field">
+                    <label>2) 请问您目前或之前有使用过风水或相关风水服务? <span class="zh">Have you used feng shui services before?</span></label>
+                    <div class="cf-radio-group">
+                        <label><input type="radio" name="q2_used_before" value="true" ${data.q2_used_before === true ? 'checked' : ''}> Yes <span style="color:#7C3AED;">有</span></label>
+                        <label><input type="radio" name="q2_used_before" value="false" ${data.q2_used_before === false ? 'checked' : ''}> No <span style="color:#7C3AED;">没有</span></label>
+                    </div>
+                </div>
+
+                <div class="cf-field">
+                    <label>3) 请问您个人或家庭之前或目前相信风水的功效吗? <span class="zh">Do you believe in feng shui?</span></label>
+                    <div class="cf-radio-group">
+                        ${radio('q3_belief', 'believe', 'Believe', '相信')}
+                        ${radio('q3_belief', 'disbelieve', 'Don’t believe', '不相信')}
+                        ${radio('q3_belief', 'neutral', 'Neutral', '中立')}
+                    </div>
+                    <input type="text" id="cf-survey-q3-reason" placeholder="为什麼 / Why?" value="${_cfEscape(data.q3_belief_reason || '')}" style="margin-top:6px;">
+                </div>
+
+                <div class="cf-field">
+                    <label>4) 如果传承7000年的玄空风水,确实有效,您会否愿意尝试使用? <span class="zh">If 7000-year heritage feng shui works, would you try?</span></label>
+                    <div class="cf-radio-group">
+                        ${radio('q4_willing', 'yes', 'Willing', '愿意')}
+                        ${radio('q4_willing', 'maybe', 'Maybe', '可能愿意')}
+                        ${radio('q4_willing', 'no', 'No', '不愿意')}
+                    </div>
+                </div>
+
+                <div class="cf-field">
+                    <label>5) 您是否愿意使用DC风水的解决方案,以帮助及改善全家的利益? <span class="zh">Willing to use DC solutions?</span></label>
+                    <div class="cf-radio-group">
+                        ${radio('q5_use_dc', 'willing', 'Willing to use', '愿意使用')}
+                        ${radio('q5_use_dc', 'consider', 'Consider', '考虑使用')}
+                        ${radio('q5_use_dc', 'neutral', 'Neutral', '中立')}
+                    </div>
+                </div>
+
+                <div class="cf-field">
+                    <label>6) 若您明白DC风水的好处,您会否主动分享给亲友? <span class="zh">Would you share with family/friends?</span></label>
+                    <div class="cf-radio-group">
+                        ${radio('q6_share', 'definitely', 'Definitely share', '一定分享')}
+                        ${radio('q6_share', 'when_opportunity', 'When opportunity arises', '有机会就分享')}
+                        ${radio('q6_share', 'no', 'Won’t share', '不愿分享')}
+                    </div>
+                </div>
+
+                <div class="cf-section-title">Customer Signature <span class="zh">客户签名</span></div>
+                <div class="cf-sig-wrap">
+                    <canvas id="cf-survey-sig" class="cf-sig-canvas" data-preload="${data.signature_data_url || ''}"></canvas>
+                    <div class="cf-sig-actions">
+                        <small>Sign with finger / mouse · 用手指或鼠标签名</small>
+                        <button type="button" class="cf-btn" onclick="app.cfClearSignature('cf-survey-sig')"><i class="fas fa-eraser"></i> Clear</button>
+                    </div>
+                </div>
+            </div>
+        `, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save Survey', type: 'primary', action: '(async () => { await app.saveCustomerSurvey(); })()' }
+        ]);
+
+        // Bind signature pad after modal renders
+        setTimeout(() => _bindSignaturePad('cf-survey-sig'), 60);
+    };
+
+    const saveCustomerSurvey = async () => {
+        const prospectId = parseInt(document.getElementById('cf-survey-prospect-id')?.value, 10);
+        const surveyId = document.getElementById('cf-survey-id')?.value || null;
+        if (!prospectId) { UI.toast.error('Missing prospect.'); return; }
+
+        const q2Raw = document.querySelector('input[name="q2_used_before"]:checked')?.value;
+        const q2 = q2Raw == null ? null : q2Raw === 'true';
+
+        const payload = {
+            prospect_id: prospectId,
+            consultant_id: parseInt(document.getElementById('cf-survey-consultant')?.value, 10) || null,
+            analysis_date: document.getElementById('cf-survey-date')?.value || null,
+            customer_name: document.getElementById('cf-survey-name')?.value?.trim() || null,
+            email: document.getElementById('cf-survey-email')?.value?.trim() || null,
+            phone: document.getElementById('cf-survey-phone')?.value?.trim() || null,
+            occupation: document.getElementById('cf-survey-occupation')?.value?.trim() || null,
+            q1_source: document.querySelector('input[name="q1_source"]:checked')?.value || null,
+            q1_source_other: document.getElementById('cf-survey-q1-other')?.value?.trim() || null,
+            q2_used_before: q2,
+            q3_belief: document.querySelector('input[name="q3_belief"]:checked')?.value || null,
+            q3_belief_reason: document.getElementById('cf-survey-q3-reason')?.value?.trim() || null,
+            q4_willing: document.querySelector('input[name="q4_willing"]:checked')?.value || null,
+            q5_use_dc: document.querySelector('input[name="q5_use_dc"]:checked')?.value || null,
+            q6_share: document.querySelector('input[name="q6_share"]:checked')?.value || null,
+            signature_data_url: _getSignatureDataUrl('cf-survey-sig'),
+            signed_at: _getSignatureDataUrl('cf-survey-sig') ? new Date().toISOString() : null,
+            created_by: _currentUser?.id || null
+        };
+
+        try {
+            if (surveyId) {
+                await AppDataStore.update('customer_surveys', surveyId, payload);
+                UI.toast.success('Survey updated.');
+            } else {
+                await AppDataStore.create('customer_surveys', { ...payload, created_at: new Date().toISOString() });
+                UI.toast.success('Survey saved.');
+            }
+            UI.hideModal();
+            const target = document.getElementById('marketing-tab-content');
+            if (target && _currentMarketingTab === 'forms') target.innerHTML = await renderFormsTab();
+        } catch (err) {
+            UI.toast.error('Save failed: ' + (err?.message || err));
+        }
+    };
+
+    // =========================================================================
+    // 2) CPS FORM — Personal Life Chart Analysis (細解命盤) with bagua grids
+    // =========================================================================
+    const _cfBaguaHtml = (which, data) => {
+        // 後天八卦 standard arrangement (3x3):
+        //   xun (SE)   | li  (S) | kun (SW)
+        //   zhen (E)   | center | dui (W)
+        //   gen  (NE)  | kan (N) | qian (NW)
+        const cells = [
+            { k: 'xun',    tg: '巽' },
+            { k: 'li',     tg: '離' },
+            { k: 'kun',    tg: '坤' },
+            { k: 'zhen',   tg: '震' },
+            { k: 'center', tg: '中' },
+            { k: 'dui',    tg: '兌' },
+            { k: 'gen',    tg: '艮' },
+            { k: 'kan',    tg: '坎' },
+            { k: 'qian',   tg: '乾' }
+        ];
+        return `
+            <div class="cf-bagua">
+                <div class="cf-bagua-title">${which === 'lunar' ? 'Lunar 農曆' : 'Solar 陽曆'}</div>
+                <div class="cf-bagua-grid">
+                    ${cells.map(c => `
+                        <div class="cf-bagua-cell ${c.k === 'center' ? 'cf-bagua-center' : ''}">
+                            <div class="tg">${c.tg}</div>
+                            <textarea id="cf-cps-${which}-${c.k}" placeholder="…">${_cfEscape((data && data[c.k]) || '')}</textarea>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    };
+
+    const _cfReadBagua = (which) => {
+        const out = {};
+        ['xun','li','kun','zhen','center','dui','gen','kan','qian'].forEach(k => {
+            out[k] = document.getElementById(`cf-cps-${which}-${k}`)?.value?.trim() || '';
+        });
+        return out;
+    };
+
+    const openCpsAnalysisModal = async (prospectId, cpsId = null) => {
+        const prospect = await AppDataStore.getById('prospects', prospectId).catch(() => null);
+        if (!prospect) { UI.toast.error('Prospect not found.'); return; }
+
+        let existing = null;
+        if (cpsId) existing = await AppDataStore.getById('cps_analyses', cpsId).catch(() => null);
+
+        const users = await AppDataStore.getAll('users').catch(() => []);
+        const dealerOpts = users
+            .filter(u => u.status !== 'inactive')
+            .map(u => `<option value="${u.id}" ${existing?.dealer_id == u.id ? 'selected' : ''}>${_cfEscape(u.full_name || u.email)}</option>`)
+            .join('');
+        const cpsByOpts = users
+            .filter(u => u.status !== 'inactive')
+            .map(u => `<option value="${u.id}" ${existing?.cps_by_id == u.id ? 'selected' : ''}>${_cfEscape(u.full_name || u.email)}</option>`)
+            .join('');
+
+        const today = new Date().toISOString().slice(0, 10);
+        const data = existing || {};
+
+        UI.showModal(`細解命盤 Personal Life Chart Analysis · ${_cfEscape(prospect.full_name || '')}`, `
+            <div class="cf-form">
+                <input type="hidden" id="cf-cps-prospect-id" value="${prospect.id}">
+                <input type="hidden" id="cf-cps-id" value="${cpsId || ''}">
+
+                <div class="cf-grid">
+                    <div class="cf-field"><label>Date</label>
+                        <input type="date" id="cf-cps-date" value="${data.form_date || today}">
+                    </div>
+                    <div class="cf-field"><label>SN <span class="zh">编号</span></label>
+                        <input type="text" id="cf-cps-sn" value="${_cfEscape(data.serial_number || '')}">
+                    </div>
+                </div>
+
+                <div class="cf-section-title">Customer Information <span class="zh">客户资料</span></div>
+                <div class="cf-grid">
+                    <div class="cf-field"><label>Customer Name <span class="zh">客戶姓名</span></label>
+                        <input type="text" id="cf-cps-name" value="${_cfEscape(data.customer_name || prospect.full_name || '')}">
+                    </div>
+                    <div class="cf-field"><label>Customer Name (中文) <span class="zh">中文姓名</span></label>
+                        <input type="text" id="cf-cps-name-zh" value="${_cfEscape(data.customer_name_chinese || '')}">
+                    </div>
+                    <div class="cf-field"><label>Gender <span class="zh">性別</span></label>
+                        <div class="cf-radio-group">
+                            <label><input type="radio" name="cps_gender" value="female" ${data.gender === 'female' ? 'checked' : ''}> Female <span style="color:#7C3AED;">女</span></label>
+                            <label><input type="radio" name="cps_gender" value="male"   ${data.gender === 'male'   ? 'checked' : ''}> Male <span style="color:#7C3AED;">男</span></label>
+                        </div>
+                    </div>
+                    <div class="cf-field"><label>Phone Number <span class="zh">手提號碼</span></label>
+                        <input type="tel" id="cf-cps-phone" value="${_cfEscape(data.phone || prospect.phone || '')}">
+                    </div>
+                    <div class="cf-field"><label>Birthdate (Solar) <span class="zh">陽曆生日</span></label>
+                        <input type="date" id="cf-cps-bd-solar" value="${data.birthdate_solar || prospect.date_of_birth || ''}">
+                    </div>
+                    <div class="cf-field"><label>Birthdate (Lunar) <span class="zh">農曆生日</span></label>
+                        <input type="date" id="cf-cps-bd-lunar" value="${data.birthdate_lunar || prospect.lunar_birth || ''}">
+                    </div>
+                    <div class="cf-field"><label>Current Occupation <span class="zh">目前職業</span></label>
+                        <input type="text" id="cf-cps-occupation" value="${_cfEscape(data.occupation || prospect.occupation || '')}">
+                    </div>
+                    <div class="cf-field"><label>Email <span class="zh">電郵</span></label>
+                        <input type="email" id="cf-cps-email" value="${_cfEscape(data.email || prospect.email || '')}">
+                    </div>
+                    <div class="cf-field"><label>Living Area <span class="zh">居住地區</span></label>
+                        <input type="text" id="cf-cps-area" value="${_cfEscape(data.living_area || prospect.city || '')}">
+                    </div>
+                    <div class="cf-field"><label>Introducer <span class="zh">介紹人</span></label>
+                        <input type="text" id="cf-cps-introducer" value="${_cfEscape(data.introducer || prospect.referred_by || '')}">
+                    </div>
+                    <div class="cf-field"><label>Marital Status <span class="zh">婚姻狀況</span></label>
+                        <div class="cf-radio-group">
+                            <label><input type="radio" name="cps_marital" value="single"  ${data.marital_status === 'single'  ? 'checked' : ''}> Single</label>
+                            <label><input type="radio" name="cps_marital" value="married" ${data.marital_status === 'married' ? 'checked' : ''}> Married</label>
+                            <label><input type="radio" name="cps_marital" value="others"  ${data.marital_status === 'others'  ? 'checked' : ''}> Others</label>
+                        </div>
+                    </div>
+                    <div class="cf-field"><label>Dealer Name <span class="zh">代理姓名</span></label>
+                        <select id="cf-cps-dealer"><option value="">--</option>${dealerOpts}</select>
+                    </div>
+                </div>
+
+                <div class="cf-section-title">Bagua Chart <span class="zh">八卦盤 · 手动填入</span></div>
+                <div class="cf-bagua-wrap">
+                    ${_cfBaguaHtml('lunar', data.lunar_chart || {})}
+                    ${_cfBaguaHtml('solar', data.solar_chart || {})}
+                </div>
+
+                <div class="cf-section-title">Notes <span class="zh">备注</span></div>
+                <div class="cf-field">
+                    <textarea id="cf-cps-notes" rows="5" placeholder="Analysis notes…">${_cfEscape(data.notes || '')}</textarea>
+                </div>
+
+                <div class="cf-section-title">For Office Use <span class="zh">办公室专用</span></div>
+                <div class="cf-grid">
+                    <div class="cf-field"><label>Dealer's Signature <span class="zh">代理签名</span></label>
+                        <div class="cf-sig-wrap">
+                            <canvas id="cf-cps-sig-dealer" class="cf-sig-canvas" data-preload="${data.dealer_signature_data_url || ''}"></canvas>
+                            <div class="cf-sig-actions">
+                                <input type="text" id="cf-cps-dealer-name" placeholder="Name" value="${_cfEscape(data.dealer_signed_name || '')}" style="flex:1; margin-right:8px; padding:5px 8px; border:1px solid #D1D5DB; border-radius:5px; font-size:12px;">
+                                <button type="button" class="cf-btn" onclick="app.cfClearSignature('cf-cps-sig-dealer')"><i class="fas fa-eraser"></i> Clear</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="cf-field"><label>CPS by <span class="zh">CPS 操作员</span></label>
+                        <select id="cf-cps-by"><option value="">--</option>${cpsByOpts}</select>
+                        <div class="cf-sig-wrap" style="margin-top:6px;">
+                            <canvas id="cf-cps-sig-cps" class="cf-sig-canvas" data-preload="${data.cps_signature_data_url || ''}"></canvas>
+                            <div class="cf-sig-actions">
+                                <input type="text" id="cf-cps-by-name" placeholder="Name" value="${_cfEscape(data.cps_signed_name || '')}" style="flex:1; margin-right:8px; padding:5px 8px; border:1px solid #D1D5DB; border-radius:5px; font-size:12px;">
+                                <button type="button" class="cf-btn" onclick="app.cfClearSignature('cf-cps-sig-cps')"><i class="fas fa-eraser"></i> Clear</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save CPS', type: 'primary', action: '(async () => { await app.saveCpsAnalysis(); })()' }
+        ]);
+
+        setTimeout(() => {
+            _bindSignaturePad('cf-cps-sig-dealer');
+            _bindSignaturePad('cf-cps-sig-cps');
+        }, 60);
+    };
+
+    const saveCpsAnalysis = async () => {
+        const prospectId = parseInt(document.getElementById('cf-cps-prospect-id')?.value, 10);
+        const cpsId = document.getElementById('cf-cps-id')?.value || null;
+        if (!prospectId) { UI.toast.error('Missing prospect.'); return; }
+
+        const dealerSig = _getSignatureDataUrl('cf-cps-sig-dealer');
+        const cpsSig    = _getSignatureDataUrl('cf-cps-sig-cps');
+
+        const payload = {
+            prospect_id: prospectId,
+            serial_number: document.getElementById('cf-cps-sn')?.value?.trim() || null,
+            form_date: document.getElementById('cf-cps-date')?.value || null,
+            customer_name: document.getElementById('cf-cps-name')?.value?.trim() || null,
+            customer_name_chinese: document.getElementById('cf-cps-name-zh')?.value?.trim() || null,
+            gender: document.querySelector('input[name="cps_gender"]:checked')?.value || null,
+            birthdate_solar: document.getElementById('cf-cps-bd-solar')?.value || null,
+            birthdate_lunar: document.getElementById('cf-cps-bd-lunar')?.value || null,
+            phone: document.getElementById('cf-cps-phone')?.value?.trim() || null,
+            email: document.getElementById('cf-cps-email')?.value?.trim() || null,
+            occupation: document.getElementById('cf-cps-occupation')?.value?.trim() || null,
+            living_area: document.getElementById('cf-cps-area')?.value?.trim() || null,
+            introducer: document.getElementById('cf-cps-introducer')?.value?.trim() || null,
+            marital_status: document.querySelector('input[name="cps_marital"]:checked')?.value || null,
+            dealer_id: parseInt(document.getElementById('cf-cps-dealer')?.value, 10) || null,
+            lunar_chart: _cfReadBagua('lunar'),
+            solar_chart: _cfReadBagua('solar'),
+            notes: document.getElementById('cf-cps-notes')?.value?.trim() || null,
+            dealer_signature_data_url: dealerSig,
+            dealer_signed_name: document.getElementById('cf-cps-dealer-name')?.value?.trim() || null,
+            dealer_signed_at: dealerSig ? new Date().toISOString() : null,
+            cps_by_id: parseInt(document.getElementById('cf-cps-by')?.value, 10) || null,
+            cps_signature_data_url: cpsSig,
+            cps_signed_name: document.getElementById('cf-cps-by-name')?.value?.trim() || null,
+            cps_signed_at: cpsSig ? new Date().toISOString() : null,
+            created_by: _currentUser?.id || null
+        };
+
+        try {
+            if (cpsId) {
+                await AppDataStore.update('cps_analyses', cpsId, payload);
+                UI.toast.success('CPS form updated.');
+            } else {
+                await AppDataStore.create('cps_analyses', { ...payload, created_at: new Date().toISOString() });
+                UI.toast.success('CPS form saved.');
+            }
+            UI.hideModal();
+            const target = document.getElementById('marketing-tab-content');
+            if (target && _currentMarketingTab === 'forms') target.innerHTML = await renderFormsTab();
+        } catch (err) {
+            UI.toast.error('Save failed: ' + (err?.message || err));
+        }
+    };
+
+    // =========================================================================
+    // 3) APU APPRAISAL FORM — 7 Qs + 3 referrals + 3 signatures
+    // =========================================================================
+    const openApuAppraisalModal = async (prospectId, apuId = null) => {
+        const prospect = await AppDataStore.getById('prospects', prospectId).catch(() => null);
+        if (!prospect) { UI.toast.error('Prospect not found.'); return; }
+
+        let existing = null, refs = [];
+        if (apuId) {
+            existing = await AppDataStore.getById('apu_appraisals', apuId).catch(() => null);
+            const allRefs = await AppDataStore.getAll('apu_referrals').catch(() => []);
+            refs = allRefs.filter(r => r.appraisal_id == apuId).sort((a, b) => (a.position || 0) - (b.position || 0));
+        }
+
+        const users = await AppDataStore.getAll('users').catch(() => []);
+        const consultantOpts = users
+            .filter(u => u.status !== 'inactive')
+            .map(u => `<option value="${u.id}" ${existing?.consultant_id == u.id ? 'selected' : ''}>${_cfEscape(u.full_name || u.email)}</option>`)
+            .join('');
+        const dealerOpts = users
+            .filter(u => u.status !== 'inactive')
+            .map(u => `<option value="${u.id}" ${existing?.dealer_ea_id == u.id ? 'selected' : ''}>${_cfEscape(u.full_name || u.email)}</option>`)
+            .join('');
+
+        const today = new Date().toISOString().slice(0, 10);
+        const data = existing || {};
+
+        const satOpts = [
+            { v: 5, en: 'Extremely Satisfied', zh: '非常滿意' },
+            { v: 4, en: 'Satisfactory',         zh: '滿意' },
+            { v: 3, en: 'Average',              zh: '一般' },
+            { v: 2, en: 'Unsatisfactory',       zh: '不滿意' },
+            { v: 1, en: 'Poor',                 zh: '非常不滿意' }
+        ];
+        const valueOpts = [
+            { v: 5, en: 'Extremely Exceeded',  zh: '最高價值' },
+            { v: 4, en: 'High Value',          zh: '高價值' },
+            { v: 3, en: 'Adequate',            zh: '值得' },
+            { v: 2, en: 'Marginal',            zh: '一般' },
+            { v: 1, en: 'Poor',                zh: '低價值' }
+        ];
+        const knowOpts = [
+            { v: 5, en: 'Excellent',      zh: '很好' },
+            { v: 4, en: 'Good',           zh: '好' },
+            { v: 3, en: 'Average',        zh: '一般' },
+            { v: 2, en: 'Below Average',  zh: '不好' },
+            { v: 1, en: 'Unacceptable',   zh: '非常不好' }
+        ];
+
+        const refRow = (i) => {
+            const r = refs[i] || {};
+            return `
+                <tr>
+                    <td data-label="No.">${i + 1}</td>
+                    <td data-label="Name 姓名"><input type="text" id="cf-apu-ref-name-${i}" value="${_cfEscape(r.name || '')}"></td>
+                    <td data-label="NRIC 身份證"><input type="text" id="cf-apu-ref-nric-${i}" value="${_cfEscape(r.nric || '')}"></td>
+                    <td data-label="Contact 電話"><input type="tel" id="cf-apu-ref-contact-${i}" value="${_cfEscape(r.contact || '')}"></td>
+                    <td data-label="Occupation 職業"><input type="text" id="cf-apu-ref-occ-${i}" value="${_cfEscape(r.occupation || '')}"></td>
+                </tr>
+            `;
+        };
+
+        UI.showModal(`APU Appraisal Form · ${_cfEscape(prospect.full_name || '')}`, `
+            <div class="cf-form">
+                <input type="hidden" id="cf-apu-prospect-id" value="${prospect.id}">
+                <input type="hidden" id="cf-apu-id" value="${apuId || ''}">
+
+                <div class="cf-grid">
+                    <div class="cf-field"><label>Date</label>
+                        <input type="date" id="cf-apu-date" value="${data.appraisal_date || today}">
+                    </div>
+                    <div class="cf-field"><label>Consultant</label>
+                        <select id="cf-apu-consultant"><option value="">--</option>${consultantOpts}</select>
+                    </div>
+                    <div class="cf-field"><label>Dealer / EA</label>
+                        <select id="cf-apu-dealer"><option value="">--</option>${dealerOpts}</select>
+                    </div>
+                    <div class="cf-field"><label>ID</label>
+                        <input type="text" id="cf-apu-cust-id" value="${_cfEscape(data.customer_identifier || '')}">
+                    </div>
+                    <div class="cf-field"><label>傳福者 <span class="zh">Referrer</span></label>
+                        <input type="text" id="cf-apu-referrer" value="${_cfEscape(data.referrer || prospect.referred_by || '')}">
+                    </div>
+                </div>
+
+                <div class="cf-section-title">Appraisal Questions <span class="zh">评估问题</span></div>
+
+                <div class="cf-field"><label>1) 您所得到的個人風水解盤服務,您覺得: <span class="zh">Rate the personal chart analysis service</span></label>
+                    ${_cfLikertHtml('q1_service_rating', data.q1_service_rating, satOpts)}
+                    <input type="text" id="cf-apu-q1-reason" placeholder="原因 Reason…" value="${_cfEscape(data.q1_reason || '')}" style="margin-top:6px;">
+                </div>
+
+                <div class="cf-field"><label>2) 您對這位風水顧問的解盤能力及其他表現,您認為: <span class="zh">Rate the Consultant's ability & performance</span></label>
+                    ${_cfLikertHtml('q2_consultant_rating', data.q2_consultant_rating, satOpts)}
+                    <input type="text" id="cf-apu-q2-reason" placeholder="原因 Reason…" value="${_cfEscape(data.q2_reason || '')}" style="margin-top:6px;">
+                </div>
+
+                <div class="cf-field"><label>3) 您對整個解盤的安排與流程,是否感到: <span class="zh">Satisfaction on arrangement & flow</span></label>
+                    ${_cfLikertHtml('q3_arrangement_rating', data.q3_arrangement_rating, satOpts)}
+                    <input type="text" id="cf-apu-q3-reason" placeholder="原因 Reason…" value="${_cfEscape(data.q3_reason || '')}" style="margin-top:6px;">
+                </div>
+
+                <div class="cf-field"><label>4) 雖然這是DC送予的免費解盤,您認為本服務給您的收獲為: <span class="zh">How do you rate the result?</span></label>
+                    ${_cfLikertHtml('q4_value_rating', data.q4_value_rating, valueOpts)}
+                    <input type="text" id="cf-apu-q4-reason" placeholder="原因 Reason…" value="${_cfEscape(data.q4_reason || '')}" style="margin-top:6px;">
+                </div>
+
+                <div class="cf-field"><label>5) 您對這位風水顧問有何評價? <span class="zh">Knowledge, sharing & responsiveness</span></label>
+                    ${_cfLikertHtml('q5_knowledge_rating', data.q5_knowledge_rating, knowOpts)}
+                    <input type="text" id="cf-apu-q5-reason" placeholder="原因 Reason…" value="${_cfEscape(data.q5_reason || '')}" style="margin-top:6px;">
+                </div>
+
+                <div class="cf-field"><label>6) 您是否知道,必須有人推薦,方可免費得到DC個人風水高價值解盤服務? <span class="zh">Aware this service is by referral only?</span></label>
+                    <div class="cf-radio-group">
+                        <label><input type="radio" name="q6_aware_referral" value="true"  ${data.q6_aware_referral === true ? 'checked' : ''}> Yes <span style="color:#7C3AED;">知道</span></label>
+                        <label><input type="radio" name="q6_aware_referral" value="false" ${data.q6_aware_referral === false ? 'checked' : ''}> No <span style="color:#7C3AED;">不知道</span></label>
+                    </div>
+                    <input type="text" id="cf-apu-q6-reason" placeholder="原因 Reason…" value="${_cfEscape(data.q6_reason || '')}" style="margin-top:6px;">
+                </div>
+
+                <div class="cf-section-title">7) Recommend 3 friends/relatives <span class="zh">推薦三位親友</span></div>
+                <div style="overflow-x:auto;">
+                    <table class="cf-ref-table">
+                        <thead><tr><th>No.</th><th>姓名 / Name</th><th>身份證 / NRIC</th><th>電話 / Contact</th><th>職業 / Occupation</th></tr></thead>
+                        <tbody>${[0, 1, 2].map(refRow).join('')}</tbody>
+                    </table>
+                </div>
+
+                <div class="cf-section-title">Signatures <span class="zh">签名</span></div>
+                <div class="cf-grid-3">
+                    <div class="cf-field"><label>DC Customer</label>
+                        <canvas id="cf-apu-sig-cust" class="cf-sig-canvas" data-preload="${data.customer_signature_data_url || ''}"></canvas>
+                        <div class="cf-sig-actions">
+                            <small>Customer signs here</small>
+                            <button type="button" class="cf-btn" onclick="app.cfClearSignature('cf-apu-sig-cust')"><i class="fas fa-eraser"></i></button>
+                        </div>
+                    </div>
+                    <div class="cf-field"><label>DC APU</label>
+                        <canvas id="cf-apu-sig-apu" class="cf-sig-canvas" data-preload="${data.apu_signature_data_url || ''}"></canvas>
+                        <div class="cf-sig-actions">
+                            <small>APU signs here</small>
+                            <button type="button" class="cf-btn" onclick="app.cfClearSignature('cf-apu-sig-apu')"><i class="fas fa-eraser"></i></button>
+                        </div>
+                    </div>
+                    <div class="cf-field"><label>Head of DC APU</label>
+                        <canvas id="cf-apu-sig-head" class="cf-sig-canvas" data-preload="${data.head_apu_signature_data_url || ''}"></canvas>
+                        <div class="cf-sig-actions">
+                            <small>Head signs here</small>
+                            <button type="button" class="cf-btn" onclick="app.cfClearSignature('cf-apu-sig-head')"><i class="fas fa-eraser"></i></button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save APU', type: 'primary', action: '(async () => { await app.saveApuAppraisal(); })()' }
+        ]);
+
+        setTimeout(() => {
+            _bindSignaturePad('cf-apu-sig-cust');
+            _bindSignaturePad('cf-apu-sig-apu');
+            _bindSignaturePad('cf-apu-sig-head');
+        }, 60);
+    };
+
+    const saveApuAppraisal = async () => {
+        const prospectId = parseInt(document.getElementById('cf-apu-prospect-id')?.value, 10);
+        const apuId = document.getElementById('cf-apu-id')?.value || null;
+        if (!prospectId) { UI.toast.error('Missing prospect.'); return; }
+
+        const q6Raw = document.querySelector('input[name="q6_aware_referral"]:checked')?.value;
+        const q6 = q6Raw == null ? null : q6Raw === 'true';
+        const custSig = _getSignatureDataUrl('cf-apu-sig-cust');
+        const apuSig  = _getSignatureDataUrl('cf-apu-sig-apu');
+        const headSig = _getSignatureDataUrl('cf-apu-sig-head');
+
+        const payload = {
+            prospect_id: prospectId,
+            appraisal_date: document.getElementById('cf-apu-date')?.value || null,
+            consultant_id: parseInt(document.getElementById('cf-apu-consultant')?.value, 10) || null,
+            dealer_ea_id: parseInt(document.getElementById('cf-apu-dealer')?.value, 10) || null,
+            customer_identifier: document.getElementById('cf-apu-cust-id')?.value?.trim() || null,
+            referrer: document.getElementById('cf-apu-referrer')?.value?.trim() || null,
+            q1_service_rating: _cfReadLikert('q1_service_rating'),
+            q1_reason: document.getElementById('cf-apu-q1-reason')?.value?.trim() || null,
+            q2_consultant_rating: _cfReadLikert('q2_consultant_rating'),
+            q2_reason: document.getElementById('cf-apu-q2-reason')?.value?.trim() || null,
+            q3_arrangement_rating: _cfReadLikert('q3_arrangement_rating'),
+            q3_reason: document.getElementById('cf-apu-q3-reason')?.value?.trim() || null,
+            q4_value_rating: _cfReadLikert('q4_value_rating'),
+            q4_reason: document.getElementById('cf-apu-q4-reason')?.value?.trim() || null,
+            q5_knowledge_rating: _cfReadLikert('q5_knowledge_rating'),
+            q5_reason: document.getElementById('cf-apu-q5-reason')?.value?.trim() || null,
+            q6_aware_referral: q6,
+            q6_reason: document.getElementById('cf-apu-q6-reason')?.value?.trim() || null,
+            customer_signature_data_url: custSig,
+            customer_signed_at: custSig ? new Date().toISOString() : null,
+            apu_signature_data_url: apuSig,
+            apu_signed_at: apuSig ? new Date().toISOString() : null,
+            apu_signed_by: apuSig ? (_currentUser?.id || null) : null,
+            head_apu_signature_data_url: headSig,
+            head_apu_signed_at: headSig ? new Date().toISOString() : null,
+            head_apu_signed_by: headSig ? (_currentUser?.id || null) : null,
+            created_by: _currentUser?.id || null
+        };
+
+        try {
+            let savedId = apuId;
+            if (apuId) {
+                await AppDataStore.update('apu_appraisals', apuId, payload);
+            } else {
+                const row = await AppDataStore.create('apu_appraisals', { ...payload, created_at: new Date().toISOString() });
+                savedId = row?.id;
+            }
+
+            if (savedId) {
+                // Wipe + re-write the 3 referral rows so re-saving replaces them cleanly.
+                const existingRefs = (await AppDataStore.getAll('apu_referrals').catch(() => []))
+                    .filter(r => r.appraisal_id == savedId);
+                for (const r of existingRefs) {
+                    try { await AppDataStore.delete('apu_referrals', r.id); } catch (_) {}
+                }
+                for (let i = 0; i < 3; i++) {
+                    const name = document.getElementById(`cf-apu-ref-name-${i}`)?.value?.trim();
+                    const nric = document.getElementById(`cf-apu-ref-nric-${i}`)?.value?.trim();
+                    const contact = document.getElementById(`cf-apu-ref-contact-${i}`)?.value?.trim();
+                    const occ = document.getElementById(`cf-apu-ref-occ-${i}`)?.value?.trim();
+                    if (name || nric || contact || occ) {
+                        await AppDataStore.create('apu_referrals', {
+                            appraisal_id: savedId,
+                            position: i + 1,
+                            name: name || null,
+                            nric: nric || null,
+                            contact: contact || null,
+                            occupation: occ || null,
+                            created_at: new Date().toISOString()
+                        });
+                    }
+                }
+            }
+
+            UI.toast.success(apuId ? 'APU updated.' : 'APU saved.');
+            UI.hideModal();
+            const target = document.getElementById('marketing-tab-content');
+            if (target && _currentMarketingTab === 'forms') target.innerHTML = await renderFormsTab();
+        } catch (err) {
+            UI.toast.error('Save failed: ' + (err?.message || err));
         }
     };
 
@@ -52337,6 +54114,21 @@ Gold-${totGold}`;
         stClearBulk,
         stExportSummary,
         stSetReason,
+        // Phase 1: accept variances back into baseline
+        stAcceptVariances,
+        // Phase 2: camera-based QR scanner (html5-qrcode)
+        stOpenScanner,
+        _stCancelScanner,
+        // Phase 3+4: Supabase-backed Shelf Master + multi-device sync
+        stScanShelfAndCount,
+        stSaveShelfCounts,
+        stStartRealtime,
+        stStopRealtime,
+        stV2AddStore,
+        stV2DeleteStore,
+        stV2AddShelf,
+        stV2DeleteShelf,
+        stV2EditExpected,
 
         // ========== EGG PURCHASING (Super Admin only) ==========
         showEggPurchasingView,
@@ -52663,6 +54455,13 @@ Gold-${totGold}`;
         rejectCpsIntake,
         uploadProfilePhoto,
 
+        // CPS Form Photo OCR (Gemini Flash)
+        scanCpsForm,
+        handleCpsScanFile,
+        renderCpsScanReview,
+        toggleCpsScanAll,
+        applyCpsScanSelection,
+
         // Lead Capture Forms
         showLeadFormsView,
         openFormBuilderModal,
@@ -52779,6 +54578,17 @@ Gold-${totGold}`;
         _confirmDeleteFile,
         showProfile,
         exportKPIDashboard,
+
+        // ==================== CUSTOMER FORMS (Marketing > Forms sub-tab) ====================
+        renderFormsTab,
+        cfSearchProspects,
+        cfClearSignature,
+        openCustomerSurveyModal,
+        saveCustomerSurvey,
+        openCpsAnalysisModal,
+        saveCpsAnalysis,
+        openApuAppraisalModal,
+        saveApuAppraisal,
 
     };
 
