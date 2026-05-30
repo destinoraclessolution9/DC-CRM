@@ -1,5 +1,6 @@
 {
   "scripts": {
+    "build": "node build.mjs",
     "test": "npx playwright test",
     "test:headed": "npx playwright test --headed",
     "test:report": "npx playwright show-report test-results"
@@ -9,6 +10,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.44.0",
+    "esbuild": "^0.28.0",
     "web-push": "^3.6.7"
   }
 }
