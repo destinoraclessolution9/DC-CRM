@@ -11253,6 +11253,13 @@ function _wireLoginBtn() {
 
     const navigateTo = async (viewId) => {
         UI.hideModal();
+        // Stock Take v2 teardown — when leaving the stock_take view, stop the
+        // Supabase realtime channel and any active camera stream so we don't
+        // pin a websocket / camera handle in the background.
+        if (_currentView === 'stock_take' && viewId !== 'stock_take') {
+            try { if (typeof window.app?.stStopRealtime === 'function') await window.app.stStopRealtime(); } catch (e) {}
+            try { if (typeof window.app?._stCancelScanner === 'function') await window.app._stCancelScanner(); } catch (e) {}
+        }
         _currentDetailView = null; // leaving any detail page — pull-to-refresh goes back to list
         // Strip mobile-home / mobile-calendar page backgrounds when leaving so
         // the beige fill doesn't bleed into other screens.
@@ -50401,6 +50408,15 @@ Gold-${totGold}`;
         if (sid && panel) panel.innerHTML = _stRenderCountsList(sid);
     };
 
+    // Stable ID generator that yields a UUID so local and Supabase rows share an
+    // id. Falls back to a `c_` prefix if crypto.randomUUID is unavailable (very
+    // old browsers); in that case the realtime echo dedupe also falls back to a
+    // (counter, sku, qty, ts<2s) heuristic.
+    const _stNewCountId = () => {
+        try { if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID(); } catch {}
+        return `c_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
+    };
+
     const stAddCount = () => {
         const sid = _stRequireOpenSession();
         if (!sid) return;
@@ -50414,19 +50430,25 @@ Gold-${totGold}`;
         if (!location) return UI.toast.error('Location required');
         if (!skuRaw) return UI.toast.error('SKU required');
         if (!qtyRaw || !isFinite(qty) || qty < 0) return UI.toast.error('Valid qty required');
+        // Bug fix: st_counts.qty is integer in the DB; reject decimals up front so
+        // the multi-device sync doesn't silently drop the row.
+        if (!Number.isInteger(qty)) return UI.toast.error('Whole number qty required (no decimals)');
         if (_stIsExcluded(skuRaw)) return UI.toast.error(`${skuRaw.toUpperCase()} is on the exclusion list — counts are blocked. Remove from Exclusions tab if you want to count it.`);
         const counts = _stCounts(sid);
         const newRow = {
-            id: `c_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
+            id: _stNewCountId(),
             timestamp: new Date().toISOString(),
             counter, location, shelf, sku: skuRaw.toUpperCase(), qty,
         };
         counts.push(newRow);
         _stSave(`counts.${sid}`, counts);
         // Phase 3+4: mirror into Supabase when this session is multi-device tracked.
+        // Pass the SAME id so the realtime echo back to this device dedupes
+        // against the local row (the dedupe key is `id`).
         const sb = _stSb();
         if (sb && _stState.sbSessionId) {
             sb.from('st_counts').insert({
+                id: newRow.id,
                 session_id: _stState.sbSessionId,
                 sku: newRow.sku, qty,
                 counter, location_label: location, shelf_text: shelf,
@@ -51389,6 +51411,20 @@ Gold-${totGold}`;
         ]);
         // Defer until modal DOM mounts.
         await new Promise(r => setTimeout(r, 80));
+        // Bug fix: hook the modal close path (X button, Escape, backdrop click)
+        // so the camera stream is released even when UI.hideModal is invoked
+        // without going through our Cancel button. We watch the overlay's
+        // `active` class — hideModal removes it.
+        const overlay = document.getElementById('global-modal-overlay');
+        if (overlay && typeof MutationObserver !== 'undefined') {
+            const obs = new MutationObserver(() => {
+                if (!overlay.classList.contains('active')) {
+                    obs.disconnect();
+                    _stStopQr();
+                }
+            });
+            obs.observe(overlay, { attributes: true, attributeFilter: ['class'] });
+        }
         try {
             _stQrInstance.instance = new Html5Qrcode(_stQrInstance.divId);
             const onScan = async (decodedText) => {
@@ -51508,14 +51544,17 @@ Gold-${totGold}`;
             if (!sku || qtyRaw === '') continue;
             const qty = Number(qtyRaw);
             if (!isFinite(qty) || qty < 0) continue;
+            // Bug fix: reject decimals so Supabase integer column doesn't drop the row silently
+            if (!Number.isInteger(qty)) continue;
             if (exSet.has(sku)) continue;
+            const newId = _stNewCountId();
             counts.push({
-                id: `c_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
+                id: newId,
                 timestamp: nowIso,
                 counter, location: locLabel, shelf: qrPayload, sku, qty,
                 shelfId,
             });
-            sbRows.push({ session_id: _stState.sbSessionId || null, shelf_id: shelfId, sku, qty, counter, location_label: locLabel, shelf_text: qrPayload });
+            sbRows.push({ id: newId, session_id: _stState.sbSessionId || null, shelf_id: shelfId, sku, qty, counter, location_label: locLabel, shelf_text: qrPayload });
             added++;
         }
         if (!added) { UI.hideModal(); return UI.toast.info('No counts entered.'); }
@@ -51535,8 +51574,11 @@ Gold-${totGold}`;
     let _stRealtimeChannel = null;
     const stStartRealtime = async () => {
         const sb = _stSb();
+        // Always tear down the prior channel first, even if we won't be starting
+        // a new one — prevents a stale channel from a different session from
+        // continuing to fire INSERT callbacks against the active local store.
+        if (sb && _stRealtimeChannel) { try { await sb.removeChannel(_stRealtimeChannel); } catch {} _stRealtimeChannel = null; }
         if (!sb || !_stState.sbSessionId) return;
-        if (_stRealtimeChannel) { try { sb.removeChannel(_stRealtimeChannel); } catch {} _stRealtimeChannel = null; }
         _stRealtimeChannel = sb
             .channel(`st_counts_${_stState.sbSessionId}`)
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'st_counts', filter: `session_id=eq.${_stState.sbSessionId}` }, payload => {
@@ -51551,7 +51593,9 @@ Gold-${totGold}`;
                 _stSave(`counts.${_stState.sessionId}`, local);
                 _stRefreshCountsList();
             })
-            .subscribe();
+            .subscribe((status, err) => {
+                if (status === 'CHANNEL_ERROR' || err) console.warn('[stock-take v2] realtime subscribe failed:', status, err);
+            });
     };
     const stStopRealtime = async () => {
         const sb = _stSb();
@@ -51562,9 +51606,13 @@ Gold-${totGold}`;
     // ── Shelves master tab (Stores -> Shelves -> Expected SKUs) ───────────
     const _stRenderShelves = () => {
         if (!_stV2Available()) return `<div style="padding:40px;text-align:center;color:var(--gray-500);">Supabase client not available. Sign in and reload.</div>`;
-        // Trigger background load on first render
-        _stV2Load().then(() => stSwitchTab('shelves'));
-        if (!_stV2.loaded) return `<div style="padding:40px;text-align:center;color:var(--gray-500);"><i class="fas fa-spinner fa-spin"></i> Loading shelves master…</div>`;
+        // Trigger background load only on the FIRST render. Once loaded, do NOT
+        // schedule another stSwitchTab — that would infinite-loop, re-rendering
+        // every microtask and yanking focus out of the store/shelf inputs.
+        if (!_stV2.loaded) {
+            if (!_stV2.loading) _stV2Load().then(() => { if (_stState.tab === 'shelves') stSwitchTab('shelves'); });
+            return `<div style="padding:40px;text-align:center;color:var(--gray-500);"><i class="fas fa-spinner fa-spin"></i> Loading shelves master…</div>`;
+        }
         const storesHtml = _stV2.stores.length === 0
             ? `<div style="padding:20px;color:var(--gray-500);text-align:center;">No stores yet. Add one to get started.</div>`
             : _stV2.stores.map(s => `
