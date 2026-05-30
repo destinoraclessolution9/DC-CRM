@@ -41269,6 +41269,8 @@ const simulateCampaignSending = async (campaignId) => {
                         <img id="account-avatar-preview"
                              src="${avatarSrc}"
                              alt="${initials}"
+                             loading="lazy"
+                             decoding="async"
                              onerror="this.src='${svgFallback}'"
                              style="width:80px;height:80px;border-radius:50%;object-fit:cover;border:3px solid var(--primary,#8B1A1A);box-shadow:0 4px 12px rgba(0,0,0,.15);display:block;">
                         <div style="position:absolute;bottom:0;right:0;width:26px;height:26px;background:var(--primary,#8B1A1A);border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,.2);pointer-events:none;">
@@ -45091,7 +45093,7 @@ const initImportDemoData = async () => {
         grid.innerHTML = visible.map((e, idx) => {
             const num = String(idx + 1).padStart(2, '0');
             const posterHtml = e._posterSigned
-                ? `<img class="nb-poster" src="${esc(e._posterSigned)}" alt="${esc(titleOf(e))}" onerror="this.outerHTML='<div class=&quot;nb-poster-placeholder&quot;>📅</div>';">`
+                ? `<img class="nb-poster" loading="lazy" decoding="async" src="${esc(e._posterSigned)}" alt="${esc(titleOf(e))}" onerror="this.outerHTML='<div class=&quot;nb-poster-placeholder&quot;>📅</div>';">`
                 : `<div class="nb-poster-placeholder">📅</div>`;
             const time = fmtTime(e.start_time, e.end_time);
             const tagline = e.speaker ? `主讲 · ${e.speaker}` : (e.target_group || '');

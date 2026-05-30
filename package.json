@@ -11,6 +11,8 @@
   "devDependencies": {
     "@playwright/test": "^1.44.0",
     "esbuild": "^0.28.0",
+    "gifsicle": "^7.0.1",
+    "sharp": "^0.34.5",
     "web-push": "^3.6.7"
   }
 }

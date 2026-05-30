@@ -1,6 +1,13 @@
 // app-init.js — loaded deferred; replaces all inline <script> blocks in index.html.
 // Runs after DOM is parsed (deferred) but before DOMContentLoaded fires.
 
+// Idle scheduler: requestIdleCallback when supported (Chrome/Firefox/Safari 16.4+),
+// setTimeout fallback elsewhere. Use for post-paint enhancements that should not
+// compete with first paint or main-thread input handling.
+const __idle = window.requestIdleCallback
+    ? function (cb, opts) { return window.requestIdleCallback(cb, opts || { timeout: 2000 }); }
+    : function (cb) { return setTimeout(cb, 1); };
+
 // ── Footer copyright year ──────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function () {
     const el = document.getElementById('footer-year');
@@ -423,14 +430,17 @@ window.addEventListener('beforeinstallprompt', function (e) {
         resolveAttachmentImages();
     }
 
-    document.addEventListener('DOMContentLoaded', runAll);
+    // Mobile enhancements are post-paint polish (table->card conversion, drawer
+    // augmentation, tree-fullscreen buttons) — defer to idle so they never
+    // compete with first contentful paint.
+    document.addEventListener('DOMContentLoaded', function () { __idle(runAll); });
     window.addEventListener('resize', function () {
         if (!isMobile()) {
             document.querySelectorAll('table.auto-card-applied').forEach(function (t) { t.classList.remove('auto-card'); });
         } else {
             document.querySelectorAll('table.auto-card-applied').forEach(function (t) { t.classList.add('auto-card'); });
         }
-        runAll();
+        __idle(runAll);
     });
 
     const viewport = document.getElementById('content-viewport');
@@ -492,7 +502,13 @@ window._openAttachment = async function (src) {
         window._chartThemeApplied = true;
         return true;
     }
-    const id = setInterval(function () { if (applyChartDefaults()) clearInterval(id); }, 500);
+    // Chart.js is loaded on-demand (only on report screens). Don't poll on a hot
+    // interval from boot — wait for idle, then check sparingly.
+    __idle(function () {
+        const id = setInterval(function () { if (applyChartDefaults()) clearInterval(id); }, 1500);
+        // Stop polling after 60s if Chart.js never loads
+        setTimeout(function () { clearInterval(id); }, 60000);
+    });
     const obs = new MutationObserver(function () { if (window.Chart) applyChartDefaults(); });
     obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 })();
