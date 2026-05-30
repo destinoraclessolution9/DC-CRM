@@ -311,9 +311,6 @@
                 <li id="nav-cases" data-view="cases">Success Case Library</li>
                 <li id="nav-purchases_history" data-view="purchases_history" style="display:none;">Purchases History</li>
 
-                <!-- Org Chart Consultant (admin Lvl 1-2 only) -->
-                <li id="nav-org-chart" data-view="org_chart" onclick="app.navigateTo('org_chart')" style="display:none;">Org Chart Consultant</li>
-
                 <!-- Group 2: Consultant & Analytics -->
                 <li id="nav-agents" data-view="agents">Consultant</li>
                 <li id="nav-marketing-lists" data-view="marketing_lists" style="display:none;">Marketing Lists</li>
@@ -505,9 +502,6 @@
                     <button class="sb-nav-item" id="sb-nav-purchases_history" data-view="purchases_history" onclick="app.navigateTo('purchases_history')" style="display:none;">
                         <i class="fas fa-shopping-bag sb-icon" aria-hidden="true"></i><span class="sb-label">Purchases History</span>
                     </button>
-                    <button class="sb-nav-item" id="sb-nav-org-chart" data-view="org_chart" onclick="app.navigateTo('org_chart')" style="display:none;">
-                        <i class="fas fa-sitemap sb-icon" aria-hidden="true"></i><span class="sb-label">Org Chart Consultant</span>
-                    </button>
                     <button class="sb-nav-item" id="sb-nav-agents" data-view="agents" onclick="app.navigateTo('agents')">
                         <i class="fas fa-user-tie sb-icon" aria-hidden="true"></i><span class="sb-label">Consultant</span>
                     </button>
@@ -602,19 +596,20 @@
         <!-- footer year set by app-init.js -->
     </div>
 
-    <!-- Scripts -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
-
-<script src="supabase-init.min.js?v=20260530a"></script>
-
-    <!-- Critical scripts loaded eagerly (needed on login screen + app shell) -->
+    <!-- Scripts — all deferred so HTML parser never blocks -->
+    <!-- Supabase must run before data.js/script.js; defer preserves document order -->
+    <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" crossorigin="anonymous"></script>
+    <script defer src="supabase-init.min.js?v=20260530a"></script>
     <script defer src="lunar-calendar.min.js"></script>
     <script defer src="data.min.js?v=20260530a"></script>
     <script defer src="auth.min.js?v=20260530a"></script>
     <script defer src="ui.min.js?v=20260530a"></script>
     <script defer src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js" integrity="sha512-dfX5uYVXzyU8+KHqj8bjo7UkOdg18PaOtpa48djpNbZHwExddghZ+ZmzWT06R5v6NSk3ZUfsH6FNEDepLx9hPQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-    <script defer src="script.min.js?v=20260530a"></script>
+    <!-- fetchpriority="low" lets the browser paint the login form (already in HTML)
+         before spending bandwidth on the 2.1 MB app bundle. defer already prevents
+         parser-blocking; low fetchpriority additionally pushes the download below
+         CSS + fonts in the network queue so FCP happens sooner. -->
+    <script defer fetchpriority="low" src="script.min.js?v=20260530a"></script>
 
     <!--
       The following libraries are loaded on-demand via window._loadScriptOnce()
