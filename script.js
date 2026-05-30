@@ -8025,8 +8025,17 @@ In a production system, this would show the actual file contents.
         // Get historical transactions
         const transactions = await AppDataStore.getAll('transactions');
 
-        // Get pipeline deals
-        const prospects = (await AppDataStore.getAll('prospects')).filter(p => p.status === 'active');
+        // Server-side status filter so we don't pull every dormant/closed
+        // prospect just to count the active pipeline. Cap large enough that
+        // even multi-tenant scale fits in one page; falls back to client
+        // filter on error.
+        const prospectsRes = await AppDataStore.queryAdvanced('prospects', {
+            filters: { status: 'active' },
+            limit: 50000,
+            countMode: null,
+        }).catch(() => null);
+        const prospects = prospectsRes?.data
+            || (await AppDataStore.getAll('prospects')).filter(p => p.status === 'active');
 
         // Simple forecast calculation
         const historicalAvg = transactions.length > 0
@@ -18234,7 +18243,7 @@ function _wireLoginBtn() {
                 <div class="form-group">
                     <label>Search and Add Co-Agents</label>
                     <div class="co-agent-search" style="position:relative;">
-                        <input type="text" id="co-agent-search-input" class="form-control" placeholder="Type consultant name..." onkeyup="app.searchAgents()">
+                        <input type="text" id="co-agent-search-input" class="form-control" placeholder="Type consultant name..." onkeyup="app.debounceCall('co-agent-search', () => app.searchAgents(), 250)">
                         <div id="agent-search-results" class="search-results-dropdown"></div>
                     </div>
                 </div>
@@ -19199,7 +19208,7 @@ function _wireLoginBtn() {
                     <h4>🧑‍💼 Appointment's Consultant</h4>
                     <div class="form-group">
                         <div class="search-with-results" style="position:relative;">
-                            <input type="text" id="consultant-search-input" class="form-control" placeholder="Search consultant..." oninput="app.searchConsultants()">
+                            <input type="text" id="consultant-search-input" class="form-control" placeholder="Search consultant..." oninput="app.debounceCall('consultant-search', () => app.searchConsultants(), 250)">
                             <div id="consultant-search-results" class="search-results-dropdown"></div>
                         </div>
                         <div id="selected-consultants-list" style="margin-top:8px;"></div>
@@ -19220,7 +19229,7 @@ function _wireLoginBtn() {
                     <div class="form-group">
                         <label>Search and Add Co-Agents</label>
                         <div class="co-agent-search" style="position:relative;">
-                            <input type="text" id="co-agent-search-input" class="form-control" placeholder="Type consultant name..." oninput="app.searchAgents()">
+                            <input type="text" id="co-agent-search-input" class="form-control" placeholder="Type consultant name..." oninput="app.debounceCall('co-agent-search-2', () => app.searchAgents(), 250)">
                             <div id="agent-search-results" class="search-results-dropdown"></div>
                         </div>
                     </div>
@@ -22229,7 +22238,14 @@ function _wireLoginBtn() {
                     const softDuplicate = allPeople.find(p => normalize(p.phone) === normalize(phone) || normalize(p.full_name) === normName);
                     if (softDuplicate) {
                         const agent = await AppDataStore.getById('users', softDuplicate.responsible_agent_id || softDuplicate.lead_agent_id) || { full_name: 'Unknown Agent' };
-                        const activities2 = (await AppDataStore.getAll('activities')).filter(a => a.prospect_id === softDuplicate.id || a.customer_id === softDuplicate.id);
+                        // Indexed lookups (idx_activities_prospect_date / _customer_date)
+                        // instead of getAll('activities').filter — was scanning the full
+                        // table on every soft-duplicate warning.
+                        const [byProspect, byCustomer] = await Promise.all([
+                            AppDataStore.getActivitiesForProspect(softDuplicate.id, { limit: 1 }).catch(() => []),
+                            AppDataStore.getActivitiesForCustomer(softDuplicate.id, { limit: 1 }).catch(() => []),
+                        ]);
+                        const activities2 = [...byProspect, ...byCustomer];
                         activities2.sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
                         const lastDate = activities2.length > 0 ? activities2[0].activity_date : 'N/A';
                         const msg = `This person may have visited before. The agent is ${agent.full_name}, last meet up on ${lastDate}. Are you sure this is not the same prospect? Check with your leader.`;
@@ -37296,12 +37312,12 @@ const exportKPIReport = async (format) => {
                             <tr style="${!item.is_active ? 'opacity: 0.6; background: #f9fafb;' : ''}">
                                 <td style="text-align:center;">
                                     ${item.photo_url
-                                        ? `<img src="${item.photo_url}" crossorigin="anonymous" style="width:40px;height:40px;object-fit:cover;border-radius:4px;cursor:pointer;" onclick="app.viewProductImage('${item.photo_url}','Photo')" title="View photo">`
+                                        ? `<img loading="lazy" decoding="async" src="${item.photo_url}" crossorigin="anonymous" style="width:40px;height:40px;object-fit:cover;border-radius:4px;cursor:pointer;" onclick="app.viewProductImage('${item.photo_url}','Photo')" title="View photo">`
                                         : `<span style="color:var(--gray-300);font-size:18px;" title="No photo">📷</span>`}
                                 </td>
                                 <td style="text-align:center;">
                                     ${item.poster_url
-                                        ? `<img src="${item.poster_url}" crossorigin="anonymous" style="width:40px;height:40px;object-fit:cover;border-radius:4px;cursor:pointer;" onclick="app.viewProductImage('${item.poster_url}','Poster')" title="View poster">`
+                                        ? `<img loading="lazy" decoding="async" src="${item.poster_url}" crossorigin="anonymous" style="width:40px;height:40px;object-fit:cover;border-radius:4px;cursor:pointer;" onclick="app.viewProductImage('${item.poster_url}','Poster')" title="View poster">`
                                         : `<span style="color:var(--gray-300);font-size:18px;" title="No poster">🖼️</span>`}
                                 </td>
                                 <td><strong>${item.name}</strong><br><small class="text-muted">${item.remarks || ''}</small></td>
@@ -37361,7 +37377,7 @@ const exportKPIReport = async (format) => {
                                 <td>${catsHtml}</td>
                                 <td style="text-align:center;">
                                     ${item.poster_url
-                                        ? `<img src="${item.poster_url}" crossorigin="anonymous" style="width:40px;height:40px;object-fit:cover;border-radius:4px;cursor:pointer;" onclick="app.viewProductImage('${item.poster_url}','Poster')" title="View poster">`
+                                        ? `<img loading="lazy" decoding="async" src="${item.poster_url}" crossorigin="anonymous" style="width:40px;height:40px;object-fit:cover;border-radius:4px;cursor:pointer;" onclick="app.viewProductImage('${item.poster_url}','Poster')" title="View poster">`
                                         : `<span style="color:var(--gray-300);font-size:18px;" title="No poster">🖼️</span>`}
                                 </td>
                                 <td><strong>${item.event_title || item.title || ''}</strong><br><small class="text-muted">${item.description || ''}</small></td>
@@ -37630,12 +37646,12 @@ const exportKPIReport = async (format) => {
                 </div>
                 <div class="form-group">
                     <label>Product Photo</label>
-                    ${item.photo_url ? `<div style="margin-bottom:6px;"><img src="${item.photo_url}" crossorigin="anonymous" style="height:64px;border-radius:4px;object-fit:cover;"> <small class="text-muted">Current photo</small></div>` : ''}
+                    ${item.photo_url ? `<div style="margin-bottom:6px;"><img loading="lazy" decoding="async" src="${item.photo_url}" crossorigin="anonymous" style="height:64px;border-radius:4px;object-fit:cover;"> <small class="text-muted">Current photo</small></div>` : ''}
                     <input type="file" id="mkt-photo" class="form-control" accept="image/*">
                 </div>
                 <div class="form-group">
                     <label>Product Poster</label>
-                    ${item.poster_url ? `<div style="margin-bottom:6px;"><img src="${item.poster_url}" crossorigin="anonymous" style="height:64px;border-radius:4px;object-fit:cover;"> <small class="text-muted">Current poster</small></div>` : ''}
+                    ${item.poster_url ? `<div style="margin-bottom:6px;"><img loading="lazy" decoding="async" src="${item.poster_url}" crossorigin="anonymous" style="height:64px;border-radius:4px;object-fit:cover;"> <small class="text-muted">Current poster</small></div>` : ''}
                     <input type="file" id="mkt-poster" class="form-control" accept="image/*">
                 </div>
                 <div class="form-group"><label>Remarks</label><input type="text" id="mkt-remarks" class="form-control" value="${item.remarks || ''}"></div>
@@ -37658,7 +37674,7 @@ const exportKPIReport = async (format) => {
                 <div class="form-group"><label>Description</label><textarea id="mkt-desc" class="form-control">${item.description || ''}</textarea></div>
                 <div class="form-group">
                     <label>Event Poster</label>
-                    ${item.poster_url ? `<div style="margin-bottom:6px;"><img src="${item.poster_url}" crossorigin="anonymous" style="height:64px;border-radius:4px;object-fit:cover;"> <small class="text-muted">Current poster</small></div>` : ''}
+                    ${item.poster_url ? `<div style="margin-bottom:6px;"><img loading="lazy" decoding="async" src="${item.poster_url}" crossorigin="anonymous" style="height:64px;border-radius:4px;object-fit:cover;"> <small class="text-muted">Current poster</small></div>` : ''}
                     <input type="file" id="mkt-poster" class="form-control" accept="image/*">
                 </div>
                 <div class="form-group"><label>Remarks</label><input type="text" id="mkt-remarks" class="form-control" value="${item.remarks || ''}"></div>
@@ -37950,7 +37966,7 @@ const exportKPIReport = async (format) => {
     };
 
     const viewProductImage = (url, label) => {
-        UI.showModal(label, `<div style="text-align:center;"><img src="${url}" crossorigin="anonymous" style="max-width:100%;max-height:70vh;border-radius:6px;"></div>`,
+        UI.showModal(label, `<div style="text-align:center;"><img loading="lazy" decoding="async" src="${url}" crossorigin="anonymous" style="max-width:100%;max-height:70vh;border-radius:6px;"></div>`,
             [{ label: 'Close', type: 'secondary', action: 'UI.hideModal()' }]);
     };
 
@@ -45121,7 +45137,7 @@ const initImportDemoData = async () => {
         const content = `
             <div style="max-width:560px;">
                 ${posterSrc
-                    ? `<img src="${esc(posterSrc)}" alt="${esc(evTitle)}" style="width:100%;max-height:360px;object-fit:contain;background:#f3f4f6;border-radius:8px;margin-bottom:16px;">`
+                    ? `<img loading="lazy" decoding="async" src="${esc(posterSrc)}" alt="${esc(evTitle)}" style="width:100%;max-height:360px;object-fit:contain;background:#f3f4f6;border-radius:8px;margin-bottom:16px;">`
                     : `<div style="width:100%;height:200px;background:linear-gradient(135deg,#be185d,#e91e8c);color:white;display:flex;align-items:center;justify-content:center;font-size:4rem;border-radius:8px;margin-bottom:16px;">📅</div>`
                 }
                 <div style="display:grid;gap:10px;color:var(--gray-700,#374151);font-size:0.95rem;">
@@ -45663,7 +45679,7 @@ const initImportDemoData = async () => {
                 .map(t => `<span style="display:inline-block;background:var(--primary-50,#fef3c7);color:var(--primary-700,#92400e);border:1px solid var(--primary-200,#fde68a);border-radius:10px;padding:2px 8px;margin:2px 4px 2px 0;font-size:11px;">${t.trim()}</span>`).join('');
             const content = `
                 <div style="max-height:75vh;overflow-y:auto;padding-right:4px;">
-                    ${imgSrc ? `<div style="margin:-4px -4px 16px;"><img src="${imgSrc}" style="width:100%;max-height:320px;object-fit:cover;border-radius:8px;display:block;"></div>` : ''}
+                    ${imgSrc ? `<div style="margin:-4px -4px 16px;"><img loading="lazy" decoding="async" src="${imgSrc}" style="width:100%;max-height:320px;object-fit:cover;border-radius:8px;display:block;"></div>` : ''}
                     ${tags ? `<div style="margin-bottom:8px;">${tags}</div>` : ''}
                     <h2 style="margin:0 0 8px;font-size:1.4rem;">${h.title || ''}</h2>
                     <div style="font-size:12px;color:var(--gray-500,#6b7280);margin-bottom:14px;">📅 ${fmtDate(h.created_at)}</div>
