@@ -4857,6 +4857,15 @@ In a production system, this would show the actual file contents.
             <div id="mcal-coming-host">${_mcalCachedComing || ''}</div>
         </div>`;
 
+        // ── Perf instrumentation (mobile Tier 0) ─────────────────
+        // Look for "[mcal-perf]" rows in the console to see where the cold
+        // mobile load is spending time.
+        const _mcalPerfT0 = performance.now();
+        const _mcalPerf = (label) => {
+            try { console.info(`[mcal-perf] ${label} +${Math.round(performance.now() - _mcalPerfT0)}ms`); } catch(_) {}
+        };
+        _mcalPerf('mcal:start');
+
         // ── Fetch month activities + supporting data ─────────────
         const monthStartStr = `${_mcalYear}-${String(_mcalMonth+1).padStart(2,'0')}-01`;
         const monthEndStr = `${_mcalYear}-${String(_mcalMonth+1).padStart(2,'0')}-${String(daysInMonth).padStart(2,'0')}`;
@@ -4928,17 +4937,53 @@ In a production system, this would show the actual file contents.
             _actsP = AppDataStore.queryAdvanced('activities', _buildActOpts(monthStartStr, monthEndStr)).catch(() => ({ data: [] }));
         }
 
-        const [actResult, allProspectsR, allCustomersR, draftsRaw, refillsRaw] = await Promise.all([
-            _actsP,
-            _needPeople  ? AppDataStore.getAll('prospects').catch(() => [])                          : Promise.resolve([]),
-            _needPeople  ? AppDataStore.getAll('customers').catch(() => [])                          : Promise.resolve([]),
-            _needDrafts  ? AppDataStore.getAll('follow_up_drafts').catch(() => [])                   : Promise.resolve([]),
-            _needRefills ? AppDataStore.query('refill_reminders', { status: 'pending' }).catch(() => []) : Promise.resolve([]),
-        ]);
+        // ── Mobile Tier 1.1: decouple people / drafts / refills ──
+        // Phase 1 (blocking): activities only. Drives the calendar grid —
+        // this is what the user is staring at. Even with no people data,
+        // activity cards still render via _mcalShortTitle's fallback to
+        // activity_type.
+        _mcalPerf('phase1:activities:start');
+        const actResult = await _actsP;
+        _mcalPerf('phase1:activities:done');
 
-        if (_needPeople)  { allPeople = [...(allProspectsR || []), ...(allCustomersR || [])]; _lsSet(_PEOPLE_KEY, allPeople); }
-        if (_needDrafts)  { cachedDrafts  = draftsRaw  || []; _lsSet(_DRAFTS_KEY,  cachedDrafts);  }
-        if (_needRefills) { cachedRefills = refillsRaw || []; _lsSet(_REFILLS_KEY, cachedRefills); }
+        // Phase 2 (fire-and-forget): people / drafts / refills.
+        // These power person-names on cards, the birthday markers, and the
+        // "Coming up" strip. On cold load they're missing — first paint
+        // falls back gracefully — then when they land we silently re-render.
+        // Trimmed select() shrinks the wire payload 5-10× vs. getAll() for
+        // wide prospect/customer schemas.
+        const _capturedYearMcal = _mcalYear, _capturedMonthMcal = _mcalMonth;
+        if (_needPeople || _needDrafts || _needRefills) {
+            Promise.all([
+                _needPeople  ? AppDataStore.queryAdvanced('prospects', { select: 'id,full_name,date_of_birth', limit: 50000, countMode: null }).then(r => r?.data || []).catch(() => []) : Promise.resolve(null),
+                _needPeople  ? AppDataStore.queryAdvanced('customers', { select: 'id,full_name,date_of_birth', limit: 50000, countMode: null }).then(r => r?.data || []).catch(() => []) : Promise.resolve(null),
+                _needDrafts  ? AppDataStore.getAll('follow_up_drafts').catch(() => []) : Promise.resolve(null),
+                _needRefills ? AppDataStore.query('refill_reminders', { status: 'pending' }).catch(() => []) : Promise.resolve(null),
+            ]).then(([p, c, d, r]) => {
+                _mcalPerf('phase2:people-drafts-refills:done');
+                if (p !== null || c !== null) {
+                    const fresh = [...(p || []), ...(c || [])];
+                    _lsSet(_PEOPLE_KEY, fresh);
+                }
+                if (d !== null) _lsSet(_DRAFTS_KEY,  d);
+                if (r !== null) _lsSet(_REFILLS_KEY, r);
+                // Silent re-render so names + birthdays + coming-up strip
+                // fill in. Guarded so we don't repaint a month the user has
+                // already swiped away from.
+                const vp = document.getElementById('content-viewport');
+                if (vp && vp.classList.contains('mcal-active') &&
+                    _capturedYearMcal === _mcalYear && _capturedMonthMcal === _mcalMonth) {
+                    showMobileCalendarView(vp).catch(() => {});
+                }
+            }).catch(() => {});
+        }
+
+        // First-paint fallbacks: ensure downstream code handles missing data
+        // without throwing. On cold load these are empty; the Phase 2 re-render
+        // swaps in real values.
+        allPeople     = allPeople     || [];
+        cachedDrafts  = cachedDrafts  || [];
+        cachedRefills = cachedRefills || [];
         const draftsR  = cachedDrafts;
         const refillsR = cachedRefills;
 
@@ -5037,6 +5082,7 @@ In a production system, this would show the actual file contents.
         if (grid) {
             grid.innerHTML = cells.join('');
             _lsSet(_mcalSnapKey, cells.join(''));
+            _mcalPerf('grid-painted');
         }
 
         // ── Coming-up strip ─────────────────────────────────────
@@ -14131,23 +14177,47 @@ function _wireLoginBtn() {
         AppDataStore.getAll('users');
         AppDataStore.getAll('names');
 
-        // Fire all section renders IMMEDIATELY. Each section paints as soon
-        // as its own data arrives, so the user sees progressive fill-in.
-        // We don't await these — the caller (navigateTo) returns immediately.
-        renderCalendar().catch(e => console.warn('renderCalendar failed:', e));
+        // ── Tier 1.2/1.3: critical path first, sidebars after ──
+        // Critical path = the calendar grid + today's activity list. These
+        // are what the user is waiting to see.
+        console.time('[cal-perf] showCalendarView:critical');
+        renderCalendar()
+            .catch(e => console.warn('renderCalendar failed:', e))
+            .finally(() => console.timeEnd('[cal-perf] showCalendarView:critical'));
         renderTodayActivities().catch(e => console.warn('renderTodayActivities failed:', e));
-        renderBirthdaySection().catch(e => console.warn('renderBirthdaySection failed:', e));
-        renderRefillReminders().catch(e => console.warn('renderRefillReminders failed:', e));
-        renderPendingCpsIntakes().catch(e => console.warn('renderPendingCpsIntakes failed:', e));
-        _migrateFollowUpTemplateColumns().catch(e => console.warn('Follow-up template migration failed:', e));
-        Promise.all([
-            dispatchBirthdayTriggers(),
-            dispatchProactiveEventInvites(),
-            dispatchPendingSolutionReminders()
-        ]).then(() => Promise.all([
-            renderFollowUpReminders(),
-            renderPendingSolutionsWidget()
-        ])).catch(e => console.warn('Follow-up reminders failed:', e));
+
+        // Secondary panels (right glance, birthdays, refills, follow-up
+        // reminders) and the schema migration are deferred so they don't
+        // compete with the grid for network + main-thread time. The 100 ms
+        // delay lets the grid's first paint settle before sidebars start
+        // fetching; on a slow connection the user perceives "the calendar
+        // appeared, then the sidebars filled in" instead of "everything
+        // hung for 10 s".
+        const _runSecondary = () => {
+            renderBirthdaySection().catch(e => console.warn('renderBirthdaySection failed:', e));
+            renderRefillReminders().catch(e => console.warn('renderRefillReminders failed:', e));
+            renderPendingCpsIntakes().catch(e => console.warn('renderPendingCpsIntakes failed:', e));
+            Promise.all([
+                dispatchBirthdayTriggers(),
+                dispatchProactiveEventInvites(),
+                dispatchPendingSolutionReminders()
+            ]).then(() => Promise.all([
+                renderFollowUpReminders(),
+                renderPendingSolutionsWidget()
+            ])).catch(e => console.warn('Follow-up reminders failed:', e));
+        };
+        setTimeout(_runSecondary, 100);
+
+        // Tier 1.3: one-time schema check moved to idle time. requestIdleCallback
+        // falls back to a 1.5 s setTimeout in browsers that don't support it
+        // (e.g. older Safari). This is a DDL probe — no reason it should run on
+        // the user-visible critical path of a calendar mount.
+        const _idle = (cb) => (typeof requestIdleCallback === 'function')
+            ? requestIdleCallback(cb, { timeout: 5000 })
+            : setTimeout(cb, 1500);
+        _idle(() => {
+            _migrateFollowUpTemplateColumns().catch(e => console.warn('Follow-up template migration failed:', e));
+        });
 
         // Show Special Program progress popup (once per session, for participating agents)
         // Deferred so it doesn't block the calendar paint.
@@ -15707,6 +15777,14 @@ function _wireLoginBtn() {
 
     const _renderCalendarImpl = async () => {
         const myToken = ++_renderCalendarToken;
+        // ── Perf instrumentation (Tier 0). Cheap, observable in DevTools.
+        // Look for "[cal-perf]" rows in the console — they print where the
+        // cold-load time is going. Remove once cold-load p50 is acceptable.
+        const _calPerfT0 = performance.now();
+        const _calPerf = (label) => {
+            try { console.info(`[cal-perf] ${label} +${Math.round(performance.now() - _calPerfT0)}ms`); } catch(_) {}
+        };
+        _calPerf('renderCalendar:start');
         updateMonthHeader(_currentDate);
 
         const header = document.getElementById('calendar-days-header');
@@ -15719,18 +15797,23 @@ function _wireLoginBtn() {
         // Snapshot restore — if we already rendered this month, show the cached
         // HTML instantly so the user sees their calendar with zero wait.
         // The RPC fetch continues below; if fresh data differs we swap quietly.
+        // Tier 1.4: TTL extended 30m → 8h to match mobile (mcal-snap), and SWR
+        // pattern — stale snapshot still paints instantly, fresh data swaps in
+        // silently when it arrives. Stale beats blank.
         const _calSnapKey = `cal-snap-${_currentDate.getFullYear()}-${_currentDate.getMonth()}`;
+        const _CAL_SNAP_TTL_MS = 8 * 60 * 60 * 1000; // 8h
         const _calSnap = (() => {
             try {
                 const raw = localStorage.getItem(_calSnapKey);
                 if (!raw) return null;
                 const { ts, html } = JSON.parse(raw);
-                if (!ts || Date.now() - ts > 30 * 60 * 1000) return null; // 30-min TTL
+                if (!ts || Date.now() - ts > _CAL_SNAP_TTL_MS) return null;
                 return html;
             } catch (_) { return null; }
         })();
         if (_calSnap) {
             grid.innerHTML = _calSnap; // instant paint — no dim needed
+            _calPerf('snapshot-painted');
         } else {
             // First-ever render of this month: paint a skeleton grid (Phase N)
             // so the user sees structured placeholders instead of a blank/dim
@@ -15742,6 +15825,7 @@ function _wireLoginBtn() {
                        '<span class="skeleton-block skel-cell-row short"></span></div>';
             }
             grid.innerHTML = _sk;
+            _calPerf('skeleton-painted');
         }
 
         try {
@@ -15812,21 +15896,24 @@ function _wireLoginBtn() {
             p_is_admin:     isAdmin,
         };
 
-        // Two parallel RPCs replace the previous 6 round-trips
-        // (activities + events + users + co-agent JSONB + prospects + customers).
-        // The light call drives the visible grid; the hot call warms the
-        // detail-modal cache. We tolerate the hot call failing — the calendar
-        // still renders, taps just incur a normal getById on click.
+        // Tier 1.1: render the grid as soon as the LIGHT RPC returns. The hot
+        // RPC only warms a click-cache for the detail modal — there's no reason
+        // to make the user wait for it. Previously a Promise.all gate meant a
+        // slow hotRes added its full latency to the time-to-grid-paint.
         // NOTE: supabase-js v2 .rpc() returns a thenable PostgrestFilterBuilder,
-        // not a real Promise — .catch() on it throws "is not a function". Wrap
-        // in Promise.resolve() to convert to a real Promise before catching.
-        const [lightRes, hotRes] = await Promise.all([
-            window.supabase.rpc('get_calendar_window', lightParams),
-            Promise.resolve(window.supabase.rpc('get_calendar_hot_details', hotParams)).catch(e => {
-                console.warn('[calendar] hot warm-up failed:', e?.message || e);
-                return { data: [], error: e };
-            }),
-        ]);
+        // not a real Promise — wrap in Promise.resolve() before .catch/.then.
+        _calPerf('rpc:light:start');
+        const lightRes = await window.supabase.rpc('get_calendar_window', lightParams);
+        _calPerf('rpc:light:done');
+        // Fire-and-forget hot RPC. Once it lands we drop the rows into
+        // _hotActivityCache so subsequent activity-card taps still feel instant.
+        Promise.resolve(window.supabase.rpc('get_calendar_hot_details', hotParams))
+            .then(hotRes => {
+                if (hotRes && hotRes.data && hotRes.data.length > 0) {
+                    for (const a of hotRes.data) _hotActivityCache.set(String(a.id), a);
+                }
+            })
+            .catch(e => { console.warn('[calendar] hot warm-up failed:', e?.message || e); });
 
         // Transition fallback: if the calendar_perf_2026-05-03 migration hasn't
         // been applied to this DB yet, the RPC won't exist (PG code 42883). Fall
@@ -15856,10 +15943,9 @@ function _wireLoginBtn() {
             activities = window._mergeOptimisticActivities(activities, rangeStart, monthEnd);
         }
 
-        // Refresh hot cache from this render's hot fetch.
-        if (hotRes && hotRes.data && hotRes.data.length > 0) {
-            for (const a of hotRes.data) _hotActivityCache.set(String(a.id), a);
-        }
+        // Hot cache is populated by the fire-and-forget block above (Tier 1.1)
+        // — no synchronous handling here. Detail-modal click incurs at most one
+        // extra getById round-trip if the hot RPC hasn't landed yet.
 
         // Orphan EVENT filter: drop activities of type EVENT that have an event_id
         // but NO resolvable title. Two title sources exist:
@@ -16067,7 +16153,11 @@ function _wireLoginBtn() {
 
         // Discard if a newer render started while this one's fetches were in flight.
         if (myToken !== _renderCalendarToken) return;
-        grid.innerHTML = html;
+        // Tier 1.4 SWR: only swap the painted snapshot if the new HTML actually
+        // differs. Avoids a perceptible re-paint flash when the cached snapshot
+        // already matches the fresh data (the common case for unchanged days).
+        if (grid.innerHTML !== html) grid.innerHTML = html;
+        _calPerf('grid-painted');
 
         // Persist this render to localStorage so future navigations back to
         // this month paint instantly — survives tab close on Android.
