@@ -10318,6 +10318,41 @@ function _wireLoginBtn() {
     // Stash scan result so the review modal callbacks can read it
     let _cpsScanCache = null;
 
+    // Dedicated overlay for the scan flow (separate from UI.showModal).
+    // The CPS form's prospect/quick-add modal already lives in the global
+    // modal overlay; reusing it for the spinner + review would WIPE the form
+    // DOM and lose the agent's in-progress entries. This standalone overlay
+    // sits on top without touching the underlying modal.
+    const _showCpsScanOverlay = (title, contentHtml, buttons = []) => {
+        let overlay = document.getElementById('cps-scan-overlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'cps-scan-overlay';
+            overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px;';
+            document.body.appendChild(overlay);
+        }
+        const btnHtml = buttons.map(b => {
+            const cls = b.type === 'primary' ? 'btn primary' : 'btn secondary';
+            return `<button class="${cls}" style="margin-left:8px;" onclick="${b.action}">${b.label}</button>`;
+        }).join('');
+        overlay.innerHTML = `
+            <div style="background:white;border-radius:12px;max-width:760px;width:100%;max-height:90vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+                <div style="padding:16px 20px;border-bottom:1px solid var(--gray-200);font-weight:600;font-size:16px;display:flex;justify-content:space-between;align-items:center;">
+                    <span>${title}</span>
+                    <button type="button" style="background:none;border:none;font-size:20px;color:var(--gray-500);cursor:pointer;padding:0;line-height:1;" onclick="app._hideCpsScanOverlay()">&times;</button>
+                </div>
+                <div style="padding:18px 20px;overflow-y:auto;flex:1;">${contentHtml}</div>
+                ${buttons.length ? `<div style="padding:14px 20px;border-top:1px solid var(--gray-200);text-align:right;background:var(--gray-50);">${btnHtml}</div>` : ''}
+            </div>
+        `;
+        overlay.style.display = 'flex';
+    };
+
+    const _hideCpsScanOverlay = () => {
+        const overlay = document.getElementById('cps-scan-overlay');
+        if (overlay) overlay.remove();
+    };
+
     const scanCpsForm = (prefix = 'cps') => {
         const input = document.getElementById(`${prefix}-scan-input`);
         if (!input) {
@@ -10341,14 +10376,21 @@ function _wireLoginBtn() {
             return;
         }
 
-        // Show a "scanning…" toast / progress modal
-        UI.showModal('Scanning Form…', `
+        // Snapshot current form values BEFORE showing any overlay.
+        const current = {};
+        CPS_SCAN_FIELD_MAP.forEach(([key, suffix]) => {
+            current[key] = _readCpsField(prefix, suffix);
+        });
+
+        // Show a "scanning…" overlay on TOP of the prospect/CPS modal
+        // (separate overlay so the form DOM stays intact).
+        _showCpsScanOverlay('Scanning Form…', `
             <div style="text-align:center; padding:20px 0;">
                 <i class="fas fa-spinner fa-spin" style="font-size:36px; color:#7c3aed; margin-bottom:14px;"></i>
                 <p style="color:var(--gray-600); margin:0;">Reading the form, please wait…</p>
                 <p style="color:var(--gray-400); font-size:12px; margin-top:6px;">(usually 3–6 seconds)</p>
             </div>
-        `, []);
+        `);
 
         try {
             // Convert image to base64 (avoids multipart edge cases)
@@ -10377,17 +10419,11 @@ function _wireLoginBtn() {
             const scanned = res.fields || {};
             const confidence = res.confidence || {};
 
-            // Snapshot the current form values BEFORE applying anything
-            const current = {};
-            CPS_SCAN_FIELD_MAP.forEach(([key, suffix]) => {
-                current[key] = _readCpsField(prefix, suffix);
-            });
-
+            // `current` was snapshotted above before any overlay opened.
             _cpsScanCache = { prefix, scanned, confidence, current, rawText: res.raw_text || '' };
-            UI.hideModal();
             renderCpsScanReview();
         } catch (err) {
-            UI.hideModal();
+            _hideCpsScanOverlay();
             console.error('CPS scan failed:', err);
             UI.toast.error('Scan failed: ' + (err.message || 'Unknown error'));
         }
@@ -10499,9 +10535,9 @@ function _wireLoginBtn() {
             </div>
         `;
 
-        UI.showModal('Review Scanned Form', html, [
-            { text: 'Cancel', class: 'secondary', action: 'UI.hideModal()' },
-            { text: 'Apply Selected', class: 'primary', action: 'app.applyCpsScanSelection()' },
+        _showCpsScanOverlay('Review Scanned Form', html, [
+            { type: 'secondary', label: 'Cancel', action: 'app._hideCpsScanOverlay()' },
+            { type: 'primary',   label: 'Apply Selected', action: 'app.applyCpsScanSelection()' },
         ]);
     };
 
@@ -10510,7 +10546,7 @@ function _wireLoginBtn() {
     };
 
     const applyCpsScanSelection = () => {
-        if (!_cpsScanCache) { UI.hideModal(); return; }
+        if (!_cpsScanCache) { _hideCpsScanOverlay(); return; }
         const { prefix, scanned } = _cpsScanCache;
 
         const picked = Array.from(document.querySelectorAll('.cps-scan-pick:checked'))
@@ -10527,7 +10563,7 @@ function _wireLoginBtn() {
             applied++;
         });
 
-        UI.hideModal();
+        _hideCpsScanOverlay();
         _cpsScanCache = null;
         if (applied > 0) {
             UI.toast.success(`Applied ${applied} field${applied === 1 ? '' : 's'} from scan. Please review before saving.`);
@@ -54461,6 +54497,7 @@ Gold-${totGold}`;
         renderCpsScanReview,
         toggleCpsScanAll,
         applyCpsScanSelection,
+        _hideCpsScanOverlay,
 
         // Lead Capture Forms
         showLeadFormsView,
