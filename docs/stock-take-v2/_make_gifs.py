@@ -49,8 +49,15 @@ YELLOW_HI   = (146, 64, 14)
 HIGHLIGHT   = (236, 72, 153, 255)
 
 
-def _font(size, bold=False):
+def _font(size, bold=False, cjk=False):
+    # CJK fonts come first when requested. Microsoft YaHei ships with every
+    # modern Windows install and covers 悅 / 客 / 匯 / 改 / 命 / etc cleanly.
     paths = []
+    if cjk:
+        if bold:
+            paths += ["C:/Windows/Fonts/msyhbd.ttc", "C:/Windows/Fonts/msyhbd.ttf"]
+        paths += ["C:/Windows/Fonts/msyh.ttc", "C:/Windows/Fonts/msyh.ttf",
+                  "C:/Windows/Fonts/simsun.ttc"]
     if bold:
         paths += [
             "C:/Windows/Fonts/seguisb.ttf",
@@ -67,6 +74,10 @@ def _font(size, bold=False):
         except Exception:
             continue
     return ImageFont.load_default()
+
+
+F_CJK_TITLE = _font(30, bold=True, cjk=True)
+F_CJK_BODY  = _font(18, cjk=True)
 
 
 F_TITLE   = _font(30, bold=True)
@@ -577,6 +588,335 @@ def gif_accept_variances():
     return frames
 
 
+# ── GIF 5: Staff daily workflow (Level 15) ────────────────────────────────
+# Login → restricted sidebar → Stock Take with 3 sub-tabs → scan + count → save
+def gif_staff_daily():
+    frames = []
+
+    # Frame 1 — login screen
+    img, d = new_frame()
+    header(d, 1, "Open destinoraclessolution.com",
+           "Each store gets its own login. Today: the 001-Wisma account.")
+    # centered login card
+    cx, cy, cw, ch = (W - 460) // 2, 220, 460, 380
+    d.rounded_rectangle([cx, cy, cx + cw, cy + ch], radius=12, fill=WHITE, outline=GRAY_200)
+    d.text((cx + 24, cy + 24), "悅客匯 CRM", fill=PRIMARY, font=F_CJK_TITLE)
+    d.text((cx + 24, cy + 64), "Sign in to continue", fill=GRAY_500, font=F_BODY)
+    d.text((cx + 24, cy + 110), "Email", fill=GRAY_700, font=F_SMALL_B)
+    input_box(d, cx + 24, cy + 134, cw - 48, 40, "", "001-wisma@destinoraclessolution.com")
+    d.text((cx + 24, cy + 192), "Password", fill=GRAY_700, font=F_SMALL_B)
+    input_box(d, cx + 24, cy + 216, cw - 48, 40, "", "••••••••••••")
+    button(d, cx + 24, cy + 280, cw - 48, 48, "Sign in")
+    highlight_ring(d, cx + 24, cy + 280, cw - 48, 48)
+    footer(d, "Same URL as the admin uses. Auth picks the right role based on the email.")
+    frames.append(img)
+
+    # Frame 2 — signed in, restricted sidebar
+    img, d = new_frame()
+    header(d, 2, "Only Stock Take in the sidebar",
+           "Level 15 staff can't see Calendar, Prospects, Reports — only the one tab they need.")
+    # Sidebar
+    d.rectangle([0, 90, 260, H], fill=WHITE, outline=GRAY_200)
+    d.rounded_rectangle([16, 104, 244, 144], radius=8, fill=PRIMARY)
+    d.text((30, 116), "悅", fill=WHITE, font=F_CJK_TITLE)
+    d.text((70, 118), "悅客匯", fill=WHITE, font=_font(18, bold=True, cjk=True))
+    # Highlighted nav row
+    nx, ny, nw, nh = 14, 170, 232, 44
+    d.rounded_rectangle([nx, ny, nx + nw, ny + nh], radius=8, fill=(254, 226, 245))
+    d.text((nx + 18, ny + 12), "📦  Stock Take", fill=PRIMARY, font=F_BODY_B)
+    highlight_ring(d, nx, ny, nw, nh, color=PRIMARY)
+    # User chip top right
+    d.rounded_rectangle([W - 240, 100, W - 24, 144], radius=22, fill=WHITE, outline=GRAY_200)
+    d.rounded_rectangle([W - 232, 108, W - 200, 140], radius=16, fill=PRIMARY)
+    d.text((W - 226, 116), "01", fill=WHITE, font=F_SMALL_B)
+    d.text((W - 188, 110), "001 Wisma", fill=GRAY_900, font=F_BODY_B)
+    d.text((W - 188, 128), "Stock Take Staff", fill=GRAY_500, font=F_SMALL)
+    # Main area — empty welcome
+    d.text((300, 200), "Welcome, 001 Wisma", fill=GRAY_900, font=F_TITLE)
+    d.text((300, 240), "Tap Stock Take on the left to start counting.", fill=GRAY_600, font=F_BODY)
+    arrow(d, 300, 220, 245, 192)
+    footer(d, "Notice: no Calendar, no Prospects, no Reports — your account is locked to one job.")
+    frames.append(img)
+
+    # Frame 3 — inside Stock Take, only 3 sub-tabs
+    img, d = new_frame()
+    header(d, 3, "Three tabs only — Count, Recount, Final Summary",
+           "You land on Per-shelf Count automatically. No setup tabs to worry about.")
+    d.text((24, 100), "Stock Take", fill=GRAY_900, font=F_TITLE)
+    d.text((24, 138), "Shelf-by-shelf physical count reconciliation", fill=GRAY_600, font=F_BODY)
+    # restricted tab row
+    tabs = ["Per-shelf Count", "Recount", "Final Summary"]
+    tab_row(d, 24, 180, tabs, 0)
+    # Form preview
+    panel(d, 24, 250, 480, 380, title="Record Physical Count")
+    bx, by, bw, bh = 360, 260, 130, 32
+    button(d, bx, by, bw, bh, "Scan Shelf", bg=PURPLE, icon="▦")
+    highlight_ring(d, bx, by, bw, bh, color=PURPLE)
+    input_box(d, 40, 310, 440, 36, "Counter Name", "Alice")
+    input_box(d, 40, 360, 380, 36, "SKU (scan or type)", mono=True)
+    button(d, 430, 360, 50, 36, "📷", bg=GRAY_100, fg=GRAY_700)
+    input_box(d, 40, 410, 440, 36, "Counted Qty")
+    button(d, 40, 460, 440, 44, "+ Add Count")
+    # Recent counts panel (right)
+    panel(d, 520, 250, W - 544, 380, title="Recent Counts (0 total)")
+    d.text((540, 320), "Counts you record show up here, with",
+           fill=GRAY_500, font=F_BODY)
+    d.text((540, 344), "live updates from the other store tablet.",
+           fill=GRAY_500, font=F_BODY)
+    footer(d, "Big purple button = scan a shelf QR and see what should be on it.")
+    frames.append(img)
+
+    # Frame 4 — Scan camera on
+    img, d = new_frame()
+    header(d, 4, "Tap Scan Shelf, point at the QR label",
+           "Camera turns on inside a modal. The PUCHONG-A1-01 label is on every shelf.")
+    overlay = Image.new("RGBA", (W, H), (15, 23, 42, 130))
+    img.paste(Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB"))
+    d = ImageDraw.Draw(img)
+    mx, my, mw, mh = 380, 200, 440, 380
+    d.rounded_rectangle([mx, my, mx + mw, my + mh], radius=10, fill=WHITE)
+    d.text((mx + 24, my + 18), "Scan shelf QR", fill=GRAY_900, font=F_TITLE)
+    d.text((mx + 24, my + 56), "Point at the shelf label.", fill=GRAY_500, font=F_BODY)
+    cx, cy, cw, ch = mx + 60, my + 100, 320, 220
+    d.rectangle([cx, cy, cx + cw, cy + ch], fill=GRAY_900)
+    # QR corner markers
+    cs = 6
+    for (px, py) in [(cx + 30, cy + 30), (cx + cw - 30, cy + 30),
+                     (cx + 30, cy + ch - 30), (cx + cw - 30, cy + ch - 30)]:
+        d.rectangle([px - 22, py - cs, px + 22, py + cs], fill=PRIMARY)
+        d.rectangle([px - cs, py - 22, px + cs, py + 22], fill=PRIMARY)
+    d.text((cx + 100, cy + ch // 2 - 6), "PUCHONG-A1-01", fill=WHITE, font=F_MONO)
+    button(d, mx + (mw - 100) // 2, my + 340, 100, 32, "Cancel",
+           bg=GRAY_100, fg=GRAY_700)
+    footer(d, "If the tablet has no camera you can also type the QR text into the SKU field.")
+    frames.append(img)
+
+    # Frame 5 — Expected products list opens
+    img, d = new_frame()
+    header(d, 5, "Expected products appear",
+           "Type the actual count next to each SKU. Unexpected items can be added below.")
+    overlay = Image.new("RGBA", (W, H), (15, 23, 42, 130))
+    img.paste(Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB"))
+    d = ImageDraw.Draw(img)
+    mx, my, mw, mh = 180, 130, 840, 540
+    d.rounded_rectangle([mx, my, mx + mw, my + mh], radius=10, fill=WHITE)
+    d.text((mx + 24, my + 18), "Count shelf: PUCHONG / A1-01", fill=GRAY_900, font=F_TITLE)
+    d.text((mx + 24, my + 56), "Shelf QR: PUCHONG-A1-01", fill=GRAY_500, font=F_SMALL)
+    # table header
+    panel(d, mx + 24, my + 88, mw - 48, 340)
+    d.text((mx + 40, my + 108), "SKU", fill=GRAY_500, font=F_SMALL_B)
+    d.text((mx + 520, my + 108), "Expected", fill=GRAY_500, font=F_SMALL_B)
+    d.text((mx + 680, my + 108), "Counted", fill=GRAY_500, font=F_SMALL_B)
+    d.rectangle([mx + 40, my + 130, mx + mw - 64, my + 131], fill=GRAY_200)
+    rows = [("ABC-001", "Paracetamol 500mg", "10", "10"),
+            ("XYZ-042", "Vitamin C 1000mg",  "25", "24"),
+            ("MED-308", "Ibuprofen 200mg",    "8",  "8"),
+            ("VIT-009", "Vit B complex",     "12", "")]
+    for i, (sku, name, exp, got) in enumerate(rows):
+        ry = my + 150 + i * 56
+        d.text((mx + 40, ry), sku, fill=GRAY_900, font=F_MONO)
+        d.text((mx + 40, ry + 20), name, fill=GRAY_500, font=F_SMALL)
+        d.text((mx + 520, ry), exp, fill=GRAY_700, font=F_BODY)
+        input_box(d, mx + 680, ry - 6, 100, 32, "", got)
+    # highlight active input
+    highlight_ring(d, mx + 680, my + 150 + 3 * 56 - 6, 100, 32, color=PRIMARY)
+    # Unexpected row at bottom of modal
+    input_box(d, mx + 24, my + 440, 380, 36, "Unexpected SKU…", mono=True)
+    input_box(d, mx + 414, my + 440, 100, 36, "qty")
+    button(d, mx + 524, my + 440, 80, 36, "+ Add", bg=GRAY_100, fg=GRAY_700)
+    button(d, mx + mw - 200, my + 446, 170, 40, "Save shelf counts")
+    footer(d, "Found a SKU not on the list? Use the Unexpected row — it gets flagged for the admin.")
+    frames.append(img)
+
+    # Frame 6 — Save → toast
+    img, d = new_frame()
+    header(d, 6, "Save — toast confirms",
+           "Counts hit your tablet AND the admin's reconciliation in real time.")
+    # tabs again
+    d.text((24, 100), "Stock Take", fill=GRAY_900, font=F_TITLE)
+    tab_row(d, 24, 180, ["Per-shelf Count", "Recount", "Final Summary"], 0)
+    # Toast top-right
+    tx, ty, tw, th = W - 360, 110, 320, 50
+    d.rounded_rectangle([tx, ty, tx + tw, ty + th], radius=8, fill=GREEN_HI)
+    d.text((tx + 14, ty + 14), "✓ +4 count(s) on PUCHONG / A1-01",
+           fill=WHITE, font=F_BODY_B)
+    # Form (cleared)
+    panel(d, 24, 250, 480, 380, title="Record Physical Count")
+    bx, by, bw, bh = 360, 260, 130, 32
+    button(d, bx, by, bw, bh, "Scan Shelf", bg=PURPLE, icon="▦")
+    input_box(d, 40, 310, 440, 36, "Counter Name", "Alice")
+    input_box(d, 40, 360, 380, 36, "SKU (scan or type)", mono=True)
+    button(d, 430, 360, 50, 36, "📷", bg=GRAY_100, fg=GRAY_700)
+    input_box(d, 40, 410, 440, 36, "Counted Qty")
+    button(d, 40, 460, 440, 44, "+ Add Count")
+    # Recent counts panel showing 4 rows just added
+    panel(d, 520, 250, W - 544, 380, title="Recent Counts (4 total)")
+    d.text((540, 290), "When         Who    Location          SKU         Qty",
+           fill=GRAY_500, font=F_SMALL_B)
+    for i, (t, sku, q) in enumerate([("12:48", "ABC-001", 10), ("12:49", "XYZ-042", 24),
+                                      ("12:50", "MED-308", 8), ("12:50", "VIT-009", 12)]):
+        ry = 320 + i * 32
+        d.text((540, ry), f"{t}  Alice  PUCHONG/A1-01  {sku}      {q}",
+               fill=GRAY_900, font=F_MONO)
+    footer(d, "Move to the next shelf, scan its QR, repeat. That's the whole job.")
+    frames.append(img)
+
+    return frames
+
+
+# ── GIF 6: Admin session lifecycle ────────────────────────────────────────
+def gif_admin_lifecycle():
+    frames = []
+
+    # Frame 1 — Sessions tab, open a new session
+    img, d = base_chrome(active_tab_idx=0)
+    header(d, 1, "Open the day's session",
+           "From the admin account, Sessions tab → New Session.")
+    panel(d, 24, 240, W - 48, 410, title="Stock Take Sessions")
+    # session table
+    d.text((40, 290), "Session ID", fill=GRAY_500, font=F_SMALL_B)
+    d.text((300, 290), "Created", fill=GRAY_500, font=F_SMALL_B)
+    d.text((500, 290), "Locations", fill=GRAY_500, font=F_SMALL_B)
+    d.text((800, 290), "Status", fill=GRAY_500, font=F_SMALL_B)
+    d.rectangle([40, 310, W - 64, 311], fill=GRAY_200)
+    # Empty hint
+    d.text((40, 340), "(No open session yet — click New Session.)",
+           fill=GRAY_500, font=F_BODY)
+    # New Session button top right
+    bx, by, bw, bh = W - 240, 252, 200, 38
+    button(d, bx, by, bw, bh, "+ New Session")
+    highlight_ring(d, bx, by, bw, bh)
+    arrow(d, 1080, 200, 1080, 248)
+    footer(d, "The session id (e.g. ST_20260530) is what staff devices join.")
+    frames.append(img)
+
+    # Frame 2 — Modal: enter session details
+    img, d = base_chrome(active_tab_idx=0)
+    header(d, 2, "Name the session, list locations",
+           "Locations go one per line. Staff will join via shelf QR — these are for filters.")
+    overlay = Image.new("RGBA", (W, H), (15, 23, 42, 130))
+    img.paste(Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB"))
+    d = ImageDraw.Draw(img)
+    mx, my, mw, mh = 320, 200, 560, 340
+    d.rounded_rectangle([mx, my, mx + mw, my + mh], radius=10, fill=WHITE)
+    d.text((mx + 24, my + 18), "New Stock Take Session", fill=GRAY_900, font=F_TITLE)
+    d.text((mx + 24, my + 64), "Session ID", fill=GRAY_700, font=F_SMALL_B)
+    input_box(d, mx + 24, my + 86, mw - 48, 40, "", "ST_20260530", mono=True)
+    d.text((mx + 24, my + 144), "Locations (one per line)", fill=GRAY_700, font=F_SMALL_B)
+    # textarea
+    d.rounded_rectangle([mx + 24, my + 166, mx + mw - 24, my + 270], radius=6,
+                        fill=WHITE, outline=GRAY_300)
+    for i, loc in enumerate(["001 Wisma", "002 BayAvenue", "003 BJPavillion"]):
+        d.text((mx + 36, my + 178 + i * 26), loc, fill=GRAY_900, font=F_BODY)
+    button(d, mx + mw - 220, my + mh - 56, 90, 36, "Cancel", bg=GRAY_100, fg=GRAY_700)
+    bx, by = mx + mw - 120, my + mh - 56
+    button(d, bx, by, 100, 36, "Create")
+    highlight_ring(d, bx, by, 100, 36)
+    footer(d, "Create writes locally AND inserts an st_sessions row in Supabase for staff to join.")
+    frames.append(img)
+
+    # Frame 3 — Per-shelf Count tab, live counts arriving
+    img, d = base_chrome(active_tab_idx=4)
+    header(d, 3, "Counts arrive live from store tablets",
+           "Sub-tab: Per-shelf Count. Each row tagged with where it came from.")
+    panel(d, 24, 250, 460, 380, title="Record Physical Count")
+    button(d, 350, 260, 120, 32, "Scan Shelf", bg=PURPLE)
+    input_box(d, 40, 310, 420, 36, "Counter Name", "Admin")
+    input_box(d, 40, 360, 420, 36, "SKU (scan or type)", mono=True)
+    input_box(d, 40, 410, 420, 36, "Counted Qty")
+    button(d, 40, 460, 420, 40, "+ Add Count")
+    panel(d, 500, 250, W - 524, 380, title="Recent Counts (12 total)")
+    d.text((520, 290), "When   Who              Location          SKU       Qty",
+           fill=GRAY_500, font=F_SMALL_B)
+    recent = [("12:48", "Alice (001)", "001 Wisma",      "ABC-001", 10, True),
+              ("12:49", "Alice (001)", "001 Wisma",      "XYZ-042", 24, True),
+              ("12:51", "Bob (002)",   "002 BayAvenue",  "ABC-001", 8,  True),
+              ("12:52", "Bob (002)",   "002 BayAvenue",  "MED-308", 7,  True),
+              ("12:53", "You",         "002 BayAvenue",  "VIT-009", 12, False),
+              ("12:54", "Carol (003)", "003 BJPavillion","ABC-001", 12, True)]
+    for i, (t, who, loc, sku, q, remote) in enumerate(recent):
+        ry = 320 + i * 32
+        d.text((520, ry), f"{t}  {who:<14} {loc:<17} {sku}    {q}",
+               fill=GRAY_900, font=F_MONO)
+        if remote:
+            d.rounded_rectangle([1160, ry - 2, 1200, ry + 18], radius=4, fill=BLUE_BG)
+            d.text((1165, ry + 1), "live", fill=BLUE, font=F_TINY)
+    footer(d, "Blue 'live' badge = came from another tablet via Supabase realtime.")
+    frames.append(img)
+
+    # Frame 4 — Reconciliation tab
+    img, d = base_chrome(active_tab_idx=6)
+    header(d, 4, "Reconciliation tab — see the variance",
+           "Aggregates every Location+SKU pair, flags rows beyond tolerance.")
+    # KPI strip
+    for i, (label, val, c) in enumerate(
+            [("Total SKUs", "143", GRAY_900),
+             ("Matched", "118", GREEN_HI),
+             ("Recount Required", "12", RED_HI),
+             ("Inventory Accuracy", "82.5%", YELLOW_HI)]):
+        x = 24 + i * 290
+        bg = WHITE
+        if label == "Matched": bg = GREEN_BG
+        if label == "Recount Required": bg = RED_BG
+        if label == "Inventory Accuracy": bg = YELLOW_BG
+        d.rounded_rectangle([x, 230, x + 270, 310], radius=8, fill=bg)
+        d.text((x + 14, 240), label, fill=GRAY_600, font=F_SMALL_B)
+        d.text((x + 14, 264), val, fill=c, font=_font(32, bold=True))
+    # Tolerance + buttons row
+    panel(d, 24, 330, W - 48, 80)
+    d.text((40, 348), "Tolerance (± units):", fill=GRAY_700, font=F_BODY_B)
+    input_box(d, 220, 342, 80, 32, "", "0")
+    button(d, 308, 342, 70, 32, "Apply")
+    button(d, 700, 342, 80, 32, "CSV", bg=GRAY_100, fg=GRAY_700)
+    button(d, 788, 342, 80, 32, "XLSX", bg=GRAY_100, fg=GRAY_700)
+    button(d, 876, 342, 150, 32, "Adjustment File")
+    bx, by, bw, bh = 1032, 342, 150, 32
+    button(d, bx, by, bw, bh, "Accept Variances", bg=PURPLE)
+    highlight_ring(d, bx, by, bw, bh, color=PURPLE)
+    # rows panel teaser
+    panel(d, 24, 430, W - 48, 220, title="Per-shelf variance (12 rows need attention)")
+    rows = [("001 Wisma",   "MED-308", "8",  "10", "-2"),
+            ("002 BayAv",   "ABC-001", "12", "10", "+2"),
+            ("003 BJPav",   "MED-308", "7",  "10", "-3")]
+    for i, (loc, sku, phys, sys, var) in enumerate(rows):
+        ry = 470 + i * 34
+        d.text((40, ry), loc, fill=GRAY_900, font=F_BODY)
+        d.text((240, ry), sku, fill=GRAY_900, font=F_MONO)
+        d.text((420, ry), phys, fill=GRAY_700, font=F_BODY)
+        d.text((520, ry), sys, fill=GRAY_700, font=F_BODY)
+        col = GREEN_HI if var.startswith("+") else RED_HI
+        d.text((620, ry), var, fill=col, font=F_BODY_B)
+        status_pill(d, 800, ry - 2, "Recount", RED_BG, RED_HI)
+    footer(d, "Click Accept Variances to use counted qty as the new baseline for next session.")
+    frames.append(img)
+
+    # Frame 5 — Close session
+    img, d = base_chrome(active_tab_idx=0)
+    header(d, 5, "Close the session when done",
+           "Sessions tab → Close. The session goes read-only and historical reports lock in.")
+    panel(d, 24, 240, W - 48, 410, title="Stock Take Sessions")
+    d.text((40, 290), "Session ID", fill=GRAY_500, font=F_SMALL_B)
+    d.text((300, 290), "Created", fill=GRAY_500, font=F_SMALL_B)
+    d.text((500, 290), "QR Counts", fill=GRAY_500, font=F_SMALL_B)
+    d.text((620, 290), "Status", fill=GRAY_500, font=F_SMALL_B)
+    d.text((820, 290), "Actions", fill=GRAY_500, font=F_SMALL_B)
+    d.rectangle([40, 310, W - 64, 311], fill=GRAY_200)
+    # row
+    ry = 332
+    d.text((40, ry), "ST_20260530", fill=GRAY_900, font=F_MONO)
+    d.text((300, ry), "2026-05-30 12:30", fill=GRAY_700, font=F_BODY)
+    d.text((500, ry), "143", fill=GRAY_900, font=F_BODY_B)
+    status_pill(d, 620, ry - 2, "● open", GREEN_BG, GREEN_HI)
+    button(d, 820, ry - 4, 90, 28, "Activate", bg=GRAY_100, fg=GRAY_700)
+    bx, by, bw, bh = 920, ry - 4, 70, 28
+    button(d, bx, by, bw, bh, "Close")
+    highlight_ring(d, bx, by, bw, bh)
+    footer(d, "Closed sessions stay forever — reopen any time to view the report.")
+    frames.append(img)
+
+    return frames
+
+
 def save_gif(frames, name):
     """Save a list of PIL Images as an animated GIF."""
     path = OUT / name
@@ -598,10 +938,12 @@ def save_gif(frames, name):
 
 
 def main():
-    save_gif(gif_shelves(),         "01-shelf-master-setup.gif")
-    save_gif(gif_scan_count(),      "02-scan-shelf-to-count.gif")
-    save_gif(gif_3way(),            "03-three-way-reconciliation.gif")
+    save_gif(gif_shelves(),          "01-shelf-master-setup.gif")
+    save_gif(gif_scan_count(),       "02-scan-shelf-to-count.gif")
+    save_gif(gif_3way(),             "03-three-way-reconciliation.gif")
     save_gif(gif_accept_variances(), "04-accept-variances.gif")
+    save_gif(gif_staff_daily(),      "05-staff-daily-workflow.gif")
+    save_gif(gif_admin_lifecycle(),  "06-admin-session-lifecycle.gif")
 
 
 if __name__ == "__main__":

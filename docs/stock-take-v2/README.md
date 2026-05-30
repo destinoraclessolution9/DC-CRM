@@ -50,6 +50,29 @@ physical quantities, so the *next* reconciliation starts from physical
 reality. The Adjustment File export still lets you sync the same delta back
 to your ERP.
 
+## 5. Staff daily workflow (Level 15)
+
+![Staff daily workflow](05-staff-daily-workflow.gif)
+
+What a per-store counter account (`001-wisma`, `002-bayavenue`,
+`003-bjpavillion`) sees from sign-in to saving counts. The sidebar contains
+only Stock Take, and inside the module only Per-shelf Count / Recount /
+Final Summary are visible — every setup tab is hidden. Tap **Scan Shelf**,
+point at the QR label, type counts next to the expected SKU list, hit
+**Save**. Counts sync live to the admin and any other staff tablet on the
+same session. See `PROVISION_STAFF_ACCOUNTS.md` for how to create these
+accounts.
+
+## 6. Admin session lifecycle
+
+![Admin session lifecycle](06-admin-session-lifecycle.gif)
+
+The other side of the same workflow from the admin account: open a session
+(Sessions tab → New Session), watch counts arrive live from store tablets
+(blue "live" badge marks scans from other devices), open Reconciliation to
+see variance and accuracy, hit Accept Variances when reality matches the
+shelf, then close the session.
+
 ---
 
 ## Regenerating the GIFs
