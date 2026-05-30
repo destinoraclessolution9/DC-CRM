@@ -440,6 +440,45 @@ const appLogic = (() => {
     // Tracks the open detail view so pull-to-refresh can re-open it instead of jumping to the list.
     let _currentDetailView = null; // { type: 'prospect'|'customer', id: number }
 
+    // ── View HTML cache (perf: instant tab switches) ──────────────────────
+    // Stores the rendered viewport DOM + scroll position per view so that
+    // bouncing between high-traffic tabs (Calendar / Prospects / Pipeline)
+    // doesn't pay the 200-800 ms cost of rebuilding a giant innerHTML on
+    // every click. Cached entries are restored only when fresh (< TTL) and
+    // are wiped by data mutations (saveProspect, dataChanged event, etc.).
+    // Safe because the codebase uses inline onclick="app.fn()" everywhere —
+    // no listeners to re-bind after innerHTML restore.
+    const _viewHtmlCache = new Map(); // viewId -> { html, className, scrollTop, ts }
+    const _VIEW_HTML_CACHE_TTL_MS = 60_000;
+    const _CACHEABLE_VIEWS = new Set(['prospects', 'calendar', 'month', 'pipeline']);
+    const _saveViewToCache = (viewId, viewport) => {
+        if (!viewId || !viewport || !_CACHEABLE_VIEWS.has(viewId)) return;
+        _viewHtmlCache.set(viewId, {
+            html: viewport.innerHTML,
+            className: viewport.className,
+            scrollTop: viewport.scrollTop || 0,
+            ts: Date.now(),
+        });
+    };
+    const _restoreViewFromCache = (viewId, viewport) => {
+        if (!viewId || !viewport || !_CACHEABLE_VIEWS.has(viewId)) return false;
+        const entry = _viewHtmlCache.get(viewId);
+        if (!entry) return false;
+        if (Date.now() - entry.ts > _VIEW_HTML_CACHE_TTL_MS) {
+            _viewHtmlCache.delete(viewId);
+            return false;
+        }
+        viewport.innerHTML = entry.html;
+        viewport.className = entry.className;
+        // Restore scroll on the next frame so layout settles first.
+        requestAnimationFrame(() => { viewport.scrollTop = entry.scrollTop; });
+        return true;
+    };
+    const _invalidateViewCache = (...viewIds) => {
+        if (!viewIds.length) { _viewHtmlCache.clear(); return; }
+        for (const v of viewIds) _viewHtmlCache.delete(v);
+    };
+
     // ========== ROLE HELPERS ==========
     // Extract numeric level from a role string. "Level 10 Agent" -> 10, "Level 1 Super Admin" -> 1.
     // Falls back to legacy named roles. Returns 99 (lowest) when nothing matches.
@@ -10275,17 +10314,18 @@ function _wireLoginBtn() {
 
     // Map of scanned field → CRM form field id (suffix on `${prefix}-`)
     const CPS_SCAN_FIELD_MAP = [
-        // [scannedKey, fieldSuffix, displayLabel, transformFn]
-        ['name',           'name',         'Full Name',          v => v],
-        ['gender',         'gender',       'Gender',             v => v],
-        ['dob_solar',      'dob',          'Date of Birth',      v => v],
-        ['dob_lunar',      'lunar',        'Lunar Birth',        v => v],
-        ['phone',          'phone',        'Phone',              v => v],
-        ['occupation',     'occupation',   'Occupation',         v => v],
-        ['email',          'email',        'Email',              v => v],
-        ['address',        'address',      'Address',            v => v],
-        // marital_status is a checkbox group, handled specially below
-        ['marital_status', '__marital__',  'Marital Status',     v => v],
+        // [scannedKey, fieldSuffix, displayLabel, dbColumn]
+        // dbColumn is used when applying to an existing prospect record.
+        ['name',           'name',         'Full Name',          'full_name'],
+        ['gender',         'gender',       'Gender',             'gender'],
+        ['dob_solar',      'dob',          'Date of Birth',      'date_of_birth'],
+        ['dob_lunar',      'lunar',        'Lunar Birth',        'lunar_birth'],
+        ['phone',          'phone',        'Phone',              'phone'],
+        ['occupation',     'occupation',   'Occupation',         'occupation'],
+        ['email',          'email',        'Email',              'email'],
+        ['address',        'address',      'Address',            'address'],
+        // marital_status is a checkbox group in form, plain column in DB
+        ['marital_status', '__marital__',  'Marital Status',     'marital_status'],
     ];
 
     // Read the current value out of the form for a given field suffix
@@ -10315,8 +10355,41 @@ function _wireLoginBtn() {
         }
     };
 
-    // Stash scan result so the review modal callbacks can read it
+    // Stash scan result so the review modal callbacks can read it.
     let _cpsScanCache = null;
+    // Photo file (File blob) pending silent upload. Persists across the
+    // review modal lifecycle — consumed when the host record (prospect or
+    // activity) is saved, then cleared. Per-prefix so prospect-modal and
+    // cps-modal flows don't trample each other.
+    let _cpsPendingPhotoFiles = {}; // { [prefix]: File }
+
+    // Centralized helper: upload a CPS form photo to Supabase Storage and
+    // patch the prospect record with the URL + date + filename. Single source
+    // of truth used by all three entry points (Upload CPS button, basic-info
+    // Take Photo, CPS Quick Add). Returns the public URL or null on failure.
+    const _uploadCpsFormFile = async (file, prospectId) => {
+        if (!file || !prospectId) return null;
+        try {
+            const sb = window.supabase;
+            if (!sb || !sb.storage) return null;
+            const ext = (file.name.match(/\.[a-z0-9]+$/i)?.[0] || '.jpg').toLowerCase();
+            const path = `cps-forms/${prospectId}_${Date.now()}${ext}`;
+            const { error: upErr } = await sb.storage
+                .from('attachments')
+                .upload(path, file, { upsert: true, contentType: file.type });
+            if (upErr) throw upErr;
+            const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
+            await AppDataStore.update('prospects', prospectId, {
+                cps_form_url: urlData?.publicUrl || null,
+                cps_form_date: new Date().toISOString().split('T')[0],
+                cps_form_name: file.name,
+            });
+            return urlData?.publicUrl || null;
+        } catch (err) {
+            console.warn('CPS form silent upload failed:', err);
+            return null;
+        }
+    };
 
     // Dedicated overlay for the scan flow (separate from UI.showModal).
     // The CPS form's prospect/quick-add modal already lives in the global
@@ -10421,6 +10494,9 @@ function _wireLoginBtn() {
 
             // `current` was snapshotted above before any overlay opened.
             _cpsScanCache = { prefix, scanned, confidence, current, rawText: res.raw_text || '' };
+            // Stash the photo for silent upload after host record is saved.
+            // Survives review modal Cancel — the photo is always uploaded.
+            _cpsPendingPhotoFiles[prefix] = file;
             renderCpsScanReview();
         } catch (err) {
             _hideCpsScanOverlay();
@@ -10545,28 +10621,54 @@ function _wireLoginBtn() {
         document.querySelectorAll('.cps-scan-pick').forEach(cb => { cb.checked = !!checked; });
     };
 
-    const applyCpsScanSelection = () => {
+    const applyCpsScanSelection = async () => {
         if (!_cpsScanCache) { _hideCpsScanOverlay(); return; }
-        const { prefix, scanned } = _cpsScanCache;
+        const { prefix, scanned, prospectId } = _cpsScanCache;
+        const dbTarget = prefix === '__prospect_row__';
 
         const picked = Array.from(document.querySelectorAll('.cps-scan-pick:checked'))
             .map(cb => parseInt(cb.dataset.idx, 10))
             .filter(n => !isNaN(n));
 
         let applied = 0;
-        picked.forEach(idx => {
-            const [key, suffix] = CPS_SCAN_FIELD_MAP[idx] || [];
-            if (!key) return;
-            const val = scanned[key];
-            if (val == null || String(val).trim() === '') return;
-            _writeCpsField(prefix, suffix, String(val).trim());
-            applied++;
-        });
+        if (dbTarget) {
+            // Write directly to the prospect record (Upload CPS button flow)
+            const patch = {};
+            picked.forEach(idx => {
+                const row = CPS_SCAN_FIELD_MAP[idx] || [];
+                const key = row[0];
+                const dbCol = row[3];
+                if (!key || !dbCol) return;
+                const val = scanned[key];
+                if (val == null || String(val).trim() === '') return;
+                patch[dbCol] = String(val).trim();
+                applied++;
+            });
+            if (applied > 0 && prospectId) {
+                try {
+                    await AppDataStore.update('prospects', prospectId, patch);
+                } catch (err) {
+                    UI.toast.error('Failed to save fields: ' + (err.message || err));
+                    applied = 0;
+                }
+            }
+        } else {
+            // Form-target: write into the open modal's form fields
+            picked.forEach(idx => {
+                const [key, suffix] = CPS_SCAN_FIELD_MAP[idx] || [];
+                if (!key) return;
+                const val = scanned[key];
+                if (val == null || String(val).trim() === '') return;
+                _writeCpsField(prefix, suffix, String(val).trim());
+                applied++;
+            });
+        }
 
         _hideCpsScanOverlay();
         _cpsScanCache = null;
         if (applied > 0) {
-            UI.toast.success(`Applied ${applied} field${applied === 1 ? '' : 's'} from scan. Please review before saving.`);
+            const tail = dbTarget ? 'to prospect record.' : 'from scan. Please review before saving.';
+            UI.toast.success(`Applied ${applied} field${applied === 1 ? '' : 's'} ${tail}`);
         } else {
             UI.toast.info('No fields were applied.');
         }
@@ -11260,6 +11362,12 @@ function _wireLoginBtn() {
             try { if (typeof window.app?.stStopRealtime === 'function') await window.app.stStopRealtime(); } catch (e) {}
             try { if (typeof window.app?._stCancelScanner === 'function') await window.app._stCancelScanner(); } catch (e) {}
         }
+        // ── View HTML cache: save the outgoing view's DOM before we replace it.
+        // Lets the user bounce back to it within TTL without paying the rebuild
+        // cost. See _saveViewToCache near the top of the IIFE.
+        if (_currentView && _currentView !== viewId && _CACHEABLE_VIEWS.has(_currentView)) {
+            _saveViewToCache(_currentView, document.getElementById('content-viewport'));
+        }
         _currentDetailView = null; // leaving any detail page — pull-to-refresh goes back to list
         // Strip mobile-home / mobile-calendar page backgrounds when leaving so
         // the beige fill doesn't bleed into other screens.
@@ -11307,6 +11415,22 @@ function _wireLoginBtn() {
         document.title = `${VIEW_TITLES[viewId] || viewId} — 悅客匯 CRM`;
 
         const viewport = document.getElementById('content-viewport');
+
+        // ── View HTML cache: try to restore from a fresh cached DOM.
+        // On a hit, we skip the entire showXView() rebuild — the dominant
+        // cost (200-800 ms) of a tab switch. 'calendar' canonicalises to
+        // 'month' (matches the _currentView assignment below).
+        {
+            const cacheKey = (viewId === 'calendar') ? 'month' : viewId;
+            if (_CACHEABLE_VIEWS.has(cacheKey) && _restoreViewFromCache(cacheKey, viewport)) {
+                _currentView = cacheKey;
+                if (isMobile()) {
+                    updateBottomNavActive(viewId);
+                    setTimeout(applyMobileTableLabels, 200);
+                }
+                return;
+            }
+        }
 
         if (viewId === 'home') {
             _currentView = 'home';
@@ -17828,37 +17952,77 @@ function _wireLoginBtn() {
                 UI.toast.error('File too large (max 5 MB)');
                 return;
             }
-            try {
-                // Storage path is the canonical store. Embedding the file as
-                // base64 in prospects.cps_form_data was previously bloating the
-                // table to 57 MB for 9 prospects — every getAll() shipped that
-                // payload back. Now we upload to the attachments bucket and
-                // store only the public URL on the row.
-                const sb = window.supabase;
-                if (!sb || !sb.storage) {
-                    UI.toast.error('Storage unavailable — cannot upload CPS form.');
-                    return;
-                }
-                const ext = (file.name.match(/\.[a-z0-9]+$/i)?.[0] || '.bin').toLowerCase();
-                const path = `cps-forms/${prospectId}_${Date.now()}${ext}`;
-                const { error: upErr } = await sb.storage
-                    .from('attachments')
-                    .upload(path, file, { upsert: true, contentType: file.type });
-                if (upErr) throw upErr;
-                const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
-                await AppDataStore.update('prospects', prospectId, {
-                    cps_form_url: urlData?.publicUrl || null,
-                    cps_form_date: new Date().toISOString().split('T')[0],
-                    cps_form_name: file.name
+            // Run upload and OCR in PARALLEL so the user only waits once.
+            // Upload always happens silently. OCR result triggers the review
+            // modal if any extractable fields differ from the existing prospect.
+            const uploadPromise = _uploadCpsFormFile(file, prospectId)
+                .then(url => {
+                    if (url) UI.toast.success('CPS form uploaded to prospect profile');
+                    else UI.toast.error('Upload failed — please retry');
                 });
-                UI.hideModal();
-                UI.toast.success('CPS form uploaded and saved to prospect profile');
-            } catch (err) {
-                UI.toast.error('Upload failed: ' + (err.message || err));
-            }
+            // OCR only if it's an image — PDFs we send too (Gemini supports both)
+            _scanAndApplyToProspect(file, prospectId).catch(err => {
+                console.warn('OCR autofill skipped:', err);
+            });
+            await uploadPromise;
         };
         input.oncancel = () => document.body.removeChild(input);
         input.click();
+    };
+
+    // OCR a CPS form photo and open the review modal scoped to an EXISTING
+    // prospect record. Applies picked fields directly via AppDataStore.update.
+    // Used by the "Upload CPS" Actions-panel button.
+    const _scanAndApplyToProspect = async (file, prospectId) => {
+        // Show OCR-only spinner on top of any open view
+        _showCpsScanOverlay('Reading Form…', `
+            <div style="text-align:center; padding:20px 0;">
+                <i class="fas fa-spinner fa-spin" style="font-size:36px; color:#7c3aed; margin-bottom:14px;"></i>
+                <p style="color:var(--gray-600); margin:0;">Reading the form, please wait…</p>
+                <p style="color:var(--gray-400); font-size:12px; margin-top:6px;">(usually 3–6 seconds)</p>
+            </div>
+        `);
+
+        try {
+            const dataUrl = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = () => reject(new Error('Could not read file'));
+                reader.readAsDataURL(file);
+            });
+            const [meta, b64] = String(dataUrl).split(',');
+            const mime = (meta.match(/data:(.*?);base64/) || [])[1] || file.type || 'image/jpeg';
+
+            if (!window.supabase || !window.supabase.functions) {
+                throw new Error('Supabase client not available');
+            }
+            const { data: res, error } = await window.supabase.functions.invoke('cps-form-ocr', {
+                body: { image_base64: b64, mime_type: mime },
+            });
+            if (error) throw new Error(error.message || 'OCR call failed');
+            if (!res || res.ok === false) throw new Error(res?.detail || res?.error || 'OCR failed');
+
+            // Snapshot existing prospect values for the diff
+            const prospect = await AppDataStore.getById('prospects', prospectId);
+            const current = {};
+            CPS_SCAN_FIELD_MAP.forEach(([key, , , dbCol]) => {
+                current[key] = prospect?.[dbCol] != null ? String(prospect[dbCol]) : '';
+            });
+
+            _cpsScanCache = {
+                prefix: '__prospect_row__',     // sentinel: write to DB not DOM
+                prospectId,
+                scanned: res.fields || {},
+                confidence: res.confidence || {},
+                current,
+                rawText: res.raw_text || '',
+            };
+            renderCpsScanReview();
+        } catch (err) {
+            _hideCpsScanOverlay();
+            console.warn('OCR failed for Upload CPS:', err);
+            UI.toast.info('Photo saved. Could not auto-read fields — please edit manually.');
+        }
     };
 
     const editActivityTiming = async (activityId) => {
@@ -20382,14 +20546,7 @@ function _wireLoginBtn() {
                     <div class="form-section">
                         <h4>👤 New Customer Information</h4>
                         ${buildBasicInfoBlock('cps')}
-                        <div class="form-group">
-                            <label>Attachment (PDF, JPG, PNG up to 5MB)</label>
-                            <input type="file" id="cps-attachment" class="form-control" accept=".pdf, .png, .jpg, .jpeg">
-                            <small class="help-text" style="color: var(--gray-500); font-size: 11px; margin-top: 4px; display: block;">
-                                Upload scanned copy of the signed CPS form
-                            </small>
-                        </div>
-                        <p class="help-text">Minimum required: Name, Phone Number, and Relation.</p>
+                        <p class="help-text">Minimum required: Name, Phone Number, and Relation. Tap <strong>📷 Take Photo</strong> above to auto-fill from a paper form — the photo is also saved to the prospect record.</p>
                     </div>
 
                     <div class="form-section">
@@ -21946,6 +22103,14 @@ function _wireLoginBtn() {
             activity.prospect_id = prospect.id;
             activity.activity_title = `CPS With ${name}`;
 
+            // Silent upload of CPS form photo (if scanned during this session).
+            // Fire-and-forget — does not block the rest of the save flow.
+            if (_cpsPendingPhotoFiles.cps) {
+                const _pendingScanFile = _cpsPendingPhotoFiles.cps;
+                delete _cpsPendingPhotoFiles.cps;
+                _uploadCpsFormFile(_pendingScanFile, prospect.id).catch(() => {});
+            }
+
             // Auto-create referral record from CPS activity
             const _refType = (_selectedReferrer.type || '').toLowerCase() === 'consultant' ? 'user' : 'prospect';
             try {
@@ -22078,16 +22243,18 @@ function _wireLoginBtn() {
 
         // CPS attachment upload — store the file in Supabase storage so it's viewable everywhere.
         // We stash it here and upload AFTER the activity row exists so the path can reference the activity id.
+        // The file comes from the "📷 Take Photo" widget at the top of the basic-info block
+        // (the dedicated <input type="file" id="cps-attachment"> was removed as part of the
+        // photo unification — one scan, both OCR and storage).
         let _pendingCpsFile = null;
         if (type === 'CPS') {
-            const attInput = document.getElementById('cps-attachment');
-            if (attInput && attInput.files.length > 0) {
-                const file = attInput.files[0];
-                if (file.size > 5 * 1024 * 1024) {
+            // Prefer the scanned file stashed by handleCpsScanFile (covers Take Photo flow)
+            if (_cpsPendingPhotoFiles?.cps) {
+                _pendingCpsFile = _cpsPendingPhotoFiles.cps;
+                if (_pendingCpsFile.size > 5 * 1024 * 1024) {
                     UI.toast.error('File size exceeds 5MB limit');
                     return;
                 }
-                _pendingCpsFile = file;
             }
         }
 
@@ -22167,6 +22334,8 @@ function _wireLoginBtn() {
                 console.error('CPS attachment upload failed:', err);
                 UI.toast.error('CPS attachment upload failed: ' + (err.message || 'Unknown error'));
             }
+            // Clear the stash so the next save doesn't reuse this file
+            delete _cpsPendingPhotoFiles.cps;
         }
 
         // Save event attendees now that we have the activity ID — stored per-activity so
@@ -24589,9 +24758,17 @@ function _wireLoginBtn() {
                 data.protection_deadline = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
                 data.score = SCORING_RULES.CREATE_PROSPECT;
                 data.created_at = new Date().toISOString();
-                await AppDataStore.create('prospects', data);
+                const newProspect = await AppDataStore.create('prospects', data);
                 UI.toast.success('Prospect created successfully');
                 document.dispatchEvent(new CustomEvent('prospectCreated', { detail: data }));
+                // Silent upload of CPS form photo if one was scanned this session.
+                // Fire-and-forget — does not block the save flow.
+                if (_cpsPendingPhotoFiles.prospect) {
+                    const _pendingScanFile = _cpsPendingPhotoFiles.prospect;
+                    delete _cpsPendingPhotoFiles.prospect;
+                    const prospectId = newProspect?.id || data.id;
+                    _uploadCpsFormFile(_pendingScanFile, prospectId).catch(() => {});
+                }
                 // Trigger new_prospect workflow
                 try { await executeWorkflows('new_prospect', { name: data.full_name }); } catch (e) { /* ignore */ }
             }
@@ -54414,6 +54591,16 @@ Gold-${totGold}`;
                     } else if (table === 'follow_up_drafts' || table === 'refill_reminders') {
                         _clearMobileSnapshots(['mhome-drafts', 'mhome-refills', 'mhome-snap-']);
                     }
+
+                    // ── View HTML cache invalidation ──
+                    // A real mutation can stale the rendered DOM of any cached view
+                    // that reads this table. Drop those entries so the next visit
+                    // re-renders fresh instead of showing pre-edit content.
+                    if (table === 'activities' || table === 'events' || table === 'prospects' || table === 'customers') {
+                        _invalidateViewCache('month', 'calendar', 'prospects', 'pipeline');
+                    } else if (table === 'users') {
+                        _invalidateViewCache('prospects', 'pipeline');
+                    }
                 }
 
                 // Map tables to views that need refresh. Must include every
@@ -54552,6 +54739,7 @@ Gold-${totGold}`;
         toggleCpsScanAll,
         applyCpsScanSelection,
         _hideCpsScanOverlay,
+        _uploadCpsFormFile,
 
         // Lead Capture Forms
         showLeadFormsView,
