@@ -495,6 +495,7 @@ const appLogic = (() => {
         if (r === 'team_leader') return 5;
         if (r === 'consultant') return 7;
         if (r === 'agent') return 10;
+        if (r === 'stock_take_staff' || r === 'stock_take') return 15;
         if (r === 'customer') return 13;
         if (r === 'referrer') return 14;
         // Chinese-only role names (no "Level X" prefix) for L12/13/14
@@ -506,6 +507,10 @@ const appLogic = (() => {
     };
     const isSystemAdmin = (user) => _getUserLevel(user) === 1;
     const isMarketingManager = (user) => _getUserLevel(user) === 2;
+    // Level 15: restricted "Stock Take Staff" — sees only the Stock Take tab,
+    // and inside it only the count / recount / summary tabs (no admin setup).
+    const isStockTakeStaff = (user) => _getUserLevel(user) === 15;
+    const canAccessStockTake = (user) => isSystemAdmin(user) || isStockTakeStaff(user);
     const isAgent = (user) => {
         const lvl = _getUserLevel(user);
         return lvl >= 3 && lvl <= 12;
@@ -4153,6 +4158,10 @@ In a production system, this would show the actual file contents.
             12: ['calendar','prospects','referrals','fude','milestones'],
             13: ['calendar','prospects','fude','milestones'],
             14: ['calendar','prospects','fude','milestones'],
+            // Level 15 Stock Take Staff — per-store counter accounts that only
+            // see the Stock Take tab. Inside the module they only get the
+            // count / recount / summary sub-tabs (gated in showStockTakeView).
+            15: ['stock-take'],
         };
         let level = 12;
         const user = _currentUser;
@@ -4308,6 +4317,15 @@ In a production system, this would show the actual file contents.
         if (!viewport) return;
         viewport.classList.add('mhome-active');
 
+        // ── Perf instrumentation (mobile Home Tier 0) ────────────
+        // Look for "[mhome-perf]" rows in the console to see where the cold
+        // home load is spending time.
+        const _mhomePerfT0 = performance.now();
+        const _mhomePerf = (label) => {
+            try { console.info(`[mhome-perf] ${label} +${Math.round(performance.now() - _mhomePerfT0)}ms`); } catch(_) {}
+        };
+        _mhomePerf('mhome:start');
+
         const now = new Date();
         const hour = now.getHours();
         const greetWord = hour < 12 ? 'Good Morning' : hour < 18 ? 'Good Afternoon' : 'Good Evening';
@@ -4362,9 +4380,11 @@ In a production system, this would show the actual file contents.
         const todayMD = mmdd(now);
         const tomMD = mmdd(tom);
 
+        _mhomePerf('visibleIds:start');
         const visibleIds = (typeof getVisibleUserIds === 'function')
             ? await getVisibleUserIds(_currentUser).catch(() => 'all')
             : 'all';
+        _mhomePerf('visibleIds:done');
 
         const actQueryOpts = {
             filters: { activity_date: todayStr },
@@ -4412,21 +4432,59 @@ In a production system, this would show the actual file contents.
         const _needRefills   = !cachedRefills;
         const _needUsers     = !cachedUsers;
 
-        // Foreground: only HOT, small data — today's activities, pending
-        // follow-ups, pending refills, and the (small) users table when needed.
-        // The heavy prospect/customer base is served from cache or loaded in the
-        // background below, so the card paints without waiting on a full-table scan.
-        const [actResult, draftsR, refillsR, allUsersR] = await Promise.all([
-            AppDataStore.queryAdvanced('activities', actQueryOpts).catch(() => ({ data: [] })),
-            _needDrafts  ? AppDataStore.query('follow_up_drafts', { status: 'pending' }).catch(() => []) : Promise.resolve([]),
-            _needRefills ? AppDataStore.query('refill_reminders', { status: 'pending' }).catch(() => []) : Promise.resolve([]),
-            _needUsers   ? AppDataStore.getAll('users').catch(() => [])                                  : Promise.resolve([]),
-        ]);
-
+        // ── Mobile Home Tier 1.1: foreground = TODAY only ────────
+        // The cold foreground used to await activities + drafts + refills
+        // + getAll('users') (full table). The users fetch alone is a 1-3 s
+        // network round-trip on a slow phone — and it's only needed for the
+        // birthday widget, which can fill in late without breaking anything.
+        //
+        // New shape: foreground awaits ONLY today's activities (small,
+        // date-bounded). Drafts + refills + users fire in background; when
+        // each arrives we save to the localStorage cache and trigger a
+        // silent _composeBody repaint so the dashboard fills in
+        // progressively instead of staying on "Loading…" until the slowest
+        // call resolves.
+        _mhomePerf('foreground:activities:start');
+        const actResult = await AppDataStore.queryAdvanced('activities', actQueryOpts).catch(() => ({ data: [] }));
+        _mhomePerf('foreground:activities:done');
         const activities = (actResult.data || []).filter(a => a.activity_type !== 'EVENT');
-        if (_needDrafts)  { cachedDrafts  = draftsR   || []; _mhomeLsSet(_mhomeDraftsKey,  cachedDrafts);  }
-        if (_needRefills) { cachedRefills = refillsR  || []; _mhomeLsSet(_mhomeRefillsKey, cachedRefills); }
-        if (_needUsers)   { cachedUsers   = allUsersR  || []; _mhomeLsSet(_mhomeUsersKey,  cachedUsers);   }
+
+        // Background data — repaint when each lands. The guard
+        // (_currentView === 'home') makes a stale repaint harmless if the
+        // user has navigated away.
+        const _mhomeRepaint = () => {
+            if (_currentView !== 'home') return;
+            if (!document.getElementById('mhome-body')) return;
+            _composeBody(cachedPeople || [], cachedUsers || [], cachedCustomers || [], !cachedPeople);
+        };
+        if (_needDrafts) {
+            AppDataStore.query('follow_up_drafts', { status: 'pending' })
+                .then(rows => { cachedDrafts = rows || []; _mhomeLsSet(_mhomeDraftsKey, cachedDrafts); _mhomePerf('bg:drafts:done'); _mhomeRepaint(); })
+                .catch(() => {});
+        }
+        if (_needRefills) {
+            AppDataStore.query('refill_reminders', { status: 'pending' })
+                .then(rows => { cachedRefills = rows || []; _mhomeLsSet(_mhomeRefillsKey, cachedRefills); _mhomePerf('bg:refills:done'); _mhomeRepaint(); })
+                .catch(() => {});
+        }
+        if (_needUsers) {
+            // Trimmed select: only the columns this view actually reads
+            // (full_name + dob for birthdays, role for "Agent" tag,
+            // reporting_to + team_id for the visibleIds traversal that runs
+            // on the next admin/lead navigation). 50× smaller payload than
+            // getAll('users') on a wide users schema.
+            AppDataStore.queryAdvanced('users', {
+                select: 'id,full_name,date_of_birth,role,reporting_to,team_id,phone',
+                limit: 50000,
+                countMode: null,
+            }).then(r => r?.data || [])
+              .then(rows => { cachedUsers = rows; _mhomeLsSet(_mhomeUsersKey, cachedUsers); _mhomePerf('bg:users:done'); _mhomeRepaint(); })
+              .catch(() => {});
+        }
+        // Ensure downstream code that reads these never gets undefined.
+        cachedDrafts  = cachedDrafts  || [];
+        cachedRefills = cachedRefills || [];
+        cachedUsers   = cachedUsers   || [];
 
         // Single source of truth for the dashboard HTML. Called once when the
         // people base is warm, or twice on a cold load (fast partial pass with
@@ -4648,25 +4706,39 @@ In a production system, this would show the actual file contents.
             // Warm base → render everything in one pass.
             _composeBody(cachedPeople, cachedUsers, cachedCustomers, false);
         } else {
-            // Cold base: paint immediately using only the people referenced by
-            // today's activities + pending drafts (correct names), with birthday
-            // and inactive numbers shown as pending; then fill from the full base.
-            const refIds = new Set();
-            activities.forEach(a => { if (a.prospect_id) refIds.add(a.prospect_id); if (a.customer_id) refIds.add(a.customer_id); });
-            (cachedDrafts || []).forEach(d => { if (d.prospect_id) refIds.add(d.prospect_id); if (d.customer_id) refIds.add(d.customer_id); });
-            let partialPeople = [];
-            if (refIds.size) {
+            // ── Mobile Home Tier 1.2: paint NOW, fill people in async ──
+            // Cold-base: previously we awaited two queryAdvanced round-trips
+            // (refId prospects + refId customers) before the first paint,
+            // adding ~500-1500 ms on a slow connection. Now we paint
+            // immediately with an empty personMap, then trigger repaints as
+            // each layer of person data lands — first the refId-scoped names
+            // (cheap, only the people referenced today), then the full base
+            // (for birthdays + inactive count).
+            _composeBody([], cachedUsers, cachedCustomers || [], true);
+            _mhomePerf('cold-paint:partial');
+
+            // Background pass 1: just the people referenced by today's
+            // activities + drafts. Fast — N is small (typically <50).
+            (async () => {
+                const refIds = new Set();
+                activities.forEach(a => { if (a.prospect_id) refIds.add(a.prospect_id); if (a.customer_id) refIds.add(a.customer_id); });
+                (cachedDrafts || []).forEach(d => { if (d.prospect_id) refIds.add(d.prospect_id); if (d.customer_id) refIds.add(d.customer_id); });
+                if (!refIds.size) return;
                 const idArr = [...refIds];
                 const [pp, cc] = await Promise.all([
-                    AppDataStore.queryAdvanced('prospects', { scopeField: 'id', scopeValues: idArr, countMode: null, limit: idArr.length }).catch(() => ({ data: [] })),
-                    AppDataStore.queryAdvanced('customers', { scopeField: 'id', scopeValues: idArr, countMode: null, limit: idArr.length }).catch(() => ({ data: [] })),
+                    AppDataStore.queryAdvanced('prospects', { scopeField: 'id', scopeValues: idArr, select: 'id,full_name,phone,date_of_birth', countMode: null, limit: idArr.length }).catch(() => ({ data: [] })),
+                    AppDataStore.queryAdvanced('customers', { scopeField: 'id', scopeValues: idArr, select: 'id,full_name,phone,date_of_birth', countMode: null, limit: idArr.length }).catch(() => ({ data: [] })),
                 ]);
-                partialPeople = [...(pp.data || []), ...(cc.data || [])];
-            }
-            _composeBody(partialPeople, cachedUsers, cachedCustomers || [], true);
+                const partialPeople = [...(pp.data || []), ...(cc.data || [])];
+                _mhomePerf('cold-bg:refids:done');
+                if (_currentView === 'home' && document.getElementById('mhome-body')) {
+                    _composeBody(partialPeople, cachedUsers, cachedCustomers || [], true);
+                }
+            })().catch(() => {});
 
-            // Background: load the full base for birthdays + inactive count, then
-            // repaint and persist the snapshot. Does not block first paint.
+            // Background pass 2: full prospect + customer base (used for the
+            // accurate birthday count + inactive-client tile). Heavy on cold
+            // boot, so we don't block any paint on it.
             (async () => {
                 const [allP, allC] = await Promise.all([
                     AppDataStore.getAll('prospects').catch(() => []),
@@ -4674,17 +4746,15 @@ In a production system, this would show the actual file contents.
                 ]);
                 cachedPeople    = [...(allP || []), ...(allC || [])];
                 cachedCustomers = allC || [];
-                // Don't poison the 8h cache with an empty result (transient
-                // error / offline) — leave it cold so the next load retries.
                 if (cachedPeople.length) {
                     _mhomeLsSet(_mhomePeopleKey,    cachedPeople);
                     _mhomeLsSet(_mhomeCustomersKey, cachedCustomers);
                 }
-                // Repaint only if the user is still on Home.
+                _mhomePerf('cold-bg:full:done');
                 if (_currentView === 'home' && document.getElementById('mhome-body')) {
                     _composeBody(cachedPeople, cachedUsers, cachedCustomers, false);
                 }
-            })();
+            })().catch(() => {});
         }
     };
 
@@ -8579,7 +8649,8 @@ In a production system, this would show the actual file contents.
             11: ['calendar', 'prospects', 'referrals', 'promotions', 'cases', 'settings', 'fude', 'milestones'],
             12: ['noticeboard', 'fude', 'milestones', 'prospects', 'referrals'],          // 传福大使
             13: ['noticeboard', 'fude', 'milestones', 'prospects'],                       // 改命客户
-            14: ['noticeboard', 'fude', 'milestones', 'prospects']                        // 准传福大使
+            14: ['noticeboard', 'fude', 'milestones', 'prospects'],                       // 准传福大使
+            15: ['stock-take']                                                            // Stock Take Staff (per-store counters)
         };
 
         // Determine level from role (e.g., "Level 1 Super Admin" -> 1)
@@ -11604,8 +11675,10 @@ function _wireLoginBtn() {
             _currentView = 'knowledge';
             await showKnowledgeView(viewport);
         } else if (viewId === 'stock_take') {
-            if (!isSystemAdmin(_currentUser)) {
-                UI.toast.error('Super Admin only');
+            // Level 1 (Super Admin) or Level 15 (Stock Take Staff). Staff get
+            // a restricted tab strip inside the module — see showStockTakeView.
+            if (!canAccessStockTake(_currentUser)) {
+                UI.toast.error('Not permitted');
                 await navigateTo('calendar');
                 return;
             }
@@ -50262,7 +50335,19 @@ Gold-${totGold}`;
     // Defense in depth: if showStockTakeView is called directly bypassing navigateTo,
     // still gate on Super Admin.
     const _stRequireAdmin = () => {
-        if (!isSystemAdmin(_currentUser)) { UI.toast.error('Super Admin only'); return false; }
+        // Level 1 Super Admin OR Level 15 Stock Take Staff. Staff are further
+        // restricted by tab visibility inside showStockTakeView and by the
+        // per-action gate _stRequireSetupAdmin (for stuff like Sessions /
+        // Shelves master / Exclusions / Import / Bulk).
+        if (!canAccessStockTake(_currentUser)) { UI.toast.error('Not permitted'); return false; }
+        return true;
+    };
+    // Setup tabs (Sessions, Shelves v2, System Stock, Exclusions, Bulk Physical,
+    // Reconciliation, Recount, Final Summary) need Super Admin. Stock Take Staff
+    // (Level 15) only get the Per-shelf Count tab. This guard is called from
+    // every mutating handler tied to a setup-only flow.
+    const _stRequireSetupAdmin = () => {
+        if (!isSystemAdmin(_currentUser)) { UI.toast.error('Super Admin only for this action'); return false; }
         return true;
     };
     // Reject mutating ops on a closed session so historical data stays immutable.
@@ -50281,7 +50366,45 @@ Gold-${totGold}`;
         if (!_stState.sessionId) {
             const list = _stSessions();
             const active = list.find(s => s.status === 'open');
-            if (active) _stState.sessionId = active.id;
+            if (active) {
+                _stState.sessionId = active.id;
+                _stState.sbSessionId = active.sbSessionId || null;
+            }
+        }
+        // Stock Take Staff (Level 15) don't have local v1 sessions in their
+        // localStorage — bootstrap by fetching the most recent open st_sessions
+        // row from Supabase and mirroring a stub locally so the count form has
+        // something to render against. Realtime then keeps both devices in sync.
+        if (!_stState.sessionId && isStockTakeStaff(_currentUser) && _stV2Available()) {
+            try {
+                const sb = _stSb();
+                const { data } = await sb.from('st_sessions')
+                    .select('id, session_code, created_by, created_at')
+                    .eq('status', 'open')
+                    .order('created_at', { ascending: false })
+                    .limit(1);
+                const sess = (data || [])[0];
+                if (sess) {
+                    _stState.sessionId = sess.session_code;
+                    _stState.sbSessionId = sess.id;
+                    // Seed a stub v1 session so _stRenderCount can render. Real
+                    // locations come from the shelf master (Scan Shelf flow);
+                    // the free-text Location dropdown is empty for staff.
+                    const sessions = _stSessions();
+                    if (!sessions.some(s => s.id === sess.session_code)) {
+                        sessions.push({
+                            id: sess.session_code,
+                            locations: [],
+                            createdAt: sess.created_at,
+                            createdBy: sess.created_by || 'admin',
+                            status: 'open',
+                            sbSessionId: sess.id,
+                        });
+                        _stSave('sessions', sessions);
+                    }
+                    await stStartRealtime();
+                }
+            } catch (e) { console.warn('[stock-take] staff bootstrap failed:', e?.message); }
         }
         container.innerHTML = `
             <div class="stock-take-view" style="padding:24px;max-width:1400px;margin:0 auto;">
@@ -50293,7 +50416,10 @@ Gold-${totGold}`;
                     <div id="st-session-chip"></div>
                 </div>
                 <div class="st-tabs" style="display:flex;gap:4px;border-bottom:2px solid var(--gray-200);margin-bottom:16px;overflow-x:auto;">
-                    ${['sessions','shelves','import','exclusions','count','bulk','reconcile','recount','summary'].map(t => `
+                    ${(isSystemAdmin(_currentUser)
+                        ? ['sessions','shelves','import','exclusions','count','bulk','reconcile','recount','summary']
+                        : ['count','recount','summary']
+                    ).map(t => `
                         <button class="st-tab-btn" data-tab="${t}" onclick="app.stSwitchTab('${t}')"
                             style="padding:10px 16px;border:none;background:none;cursor:pointer;font-weight:600;white-space:nowrap;border-bottom:3px solid transparent;color:var(--gray-600);">
                             ${({sessions:'Sessions',shelves:'Shelves (v2)',import:'System Stock',exclusions:'Exclusions',count:'Per-shelf Count',bulk:'Bulk Physical',reconcile:'Reconciliation',recount:'Recount',summary:'Final Summary'})[t]}
@@ -50303,7 +50429,14 @@ Gold-${totGold}`;
                 <div id="st-tab-body"></div>
             </div>
         `;
-        await stSwitchTab(_stState.tab || 'sessions');
+        // Stock Take Staff land directly on Per-shelf Count; admins land on Sessions.
+        const defaultTab = isSystemAdmin(_currentUser) ? 'sessions' : 'count';
+        // If a stored tab is not allowed for this user level, fall back to default.
+        const allowed = isSystemAdmin(_currentUser)
+            ? new Set(['sessions','shelves','import','exclusions','count','bulk','reconcile','recount','summary'])
+            : new Set(['count','recount','summary']);
+        const tab = allowed.has(_stState.tab) ? _stState.tab : defaultTab;
+        await stSwitchTab(tab);
     };
 
     const stSwitchTab = async (tab) => {
