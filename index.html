@@ -311,6 +311,9 @@
                 <li id="nav-cases" data-view="cases">Success Case Library</li>
                 <li id="nav-purchases_history" data-view="purchases_history" style="display:none;">Purchases History</li>
 
+                <!-- Org Chart Consultant (admin Lvl 1-2 only) -->
+                <li id="nav-org-chart" data-view="org_chart" onclick="app.navigateTo('org_chart')" style="display:none;">Org Chart Consultant</li>
+
                 <!-- Group 2: Consultant & Analytics -->
                 <li id="nav-agents" data-view="agents">Consultant</li>
                 <li id="nav-marketing-lists" data-view="marketing_lists" style="display:none;">Marketing Lists</li>
@@ -501,6 +504,9 @@
                     </button>
                     <button class="sb-nav-item" id="sb-nav-purchases_history" data-view="purchases_history" onclick="app.navigateTo('purchases_history')" style="display:none;">
                         <i class="fas fa-shopping-bag sb-icon" aria-hidden="true"></i><span class="sb-label">Purchases History</span>
+                    </button>
+                    <button class="sb-nav-item" id="sb-nav-org-chart" data-view="org_chart" onclick="app.navigateTo('org_chart')" style="display:none;">
+                        <i class="fas fa-sitemap sb-icon" aria-hidden="true"></i><span class="sb-label">Org Chart Consultant</span>
                     </button>
                     <button class="sb-nav-item" id="sb-nav-agents" data-view="agents" onclick="app.navigateTo('agents')">
                         <i class="fas fa-user-tie sb-icon" aria-hidden="true"></i><span class="sb-label">Consultant</span>
