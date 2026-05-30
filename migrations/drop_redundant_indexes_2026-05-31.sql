@@ -1,0 +1,77 @@
+-- ============================================================================
+-- Drop 5 redundant single-column indexes covered by composite successors
+-- Date: 2026-05-31
+-- ----------------------------------------------------------------------------
+-- Every index dropped here has its leading column already covered by a
+-- composite index that Postgres can use just as efficiently for the
+-- `WHERE column = X` filter pattern. Keeping the single-column duplicate
+-- only adds write amplification on inserts/updates of the hottest tables.
+--
+-- All drops use IF EXISTS so the migration is idempotent and safe to re-run.
+-- All drops use CONCURRENTLY where supported so the table stays writable
+-- during the drop (no exclusive lock).
+--
+-- Verification BEFORE applying — confirm coverage:
+--   SELECT indexname, indexdef
+--   FROM pg_indexes
+--   WHERE schemaname = 'public'
+--     AND indexname IN (
+--       'idx_activities_prospect',       'idx_activities_prospect_date',
+--       'idx_activities_customer',       'idx_activities_customer_date',
+--       'idx_activities_lead_agent',     'idx_activities_agent_date',
+--       'idx_prospects_responsible_agent','idx_prospects_agent_created',
+--       'idx_customers_responsible_agent','idx_customers_agent_created'
+--     );
+--
+-- Coverage matrix:
+--   idx_activities_prospect          (prospect_id)            → idx_activities_prospect_date  (prospect_id, activity_date DESC)
+--   idx_activities_customer          (customer_id)            → idx_activities_customer_date  (customer_id, activity_date DESC)
+--   idx_activities_lead_agent        (lead_agent_id)          → idx_activities_agent_date     (lead_agent_id, activity_date DESC)
+--   idx_prospects_responsible_agent  (responsible_agent_id)   → idx_prospects_agent_created   (responsible_agent_id, created_at DESC)
+--   idx_customers_responsible_agent  (responsible_agent_id)   → idx_customers_agent_created   (responsible_agent_id, created_at DESC)
+--
+-- NOTE on partial indexes:
+--   idx_activities_prospect was a partial index (WHERE prospect_id IS NOT NULL).
+--   The composite successor is non-partial — but since any equality query
+--   WHERE prospect_id = X cannot match NULL rows anyway, the composite serves
+--   the same workload with no performance regression. The only cost is a
+--   marginally larger index on disk (rows where prospect_id IS NULL also
+--   appear in the composite), which is acceptable given write-amplification
+--   savings from dropping the duplicate.
+-- ============================================================================
+
+DROP INDEX CONCURRENTLY IF EXISTS public.idx_activities_prospect;
+DROP INDEX CONCURRENTLY IF EXISTS public.idx_activities_customer;
+DROP INDEX CONCURRENTLY IF EXISTS public.idx_activities_lead_agent;
+DROP INDEX CONCURRENTLY IF EXISTS public.idx_prospects_responsible_agent;
+DROP INDEX CONCURRENTLY IF EXISTS public.idx_customers_responsible_agent;
+
+-- ----------------------------------------------------------------------------
+-- Post-apply verification — confirm only the composite indexes remain:
+-- ----------------------------------------------------------------------------
+--   SELECT indexname FROM pg_indexes
+--   WHERE schemaname = 'public'
+--     AND indexname IN (
+--       'idx_activities_prospect',       'idx_activities_customer',
+--       'idx_activities_lead_agent',     'idx_prospects_responsible_agent',
+--       'idx_customers_responsible_agent'
+--     );
+--   -- Expect: 0 rows.
+--
+--   SELECT indexname FROM pg_indexes
+--   WHERE schemaname = 'public'
+--     AND indexname IN (
+--       'idx_activities_prospect_date',  'idx_activities_customer_date',
+--       'idx_activities_agent_date',     'idx_prospects_agent_created',
+--       'idx_customers_agent_created'
+--     );
+--   -- Expect: 5 rows.
+--
+-- Application instructions:
+--   Run via Supabase SQL editor with destructive-operations confirmation:
+--     https://supabase.com/dashboard/project/remuwhxvzkzjtgbzqjaa/sql/new
+--   Note: DROP INDEX CONCURRENTLY cannot run inside a transaction block.
+--   The Supabase SQL editor runs each statement in its own transaction by
+--   default, so this should just work — but if you see "DROP INDEX
+--   CONCURRENTLY cannot run inside a transaction block", paste each DROP
+--   on its own and run them one at a time.
