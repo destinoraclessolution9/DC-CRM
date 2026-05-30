@@ -1,0 +1,728 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Team User Guide · Destin Oracles CRM</title>
+<meta name="description" content="30 picture-by-picture walkthroughs of every Destin Oracles CRM workflow — sign-in, sales, AI tools, admin, and security.">
+<meta name="robots" content="noindex, nofollow">
+<style>
+  :root {
+    --primary: #ec4899;
+    --primary-bg: #fde8f3;
+    --purple: #7c3aed;
+    --purple-bg: #ede9fe;
+    --green: #059669;
+    --orange: #f59e0b;
+    --red: #dc2626;
+    --gray-900: #0f172a;
+    --gray-700: #334155;
+    --gray-600: #475569;
+    --gray-500: #64748b;
+    --gray-400: #94a3b8;
+    --gray-300: #cbd5e1;
+    --gray-200: #e2e8f0;
+    --gray-100: #f1f5f9;
+    --gray-50:  #f8fafc;
+    --bg:       #ffffff;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 80px; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    color: var(--gray-900);
+    background: var(--bg);
+    line-height: 1.6;
+  }
+  a { color: var(--primary); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  /* Sticky header */
+  header.top {
+    position: sticky; top: 0; z-index: 10;
+    background: rgba(255,255,255,0.94);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--gray-200);
+  }
+  .top-inner {
+    max-width: 1100px; margin: 0 auto;
+    padding: 14px 24px;
+    display: flex; align-items: center; gap: 14px;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; color: var(--gray-900); }
+  .logo {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: var(--primary); color: white;
+    display: grid; place-items: center; font-weight: 700;
+  }
+  .brand-text { line-height: 1.2; }
+  .brand-text small { display: block; font-weight: 500; color: var(--gray-500); font-size: 12px; }
+  .top-spacer { flex: 1; }
+  .top-links a {
+    margin-left: 18px; color: var(--gray-700); font-weight: 500; font-size: 14px;
+  }
+  /* Hero */
+  .hero {
+    background: linear-gradient(135deg, #fdf2f8 0%, #faf5ff 100%);
+    border-bottom: 1px solid var(--gray-200);
+  }
+  .hero-inner { max-width: 1100px; margin: 0 auto; padding: 56px 24px 40px; }
+  .hero h1 {
+    margin: 0 0 12px;
+    font-size: clamp(28px, 4.5vw, 44px);
+    line-height: 1.1; letter-spacing: -0.02em;
+  }
+  .hero h1 .accent { color: var(--primary); }
+  .hero p.lede {
+    margin: 0 0 24px; font-size: 18px; color: var(--gray-600);
+    max-width: 720px;
+  }
+  .hero-stats { display: flex; gap: 28px; flex-wrap: wrap; }
+  .hero-stat { display: flex; flex-direction: column; }
+  .hero-stat b { font-size: 26px; font-weight: 700; color: var(--gray-900); }
+  .hero-stat span { font-size: 13px; color: var(--gray-500); }
+  /* Layout */
+  main { max-width: 1100px; margin: 0 auto; padding: 40px 24px 80px; }
+  /* TOC */
+  .toc {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 8px 16px;
+    background: var(--gray-50);
+    border: 1px solid var(--gray-200);
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 48px;
+  }
+  .toc-group h3 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--gray-500); margin: 0 0 10px;
+  }
+  .toc-group ol { list-style: none; padding: 0; margin: 0; }
+  .toc-group li { margin-bottom: 4px; font-size: 14px; }
+  .toc-group li a { color: var(--gray-700); }
+  .toc-group li a:hover { color: var(--primary); }
+  .toc-num {
+    display: inline-block; min-width: 22px;
+    color: var(--gray-400); font-variant-numeric: tabular-nums;
+    margin-right: 4px;
+  }
+  /* Section */
+  section.guide {
+    margin: 56px 0 0;
+    scroll-margin-top: 80px;
+  }
+  section.guide .badge {
+    display: inline-block;
+    background: var(--primary); color: white;
+    padding: 4px 10px; border-radius: 12px;
+    font-size: 12px; font-weight: 700;
+    margin-bottom: 12px;
+  }
+  section.guide .badge.purple { background: var(--purple); }
+  section.guide .badge.green  { background: var(--green); }
+  section.guide .badge.orange { background: var(--orange); }
+  section.guide .badge.gray   { background: var(--gray-500); }
+  section.guide h2 {
+    margin: 0 0 6px; font-size: 24px;
+    letter-spacing: -0.01em;
+  }
+  section.guide p.who {
+    font-size: 13px; color: var(--gray-500); margin: 0 0 18px;
+  }
+  section.guide p.body {
+    font-size: 16px; color: var(--gray-700); margin: 0 0 18px;
+    max-width: 720px;
+  }
+  section.guide figure {
+    margin: 0; border: 1px solid var(--gray-200);
+    border-radius: 12px; overflow: hidden;
+    background: var(--gray-50);
+  }
+  section.guide figure img {
+    display: block; width: 100%; height: auto;
+  }
+  .actions {
+    margin-top: 12px;
+    display: flex; gap: 10px; flex-wrap: wrap;
+    font-size: 13px;
+  }
+  .actions a, .actions button {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 12px; border-radius: 6px;
+    background: var(--gray-100); color: var(--gray-700);
+    border: 1px solid var(--gray-200);
+    font: inherit; font-weight: 500; cursor: pointer;
+  }
+  .actions a:hover, .actions button:hover {
+    background: var(--primary-bg); color: var(--primary);
+    border-color: var(--primary);
+    text-decoration: none;
+  }
+  /* Section group divider */
+  .group-divider {
+    display: flex; align-items: center; gap: 16px;
+    margin: 80px 0 0; padding-top: 32px;
+    border-top: 2px solid var(--gray-200);
+  }
+  .group-divider h2 {
+    font-size: 14px; text-transform: uppercase; letter-spacing: 0.12em;
+    color: var(--gray-500); margin: 0; white-space: nowrap;
+  }
+  .group-divider .line { flex: 1; height: 1px; background: var(--gray-200); }
+  /* Footer */
+  footer {
+    background: var(--gray-50);
+    border-top: 1px solid var(--gray-200);
+    padding: 40px 24px 32px;
+    margin-top: 80px;
+    color: var(--gray-600); font-size: 14px;
+  }
+  footer .inner {
+    max-width: 1100px; margin: 0 auto;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 32px;
+  }
+  footer code {
+    background: var(--gray-900); color: #d4f4dd;
+    padding: 2px 6px; border-radius: 4px; font-size: 13px;
+  }
+  footer h3 {
+    margin: 0 0 10px; font-size: 13px; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--gray-500);
+  }
+  footer ul { list-style: none; padding: 0; margin: 0; }
+  footer li { margin-bottom: 6px; }
+  /* Mobile */
+  @media (max-width: 640px) {
+    .top-links a:not(:last-child) { display: none; }
+    .hero-inner { padding: 36px 18px 28px; }
+    main { padding: 28px 18px 60px; }
+    footer .inner { grid-template-columns: 1fr; }
+  }
+  /* Print */
+  @media print {
+    header.top, .hero, footer, .actions, .toc { display: none; }
+    section.guide { page-break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="top-inner">
+    <a href="/" class="brand">
+      <span class="logo">D</span>
+      <span class="brand-text">Destin Oracles<small>CRM team guide</small></span>
+    </a>
+    <div class="top-spacer"></div>
+    <div class="top-links">
+      <a href="#toc">Contents</a>
+      <a href="https://github.com/destinoraclessolution9/DC-CRM/tree/main/docs/user-guide" target="_blank" rel="noopener">GitHub</a>
+      <a href="/">Open CRM →</a>
+    </div>
+  </div>
+</header>
+
+<section class="hero">
+  <div class="hero-inner">
+    <h1>Team User Guide<br><span class="accent">30 walkthroughs</span> · pick a workflow, get the steps</h1>
+    <p class="lede">
+      Every CRM workflow your team will run — sign-in, sales pipeline, calendar,
+      AI tools, contracts, admin, security — explained with a short animated GIF.
+      Pin this page in the team chat or open it on Monday mornings with new hires.
+    </p>
+    <div class="hero-stats">
+      <div class="hero-stat"><b>30</b><span>workflows</span></div>
+      <div class="hero-stat"><b>~90</b><span>frames in total</span></div>
+      <div class="hero-stat"><b>3.8 MB</b><span>fits in one chat msg</span></div>
+      <div class="hero-stat"><b>0 KB</b><span>customer data leaked</span></div>
+    </div>
+  </div>
+</section>
+
+<main>
+
+<nav id="toc" class="toc" aria-label="Table of contents">
+  <div class="toc-group">
+    <h3>Core sales</h3>
+    <ol>
+      <li><a href="#g1"><span class="toc-num">01</span>Sign in &amp; navigation</a></li>
+      <li><a href="#g2"><span class="toc-num">02</span>Add a prospect</a></li>
+      <li><a href="#g3"><span class="toc-num">03</span>Pipeline</a></li>
+      <li><a href="#g4"><span class="toc-num">04</span>Calendar booking</a></li>
+      <li><a href="#g5"><span class="toc-num">05</span>Cases &amp; follow-ups</a></li>
+      <li><a href="#g6"><span class="toc-num">06</span>Referrals + tree</a></li>
+      <li><a href="#g7"><span class="toc-num">07</span>Performance &amp; reports</a></li>
+      <li><a href="#g8"><span class="toc-num">08</span>Knowledge HQ</a></li>
+    </ol>
+  </div>
+  <div class="toc-group">
+    <h3>Campaigns &amp; team</h3>
+    <ol>
+      <li><a href="#g9"><span class="toc-num">09</span>Promotions</a></li>
+      <li><a href="#g10"><span class="toc-num">10</span>Marketing Automation</a></li>
+      <li><a href="#g11"><span class="toc-num">11</span>Agents &amp; roles</a></li>
+      <li><a href="#g12"><span class="toc-num">12</span>Documents</a></li>
+    </ol>
+  </div>
+  <div class="toc-group">
+    <h3>AI suite</h3>
+    <ol>
+      <li><a href="#g13"><span class="toc-num">13</span>AI Insights</a></li>
+      <li><a href="#g14"><span class="toc-num">14</span>Lead Scoring</a></li>
+      <li><a href="#g15"><span class="toc-num">15</span>Sales Forecast</a></li>
+      <li><a href="#g16"><span class="toc-num">16</span>Churn Risk</a></li>
+      <li><a href="#g17"><span class="toc-num">17</span>Performance Insights</a></li>
+    </ol>
+  </div>
+  <div class="toc-group">
+    <h3>Customer-facing</h3>
+    <ol>
+      <li><a href="#g18"><span class="toc-num">18</span>Lead Capture Forms</a></li>
+      <li><a href="#g19"><span class="toc-num">19</span>NPS Surveys</a></li>
+      <li><a href="#g20"><span class="toc-num">20</span>Contracts &amp; e-sign</a></li>
+      <li><a href="#g21"><span class="toc-num">21</span>Booking Scheduler</a></li>
+    </ol>
+  </div>
+  <div class="toc-group">
+    <h3>Admin &amp; data</h3>
+    <ol>
+      <li><a href="#g22"><span class="toc-num">22</span>Custom Fields</a></li>
+      <li><a href="#g23"><span class="toc-num">23</span>Integrations</a></li>
+      <li><a href="#g24"><span class="toc-num">24</span>Marketing Lists</a></li>
+      <li><a href="#g25"><span class="toc-num">25</span>Purchases History</a></li>
+      <li><a href="#g26"><span class="toc-num">26</span>Audit Logs</a></li>
+    </ol>
+  </div>
+  <div class="toc-group">
+    <h3>Security &amp; ops</h3>
+    <ol>
+      <li><a href="#g27"><span class="toc-num">27</span>2FA setup</a></li>
+      <li><a href="#g28"><span class="toc-num">28</span>Backup &amp; restore</a></li>
+      <li><a href="#g29"><span class="toc-num">29</span>Noticeboard · 公告栏</a></li>
+      <li><a href="#g30"><span class="toc-num">30</span>Profile &amp; settings</a></li>
+    </ol>
+  </div>
+</nav>
+
+<!-- ────────────────────────────  CORE SALES ──────────────────────────── -->
+<div class="group-divider"><h2>Core sales workflow</h2><div class="line"></div></div>
+
+<section class="guide" id="g1">
+  <span class="badge">Step 01</span>
+  <h2>Sign in &amp; find your way around</h2>
+  <p class="who">Everyone</p>
+  <p class="body">Open the CRM, sign in with the email your manager set up. You land on Calendar by default. Dark sidebar on the left switches modules — 12 in total. Top-right initials open profile / sign-out.</p>
+  <figure><img src="/docs/user-guide/01-login-and-navigation.gif" alt="Login and sidebar tour" loading="lazy"></figure>
+  <div class="actions">
+    <a href="/docs/user-guide/01-login-and-navigation.gif" download>↓ Download GIF</a>
+    <a href="#g1" onclick="copyShareLink(event, '01-login-and-navigation.gif')">⎘ Copy link</a>
+  </div>
+</section>
+
+<section class="guide" id="g2">
+  <span class="badge">Step 02</span>
+  <h2>Add a new prospect</h2>
+  <p class="who">Everyone</p>
+  <p class="body">Prospects → <b>+ Add Prospect</b>. Only Name and Phone are required. Pick the Source accurately — it powers campaign ROI numbers later. Save closes the modal and the new row appears at the top.</p>
+  <figure><img src="/docs/user-guide/02-add-prospect.gif" alt="Add a prospect" loading="lazy"></figure>
+  <div class="actions">
+    <a href="/docs/user-guide/02-add-prospect.gif" download>↓ Download GIF</a>
+    <a href="#g2" onclick="copyShareLink(event, '02-add-prospect.gif')">⎘ Copy link</a>
+  </div>
+</section>
+
+<section class="guide" id="g3">
+  <span class="badge">Step 03</span>
+  <h2>Move a deal through the pipeline</h2>
+  <p class="who">Sales + managers</p>
+  <p class="body">Kanban with five columns left→right: <b>New → Contacted → Qualified → Proposal → Won</b>. After every call, drag the card one column right. Click any card for the deal detail and the green <b>★ Mark Won</b> button.</p>
+  <figure><img src="/docs/user-guide/03-pipeline-management.gif" alt="Pipeline kanban" loading="lazy"></figure>
+  <div class="actions">
+    <a href="/docs/user-guide/03-pipeline-management.gif" download>↓ Download GIF</a>
+    <a href="#g3" onclick="copyShareLink(event, '03-pipeline-management.gif')">⎘ Copy link</a>
+  </div>
+</section>
+
+<section class="guide" id="g4">
+  <span class="badge">Step 04</span>
+  <h2>Schedule a calendar booking</h2>
+  <p class="who">Everyone</p>
+  <p class="body">Click any empty day cell — modal opens with the date pre-filled. Customer field auto-suggests existing prospects. Save creates a calendar entry AND links it to the customer's history. SMS reminder fires 24h before.</p>
+  <figure><img src="/docs/user-guide/04-calendar-and-booking.gif" alt="Calendar booking" loading="lazy"></figure>
+  <div class="actions">
+    <a href="/docs/user-guide/04-calendar-and-booking.gif" download>↓ Download GIF</a>
+    <a href="#g4" onclick="copyShareLink(event, '04-calendar-and-booking.gif')">⎘ Copy link</a>
+  </div>
+</section>
+
+<section class="guide" id="g5">
+  <span class="badge">Step 05</span>
+  <h2>Open a case and log follow-ups</h2>
+  <p class="who">Everyone</p>
+  <p class="body">Cases tracks customer problems until they're closed. <b>+ New Case</b>, write a specific Subject, set Priority + Owner. On the case page, every follow-up becomes a timestamped row. When fixed, hit green <b>Mark Resolved</b>.</p>
+  <figure><img src="/docs/user-guide/05-cases-and-followups.gif" alt="Cases and follow-ups" loading="lazy"></figure>
+  <div class="actions">
+    <a href="/docs/user-guide/05-cases-and-followups.gif" download>↓ Download GIF</a>
+    <a href="#g5" onclick="copyShareLink(event, '05-cases-and-followups.gif')">⎘ Copy link</a>
+  </div>
+</section>
+
+<section class="guide" id="g6">
+  <span class="badge">Step 06</span>
+  <h2>Add a referral &amp; read the tree</h2>
+  <p class="who">Everyone</p>
+  <p class="body">Log a referral the moment you hear about it. Switch to <b>Tree</b> view to see who-referred-whom — top referrers in pink, direct in purple, second-level in blue. Compounding referral networks are how we grow.</p>
+  <figure><img src="/docs/user-guide/06-referrals.gif" alt="Referrals tree" loading="lazy"></figure>
+  <div class="actions">
+    <a href="/docs/user-guide/06-referrals.gif" download>↓ Download GIF</a>
+    <a href="#g6" onclick="copyShareLink(event, '06-referrals.gif')">⎘ Copy link</a>
+  </div>
+</section>
+
+<section class="guide" id="g7">
+  <span class="badge">Step 07</span>
+  <h2>Read performance &amp; export a report</h2>
+  <p class="who">Everyone (filtered by role)</p>
+  <p class="body">Performance is your scoreboard — KPIs vs target this month. Numbers under target turn orange; below 50% red. Reports → Run → Download (XLSX is the team default, includes chart preview).</p>
+  <figure><img src="/docs/user-guide/07-performance-reports.gif" alt="Performance and reports" loading="lazy"></figure>
+  <div class="actions">
+    <a href="/docs/user-guide/07-performance-reports.gif" download>↓ Download GIF</a>
+    <a href="#g7" onclick="copyShareLink(event, '07-performance-reports.gif')">⎘ Copy link</a>
+  </div>
+</section>
+
+<section class="guide" id="g8">
+  <span class="badge">Step 08</span>
+  <h2>Upload to Knowledge HQ</h2>
+  <p class="who">Everyone</p>
+  <p class="body">Team library — cold-call scripts, refund SOPs, qualification checklists. <b>+ Upload</b>, drop file, fill Title + Tags. Inside any doc, <b>Share</b> copies a deep link for WhatsApp. Edits keep version history.</p>
+  <figure><img src="/docs/user-guide/08-knowledge-hq.gif" alt="Knowledge HQ" loading="lazy"></figure>
+  <div class="actions">
+    <a href="/docs/user-guide/08-knowledge-hq.gif" download>↓ Download GIF</a>
+    <a href="#g8" onclick="copyShareLink(event, '08-knowledge-hq.gif')">⎘ Copy link</a>
+  </div>
+</section>
+
+<!-- ────────────────────────────  CAMPAIGNS  ──────────────────────────── -->
+<div class="group-divider"><h2>Campaigns &amp; team</h2><div class="line"></div></div>
+
+<section class="guide" id="g9">
+  <span class="badge purple">Step 09</span>
+  <h2>Create a promo code</h2>
+  <p class="who">Marketing Manager / Super Admin</p>
+  <p class="body">+ New Promo → short code (e.g. JUNE20), %  or RM off, valid dates, optional usage cap. Share card gives three formats: Copy code, Download PNG flyer, WhatsApp.</p>
+  <figure><img src="/docs/user-guide/09-promotions.gif" alt="Promotions" loading="lazy"></figure>
+  <div class="actions">
+    <a href="/docs/user-guide/09-promotions.gif" download>↓ Download GIF</a>
+    <a href="#g9" onclick="copyShareLink(event, '09-promotions.gif')">⎘ Copy link</a>
+  </div>
+</section>
+
+<section class="guide" id="g10">
+  <span class="badge purple">Step 10</span>
+  <h2>Build a marketing-automation rule</h2>
+  <p class="who">Marketing Manager / Super Admin</p>
+  <p class="body">Three steps: <b>When</b> (trigger), <b>If</b> (condition), <b>Then</b> (action). Defaults to Paused so you can dry-run before going live. Open any rule for the run log — Delivered / Failed / Opt-outs.</p>
+  <figure><img src="/docs/user-guide/10-marketing-automation.gif" alt="Marketing automation rules" loading="lazy"></figure>
+  <div class="actions">
+    <a href="/docs/user-guide/10-marketing-automation.gif" download>↓ Download GIF</a>
+    <a href="#g10" onclick="copyShareLink(event, '10-marketing-automation.gif')">⎘ Copy link</a>
+  </div>
+</section>
+
+<section class="guide" id="g11">
+  <span class="badge purple">Step 11</span>
+  <h2>Manage the team — Agents &amp; roles</h2>
+  <p class="who">Super Admin / Marketing Manager</p>
+  <p class="body">List every team member with role badge + this month's deal count. <b>+ Add Agent</b> invites a new joiner — they get an email to set their password. Roles: Super Admin / Marketing Manager / Manager / Agent.</p>
+  <figure><img src="/docs/user-guide/11-agents-and-roles.gif" alt="Agents and roles" loading="lazy"></figure>
+  <div class="actions">
+    <a href="/docs/user-guide/11-agents-and-roles.gif" download>↓ Download GIF</a>
+    <a href="#g11" onclick="copyShareLink(event, '11-agents-and-roles.gif')">⎘ Copy link</a>
+  </div>
+</section>
+
+<section class="guide" id="g12">
+  <span class="badge purple">Step 12</span>
+  <h2>Documents library</h2>
+  <p class="who">Everyone</p>
+  <p class="body">Customer-facing file store. Folders by type. <b>Link to customer</b> in the upload modal makes the file show in their profile too. <b>Send via WhatsApp</b> pushes the file to the linked customer's number.</p>
+  <figure><img src="/docs/user-guide/12-documents.gif" alt="Documents library" loading="lazy"></figure>
+  <div class="actions">
+    <a href="/docs/user-guide/12-documents.gif" download>↓ Download GIF</a>
+    <a href="#g12" onclick="copyShareLink(event, '12-documents.gif')">⎘ Copy link</a>
+  </div>
+</section>
+
+<!-- ────────────────────────────  AI SUITE  ──────────────────────────── -->
+<div class="group-divider"><h2>AI suite</h2><div class="line"></div></div>
+
+<section class="guide" id="g13">
+  <span class="badge orange">Step 13</span>
+  <h2>AI Insights dashboard</h2>
+  <p class="who">Manager and above</p>
+  <p class="body">Your morning brief. Six colour-coded cards highlight what the model spotted overnight — hot leads, churn risk, pipeline, agent patterns, best-call-time. Click <b>Open</b> on any card to drill in.</p>
+  <figure><img src="/docs/user-guide/13-ai-insights.gif" alt="AI insights" loading="lazy"></figure>
+  <div class="actions">
+    <a href="/docs/user-guide/13-ai-insights.gif" download>↓ Download GIF</a>
+    <a href="#g13" onclick="copyShareLink(event, '13-ai-insights.gif')">⎘ Copy link</a>
+  </div>
+</section>
+
+<section class="guide" id="g14">
+  <span class="badge orange">Step 14</span>
+  <h2>Lead Scoring</h2>
+  <p class="who">Everyone</p>
+  <p class="body">Every prospect gets a 0–100 AI score. Hot (80+) / Warm (50–79) / Cold (&lt;50). Trend column shows if the score moved this week. Drill in to see what's pushing it up or down + Next-best-action button.</p>
+  <figure><img src="/docs/user-guide/14-lead-scoring.gif" alt="Lead scoring" loading="lazy"></figure>
+  <div class="actions">
+    <a href="/docs/user-guide/14-lead-scoring.gif" download>↓ Download GIF</a>
+    <a href="#g14" onclick="copyShareLink(event, '14-lead-scoring.gif')">⎘ Copy link</a>
+  </div>
+</section>
+
+<section class="guide" id="g15">
+  <span class="badge orange">Step 15</span>
+  <h2>Sales Forecast</h2>
+  <p class="who">Manager and above</p>
+  <p class="body">AI-projected revenue 90 days out. Locked / Likely / At-risk / Stretch buckets. Chart with most-likely line + optimistic + pessimistic confidence band. ~84% accurate on 60-day calls.</p>
+  <figure><img src="/docs/user-guide/15-sales-forecast.gif" alt="Sales forecast" loading="lazy"></figure>
+  <div class="actions">
+    <a href="/docs/user-guide/15-sales-forecast.gif" download>↓ Download GIF</a>
+    <a href="#g15" onclick="copyShareLink(event, '15-sales-forecast.gif')">⎘ Copy link</a>
+  </div>
+</section>
+
+<section class="guide" id="g16">
+  <span class="badge orange">Step 16</span>
+  <h2>Churn Risk Analysis</h2>
+  <p class="who">Manager and above</p>
+  <p class="body">Customers about to leave. Risk score with reasons (no contact 90d, sentiment drop, late payment, etc.). <b>Save action plan</b> ticks one or more rescue actions and creates Cases with you as owner.</p>
+  <figure><img src="/docs/user-guide/16-churn-risk.gif" alt="Churn risk" loading="lazy"></figure>
+  <div class="actions">
+    <a href="/docs/user-guide/16-churn-risk.gif" download>↓ Download GIF</a>
+    <a href="#g16" onclick="copyShareLink(event, '16-churn-risk.gif')">⎘ Copy link</a>
+  </div>
+</section>
+
+<section class="guide" id="g17">
+  <span class="badge orange">Step 17</span>
+  <h2>Performance Insights — team AI tips</h2>
+  <p class="who">Manager / Marketing Manager only</p>
+  <p class="body">Model watches your team and surfaces patterns worth copying or fixing. Each tip has a finding, a why, and a one-click <b>Apply</b> action (extract template, schedule 1-on-1, add KPI tile). Reversible.</p>
+  <figure><img src="/docs/user-guide/17-performance-insights.gif" alt="Performance insights" loading="lazy"></figure>
+  <div class="actions">
+    <a href="/docs/user-guide/17-performance-insights.gif" download>↓ Download GIF</a>
+    <a href="#g17" onclick="copyShareLink(event, '17-performance-insights.gif')">⎘ Copy link</a>
+  </div>
+</section>
+
+<!-- ────────────────────────  CUSTOMER-FACING  ──────────────────────── -->
+<div class="group-divider"><h2>Customer-facing tools</h2><div class="line"></div></div>
+
+<section class="guide" id="g18">
+  <span class="badge green">Step 18</span>
+  <h2>Lead Capture Forms</h2>
+  <p class="who">Marketing Manager / Super Admin</p>
+  <p class="body">Public forms for your website / IG bio / event flyers. Drag-and-drop builder with 10 field types. Three publish formats: iframe, public link, QR code.</p>
+  <figure><img src="/docs/user-guide/18-lead-capture-forms.gif" alt="Lead capture forms" loading="lazy"></figure>
+  <div class="actions">
+    <a href="/docs/user-guide/18-lead-capture-forms.gif" download>↓ Download GIF</a>
+    <a href="#g18" onclick="copyShareLink(event, '18-lead-capture-forms.gif')">⎘ Copy link</a>
+  </div>
+</section>
+
+<section class="guide" id="g19">
+  <span class="badge green">Step 19</span>
+  <h2>NPS Surveys</h2>
+  <p class="who">Marketing Manager / Super Admin</p>
+  <p class="body">Send NPS surveys to measure satisfaction. WhatsApp / Email / SMS. The template editor shows a phone-mockup preview. Detractor scores (0–6) auto-open a Case with the Marketing Manager.</p>
+  <figure><img src="/docs/user-guide/19-nps-surveys.gif" alt="NPS surveys" loading="lazy"></figure>
+  <div class="actions">
+    <a href="/docs/user-guide/19-nps-surveys.gif" download>↓ Download GIF</a>
+    <a href="#g19" onclick="copyShareLink(event, '19-nps-surveys.gif')">⎘ Copy link</a>
+  </div>
+</section>
+
+<section class="guide" id="g20">
+  <span class="badge green">Step 20</span>
+  <h2>Contracts &amp; e-signature</h2>
+  <p class="who">Manager and above</p>
+  <p class="body">Send service agreements for e-signature. PDF preview on the left, send-panel on the right (signer + channel toggle + reminder schedule). Signed contracts auto-file into Documents under Contracts.</p>
+  <figure><img src="/docs/user-guide/20-contracts.gif" alt="Contracts and e-signature" loading="lazy"></figure>
+  <div class="actions">
+    <a href="/docs/user-guide/20-contracts.gif" download>↓ Download GIF</a>
+    <a href="#g20" onclick="copyShareLink(event, '20-contracts.gif')">⎘ Copy link</a>
+  </div>
+</section>
+
+<section class="guide" id="g21">
+  <span class="badge green">Step 21</span>
+  <h2>Public Booking Scheduler</h2>
+  <p class="who">Marketing Manager / Super Admin</p>
+  <p class="body">Booking pages customers fill in themselves. Each page is a slot type (Free 15-min, Full 60-min, Couple 90, VIP). Copy the link, paste in IG bio — they pick a slot, you get a calendar entry.</p>
+  <figure><img src="/docs/user-guide/21-booking-scheduler.gif" alt="Booking scheduler" loading="lazy"></figure>
+  <div class="actions">
+    <a href="/docs/user-guide/21-booking-scheduler.gif" download>↓ Download GIF</a>
+    <a href="#g21" onclick="copyShareLink(event, '21-booking-scheduler.gif')">⎘ Copy link</a>
+  </div>
+</section>
+
+<!-- ────────────────────────────  ADMIN  ──────────────────────────── -->
+<div class="group-divider"><h2>Admin &amp; data</h2><div class="line"></div></div>
+
+<section class="guide" id="g22">
+  <span class="badge gray">Step 22</span>
+  <h2>Custom Fields</h2>
+  <p class="who">Super Admin only</p>
+  <p class="body">Add your own fields to Customers / Prospects / Deals. 10 types (text, number, date, single/multi choice, file upload, consent). Saving makes the field appear on edit modals AND filterable in Marketing Lists.</p>
+  <figure><img src="/docs/user-guide/22-custom-fields.gif" alt="Custom fields" loading="lazy"></figure>
+  <div class="actions">
+    <a href="/docs/user-guide/22-custom-fields.gif" download>↓ Download GIF</a>
+    <a href="#g22" onclick="copyShareLink(event, '22-custom-fields.gif')">⎘ Copy link</a>
+  </div>
+</section>
+
+<section class="guide" id="g23">
+  <span class="badge gray">Step 23</span>
+  <h2>Integrations</h2>
+  <p class="who">Super Admin only</p>
+  <p class="body">Connect the CRM to WhatsApp, Stripe, Mailchimp, Google Calendar, Vercel AI Gateway, Telegram, Twilio, Zapier. Guided 3–4 step wizard each. <b>WhatsApp is the highest-leverage first connect.</b></p>
+  <figure><img src="/docs/user-guide/23-integrations.gif" alt="Integrations" loading="lazy"></figure>
+  <div class="actions">
+    <a href="/docs/user-guide/23-integrations.gif" download>↓ Download GIF</a>
+    <a href="#g23" onclick="copyShareLink(event, '23-integrations.gif')">⎘ Copy link</a>
+  </div>
+</section>
+
+<section class="guide" id="g24">
+  <span class="badge gray">Step 24</span>
+  <h2>Marketing Lists / segments</h2>
+  <p class="who">Marketing Manager / Super Admin</p>
+  <p class="body">Saved customer segments feed campaigns + automations. The builder stacks WHERE / AND / OR rules with a live preview count. Live lists auto-refresh daily; static lists freeze at creation.</p>
+  <figure><img src="/docs/user-guide/24-marketing-lists.gif" alt="Marketing lists segment builder" loading="lazy"></figure>
+  <div class="actions">
+    <a href="/docs/user-guide/24-marketing-lists.gif" download>↓ Download GIF</a>
+    <a href="#g24" onclick="copyShareLink(event, '24-marketing-lists.gif')">⎘ Copy link</a>
+  </div>
+</section>
+
+<section class="guide" id="g25">
+  <span class="badge gray">Step 25</span>
+  <h2>Purchases History</h2>
+  <p class="who">Manager and above</p>
+  <p class="body">Every paid invoice. KPI strip: revenue, count, avg basket, refunded. Click any row for the invoice PDF + actions (Download, Email, WhatsApp, Refund). Export to XLSX for finance.</p>
+  <figure><img src="/docs/user-guide/25-purchases-history.gif" alt="Purchases history" loading="lazy"></figure>
+  <div class="actions">
+    <a href="/docs/user-guide/25-purchases-history.gif" download>↓ Download GIF</a>
+    <a href="#g25" onclick="copyShareLink(event, '25-purchases-history.gif')">⎘ Copy link</a>
+  </div>
+</section>
+
+<section class="guide" id="g26">
+  <span class="badge gray">Step 26</span>
+  <h2>Audit Logs</h2>
+  <p class="who">Super Admin / Marketing Manager</p>
+  <p class="body">Every change in the system is logged — by user, by system jobs, and by AI actions. Filterable. Click any row for actor + IP + device + before/after diff + reason + 24h <b>Revert</b>.</p>
+  <figure><img src="/docs/user-guide/26-audit-logs.gif" alt="Audit logs" loading="lazy"></figure>
+  <div class="actions">
+    <a href="/docs/user-guide/26-audit-logs.gif" download>↓ Download GIF</a>
+    <a href="#g26" onclick="copyShareLink(event, '26-audit-logs.gif')">⎘ Copy link</a>
+  </div>
+</section>
+
+<!-- ────────────────────────────  SECURITY  ──────────────────────────── -->
+<div class="group-divider"><h2>Security &amp; operations</h2><div class="line"></div></div>
+
+<section class="guide" id="g27">
+  <span class="badge">Step 27</span>
+  <h2>Set up two-factor auth</h2>
+  <p class="who">Everyone (strongly recommended)</p>
+  <p class="body">Four steps: pick method → scan QR with Authy / Google Authenticator / 1Password → type the 6-digit code → save 10 one-time backup codes. <b>Single most useful security step — takes 2 minutes.</b></p>
+  <figure><img src="/docs/user-guide/27-two-factor-auth.gif" alt="Two-factor auth setup" loading="lazy"></figure>
+  <div class="actions">
+    <a href="/docs/user-guide/27-two-factor-auth.gif" download>↓ Download GIF</a>
+    <a href="#g27" onclick="copyShareLink(event, '27-two-factor-auth.gif')">⎘ Copy link</a>
+  </div>
+</section>
+
+<section class="guide" id="g28">
+  <span class="badge">Step 28</span>
+  <h2>Backup &amp; restore</h2>
+  <p class="who">Super Admin only</p>
+  <p class="body">Nightly auto-backups at 02:00 MYT + pre-deploy snapshots + on-demand manual. History table with per-row Download / Restore. Restore lists exactly what you'll lose and requires you to type RESTORE.</p>
+  <figure><img src="/docs/user-guide/28-backup-manager.gif" alt="Backup manager" loading="lazy"></figure>
+  <div class="actions">
+    <a href="/docs/user-guide/28-backup-manager.gif" download>↓ Download GIF</a>
+    <a href="#g28" onclick="copyShareLink(event, '28-backup-manager.gif')">⎘ Copy link</a>
+  </div>
+</section>
+
+<section class="guide" id="g29">
+  <span class="badge">Step 29</span>
+  <h2>Noticeboard · 公告栏</h2>
+  <p class="who">Everyone</p>
+  <p class="body">Internal team announcements. Pinned post on top, normal posts in a card grid below. Types: Announce / Celebrate / Heads-up / Pin. Markdown body. Mandarin posts auto-translate for English readers.</p>
+  <figure><img src="/docs/user-guide/29-noticeboard.gif" alt="Noticeboard" loading="lazy"></figure>
+  <div class="actions">
+    <a href="/docs/user-guide/29-noticeboard.gif" download>↓ Download GIF</a>
+    <a href="#g29" onclick="copyShareLink(event, '29-noticeboard.gif')">⎘ Copy link</a>
+  </div>
+</section>
+
+<section class="guide" id="g30">
+  <span class="badge">Step 30</span>
+  <h2>Profile &amp; settings</h2>
+  <p class="who">Everyone</p>
+  <p class="body">Top-right initials → <b>My profile</b>. Profile, Account (language / timezone / date format), Notifications toggles, Security (change password / set up 2FA / sign out other sessions).</p>
+  <figure><img src="/docs/user-guide/30-profile-settings.gif" alt="Profile and settings" loading="lazy"></figure>
+  <div class="actions">
+    <a href="/docs/user-guide/30-profile-settings.gif" download>↓ Download GIF</a>
+    <a href="#g30" onclick="copyShareLink(event, '30-profile-settings.gif')">⎘ Copy link</a>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="inner">
+    <div>
+      <h3>What's NOT here</h3>
+      <ul>
+        <li><a href="/docs/stock-take-v2/">Stock Take v2</a> — separate guide</li>
+        <li>Egg Purchasing, Formula Purchaser, Boss Report — Standard Functions manual</li>
+        <li>Milestones (增运九法), Fude (福运相随) — Mandarin Feng Shui module guide</li>
+        <li>System Health, Compliance Center, Tenant Management — IT runbook</li>
+      </ul>
+    </div>
+    <div>
+      <h3>For the keen</h3>
+      <ul>
+        <li>Regenerate any GIF: <code>python docs/user-guide/_make_gifs.py</code></li>
+        <li>Source: <a href="https://github.com/destinoraclessolution9/DC-CRM/tree/main/docs/user-guide" target="_blank" rel="noopener">GitHub</a></li>
+        <li>Long-form prose: <a href="/docs/user-guide/README.md">README.md</a></li>
+        <li>All GIFs were rendered with PIL — never touches live customer data.</li>
+      </ul>
+    </div>
+  </div>
+</footer>
+
+<script>
+function copyShareLink(e, file){
+  e.preventDefault();
+  var u = location.origin + "/docs/user-guide/" + file;
+  if (navigator.clipboard){
+    navigator.clipboard.writeText(u).then(function(){
+      var btn = e.currentTarget;
+      var old = btn.textContent;
+      btn.textContent = "✓ Copied — paste anywhere";
+      setTimeout(function(){ btn.textContent = old; }, 1800);
+    }).catch(function(){ window.prompt("Copy this link:", u); });
+  } else { window.prompt("Copy this link:", u); }
+}
+</script>
+
+</body>
+</html>

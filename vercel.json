@@ -92,6 +92,14 @@
       "destination": "/terms.html"
     },
     {
+      "source": "/user-guide",
+      "destination": "/user-guide.html"
+    },
+    {
+      "source": "/guide",
+      "destination": "/user-guide.html"
+    },
+    {
       "source": "/package.json",
       "destination": "/404.html"
     },
