@@ -26265,6 +26265,15 @@ function _wireLoginBtn() {
                             <div class="acc-body" id="acc-body-fengshui-${prospect.id}" style="display:none" data-loaded="false"></div>
                         </div>
 
+                        <!-- ⑦d Customer Forms (Survey / CPS / APU) -->
+                        <div class="acc-item" id="acc-forms-${prospect.id}">
+                            <div class="acc-hdr" onclick="app.toggleAccordion('forms',${prospect.id},this.parentElement)">
+                                <span><i class="fas fa-clipboard-list"></i> Customer Forms <span style="color:#7C3AED;">客户表格</span></span>
+                                <i class="fas fa-chevron-down acc-chev"></i>
+                            </div>
+                            <div class="acc-body" id="acc-body-forms-${prospect.id}" style="display:none" data-loaded="false"></div>
+                        </div>
+
                         <!-- ⑧ Notes -->
                         <div class="acc-item" id="acc-notes-${prospect.id}">
                             <div class="acc-hdr" onclick="app.toggleAccordion('notes',${prospect.id},this.parentElement)">
@@ -26402,6 +26411,48 @@ function _wireLoginBtn() {
                 <div class="pv-row"><span class="pv-lbl">City</span><span class="pv-val">${prospect.city || '-'}</span></div>
                 <div class="pv-row"><span class="pv-lbl">State</span><span class="pv-val">${prospect.state || '-'}</span></div>
                 <div class="pv-row"><span class="pv-lbl">Postal Code</span><span class="pv-val">${prospect.postal_code || '-'}</span></div>
+            `;
+        }
+        else if (tab === 'forms') {
+            // Customer Forms accordion — Survey / CPS / APU per prospect.
+            // Each fetch races a 4s timeout so a missing row never hangs the panel.
+            const _qf = (t) => Promise.race([
+                AppDataStore.query(t, { prospect_id: prospectId }).catch(() => []),
+                new Promise(r => setTimeout(() => r([]), 4000))
+            ]);
+            const [surveys, cpsRows, apuRows] = await Promise.all([
+                _qf('customer_surveys'), _qf('cps_analyses'), _qf('apu_appraisals')
+            ]);
+            const survey = surveys[0] || null;
+            const cps    = cpsRows[0] || null;
+            const apu    = apuRows[0] || null;
+            const fmtDate = (iso) => { try { return iso ? new Date(iso).toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' }) : ''; } catch(_) { return iso || ''; } };
+            const card = (kind, label, zhLabel, color, row) => `
+                <div style="background:white;border:1px solid var(--gray-200);border-radius:10px;padding:14px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;">
+                    <div style="flex:1;min-width:180px;">
+                        <div style="font-weight:600;font-size:14px;color:${color};">${label} <span style="color:#7C3AED;font-weight:500;">${zhLabel}</span></div>
+                        <div style="font-size:12px;color:var(--gray-500);margin-top:2px;">
+                            ${row ? `<i class="fas fa-check-circle" style="color:#10B981;margin-right:4px;"></i> Completed · ${fmtDate(row.created_at)}` : `<i class="far fa-circle" style="color:#9CA3AF;margin-right:4px;"></i> Not yet filled`}
+                        </div>
+                    </div>
+                    <button class="btn ${row ? 'secondary' : 'primary'} btn-sm" onclick="event.stopPropagation(); app.open${kind}Modal(${prospect.id}${row ? ',' + row.id : ''})">
+                        <i class="fas fa-${row ? 'edit' : 'pen'}"></i> ${row ? 'Edit' : 'Fill'}
+                    </button>
+                </div>
+            `;
+            container.innerHTML = `
+                <div style="display:flex;flex-direction:column;gap:10px;">
+                    <div style="background:#F9FAFB;border:1px dashed #D1D5DB;border-radius:8px;padding:10px 14px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:12px;color:#374151;">
+                        <span style="display:inline-flex;width:20px;height:20px;border-radius:50%;background:#7C3AED;color:white;font-weight:700;font-size:11px;align-items:center;justify-content:center;">1</span> Survey
+                        <i class="fas fa-arrow-right" style="color:#9CA3AF;font-size:10px;"></i>
+                        <span style="display:inline-flex;width:20px;height:20px;border-radius:50%;background:#7C3AED;color:white;font-weight:700;font-size:11px;align-items:center;justify-content:center;">2</span> CPS
+                        <i class="fas fa-arrow-right" style="color:#9CA3AF;font-size:10px;"></i>
+                        <span style="display:inline-flex;width:20px;height:20px;border-radius:50%;background:#7C3AED;color:white;font-weight:700;font-size:11px;align-items:center;justify-content:center;">3</span> APU
+                    </div>
+                    ${card('CustomerSurvey', 'New Customer Survey', '新客户调查表', '#4338CA', survey)}
+                    ${card('CpsAnalysis',     'CPS Analysis',         '細解命盤',     '#92400E', cps)}
+                    ${card('ApuAppraisal',    'APU Appraisal',        '反馈评估',     '#9D174D', apu)}
+                </div>
             `;
         }
         else if (tab === 'names') {
