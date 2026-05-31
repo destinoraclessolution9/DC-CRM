@@ -53725,10 +53725,27 @@ Gold-${totGold}`;
                     </div>
                 </div>
 
-                <!-- Customer info bordered box, 2 columns x 5 rows like paper -->
+                <!-- Customer info bordered box, 2 columns x 5 rows like paper.
+                     CPS-specific overrides: tighter label column, inline-nowrap
+                     checkboxes for Gender/Marital, Birthdate cell holds BOTH
+                     Solar+Lunar inputs side-by-side. -->
+                <style>
+                    #cf-cps-paper .cf-info-row{ grid-template-columns:108px 1fr; gap:6px; }
+                    #cf-cps-paper .cf-info-lbl{ font-size:12px; }
+                    #cf-cps-paper .cf-info-lbl em{ font-size:10.5px; }
+                    #cf-cps-paper .cf-info-row .cf-cb-row{ flex-wrap:nowrap; gap:12px; }
+                    #cf-cps-paper .cf-info-row .cf-cb{ font-size:12px; white-space:nowrap; }
+                    #cf-cps-paper .cf-bd-cell{ display:grid; grid-template-columns:auto 1fr; gap:4px 6px; align-items:center; }
+                    #cf-cps-paper .cf-bd-cell .lbl{ font-size:10.5px; color:#6b7280; white-space:nowrap; }
+                    #cf-cps-paper .cf-bd-cell input{ min-width:0; }
+                    #cf-cps-paper .cf-paper-input{ min-width:0; }
+                    @media (max-width:640px){
+                        #cf-cps-paper .cf-info-row .cf-cb-row{ flex-wrap:wrap; }
+                    }
+                </style>
                 <div class="cf-paper-info">
                     <div class="cf-info-2col">
-                        <!-- Row 1 -->
+                        <!-- Row 1: Customer Name | Gender -->
                         <div class="cf-info-row">
                             <span class="cf-info-lbl">Customer Name<em>客戶姓名</em></span>
                             <input type="text" class="cf-paper-input" id="cf-cps-name" value="${_cfEscape(data.customer_name || prospect.full_name || '')}" placeholder="(中文)">
@@ -53736,27 +53753,25 @@ Gold-${totGold}`;
                         <div class="cf-info-row">
                             <span class="cf-info-lbl">Gender<em>性別</em></span>
                             <div class="cf-cb-row">
-                                <label class="cf-cb"><input type="radio" name="cps_gender" value="female" ${data.gender === 'female' ? 'checked' : ''}><span class="cf-cb-txt">女 <span class="cf-cb-en">Female</span></span></label>
-                                <label class="cf-cb"><input type="radio" name="cps_gender" value="male" ${data.gender === 'male' ? 'checked' : ''}><span class="cf-cb-txt">男 <span class="cf-cb-en">Male</span></span></label>
+                                <label class="cf-cb"><input type="radio" name="cps_gender" value="female" ${data.gender === 'female' ? 'checked' : ''}><span class="cf-cb-txt">女&nbsp;<span class="cf-cb-en">Female</span></span></label>
+                                <label class="cf-cb"><input type="radio" name="cps_gender" value="male"   ${data.gender === 'male'   ? 'checked' : ''}><span class="cf-cb-txt">男&nbsp;<span class="cf-cb-en">Male</span></span></label>
                             </div>
                         </div>
-                        <!-- Row 2 -->
+                        <!-- Row 2: Birthdate (Solar + Lunar inline) | Phone -->
                         <div class="cf-info-row">
                             <span class="cf-info-lbl">Birthdate<em>生日日期</em></span>
-                            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-                                <span style="font-size:11px;color:#6b7280;">(Solar 陽曆)</span>
-                                <input type="date" class="cf-paper-input" id="cf-cps-bd-solar" value="${data.birthdate_solar || prospect.date_of_birth || ''}" style="flex:1; min-width:120px;">
+                            <div class="cf-bd-cell">
+                                <span class="lbl">Solar 陽曆</span>
+                                <input type="date" class="cf-paper-input" id="cf-cps-bd-solar" value="${data.birthdate_solar || prospect.date_of_birth || ''}">
+                                <span class="lbl">Lunar 農曆</span>
+                                <input type="date" class="cf-paper-input" id="cf-cps-bd-lunar" value="${data.birthdate_lunar || prospect.lunar_birth || ''}">
                             </div>
                         </div>
                         <div class="cf-info-row">
                             <span class="cf-info-lbl">Phone Number<em>手提號碼</em></span>
                             <input type="tel" class="cf-paper-input" id="cf-cps-phone" value="${_cfEscape(data.phone || prospect.phone || '')}">
                         </div>
-                        <div class="cf-info-row" style="grid-column:1 / -1; grid-template-columns:130px 1fr;">
-                            <span class="cf-info-lbl"><em>(Lunar 農曆)</em></span>
-                            <input type="date" class="cf-paper-input" id="cf-cps-bd-lunar" value="${data.birthdate_lunar || prospect.lunar_birth || ''}" style="max-width:220px;">
-                        </div>
-                        <!-- Row 3 -->
+                        <!-- Row 3: Occupation | Email -->
                         <div class="cf-info-row">
                             <span class="cf-info-lbl">Current Occupation<em>目前職業</em></span>
                             <input type="text" class="cf-paper-input" id="cf-cps-occupation" value="${_cfEscape(data.occupation || prospect.occupation || '')}">
@@ -53765,7 +53780,7 @@ Gold-${totGold}`;
                             <span class="cf-info-lbl">Email<em>電郵</em></span>
                             <input type="email" class="cf-paper-input" id="cf-cps-email" value="${_cfEscape(data.email || prospect.email || '')}">
                         </div>
-                        <!-- Row 4 -->
+                        <!-- Row 4: Living Area | Introducer -->
                         <div class="cf-info-row">
                             <span class="cf-info-lbl">Living Area<em>居住地區</em></span>
                             <input type="text" class="cf-paper-input" id="cf-cps-area" value="${_cfEscape(data.living_area || prospect.city || '')}">
@@ -53774,7 +53789,7 @@ Gold-${totGold}`;
                             <span class="cf-info-lbl">Introducer<em>介紹人</em></span>
                             <input type="text" class="cf-paper-input" id="cf-cps-introducer" value="${_cfEscape(data.introducer || prospect.referred_by || '')}">
                         </div>
-                        <!-- Row 5 -->
+                        <!-- Row 5: Marital Status | Dealer Name -->
                         <div class="cf-info-row">
                             <span class="cf-info-lbl">Marital Status<em>婚姻狀況</em></span>
                             <div class="cf-cb-row">
@@ -54471,7 +54486,7 @@ Gold-${totGold}`;
         `, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
             { label: 'Save Blueprint', type: 'primary', action: '(async () => { await app.saveDestinyBlueprint(); })()' }
-        ]);
+        ], 'fullscreen');
 
         // Bind signature pads + live year-label updates
         setTimeout(() => {
