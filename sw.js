@@ -1,23 +1,26 @@
 // CRM Service Worker — Phase D performance: stale-while-revalidate for static assets.
 // Cache version is keyed by date so a deploy invalidates old caches.
-const CACHE_VERSION = 'crm-v2026-05-26-3';
+const CACHE_VERSION = 'crm-v2026-05-31-1';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 
 // Same-origin static assets we want pre-warmed. CDN libs (fontawesome, supabase-js)
 // are still cached at runtime via the SWR strategy below.
+// Precache the .min.* variants — those are what index.html actually loads; the
+// non-minified sources are dev-only and would waste ~50% bandwidth on first visit.
 const PRECACHE_URLS = [
     '/',
     '/index.html',
-    '/styles-fixed.css',
-    '/styles-mobile.css',
-    '/styles-mobile-v2.css',
-    '/styles-theme.css',
-    '/data.js',
-    '/auth.js',
-    '/ui.js',
-    '/script.js',
-    '/supabase-init.js',
+    '/styles-fixed.min.css',
+    '/styles-mobile.min.css',
+    '/styles-mobile-v2.min.css',
+    '/styles-theme.min.css',
+    '/data.min.js',
+    '/auth.min.js',
+    '/ui.min.js',
+    '/script.min.js',
+    '/supabase-init.min.js',
+    '/app-init.min.js',
     '/manifest.json'
 ];
 

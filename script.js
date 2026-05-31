@@ -392,6 +392,12 @@ const UserPreferences = {
 window.UserPreferences = UserPreferences;
 
 const appLogic = (() => {
+    // Ensure _crmUtils exists before any early Object.assign() augments it.
+    // Initialised properly at ~line 928 with escapeHtml; this prevents the
+    // TypeError that breaks the entire IIFE return when early role-helpers
+    // (isSystemAdmin / isMarketingManager) try to attach themselves first.
+    window._crmUtils = window._crmUtils || {};
+
     let _currentView = 'dashboard';
     let _currentUser = null;
     let _currentMarketingTab = 'templates'; // Phase 12: 'templates', 'campaigns', 'analytics'
@@ -868,6 +874,7 @@ const appLogic = (() => {
         }
         return 'id_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
     };
+    Object.assign(window._crmUtils, { generateId: () => generateId() });
 
     const generateModelId = () => {
         if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -923,8 +930,9 @@ const appLogic = (() => {
 };
     // Expose escapeHtml globally so script-features.js can use it
     // without closure access. Remaining utils added further down as
-    // they're defined later in the file.
-    window._crmUtils = { escapeHtml };
+    // they're defined later in the file. Use Object.assign so we don't
+    // clobber utils attached by earlier sections (isSystemAdmin, etc.).
+    Object.assign(window._crmUtils, { escapeHtml });
 
     const FILE_ICONS = {
         // Documents
@@ -1002,6 +1010,7 @@ const appLogic = (() => {
         const i = Math.floor(Math.log(bytes) / Math.log(k));
         return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     };
+    Object.assign(window._crmUtils, { getFileIcon, formatFileSize });
 
     const getFileExtension = (filename) => {
         return filename.split('.').pop().toLowerCase();
@@ -11506,7 +11515,7 @@ function _wireLoginBtn() {
                 }
                 _promise = new Promise((resolve, reject) => {
                     const s = document.createElement('script');
-                    s.src = 'script-features.min.js?v=20260531a';
+                    s.src = 'script-features.min.js?v=20260531c';
                     s.async = false; // preserve execution order
                     s.onload = () => { window._appFeaturesLoaded = true; resolve(); };
                     s.onerror = (e) => {
@@ -23439,6 +23448,16 @@ function _wireLoginBtn() {
     let _customerPage = 0;
     const _customerPageSize = 50;
 
+    // Live app-state for script-features.js
+    window._appState = {
+        get cu() { return _currentUser; },
+        get ial() { return !!(_currentUser && (isSystemAdmin(_currentUser) || isMarketingManager(_currentUser))); },
+        get pp() { return _prospectPage; },
+        set pp(v) { _prospectPage = v; },
+        get cp() { return _customerPage; },
+        set cp(v) { _customerPage = v; },
+    };
+
     const renderCustomersTable = async () => {
         const tbody = document.getElementById('customers-table-body');
         if (!tbody) return;
@@ -24576,6 +24595,7 @@ function _wireLoginBtn() {
         if (!name) return '?';
         return name.trim().split(/\s+/).map(w => w[0]?.toUpperCase() || '').slice(0, 2).join('');
     };
+    Object.assign(window._crmUtils, { getAvatarColor, getInitials });
 
     const toggleProspectView = (mode) => {
         _prospectViewMode = mode;
@@ -26473,12 +26493,13 @@ function _wireLoginBtn() {
                 AppDataStore.query(t, { prospect_id: prospectId }).catch(() => []),
                 new Promise(r => setTimeout(() => r([]), 4000))
             ]);
-            const [surveys, cpsRows, apuRows] = await Promise.all([
-                _qf('customer_surveys'), _qf('cps_analyses'), _qf('apu_appraisals')
+            const [surveys, cpsRows, apuRows, blueprintRows] = await Promise.all([
+                _qf('customer_surveys'), _qf('cps_analyses'), _qf('apu_appraisals'), _qf('destiny_blueprints')
             ]);
-            const survey = surveys[0] || null;
-            const cps    = cpsRows[0] || null;
-            const apu    = apuRows[0] || null;
+            const survey    = surveys[0] || null;
+            const cps       = cpsRows[0] || null;
+            const apu       = apuRows[0] || null;
+            const blueprint = blueprintRows[0] || null;
             const fmtDate = (iso) => { try { return iso ? new Date(iso).toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' }) : ''; } catch(_) { return iso || ''; } };
             const card = (kind, label, zhLabel, color, row) => `
                 <div style="background:white;border:1px solid var(--gray-200);border-radius:10px;padding:14px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;">
@@ -26501,10 +26522,13 @@ function _wireLoginBtn() {
                         <span style="display:inline-flex;width:20px;height:20px;border-radius:50%;background:#7C3AED;color:white;font-weight:700;font-size:11px;align-items:center;justify-content:center;">2</span> CPS
                         <i class="fas fa-arrow-right" style="color:#9CA3AF;font-size:10px;"></i>
                         <span style="display:inline-flex;width:20px;height:20px;border-radius:50%;background:#7C3AED;color:white;font-weight:700;font-size:11px;align-items:center;justify-content:center;">3</span> APU
+                        <i class="fas fa-arrow-right" style="color:#9CA3AF;font-size:10px;"></i>
+                        <span style="display:inline-flex;width:20px;height:20px;border-radius:50%;background:#7C3AED;color:white;font-weight:700;font-size:11px;align-items:center;justify-content:center;">4</span> Blueprint
                     </div>
-                    ${card('CustomerSurvey', 'New Customer Survey', '新客户调查表', '#4338CA', survey)}
-                    ${card('CpsAnalysis',     'CPS Analysis',         '細解命盤',     '#92400E', cps)}
-                    ${card('ApuAppraisal',    'APU Appraisal',        '反馈评估',     '#9D174D', apu)}
+                    ${card('CustomerSurvey',   'New Customer Survey',  '新客户调查表',     '#4338CA', survey)}
+                    ${card('CpsAnalysis',      'CPS Analysis',         '細解命盤',         '#92400E', cps)}
+                    ${card('ApuAppraisal',     'APU Appraisal',        '反馈评估',         '#9D174D', apu)}
+                    ${card('DestinyBlueprint', '3-Year Blueprint',     '九運改命藍圖表',   '#3730A3', blueprint)}
                 </div>
             `;
         }
@@ -53054,11 +53078,12 @@ Gold-${totGold}`;
             AppDataStore.getAll(table).catch(() => []),
             new Promise(resolve => setTimeout(() => resolve([]), ms))
         ]);
-        const [prospects, surveys, cps, apus] = await Promise.all([
+        const [prospects, surveys, cps, apus, blueprints] = await Promise.all([
             _quickFetch('prospects', 6000),
             _quickFetch('customer_surveys'),
             _quickFetch('cps_analyses'),
-            _quickFetch('apu_appraisals')
+            _quickFetch('apu_appraisals'),
+            _quickFetch('destiny_blueprints')
         ]);
 
         // Build per-prospect status map
@@ -53067,19 +53092,20 @@ Gold-${totGold}`;
             id: p.id,
             name: p.full_name || p.nickname || '(no name)',
             phone: p.phone || '',
-            survey: null, cps: null, apu: null
+            survey: null, cps: null, apu: null, blueprint: null
         }));
         surveys.forEach(s => { const e = byProspect.get(s.prospect_id); if (e) e.survey = s; });
         cps.forEach(c => { const e = byProspect.get(c.prospect_id); if (e) e.cps = c; });
         apus.forEach(a => { const e = byProspect.get(a.prospect_id); if (e) e.apu = a; });
+        blueprints.forEach(b => { const e = byProspect.get(b.prospect_id); if (e) e.blueprint = b; });
 
         const q = (_cfState.prospectQuery || '').toLowerCase();
         const filtered = Array.from(byProspect.values())
             .filter(p => !q || p.name.toLowerCase().includes(q) || (p.phone || '').includes(q))
             .sort((a, b) => {
                 // Show prospects with any form filled in first, then by name
-                const ax = (a.survey || a.cps || a.apu) ? 0 : 1;
-                const bx = (b.survey || b.cps || b.apu) ? 0 : 1;
+                const ax = (a.survey || a.cps || a.apu || a.blueprint) ? 0 : 1;
+                const bx = (b.survey || b.cps || b.apu || b.blueprint) ? 0 : 1;
                 return ax - bx || a.name.localeCompare(b.name);
             })
             .slice(0, 200);
@@ -53111,6 +53137,7 @@ Gold-${totGold}`;
                 .cf-btn.cf-btn-survey{ background:#EEF2FF; color:#4338CA; border-color:#C7D2FE; }
                 .cf-btn.cf-btn-cps{ background:#FEF3C7; color:#92400E; border-color:#FCD34D; }
                 .cf-btn.cf-btn-apu{ background:#FCE7F3; color:#9D174D; border-color:#F9A8D4; }
+                .cf-btn.cf-btn-blueprint{ background:#E0E7FF; color:#3730A3; border-color:#A5B4FC; }
                 .cf-empty{ padding:40px; text-align:center; color:#9CA3AF; background:white; border:1px dashed #E5E7EB; border-radius:10px; }
 
                 /* ── Form modal styling (shared by Survey/CPS/APU) ── */
@@ -53186,6 +53213,8 @@ Gold-${totGold}`;
                     <span><span class="num">2</span> 細解命盤 CPS Form</span>
                     <i class="fas fa-arrow-right" style="color:#9CA3AF;"></i>
                     <span><span class="num">3</span> APU Appraisal 反馈</span>
+                    <i class="fas fa-arrow-right" style="color:#9CA3AF;"></i>
+                    <span><span class="num">4</span> 九運改命藍圖表 Blueprint</span>
                 </div>
 
                 ${filtered.length === 0 ? `
@@ -53205,6 +53234,7 @@ Gold-${totGold}`;
                                     ${badge(p.survey, 'Survey')}
                                     ${badge(p.cps, 'CPS')}
                                     ${badge(p.apu, 'APU')}
+                                    ${badge(p.blueprint, 'Blueprint')}
                                 </div>
                                 <div class="cf-actions">
                                     <button class="cf-btn cf-btn-survey" onclick="app.openCustomerSurveyModal(${p.id}${p.survey ? ',' + p.survey.id : ''})">
@@ -53215,6 +53245,9 @@ Gold-${totGold}`;
                                     </button>
                                     <button class="cf-btn cf-btn-apu" onclick="app.openApuAppraisalModal(${p.id}${p.apu ? ',' + p.apu.id : ''})">
                                         <i class="fas fa-edit"></i> ${p.apu ? 'Edit' : 'Fill'} APU
+                                    </button>
+                                    <button class="cf-btn cf-btn-blueprint" onclick="app.openDestinyBlueprintModal(${p.id}${p.blueprint ? ',' + p.blueprint.id : ''})">
+                                        <i class="fas fa-edit"></i> ${p.blueprint ? 'Edit' : 'Fill'} Blueprint
                                     </button>
                                 </div>
                             </div>
@@ -53889,6 +53922,274 @@ Gold-${totGold}`;
             }
 
             UI.toast.success(apuId ? 'APU updated.' : 'APU saved.');
+            UI.hideModal();
+            const target = document.getElementById('marketing-tab-content');
+            if (target && _currentMarketingTab === 'forms') target.innerHTML = await renderFormsTab();
+        } catch (err) {
+            UI.toast.error('Save failed: ' + (err?.message || err));
+        }
+    };
+
+    // =========================================================================
+    // 4) DESTINY CODE 3-YEAR BLUEPRINT (九運改命藍圖表)
+    // Sections: 命卦大運 → 成效與需求 → 未來3年運盤 → 行動與結果 → 簽名
+    // Default 3-year window: 2026–2028 (start_year configurable per-form).
+    // =========================================================================
+    const openDestinyBlueprintModal = async (prospectId, dbId = null) => {
+        const prospect = await AppDataStore.getById('prospects', prospectId).catch(() => null);
+        if (!prospect) { UI.toast.error('Prospect not found.'); return; }
+
+        let existing = null;
+        if (dbId) existing = await AppDataStore.getById('destiny_blueprints', dbId).catch(() => null);
+
+        const users = await AppDataStore.getAll('users').catch(() => []);
+        const userOpts = (selectedId) => users
+            .filter(u => u.status !== 'inactive')
+            .map(u => `<option value="${u.id}" ${selectedId == u.id ? 'selected' : ''}>${_cfEscape(u.full_name || u.email)}</option>`)
+            .join('');
+
+        const today = new Date().toISOString().slice(0, 10);
+        const data = existing || {};
+        const startYear = data.start_year || 2026;
+        const y1 = startYear, y2 = startYear + 1, y3 = startYear + 2;
+
+        UI.showModal(`九運改命藍圖表 Destiny Code Blueprint · ${_cfEscape(prospect.full_name || '')}`, `
+            <div class="cf-form">
+                <input type="hidden" id="cf-db-prospect-id" value="${prospect.id}">
+                <input type="hidden" id="cf-db-id" value="${dbId || ''}">
+
+                <div class="cf-section-title">DC 個人風水 <span class="zh">九運改命藍圖表</span></div>
+                <div class="cf-grid">
+                    <div class="cf-field"><label>姓名 <span class="zh">Name</span></label>
+                        <input type="text" id="cf-db-name" value="${_cfEscape(data.customer_name || prospect.full_name || '')}">
+                    </div>
+                    <div class="cf-field"><label>聯絡號碼 <span class="zh">Contact</span></label>
+                        <input type="tel" id="cf-db-phone" value="${_cfEscape(data.contact_number || prospect.phone || '')}">
+                    </div>
+                    <div class="cf-field"><label>代理 <span class="zh">Agent</span></label>
+                        <select id="cf-db-agent"><option value="">--</option>${userOpts(data.agent_id)}</select>
+                    </div>
+                    <div class="cf-field"><label>組別 <span class="zh">Group</span></label>
+                        <input type="text" id="cf-db-group" value="${_cfEscape(data.group_name || '')}">
+                    </div>
+                    <div class="cf-field"><label>Form Date <span class="zh">日期</span></label>
+                        <input type="date" id="cf-db-date" value="${data.form_date || today}">
+                    </div>
+                </div>
+
+                <div class="cf-section-title">1. 命卦大運 <span class="zh">Life Trigram Fortune</span></div>
+                <div class="cf-grid">
+                    <div class="cf-field"><label>吉 <span class="zh">Auspicious</span></label>
+                        <textarea id="cf-db-ji" rows="2">${_cfEscape(data.section1_ji || '')}</textarea>
+                    </div>
+                    <div class="cf-field"><label>悔 <span class="zh">Regret</span></label>
+                        <textarea id="cf-db-hui" rows="2">${_cfEscape(data.section1_hui || '')}</textarea>
+                    </div>
+                    <div class="cf-field"><label>凶 <span class="zh">Inauspicious</span></label>
+                        <textarea id="cf-db-xiong" rows="2">${_cfEscape(data.section1_xiong || '')}</textarea>
+                    </div>
+                    <div class="cf-field"><label>吝 <span class="zh">Stinginess</span></label>
+                        <textarea id="cf-db-lin" rows="2">${_cfEscape(data.section1_lin || '')}</textarea>
+                    </div>
+                    <div class="cf-field"><label>分數 <span class="zh">Score</span></label>
+                        <input type="number" id="cf-db-score" min="0" max="100" value="${data.section1_score ?? ''}">
+                    </div>
+                    <div class="cf-field"><label>建言 <span class="zh">Advice</span></label>
+                        <input type="text" id="cf-db-s1-advice" value="${_cfEscape(data.section1_advice || '')}">
+                    </div>
+                </div>
+
+                <div class="cf-section-title">2. 成效與需求 <span class="zh">Effectiveness & Needs</span></div>
+                <div style="font-size:12px;color:#6B7280;margin:-6px 0 4px;">按命盤解析,已採用之方案 · 現在及未來可能需要之方案</div>
+                <div class="cf-field"><label>個人 <span class="zh">Personal</span></label>
+                    <input type="text" id="cf-db-s2-personal" value="${_cfEscape(data.section2_personal || '')}">
+                </div>
+                <div class="cf-field"><label>家居 <span class="zh">Home</span></label>
+                    <input type="text" id="cf-db-s2-home" value="${_cfEscape(data.section2_home || '')}">
+                </div>
+                <div class="cf-field"><label>工作 <span class="zh">Work</span></label>
+                    <input type="text" id="cf-db-s2-work" value="${_cfEscape(data.section2_work || '')}">
+                </div>
+                <div class="cf-field"><label>生意 <span class="zh">Business</span></label>
+                    <input type="text" id="cf-db-s2-business" value="${_cfEscape(data.section2_business || '')}">
+                </div>
+                <div class="cf-field"><label>關係 <span class="zh">Relationships</span></label>
+                    <input type="text" id="cf-db-s2-relationship" value="${_cfEscape(data.section2_relationship || '')}">
+                </div>
+                <div class="cf-field"><label>子女 <span class="zh">Children</span></label>
+                    <input type="text" id="cf-db-s2-children" value="${_cfEscape(data.section2_children || '')}">
+                </div>
+                <div class="cf-field"><label>建言 <span class="zh">Advice</span></label>
+                    <textarea id="cf-db-s2-advice" rows="2">${_cfEscape(data.section2_advice || '')}</textarea>
+                </div>
+
+                <div class="cf-section-title">3. 未來3年運盤 <span class="zh">Future 3-Year Fortune (${y1}–${y3})</span></div>
+                <div class="cf-field" style="max-width:200px;">
+                    <label>Start Year <span class="zh">起始年</span></label>
+                    <input type="number" id="cf-db-start-year" min="2024" max="2099" value="${startYear}">
+                </div>
+                <table class="cf-ref-table" style="margin-top:6px;">
+                    <thead>
+                        <tr>
+                            <th style="width:80px;">Year</th>
+                            <th>未來3年運盤重大剋應 <span style="color:#7C3AED;font-weight:500;">Major Impact</span></th>
+                            <th>未來3年最想要之藍圖目標 <span style="color:#7C3AED;font-weight:500;">Blueprint Goal</span></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td data-label="Year" style="font-weight:700;text-align:center;" id="cf-db-y1-label">${y1}</td>
+                            <td data-label="Major Impact"><input type="text" id="cf-db-y1-event" value="${_cfEscape(data.year_1_event || '')}"></td>
+                            <td data-label="Blueprint Goal"><input type="text" id="cf-db-y1-goal" value="${_cfEscape(data.year_1_goal || '')}"></td>
+                        </tr>
+                        <tr>
+                            <td data-label="Year" style="font-weight:700;text-align:center;" id="cf-db-y2-label">${y2}</td>
+                            <td data-label="Major Impact"><input type="text" id="cf-db-y2-event" value="${_cfEscape(data.year_2_event || '')}"></td>
+                            <td data-label="Blueprint Goal"><input type="text" id="cf-db-y2-goal" value="${_cfEscape(data.year_2_goal || '')}"></td>
+                        </tr>
+                        <tr>
+                            <td data-label="Year" style="font-weight:700;text-align:center;" id="cf-db-y3-label">${y3}</td>
+                            <td data-label="Major Impact"><input type="text" id="cf-db-y3-event" value="${_cfEscape(data.year_3_event || '')}"></td>
+                            <td data-label="Blueprint Goal"><input type="text" id="cf-db-y3-goal" value="${_cfEscape(data.year_3_goal || '')}"></td>
+                        </tr>
+                    </tbody>
+                </table>
+                <div style="font-size:11px;color:#6B7280;margin-top:6px;">*藍圖目標與結果,每年可以是一個,也可以三年是一個,或三年三個皆可。卻不可過多。</div>
+                <div class="cf-field"><label>結論 <span class="zh">Conclusion</span></label>
+                    <textarea id="cf-db-s3-conclusion" rows="2">${_cfEscape(data.section3_conclusion || '')}</textarea>
+                </div>
+
+                <div class="cf-section-title">4. 行動與結果 <span class="zh">Action & Results</span></div>
+                <div style="font-size:12px;color:#6B7280;margin:-6px 0 4px;">面對未來,其藍圖目標可能之結果變化</div>
+                <div class="cf-field"><label>得到 <span class="zh">Gain</span></label>
+                    <input type="text" id="cf-db-s4-gain" value="${_cfEscape(data.section4_gain || '')}">
+                </div>
+                <div class="cf-field"><label>損失 <span class="zh">Loss</span></label>
+                    <input type="text" id="cf-db-s4-loss" value="${_cfEscape(data.section4_loss || '')}">
+                </div>
+                <div class="cf-field"><label>保持 <span class="zh">Maintain</span></label>
+                    <input type="text" id="cf-db-s4-maintain" value="${_cfEscape(data.section4_maintain || '')}">
+                </div>
+                <div class="cf-field"><label>衰退 <span class="zh">Decline</span></label>
+                    <input type="text" id="cf-db-s4-decline" value="${_cfEscape(data.section4_decline || '')}">
+                </div>
+                <div class="cf-field"><label>*把風險降低提高成率的最佳輔助方案或決定 <span class="zh">Best Supporting Plan / Decision</span></label>
+                    <textarea id="cf-db-s4-best" rows="2">${_cfEscape(data.section4_best_solution || '')}</textarea>
+                </div>
+
+                <div class="cf-section-title">Signatures <span class="zh">簽名</span></div>
+                <div class="cf-grid">
+                    <div class="cf-sig-wrap">
+                        <label style="font-size:12px;font-weight:600;color:#374151;">客戶姓名 Customer</label>
+                        <input type="text" id="cf-db-cust-signed-name" placeholder="Customer signed name" value="${_cfEscape(data.customer_signed_name || '')}">
+                        <canvas id="cf-db-sig-cust" class="cf-sig-canvas" data-preload="${data.customer_signature_data_url || ''}"></canvas>
+                        <div class="cf-sig-actions">
+                            <small>日期: ${_cfFmtDate(data.customer_signed_at) || today}</small>
+                            <button type="button" class="cf-btn" onclick="app.cfClearSignature('cf-db-sig-cust')"><i class="fas fa-eraser"></i> Clear</button>
+                        </div>
+                    </div>
+                    <div class="cf-sig-wrap">
+                        <label style="font-size:12px;font-weight:600;color:#374151;">顧問姓名 Consultant</label>
+                        <select id="cf-db-consultant"><option value="">--</option>${userOpts(data.consultant_id)}</select>
+                        <canvas id="cf-db-sig-cons" class="cf-sig-canvas" data-preload="${data.consultant_signature_data_url || ''}"></canvas>
+                        <div class="cf-sig-actions">
+                            <small>日期: ${_cfFmtDate(data.consultant_signed_at) || today}</small>
+                            <button type="button" class="cf-btn" onclick="app.cfClearSignature('cf-db-sig-cons')"><i class="fas fa-eraser"></i> Clear</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save Blueprint', type: 'primary', action: '(async () => { await app.saveDestinyBlueprint(); })()' }
+        ]);
+
+        // Bind signature pads + live year-label updates
+        setTimeout(() => {
+            _bindSignaturePad('cf-db-sig-cust');
+            _bindSignaturePad('cf-db-sig-cons');
+            const syEl = document.getElementById('cf-db-start-year');
+            if (syEl) {
+                syEl.addEventListener('input', () => {
+                    const sy = parseInt(syEl.value, 10);
+                    if (!sy || sy < 2024 || sy > 2099) return;
+                    const l1 = document.getElementById('cf-db-y1-label');
+                    const l2 = document.getElementById('cf-db-y2-label');
+                    const l3 = document.getElementById('cf-db-y3-label');
+                    if (l1) l1.textContent = sy;
+                    if (l2) l2.textContent = sy + 1;
+                    if (l3) l3.textContent = sy + 2;
+                });
+            }
+        }, 60);
+    };
+
+    const saveDestinyBlueprint = async () => {
+        const prospectId = parseInt(document.getElementById('cf-db-prospect-id')?.value, 10);
+        const dbId = document.getElementById('cf-db-id')?.value || null;
+        if (!prospectId) { UI.toast.error('Missing prospect.'); return; }
+
+        const custSig = _getSignatureDataUrl('cf-db-sig-cust');
+        const consSig = _getSignatureDataUrl('cf-db-sig-cons');
+        const scoreRaw = document.getElementById('cf-db-score')?.value;
+        const startYearRaw = document.getElementById('cf-db-start-year')?.value;
+
+        const payload = {
+            prospect_id: prospectId,
+            form_date: document.getElementById('cf-db-date')?.value || null,
+            customer_name: document.getElementById('cf-db-name')?.value?.trim() || null,
+            contact_number: document.getElementById('cf-db-phone')?.value?.trim() || null,
+            agent_id: parseInt(document.getElementById('cf-db-agent')?.value, 10) || null,
+            group_name: document.getElementById('cf-db-group')?.value?.trim() || null,
+
+            section1_ji: document.getElementById('cf-db-ji')?.value?.trim() || null,
+            section1_xiong: document.getElementById('cf-db-xiong')?.value?.trim() || null,
+            section1_hui: document.getElementById('cf-db-hui')?.value?.trim() || null,
+            section1_lin: document.getElementById('cf-db-lin')?.value?.trim() || null,
+            section1_score: scoreRaw === '' || scoreRaw == null ? null : parseInt(scoreRaw, 10),
+            section1_advice: document.getElementById('cf-db-s1-advice')?.value?.trim() || null,
+
+            section2_personal: document.getElementById('cf-db-s2-personal')?.value?.trim() || null,
+            section2_home: document.getElementById('cf-db-s2-home')?.value?.trim() || null,
+            section2_work: document.getElementById('cf-db-s2-work')?.value?.trim() || null,
+            section2_business: document.getElementById('cf-db-s2-business')?.value?.trim() || null,
+            section2_relationship: document.getElementById('cf-db-s2-relationship')?.value?.trim() || null,
+            section2_children: document.getElementById('cf-db-s2-children')?.value?.trim() || null,
+            section2_advice: document.getElementById('cf-db-s2-advice')?.value?.trim() || null,
+
+            start_year: startYearRaw ? parseInt(startYearRaw, 10) : 2026,
+            year_1_event: document.getElementById('cf-db-y1-event')?.value?.trim() || null,
+            year_1_goal: document.getElementById('cf-db-y1-goal')?.value?.trim() || null,
+            year_2_event: document.getElementById('cf-db-y2-event')?.value?.trim() || null,
+            year_2_goal: document.getElementById('cf-db-y2-goal')?.value?.trim() || null,
+            year_3_event: document.getElementById('cf-db-y3-event')?.value?.trim() || null,
+            year_3_goal: document.getElementById('cf-db-y3-goal')?.value?.trim() || null,
+            section3_conclusion: document.getElementById('cf-db-s3-conclusion')?.value?.trim() || null,
+
+            section4_gain: document.getElementById('cf-db-s4-gain')?.value?.trim() || null,
+            section4_loss: document.getElementById('cf-db-s4-loss')?.value?.trim() || null,
+            section4_maintain: document.getElementById('cf-db-s4-maintain')?.value?.trim() || null,
+            section4_decline: document.getElementById('cf-db-s4-decline')?.value?.trim() || null,
+            section4_best_solution: document.getElementById('cf-db-s4-best')?.value?.trim() || null,
+
+            customer_signed_name: document.getElementById('cf-db-cust-signed-name')?.value?.trim() || null,
+            customer_signature_data_url: custSig,
+            customer_signed_at: custSig ? new Date().toISOString() : null,
+            consultant_id: parseInt(document.getElementById('cf-db-consultant')?.value, 10) || null,
+            consultant_signature_data_url: consSig,
+            consultant_signed_at: consSig ? new Date().toISOString() : null,
+
+            created_by: _currentUser?.id || null
+        };
+
+        try {
+            if (dbId) {
+                await AppDataStore.update('destiny_blueprints', dbId, payload);
+                UI.toast.success('Blueprint updated.');
+            } else {
+                await AppDataStore.create('destiny_blueprints', { ...payload, created_at: new Date().toISOString() });
+                UI.toast.success('Blueprint saved.');
+            }
             UI.hideModal();
             const target = document.getElementById('marketing-tab-content');
             if (target && _currentMarketingTab === 'forms') target.innerHTML = await renderFormsTab();
@@ -55229,6 +55530,8 @@ Gold-${totGold}`;
         saveCpsAnalysis,
         openApuAppraisalModal,
         saveApuAppraisal,
+        openDestinyBlueprintModal,
+        saveDestinyBlueprint,
 
     };
 
