@@ -29,6 +29,13 @@ const JS_TARGETS = [
   'supabase-init.js',
   'two-factor.js',
   'push-notifications.js',
+  // Role-gated lazy chunks — fetched only when user navigates to the view
+  // AND their role level matches _CHUNK_VIEWS in script.js. The runtime
+  // loader resolves hashed filenames via window.__ASSET_MANIFEST.
+  'chunks/script-egg.js',
+  'chunks/script-boss-report.js',
+  'chunks/script-stock-take.js',
+  'chunks/script-knowledge.js',
 ];
 
 const CSS_TARGETS = [
