@@ -507,6 +507,8 @@ const appLogic = (() => {
     };
     const isSystemAdmin = (user) => _getUserLevel(user) === 1;
     const isMarketingManager = (user) => _getUserLevel(user) === 2;
+    // Expose role helpers after they're defined
+    Object.assign(window._crmUtils, { isSystemAdmin, isMarketingManager });
     // Level 15: restricted "Stock Take Staff" — sees only the Stock Take tab,
     // and inside it only the count / recount / summary tabs (no admin setup).
     const isStockTakeStaff = (user) => _getUserLevel(user) === 15;
@@ -919,7 +921,10 @@ const appLogic = (() => {
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#039;");
 };
-    
+    // Expose escapeHtml globally so script-features.js can use it
+    // without closure access. Remaining utils added further down as
+    // they're defined later in the file.
+    window._crmUtils = { escapeHtml };
 
     const FILE_ICONS = {
         // Documents
@@ -4085,6 +4090,7 @@ In a production system, this would show the actual file contents.
     // ==================== PHASE 14: MOBILE FUNCTIONS ====================
 
     const isMobile = () => window.innerWidth <= 768;
+    Object.assign(window._crmUtils, { isMobile });
 
     // Apply/remove body.is-mobile class and drive layout changes
     const applyMobileClass = () => {
@@ -11479,8 +11485,51 @@ function _wireLoginBtn() {
         `, [{ label: 'Close', type: 'secondary', action: 'UI.hideModal()' }]);
     };
 
+    // ── Core views that are always available in script.js ─────────────────
+    // Everything else is in script-features.min.js and loaded on first use.
+    const _CORE_VIEWS = new Set(['home', 'calendar', 'month']);
+
+    // One-shot promise-based loader for script-features.js.
+    // Returns immediately if already loaded. Shows inline loading ring
+    // in the viewport while waiting so the user sees feedback.
+    const _loadFeatures = (() => {
+        let _promise = null;
+        return (viewport) => {
+            if (window._appFeaturesLoaded) return Promise.resolve();
+            if (!_promise) {
+                if (viewport) {
+                    viewport.innerHTML =
+                        '<div style="display:flex;align-items:center;justify-content:center;' +
+                        'height:200px;gap:12px;color:var(--text-secondary);">' +
+                        '<i class="fas fa-circle-notch fa-spin" style="font-size:20px;color:var(--primary,#800020);"></i>' +
+                        '<span style="font-size:15px;">Loading...</span></div>';
+                }
+                _promise = new Promise((resolve, reject) => {
+                    const s = document.createElement('script');
+                    s.src = 'script-features.min.js?v=20260531a';
+                    s.async = false; // preserve execution order
+                    s.onload = () => { window._appFeaturesLoaded = true; resolve(); };
+                    s.onerror = (e) => {
+                        console.warn('[perf] script-features failed, falling back to script.js', e);
+                        window._appFeaturesLoaded = true; // don't retry forever
+                        resolve();
+                    };
+                    document.body.appendChild(s);
+                });
+            }
+            return _promise;
+        };
+    })();
+
     const navigateTo = async (viewId) => {
         UI.hideModal();
+        // ── Lazy-load non-core views ──────────────────────────────────────────
+        // script-features.min.js is only fetched when the user first navigates
+        // away from home/calendar. After that it's cached + immutable.
+        if (!_CORE_VIEWS.has(viewId) && !window._appFeaturesLoaded) {
+            const vp = document.getElementById('content-viewport');
+            await _loadFeatures(vp);
+        }
         // Stock Take v2 teardown — when leaving the stock_take view, stop the
         // Supabase realtime channel and any active camera stream so we don't
         // pin a websocket / camera handle in the background.
@@ -24512,6 +24561,10 @@ function _wireLoginBtn() {
         if (d < 365) return `${Math.floor(d / 30)}mo ago`;
         return `${Math.floor(d / 365)}y ago`;
     };
+    // Expose remaining utils after they're defined — all needed by script-features.js
+    Object.assign(window._crmUtils, {
+        timeAgo, getScoreGrade, calculateProtectionDays, getProtectionStatus,
+    });
 
     const _avatarColors = ['#ef4444','#f97316','#f59e0b','#10b981','#14b8a6','#3b82f6','#8b5cf6','#ec4899','#be185d','#0d9488'];
     const getAvatarColor = (name) => {
