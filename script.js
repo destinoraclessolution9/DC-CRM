@@ -527,6 +527,35 @@ const appLogic = (() => {
     // Team Leader and above = Level 1-5 (Super Admin, Marketing Manager, Senior Manager, Manager, Team Leader)
     const isTeamLeaderOrAbove = (user) => _getUserLevel(user) <= 5;
 
+    // "Agent or any leader role" — the predicate behind the agent-search and
+    // calendar-filter dropdowns. The legacy `u.role?.includes('Level 7')` clause
+    // is technically redundant (Level 7 is already in isAgent's 3-12 band) but
+    // preserved to avoid changing the set in edge cases where the role string
+    // doesn't match the strict `Level N` regex (e.g. legacy "Level 7 Senior").
+    const isAgentOrLeader = (user) =>
+        isAgent(user) || user?.role === 'team_leader' || user?.role?.includes('Level 7');
+
+    // Memoized agents-and-leaders fetch. getAll('users') is already in-memory
+    // cached by data.js, so the savings here are modest — but having a single
+    // source of truth makes future tightening (e.g. server-side role filter)
+    // a one-line change. Cache invalidates on dataChanged for 'users'.
+    let _agentsLeadersCache = null;
+    let _agentsLeadersCacheTs = 0;
+    const AGENTS_LEADERS_TTL = 30_000; // 30s; getAll('users') already SWR's longer
+    const getAgentsAndLeaders = async () => {
+        if (_agentsLeadersCache && (Date.now() - _agentsLeadersCacheTs) < AGENTS_LEADERS_TTL) {
+            return _agentsLeadersCache;
+        }
+        const users = (await AppDataStore.getAll('users')) || [];
+        _agentsLeadersCache = users.filter(isAgentOrLeader);
+        _agentsLeadersCacheTs = Date.now();
+        return _agentsLeadersCache;
+    };
+    // Bust the memoized agent list whenever the underlying users table changes.
+    window.addEventListener('dataChanged', (e) => {
+        if (e?.detail?.table === 'users') { _agentsLeadersCache = null; _agentsLeadersCacheTs = 0; }
+    });
+
     // Phase 10: Search Panel State
     let _searchPanelVisible = false;
     let _currentSearchEntity = 'prospects'; // default entity
@@ -2067,7 +2096,7 @@ const appLogic = (() => {
     };
 
     const performAgentSearch = async (filters) => {
-        const allAgentUsers = (await AppDataStore.getAll('users')).filter(u => isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'));
+        const allAgentUsers = await getAgentsAndLeaders();
         const visibleAgentIds = await getVisibleUserIds(_currentUser);
         let items = visibleAgentIds === 'all' ? allAgentUsers : allAgentUsers.filter(u => visibleAgentIds.map(String).includes(String(u.id)));
 
@@ -16354,7 +16383,7 @@ function _wireLoginBtn() {
     };
 
     const openCalendarFilterModal = async () => {
-        const agents = (await AppDataStore.getAll('users')).filter(u => isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'));
+        const agents = await getAgentsAndLeaders();
         const types = ['CPS', 'FTF', 'FSA', 'EVENT', 'CALL', 'EMAIL', 'WHATSAPP'];
 
         const content = `
@@ -33060,7 +33089,7 @@ const deactivateAgent = async (agentId) => {
             withTimeout(loadPipelineConfig(), 15000, null, 'pipeline:loadPipelineConfig'), // warms cache
         ]);
 
-        const agents = (allUsers || []).filter(u => isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'));
+        const agents = (allUsers || []).filter(isAgentOrLeader);
 
         // Fill header controls as soon as agents are available
         const _plHdrCtrl = document.getElementById('pl-header-controls');
