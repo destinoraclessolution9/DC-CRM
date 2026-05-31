@@ -91,7 +91,7 @@
   ],
   "redirects": [
     {
-      "source": "/(.*)",
+      "source": "/:path*",
       "has": [{ "type": "host", "value": "www.destinoraclessolution.com" }],
       "destination": "https://destinoraclessolution.com/:path*",
       "permanent": true
