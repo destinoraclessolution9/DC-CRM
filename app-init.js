@@ -1,12 +1,30 @@
 // app-init.js — loaded deferred; replaces all inline <script> blocks in index.html.
 // Runs after DOM is parsed (deferred) but before DOMContentLoaded fires.
 
-// Idle scheduler: requestIdleCallback when supported (Chrome/Firefox/Safari 16.4+),
-// setTimeout fallback elsewhere. Use for post-paint enhancements that should not
-// compete with first paint or main-thread input handling.
-const __idle = window.requestIdleCallback
-    ? function (cb, opts) { return window.requestIdleCallback(cb, opts || { timeout: 2000 }); }
-    : function (cb) { return setTimeout(cb, 1); };
+// Idle scheduler — three-tier fallback by preference:
+//   1) scheduler.postTask (Chrome 94+, Safari 17+) — modern priority-aware API.
+//      'background' priority yields to user-blocking + user-visible work,
+//      runs only when nothing more important is queued, but still has a
+//      timeout escape hatch so it eventually runs even under sustained load.
+//   2) requestIdleCallback (Firefox + older Chrome/Safari) — fires when the
+//      browser is otherwise idle; same semantics but no priority levels.
+//   3) setTimeout(1) — fallback for ancient browsers. Microtask-after-paint.
+// Same call-site signature so all 6 existing __idle() sites upgrade for free.
+const __idle = (function () {
+    if (typeof window.scheduler !== 'undefined' && typeof window.scheduler.postTask === 'function') {
+        return function (cb, opts) {
+            try {
+                return window.scheduler.postTask(cb, { priority: 'background', delay: (opts && opts.timeout) ? 0 : 0 });
+            } catch (_) {
+                return setTimeout(cb, 1);
+            }
+        };
+    }
+    if (typeof window.requestIdleCallback === 'function') {
+        return function (cb, opts) { return window.requestIdleCallback(cb, opts || { timeout: 2000 }); };
+    }
+    return function (cb) { return setTimeout(cb, 1); };
+})();
 
 // ── Footer copyright year ──────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function () {

@@ -1,0 +1,83 @@
+# Lighthouse CI — runs on every PR + every push to main.
+# Catches Core Web Vitals regressions BEFORE they ship to live.
+#
+# What it does:
+#   1. Waits up to 5 minutes for the Vercel preview deployment to come up
+#      (preview URL inferred from the PR — for main, uses production URL).
+#   2. Runs Lighthouse against the login page 3 times, keeps the median.
+#   3. Posts the report as a PR comment and fails the check if any budget
+#      below is breached.
+#
+# Tuning the budgets:
+#   - LCP / TBT / CLS thresholds are intentionally lenient at first.
+#     Tighten them once Speed Insights gives us a real-user baseline.
+#   - Lighthouse runs in a synthetic Chrome and can be 200-400ms slower than
+#     real users — don't set thresholds against synthetic numbers alone.
+
+name: Lighthouse CI
+
+on:
+  pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'marketing/**'
+      - '_*'
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'marketing/**'
+      - '_*'
+
+jobs:
+  lhci:
+    name: Run Lighthouse CI
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Wait for Vercel preview deployment
+        id: wait_preview
+        if: github.event_name == 'pull_request'
+        uses: patrickedqvist/wait-for-vercel-preview@v1.3.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          max_timeout: 300
+          check_interval: 10
+
+      - name: Resolve target URL
+        id: target
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "url=${{ steps.wait_preview.outputs.url }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "url=https://destinoraclessolution.com" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Lighthouse CI
+        run: npm install -g @lhci/cli@0.14.x
+
+      - name: Run Lighthouse CI
+        run: |
+          lhci autorun \
+            --collect.url='${{ steps.target.outputs.url }}' \
+            --collect.numberOfRuns=3 \
+            --collect.settings.preset=desktop \
+            --upload.target=temporary-public-storage \
+            --assert.assertions.first-contentful-paint='["warn", {"maxNumericValue": 2000}]' \
+            --assert.assertions.largest-contentful-paint='["error", {"maxNumericValue": 4000}]' \
+            --assert.assertions.cumulative-layout-shift='["error", {"maxNumericValue": 0.1}]' \
+            --assert.assertions.total-blocking-time='["warn", {"maxNumericValue": 600}]' \
+            --assert.assertions.interactive='["warn", {"maxNumericValue": 5000}]' \
+            --assert.assertions.speed-index='["warn", {"maxNumericValue": 4500}]'
+        env:
+          LHCI_GITHUB_APP_TOKEN: ${{ secrets.LHCI_GITHUB_APP_TOKEN }}
