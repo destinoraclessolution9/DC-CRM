@@ -9279,24 +9279,6 @@ function _wireLoginBtn() {
         const _initialView = _initLevel >= 13 ? 'fude' : (isMobile() ? 'home' : 'calendar');
         await navigateTo(_initialView);
 
-        // Deep-link: if URL has ?form=blueprint&pid=N[&bid=M], auto-open the
-        // Destiny Blueprint modal on top of whatever landed. Triggered by
-        // openDestinyBlueprintInTab() so users get a dedicated form tab/window.
-        try {
-            const _qs = new URLSearchParams(window.location.search);
-            if (_qs.get('form') === 'blueprint') {
-                const _pid = parseInt(_qs.get('pid'), 10);
-                const _bid = _qs.get('bid') ? parseInt(_qs.get('bid'), 10) : null;
-                if (_pid) {
-                    // Mark the window as a "blueprint form tab" so saveDestinyBlueprint
-                    // can close it after a successful save.
-                    window.__isBlueprintFormTab = true;
-                    // Wait briefly for shell/auth/AppDataStore to fully settle before opening.
-                    setTimeout(() => { openDestinyBlueprintModal(_pid, _bid).catch(() => {}); }, 600);
-                }
-            }
-        } catch (_) {}
-
         // Background pre-warm: silently fetch the most-navigated tables 2 seconds
         // after first paint so every subsequent page navigation serves from
         // in-memory cache instead of hitting Supabase. The 2s delay keeps startup
@@ -54210,28 +54192,13 @@ Gold-${totGold}`;
     // Default 3-year window: 2026–2028 (start_year configurable per-form).
     // =========================================================================
 
-    // Opens the Blueprint form in a NEW tab via window.open. The new tab loads
-    // the CRM root with ?form=blueprint&pid=...&bid=... — init() detects those
-    // params, finishes auth/data-store boot, then auto-opens the modal. Save
-    // closes the tab automatically. The standalone modal function below is
-    // unchanged so legacy callers / scripted calls still work in-place.
-    const openDestinyBlueprintInTab = (prospectId, dbId = null) => {
-        if (!prospectId) { UI.toast.error('Missing prospect.'); return; }
-        const params = new URLSearchParams();
-        params.set('form', 'blueprint');
-        params.set('pid', String(prospectId));
-        if (dbId) params.set('bid', String(dbId));
-        // Open a fresh tab. window.opener gets set automatically so window.close()
-        // works after save.
-        const url = `${window.location.origin}${window.location.pathname}?${params.toString()}`;
-        const w = window.open(url, '_blank', 'noopener=no');
-        if (!w) {
-            // Popup blocked — fall back to in-place modal so the user is never
-            // dead-ended.
-            UI.toast.info('Popup blocked — opening in-place.');
-            openDestinyBlueprintModal(prospectId, dbId);
-        }
-    };
+    // Opens the Blueprint form in-place. We tried opening a separate tab via
+    // window.open earlier, but tab boundaries don't reliably share the Supabase
+    // session in production (the new tab landed on the login screen). Modal
+    // in-place keeps the user inside the authenticated session and reuses the
+    // same data store cache, so saves are instant.
+    const openDestinyBlueprintInTab = (prospectId, dbId = null) =>
+        openDestinyBlueprintModal(prospectId, dbId);
 
     const openDestinyBlueprintModal = async (prospectId, dbId = null) => {
         const prospect = await AppDataStore.getById('prospects', prospectId).catch(() => null);
@@ -54595,13 +54562,6 @@ Gold-${totGold}`;
             UI.hideModal();
             const target = document.getElementById('marketing-tab-content');
             if (target && _currentMarketingTab === 'forms') target.innerHTML = await renderFormsTab();
-
-            // If this window was spawned as a dedicated blueprint-form tab,
-            // close it after the toast so the user is dropped back to where
-            // they came from. Give the toast ~1s to be visible first.
-            if (window.__isBlueprintFormTab) {
-                setTimeout(() => { try { window.close(); } catch (_) {} }, 1100);
-            }
         } catch (err) {
             UI.toast.error('Save failed: ' + (err?.message || err));
         }
