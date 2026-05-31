@@ -128,16 +128,14 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 
 // ── PWA: Service Worker ────────────────────────────────────────────────────
-if ('serviceWorker' in navigator) {
-    window.addEventListener('load', function () {
-        navigator.serviceWorker.register('service-worker.js')
-            .then(function (reg) {
-                console.log('[PWA] Service worker registered:', reg.scope);
-                window._swRegistration = reg;
-            })
-            .catch(function (err) { console.warn('[PWA] Service worker registration failed:', err); });
-    });
-}
+// NOTE 2026-05-31: legacy registration of /service-worker.js removed here.
+// Two SWs were registering for the same scope (this one + /sw.js inline in
+// index.html) and racing for control. The legacy SW also had a broken cache
+// strategy (resp.type==='basic' check silently failed to refresh under Vercel's
+// CORS headers, pinning users to stale assets). /sw.js is now the sole SW.
+// An inline cleanup block in index.html unregisters orphan registrations on
+// next visit for users who got the legacy SW. Keep window._swRegistration
+// populated from the inline registration in index.html if external code reads it.
 
 // ── PWA: Install prompt ────────────────────────────────────────────────────
 window.addEventListener('beforeinstallprompt', function (e) {

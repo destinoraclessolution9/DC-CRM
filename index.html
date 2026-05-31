@@ -60,22 +60,22 @@
          it before the parser reaches the <script> tag near </body>.
          script.js is ~2.5 MB so getting it in flight ASAP is the single
          biggest perceived-load win on first visit. -->
-    <link rel="preload" href="script.min.js?v=20260531e" as="script">
-    <link rel="preload" href="data.min.js?v=20260531e" as="script">
-    <link rel="preload" href="styles-fixed.min.css?v=20260531e" as="style">
+    <link rel="preload" href="script.min.js?v=20260531f" as="script">
+    <link rel="preload" href="data.min.js?v=20260531f" as="script">
+    <link rel="preload" href="styles-fixed.min.css?v=20260531f" as="style">
 
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" integrity="sha512-9usAa10IRO0HhonpyAIVpjrylPvoDwiPUiKdWk5t3PyolY1cOd4DSE0Ga+ri4AuTroPR5aQvXU9xC6qOPnzFeg==" crossorigin="anonymous" referrerpolicy="no-referrer" media="print" onload="this.media='all'; this.onload=null;">
     <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" integrity="sha512-9usAa10IRO0HhonpyAIVpjrylPvoDwiPUiKdWk5t3PyolY1cOd4DSE0Ga+ri4AuTroPR5aQvXU9xC6qOPnzFeg==" crossorigin="anonymous"></noscript>
     <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" onload="this.onload=null; this.rel='stylesheet';">
     <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"></noscript>
     <link rel="icon" href="favicon.ico" type="image/x-icon">
-    <link rel="stylesheet" href="styles-fixed.min.css?v=20260531e">
+    <link rel="stylesheet" href="styles-fixed.min.css?v=20260531f">
     <!-- styles-mobile.css contains top-level (non-@media) rules that hide
          the mobile drawer overlay on ALL viewports. Gating it by media
          query would expose those rules only to mobile and the drawer
          overlay would default to display:block on desktop, covering the
          page. Keep it unconditional. -->
-    <link rel="stylesheet" href="styles-mobile.min.css?v=20260531e">
+    <link rel="stylesheet" href="styles-mobile.min.css?v=20260531f">
     <!-- styles-mobile-v2 — NOT "pure responsive overrides" as the prior
          comment claimed. It carries the entire .login-v2 / .lv2-* decoration
          system (~700 lines, position:absolute branches, blobs, petals,
@@ -87,8 +87,8 @@
          downloads with the rest of the CSS over HTTP/2 with negligible
          first-paint cost. If the file is ever cleaned up to be truly
          responsive-only, this can revert to the async pattern. -->
-    <link rel="stylesheet" href="styles-mobile-v2.min.css?v=20260531e">
-    <link rel="stylesheet" href="styles-theme.min.css?v=20260531e">
+    <link rel="stylesheet" href="styles-mobile-v2.min.css?v=20260531f">
+    <link rel="stylesheet" href="styles-theme.min.css?v=20260531f">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#800020">
     <script>
@@ -98,6 +98,48 @@
                 const saved = localStorage.getItem('docs-theme') || 'light';
                 document.documentElement.setAttribute('data-theme', saved);
             } catch (e) {}
+        })();
+    </script>
+
+    <!-- ═══ Orphan service-worker cleanup (one-shot, runs once per browser) ═══
+         Background: this codebase historically registered TWO service workers
+         for the same scope:
+           1) /service-worker.js  — legacy SW (app-init.js registered it)
+           2) /sw.js              — newer SW (registered inline below)
+         Whichever installed first won the scope. On many users' browsers the
+         legacy /service-worker.js won, kept its old crm-cache-v10 + crm-
+         runtime-v10 entries alive, and would never invalidate them on deploy
+         because its `resp.type === 'basic'` check silently failed to cache
+         fresh responses (Vercel sends CORS headers → type:'cors'). Result:
+         users saw stale assets long after we'd shipped new code.
+         This block detects an orphan service-worker.js registration on next
+         visit, unregisters it, drops the legacy caches, and reloads once.
+         The sentinel flag is set BEFORE the work so a partial failure can't
+         loop. After this runs, /sw.js takes over as the sole SW. -->
+    <script>
+        (async function () {
+            try {
+                if (!('serviceWorker' in navigator)) return;
+                if (localStorage.getItem('crm_sw_cleanup_v1') === 'done') return;
+                const regs = await navigator.serviceWorker.getRegistrations();
+                const orphans = regs.filter(function (r) {
+                    var url = (r.active || r.waiting || r.installing || {}).scriptURL || '';
+                    return url.indexOf('/service-worker.js') !== -1;
+                });
+                // Set sentinel FIRST so even if reload races we don't loop.
+                localStorage.setItem('crm_sw_cleanup_v1', 'done');
+                if (orphans.length === 0) return;
+                await Promise.all(orphans.map(function (r) { return r.unregister(); }));
+                var cacheNames = await caches.keys();
+                var legacyCaches = cacheNames.filter(function (n) {
+                    return n.indexOf('crm-cache-') === 0 || n.indexOf('crm-runtime-') === 0;
+                });
+                await Promise.all(legacyCaches.map(function (n) { return caches.delete(n); }));
+                console.info('[crm] cleaned ' + orphans.length + ' orphan SW + ' + legacyCaches.length + ' legacy cache(s); reloading');
+                location.reload();
+            } catch (e) {
+                console.warn('[crm] orphan-SW cleanup failed:', e);
+            }
         })();
     </script>
 
@@ -610,17 +652,17 @@
     <!-- Scripts — all deferred so HTML parser never blocks -->
     <!-- Supabase must run before data.js/script.js; defer preserves document order -->
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" crossorigin="anonymous"></script>
-    <script defer src="supabase-init.min.js?v=20260531e"></script>
+    <script defer src="supabase-init.min.js?v=20260531f"></script>
     <script defer src="lunar-calendar.min.js"></script>
-    <script defer src="data.min.js?v=20260531e"></script>
-    <script defer src="auth.min.js?v=20260531e"></script>
-    <script defer src="ui.min.js?v=20260531e"></script>
+    <script defer src="data.min.js?v=20260531f"></script>
+    <script defer src="auth.min.js?v=20260531f"></script>
+    <script defer src="ui.min.js?v=20260531f"></script>
     <script defer src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js" integrity="sha512-dfX5uYVXzyU8+KHqj8bjo7UkOdg18PaOtpa48djpNbZHwExddghZ+ZmzWT06R5v6NSk3ZUfsH6FNEDepLx9hPQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <!-- fetchpriority="low" lets the browser paint the login form (already in HTML)
          before spending bandwidth on the 2.1 MB app bundle. defer already prevents
          parser-blocking; low fetchpriority additionally pushes the download below
          CSS + fonts in the network queue so FCP happens sooner. -->
-    <script defer fetchpriority="low" src="script.min.js?v=20260531e"></script>
+    <script defer fetchpriority="low" src="script.min.js?v=20260531f"></script>
 
     <!--
       The following libraries are loaded on-demand via window._loadScriptOnce()
@@ -639,7 +681,7 @@
 <!-- Properly commented out scripts -->
     <!-- <script src="offline-storage.js"></script> -->
     <!-- <script src="mobile-components.js"></script> -->
-    <script defer src="push-notifications.min.js?v=20260531e"></script>
+    <script defer src="push-notifications.min.js?v=20260531f"></script>
     <!-- <script src="biometric-auth.js"></script> -->
     <!-- <script src="mobile-settings.js"></script> -->
 
@@ -648,14 +690,19 @@
     <!-- <script src="audit-log.js"></script> -->
     <!-- <script src="compliance.js"></script> -->
     <!-- <script src="rbac.js"></script> -->
-    <script defer src="two-factor.min.js?v=20260531e"></script>
+    <script defer src="two-factor.min.js?v=20260531f"></script>
 
-    <!-- Phase D: Service Worker for stale-while-revalidate static asset caching -->
+    <!-- Phase D: Service Worker for stale-while-revalidate static asset caching.
+         /sw.js is the SOLE service worker (legacy /service-worker.js removed
+         from app-init.js 2026-05-31; orphan registrations cleaned up by the
+         inline block in <head>). Expose registration on window._swRegistration
+         so script.js + push-notifications.js can read it for push subscription. -->
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('/sw.js').then((reg) => {
                     console.info('[SW] registered, scope:', reg.scope);
+                    window._swRegistration = reg;
                 }).catch((err) => {
                     console.warn('[SW] registration failed:', err);
                 });
@@ -672,7 +719,7 @@
     <!-- <script src="config-manager.js"></script> -->
     <!-- <script src="system-logs.js"></script> -->
   
-    <script defer src="app-init.min.js?v=20260531e"></script>
+    <script defer src="app-init.min.js?v=20260531f"></script>
 
     <!-- Vercel Analytics — page-view tracking. Enable in Vercel Dashboard → Analytics. -->
     <script defer src="/_vercel/insights/script.js"></script>
