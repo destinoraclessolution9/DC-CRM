@@ -53954,150 +53954,254 @@ Gold-${totGold}`;
         const y1 = startYear, y2 = startYear + 1, y3 = startYear + 2;
 
         UI.showModal(`九運改命藍圖表 Destiny Code Blueprint · ${_cfEscape(prospect.full_name || '')}`, `
-            <div class="cf-form">
+            <style>
+                /* ── Destiny Blueprint — paper-form-faithful layout ── */
+                .db-form{ font-family: 'Inter', sans-serif; color:#111827; }
+                .db-form input[type="text"], .db-form input[type="tel"], .db-form input[type="number"], .db-form input[type="date"], .db-form select, .db-form textarea{
+                    width:100%; padding:6px 8px; border:1px solid #D1D5DB; border-radius:4px; font-size:13px; font-family:inherit; background:white; box-sizing:border-box;
+                }
+                .db-form textarea{ resize:vertical; min-height:38px; }
+
+                /* Top branding row */
+                .db-brand{
+                    display:flex; align-items:flex-start; justify-content:space-between;
+                    border-bottom:1px solid #E5E7EB; padding-bottom:10px; margin-bottom:12px;
+                }
+                .db-brand-left{ display:flex; flex-direction:column; gap:4px; }
+                .db-brand-tag{
+                    display:inline-block; background:#1E3A8A; color:white; font-size:11px; font-weight:600;
+                    padding:3px 10px; border-radius:3px; letter-spacing:1px; width:fit-content;
+                }
+                .db-brand-title{
+                    background:#1E3A8A; color:white; font-size:18px; font-weight:700;
+                    padding:6px 14px; border-radius:4px; letter-spacing:2px; width:fit-content;
+                }
+                .db-brand-right{ text-align:right; font-size:11px; color:#6B7280; letter-spacing:2px; }
+                .db-brand-right strong{ font-size:14px; color:#111827; letter-spacing:3px; display:block; }
+
+                /* Header fields row (姓名/聯絡 / 代理/組別) */
+                .db-header-grid{ display:grid; grid-template-columns:1fr 1fr; gap:8px 16px; margin-bottom:14px; }
+                @media (max-width:600px){ .db-header-grid{ grid-template-columns:1fr; } }
+                .db-header-grid .db-cell{ display:flex; align-items:center; gap:8px; }
+                .db-header-grid .db-cell label{ font-size:13px; font-weight:600; white-space:nowrap; color:#1F2937; min-width:90px; }
+
+                /* Section header bar (number badge + Chinese title) */
+                .db-section-bar{
+                    display:flex; align-items:center; gap:0; margin:18px 0 8px;
+                    border:1px solid #1E3A8A; border-radius:4px; overflow:hidden;
+                }
+                .db-section-num{
+                    background:#1E3A8A; color:white; font-weight:700; font-size:14px;
+                    width:30px; text-align:center; padding:6px 0;
+                }
+                .db-section-title{ background:#1E3A8A; color:white; font-weight:600; font-size:14px; padding:6px 14px; flex:1; }
+                .db-section-en{ color:#BFDBFE; font-size:11px; font-weight:400; margin-left:6px; }
+
+                .db-section-hint{ font-size:11px; color:#4B5563; margin:4px 0 8px; padding-left:4px; }
+
+                /* Section 1: 命卦大運 — 4-quadrant grid + score/advice row */
+                .db-quadrant{ display:grid; grid-template-columns:1fr 1fr; gap:6px 14px; margin-bottom:8px; }
+                @media (max-width:600px){ .db-quadrant{ grid-template-columns:1fr; } }
+                .db-quadrant .db-qcell{ display:flex; align-items:center; gap:8px; }
+                .db-quadrant .db-qcell label{ font-weight:600; min-width:38px; font-size:13px; color:#1F2937; }
+                .db-score-row{ display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-top:6px; }
+                .db-score-row .db-score-wrap{ display:flex; align-items:center; gap:8px; }
+                .db-score-row .db-score-wrap label{ font-weight:600; font-size:13px; min-width:38px; }
+                .db-score-row .db-score-wrap input{ width:70px; text-align:center; font-weight:700; }
+                .db-score-row .db-advice-wrap{ display:flex; align-items:center; gap:8px; flex:1; min-width:200px; }
+                .db-score-row .db-advice-wrap label{ font-weight:600; font-size:13px; }
+
+                /* Paper-style tables (sections 2, 3, 4) */
+                .db-table{ width:100%; border-collapse:collapse; font-size:13px; }
+                .db-table th, .db-table td{ border:1px solid #9CA3AF; padding:6px 8px; vertical-align:middle; }
+                .db-table thead th{ background:#F3F4F6; font-weight:600; text-align:center; font-size:12px; color:#1F2937; }
+                .db-table th.db-row-label{ background:#F9FAFB; font-weight:700; text-align:center; width:80px; font-size:13px; }
+                .db-table td input, .db-table td textarea{ border:none; padding:2px 4px; background:transparent; }
+                .db-table td input:focus, .db-table td textarea:focus{ outline:1px solid #1E3A8A; border-radius:2px; }
+                .db-year-cell{ background:#F9FAFB; font-weight:700; text-align:center; font-size:14px; }
+
+                .db-advice-block{ margin-top:8px; display:flex; align-items:flex-start; gap:8px; }
+                .db-advice-block label{ font-weight:600; font-size:13px; min-width:50px; padding-top:6px; }
+                .db-advice-block textarea{ flex:1; }
+
+                /* Footer signature row */
+                .db-footer{ display:grid; grid-template-columns:1fr 1fr; gap:24px; margin-top:20px; padding-top:14px; border-top:1px dashed #9CA3AF; }
+                @media (max-width:600px){ .db-footer{ grid-template-columns:1fr; } }
+                .db-footer .db-sigbox{ display:flex; flex-direction:column; gap:6px; }
+                .db-footer .db-sig-label{ font-size:12px; font-weight:700; color:#1F2937; }
+                .db-footer .db-sig-name{ font-size:11px; color:#6B7280; }
+                .db-footer canvas{ width:100%; height:90px; border:1px solid #9CA3AF; border-radius:4px; background:white; touch-action:none; }
+                .db-footer .db-sig-date-row{ display:flex; justify-content:space-between; align-items:center; font-size:11px; color:#4B5563; }
+                .db-footer .db-clear{ background:white; border:1px solid #D1D5DB; padding:3px 8px; border-radius:4px; cursor:pointer; font-size:11px; }
+                .db-footer .db-clear:hover{ background:#F9FAFB; }
+
+                .db-copyright{ text-align:right; font-size:10px; color:#9CA3AF; margin-top:10px; font-style:italic; }
+            </style>
+
+            <div class="db-form">
                 <input type="hidden" id="cf-db-prospect-id" value="${prospect.id}">
                 <input type="hidden" id="cf-db-id" value="${dbId || ''}">
 
-                <div class="cf-section-title">DC 個人風水 <span class="zh">九運改命藍圖表</span></div>
-                <div class="cf-grid">
-                    <div class="cf-field"><label>姓名 <span class="zh">Name</span></label>
+                <!-- Top branding (matches paper form) -->
+                <div class="db-brand">
+                    <div class="db-brand-left">
+                        <span class="db-brand-tag">DC 個人風水</span>
+                        <span class="db-brand-title">九運改命藍圖表</span>
+                    </div>
+                    <div class="db-brand-right">
+                        天 命 定 數
+                        <strong>DESTINY CODE</strong>
+                    </div>
+                </div>
+
+                <!-- Header fields: 姓名/聯絡, 代理/組別 -->
+                <div class="db-header-grid">
+                    <div class="db-cell"><label>姓名</label>
                         <input type="text" id="cf-db-name" value="${_cfEscape(data.customer_name || prospect.full_name || '')}">
                     </div>
-                    <div class="cf-field"><label>聯絡號碼 <span class="zh">Contact</span></label>
+                    <div class="db-cell"><label>聯絡號碼</label>
                         <input type="tel" id="cf-db-phone" value="${_cfEscape(data.contact_number || prospect.phone || '')}">
                     </div>
-                    <div class="cf-field"><label>代理 <span class="zh">Agent</span></label>
+                    <div class="db-cell"><label>代理</label>
                         <select id="cf-db-agent"><option value="">--</option>${userOpts(data.agent_id)}</select>
                     </div>
-                    <div class="cf-field"><label>組別 <span class="zh">Group</span></label>
+                    <div class="db-cell"><label>組別</label>
                         <input type="text" id="cf-db-group" value="${_cfEscape(data.group_name || '')}">
                     </div>
-                    <div class="cf-field"><label>Form Date <span class="zh">日期</span></label>
+                    <div class="db-cell"><label>日期</label>
                         <input type="date" id="cf-db-date" value="${data.form_date || today}">
                     </div>
                 </div>
 
-                <div class="cf-section-title">1. 命卦大運 <span class="zh">Life Trigram Fortune</span></div>
-                <div class="cf-grid">
-                    <div class="cf-field"><label>吉 <span class="zh">Auspicious</span></label>
-                        <textarea id="cf-db-ji" rows="2">${_cfEscape(data.section1_ji || '')}</textarea>
-                    </div>
-                    <div class="cf-field"><label>悔 <span class="zh">Regret</span></label>
-                        <textarea id="cf-db-hui" rows="2">${_cfEscape(data.section1_hui || '')}</textarea>
-                    </div>
-                    <div class="cf-field"><label>凶 <span class="zh">Inauspicious</span></label>
-                        <textarea id="cf-db-xiong" rows="2">${_cfEscape(data.section1_xiong || '')}</textarea>
-                    </div>
-                    <div class="cf-field"><label>吝 <span class="zh">Stinginess</span></label>
-                        <textarea id="cf-db-lin" rows="2">${_cfEscape(data.section1_lin || '')}</textarea>
-                    </div>
-                    <div class="cf-field"><label>分數 <span class="zh">Score</span></label>
+                <!-- Section 1: 命卦大運 -->
+                <div class="db-section-bar">
+                    <div class="db-section-num">1</div>
+                    <div class="db-section-title">命卦大運<span class="db-section-en">Life Trigram Fortune</span></div>
+                </div>
+                <div class="db-quadrant">
+                    <div class="db-qcell"><label>吉:</label><textarea id="cf-db-ji" rows="1">${_cfEscape(data.section1_ji || '')}</textarea></div>
+                    <div class="db-qcell"><label>悔:</label><textarea id="cf-db-hui" rows="1">${_cfEscape(data.section1_hui || '')}</textarea></div>
+                    <div class="db-qcell"><label>凶:</label><textarea id="cf-db-xiong" rows="1">${_cfEscape(data.section1_xiong || '')}</textarea></div>
+                    <div class="db-qcell"><label>吝:</label><textarea id="cf-db-lin" rows="1">${_cfEscape(data.section1_lin || '')}</textarea></div>
+                </div>
+                <div class="db-score-row">
+                    <div class="db-score-wrap"><label>分數:</label>
                         <input type="number" id="cf-db-score" min="0" max="100" value="${data.section1_score ?? ''}">
                     </div>
-                    <div class="cf-field"><label>建言 <span class="zh">Advice</span></label>
+                    <div class="db-advice-wrap"><label>建言:</label>
                         <input type="text" id="cf-db-s1-advice" value="${_cfEscape(data.section1_advice || '')}">
                     </div>
                 </div>
 
-                <div class="cf-section-title">2. 成效與需求 <span class="zh">Effectiveness & Needs</span></div>
-                <div style="font-size:12px;color:#6B7280;margin:-6px 0 4px;">按命盤解析,已採用之方案 · 現在及未來可能需要之方案</div>
-                <div class="cf-field"><label>個人 <span class="zh">Personal</span></label>
-                    <input type="text" id="cf-db-s2-personal" value="${_cfEscape(data.section2_personal || '')}">
+                <!-- Section 2: 成效與需求 -->
+                <div class="db-section-bar">
+                    <div class="db-section-num">2</div>
+                    <div class="db-section-title">成效與需求<span class="db-section-en">Effectiveness & Needs</span></div>
                 </div>
-                <div class="cf-field"><label>家居 <span class="zh">Home</span></label>
-                    <input type="text" id="cf-db-s2-home" value="${_cfEscape(data.section2_home || '')}">
-                </div>
-                <div class="cf-field"><label>工作 <span class="zh">Work</span></label>
-                    <input type="text" id="cf-db-s2-work" value="${_cfEscape(data.section2_work || '')}">
-                </div>
-                <div class="cf-field"><label>生意 <span class="zh">Business</span></label>
-                    <input type="text" id="cf-db-s2-business" value="${_cfEscape(data.section2_business || '')}">
-                </div>
-                <div class="cf-field"><label>關係 <span class="zh">Relationships</span></label>
-                    <input type="text" id="cf-db-s2-relationship" value="${_cfEscape(data.section2_relationship || '')}">
-                </div>
-                <div class="cf-field"><label>子女 <span class="zh">Children</span></label>
-                    <input type="text" id="cf-db-s2-children" value="${_cfEscape(data.section2_children || '')}">
-                </div>
-                <div class="cf-field"><label>建言 <span class="zh">Advice</span></label>
+                <div class="db-section-hint">按命盤解析,已採用之方案</div>
+                <table class="db-table">
+                    <thead>
+                        <tr><th colspan="2">現在及未來可能需要之方案</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><th class="db-row-label">個人</th><td><input type="text" id="cf-db-s2-personal" value="${_cfEscape(data.section2_personal || '')}"></td></tr>
+                        <tr><th class="db-row-label">家居</th><td><input type="text" id="cf-db-s2-home" value="${_cfEscape(data.section2_home || '')}"></td></tr>
+                        <tr><th class="db-row-label">工作</th><td><input type="text" id="cf-db-s2-work" value="${_cfEscape(data.section2_work || '')}"></td></tr>
+                        <tr><th class="db-row-label">生意</th><td><input type="text" id="cf-db-s2-business" value="${_cfEscape(data.section2_business || '')}"></td></tr>
+                        <tr><th class="db-row-label">關係</th><td><input type="text" id="cf-db-s2-relationship" value="${_cfEscape(data.section2_relationship || '')}"></td></tr>
+                        <tr><th class="db-row-label">子女</th><td><input type="text" id="cf-db-s2-children" value="${_cfEscape(data.section2_children || '')}"></td></tr>
+                    </tbody>
+                </table>
+                <div class="db-advice-block">
+                    <label>建言:</label>
                     <textarea id="cf-db-s2-advice" rows="2">${_cfEscape(data.section2_advice || '')}</textarea>
                 </div>
 
-                <div class="cf-section-title">3. 未來3年運盤 <span class="zh">Future 3-Year Fortune (${y1}–${y3})</span></div>
-                <div class="cf-field" style="max-width:200px;">
-                    <label>Start Year <span class="zh">起始年</span></label>
-                    <input type="number" id="cf-db-start-year" min="2024" max="2099" value="${startYear}">
+                <!-- Section 3: Future 3-year fortune -->
+                <div class="db-section-bar">
+                    <div class="db-section-num">3</div>
+                    <div class="db-section-title">未來3年運盤<span class="db-section-en">Future 3-Year Fortune</span></div>
                 </div>
-                <table class="cf-ref-table" style="margin-top:6px;">
+                <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
+                    <label style="font-size:11px; color:#4B5563; font-weight:600;">起始年 Start Year:</label>
+                    <input type="number" id="cf-db-start-year" min="2024" max="2099" value="${startYear}" style="width:90px; text-align:center;">
+                </div>
+                <table class="db-table">
                     <thead>
                         <tr>
-                            <th style="width:80px;">Year</th>
-                            <th>未來3年運盤重大剋應 <span style="color:#7C3AED;font-weight:500;">Major Impact</span></th>
-                            <th>未來3年最想要之藍圖目標 <span style="color:#7C3AED;font-weight:500;">Blueprint Goal</span></th>
+                            <th style="width:80px;">&nbsp;</th>
+                            <th>未來3年運盤重大剋應</th>
+                            <th>未來3年最想要之藍圖目標</th>
                         </tr>
                     </thead>
                     <tbody>
                         <tr>
-                            <td data-label="Year" style="font-weight:700;text-align:center;" id="cf-db-y1-label">${y1}</td>
-                            <td data-label="Major Impact"><input type="text" id="cf-db-y1-event" value="${_cfEscape(data.year_1_event || '')}"></td>
-                            <td data-label="Blueprint Goal"><input type="text" id="cf-db-y1-goal" value="${_cfEscape(data.year_1_goal || '')}"></td>
+                            <td class="db-year-cell" id="cf-db-y1-label">${y1}</td>
+                            <td><input type="text" id="cf-db-y1-event" value="${_cfEscape(data.year_1_event || '')}"></td>
+                            <td><input type="text" id="cf-db-y1-goal" value="${_cfEscape(data.year_1_goal || '')}"></td>
                         </tr>
                         <tr>
-                            <td data-label="Year" style="font-weight:700;text-align:center;" id="cf-db-y2-label">${y2}</td>
-                            <td data-label="Major Impact"><input type="text" id="cf-db-y2-event" value="${_cfEscape(data.year_2_event || '')}"></td>
-                            <td data-label="Blueprint Goal"><input type="text" id="cf-db-y2-goal" value="${_cfEscape(data.year_2_goal || '')}"></td>
+                            <td class="db-year-cell" id="cf-db-y2-label">${y2}</td>
+                            <td><input type="text" id="cf-db-y2-event" value="${_cfEscape(data.year_2_event || '')}"></td>
+                            <td><input type="text" id="cf-db-y2-goal" value="${_cfEscape(data.year_2_goal || '')}"></td>
                         </tr>
                         <tr>
-                            <td data-label="Year" style="font-weight:700;text-align:center;" id="cf-db-y3-label">${y3}</td>
-                            <td data-label="Major Impact"><input type="text" id="cf-db-y3-event" value="${_cfEscape(data.year_3_event || '')}"></td>
-                            <td data-label="Blueprint Goal"><input type="text" id="cf-db-y3-goal" value="${_cfEscape(data.year_3_goal || '')}"></td>
+                            <td class="db-year-cell" id="cf-db-y3-label">${y3}</td>
+                            <td><input type="text" id="cf-db-y3-event" value="${_cfEscape(data.year_3_event || '')}"></td>
+                            <td><input type="text" id="cf-db-y3-goal" value="${_cfEscape(data.year_3_goal || '')}"></td>
                         </tr>
                     </tbody>
                 </table>
-                <div style="font-size:11px;color:#6B7280;margin-top:6px;">*藍圖目標與結果,每年可以是一個,也可以三年是一個,或三年三個皆可。卻不可過多。</div>
-                <div class="cf-field"><label>結論 <span class="zh">Conclusion</span></label>
+                <div class="db-section-hint">*藍圖目標與結果,每年可以是一個,也可以三年是一個,或三年三個皆可。卻不可過多。</div>
+                <div class="db-advice-block">
+                    <label>結論:</label>
                     <textarea id="cf-db-s3-conclusion" rows="2">${_cfEscape(data.section3_conclusion || '')}</textarea>
                 </div>
 
-                <div class="cf-section-title">4. 行動與結果 <span class="zh">Action & Results</span></div>
-                <div style="font-size:12px;color:#6B7280;margin:-6px 0 4px;">面對未來,其藍圖目標可能之結果變化</div>
-                <div class="cf-field"><label>得到 <span class="zh">Gain</span></label>
-                    <input type="text" id="cf-db-s4-gain" value="${_cfEscape(data.section4_gain || '')}">
+                <!-- Section 4: 行動與結果 -->
+                <div class="db-section-bar">
+                    <div class="db-section-num">4</div>
+                    <div class="db-section-title">行動與結果<span class="db-section-en">Action & Results</span></div>
                 </div>
-                <div class="cf-field"><label>損失 <span class="zh">Loss</span></label>
-                    <input type="text" id="cf-db-s4-loss" value="${_cfEscape(data.section4_loss || '')}">
-                </div>
-                <div class="cf-field"><label>保持 <span class="zh">Maintain</span></label>
-                    <input type="text" id="cf-db-s4-maintain" value="${_cfEscape(data.section4_maintain || '')}">
-                </div>
-                <div class="cf-field"><label>衰退 <span class="zh">Decline</span></label>
-                    <input type="text" id="cf-db-s4-decline" value="${_cfEscape(data.section4_decline || '')}">
-                </div>
-                <div class="cf-field"><label>*把風險降低提高成率的最佳輔助方案或決定 <span class="zh">Best Supporting Plan / Decision</span></label>
+                <table class="db-table">
+                    <thead>
+                        <tr><th colspan="2">面對未來,其藍圖目標可能之結果變化</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><th class="db-row-label">得到</th><td><input type="text" id="cf-db-s4-gain" value="${_cfEscape(data.section4_gain || '')}"></td></tr>
+                        <tr><th class="db-row-label">損失</th><td><input type="text" id="cf-db-s4-loss" value="${_cfEscape(data.section4_loss || '')}"></td></tr>
+                        <tr><th class="db-row-label">保持</th><td><input type="text" id="cf-db-s4-maintain" value="${_cfEscape(data.section4_maintain || '')}"></td></tr>
+                        <tr><th class="db-row-label">衰退</th><td><input type="text" id="cf-db-s4-decline" value="${_cfEscape(data.section4_decline || '')}"></td></tr>
+                    </tbody>
+                </table>
+                <div class="db-advice-block">
+                    <label style="min-width:auto;">*把風險降低提高成率的最佳輔助方案或決定是:</label>
                     <textarea id="cf-db-s4-best" rows="2">${_cfEscape(data.section4_best_solution || '')}</textarea>
                 </div>
 
-                <div class="cf-section-title">Signatures <span class="zh">簽名</span></div>
-                <div class="cf-grid">
-                    <div class="cf-sig-wrap">
-                        <label style="font-size:12px;font-weight:600;color:#374151;">客戶姓名 Customer</label>
+                <!-- Footer signatures (customer + consultant) -->
+                <div class="db-footer">
+                    <div class="db-sigbox">
+                        <span class="db-sig-label">客戶姓名 Customer</span>
                         <input type="text" id="cf-db-cust-signed-name" placeholder="Customer signed name" value="${_cfEscape(data.customer_signed_name || '')}">
-                        <canvas id="cf-db-sig-cust" class="cf-sig-canvas" data-preload="${data.customer_signature_data_url || ''}"></canvas>
-                        <div class="cf-sig-actions">
-                            <small>日期: ${_cfFmtDate(data.customer_signed_at) || today}</small>
-                            <button type="button" class="cf-btn" onclick="app.cfClearSignature('cf-db-sig-cust')"><i class="fas fa-eraser"></i> Clear</button>
+                        <canvas id="cf-db-sig-cust" data-preload="${data.customer_signature_data_url || ''}"></canvas>
+                        <div class="db-sig-date-row">
+                            <span>日期: ${_cfFmtDate(data.customer_signed_at) || today}</span>
+                            <button type="button" class="db-clear" onclick="app.cfClearSignature('cf-db-sig-cust')"><i class="fas fa-eraser"></i> Clear</button>
                         </div>
                     </div>
-                    <div class="cf-sig-wrap">
-                        <label style="font-size:12px;font-weight:600;color:#374151;">顧問姓名 Consultant</label>
+                    <div class="db-sigbox">
+                        <span class="db-sig-label">顧問姓名 Consultant</span>
                         <select id="cf-db-consultant"><option value="">--</option>${userOpts(data.consultant_id)}</select>
-                        <canvas id="cf-db-sig-cons" class="cf-sig-canvas" data-preload="${data.consultant_signature_data_url || ''}"></canvas>
-                        <div class="cf-sig-actions">
-                            <small>日期: ${_cfFmtDate(data.consultant_signed_at) || today}</small>
-                            <button type="button" class="cf-btn" onclick="app.cfClearSignature('cf-db-sig-cons')"><i class="fas fa-eraser"></i> Clear</button>
+                        <canvas id="cf-db-sig-cons" data-preload="${data.consultant_signature_data_url || ''}"></canvas>
+                        <div class="db-sig-date-row">
+                            <span>日期: ${_cfFmtDate(data.consultant_signed_at) || today}</span>
+                            <button type="button" class="db-clear" onclick="app.cfClearSignature('cf-db-sig-cons')"><i class="fas fa-eraser"></i> Clear</button>
                         </div>
                     </div>
                 </div>
+
+                <div class="db-copyright">copyright reserved by DESTINY CODE SDN BHD 2024</div>
             </div>
         `, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
