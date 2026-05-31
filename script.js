@@ -11544,7 +11544,7 @@ function _wireLoginBtn() {
                 }
                 _promise = new Promise((resolve, reject) => {
                     const s = document.createElement('script');
-                    s.src = 'script-features.min.js?v=20260531m';
+                    s.src = 'script-features.min.js?v=20260531n';
                     s.async = false; // preserve execution order
                     s.onload = () => { window._appFeaturesLoaded = true; resolve(); };
                     s.onerror = (e) => {
@@ -45433,7 +45433,7 @@ const initImportDemoData = async () => {
                                 const on = !!nineStatuses[def.key];
                                 return `
                                     <div class="nine-method-card ${on ? 'attended' : ''}">
-                                        <div class="mc-icon"><img loading="lazy" decoding="async" src="${def.icon}" alt=""></div>
+                                        <div class="mc-icon"><picture><source srcset="${def.icon.replace(/\.png$/i,'.webp')}" type="image/webp"><img loading="lazy" decoding="async" src="${def.icon}" alt=""></picture></div>
                                         ${adminBtn(def.key, on)}
                                     </div>
                                 `;
@@ -45447,7 +45447,7 @@ const initImportDemoData = async () => {
                                     const on = !!pillarStatuses[def.key];
                                     return `
                                         <div class="four-pillar-card ${on ? 'owned' : ''}">
-                                            <div class="pc-icon"><img loading="lazy" decoding="async" src="${def.icon}" alt=""></div>
+                                            <div class="pc-icon"><picture><source srcset="${def.icon.replace(/\.png$/i,'.webp')}" type="image/webp"><img loading="lazy" decoding="async" src="${def.icon}" alt=""></picture></div>
                                             <div class="pc-label">${def.label}</div>
                                             ${adminBtnPillar(def.key, on)}
                                         </div>
@@ -49204,7 +49204,7 @@ Gold-${totGold}`;
                         </thead>
                         <tbody>
                             ${lowStock.length ? lowStock.slice(0, 200).map(r => `
-                                <tr style="border-top:1px solid var(--gray-100);">
+                                <tr style="content-visibility:auto;contain-intrinsic-size:auto 36px;border-top:1px solid var(--gray-100);">
                                     <td style="padding:8px 10px;font-family:monospace;font-size:12px;">${fpEsc(r.sku.product_code)}</td>
                                     <td style="padding:8px 10px;">${fpEsc((r.sku.product_name || '').slice(0, 60))}</td>
                                     <td style="padding:8px 10px;text-align:right;${r.totalStock < 0 ? 'color:#dc2626;font-weight:700;' : ''}">${r.totalStock}</td>
@@ -49571,7 +49571,7 @@ Gold-${totGold}`;
                         </thead>
                         <tbody>
                             ${recs.length ? recs.slice(0, 200).map((r, i) => `
-                                <tr style="border-top:1px solid var(--gray-100);">
+                                <tr style="content-visibility:auto;contain-intrinsic-size:auto 36px;border-top:1px solid var(--gray-100);">
                                     <td style="padding:8px 10px;">${fpEsc(r.outlet.name)}</td>
                                     <td style="padding:8px 10px;font-family:monospace;font-size:12px;">${fpEsc(r.sku.product_code)} <span style="color:var(--gray-500);font-family:initial;">— ${fpEsc((r.sku.product_name || '').slice(0, 30))}</span></td>
                                     <td style="padding:8px 10px;text-align:right;">${r.currentStock}</td>
@@ -50831,7 +50831,7 @@ Gold-${totGold}`;
                                     <th scope="col" style="padding:6px;text-align:left;">SKU</th>
                                     <th scope="col" style="padding:6px;text-align:right;">Qty</th>
                                 </tr></thead>
-                                <tbody>${stock.slice(0,500).map(r => `<tr style="border-top:1px solid var(--gray-100);">
+                                <tbody>${stock.slice(0,500).map(r => `<tr style="content-visibility:auto;contain-intrinsic-size:auto 28px;border-top:1px solid var(--gray-100);">
                                     <td style="padding:6px;">${_stEsc(r.Location)}</td>
                                     <td style="padding:6px;font-family:monospace;">${_stEsc(r.SKU)}</td>
                                     <td style="padding:6px;text-align:right;">${r.System_Qty}</td>
@@ -51678,7 +51678,7 @@ Gold-${totGold}`;
                                 </tr></thead>
                                 <tbody>${rows.slice(0,500).map(r => {
                                     const ex = exSet.has(r.SKU);
-                                    return `<tr style="border-top:1px solid var(--gray-100);${ex?'background:#fef2f2;color:#991b1b;':''}">
+                                    return `<tr style="content-visibility:auto;contain-intrinsic-size:auto 28px;border-top:1px solid var(--gray-100);${ex?'background:#fef2f2;color:#991b1b;':''}">
                                         <td style="padding:6px;font-family:monospace;">${_stEsc(r.SKU)}${ex?' <span style="background:#fee2e2;color:#991b1b;padding:1px 4px;border-radius:3px;font-size:10px;">EXCLUDED</span>':''}</td>
                                         <td style="padding:6px;">${_stEsc(r.Location||'—')}</td>
                                         <td style="padding:6px;text-align:right;">${r.Physical_Qty}</td>

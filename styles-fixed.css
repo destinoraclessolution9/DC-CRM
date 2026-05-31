@@ -9873,7 +9873,11 @@ input:checked+.slider:before {
     width: 100%;
     max-width: 420px;
     aspect-ratio: 9 / 16.5;
-    background-image: url('assets/milestone-scroll-bg.jpg');
+    background-image: url('assets/milestone-scroll-bg.jpg'); /* fallback */
+    background-image: image-set(
+        url('assets/milestone-scroll-bg.webp') type('image/webp'),
+        url('assets/milestone-scroll-bg.jpg') type('image/jpeg')
+    );
     background-size: 100% 100%;
     background-repeat: no-repeat;
     background-position: center;
