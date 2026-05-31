@@ -11544,7 +11544,7 @@ function _wireLoginBtn() {
                 }
                 _promise = new Promise((resolve, reject) => {
                     const s = document.createElement('script');
-                    s.src = 'script-features.min.js?v=20260531f';
+                    s.src = 'script-features.min.js?v=20260531m';
                     s.async = false; // preserve execution order
                     s.onload = () => { window._appFeaturesLoaded = true; resolve(); };
                     s.onerror = (e) => {
