@@ -573,6 +573,59 @@ class DataStore {
         }
     }
 
+    // ── Cache API tier (async, large-quota overflow tier) ───────────────
+    // localStorage caps at ~5 MB per origin. Large tables (activities,
+    // prospects, customers) can each be 500 KB+ of JSON, so the pruner
+    // kicks in and removes them — the next page load hits Supabase cold.
+    //
+    // The Cache API has 100+ MB quota and is available from the same context
+    // (plus the SW). It's async, so we can't use it for the sync hot-path
+    // in _swrGetLocal — but we CAN use it as an overflow fallback:
+    //   1. If _swrGetLocal returns null (localStorage miss or quota eviction),
+    //      check the Cache API async before firing Supabase.
+    //   2. When we write a fresh fetch result to localStorage and it throws
+    //      a QuotaExceededError, fall through to Cache API instead.
+    //
+    // Tables stored in Cache API use the key:
+    //   crm-data/fs_crm_<tableName>   → Response{json(array)}
+    //
+    // Tombstone + sanitise logic is applied before storage, same as localStorage.
+    static get _DATA_CACHE_NAME() { return 'crm-data-v1'; }
+
+    async _cacheApiGet(tableName) {
+        try {
+            if (typeof caches === 'undefined') return null;
+            const cache = await caches.open(DataStore._DATA_CACHE_NAME);
+            const resp = await cache.match(`/crm-data/fs_crm_${tableName}`);
+            if (!resp) return null;
+            const data = await resp.json();
+            if (!Array.isArray(data) || data.length === 0) return null;
+            const tombstoneRaw = localStorage.getItem('fs_crm_tombstones');
+            const tombstones = tombstoneRaw ? JSON.parse(tombstoneRaw) : {};
+            const deletedIds = new Set(tombstones[tableName] || []);
+            return data.filter(r =>
+                !deletedIds.has(String(r.id)) &&
+                !(tableName === 'users' && r.status === 'deleted')
+            );
+        } catch (_) {
+            return null;
+        }
+    }
+
+    async _cacheApiSet(tableName, rows) {
+        try {
+            if (typeof caches === 'undefined') return;
+            const cache = await caches.open(DataStore._DATA_CACHE_NAME);
+            const sanitised = this._sanitizeForStorage(tableName, rows);
+            await cache.put(
+                `/crm-data/fs_crm_${tableName}`,
+                new Response(JSON.stringify(sanitised), {
+                    headers: { 'Content-Type': 'application/json' }
+                })
+            );
+        } catch (_) {}
+    }
+
     // Background fetch that refreshes stale data. Dedupes with _inFlightGetAll
     // so a concurrent { fresh: true } call shares this network request. Only
     // emits dataChanged when the fresh rows actually differ from the stale
@@ -700,11 +753,28 @@ class DataStore {
                 // callers during the same render cycle reuse it instead of
                 // firing more background fetches.
                 this._cacheSet(tableName, stale);
-                if (window.__FS_DEBUG_SWR) console.log(`[SWR] ${tableName}: served ${stale.length} rows instantly from cache`);
+                if (window.__FS_DEBUG_SWR) console.log(`[SWR] ${tableName}: served ${stale.length} rows instantly from localStorage cache`);
                 // Fire-and-forget background refresh
                 this._swrRevalidate(tableName).catch(() => {});
                 return stale;
             }
+
+            // Tier 2.5 — Cache API overflow tier (async, 100+ MB quota).
+            // Checked when localStorage missed — either the table was never
+            // persisted there, or the quota pruner evicted it. The Cache API
+            // check is async so it can't block; we fire it as a background
+            // promise that primes the in-memory cache and emits dataChanged
+            // (exactly like SWR revalidation). The Supabase fetch (Tier 3)
+            // fires immediately in parallel so there's no extra RTT added.
+            this._cacheApiGet(tableName).then(cacheApiRows => {
+                if (!cacheApiRows || cacheApiRows.length === 0) return;
+                // Only prime if Tier 3 hasn't already returned fresh data.
+                if (!this._cacheGet(tableName)) {
+                    this._cacheSet(tableName, cacheApiRows);
+                    if (window.__FS_DEBUG_SWR) console.log(`[SWR] ${tableName}: served ${cacheApiRows.length} rows from Cache API overflow tier`);
+                    this.emit('dataChanged', { action: 'cache_api_hit', table: tableName });
+                }
+            }).catch(() => {});
         }
 
         // Tier 3 — cold path (first-ever visit or explicit fresh request).
@@ -909,7 +979,19 @@ class DataStore {
                     localStorage.setItem(`fs_crm_${tableName}`, JSON.stringify(this._sanitizeForStorage(tableName, result)));
                     // Record sync time so _swrRevalidate can use delta fetch next time
                     localStorage.setItem(`fs_crm_${tableName}_last_sync`, new Date().toISOString());
-                } catch (_) {}
+                } catch (lsErr) {
+                    // QuotaExceededError — localStorage full. Write to Cache API
+                    // overflow tier so this table isn't lost for the next reload.
+                    const isQuota = lsErr && (
+                        lsErr.name === 'QuotaExceededError' ||
+                        lsErr.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
+                        (lsErr.code !== undefined && lsErr.code === 22)
+                    );
+                    if (isQuota) {
+                        this._cacheApiSet(tableName, result).catch(() => {});
+                        if (window.__FS_DEBUG_SWR) console.log(`[SWR] ${tableName}: localStorage quota exceeded — wrote to Cache API overflow`);
+                    }
+                }
             }, 0);
             return result;
         } catch (e) {

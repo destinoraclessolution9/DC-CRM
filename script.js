@@ -11527,6 +11527,42 @@ function _wireLoginBtn() {
     // Everything else is in script-features.min.js and loaded on first use.
     const _CORE_VIEWS = new Set(['home', 'calendar', 'month']);
 
+    // ── Lazy-chunk loader infrastructure (Code-Split Design Option A) ────
+    // Each entry maps a viewId to a chunks/<name>.min.js file. The chunk is
+    // a self-contained IIFE that reads only stable globals (window.AppDataStore,
+    // window.UI, window._currentUser, window._crmUtils) and calls
+    // Object.assign(window.app, { ... }) to attach its public surface.
+    //
+    // CURRENT STATUS: infrastructure in place, no chunks extracted yet.
+    // First extraction (stock_take ~1,428 lines) needs a dedicated session to
+    // audit IIFE closure dependencies. See chunks/README.md + docs/CODE_SPLIT_DESIGN.md.
+    //
+    // To add a chunk: move functions to chunks/<viewId>.js, ensure they only
+    // touch stable globals, run build.mjs (it auto-picks up chunks/*.js), then
+    // add the viewId entry below.
+    const _CHUNK_VIEWS = {
+        // 'stock_take':   'chunks/script-stock-take.min.js',  // pending extraction
+        // 'knowledge':    'chunks/script-knowledge.min.js',   // next candidate
+        // 'egg_purchasing': 'chunks/script-egg.min.js',
+    };
+
+    // In-flight promises keyed by chunk src URL — ensures each chunk is fetched once.
+    const _chunkInFlight = new Map();
+    const _loadChunkOnce = (src) => {
+        if (_chunkInFlight.has(src)) return _chunkInFlight.get(src);
+        const p = new Promise((resolve) => {
+            const s = document.createElement('script');
+            const manifest = window.__ASSET_MANIFEST || {};
+            s.src = manifest[src] || src;
+            s.async = false;
+            s.onload = resolve;
+            s.onerror = (e) => { console.warn('[chunk] failed to load', src, e); resolve(); };
+            document.body.appendChild(s);
+        });
+        _chunkInFlight.set(src, p);
+        return p;
+    };
+
     // One-shot promise-based loader for script-features.js.
     // Returns immediately if already loaded. Shows inline loading ring
     // in the viewport while waiting so the user sees feedback.
@@ -11544,7 +11580,12 @@ function _wireLoginBtn() {
                 }
                 _promise = new Promise((resolve, reject) => {
                     const s = document.createElement('script');
-                    s.src = 'script-features.min.js?v=20260531n';
+                    // Resolve the content-hashed filename from the manifest injected
+                    // by build.mjs into index.html (window.__ASSET_MANIFEST). Falls back
+                    // to the canonical non-hashed name (no ?v= needed — Vercel serves
+                    // the latest and the SW caches it stale-while-revalidate).
+                    const _manifest = window.__ASSET_MANIFEST || {};
+                    s.src = _manifest['script-features.min.js'] || 'script-features.min.js';
                     s.async = false; // preserve execution order
                     s.onload = () => { window._appFeaturesLoaded = true; resolve(); };
                     s.onerror = (e) => {
@@ -11569,6 +11610,13 @@ function _wireLoginBtn() {
         try { if (window.AppDataStore && typeof window.AppDataStore.abortInflight === 'function') {
             window.AppDataStore.abortInflight('navigate:' + viewId);
         } } catch (_) {}
+        // ── Lazy-load per-view chunk (Code-Split Design Option A) ────────────
+        // If this view has a dedicated chunk registered in _CHUNK_VIEWS, fetch
+        // it before attempting to render. _loadChunkOnce deduplicates — the
+        // network request fires only the first time this view is visited.
+        if (_CHUNK_VIEWS[viewId]) {
+            await _loadChunkOnce(_CHUNK_VIEWS[viewId]);
+        }
         // ── Lazy-load non-core views ──────────────────────────────────────────
         // script-features.min.js is only fetched when the user first navigates
         // away from home/calendar. After that it's cached + immutable.
@@ -11612,6 +11660,26 @@ function _wireLoginBtn() {
             btn.classList.toggle('active', btn.getAttribute('data-view') === viewId);
         });
 
+        // ── View Transitions API (Chrome 111+ / Safari 18+) ─────────────────
+        // Wraps the view-swap in a cross-fade transition. Browser captures the
+        // outgoing DOM, renders the new view, then animates between them using
+        // GPU-composited cross-fade — no main-thread blocking. Users perceive
+        // the app as feeling "native" even on slow connections because the exit
+        // animation plays instantly while the new view renders.
+        // Opt-out list: views that clear then refill DOM with the same content
+        // (e.g. month nav) skip transitions to avoid a flash.
+        const _NO_TRANSITION_VIEWS = new Set(['month']);
+        const _withViewTransition = (fn) => {
+            if (
+                typeof document.startViewTransition === 'function'
+                && _currentView !== viewId
+                && !_NO_TRANSITION_VIEWS.has(viewId)
+            ) {
+                return document.startViewTransition(fn).finished.catch(() => {});
+            }
+            return fn();
+        };
+
         // Update document title BEFORE awaiting the view render. If the render
         // hangs or throws, the browser tab title still reflects the user's
         // last click — previously the title would lag on the prior view.
@@ -11654,6 +11722,7 @@ function _wireLoginBtn() {
             }
         }
 
+        await _withViewTransition(async () => {
         if (viewId === 'home') {
             _currentView = 'home';
             await showMobileHomeView(viewport);
@@ -11825,6 +11894,7 @@ function _wireLoginBtn() {
         // Silent nav switch — previous info toast was firing on every click, spamming
         // the DOM with toast nodes + timers and contributing to the perceived lag.
         // (document.title was set at the top of this function — see VIEW_TITLES.)
+        }); // end _withViewTransition
 
         // Mobile: update bottom nav active state + apply table card labels
         if (isMobile()) {
@@ -14415,14 +14485,20 @@ function _wireLoginBtn() {
         };
         setTimeout(_runSecondary, 100);
 
-        // Tier 1.3: one-time schema check moved to idle time. requestIdleCallback
-        // falls back to a 1.5 s setTimeout in browsers that don't support it
-        // (e.g. older Safari). This is a DDL probe — no reason it should run on
-        // the user-visible critical path of a calendar mount.
-        const _idle = (cb) => (typeof requestIdleCallback === 'function')
-            ? requestIdleCallback(cb, { timeout: 5000 })
-            : setTimeout(cb, 1500);
-        _idle(() => {
+        // Tier 1.3: one-time schema check + follow-up template migration at idle.
+        // Three-tier priority: scheduler.postTask (Chrome 94+, priority:'background')
+        // > requestIdleCallback > setTimeout(1500). The migration itself uses
+        // scheduler.yield() internally to break up the work if it loops.
+        const _idleDeferred = (cb) => {
+            if (typeof window.scheduler !== 'undefined' && typeof window.scheduler.postTask === 'function') {
+                return window.scheduler.postTask(cb, { priority: 'background' });
+            }
+            if (typeof requestIdleCallback === 'function') {
+                return requestIdleCallback(cb, { timeout: 5000 });
+            }
+            return setTimeout(cb, 1500);
+        };
+        _idleDeferred(() => {
             _migrateFollowUpTemplateColumns().catch(e => console.warn('Follow-up template migration failed:', e));
         });
 
@@ -14507,6 +14583,18 @@ function _wireLoginBtn() {
         solution_overdue: { trigger_category: 'solution_overdue', event_keywords: '', cps_interest_match: '', solution_match: '', solution_category_match: '', eligibility_tiers: 'active', icon: '⚠️', description: 'Day 21+ — proposed solution still Proposed. Escalation alert.', sort_order: 104, template_name: 'Solution Overdue Alert', message_template: 'Hi {name}，距离我们上次提案已超过21天，希望能再约个时间为您跟进。— {agent_name}', delay_days: 21, event_window_days: 0 }
     };
 
+    // scheduler.yield() helper — breaks up long async loops so the browser can
+    // handle user input between iterations. Falls back to a 0ms setTimeout on
+    // browsers that don't yet support scheduler.yield() (Firefox, Safari <17).
+    // Use: `await _yieldToMain()` at the top of every loop iteration that
+    // might run 50+ times, or after any operation that's measurably blocking.
+    const _yieldToMain = () => {
+        if (typeof window.scheduler !== 'undefined' && typeof window.scheduler.yield === 'function') {
+            return window.scheduler.yield();
+        }
+        return new Promise(resolve => setTimeout(resolve, 0));
+    };
+
     // One-time JS migration: ensure all templates exist + backfill new columns
     const _migrateFollowUpTemplateColumns = async () => {
         try {
@@ -14520,6 +14608,7 @@ function _wireLoginBtn() {
                 cps_huiji:    { is_active: false, event_keywords: '汇集-商业,汇集-灵活,汇集-简易,汇聚-专案', solution_category_match: '', eligibility_tiers: 'active' },
             };
             for (const tpl of existing) {
+                await _yieldToMain(); // yield between rows so input stays responsive
                 if (_LEGACY_DEACTIVATE[tpl.trigger_type] && tpl.is_active !== false) {
                     await AppDataStore.update('follow_up_templates', tpl.id, {
                         ..._LEGACY_DEACTIVATE[tpl.trigger_type],
@@ -14530,6 +14619,7 @@ function _wireLoginBtn() {
 
             // Seed missing templates from _TRIGGER_DEFAULTS
             for (const [tType, defaults] of Object.entries(_TRIGGER_DEFAULTS)) {
+                await _yieldToMain();
                 if (!existing.some(t => t.trigger_type === tType)) {
                     await AppDataStore.create('follow_up_templates', {
                         id: Date.now() + Math.random(),

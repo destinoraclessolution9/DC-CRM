@@ -152,27 +152,35 @@ async function hashAll() {
   return manifest;
 }
 
-// Rewrite index.html — replace every `foo.min.<ext>?v=<anything>` with the
-// hashed `foo.<hash>.min.<ext>` from the manifest. Idempotent: if a hashed
-// name is already in place, the same hash gets re-written identically.
+// Rewrite index.html:
+//  1. Replace every `foo.min.<ext>?v=<anything>` with the hashed name.
+//  2. Inject window.__ASSET_MANIFEST so the script-features dynamic loader
+//     can resolve the hashed filename at runtime without a ?v= query string.
+//     The manifest is ~400 bytes; injecting it inline saves a round-trip.
 async function rewriteHtml(manifest) {
   const htmlPath = path.join(ROOT, 'index.html');
   let html = await fs.readFile(htmlPath, 'utf8');
   for (const [canonical, hashed] of Object.entries(manifest)) {
-    // Match `canonical?v=<anything>` AND `canonical` (no query string) AND
-    // any previously-hashed variant (foo.<hex>.min.<ext>).
-    // Order matters: trim the .min.<ext> suffix first, THEN escape dots,
-    // so the regex is rebuilt cleanly.
     const m = canonical.match(/^(.+?)\.min\.(js|css)$/);
     if (!m) continue;
-    const base = m[1];           // e.g. 'script', 'styles-fixed'
-    const ext = m[2];            // 'js' | 'css'
+    const base = m[1];
+    const ext = m[2];
     const baseEsc = base.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
     const re = new RegExp(`${baseEsc}(?:\\.[a-f0-9]{8,12})?\\.min\\.${ext}(?:\\?v=[\\w]+)?`, 'g');
     html = html.replace(re, hashed);
   }
+  // Inject / replace asset manifest inline script immediately before </head>.
+  // The script-features dynamic loader uses window.__ASSET_MANIFEST['script-features.min.js']
+  // to get the hashed name — eliminates the last remaining ?v= fallback.
+  const manifestScript = `<script>window.__ASSET_MANIFEST=${JSON.stringify(manifest)};</script>`;
+  // Replace existing manifest injection if present, or insert before </head>.
+  if (html.includes('window.__ASSET_MANIFEST=')) {
+    html = html.replace(/<script>window\.__ASSET_MANIFEST=[^<]+<\/script>/, manifestScript);
+  } else {
+    html = html.replace('</head>', `${manifestScript}\n</head>`);
+  }
   await fs.writeFile(htmlPath, html);
-  console.log('  index.html rewritten to reference hashed assets.');
+  console.log('  index.html rewritten to reference hashed assets + manifest injected.');
 }
 
 console.log('Minifying JS...');

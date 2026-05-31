@@ -1522,3 +1522,37 @@ table.auto-card tbody tr:not(.no-cv) {
 .targets-table tbody tr {
     content-visibility: visible;
 }
+
+/* =====================================================================
+   Phase G — View Transitions API
+   ---------------------------------------------------------------------
+   When document.startViewTransition() fires in navigateTo(), the browser
+   automatically cross-fades between the outgoing and incoming view.
+   These rules customise the animation: 200ms is fast enough to feel
+   snappy, slow enough to be perceived as intentional on mid-range
+   phones. Reduced-motion respected via the @media override.
+
+   ::view-transition-old  = screenshot of the OUTGOING view
+   ::view-transition-new  = live render of the INCOMING view
+
+   Both fade with different timing curves so the old fades out faster
+   (feels like it "gets out of the way") while the new fades in slightly
+   slower (user's eye has time to settle).
+   ===================================================================== */
+@keyframes vt-fade-in  { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes vt-fade-out { from { opacity: 1; } to { opacity: 0; } }
+
+::view-transition-old(root) {
+    animation: 120ms ease-in vt-fade-out;
+}
+::view-transition-new(root) {
+    animation: 200ms ease-out vt-fade-in;
+}
+
+/* Disable transitions for users who prefer less motion. */
+@media (prefers-reduced-motion: reduce) {
+    ::view-transition-old(root),
+    ::view-transition-new(root) {
+        animation: none;
+    }
+}
