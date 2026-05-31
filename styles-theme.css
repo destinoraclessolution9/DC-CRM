@@ -1483,3 +1483,39 @@ table td.num, table td.id, .mono { font-family: var(--font-mono); }
 .action-plan-section h4 {
     font-family: var(--font-display);
 }
+
+/* =====================================================================
+   Phase D — Browser-native row virtualization (content-visibility: auto)
+   ---------------------------------------------------------------------
+   Off-screen rows skip layout + paint until they scroll into view. This
+   is browser-native virtualization — zero JS, no scroll listeners, no
+   intersection observers. Massive scroll-perf win on large prospect /
+   customer / activity / data tables without touching any render code.
+   The `contain-intrinsic-size` value is the placeholder height used
+   before the row has been laid out once; the `auto` keyword tells the
+   browser to remember each row's actual measured height after first
+   render so subsequent recalcs hit the right size.
+   Opt-out: any table that breaks under this (sticky-anchored popovers,
+   ScrollIntoView targets, etc.) can use class="no-card-mode no-cv" and
+   the rule below excludes it.
+   Browser support: Chrome 105+, Edge 105+, Safari 16.4+, Firefox 111+.
+   In older browsers the property is ignored — graceful degradation.
+   ===================================================================== */
+[class*="-table"] tbody tr:not(.no-cv) {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 56px;
+}
+
+/* Mobile card-mode rows expand vertically (label/value stacked) — bigger
+   intrinsic height so the scrollbar geometry stays accurate before the
+   first measurement pass. */
+table.auto-card tbody tr:not(.no-cv) {
+    contain-intrinsic-size: auto 220px;
+}
+
+/* Skip on the targets-table — its rows use rowspan + sticky headers
+   for the quarterly/monthly breakdown grid and content-visibility
+   confuses the sticky offset calculation. */
+.targets-table tbody tr {
+    content-visibility: visible;
+}

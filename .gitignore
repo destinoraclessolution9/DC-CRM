@@ -5,3 +5,52 @@ test_report.md
 test_screenshots/
 
 .vercel
+
+# ─── Local scratch / scraping work — never commit ─────────────────────────
+# Bookmarklets, queue jsons, lighthouse reports, recovered csvs, paste helpers.
+# These accumulate from data-recovery and scraping sessions and have no place
+# in the repo. Patterns are conservative — they only match files prefixed
+# with "_" or in obvious scratch dirs.
+_*.txt
+_*.json
+_*.js
+_*.tsv
+_*.csv
+_chunks/
+_chunks2/
+_make_*.py
+
+# Lighthouse / perf reports
+_lighthouse_*.json
+
+# Scraping / outreach scratch
+NOT_FOUND_*.xlsx
+final_*.csv
+final_*.tsv
+tech_grind_*.csv
+tech_paste.*
+temp_clip.js
+temp_paste.tsv
+tmra_2026_tech_grind.csv
+unifi_orders_*.csv
+unifi_tech_progress*.csv
+unifi_tech_grinder.*
+unifi_inspect.*
+downloaded_files/
+tmra_*.csv
+
+# Python build artefacts
+__pycache__/
+**/__pycache__/
+
+# Supabase CLI scratch
+supabase/.temp/
+
+# Misc transient
+"diamond and jeweler.txt"
+fill_remaining_2025.py
+make_paste.py
+merge_*.py
+
+# Stray temp files written by Windows tools
+"C\357\200\272UsersDCAppDataLocalTempcps_stash_out.txt"
