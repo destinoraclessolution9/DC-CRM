@@ -9279,6 +9279,24 @@ function _wireLoginBtn() {
         const _initialView = _initLevel >= 13 ? 'fude' : (isMobile() ? 'home' : 'calendar');
         await navigateTo(_initialView);
 
+        // Deep-link: if URL has ?form=blueprint&pid=N[&bid=M], auto-open the
+        // Destiny Blueprint modal on top of whatever landed. Triggered by
+        // openDestinyBlueprintInTab() so users get a dedicated form tab/window.
+        try {
+            const _qs = new URLSearchParams(window.location.search);
+            if (_qs.get('form') === 'blueprint') {
+                const _pid = parseInt(_qs.get('pid'), 10);
+                const _bid = _qs.get('bid') ? parseInt(_qs.get('bid'), 10) : null;
+                if (_pid) {
+                    // Mark the window as a "blueprint form tab" so saveDestinyBlueprint
+                    // can close it after a successful save.
+                    window.__isBlueprintFormTab = true;
+                    // Wait briefly for shell/auth/AppDataStore to fully settle before opening.
+                    setTimeout(() => { openDestinyBlueprintModal(_pid, _bid).catch(() => {}); }, 600);
+                }
+            }
+        } catch (_) {}
+
         // Background pre-warm: silently fetch the most-navigated tables 2 seconds
         // after first paint so every subsequent page navigation serves from
         // in-memory cache instead of hitting Supabase. The 2s delay keeps startup
@@ -26501,7 +26519,13 @@ function _wireLoginBtn() {
             const apu       = apuRows[0] || null;
             const blueprint = blueprintRows[0] || null;
             const fmtDate = (iso) => { try { return iso ? new Date(iso).toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' }) : ''; } catch(_) { return iso || ''; } };
-            const card = (kind, label, zhLabel, color, row) => `
+            const card = (kind, label, zhLabel, color, row) => {
+                // DestinyBlueprint opens in a new tab; all other forms open a modal in-place.
+                const handler = kind === 'DestinyBlueprint'
+                    ? `app.openDestinyBlueprintInTab(${prospect.id}${row ? ',' + row.id : ''})`
+                    : `app.open${kind}Modal(${prospect.id}${row ? ',' + row.id : ''})`;
+                const icon = kind === 'DestinyBlueprint' ? 'external-link-alt' : (row ? 'edit' : 'pen');
+                return `
                 <div style="background:white;border:1px solid var(--gray-200);border-radius:10px;padding:14px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;">
                     <div style="flex:1;min-width:180px;">
                         <div style="font-weight:600;font-size:14px;color:${color};">${label} <span style="color:#7C3AED;font-weight:500;">${zhLabel}</span></div>
@@ -26509,11 +26533,12 @@ function _wireLoginBtn() {
                             ${row ? `<i class="fas fa-check-circle" style="color:#10B981;margin-right:4px;"></i> Completed · ${fmtDate(row.created_at)}` : `<i class="far fa-circle" style="color:#9CA3AF;margin-right:4px;"></i> Not yet filled`}
                         </div>
                     </div>
-                    <button class="btn ${row ? 'secondary' : 'primary'} btn-sm" onclick="event.stopPropagation(); app.open${kind}Modal(${prospect.id}${row ? ',' + row.id : ''})">
-                        <i class="fas fa-${row ? 'edit' : 'pen'}"></i> ${row ? 'Edit' : 'Fill'}
+                    <button class="btn ${row ? 'secondary' : 'primary'} btn-sm" onclick="event.stopPropagation(); ${handler}">
+                        <i class="fas fa-${icon}"></i> ${row ? 'Edit' : 'Fill'}
                     </button>
                 </div>
             `;
+            };
             container.innerHTML = `
                 <div style="display:flex;flex-direction:column;gap:10px;">
                     <div style="background:#F9FAFB;border:1px dashed #D1D5DB;border-radius:8px;padding:10px 14px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:12px;color:#374151;">
@@ -53246,8 +53271,8 @@ Gold-${totGold}`;
                                     <button class="cf-btn cf-btn-apu" onclick="app.openApuAppraisalModal(${p.id}${p.apu ? ',' + p.apu.id : ''})">
                                         <i class="fas fa-edit"></i> ${p.apu ? 'Edit' : 'Fill'} APU
                                     </button>
-                                    <button class="cf-btn cf-btn-blueprint" onclick="app.openDestinyBlueprintModal(${p.id}${p.blueprint ? ',' + p.blueprint.id : ''})">
-                                        <i class="fas fa-edit"></i> ${p.blueprint ? 'Edit' : 'Fill'} Blueprint
+                                    <button class="cf-btn cf-btn-blueprint" onclick="app.openDestinyBlueprintInTab(${p.id}${p.blueprint ? ',' + p.blueprint.id : ''})">
+                                        <i class="fas fa-external-link-alt"></i> ${p.blueprint ? 'Edit' : 'Fill'} Blueprint
                                     </button>
                                 </div>
                             </div>
@@ -53288,6 +53313,118 @@ Gold-${totGold}`;
     };
 
     // =========================================================================
+    // Shared paper-styled CSS for the 3 official forms (Survey / CPS / APU).
+    // Mirrors the paper PDFs: serif title, tight bordered info box, square
+    // checkboxes (□), bilingual labels, print-friendly.
+    // =========================================================================
+    const _cfPaperStyles = () => `<style>
+        .cf-paper{ background:#fff; color:#1f2937; font-family:'Times New Roman','SimSun',serif; padding:28px 32px; max-width:880px; margin:0 auto; line-height:1.45; border:1px solid #e5e7eb; border-radius:4px; }
+        .cf-paper *{ box-sizing:border-box; }
+        .cf-paper-head{ display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:18px; gap:16px; flex-wrap:wrap; }
+        .cf-paper-title-en{ font-size:22px; font-weight:700; letter-spacing:1px; }
+        .cf-paper-title-zh{ font-size:24px; font-weight:700; margin-top:4px; letter-spacing:2px; }
+        .cf-paper-brand{ text-align:right; font-family:'Times New Roman',serif; }
+        .cf-paper-brand .cf-brand-zh{ display:block; font-size:14px; font-weight:700; color:#B89F4A; letter-spacing:1px; }
+        .cf-paper-brand .cf-brand-en{ display:block; font-size:11px; font-weight:700; color:#B89F4A; letter-spacing:3px; margin-top:2px; }
+        .cf-paper-info{ border:1px solid #000; padding:8px 14px; margin-bottom:14px; }
+        .cf-info-2col{ display:grid; grid-template-columns:1fr 1fr; column-gap:24px; }
+        @media (max-width:640px){ .cf-info-2col{ grid-template-columns:1fr; } }
+        .cf-info-row{ display:grid; grid-template-columns:130px 1fr; align-items:baseline; padding:6px 0; gap:8px; border-bottom:1px dotted #d1d5db; }
+        .cf-info-row:last-child, .cf-info-row:nth-last-child(2){ border-bottom:none; }
+        .cf-info-lbl{ font-size:13px; font-weight:600; color:#111827; text-align:right; }
+        .cf-info-lbl em{ display:block; font-style:italic; font-size:11px; font-weight:500; color:#6b7280; margin-top:1px; }
+        .cf-paper-input{ width:100%; border:none; border-bottom:1px solid #6b7280; background:transparent; padding:4px 6px; font-family:inherit; font-size:13px; color:#1f2937; }
+        .cf-paper-input:focus{ outline:none; border-bottom-color:#7C3AED; }
+        .cf-line-input{ border:none; border-bottom:1px solid #6b7280; background:transparent; padding:2px 6px; font-family:inherit; font-size:13px; min-width:120px; flex:1; }
+        .cf-line-input.cf-full{ display:block; width:100%; margin-top:6px; }
+
+        .cf-paper-instr{ font-size:13px; margin:12px 0 8px; font-weight:600; }
+
+        .cf-paper-qs{ display:flex; flex-direction:column; gap:10px; }
+        .cf-q{ font-size:13.5px; }
+        .cf-q-line{ line-height:1.6; margin-bottom:4px; }
+        .cf-q-n{ font-weight:700; margin-right:4px; }
+        .cf-cb-row{ display:flex; flex-wrap:wrap; gap:12px 22px; align-items:center; margin:4px 0; }
+        .cf-cb{ display:inline-flex; align-items:center; gap:6px; cursor:pointer; font-size:13px; user-select:none; }
+        .cf-cb input{ -webkit-appearance:none; appearance:none; width:14px; height:14px; min-width:14px; border:1.5px solid #1f2937; background:#fff; cursor:pointer; margin:0; position:relative; border-radius:0; }
+        .cf-cb input:checked{ background:#1f2937; }
+        .cf-cb input:checked::after{ content:""; position:absolute; left:3px; top:0px; width:4px; height:8px; border:solid #fff; border-width:0 2px 2px 0; transform:rotate(45deg); }
+        .cf-cb-txt{ line-height:1.3; }
+        .cf-cb-en{ font-size:11px; color:#6b7280; font-style:italic; margin-left:2px; }
+        .cf-cb-stack{ flex-direction:column; align-items:center; text-align:center; padding:6px 4px; min-width:90px; }
+        .cf-cb-stack .cf-cb-txt{ font-size:12px; margin-top:4px; }
+
+        .cf-paper-sig-row{ display:grid; grid-template-columns:1.4fr 1fr; gap:24px; margin-top:28px; }
+        @media (max-width:640px){ .cf-paper-sig-row{ grid-template-columns:1fr; } }
+        .cf-paper-sig-block{ text-align:center; }
+        .cf-paper-sig-canvas{ width:100%; height:74px; border-bottom:1px solid #1f2937; background:#fff; touch-action:none; display:block; }
+        .cf-paper-sig-cap{ font-size:12px; color:#1f2937; margin-top:4px; }
+        .cf-paper-sig-date{ border-bottom:1px solid #1f2937; padding:24px 0 4px; font-size:13px; color:#374151; text-align:center; }
+        .cf-mini-btn{ background:transparent; border:1px solid #d1d5db; padding:3px 8px; border-radius:4px; font-size:11px; cursor:pointer; color:#6b7280; }
+
+        .cf-paper-thanks{ margin-top:22px; padding-top:14px; border-top:1px dashed #6b7280; text-align:center; font-size:12.5px; line-height:1.7; color:#1f2937; }
+        .cf-paper-copyright{ text-align:center; font-size:11px; color:#6b7280; margin-top:8px; letter-spacing:1px; }
+
+        /* CPS bagua grid — paper styled */
+        .cf-bagua-box{ border:1px solid #000; padding:18px 22px; margin:14px 0; }
+        .cf-bagua-2col{ display:grid; grid-template-columns:1fr 1fr; gap:36px; }
+        @media (max-width:640px){ .cf-bagua-2col{ grid-template-columns:1fr; } }
+        .cf-bagua-lbl{ font-weight:700; font-size:15px; margin-bottom:10px; padding-left:4px; }
+        .cf-bagua-cells{ display:grid; grid-template-columns:repeat(3, 1fr); border:1.5px solid #1f2937; }
+        .cf-bagua-cell{ aspect-ratio:1; border:1px solid #1f2937; position:relative; padding:6px 6px 4px; background:#fff; display:flex; flex-direction:column; }
+        .cf-bagua-cell .tg{ position:absolute; top:6px; left:8px; font-size:24px; font-weight:700; color:#cbd5e1; line-height:1; pointer-events:none; font-family:'SimSun','PMingLiU',serif; }
+        .cf-bagua-cell textarea{ width:100%; flex:1; border:none; resize:none; padding:24px 4px 4px; font-size:12px; font-family:inherit; color:#1f2937; background:transparent; outline:none; }
+
+        /* CPS notes — 6 lines */
+        .cf-notes-lines{ margin:10px 0 14px; }
+        .cf-notes-lines .nline{ border-bottom:1px solid #6b7280; height:26px; }
+
+        /* FOR OFFICE USE black banner */
+        .cf-office-banner{ background:#000; color:#fff; padding:5px 14px; font-weight:700; font-size:12.5px; letter-spacing:1px; margin:14px 0 12px; }
+        .cf-office-row{ display:grid; grid-template-columns:1fr 1fr; gap:36px; padding:6px 4px 0; }
+        @media (max-width:640px){ .cf-office-row{ grid-template-columns:1fr; } }
+        .cf-office-sig-line{ border-bottom:1px solid #1f2937; height:54px; position:relative; }
+        .cf-office-sig-line canvas{ width:100%; height:100%; touch-action:none; display:block; }
+        .cf-office-sig-cap{ font-size:12px; color:#1f2937; margin-top:4px; }
+        .cf-office-sig-cap .ndate{ display:grid; grid-template-columns:50px 1fr; gap:4px; font-size:12px; margin-top:6px; }
+        .cf-office-sig-cap .ndate input,.cf-office-sig-cap .ndate select{ border:none; border-bottom:1px dotted #6b7280; background:transparent; font-family:inherit; font-size:12px; padding:1px 2px; }
+
+        /* APU likert 5 in a row */
+        .cf-apu-q{ border-bottom:1px solid #e5e7eb; padding:8px 0; }
+        .cf-apu-q:last-child{ border-bottom:none; }
+        .cf-apu-likert{ display:grid; grid-template-columns:repeat(5, 1fr); gap:8px; margin:6px 0 6px; }
+        @media (max-width:640px){ .cf-apu-likert{ grid-template-columns:repeat(2, 1fr); } }
+        .cf-apu-reason{ display:flex; align-items:baseline; gap:6px; margin-top:4px; font-size:12px; }
+        .cf-apu-reason .lbl{ white-space:nowrap; font-weight:500; }
+
+        /* APU referral table */
+        .cf-apu-ref{ width:100%; border-collapse:collapse; margin:8px 0; font-size:12.5px; }
+        .cf-apu-ref th,.cf-apu-ref td{ border:1px solid #1f2937; padding:6px 8px; vertical-align:middle; }
+        .cf-apu-ref th{ background:#f3f4f6; font-weight:600; text-align:left; }
+        .cf-apu-ref td{ height:30px; }
+        .cf-apu-ref input{ width:100%; border:none; background:transparent; font-family:inherit; font-size:12.5px; padding:2px 0; }
+        @media (max-width:640px){
+            .cf-apu-ref thead{ display:none; }
+            .cf-apu-ref tr{ display:block; border:1px solid #1f2937; padding:6px 8px; margin-bottom:8px; }
+            .cf-apu-ref td{ display:grid; grid-template-columns:90px 1fr; gap:6px; border:none; padding:3px 0; }
+            .cf-apu-ref td::before{ content:attr(data-label); font-weight:600; font-size:11px; color:#6b7280; }
+        }
+
+        /* APU 3 signatures */
+        .cf-sig-3{ display:grid; grid-template-columns:repeat(3, 1fr); gap:24px; margin-top:24px; }
+        @media (max-width:640px){ .cf-sig-3{ grid-template-columns:1fr; } }
+
+        /* Print */
+        @media print {
+            body * { visibility:hidden !important; }
+            .cf-paper, .cf-paper * { visibility:visible !important; }
+            .cf-paper{ position:absolute; left:0; top:0; box-shadow:none; border:none; max-width:none; padding:18px; }
+            .cf-no-print{ display:none !important; }
+            .modal-overlay,.modal-footer{ display:none !important; }
+        }
+    </style>`;
+
+    // =========================================================================
     // 1) NEW CUSTOMER SURVEY (新客户调查表) — 6 Qs + signature
     // =========================================================================
     const openCustomerSurveyModal = async (prospectId, surveyId = null) => {
@@ -53308,105 +53445,137 @@ Gold-${totGold}`;
         const today = new Date().toISOString().slice(0, 10);
         const data = existing || {};
 
-        const radio = (name, val, label, labelZh) => `
-            <label><input type="radio" name="${name}" value="${val}" ${data[name] === val ? 'checked' : ''}> ${label} <span style="color:#7C3AED;">${labelZh}</span></label>
-        `;
+        const cb = (name, val, en, zh, extra = '') => `
+            <label class="cf-cb"><input type="radio" name="${name}" value="${val}" ${data[name] === val ? 'checked' : ''}>
+                <span class="cf-cb-txt">${zh}${en ? ` <span class="cf-cb-en">${en}</span>` : ''}${extra}</span>
+            </label>`;
 
-        UI.showModal(`新客户调查表 New Customer Survey · ${_cfEscape(prospect.full_name || '')}`, `
-            <div class="cf-form">
+        UI.showModal(`新客户调查表 · ${_cfEscape(prospect.full_name || '')}`, `
+            ${_cfPaperStyles()}
+            <div class="cf-paper" id="cf-survey-paper">
                 <input type="hidden" id="cf-survey-prospect-id" value="${prospect.id}">
                 <input type="hidden" id="cf-survey-id" value="${surveyId || ''}">
 
-                <div class="cf-section-title">Customer Information <span class="zh">客户资料</span></div>
-                <div class="cf-grid">
-                    <div class="cf-field"><label>Consultant <span class="zh">顾问姓名</span></label>
-                        <select id="cf-survey-consultant"><option value="">--</option>${consultantOpts}</select>
+                <div class="cf-paper-head">
+                    <div>
+                        <div class="cf-paper-title-en">DESTINY CODE</div>
+                        <div class="cf-paper-title-zh">新客户调查表</div>
                     </div>
-                    <div class="cf-field"><label>Analysis Date <span class="zh">解盘日期</span></label>
-                        <input type="date" id="cf-survey-date" value="${data.analysis_date || today}">
-                    </div>
-                    <div class="cf-field"><label>Customer Name <span class="zh">客户姓名</span></label>
-                        <input type="text" id="cf-survey-name" value="${_cfEscape(data.customer_name || prospect.full_name || '')}">
-                    </div>
-                    <div class="cf-field"><label>Email <span class="zh">电邮</span></label>
-                        <input type="email" id="cf-survey-email" value="${_cfEscape(data.email || prospect.email || '')}">
-                    </div>
-                    <div class="cf-field"><label>Phone <span class="zh">联络电话</span></label>
-                        <input type="tel" id="cf-survey-phone" value="${_cfEscape(data.phone || prospect.phone || '')}">
-                    </div>
-                    <div class="cf-field"><label>Occupation <span class="zh">职业</span></label>
-                        <input type="text" id="cf-survey-occupation" value="${_cfEscape(data.occupation || prospect.occupation || '')}">
+                    <div class="cf-paper-brand">
+                        <span class="cf-brand-zh">天　命　定　數<sup>®</sup></span>
+                        <span class="cf-brand-en">DESTINY CODE</span>
                     </div>
                 </div>
 
-                <div class="cf-section-title">Survey Questions <span class="zh">调查问题</span> · 请在格子里打勾</div>
-
-                <div class="cf-field">
-                    <label>1) 请问您从哪里听闻及认识到DC? <span class="zh">How did you hear about DC?</span></label>
-                    <div class="cf-radio-group">
-                        ${radio('q1_source', 'family', 'Family', '亲属')}
-                        ${radio('q1_source', 'friend', 'Friend', '朋友')}
-                        ${radio('q1_source', 'other', 'Other', '其他')}
-                    </div>
-                    <input type="text" id="cf-survey-q1-other" placeholder="If other, specify…" value="${_cfEscape(data.q1_source_other || '')}" style="margin-top:6px;">
-                </div>
-
-                <div class="cf-field">
-                    <label>2) 请问您目前或之前有使用过风水或相关风水服务? <span class="zh">Have you used feng shui services before?</span></label>
-                    <div class="cf-radio-group">
-                        <label><input type="radio" name="q2_used_before" value="true" ${data.q2_used_before === true ? 'checked' : ''}> Yes <span style="color:#7C3AED;">有</span></label>
-                        <label><input type="radio" name="q2_used_before" value="false" ${data.q2_used_before === false ? 'checked' : ''}> No <span style="color:#7C3AED;">没有</span></label>
-                    </div>
-                </div>
-
-                <div class="cf-field">
-                    <label>3) 请问您个人或家庭之前或目前相信风水的功效吗? <span class="zh">Do you believe in feng shui?</span></label>
-                    <div class="cf-radio-group">
-                        ${radio('q3_belief', 'believe', 'Believe', '相信')}
-                        ${radio('q3_belief', 'disbelieve', 'Don’t believe', '不相信')}
-                        ${radio('q3_belief', 'neutral', 'Neutral', '中立')}
-                    </div>
-                    <input type="text" id="cf-survey-q3-reason" placeholder="为什麼 / Why?" value="${_cfEscape(data.q3_belief_reason || '')}" style="margin-top:6px;">
-                </div>
-
-                <div class="cf-field">
-                    <label>4) 如果传承7000年的玄空风水,确实有效,您会否愿意尝试使用? <span class="zh">If 7000-year heritage feng shui works, would you try?</span></label>
-                    <div class="cf-radio-group">
-                        ${radio('q4_willing', 'yes', 'Willing', '愿意')}
-                        ${radio('q4_willing', 'maybe', 'Maybe', '可能愿意')}
-                        ${radio('q4_willing', 'no', 'No', '不愿意')}
+                <div class="cf-paper-info">
+                    <div class="cf-info-2col">
+                        <div class="cf-info-row">
+                            <span class="cf-info-lbl">顾问姓名 <em>Consultant</em></span>
+                            <select class="cf-paper-input" id="cf-survey-consultant"><option value="">—</option>${consultantOpts}</select>
+                        </div>
+                        <div class="cf-info-row">
+                            <span class="cf-info-lbl">解盘日期 <em>Date</em></span>
+                            <input type="date" class="cf-paper-input" id="cf-survey-date" value="${data.analysis_date || today}">
+                        </div>
+                        <div class="cf-info-row">
+                            <span class="cf-info-lbl">客户姓名 <em>Customer Name</em></span>
+                            <input type="text" class="cf-paper-input" id="cf-survey-name" value="${_cfEscape(data.customer_name || prospect.full_name || '')}">
+                        </div>
+                        <div class="cf-info-row">
+                            <span class="cf-info-lbl">电邮 <em>Email</em></span>
+                            <input type="email" class="cf-paper-input" id="cf-survey-email" value="${_cfEscape(data.email || prospect.email || '')}">
+                        </div>
+                        <div class="cf-info-row">
+                            <span class="cf-info-lbl">联络电话 <em>Phone</em></span>
+                            <input type="tel" class="cf-paper-input" id="cf-survey-phone" value="${_cfEscape(data.phone || prospect.phone || '')}">
+                        </div>
+                        <div class="cf-info-row">
+                            <span class="cf-info-lbl">职业 <em>Occupation</em></span>
+                            <input type="text" class="cf-paper-input" id="cf-survey-occupation" value="${_cfEscape(data.occupation || prospect.occupation || '')}">
+                        </div>
                     </div>
                 </div>
 
-                <div class="cf-field">
-                    <label>5) 您是否愿意使用DC风水的解决方案,以帮助及改善全家的利益? <span class="zh">Willing to use DC solutions?</span></label>
-                    <div class="cf-radio-group">
-                        ${radio('q5_use_dc', 'willing', 'Willing to use', '愿意使用')}
-                        ${radio('q5_use_dc', 'consider', 'Consider', '考虑使用')}
-                        ${radio('q5_use_dc', 'neutral', 'Neutral', '中立')}
+                <div class="cf-paper-instr">* 请在格子里打勾 <span style="color:#888;">(Tick the appropriate box)</span> ︰－</div>
+
+                <div class="cf-paper-qs">
+                    <div class="cf-q">
+                        <div class="cf-q-line"><span class="cf-q-n">1)</span> 请问您从哪里听闻及认识到DC?</div>
+                        <div class="cf-cb-row">
+                            ${cb('q1_source','family','','亲属')}
+                            ${cb('q1_source','friend','','朋友')}
+                            ${cb('q1_source','other','','其他')}
+                            <input type="text" id="cf-survey-q1-other" class="cf-line-input" placeholder="(请说明)" value="${_cfEscape(data.q1_source_other || '')}">
+                        </div>
+                    </div>
+
+                    <div class="cf-q">
+                        <div class="cf-q-line"><span class="cf-q-n">2)</span> 请问您目前或之前有使用过风水或相关风水服务?</div>
+                        <div class="cf-cb-row">
+                            <label class="cf-cb"><input type="radio" name="q2_used_before" value="true" ${data.q2_used_before === true ? 'checked' : ''}><span class="cf-cb-txt">有</span></label>
+                            <label class="cf-cb"><input type="radio" name="q2_used_before" value="false" ${data.q2_used_before === false ? 'checked' : ''}><span class="cf-cb-txt">没有</span></label>
+                        </div>
+                    </div>
+
+                    <div class="cf-q">
+                        <div class="cf-q-line"><span class="cf-q-n">3)</span> 请问您个人或家庭之前或目前相信风水的功效吗?</div>
+                        <div class="cf-cb-row">
+                            <label class="cf-cb"><input type="radio" name="q3_belief" value="believe" ${data.q3_belief === 'believe' ? 'checked' : ''}><span class="cf-cb-txt">相信, 为什麼</span></label>
+                            <label class="cf-cb"><input type="radio" name="q3_belief" value="disbelieve" ${data.q3_belief === 'disbelieve' ? 'checked' : ''}><span class="cf-cb-txt">不相信, 为什麼</span></label>
+                            <label class="cf-cb"><input type="radio" name="q3_belief" value="neutral" ${data.q3_belief === 'neutral' ? 'checked' : ''}><span class="cf-cb-txt">中立</span></label>
+                        </div>
+                        <input type="text" id="cf-survey-q3-reason" class="cf-line-input cf-full" placeholder="(请说明原因)" value="${_cfEscape(data.q3_belief_reason || '')}">
+                    </div>
+
+                    <div class="cf-q">
+                        <div class="cf-q-line"><span class="cf-q-n">4)</span> 如果传承7000年的玄空风水, 确实有效, 您会否愿意尝试使用?</div>
+                        <div class="cf-cb-row">
+                            ${cb('q4_willing','yes','','愿意')}
+                            ${cb('q4_willing','maybe','','可能愿意')}
+                            ${cb('q4_willing','no','','不愿意')}
+                        </div>
+                    </div>
+
+                    <div class="cf-q">
+                        <div class="cf-q-line"><span class="cf-q-n">5)</span> 为了个人及家人拥有更好的利益、更安全的生活环境, 倘若有能力及良好机会, 您是否愿意使用DC风水的解决方案, 以帮助及改善全家人的财富状况、事业发展、工作绩效、夫妻关系、孩子教育及人缘关系等?</div>
+                        <div class="cf-cb-row">
+                            ${cb('q5_use_dc','willing','','愿意使用')}
+                            ${cb('q5_use_dc','consider','','考虑使用')}
+                            ${cb('q5_use_dc','neutral','','中立')}
+                        </div>
+                    </div>
+
+                    <div class="cf-q">
+                        <div class="cf-q-line"><span class="cf-q-n">6)</span> 若您明白到DC风水知识的种种好处与利益, 您会否主动分享给亲友一起获得这个利益?</div>
+                        <div class="cf-cb-row">
+                            ${cb('q6_share','definitely','','一定分享')}
+                            ${cb('q6_share','when_opportunity','','有机会就分享')}
+                            ${cb('q6_share','no','','不愿分享')}
+                        </div>
                     </div>
                 </div>
 
-                <div class="cf-field">
-                    <label>6) 若您明白DC风水的好处,您会否主动分享给亲友? <span class="zh">Would you share with family/friends?</span></label>
-                    <div class="cf-radio-group">
-                        ${radio('q6_share', 'definitely', 'Definitely share', '一定分享')}
-                        ${radio('q6_share', 'when_opportunity', 'When opportunity arises', '有机会就分享')}
-                        ${radio('q6_share', 'no', 'Won’t share', '不愿分享')}
+                <div class="cf-paper-sig-row">
+                    <div class="cf-paper-sig-block">
+                        <canvas id="cf-survey-sig" class="cf-paper-sig-canvas" data-preload="${data.signature_data_url || ''}"></canvas>
+                        <div class="cf-paper-sig-cap">客户签名 / Customer Signature</div>
+                    </div>
+                    <div class="cf-paper-sig-block">
+                        <div class="cf-paper-sig-date">${_cfFmtDate(data.signed_at) || _cfFmtDate(new Date().toISOString())}</div>
+                        <div class="cf-paper-sig-cap">日期 / Date</div>
                     </div>
                 </div>
+                <div class="cf-no-print" style="text-align:right;margin-top:-8px;"><button type="button" class="cf-mini-btn" onclick="app.cfClearSignature('cf-survey-sig')">Clear signature</button></div>
 
-                <div class="cf-section-title">Customer Signature <span class="zh">客户签名</span></div>
-                <div class="cf-sig-wrap">
-                    <canvas id="cf-survey-sig" class="cf-sig-canvas" data-preload="${data.signature_data_url || ''}"></canvas>
-                    <div class="cf-sig-actions">
-                        <small>Sign with finger / mouse · 用手指或鼠标签名</small>
-                        <button type="button" class="cf-btn" onclick="app.cfClearSignature('cf-survey-sig')"><i class="fas fa-eraser"></i> Clear</button>
-                    </div>
+                <div class="cf-paper-thanks">
+                    助人为乐, DC全体同仁感谢您无私地参与本次的调查,<br>
+                    有助於我们提升服务水准, 帮助更多朋友获得利益. 谢谢.
                 </div>
+                <div class="cf-paper-copyright">~ 版权所有, 翻印必究 ~</div>
             </div>
         `, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Print', type: 'secondary', action: 'window.print()' },
             { label: 'Save Survey', type: 'primary', action: '(async () => { await app.saveCustomerSurvey(); })()' }
         ]);
 
@@ -53935,6 +54104,30 @@ Gold-${totGold}`;
     // Sections: 命卦大運 → 成效與需求 → 未來3年運盤 → 行動與結果 → 簽名
     // Default 3-year window: 2026–2028 (start_year configurable per-form).
     // =========================================================================
+
+    // Opens the Blueprint form in a NEW tab via window.open. The new tab loads
+    // the CRM root with ?form=blueprint&pid=...&bid=... — init() detects those
+    // params, finishes auth/data-store boot, then auto-opens the modal. Save
+    // closes the tab automatically. The standalone modal function below is
+    // unchanged so legacy callers / scripted calls still work in-place.
+    const openDestinyBlueprintInTab = (prospectId, dbId = null) => {
+        if (!prospectId) { UI.toast.error('Missing prospect.'); return; }
+        const params = new URLSearchParams();
+        params.set('form', 'blueprint');
+        params.set('pid', String(prospectId));
+        if (dbId) params.set('bid', String(dbId));
+        // Open a fresh tab. window.opener gets set automatically so window.close()
+        // works after save.
+        const url = `${window.location.origin}${window.location.pathname}?${params.toString()}`;
+        const w = window.open(url, '_blank', 'noopener=no');
+        if (!w) {
+            // Popup blocked — fall back to in-place modal so the user is never
+            // dead-ended.
+            UI.toast.info('Popup blocked — opening in-place.');
+            openDestinyBlueprintModal(prospectId, dbId);
+        }
+    };
+
     const openDestinyBlueprintModal = async (prospectId, dbId = null) => {
         const prospect = await AppDataStore.getById('prospects', prospectId).catch(() => null);
         if (!prospect) { UI.toast.error('Prospect not found.'); return; }
@@ -54297,6 +54490,13 @@ Gold-${totGold}`;
             UI.hideModal();
             const target = document.getElementById('marketing-tab-content');
             if (target && _currentMarketingTab === 'forms') target.innerHTML = await renderFormsTab();
+
+            // If this window was spawned as a dedicated blueprint-form tab,
+            // close it after the toast so the user is dropped back to where
+            // they came from. Give the toast ~1s to be visible first.
+            if (window.__isBlueprintFormTab) {
+                setTimeout(() => { try { window.close(); } catch (_) {} }, 1100);
+            }
         } catch (err) {
             UI.toast.error('Save failed: ' + (err?.message || err));
         }
@@ -55635,6 +55835,7 @@ Gold-${totGold}`;
         openApuAppraisalModal,
         saveApuAppraisal,
         openDestinyBlueprintModal,
+        openDestinyBlueprintInTab,
         saveDestinyBlueprint,
 
     };
