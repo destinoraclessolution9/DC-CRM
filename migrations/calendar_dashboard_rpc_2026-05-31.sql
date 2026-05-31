@@ -17,7 +17,7 @@
 -- ============================================================================
 
 create or replace function public.calendar_dashboard_payload(
-    p_agent_id uuid     default null,
+    p_agent_id text        default null,
     p_since    timestamptz default (now() - interval '60 days'),
     p_until    timestamptz default (now() + interval '60 days')
 )
@@ -44,9 +44,9 @@ as $fn$
          where activity_date between p_since and p_until
            and (
                 p_agent_id is null
-                or lead_agent_id = p_agent_id
+                or lead_agent_id::text = p_agent_id
                 or visibility in ('open','public')
-                or (co_agents ? p_agent_id::text)
+                or (co_agents ? p_agent_id)
            )
     ),
     -- Users: hierarchy + display fields. ~75 rows for this CRM — full set always.
@@ -67,9 +67,9 @@ as $fn$
          where (status is null or status not in ('closed_lost','archived'))
            and (
                 p_agent_id is null
-                or responsible_agent_id = p_agent_id
-                or cps_agent_id = p_agent_id
-                or lead_agent_id = p_agent_id
+                or responsible_agent_id::text = p_agent_id
+                or cps_agent_id::text = p_agent_id
+                or lead_agent_id::text = p_agent_id
            )
          order by last_activity_date desc nulls last
          limit 1000
@@ -81,7 +81,7 @@ as $fn$
           from public.customers
          where (
                 p_agent_id is null
-                or responsible_agent_id = p_agent_id
+                or responsible_agent_id::text = p_agent_id
            )
          order by updated_at desc nulls last
          limit 500
@@ -95,7 +95,7 @@ as $fn$
     );
 $fn$;
 
-grant execute on function public.calendar_dashboard_payload(uuid, timestamptz, timestamptz) to authenticated;
+grant execute on function public.calendar_dashboard_payload(text, timestamptz, timestamptz) to authenticated;
 
 -- Client-side call pattern (AppDataStore wrapper):
 --   const { data } = await supabase.rpc('calendar_dashboard_payload', {
