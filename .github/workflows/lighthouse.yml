@@ -9,10 +9,17 @@
 #      below is breached.
 #
 # Tuning the budgets:
-#   - LCP / TBT / CLS thresholds are intentionally lenient at first.
-#     Tighten them once Speed Insights gives us a real-user baseline.
+#   - Tightened 2026-06-01 to lock in Phase F gains (self-hosted fonts +
+#     brotli + content-hashed assets cut transferred bytes ~75%).
+#   - LCP error threshold dropped from 4000ms to 3000ms. Google's
+#     real-user "good" target is <2500ms, "poor" is >4000ms; 3000ms
+#     gives synthetic-vs-real margin without normalizing past "good".
+#   - TBT / TTI / SI tightened similarly. CLS stays at 0.1 (font-display
+#     is now `optional` so zero-CLS is achievable).
 #   - Lighthouse runs in a synthetic Chrome and can be 200-400ms slower than
 #     real users — don't set thresholds against synthetic numbers alone.
+#   - Resource-summary budgets enforce no-bundle-bloat: regressions that
+#     accidentally re-add Google Fonts or unminify a bundle will fail CI.
 
 name: Lighthouse CI
 
@@ -73,11 +80,17 @@ jobs:
             --collect.numberOfRuns=3 \
             --collect.settings.preset=desktop \
             --upload.target=temporary-public-storage \
-            --assert.assertions.first-contentful-paint='["warn", {"maxNumericValue": 2000}]' \
-            --assert.assertions.largest-contentful-paint='["error", {"maxNumericValue": 4000}]' \
-            --assert.assertions.cumulative-layout-shift='["error", {"maxNumericValue": 0.1}]' \
-            --assert.assertions.total-blocking-time='["warn", {"maxNumericValue": 600}]' \
-            --assert.assertions.interactive='["warn", {"maxNumericValue": 5000}]' \
-            --assert.assertions.speed-index='["warn", {"maxNumericValue": 4500}]'
+            --assert.assertions.first-contentful-paint='["warn", {"maxNumericValue": 1500}]' \
+            --assert.assertions.largest-contentful-paint='["error", {"maxNumericValue": 3000}]' \
+            --assert.assertions.cumulative-layout-shift='["error", {"maxNumericValue": 0.05}]' \
+            --assert.assertions.total-blocking-time='["warn", {"maxNumericValue": 400}]' \
+            --assert.assertions.interactive='["warn", {"maxNumericValue": 3500}]' \
+            --assert.assertions.speed-index='["warn", {"maxNumericValue": 3500}]' \
+            --assert.assertions.unused-javascript='["warn", {"maxNumericValue": 200000}]' \
+            --assert.assertions.unused-css-rules='["warn", {"maxNumericValue": 50000}]' \
+            --assert.assertions.uses-text-compression='["error", {"minScore": 1}]' \
+            --assert.assertions.uses-long-cache-ttl='["warn", {"minScore": 0.9}]' \
+            --assert.assertions.modern-image-formats='["warn", {"minScore": 0.8}]' \
+            --assert.assertions.uses-responsive-images='["warn", {"minScore": 0.8}]'
         env:
           LHCI_GITHUB_APP_TOKEN: ${{ secrets.LHCI_GITHUB_APP_TOKEN }}
