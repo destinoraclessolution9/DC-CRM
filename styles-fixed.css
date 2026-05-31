@@ -273,6 +273,51 @@ body {
     flex-direction: column;
 }
 
+/* Fullscreen modal variant — used by long forms like Destiny Blueprint that
+   need the whole viewport. Header stays pinned, footer (Cancel / Save) stays
+   pinned at the bottom; only .modal-content scrolls. !important is necessary
+   here because styles-mobile.css unconditionally bottom-sheets .modal-box at
+   width<=768px, overriding the default desktop dimensions. */
+.modal-overlay.active:has(.modal-box.fullscreen),
+.modal-overlay.fullscreen-host {
+    align-items: stretch !important;
+    padding: 0 !important;
+}
+.modal-box.fullscreen {
+    width: 100vw !important;
+    height: 100vh !important;
+    max-width: none !important;
+    max-height: none !important;
+    border-radius: 0 !important;
+    padding: 16px 24px !important;
+    margin: 0 !important;
+    overflow: hidden !important;
+    display: flex !important;
+    flex-direction: column !important;
+}
+.modal-box.fullscreen::before { display: none !important; }
+.modal-box.fullscreen .modal-content {
+    flex: 1 !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+    padding: 8px 4px !important;
+}
+.modal-box.fullscreen .modal-header {
+    flex-shrink: 0 !important;
+    border-radius: 0 !important;
+    padding: 6px 4px 10px !important;
+    border-bottom: 1px solid var(--border, #E5E7EB);
+}
+.modal-box.fullscreen .modal-footer {
+    flex-shrink: 0 !important;
+    padding: 10px 4px calc(10px + env(safe-area-inset-bottom)) 4px !important;
+    border-top: 1px solid var(--border, #E5E7EB);
+    background: var(--bg-elevated, white);
+}
+@media (max-width: 640px) {
+    .modal-box.fullscreen { padding: 8px 12px !important; }
+}
+
 .modal-content {
     overflow-y: auto;
     flex: 1;
