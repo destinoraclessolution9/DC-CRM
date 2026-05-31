@@ -21,7 +21,8 @@ const PRECACHE_URLS = [
     '/script.min.js',
     '/supabase-init.min.js',
     '/app-init.min.js',
-    '/manifest.json'
+    '/manifest.json',
+    '/fonts/local-fonts.css'
 ];
 
 self.addEventListener('install', (event) => {

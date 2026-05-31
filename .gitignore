@@ -39,6 +39,28 @@ unifi_inspect.*
 downloaded_files/
 tmra_*.csv
 
+# ─── Build-generated content-hashed asset copies ─────────────────────────
+# build.mjs computes a SHA-256 hash per .min.js/.min.css and writes a hashed
+# COPY (e.g. script.16a5f8376e.min.js) alongside the canonical file. The
+# canonical (non-hashed) .min.* stays committed as source-of-truth; the hashed
+# copies regenerate on every build with the same hash for the same content.
+# Committing them would pollute git history with a new filename for every
+# source change. Vercel re-runs build.mjs on every deploy so they exist
+# in production.
+*.??????????.min.js
+*.??????????.min.css
+
+# Build-generated brotli pre-compression (.br files served by Vercel with
+# Content-Encoding: br when the client allows it).
+*.min.js.br
+*.min.css.br
+*.??????????.min.js.br
+*.??????????.min.css.br
+
+# Build-generated asset manifest (regenerated each build; canonical hash
+# is verifiable from the file content + build.mjs).
+dist-manifest.json
+
 # Python build artefacts
 __pycache__/
 **/__pycache__/

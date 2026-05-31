@@ -11561,6 +11561,14 @@ function _wireLoginBtn() {
 
     const navigateTo = async (viewId) => {
         UI.hideModal();
+        // Cancel any in-flight Supabase reads tied to the OUTGOING view so
+        // their late-arriving responses can't overwrite the new view's cache
+        // ~800ms after navigation. AppDataStore catches AbortError internally
+        // and returns []; no exception leaks here.
+        // No-op if AppDataStore isn't ready yet (first navigate during boot).
+        try { if (window.AppDataStore && typeof window.AppDataStore.abortInflight === 'function') {
+            window.AppDataStore.abortInflight('navigate:' + viewId);
+        } } catch (_) {}
         // ── Lazy-load non-core views ──────────────────────────────────────────
         // script-features.min.js is only fetched when the user first navigates
         // away from home/calendar. After that it's cached + immutable.
@@ -14361,6 +14369,20 @@ function _wireLoginBtn() {
         AppDataStore.getAll('events');
         AppDataStore.getAll('users');
         AppDataStore.getAll('names');
+
+        // ── Single-call dashboard prime (F6) ────────────────────────────
+        // calendar_dashboard_payload() RPC returns activities+users+prospects
+        // +customers in ONE round-trip with server-side filtering, then primes
+        // each table's cache. Subsequent renderCalendar / renderTodayActivities
+        // calls below hit the warm cache instead of 4 separate HTTP fetches.
+        // Falls back gracefully (returns null) when the RPC isn't deployed yet;
+        // the existing getAll() calls above already handle that path.
+        // Fire-and-forget so we don't block the critical-path render — when
+        // the RPC lands, it emits dataChanged which triggers a re-render.
+        try {
+            const _agentId = _currentUser?.id || null;
+            AppDataStore.loadCalendarDashboard(_agentId).catch(() => {});
+        } catch (_) {}
 
         // ── Tier 1.2/1.3: critical path first, sidebars after ──
         // Critical path = the calendar grid + today's activity list. These

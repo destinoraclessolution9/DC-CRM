@@ -49,8 +49,13 @@
          DNS+TLS already warm. This is what cuts the first paint from
          "wait, then fetch, then paint" to "fetch and paint together". -->
     <link rel="preconnect" href="https://remuwhxvzkzjtgbzqjaa.supabase.co" crossorigin>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <!-- Self-hosted fonts (2026-05-31) — privacy partitioning made the
+         cross-origin Google Fonts cache useless (Chrome 86+ / Firefox 85+).
+         Local woff2 served from same-origin HTTP/2 connection, one round-trip
+         vs DNS+TLS+2 RTT to fonts.gstatic.com. Stale fonts.* preconnects
+         removed; left dns-prefetch entries in for the bilingual SEO/markup
+         in marketing landing pages (cps-intake.html, booking.html, etc.) that
+         haven't been migrated yet. -->
     <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
     <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
     <link rel="dns-prefetch" href="https://cdn.sheetjs.com">
@@ -60,22 +65,24 @@
          it before the parser reaches the <script> tag near </body>.
          script.js is ~2.5 MB so getting it in flight ASAP is the single
          biggest perceived-load win on first visit. -->
-    <link rel="preload" href="script.min.js?v=20260531n" as="script">
-    <link rel="preload" href="data.min.js?v=20260531n" as="script">
-    <link rel="preload" href="styles-fixed.min.css?v=20260531n" as="style">
+    <link rel="preload" href="script.16a5f8376e.min.js" as="script">
+    <link rel="preload" href="data.bb64874389.min.js" as="script">
+    <link rel="preload" href="styles-fixed.a5f1424599.min.css" as="style">
 
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" integrity="sha512-9usAa10IRO0HhonpyAIVpjrylPvoDwiPUiKdWk5t3PyolY1cOd4DSE0Ga+ri4AuTroPR5aQvXU9xC6qOPnzFeg==" crossorigin="anonymous" referrerpolicy="no-referrer" media="print" onload="this.media='all'; this.onload=null;">
     <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" integrity="sha512-9usAa10IRO0HhonpyAIVpjrylPvoDwiPUiKdWk5t3PyolY1cOd4DSE0Ga+ri4AuTroPR5aQvXU9xC6qOPnzFeg==" crossorigin="anonymous"></noscript>
-    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" onload="this.onload=null; this.rel='stylesheet';">
-    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"></noscript>
+    <!-- Self-hosted fonts — loaded synchronously (~12 KB CSS) so font-display:
+         optional has its 100ms window. The browser already starts woff2 fetches
+         in parallel from /fonts/* during HTML parse. -->
+    <link rel="stylesheet" href="/fonts/local-fonts.css?v=20260531o">
     <link rel="icon" href="favicon.ico" type="image/x-icon">
-    <link rel="stylesheet" href="styles-fixed.min.css?v=20260531n">
+    <link rel="stylesheet" href="styles-fixed.a5f1424599.min.css">
     <!-- styles-mobile.css contains top-level (non-@media) rules that hide
          the mobile drawer overlay on ALL viewports. Gating it by media
          query would expose those rules only to mobile and the drawer
          overlay would default to display:block on desktop, covering the
          page. Keep it unconditional. -->
-    <link rel="stylesheet" href="styles-mobile.min.css?v=20260531n">
+    <link rel="stylesheet" href="styles-mobile.5c2e7e65a7.min.css">
     <!-- styles-mobile-v2 — NOT "pure responsive overrides" as the prior
          comment claimed. It carries the entire .login-v2 / .lv2-* decoration
          system (~700 lines, position:absolute branches, blobs, petals,
@@ -87,8 +94,8 @@
          downloads with the rest of the CSS over HTTP/2 with negligible
          first-paint cost. If the file is ever cleaned up to be truly
          responsive-only, this can revert to the async pattern. -->
-    <link rel="stylesheet" href="styles-mobile-v2.min.css?v=20260531n">
-    <link rel="stylesheet" href="styles-theme.min.css?v=20260531n">
+    <link rel="stylesheet" href="styles-mobile-v2.c9b89a69be.min.css">
+    <link rel="stylesheet" href="styles-theme.801f1d14c2.min.css">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#800020">
     <script>
@@ -664,17 +671,17 @@
     <!-- Scripts — all deferred so HTML parser never blocks -->
     <!-- Supabase must run before data.js/script.js; defer preserves document order -->
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" crossorigin="anonymous"></script>
-    <script defer src="supabase-init.min.js?v=20260531n"></script>
+    <script defer src="supabase-init.417a157ca9.min.js"></script>
     <script defer src="lunar-calendar.min.js"></script>
-    <script defer src="data.min.js?v=20260531n"></script>
-    <script defer src="auth.min.js?v=20260531n"></script>
-    <script defer src="ui.min.js?v=20260531n"></script>
+    <script defer src="data.bb64874389.min.js"></script>
+    <script defer src="auth.8fef230596.min.js"></script>
+    <script defer src="ui.32556cfe35.min.js"></script>
     <script defer src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js" integrity="sha512-dfX5uYVXzyU8+KHqj8bjo7UkOdg18PaOtpa48djpNbZHwExddghZ+ZmzWT06R5v6NSk3ZUfsH6FNEDepLx9hPQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <!-- fetchpriority="low" lets the browser paint the login form (already in HTML)
          before spending bandwidth on the 2.1 MB app bundle. defer already prevents
          parser-blocking; low fetchpriority additionally pushes the download below
          CSS + fonts in the network queue so FCP happens sooner. -->
-    <script defer fetchpriority="low" src="script.min.js?v=20260531n"></script>
+    <script defer fetchpriority="low" src="script.16a5f8376e.min.js"></script>
 
     <!--
       The following libraries are loaded on-demand via window._loadScriptOnce()
@@ -693,7 +700,7 @@
 <!-- Properly commented out scripts -->
     <!-- <script src="offline-storage.js"></script> -->
     <!-- <script src="mobile-components.js"></script> -->
-    <script defer src="push-notifications.min.js?v=20260531n"></script>
+    <script defer src="push-notifications.406fb9b19d.min.js"></script>
     <!-- <script src="biometric-auth.js"></script> -->
     <!-- <script src="mobile-settings.js"></script> -->
 
@@ -702,7 +709,7 @@
     <!-- <script src="audit-log.js"></script> -->
     <!-- <script src="compliance.js"></script> -->
     <!-- <script src="rbac.js"></script> -->
-    <script defer src="two-factor.min.js?v=20260531n"></script>
+    <script defer src="two-factor.0f11c12431.min.js"></script>
 
     <!-- Phase D: Service Worker for stale-while-revalidate static asset caching.
          /sw.js is the SOLE service worker (legacy /service-worker.js removed
@@ -731,7 +738,7 @@
     <!-- <script src="config-manager.js"></script> -->
     <!-- <script src="system-logs.js"></script> -->
   
-    <script defer src="app-init.min.js?v=20260531n"></script>
+    <script defer src="app-init.7bef14e669.min.js"></script>
 
     <!-- Speculation Rules (Chrome 121+) — prerender the small static info pages
          on a user-likely-to-navigate signal (hover or moderate-eagerness idle).

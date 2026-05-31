@@ -5,8 +5,11 @@
    Supports [data-theme="light"] (default) and [data-theme="dark"].
    ===================================================================== */
 
-/* ---------- Fonts ---------- */
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+/* ---------- Fonts ----------
+   Space Grotesk + JetBrains Mono are self-hosted alongside Inter in
+   /fonts/local-fonts.css (loaded in index.html <head>). The Google Fonts
+   @import that used to live here forced a render-blocking cross-origin CSS
+   fetch on every page load — now zero. -->
 
 /* ---------- Token system ---------- */
 :root,

@@ -75,6 +75,18 @@ class DataStore {
         this._cache = new Map();
         this._cacheTTL = 300_000; // 5 min (was 30s — too aggressive for 500 concurrent users)
         this._cacheMaxEntries = 256; // LRU eviction threshold (app has 70+ tables; 64 was too aggressive)
+
+        // ── In-flight request cancellation ──────────────────────────────────
+        // A single AbortController whose signal is chained onto every Supabase
+        // read (.abortSignal(signal) — supported since supabase-js@2.20). When
+        // the user navigates away, script.js calls AppDataStore.abortInflight()
+        // which aborts every in-flight read and creates a fresh controller for
+        // the new view. Result: an orphan getAll('prospects') that's mid-flight
+        // when the user clicks away to /calendar doesn't land 800ms later and
+        // overwrite the calendar's cache with stale prospect data.
+        // Reads catch AbortError and return [] silently rather than poisoning
+        // the cache or surfacing an error toast — view-change is not an error.
+        this._inflightController = (typeof AbortController === 'function') ? new AbortController() : null;
         this._staticTables = new Set([
             'users', 'roles', 'teams', 'event_categories', 'event_templates',
             'products', 'appointment_locations', 'venues', 'ai_models',
@@ -240,6 +252,19 @@ class DataStore {
             });
 
             console.log('DataStore initialised (Supabase mode).');
+            // Start Realtime SWR after the auth client is ready. Wrapped in a
+            // try/catch and runs lazily (background idle if available) so it
+            // never blocks the ready event.
+            try {
+                const start = () => this._startRealtimeSWR();
+                if (typeof window.scheduler !== 'undefined' && typeof window.scheduler.postTask === 'function') {
+                    window.scheduler.postTask(start, { priority: 'background' });
+                } else if (typeof window.requestIdleCallback === 'function') {
+                    window.requestIdleCallback(start, { timeout: 2000 });
+                } else {
+                    setTimeout(start, 1);
+                }
+            } catch (_) {}
             this.emit('ready');
             return true;
         } catch (err) {
@@ -279,6 +304,178 @@ class DataStore {
             }
             if (dirty) localStorage.setItem('fs_crm_tombstones', JSON.stringify(tombstones));
         } catch (_) {}
+    }
+
+    // ── Dashboard RPC: single-call calendar boot ─────────────────────────
+    // Calls calendar_dashboard_payload(agent_id, since, until) — a Postgres
+    // function that returns activities + users + prospects (lean) + customers
+    // (lean) in ONE round-trip with server-side filtering. Replaces the 4
+    // parallel getAll() calls the calendar mount does today.
+    //
+    // After fetch, primes the in-memory cache + localStorage snapshot for
+    // each table so subsequent code paths that call getAll('activities') etc.
+    // hit the warm cache instead of firing a second HTTP request.
+    //
+    // Falls back to parallel getAll() if the RPC isn't deployed yet (PGRST
+    // error code 'PGRST202' = function not found) so calling code is safe to
+    // adopt before the migration has been applied. Returns whatever shape it
+    // got — callers should null-check.
+    async loadCalendarDashboard(agentId, sinceISO, untilISO) {
+        try {
+            const signal = this._inflightSignal();
+            let rpc = this._readClient().rpc('calendar_dashboard_payload', {
+                p_agent_id: agentId || null,
+                p_since:    sinceISO || new Date(Date.now() - 60 * 86400 * 1000).toISOString(),
+                p_until:    untilISO || new Date(Date.now() + 60 * 86400 * 1000).toISOString(),
+            });
+            if (signal && typeof rpc.abortSignal === 'function') rpc = rpc.abortSignal(signal);
+            const { data, error } = await rpc;
+            if (error) {
+                if (this._isAbortError(error)) return null;
+                // PGRST202 = function not found (RPC not deployed). Caller falls back.
+                if (error.code === 'PGRST202' || /function .+ does not exist/i.test(error.message || '')) {
+                    return null;
+                }
+                throw error;
+            }
+            if (!data || typeof data !== 'object') return null;
+            // Prime caches so subsequent getAll() reads hit warm cache.
+            const tablesPrimed = [];
+            for (const t of ['activities', 'users', 'prospects', 'customers']) {
+                const rows = data[t];
+                if (Array.isArray(rows)) {
+                    this._cacheSet(t, rows);
+                    tablesPrimed.push(t);
+                    // Persist async — same pattern as _getAllImpl writes.
+                    setTimeout(() => {
+                        try {
+                            localStorage.setItem(`fs_crm_${t}`, JSON.stringify(this._sanitizeForStorage(t, rows)));
+                            localStorage.setItem(`fs_crm_${t}_last_sync`, new Date().toISOString());
+                        } catch (_) {}
+                    }, 0);
+                }
+            }
+            if (window.__FS_DEBUG_SWR) console.log(`[Dashboard RPC] primed: ${tablesPrimed.join(', ')}`);
+            this.emit('dataChanged', { action: 'dashboard_rpc', tables: tablesPrimed });
+            return data;
+        } catch (e) {
+            if (this._isAbortError(e)) return null;
+            console.warn('[Dashboard RPC] failed, caller should fall back:', e?.message);
+            return null;
+        }
+    }
+
+    // ── Realtime SWR push ────────────────────────────────────────────────
+    // After init, subscribe to postgres_changes for the core CRM tables. When
+    // a change lands on a connected tab, splice the new row directly into the
+    // in-memory cache + localStorage snapshot. This eliminates the
+    // updated_at>lastSync delta poll for any tab that's been continuously open
+    // — and on the next reload, the delta poll fetches only what happened
+    // while disconnected (already the existing behavior).
+    //
+    // Tables subscribed: those added to supabase_realtime publication by
+    //   migrations/realtime_publication_2026-05-03.sql        (cps_intake_requests, refill_reminders, activities)
+    //   migrations/realtime_publication_extend_2026-05-31.sql (prospects, customers, users)
+    //
+    // Idempotent: bails if window.supabase missing or already subscribed.
+    // Reconnect: the supabase-js channel handles websocket reconnect itself;
+    // we don't tear down on visibility-hidden because RLS still gates the
+    // events anyway.
+    _startRealtimeSWR() {
+        if (this._realtimeChannel) return;
+        if (!window.supabase || typeof window.supabase.channel !== 'function') return;
+        const TABLES = ['prospects', 'customers', 'users', 'activities', 'cps_intake_requests', 'refill_reminders'];
+        const onChange = (payload) => {
+            try {
+                const table = payload?.table;
+                if (!table) return;
+                const evt = payload?.eventType;        // INSERT | UPDATE | DELETE
+                const row = payload?.new || payload?.old;
+                if (!row || !row.id) return;
+                // Update in-memory cache if present (LRU): splice the row.
+                const cached = this._cache.get(table);
+                if (cached && Array.isArray(cached.data)) {
+                    const idStr = String(row.id);
+                    const idx = cached.data.findIndex(r => String(r.id) === idStr);
+                    if (evt === 'DELETE') {
+                        if (idx >= 0) cached.data.splice(idx, 1);
+                    } else {
+                        if (idx >= 0) cached.data[idx] = { ...cached.data[idx], ...row };
+                        else cached.data.unshift(row);
+                    }
+                    cached.ts = Date.now();
+                    // Defer the localStorage write off the realtime tick.
+                    setTimeout(() => {
+                        try { localStorage.setItem(`fs_crm_${table}`, JSON.stringify(this._sanitizeForStorage(table, cached.data))); } catch (_) {}
+                        try { localStorage.setItem(`fs_crm_${table}_last_sync`, new Date().toISOString()); } catch (_) {}
+                    }, 0);
+                } else {
+                    // Table not in cache yet — just mark the table dirty so the
+                    // next getAll() does a fresh fetch instead of an old snapshot.
+                    this.invalidateCache(table);
+                }
+                this.emit('dataChanged', { action: 'realtime', table });
+            } catch (e) {
+                console.warn('[Realtime SWR] handler error:', e);
+            }
+        };
+        try {
+            const ch = window.supabase.channel('crm-swr');
+            for (const t of TABLES) {
+                ch.on('postgres_changes', { event: '*', schema: 'public', table: t }, onChange);
+            }
+            ch.subscribe((status) => {
+                if (status === 'SUBSCRIBED') {
+                    if (window.__FS_DEBUG_SWR) console.log('[Realtime SWR] subscribed to', TABLES.join(', '));
+                }
+            });
+            this._realtimeChannel = ch;
+        } catch (e) {
+            console.warn('[Realtime SWR] failed to subscribe:', e);
+        }
+    }
+
+    _stopRealtimeSWR() {
+        if (this._realtimeChannel) {
+            try { window.supabase.removeChannel(this._realtimeChannel); } catch (_) {}
+            this._realtimeChannel = null;
+        }
+    }
+
+    // ── In-flight abort helpers ──────────────────────────────────────────
+    // Return the current AbortSignal so reads can chain .abortSignal(signal).
+    // Returns undefined if AbortController is unsupported (very old browsers),
+    // so the chain becomes a no-op rather than throwing.
+    _inflightSignal() {
+        return this._inflightController ? this._inflightController.signal : undefined;
+    }
+
+    // Public: abort every in-flight read tied to the current signal, then
+    // create a fresh controller for subsequent reads. Called from
+    // script.js navigateTo() at the START of a view switch — cancels stale
+    // reads so they don't land after the new view starts rendering.
+    // `reason` is optional and only used for debugging.
+    abortInflight(reason) {
+        try {
+            if (this._inflightController) {
+                this._inflightController.abort(reason || 'navigate');
+            }
+        } catch (_) {}
+        this._inflightController = (typeof AbortController === 'function') ? new AbortController() : null;
+    }
+
+    // True if err looks like an AbortError from any of: fetch, supabase-js,
+    // or our own abort() call. Different layers report the abort differently:
+    //   - native fetch:    err.name === 'AbortError'
+    //   - supabase-js v2:  err.message contains 'abort' or 'cancel'
+    //   - postgrest-js:    err.code === '20' or err.message includes 'aborted'
+    // Cheap, defensive — false positives are fine since the caller treats
+    // it as "view changed, drop silently".
+    _isAbortError(err) {
+        if (!err) return false;
+        if (err.name === 'AbortError') return true;
+        const msg = String(err.message || err.toString() || '').toLowerCase();
+        return msg.includes('abort') || msg.includes('cancel') || err.code === '20';
     }
 
     // ── Cache helpers ────────────────────────────────────────────────────
@@ -612,32 +809,47 @@ class DataStore {
     // Throws on error so the caller can fall back to a full fetch.
     async getAllSince(tableName, sinceISO) {
         const selectClause = this._selectClauseForGetAll(tableName);
-        let { data, error } = await this._readClient()
-            .from(tableName)
-            .select(selectClause)
-            .gt('updated_at', sinceISO);
-        // If the light-select column list is stale, retry with '*'
-        if (error && selectClause !== '*') {
-            ({ data, error } = await this._readClient()
-                .from(tableName)
-                .select('*')
-                .gt('updated_at', sinceISO));
+        const signal = this._inflightSignal();
+        try {
+            let q1 = this._readClient().from(tableName).select(selectClause).gt('updated_at', sinceISO);
+            if (signal && typeof q1.abortSignal === 'function') q1 = q1.abortSignal(signal);
+            let { data, error } = await q1;
+            // If the light-select column list is stale, retry with '*'
+            if (error && selectClause !== '*' && !this._isAbortError(error)) {
+                let q2 = this._readClient().from(tableName).select('*').gt('updated_at', sinceISO);
+                if (signal && typeof q2.abortSignal === 'function') q2 = q2.abortSignal(signal);
+                ({ data, error } = await q2);
+            }
+            if (error) {
+                if (this._isAbortError(error)) return [];  // view changed mid-fetch — drop silently
+                throw error;
+            }
+            return data || [];
+        } catch (e) {
+            if (this._isAbortError(e)) return [];
+            throw e;
         }
-        if (error) throw error;
-        return data || [];
     }
 
     async _getAllImpl(tableName) {
         const selectClause = this._selectClauseForGetAll(tableName);
+        const signal = this._inflightSignal();
         try {
             let data, error;
-            ({ data, error } = await this._readClient().from(tableName).select(selectClause));
+            let q1 = this._readClient().from(tableName).select(selectClause);
+            if (signal && typeof q1.abortSignal === 'function') q1 = q1.abortSignal(signal);
+            ({ data, error } = await q1);
+            // Abort: view changed mid-fetch — drop silently, don't poison cache.
+            if (this._isAbortError(error)) return [];
             // If the light-select column list is stale (e.g. a column was renamed
             // or dropped), PostgREST returns a 400. Fall back to '*' once so the
             // page still loads with the full row (including the heavy column).
             if (error && selectClause !== '*') {
                 console.warn(`Light select failed for ${tableName}, retrying with *:`, error.message);
-                ({ data, error } = await this._readClient().from(tableName).select('*'));
+                let q2 = this._readClient().from(tableName).select('*');
+                if (signal && typeof q2.abortSignal === 'function') q2 = q2.abortSignal(signal);
+                ({ data, error } = await q2);
+                if (this._isAbortError(error)) return [];
             }
             if (error) throw error;
             // Supabase caps getAll() implicitly at 1000 rows per request. When
@@ -705,6 +917,10 @@ class DataStore {
             // These are benign in this codebase (tables provisioned lazily), so don't log noisily,
             // don't bother retrying via direct REST, and memoize the miss so repeated getAll()
             // calls on the same cold cache don't all re-hit Supabase with the same 404.
+            // AbortError: navigateTo() cancelled this read because the user moved to a
+            // different view. Drop silently — caching [] would poison the next page
+            // load, and surfacing it as an error toast would be confusing.
+            if (this._isAbortError(e)) return [];
             const isMissingTable = e?.code === 'PGRST205'
                 || /schema cache|could not find the table|relation ".+" does not exist/i.test(e?.message || '');
             if (isMissingTable) {
