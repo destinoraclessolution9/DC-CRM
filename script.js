@@ -53690,103 +53690,166 @@ Gold-${totGold}`;
         const today = new Date().toISOString().slice(0, 10);
         const data = existing || {};
 
-        UI.showModal(`細解命盤 Personal Life Chart Analysis · ${_cfEscape(prospect.full_name || '')}`, `
-            <div class="cf-form">
+        // Bagua cells in 後天八卦 standard arrangement (matches paper):
+        //   xun (NW) | li (N) | kun (NE)
+        //   zhen (W) |        | dui (E)
+        //   gen (SW) | kan(S) | qian(SE)
+        const baguaPaper = (which, chartData) => {
+            const cells = [
+                { k: 'xun',  tg: '巽' }, { k: 'li',   tg: '離' }, { k: 'kun',  tg: '坤' },
+                { k: 'zhen', tg: '震' }, { k: 'center', tg: '' },  { k: 'dui',  tg: '兌' },
+                { k: 'gen',  tg: '艮' }, { k: 'kan',  tg: '坎' }, { k: 'qian', tg: '乾' }
+            ];
+            return `
+                <div>
+                    <div class="cf-bagua-lbl">${which === 'lunar' ? 'Lunar' : 'Solar'}</div>
+                    <div class="cf-bagua-cells">
+                        ${cells.map(c => `
+                            <div class="cf-bagua-cell">
+                                <span class="tg">${c.tg}</span>
+                                <textarea id="cf-cps-${which}-${c.k}">${_cfEscape((chartData && chartData[c.k]) || '')}</textarea>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>`;
+        };
+
+        UI.showModal(`細解命盤 · ${_cfEscape(prospect.full_name || '')}`, `
+            ${_cfPaperStyles()}
+            <div class="cf-paper" id="cf-cps-paper">
                 <input type="hidden" id="cf-cps-prospect-id" value="${prospect.id}">
                 <input type="hidden" id="cf-cps-id" value="${cpsId || ''}">
 
-                <div class="cf-grid">
-                    <div class="cf-field"><label>Date</label>
-                        <input type="date" id="cf-cps-date" value="${data.form_date || today}">
+                <div class="cf-paper-head">
+                    <div>
+                        <div class="cf-paper-title-en">PERSONAL LIFE CHART ANALYSIS</div>
+                        <div class="cf-paper-title-zh">細解命盤</div>
                     </div>
-                    <div class="cf-field"><label>SN <span class="zh">编号</span></label>
-                        <input type="text" id="cf-cps-sn" value="${_cfEscape(data.serial_number || '')}">
+                    <div class="cf-paper-brand">
+                        <span class="cf-brand-zh">天　命　定　數<sup>®</sup></span>
+                        <span class="cf-brand-en">DESTINY CODE</span>
                     </div>
                 </div>
 
-                <div class="cf-section-title">Customer Information <span class="zh">客户资料</span></div>
-                <div class="cf-grid">
-                    <div class="cf-field"><label>Customer Name <span class="zh">客戶姓名</span></label>
-                        <input type="text" id="cf-cps-name" value="${_cfEscape(data.customer_name || prospect.full_name || '')}">
+                <!-- Date / SN row (above the info box, like paper) -->
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:32px; margin-bottom:12px;">
+                    <div class="cf-info-row" style="border-bottom:none; grid-template-columns:80px 1fr;">
+                        <span class="cf-info-lbl"><strong>Date</strong></span>
+                        <input type="date" class="cf-paper-input" id="cf-cps-date" value="${data.form_date || today}">
                     </div>
-                    <div class="cf-field"><label>Customer Name (中文) <span class="zh">中文姓名</span></label>
-                        <input type="text" id="cf-cps-name-zh" value="${_cfEscape(data.customer_name_chinese || '')}">
+                    <div class="cf-info-row" style="border-bottom:none; grid-template-columns:80px 1fr;">
+                        <span class="cf-info-lbl"><strong>SN</strong></span>
+                        <input type="text" class="cf-paper-input" id="cf-cps-sn" value="${_cfEscape(data.serial_number || '')}" placeholder="…">
                     </div>
-                    <div class="cf-field"><label>Gender <span class="zh">性別</span></label>
-                        <div class="cf-radio-group">
-                            <label><input type="radio" name="cps_gender" value="female" ${data.gender === 'female' ? 'checked' : ''}> Female <span style="color:#7C3AED;">女</span></label>
-                            <label><input type="radio" name="cps_gender" value="male"   ${data.gender === 'male'   ? 'checked' : ''}> Male <span style="color:#7C3AED;">男</span></label>
+                </div>
+
+                <!-- Customer info bordered box, 2 columns x 5 rows like paper -->
+                <div class="cf-paper-info">
+                    <div class="cf-info-2col">
+                        <!-- Row 1 -->
+                        <div class="cf-info-row">
+                            <span class="cf-info-lbl">Customer Name<em>客戶姓名</em></span>
+                            <input type="text" class="cf-paper-input" id="cf-cps-name" value="${_cfEscape(data.customer_name || prospect.full_name || '')}" placeholder="(中文)">
                         </div>
-                    </div>
-                    <div class="cf-field"><label>Phone Number <span class="zh">手提號碼</span></label>
-                        <input type="tel" id="cf-cps-phone" value="${_cfEscape(data.phone || prospect.phone || '')}">
-                    </div>
-                    <div class="cf-field"><label>Birthdate (Solar) <span class="zh">陽曆生日</span></label>
-                        <input type="date" id="cf-cps-bd-solar" value="${data.birthdate_solar || prospect.date_of_birth || ''}">
-                    </div>
-                    <div class="cf-field"><label>Birthdate (Lunar) <span class="zh">農曆生日</span></label>
-                        <input type="date" id="cf-cps-bd-lunar" value="${data.birthdate_lunar || prospect.lunar_birth || ''}">
-                    </div>
-                    <div class="cf-field"><label>Current Occupation <span class="zh">目前職業</span></label>
-                        <input type="text" id="cf-cps-occupation" value="${_cfEscape(data.occupation || prospect.occupation || '')}">
-                    </div>
-                    <div class="cf-field"><label>Email <span class="zh">電郵</span></label>
-                        <input type="email" id="cf-cps-email" value="${_cfEscape(data.email || prospect.email || '')}">
-                    </div>
-                    <div class="cf-field"><label>Living Area <span class="zh">居住地區</span></label>
-                        <input type="text" id="cf-cps-area" value="${_cfEscape(data.living_area || prospect.city || '')}">
-                    </div>
-                    <div class="cf-field"><label>Introducer <span class="zh">介紹人</span></label>
-                        <input type="text" id="cf-cps-introducer" value="${_cfEscape(data.introducer || prospect.referred_by || '')}">
-                    </div>
-                    <div class="cf-field"><label>Marital Status <span class="zh">婚姻狀況</span></label>
-                        <div class="cf-radio-group">
-                            <label><input type="radio" name="cps_marital" value="single"  ${data.marital_status === 'single'  ? 'checked' : ''}> Single</label>
-                            <label><input type="radio" name="cps_marital" value="married" ${data.marital_status === 'married' ? 'checked' : ''}> Married</label>
-                            <label><input type="radio" name="cps_marital" value="others"  ${data.marital_status === 'others'  ? 'checked' : ''}> Others</label>
-                        </div>
-                    </div>
-                    <div class="cf-field"><label>Dealer Name <span class="zh">代理姓名</span></label>
-                        <select id="cf-cps-dealer"><option value="">--</option>${dealerOpts}</select>
-                    </div>
-                </div>
-
-                <div class="cf-section-title">Bagua Chart <span class="zh">八卦盤 · 手动填入</span></div>
-                <div class="cf-bagua-wrap">
-                    ${_cfBaguaHtml('lunar', data.lunar_chart || {})}
-                    ${_cfBaguaHtml('solar', data.solar_chart || {})}
-                </div>
-
-                <div class="cf-section-title">Notes <span class="zh">备注</span></div>
-                <div class="cf-field">
-                    <textarea id="cf-cps-notes" rows="5" placeholder="Analysis notes…">${_cfEscape(data.notes || '')}</textarea>
-                </div>
-
-                <div class="cf-section-title">For Office Use <span class="zh">办公室专用</span></div>
-                <div class="cf-grid">
-                    <div class="cf-field"><label>Dealer's Signature <span class="zh">代理签名</span></label>
-                        <div class="cf-sig-wrap">
-                            <canvas id="cf-cps-sig-dealer" class="cf-sig-canvas" data-preload="${data.dealer_signature_data_url || ''}"></canvas>
-                            <div class="cf-sig-actions">
-                                <input type="text" id="cf-cps-dealer-name" placeholder="Name" value="${_cfEscape(data.dealer_signed_name || '')}" style="flex:1; margin-right:8px; padding:5px 8px; border:1px solid #D1D5DB; border-radius:5px; font-size:12px;">
-                                <button type="button" class="cf-btn" onclick="app.cfClearSignature('cf-cps-sig-dealer')"><i class="fas fa-eraser"></i> Clear</button>
+                        <div class="cf-info-row">
+                            <span class="cf-info-lbl">Gender<em>性別</em></span>
+                            <div class="cf-cb-row">
+                                <label class="cf-cb"><input type="radio" name="cps_gender" value="female" ${data.gender === 'female' ? 'checked' : ''}><span class="cf-cb-txt">女 <span class="cf-cb-en">Female</span></span></label>
+                                <label class="cf-cb"><input type="radio" name="cps_gender" value="male" ${data.gender === 'male' ? 'checked' : ''}><span class="cf-cb-txt">男 <span class="cf-cb-en">Male</span></span></label>
                             </div>
                         </div>
-                    </div>
-                    <div class="cf-field"><label>CPS by <span class="zh">CPS 操作员</span></label>
-                        <select id="cf-cps-by"><option value="">--</option>${cpsByOpts}</select>
-                        <div class="cf-sig-wrap" style="margin-top:6px;">
-                            <canvas id="cf-cps-sig-cps" class="cf-sig-canvas" data-preload="${data.cps_signature_data_url || ''}"></canvas>
-                            <div class="cf-sig-actions">
-                                <input type="text" id="cf-cps-by-name" placeholder="Name" value="${_cfEscape(data.cps_signed_name || '')}" style="flex:1; margin-right:8px; padding:5px 8px; border:1px solid #D1D5DB; border-radius:5px; font-size:12px;">
-                                <button type="button" class="cf-btn" onclick="app.cfClearSignature('cf-cps-sig-cps')"><i class="fas fa-eraser"></i> Clear</button>
+                        <!-- Row 2 -->
+                        <div class="cf-info-row">
+                            <span class="cf-info-lbl">Birthdate<em>生日日期</em></span>
+                            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                                <span style="font-size:11px;color:#6b7280;">(Solar 陽曆)</span>
+                                <input type="date" class="cf-paper-input" id="cf-cps-bd-solar" value="${data.birthdate_solar || prospect.date_of_birth || ''}" style="flex:1; min-width:120px;">
                             </div>
+                        </div>
+                        <div class="cf-info-row">
+                            <span class="cf-info-lbl">Phone Number<em>手提號碼</em></span>
+                            <input type="tel" class="cf-paper-input" id="cf-cps-phone" value="${_cfEscape(data.phone || prospect.phone || '')}">
+                        </div>
+                        <div class="cf-info-row" style="grid-column:1 / -1; grid-template-columns:130px 1fr;">
+                            <span class="cf-info-lbl"><em>(Lunar 農曆)</em></span>
+                            <input type="date" class="cf-paper-input" id="cf-cps-bd-lunar" value="${data.birthdate_lunar || prospect.lunar_birth || ''}" style="max-width:220px;">
+                        </div>
+                        <!-- Row 3 -->
+                        <div class="cf-info-row">
+                            <span class="cf-info-lbl">Current Occupation<em>目前職業</em></span>
+                            <input type="text" class="cf-paper-input" id="cf-cps-occupation" value="${_cfEscape(data.occupation || prospect.occupation || '')}">
+                        </div>
+                        <div class="cf-info-row">
+                            <span class="cf-info-lbl">Email<em>電郵</em></span>
+                            <input type="email" class="cf-paper-input" id="cf-cps-email" value="${_cfEscape(data.email || prospect.email || '')}">
+                        </div>
+                        <!-- Row 4 -->
+                        <div class="cf-info-row">
+                            <span class="cf-info-lbl">Living Area<em>居住地區</em></span>
+                            <input type="text" class="cf-paper-input" id="cf-cps-area" value="${_cfEscape(data.living_area || prospect.city || '')}">
+                        </div>
+                        <div class="cf-info-row">
+                            <span class="cf-info-lbl">Introducer<em>介紹人</em></span>
+                            <input type="text" class="cf-paper-input" id="cf-cps-introducer" value="${_cfEscape(data.introducer || prospect.referred_by || '')}">
+                        </div>
+                        <!-- Row 5 -->
+                        <div class="cf-info-row">
+                            <span class="cf-info-lbl">Marital Status<em>婚姻狀況</em></span>
+                            <div class="cf-cb-row">
+                                <label class="cf-cb"><input type="radio" name="cps_marital" value="single"  ${data.marital_status === 'single'  ? 'checked' : ''}><span class="cf-cb-txt">Single</span></label>
+                                <label class="cf-cb"><input type="radio" name="cps_marital" value="married" ${data.marital_status === 'married' ? 'checked' : ''}><span class="cf-cb-txt">Married</span></label>
+                                <label class="cf-cb"><input type="radio" name="cps_marital" value="others"  ${data.marital_status === 'others'  ? 'checked' : ''}><span class="cf-cb-txt">Others</span></label>
+                            </div>
+                        </div>
+                        <div class="cf-info-row">
+                            <span class="cf-info-lbl">Dealer Name<em>代理姓名</em></span>
+                            <select class="cf-paper-input" id="cf-cps-dealer"><option value="">—</option>${dealerOpts}</select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Bagua: Lunar | Solar -->
+                <div class="cf-bagua-box">
+                    <div class="cf-bagua-2col">
+                        ${baguaPaper('lunar', data.lunar_chart || {})}
+                        ${baguaPaper('solar', data.solar_chart || {})}
+                    </div>
+                </div>
+
+                <!-- 6 horizontal notes lines (combined into one textarea backing) -->
+                <textarea id="cf-cps-notes" style="width:100%; min-height:160px; border:1px solid #6b7280; padding:6px 8px; font-family:inherit; font-size:12.5px; line-height:26px; background:repeating-linear-gradient(transparent, transparent 25px, #6b7280 25px, #6b7280 26px);">${_cfEscape(data.notes || '')}</textarea>
+
+                <!-- FOR OFFICE USE black banner + 2 signature blocks -->
+                <div class="cf-office-banner">FOR OFFICE USE</div>
+                <div class="cf-office-row">
+                    <div>
+                        <div class="cf-office-sig-line">
+                            <canvas id="cf-cps-sig-dealer" data-preload="${data.dealer_signature_data_url || ''}"></canvas>
+                        </div>
+                        <div class="cf-office-sig-cap">
+                            <strong>Dealer's Signature</strong>
+                            <div class="ndate"><span>Name</span><input type="text" id="cf-cps-dealer-name" value="${_cfEscape(data.dealer_signed_name || '')}"></div>
+                            <div class="ndate"><span>Date</span><input type="date" id="cf-cps-dealer-date" value="${data.dealer_signed_at ? data.dealer_signed_at.slice(0,10) : today}"></div>
+                            <button type="button" class="cf-mini-btn cf-no-print" style="margin-top:4px;" onclick="app.cfClearSignature('cf-cps-sig-dealer')">Clear signature</button>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="cf-office-sig-line">
+                            <canvas id="cf-cps-sig-cps" data-preload="${data.cps_signature_data_url || ''}"></canvas>
+                        </div>
+                        <div class="cf-office-sig-cap">
+                            <strong>CPS by</strong>
+                            <div class="ndate"><span>Name</span><select id="cf-cps-by"><option value="">—</option>${cpsByOpts}</select></div>
+                            <div class="ndate"><span></span><input type="text" id="cf-cps-by-name" value="${_cfEscape(data.cps_signed_name || '')}" placeholder="or write name"></div>
+                            <div class="ndate"><span>Date</span><input type="date" id="cf-cps-by-date" value="${data.cps_signed_at ? data.cps_signed_at.slice(0,10) : today}"></div>
+                            <button type="button" class="cf-mini-btn cf-no-print" style="margin-top:4px;" onclick="app.cfClearSignature('cf-cps-sig-cps')">Clear signature</button>
                         </div>
                     </div>
                 </div>
             </div>
         `, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Print', type: 'secondary', action: 'window.print()' },
             { label: 'Save CPS', type: 'primary', action: '(async () => { await app.saveCpsAnalysis(); })()' }
         ]);
 
@@ -53902,108 +53965,150 @@ Gold-${totGold}`;
             const r = refs[i] || {};
             return `
                 <tr>
-                    <td data-label="No.">${i + 1}</td>
-                    <td data-label="Name 姓名"><input type="text" id="cf-apu-ref-name-${i}" value="${_cfEscape(r.name || '')}"></td>
-                    <td data-label="NRIC 身份證"><input type="text" id="cf-apu-ref-nric-${i}" value="${_cfEscape(r.nric || '')}"></td>
-                    <td data-label="Contact 電話"><input type="tel" id="cf-apu-ref-contact-${i}" value="${_cfEscape(r.contact || '')}"></td>
-                    <td data-label="Occupation 職業"><input type="text" id="cf-apu-ref-occ-${i}" value="${_cfEscape(r.occupation || '')}"></td>
+                    <td data-label="NO.">${i + 1}.</td>
+                    <td data-label="姓名 / NAME"><input type="text" id="cf-apu-ref-name-${i}" value="${_cfEscape(r.name || '')}"></td>
+                    <td data-label="身份證 / NRIC"><input type="text" id="cf-apu-ref-nric-${i}" value="${_cfEscape(r.nric || '')}"></td>
+                    <td data-label="電話 / CONTACT"><input type="tel" id="cf-apu-ref-contact-${i}" value="${_cfEscape(r.contact || '')}"></td>
+                    <td data-label="職業 / OCCUPATION"><input type="text" id="cf-apu-ref-occ-${i}" value="${_cfEscape(r.occupation || '')}"></td>
                 </tr>
             `;
         };
 
-        UI.showModal(`APU Appraisal Form · ${_cfEscape(prospect.full_name || '')}`, `
-            <div class="cf-form">
+        // Paper-style Likert: 5 stacked checkboxes side-by-side with zh on top, en italicized below
+        const likertPaper = (name, currentVal, options) => `
+            <div class="cf-apu-likert">
+                ${options.map(o => `
+                    <label class="cf-cb cf-cb-stack">
+                        <input type="radio" name="${name}" value="${o.v}" ${currentVal === o.v ? 'checked' : ''}>
+                        <span class="cf-cb-txt">${o.zh}<br><span class="cf-cb-en">${o.en}</span></span>
+                    </label>
+                `).join('')}
+            </div>
+        `;
+
+        UI.showModal(`DC APPRAISAL FORM · ${_cfEscape(prospect.full_name || '')}`, `
+            ${_cfPaperStyles()}
+            <div class="cf-paper" id="cf-apu-paper">
                 <input type="hidden" id="cf-apu-prospect-id" value="${prospect.id}">
                 <input type="hidden" id="cf-apu-id" value="${apuId || ''}">
 
-                <div class="cf-grid">
-                    <div class="cf-field"><label>Date</label>
-                        <input type="date" id="cf-apu-date" value="${data.appraisal_date || today}">
+                <div class="cf-paper-head">
+                    <div>
+                        <div class="cf-paper-title-zh">DC 個人風水之析運論勢 <span style="color:#9ca3af;">|</span> 評估表</div>
+                        <div class="cf-paper-title-en" style="font-size:14px; margin-top:4px; color:#374151;">DC PERSONAL CHART ANALYSIS <span style="color:#9ca3af;">|</span> APPRAISAL FORM</div>
                     </div>
-                    <div class="cf-field"><label>Consultant</label>
-                        <select id="cf-apu-consultant"><option value="">--</option>${consultantOpts}</select>
-                    </div>
-                    <div class="cf-field"><label>Dealer / EA</label>
-                        <select id="cf-apu-dealer"><option value="">--</option>${dealerOpts}</select>
-                    </div>
-                    <div class="cf-field"><label>ID</label>
-                        <input type="text" id="cf-apu-cust-id" value="${_cfEscape(data.customer_identifier || '')}">
-                    </div>
-                    <div class="cf-field"><label>傳福者 <span class="zh">Referrer</span></label>
-                        <input type="text" id="cf-apu-referrer" value="${_cfEscape(data.referrer || prospect.referred_by || '')}">
+                    <div class="cf-paper-brand">
+                        <span class="cf-brand-zh">天　命　定　數<sup>®</sup></span>
+                        <span class="cf-brand-en">DESTINY CODE</span>
                     </div>
                 </div>
 
-                <div class="cf-section-title">Appraisal Questions <span class="zh">评估问题</span></div>
-
-                <div class="cf-field"><label>1) 您所得到的個人風水解盤服務,您覺得: <span class="zh">Rate the personal chart analysis service</span></label>
-                    ${_cfLikertHtml('q1_service_rating', data.q1_service_rating, satOpts)}
-                    <input type="text" id="cf-apu-q1-reason" placeholder="原因 Reason…" value="${_cfEscape(data.q1_reason || '')}" style="margin-top:6px;">
-                </div>
-
-                <div class="cf-field"><label>2) 您對這位風水顧問的解盤能力及其他表現,您認為: <span class="zh">Rate the Consultant's ability & performance</span></label>
-                    ${_cfLikertHtml('q2_consultant_rating', data.q2_consultant_rating, satOpts)}
-                    <input type="text" id="cf-apu-q2-reason" placeholder="原因 Reason…" value="${_cfEscape(data.q2_reason || '')}" style="margin-top:6px;">
-                </div>
-
-                <div class="cf-field"><label>3) 您對整個解盤的安排與流程,是否感到: <span class="zh">Satisfaction on arrangement & flow</span></label>
-                    ${_cfLikertHtml('q3_arrangement_rating', data.q3_arrangement_rating, satOpts)}
-                    <input type="text" id="cf-apu-q3-reason" placeholder="原因 Reason…" value="${_cfEscape(data.q3_reason || '')}" style="margin-top:6px;">
-                </div>
-
-                <div class="cf-field"><label>4) 雖然這是DC送予的免費解盤,您認為本服務給您的收獲為: <span class="zh">How do you rate the result?</span></label>
-                    ${_cfLikertHtml('q4_value_rating', data.q4_value_rating, valueOpts)}
-                    <input type="text" id="cf-apu-q4-reason" placeholder="原因 Reason…" value="${_cfEscape(data.q4_reason || '')}" style="margin-top:6px;">
-                </div>
-
-                <div class="cf-field"><label>5) 您對這位風水顧問有何評價? <span class="zh">Knowledge, sharing & responsiveness</span></label>
-                    ${_cfLikertHtml('q5_knowledge_rating', data.q5_knowledge_rating, knowOpts)}
-                    <input type="text" id="cf-apu-q5-reason" placeholder="原因 Reason…" value="${_cfEscape(data.q5_reason || '')}" style="margin-top:6px;">
-                </div>
-
-                <div class="cf-field"><label>6) 您是否知道,必須有人推薦,方可免費得到DC個人風水高價值解盤服務? <span class="zh">Aware this service is by referral only?</span></label>
-                    <div class="cf-radio-group">
-                        <label><input type="radio" name="q6_aware_referral" value="true"  ${data.q6_aware_referral === true ? 'checked' : ''}> Yes <span style="color:#7C3AED;">知道</span></label>
-                        <label><input type="radio" name="q6_aware_referral" value="false" ${data.q6_aware_referral === false ? 'checked' : ''}> No <span style="color:#7C3AED;">不知道</span></label>
+                <!-- Header info: DATE / CONSULTANT then DEALER/EA / ID / 傳福者 -->
+                <div class="cf-paper-info">
+                    <div class="cf-info-2col">
+                        <div class="cf-info-row">
+                            <span class="cf-info-lbl"><strong>DATE</strong></span>
+                            <input type="date" class="cf-paper-input" id="cf-apu-date" value="${data.appraisal_date || today}">
+                        </div>
+                        <div class="cf-info-row">
+                            <span class="cf-info-lbl"><strong>CONSULTANT</strong></span>
+                            <select class="cf-paper-input" id="cf-apu-consultant"><option value="">—</option>${consultantOpts}</select>
+                        </div>
                     </div>
-                    <input type="text" id="cf-apu-q6-reason" placeholder="原因 Reason…" value="${_cfEscape(data.q6_reason || '')}" style="margin-top:6px;">
+                    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-top:6px;">
+                        <div class="cf-info-row" style="grid-template-columns:90px 1fr; border-bottom:none;">
+                            <span class="cf-info-lbl"><strong>DEALER / EA</strong></span>
+                            <select class="cf-paper-input" id="cf-apu-dealer"><option value="">—</option>${dealerOpts}</select>
+                        </div>
+                        <div class="cf-info-row" style="grid-template-columns:30px 1fr; border-bottom:none;">
+                            <span class="cf-info-lbl"><strong>ID</strong></span>
+                            <input type="text" class="cf-paper-input" id="cf-apu-cust-id" value="${_cfEscape(data.customer_identifier || '')}">
+                        </div>
+                        <div class="cf-info-row" style="grid-template-columns:70px 1fr; border-bottom:none;">
+                            <span class="cf-info-lbl"><strong>傳福者</strong></span>
+                            <input type="text" class="cf-paper-input" id="cf-apu-referrer" value="${_cfEscape(data.referrer || prospect.referred_by || '')}">
+                        </div>
+                    </div>
                 </div>
 
-                <div class="cf-section-title">7) Recommend 3 friends/relatives <span class="zh">推薦三位親友</span></div>
-                <div style="overflow-x:auto;">
-                    <table class="cf-ref-table">
-                        <thead><tr><th>No.</th><th>姓名 / Name</th><th>身份證 / NRIC</th><th>電話 / Contact</th><th>職業 / Occupation</th></tr></thead>
-                        <tbody>${[0, 1, 2].map(refRow).join('')}</tbody>
+                <!-- 7 questions -->
+                <div class="cf-apu-q">
+                    <div class="cf-q-line"><span class="cf-q-n">1)</span> 您所得到的個人風水解盤服務,您覺得︰<br><em style="font-size:11px;color:#6b7280;">How do you rate the personal chart analysis service received:</em></div>
+                    ${likertPaper('q1_service_rating', data.q1_service_rating, satOpts)}
+                    <div class="cf-apu-reason"><span class="lbl">原因 Reason :</span><input type="text" id="cf-apu-q1-reason" class="cf-line-input" value="${_cfEscape(data.q1_reason || '')}"></div>
+                </div>
+
+                <div class="cf-apu-q">
+                    <div class="cf-q-line"><span class="cf-q-n">2)</span> 您對這位風水顧問的解盤能力及其他表現,您認為︰<br><em style="font-size:11px;color:#6b7280;">Please rate your opinion on the chart analysis ability and overall performance of the Consultant:</em></div>
+                    ${likertPaper('q2_consultant_rating', data.q2_consultant_rating, satOpts)}
+                    <div class="cf-apu-reason"><span class="lbl">原因 Reason :</span><input type="text" id="cf-apu-q2-reason" class="cf-line-input" value="${_cfEscape(data.q2_reason || '')}"></div>
+                </div>
+
+                <div class="cf-apu-q">
+                    <div class="cf-q-line"><span class="cf-q-n">3)</span> 您對整個解盤的安排與流程,是否感到︰<br><em style="font-size:11px;color:#6b7280;">Please indicate your level of satisfaction on the arrangement and flow of the chart analysis:</em></div>
+                    ${likertPaper('q3_arrangement_rating', data.q3_arrangement_rating, satOpts)}
+                    <div class="cf-apu-reason"><span class="lbl">原因 Reason :</span><input type="text" id="cf-apu-q3-reason" class="cf-line-input" value="${_cfEscape(data.q3_reason || '')}"></div>
+                </div>
+
+                <div class="cf-apu-q">
+                    <div class="cf-q-line"><span class="cf-q-n">4)</span> 雖然這是DC送予的免費個人風水解盤,您認為本服務給您的收獲為︰<br><em style="font-size:11px;color:#6b7280;">This is a complimentary chart analysis service provided by DC, how do you rate the result of the analysis:</em></div>
+                    ${likertPaper('q4_value_rating', data.q4_value_rating, valueOpts)}
+                    <div class="cf-apu-reason"><span class="lbl">原因 Reason :</span><input type="text" id="cf-apu-q4-reason" class="cf-line-input" value="${_cfEscape(data.q4_reason || '')}"></div>
+                </div>
+
+                <div class="cf-apu-q">
+                    <div class="cf-q-line"><span class="cf-q-n">5)</span> 您對這位風水顧問有何評價? 包括其對風水知識的理解、分享及解答疑問。<br><em style="font-size:11px;color:#6b7280;">How do you rate the Consultant? Including His/Her knowledge and understanding of Fengshui and responsiveness?</em></div>
+                    ${likertPaper('q5_knowledge_rating', data.q5_knowledge_rating, knowOpts)}
+                    <div class="cf-apu-reason"><span class="lbl">原因 Reason :</span><input type="text" id="cf-apu-q5-reason" class="cf-line-input" value="${_cfEscape(data.q5_reason || '')}"></div>
+                </div>
+
+                <div class="cf-apu-q">
+                    <div class="cf-q-line"><span class="cf-q-n">6)</span> 您是否知道,必須有人推薦,方可免費得到DC個人風水高價值解盤服務?<br><em style="font-size:11px;color:#6b7280;">Are you aware that complementary DC Personal Chart Analysis service will only be accorded by referral?</em></div>
+                    <div class="cf-cb-row" style="margin-top:4px;">
+                        <label class="cf-cb cf-cb-stack" style="min-width:60px;"><input type="radio" name="q6_aware_referral" value="true" ${data.q6_aware_referral === true ? 'checked' : ''}><span class="cf-cb-txt">知道<br><span class="cf-cb-en">Yes</span></span></label>
+                        <label class="cf-cb cf-cb-stack" style="min-width:60px;"><input type="radio" name="q6_aware_referral" value="false" ${data.q6_aware_referral === false ? 'checked' : ''}><span class="cf-cb-txt">不知道<br><span class="cf-cb-en">No</span></span></label>
+                        <div class="cf-apu-reason" style="flex:1; margin-top:0;"><span class="lbl">原因 Reason :</span><input type="text" id="cf-apu-q6-reason" class="cf-line-input" value="${_cfEscape(data.q6_reason || '')}"></div>
+                    </div>
+                </div>
+
+                <div class="cf-apu-q">
+                    <div class="cf-q-line"><span class="cf-q-n">7)</span> 若您認同DC個人風水解盤服務物有所值,您最想推薦哪三位親友得到此高價值服務?<br><em style="font-size:11px;color:#6b7280;">Whom are the three relatives/friends that you would strongly recommend to receive this high value DC Personal Chart Analysis service?</em></div>
+                    <table class="cf-apu-ref">
+                        <thead>
+                            <tr>
+                                <th style="width:38px;">NO.</th>
+                                <th>姓名 / NAME</th>
+                                <th>身份證 / NRIC</th>
+                                <th>電話 / CONTACT</th>
+                                <th>職業 / OCCUPATION</th>
+                            </tr>
+                        </thead>
+                        <tbody>${[0,1,2].map(refRow).join('')}</tbody>
                     </table>
                 </div>
 
-                <div class="cf-section-title">Signatures <span class="zh">签名</span></div>
-                <div class="cf-grid-3">
-                    <div class="cf-field"><label>DC Customer</label>
-                        <canvas id="cf-apu-sig-cust" class="cf-sig-canvas" data-preload="${data.customer_signature_data_url || ''}"></canvas>
-                        <div class="cf-sig-actions">
-                            <small>Customer signs here</small>
-                            <button type="button" class="cf-btn" onclick="app.cfClearSignature('cf-apu-sig-cust')"><i class="fas fa-eraser"></i></button>
-                        </div>
+                <!-- 3 signatures -->
+                <div class="cf-sig-3">
+                    <div class="cf-paper-sig-block">
+                        <canvas id="cf-apu-sig-cust" class="cf-paper-sig-canvas" data-preload="${data.customer_signature_data_url || ''}"></canvas>
+                        <div class="cf-paper-sig-cap"><strong>Signature</strong><br>DC CUSTOMER</div>
+                        <button type="button" class="cf-mini-btn cf-no-print" onclick="app.cfClearSignature('cf-apu-sig-cust')">Clear</button>
                     </div>
-                    <div class="cf-field"><label>DC APU</label>
-                        <canvas id="cf-apu-sig-apu" class="cf-sig-canvas" data-preload="${data.apu_signature_data_url || ''}"></canvas>
-                        <div class="cf-sig-actions">
-                            <small>APU signs here</small>
-                            <button type="button" class="cf-btn" onclick="app.cfClearSignature('cf-apu-sig-apu')"><i class="fas fa-eraser"></i></button>
-                        </div>
+                    <div class="cf-paper-sig-block">
+                        <canvas id="cf-apu-sig-apu" class="cf-paper-sig-canvas" data-preload="${data.apu_signature_data_url || ''}"></canvas>
+                        <div class="cf-paper-sig-cap"><strong>Signature</strong><br>DC APU</div>
+                        <button type="button" class="cf-mini-btn cf-no-print" onclick="app.cfClearSignature('cf-apu-sig-apu')">Clear</button>
                     </div>
-                    <div class="cf-field"><label>Head of DC APU</label>
-                        <canvas id="cf-apu-sig-head" class="cf-sig-canvas" data-preload="${data.head_apu_signature_data_url || ''}"></canvas>
-                        <div class="cf-sig-actions">
-                            <small>Head signs here</small>
-                            <button type="button" class="cf-btn" onclick="app.cfClearSignature('cf-apu-sig-head')"><i class="fas fa-eraser"></i></button>
-                        </div>
+                    <div class="cf-paper-sig-block">
+                        <canvas id="cf-apu-sig-head" class="cf-paper-sig-canvas" data-preload="${data.head_apu_signature_data_url || ''}"></canvas>
+                        <div class="cf-paper-sig-cap"><strong>Signature</strong><br>HEAD OF DC APU</div>
+                        <button type="button" class="cf-mini-btn cf-no-print" onclick="app.cfClearSignature('cf-apu-sig-head')">Clear</button>
                     </div>
                 </div>
             </div>
         `, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Print', type: 'secondary', action: 'window.print()' },
             { label: 'Save APU', type: 'primary', action: '(async () => { await app.saveApuAppraisal(); })()' }
         ]);
 
