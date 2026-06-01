@@ -9,19 +9,33 @@
 // Auth dashboard if desired) is auto-rotated each time getUser/getSession
 // is called.
 window.SUPABASE_URL = 'https://remuwhxvzkzjtgbzqjaa.supabase.co';
-window._supabaseFactory = window.supabase;
-window.supabase = window.supabase.createClient(
-    window.SUPABASE_URL,
-    'sb_publishable_XVWyiw5j1lnEErQUTV4XWg_lQcCIAjX',
-    {
-        auth: {
-            persistSession: true,
-            autoRefreshToken: true,
-            detectSessionInUrl: true,
-            storage: window.localStorage,
-            // Stable namespaced key — survives Phase D service-worker cache clears.
-            storageKey: 'fs-crm-auth-v1',
-            flowType: 'pkce'
+
+// Guard against the supabase-js library failing to load (CDN block, weak signal,
+// service-worker cache miss). Without this guard the next line crashed with
+// "Cannot read properties of undefined (reading 'createClient')" and left
+// window.supabase undefined — every later Auth.login call then threw
+// "Cannot read properties of undefined (reading 'auth')". The library is now
+// self-hosted (libs/supabase-js-*.min.js) so this should never fire, but the
+// flag is the last line of defense so the login screen can show a clear
+// "refresh the page" message instead of leaking the cryptic internal error.
+if (typeof window.supabase === 'undefined' || typeof window.supabase.createClient !== 'function') {
+    window._SUPABASE_LIB_FAILED = true;
+    console.error('[supabase-init] supabase-js library did not load. Check libs/supabase-js-*.min.js is reachable.');
+} else {
+    window._supabaseFactory = window.supabase;
+    window.supabase = window.supabase.createClient(
+        window.SUPABASE_URL,
+        'sb_publishable_XVWyiw5j1lnEErQUTV4XWg_lQcCIAjX',
+        {
+            auth: {
+                persistSession: true,
+                autoRefreshToken: true,
+                detectSessionInUrl: true,
+                storage: window.localStorage,
+                // Stable namespaced key — survives Phase D service-worker cache clears.
+                storageKey: 'fs-crm-auth-v1',
+                flowType: 'pkce'
+            }
         }
-    }
-);
+    );
+}

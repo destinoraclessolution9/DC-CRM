@@ -8916,6 +8916,25 @@ function _wireLoginBtn() {
         emailEl?.removeAttribute('aria-invalid');
         passwordEl?.removeAttribute('aria-invalid');
 
+        // Fail fast if the supabase-js library never finished loading. Without
+        // this check, Auth.login() would throw "Cannot read properties of
+        // undefined (reading 'auth')" — meaningless to the user. Now the
+        // login screen tells them exactly what to do.
+        if (window._SUPABASE_LIB_FAILED || !window.supabase || typeof window.supabase.auth === 'undefined') {
+            const errEl = passwordErrEl || emailErrEl;
+            const msg = 'Page didn’t finish loading. Please pull-to-refresh (or close and reopen the tab) and try again. If it keeps failing, switch between WiFi and mobile data, or disable any ad-blocker / VPN apps.';
+            if (errEl) {
+                errEl.textContent = msg;
+                errEl.style.display = 'block';
+                errEl.setAttribute('role', 'alert');
+            } else if (window.UI?.toast?.error) {
+                UI.toast.error(msg);
+            } else {
+                alert(msg);
+            }
+            return;
+        }
+
         let hasError = false;
         if (!email) {
             if (emailErrEl) { emailErrEl.textContent = 'Email is required.'; emailErrEl.style.display = 'block'; }
