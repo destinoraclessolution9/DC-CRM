@@ -9875,6 +9875,7 @@ input:checked+.slider:before {
     aspect-ratio: 9 / 16.5;
     background-image: url('assets/milestone-scroll-bg.jpg'); /* fallback */
     background-image: image-set(
+        url('assets/milestone-scroll-bg.avif') type('image/avif'),
         url('assets/milestone-scroll-bg.webp') type('image/webp'),
         url('assets/milestone-scroll-bg.jpg') type('image/jpeg')
     );

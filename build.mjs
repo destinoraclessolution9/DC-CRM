@@ -36,6 +36,12 @@ const JS_TARGETS = [
   'chunks/script-boss-report.js',
   'chunks/script-stock-take.js',
   'chunks/script-knowledge.js',
+  // Phase-i role-gated chunks
+  'chunks/script-formula.js',
+  'chunks/script-marketing.js',
+  'chunks/script-reporting.js',
+  'chunks/script-cases.js',
+  'chunks/script-referrals.js',
 ];
 
 const CSS_TARGETS = [
