@@ -3,6 +3,15 @@
 
 <head>
     <meta charset="UTF-8">
+    <!-- www→apex defense: the vercel.json 308 redirect can be skipped when
+         Vercel's edge has root HTML cached separately for the www subdomain
+         (cache predates the redirect rule). When that happens, the cached
+         HTML serves at www but every sub-resource 308-redirects to apex —
+         which is cross-origin → CSP 'self' blocks everything + SW refuses to
+         register (no redirects allowed for SW). This inline redirect runs
+         before ANY other tag is parsed, so the user lands on apex with no
+         requests fired from the wrong origin. -->
+    <script>if(location.host.indexOf('www.')===0){location.replace(location.protocol+'//'+location.host.slice(4)+location.pathname+location.search+location.hash);}</script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta http-equiv="X-Content-Type-Options" content="nosniff">
     <meta name="referrer" content="strict-origin-when-cross-origin">
