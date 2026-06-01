@@ -140,6 +140,10 @@ body {
     flex-direction: column;
     align-items: stretch;
     padding: 0;
+    /* Perf: tell browser the sidebar's layout can't affect the rest of
+       the page — fixed width, isolated DOM, no overflow. Skips reflow on
+       sibling content changes. */
+    contain: layout;
 }
 
 .search-trigger {
@@ -323,6 +327,9 @@ body {
     flex: 1;
     min-height: 0;
     margin-bottom: 16px;
+    /* Perf: already overflow:auto so paint containment is safe — clips
+       painting to the box, lets the compositor skip when scrolling. */
+    contain: layout paint;
 }
 
 .modal-header {
@@ -421,7 +428,12 @@ body {
     gap: 8px;
 }
 
+/* Toast container is fixed-positioned and animation effects (slide+fade)
+   stay within the toast bounds. Layout containment skips reflow ripple
+   when toasts appear/dismiss. Avoid paint containment — shadow extends
+   slightly outside the box. */
 .toast {
+    contain: layout;
     background: var(--white);
     padding: 12px 20px;
     border-radius: 8px;
