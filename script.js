@@ -401,6 +401,11 @@ const appLogic = (() => {
     let _currentView = 'dashboard';
     let _currentUser = null;
     let _currentMarketingTab = 'templates'; // Phase 12: 'templates', 'campaigns', 'analytics'
+    // _currentMarketingListTab moved here from the (now-chunked) Marketing Lists
+    // section so script.js's bare assignments at ~21900/33950/35850 stay valid
+    // rather than silently creating an implicit window global. The marketing
+    // chunk reads/writes it via window._appState.cmlt (see below).
+    let _currentMarketingListTab = 'products'; // 'products', 'events', 'promotions', 'venues'
     let _selectedEntity = null;
     let _selectedAttendees = [];
     let _selectedCoAgents = [];
@@ -667,6 +672,9 @@ const appLogic = (() => {
         _visibleUserIdsCache.set(key, { data: result, ts: Date.now() });
         return result;
     };
+    // Exposed for the reporting + referrals chunks (both need the same
+    // role-scoped visible user list).
+    Object.assign(window._crmUtils, { getVisibleUserIds: (u) => getVisibleUserIds(u) });
 
     // Race a promise against a timeout. On timeout returns the fallback so
     // a slow Supabase call never leaves a view stuck on a skeleton loader.
@@ -8683,6 +8691,8 @@ In a production system, this would show the actual file contents.
         "改命客户",
         "准传福大使"
     ];
+    // Exposed for the reporting chunk's role-filter dropdown.
+    Object.assign(window._crmUtils, { USER_ROLES });
 
 
 
@@ -21344,6 +21354,12 @@ function _wireLoginBtn() {
         set cp(v) { _customerPage = v; },
         get cv() { return _currentView; },
         set cv(v) { _currentView = v; },
+        // Marketing tab state — chunked marketing module mutates these through
+        // the getter/setter so script.js's local `let` stays authoritative.
+        get cmt()  { return _currentMarketingTab; },
+        set cmt(v) { _currentMarketingTab = v; },
+        get cmlt() { return _currentMarketingListTab; },
+        set cmlt(v){ _currentMarketingListTab = v; },
     };
 
     const renderCustomersTable = async () => {

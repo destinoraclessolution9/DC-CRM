@@ -433,7 +433,7 @@
             return;
         }
 
-        const visibleIds = await getVisibleUserIds(_state.cu);
+        const visibleIds = await _utils.getVisibleUserIds(_state.cu);
         const [allProspects, allCustomers] = await Promise.all([
             AppDataStore.getAll('prospects'),
             AppDataStore.getAll('customers'),
@@ -549,7 +549,7 @@
         const fullAccess = level <= 2;
         let visibleUserIds = null;
         if (!fullAccess) {
-            const vIds = await getVisibleUserIds(_state.cu);
+            const vIds = await _utils.getVisibleUserIds(_state.cu);
             visibleUserIds = vIds === 'all' ? null : new Set((vIds || []).map(String));
         }
         const canViewUser = (uid) => fullAccess || visibleUserIds === null || visibleUserIds.has(String(uid));

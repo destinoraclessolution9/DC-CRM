@@ -28,7 +28,8 @@
     // AppDataStore, UI, supabase, XLSX (on demand) are globals — no alias needed.
 
     // ========== PHASE: MARKETING MANAGER LISTS ==========
-    let _currentMarketingListTab = 'products'; // 'products', 'events', 'promotions', 'venues'
+    // _state.cmt + _state.cmlt moved to script.js's main
+    // IIFE so its bare assignments stay valid. We access them via _state getters.
 
     // Predefined event categories (multi-select)
     const EVENT_CATEGORIES = [
@@ -117,51 +118,51 @@
                         <p class="text-muted">Manage master data for products, events, and monthly promotions.</p>
                     </div>
                     <div class="header-actions">
-                        ${_currentMarketingListTab === 'special_programs'
+                        ${_state.cmlt === 'special_programs'
                             ? (isTeamLeaderOrAbove(_state.cu)
                                 ? `<button class="btn primary" onclick="app.openSpecialProgramModal()"><i class="fas fa-plus"></i> New Program</button>`
                                 : '')
-                            : ((_currentMarketingListTab !== 'promotions') ? `
+                            : ((_state.cmlt !== 'promotions') ? `
                         <button class="btn primary" onclick="app.openMarketingListAddModal()">
-                            <i class="fas fa-plus"></i> New ${{ products: 'Product', events: 'Event', venues: 'Venue' }[_currentMarketingListTab] || _currentMarketingListTab}
+                            <i class="fas fa-plus"></i> New ${{ products: 'Product', events: 'Event', venues: 'Venue' }[_state.cmlt] || _state.cmlt}
                         </button>` : '')}
                     </div>
                 </div>
 
                 <div class="tabs-container" style="margin-bottom: 20px; border-bottom: 1px solid var(--gray-200); display: flex; gap: 20px;">
-                    <div class="tab-item ${_currentMarketingListTab === 'products' ? 'active' : ''}" 
+                    <div class="tab-item ${_state.cmlt === 'products' ? 'active' : ''}" 
                          onclick="app.switchMarketingListTab('products')" 
-                         style="padding: 10px 16px; cursor: pointer; border-bottom: 2px solid ${_currentMarketingListTab === 'products' ? 'var(--primary-600)' : 'transparent'}; color: ${_currentMarketingListTab === 'products' ? 'var(--primary-600)' : 'var(--gray-600)'}; font-weight: 500;">
+                         style="padding: 10px 16px; cursor: pointer; border-bottom: 2px solid ${_state.cmlt === 'products' ? 'var(--primary-600)' : 'transparent'}; color: ${_state.cmlt === 'products' ? 'var(--primary-600)' : 'var(--gray-600)'}; font-weight: 500;">
                         Products
                     </div>
-                    <div class="tab-item ${_currentMarketingListTab === 'events' ? 'active' : ''}" 
+                    <div class="tab-item ${_state.cmlt === 'events' ? 'active' : ''}" 
                          onclick="app.switchMarketingListTab('events')" 
-                         style="padding: 10px 16px; cursor: pointer; border-bottom: 2px solid ${_currentMarketingListTab === 'events' ? 'var(--primary-600)' : 'transparent'}; color: ${_currentMarketingListTab === 'events' ? 'var(--primary-600)' : 'var(--gray-600)'}; font-weight: 500;">
+                         style="padding: 10px 16px; cursor: pointer; border-bottom: 2px solid ${_state.cmlt === 'events' ? 'var(--primary-600)' : 'transparent'}; color: ${_state.cmlt === 'events' ? 'var(--primary-600)' : 'var(--gray-600)'}; font-weight: 500;">
                         Events
                     </div>
-                    <div class="tab-item ${_currentMarketingListTab === 'promotions' ? 'active' : ''}"
+                    <div class="tab-item ${_state.cmlt === 'promotions' ? 'active' : ''}"
                          onclick="app.switchMarketingListTab('promotions')"
-                         style="padding: 10px 16px; cursor: pointer; border-bottom: 2px solid ${_currentMarketingListTab === 'promotions' ? 'var(--primary-600)' : 'transparent'}; color: ${_currentMarketingListTab === 'promotions' ? 'var(--primary-600)' : 'var(--gray-600)'}; font-weight: 500;">
+                         style="padding: 10px 16px; cursor: pointer; border-bottom: 2px solid ${_state.cmlt === 'promotions' ? 'var(--primary-600)' : 'transparent'}; color: ${_state.cmlt === 'promotions' ? 'var(--primary-600)' : 'var(--gray-600)'}; font-weight: 500;">
                         Promotions
                     </div>
-                    <div class="tab-item ${_currentMarketingListTab === 'venues' ? 'active' : ''}"
+                    <div class="tab-item ${_state.cmlt === 'venues' ? 'active' : ''}"
                          onclick="app.switchMarketingListTab('venues')"
-                         style="padding: 10px 16px; cursor: pointer; border-bottom: 2px solid ${_currentMarketingListTab === 'venues' ? 'var(--primary-600)' : 'transparent'}; color: ${_currentMarketingListTab === 'venues' ? 'var(--primary-600)' : 'var(--gray-600)'}; font-weight: 500;">
+                         style="padding: 10px 16px; cursor: pointer; border-bottom: 2px solid ${_state.cmlt === 'venues' ? 'var(--primary-600)' : 'transparent'}; color: ${_state.cmlt === 'venues' ? 'var(--primary-600)' : 'var(--gray-600)'}; font-weight: 500;">
                         Venues
                     </div>
-                    <div class="tab-item ${_currentMarketingListTab === 'bujishu' ? 'active' : ''}"
+                    <div class="tab-item ${_state.cmlt === 'bujishu' ? 'active' : ''}"
                          onclick="app.switchMarketingListTab('bujishu')"
-                         style="padding: 10px 16px; cursor: pointer; border-bottom: 2px solid ${_currentMarketingListTab === 'bujishu' ? 'var(--primary-600)' : 'transparent'}; color: ${_currentMarketingListTab === 'bujishu' ? 'var(--primary-600)' : 'var(--gray-600)'}; font-weight: 500;">
+                         style="padding: 10px 16px; cursor: pointer; border-bottom: 2px solid ${_state.cmlt === 'bujishu' ? 'var(--primary-600)' : 'transparent'}; color: ${_state.cmlt === 'bujishu' ? 'var(--primary-600)' : 'var(--gray-600)'}; font-weight: 500;">
                         Bujishu
                     </div>
-                    <div class="tab-item ${_currentMarketingListTab === 'formula' ? 'active' : ''}"
+                    <div class="tab-item ${_state.cmlt === 'formula' ? 'active' : ''}"
                          onclick="app.switchMarketingListTab('formula')"
-                         style="padding: 10px 16px; cursor: pointer; border-bottom: 2px solid ${_currentMarketingListTab === 'formula' ? 'var(--primary-600)' : 'transparent'}; color: ${_currentMarketingListTab === 'formula' ? 'var(--primary-600)' : 'var(--gray-600)'}; font-weight: 500;">
+                         style="padding: 10px 16px; cursor: pointer; border-bottom: 2px solid ${_state.cmlt === 'formula' ? 'var(--primary-600)' : 'transparent'}; color: ${_state.cmlt === 'formula' ? 'var(--primary-600)' : 'var(--gray-600)'}; font-weight: 500;">
                         Formula
                     </div>
-                    <div class="tab-item ${_currentMarketingListTab === 'special_programs' ? 'active' : ''}"
+                    <div class="tab-item ${_state.cmlt === 'special_programs' ? 'active' : ''}"
                          onclick="app.switchMarketingListTab('special_programs')"
-                         style="padding: 10px 16px; cursor: pointer; border-bottom: 2px solid ${_currentMarketingListTab === 'special_programs' ? 'var(--primary-600)' : 'transparent'}; color: ${_currentMarketingListTab === 'special_programs' ? 'var(--primary-600)' : 'var(--gray-600)'}; font-weight: 500;">
+                         style="padding: 10px 16px; cursor: pointer; border-bottom: 2px solid ${_state.cmlt === 'special_programs' ? 'var(--primary-600)' : 'transparent'}; color: ${_state.cmlt === 'special_programs' ? 'var(--primary-600)' : 'var(--gray-600)'}; font-weight: 500;">
                         🏆 Special Programs
                     </div>
                 </div>
@@ -174,19 +175,19 @@
     };
 
     const switchMarketingListTab = async (tab) => {
-        _currentMarketingListTab = tab;
+        _state.cmlt = tab;
         const viewport = document.getElementById('content-viewport');
         await showMarketingListsView(viewport);
     };
 
     const renderMarketingListTable = async () => {
         // Special Programs tab uses its own renderer (KPI-style, not master-data style)
-        if (_currentMarketingListTab === 'special_programs') {
+        if (_state.cmlt === 'special_programs') {
             return await renderSpecialProgramsTable();
         }
-        let data = await AppDataStore.getAll(_currentMarketingListTab);
+        let data = await AppDataStore.getAll(_state.cmlt);
         // Deduplicate by name+location for venues (prevents double-write artifacts)
-        if (_currentMarketingListTab === 'venues') {
+        if (_state.cmlt === 'venues') {
             const seen = new Set();
             data = data.filter(v => {
                 const key = (v.name || '') + '|' + (v.location || '');
@@ -197,7 +198,7 @@
             data.sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
         }
 
-        if (_currentMarketingListTab === 'products') {
+        if (_state.cmlt === 'products') {
             return `
                 <table class="data-table">
                     <thead>
@@ -254,7 +255,7 @@
                     </tbody>
                 </table>
             `;
-        } else if (_currentMarketingListTab === 'events') {
+        } else if (_state.cmlt === 'events') {
             return `
                 <table class="data-table">
                     <thead>
@@ -312,7 +313,7 @@
                     </tbody>
                 </table>
             `;
-        } else if (_currentMarketingListTab === 'venues') {
+        } else if (_state.cmlt === 'venues') {
             const seqOptions = Array.from({length: data.length}, (_, i) => i + 1);
             return `
                 <table class="data-table">
@@ -347,7 +348,7 @@
                     </tbody>
                 </table>
             `;
-        } else if (_currentMarketingListTab === 'bujishu') {
+        } else if (_state.cmlt === 'bujishu') {
             return `
                 <table class="data-table">
                     <thead>
@@ -387,7 +388,7 @@
                     </tbody>
                 </table>
             `;
-        } else if (_currentMarketingListTab === 'formula') {
+        } else if (_state.cmlt === 'formula') {
             return `
                 <table class="data-table">
                     <thead>
@@ -438,7 +439,7 @@
 
     const openMarketingListAddModal = async () => {
         let content = '';
-        const type = _currentMarketingListTab;
+        const type = _state.cmlt;
 
         if (type === 'products') {
             const _today = new Date().toISOString().split('T')[0];
@@ -536,11 +537,11 @@
     };
 
     const openMarketingListEditModal = async (id) => {
-        const item = await AppDataStore.getById(_currentMarketingListTab, id);
+        const item = await AppDataStore.getById(_state.cmlt, id);
         if (!item) return;
 
         let content = '';
-        const type = _currentMarketingListTab;
+        const type = _state.cmlt;
 
         if (type === 'products') {
             const _today = new Date().toISOString().split('T')[0];
@@ -650,7 +651,7 @@
     };
 
     const saveMarketingListItem = async (id = null) => {
-        const type = _currentMarketingListTab;
+        const type = _state.cmlt;
         let data = { updated_at: new Date().toISOString() };
 
         if (type === 'venues') {
@@ -935,7 +936,7 @@
     const deleteMarketingListItem = async (id) => {
         if (confirm('Are you sure you want to delete this record? This action cannot be undone.')) {
             try {
-                if (_currentMarketingListTab === 'events') {
+                if (_state.cmlt === 'events') {
                     // Cascade-delete linked activities and attendees using fresh Supabase data
                     // so we don't miss records that aren't in the local SWR cache.
                     // Each cascade delete is soft — a failure here doesn't block the event delete.
@@ -958,7 +959,7 @@
                     AppDataStore.invalidateCache('activities');
                     AppDataStore.invalidateCache('event_attendees');
                 }
-                await AppDataStore.delete(_currentMarketingListTab, id);
+                await AppDataStore.delete(_state.cmlt, id);
                 UI.toast.success('Record deleted');
             } catch (e) {
                 console.warn('Delete failed:', e);
@@ -1101,29 +1102,29 @@
                 </div>
 
                 <div class="marketing-tabs">
-                    <button class="marketing-tab ${_currentMarketingTab === 'forms' ? 'active' : ''}" onclick="app.switchMarketingTab('forms')">
+                    <button class="marketing-tab ${_state.cmt === 'forms' ? 'active' : ''}" onclick="app.switchMarketingTab('forms')">
                         <i class="fas fa-clipboard-list"></i> Forms 表格
                     </button>
-                    <button class="marketing-tab ${_currentMarketingTab === 'templates' ? 'active' : ''}" onclick="app.switchMarketingTab('templates')">
+                    <button class="marketing-tab ${_state.cmt === 'templates' ? 'active' : ''}" onclick="app.switchMarketingTab('templates')">
                         <i class="fas fa-layer-group"></i> Message Templates
                     </button>
-                    <button class="marketing-tab ${_currentMarketingTab === 'campaigns' ? 'active' : ''}" onclick="app.switchMarketingTab('campaigns')">
+                    <button class="marketing-tab ${_state.cmt === 'campaigns' ? 'active' : ''}" onclick="app.switchMarketingTab('campaigns')">
                         <i class="fas fa-bullhorn"></i> Active Campaigns
                     </button>
-                    <button class="marketing-tab ${_currentMarketingTab === 'automation' ? 'active' : ''}" onclick="app.switchMarketingTab('automation')">
+                    <button class="marketing-tab ${_state.cmt === 'automation' ? 'active' : ''}" onclick="app.switchMarketingTab('automation')">
                         <i class="fas fa-cogs"></i> Automation
                     </button>
-                    <button class="marketing-tab ${_currentMarketingTab === 'analytics' ? 'active' : ''}" onclick="app.switchMarketingTab('analytics')">
+                    <button class="marketing-tab ${_state.cmt === 'analytics' ? 'active' : ''}" onclick="app.switchMarketingTab('analytics')">
                         <i class="fas fa-chart-line"></i> Campaign Analytics
                     </button>
                     ${(isMarketingManager(_state.cu) || isSystemAdmin(_state.cu)) ? `
-                    <button class="marketing-tab ${_currentMarketingTab === 'products' ? 'active' : ''}" onclick="app.switchMarketingTab('products')">
+                    <button class="marketing-tab ${_state.cmt === 'products' ? 'active' : ''}" onclick="app.switchMarketingTab('products')">
                         <i class="fas fa-box"></i> Products & Services
                     </button>
-                    <button class="marketing-tab ${_currentMarketingTab === 'promotions' ? 'active' : ''}" onclick="app.switchMarketingTab('promotions')">
+                    <button class="marketing-tab ${_state.cmt === 'promotions' ? 'active' : ''}" onclick="app.switchMarketingTab('promotions')">
                         <i class="fas fa-calendar-alt"></i> Monthly Promotions
                     </button>
-                    <button class="marketing-tab ${_currentMarketingTab === 'promotions' ? 'active' : ''}" onclick="app.switchMarketingTab('promotions')">
+                    <button class="marketing-tab ${_state.cmt === 'promotions' ? 'active' : ''}" onclick="app.switchMarketingTab('promotions')">
                         <i class="fas fa-calendar-alt"></i> Monthly Promotions
                     </button>
                     ` : ''}
@@ -1143,7 +1144,7 @@
                 15000,
                 `<div style="padding:32px;text-align:center;color:#9CA3AF;">
                     <div style="margin-bottom:8px;">Couldn't load this tab — the request timed out.</div>
-                    <button class="btn secondary" onclick="app.switchMarketingTab('${_currentMarketingTab || 'templates'}')">
+                    <button class="btn secondary" onclick="app.switchMarketingTab('${_state.cmt || 'templates'}')">
                         <i class="fas fa-sync-alt"></i> Retry
                     </button>
                 </div>`,
@@ -1155,13 +1156,13 @@
             console.warn('marketing tab render failed:', e);
             const target = document.getElementById('marketing-tab-content');
             if (target) {
-                target.innerHTML = `<div style="padding:32px;text-align:center;color:#9CA3AF;">Couldn't load this tab. <button class="btn secondary" onclick="app.switchMarketingTab('${_currentMarketingTab || 'templates'}')"><i class="fas fa-sync-alt"></i> Retry</button></div>`;
+                target.innerHTML = `<div style="padding:32px;text-align:center;color:#9CA3AF;">Couldn't load this tab. <button class="btn secondary" onclick="app.switchMarketingTab('${_state.cmt || 'templates'}')"><i class="fas fa-sync-alt"></i> Retry</button></div>`;
             }
         }
     };
 
     const switchMarketingTab = async (tab) => {
-        _currentMarketingTab = tab;
+        _state.cmt = tab;
         const container = document.getElementById('marketing-tab-content');
         if (container) {
             container.innerHTML = `<div class="marketing-tab-loading" style="padding:48px;text-align:center;color:#6B7280;"><i class="fas fa-spinner fa-spin" style="font-size:24px;margin-bottom:12px;"></i><div>Loading…</div></div>`;
@@ -1199,19 +1200,19 @@
     };
 
     const renderMarketingTabContent = async () => {
-        if (_currentMarketingTab === 'forms') {
+        if (_state.cmt === 'forms') {
             return await renderFormsTab();
-        } else if (_currentMarketingTab === 'templates') {
+        } else if (_state.cmt === 'templates') {
             return await renderTemplatesTab();
-        } else if (_currentMarketingTab === 'campaigns') {
+        } else if (_state.cmt === 'campaigns') {
             return await renderCampaignsTab();
-        } else if (_currentMarketingTab === 'automation') {
+        } else if (_state.cmt === 'automation') {
             return await renderAutomationTab();
-        } else if (_currentMarketingTab === 'analytics') {
+        } else if (_state.cmt === 'analytics') {
             return await renderAnalyticsTab();
-        } else if (_currentMarketingTab === 'products') {
+        } else if (_state.cmt === 'products') {
             return await renderProductsTab();
-        } else if (_currentMarketingTab === 'promotions') {
+        } else if (_state.cmt === 'promotions') {
             return await renderMonthlyPromotionsTab();
         }
     };
@@ -1656,13 +1657,13 @@
             UI.toast.success("Product added");
         }
         UI.hideModal();
-        if (_currentMarketingTab === 'products') document.getElementById('marketing-tab-content').innerHTML = await renderProductsTab();
+        if (_state.cmt === 'products') document.getElementById('marketing-tab-content').innerHTML = await renderProductsTab();
     };
 
     const toggleProductStatus = async (id, currentStatus) => {
         await AppDataStore.update('products', id, { is_active: !currentStatus });
         UI.toast.success("Product status updated");
-        if (_currentMarketingTab === 'products') document.getElementById('marketing-tab-content').innerHTML = await renderProductsTab();
+        if (_state.cmt === 'products') document.getElementById('marketing-tab-content').innerHTML = await renderProductsTab();
     };
 
     // ========== PROMOTION PACKAGES TAB ==========
@@ -2300,7 +2301,7 @@
                 UI.toast.success('Promotion created successfully');
             }
             UI.hideModal();
-            if (_currentMarketingTab === 'promotions') await app.switchMarketingTab('promotions');
+            if (_state.cmt === 'promotions') await app.switchMarketingTab('promotions');
         } catch(e) {
             UI.toast.error('Failed to save promotion. Please try again.');
         }
@@ -2314,7 +2315,7 @@
             });
             UI.toast.success('Promotion archived');
             UI.hideModal();
-            if (_currentMarketingTab === 'promotions') await app.switchMarketingTab('promotions');
+            if (_state.cmt === 'promotions') await app.switchMarketingTab('promotions');
         } catch(e) {
             UI.toast.error('Failed to archive promotion');
         }
@@ -2336,7 +2337,7 @@
             await AppDataStore.create('monthly_promotions', copy);
             UI.toast.success('Promotion duplicated as Draft');
             UI.hideModal();
-            if (_currentMarketingTab === 'promotions') await app.switchMarketingTab('promotions');
+            if (_state.cmt === 'promotions') await app.switchMarketingTab('promotions');
         } catch(e) {
             UI.toast.error('Failed to duplicate promotion');
         }
@@ -2347,7 +2348,7 @@
         try {
             await AppDataStore.delete('monthly_promotions', id);
             UI.toast.success('Promotion deleted');
-            if (_currentMarketingTab === 'promotions') await app.switchMarketingTab('promotions');
+            if (_state.cmt === 'promotions') await app.switchMarketingTab('promotions');
         } catch(e) {
             UI.toast.error('Failed to delete promotion');
         }
@@ -2598,10 +2599,10 @@ ALTER TABLE public.promotions
         }
 
         UI.hideModal();
-        if (_currentMarketingListTab === 'promotions') {
+        if (_state.cmlt === 'promotions') {
             const viewport = document.getElementById('content-viewport');
             await showMarketingListsView(viewport);
-        } else if (_currentMarketingTab === 'packages') {
+        } else if (_state.cmt === 'packages') {
             await app.switchMarketingTab('packages');
         }
     };
@@ -2610,10 +2611,10 @@ ALTER TABLE public.promotions
         if (confirm("Are you sure you want to delete this promotion package? This action cannot be undone.")) {
             await AppDataStore.delete('promotions', id);
             UI.toast.success("Package deleted");
-            if (_currentMarketingListTab === 'promotions') {
+            if (_state.cmlt === 'promotions') {
                 const viewport = document.getElementById('content-viewport');
                 await showMarketingListsView(viewport);
-            } else if (_currentMarketingTab === 'packages') {
+            } else if (_state.cmt === 'packages') {
                 await app.switchMarketingTab('packages');
             }
         }
@@ -2962,7 +2963,7 @@ ALTER TABLE public.promotions
     };
 
     const refreshTemplatesTab = async () => {
-        if (_currentMarketingTab === 'templates') {
+        if (_state.cmt === 'templates') {
             const container = document.getElementById('marketing-tab-content');
             if (container) {
                 container.innerHTML = await renderTemplatesTab();
@@ -3068,7 +3069,7 @@ ALTER TABLE public.promotions
         }
     };
     const useTemplate = async (id) => {
-        _currentMarketingTab = 'campaigns';
+        _state.cmt = 'campaigns';
         const viewport = document.getElementById('content-viewport');
         await showMarketingAutomationView(viewport);
         await openCreateCampaignModal();
@@ -3286,7 +3287,7 @@ ALTER TABLE public.promotions
             btnNext.onclick = async () => await app.nextCampaignStep();
         }
 
-        if (_currentMarketingTab === 'analytics') {
+        if (_state.cmt === 'analytics') {
             return; // Safety
         }
 
@@ -3550,7 +3551,7 @@ const simulateCampaignSending = async (campaignId) => {
 };
 
     const refreshCampaignsTab = async () => {
-        if (_currentMarketingTab === 'campaigns') {
+        if (_state.cmt === 'campaigns') {
             const container = document.getElementById('marketing-tab-content');
             if (container) {
                 container.innerHTML = await renderCampaignsTab();

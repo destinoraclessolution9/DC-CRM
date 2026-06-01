@@ -95,7 +95,7 @@
                     <div class="role-filter-group" style="margin-left: 20px;">
                         <select id="kpi-role-filter" class="form-control" onchange="app.setRoleFilter(this.value)" style="width: 200px;">
                             <option value="All">All Roles</option>
-                            ${USER_ROLES.map(r => `<option value="${r}" ${_currentRoleFilter === r ? 'selected' : ''}>${r}</option>`).join('')}
+                            ${_utils.USER_ROLES.map(r => `<option value="${r}" ${_currentRoleFilter === r ? 'selected' : ''}>${r}</option>`).join('')}
                         </select>
                     </div>
                     <div class="role-filter-group" style="margin-left: 12px;">
@@ -344,7 +344,7 @@
     };
 
     const refreshKPIDashboard = async () => {
-        _visibleUserIds = await getVisibleUserIds(_state.cu);
+        _visibleUserIds = await _utils.getVisibleUserIds(_state.cu);
         // Narrow visibility to a single agent if the agent filter is active
         if (_currentAgentFilter && _currentAgentFilter !== 'all') {
             const agentId = parseInt(_currentAgentFilter);
