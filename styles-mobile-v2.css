@@ -1253,24 +1253,29 @@
     .mcal-quick-btn.add { background:var(--mc-red); font-size:16px; }
     .mcal-today { background:var(--mc-pink); color:var(--mc-red); padding:8px 16px; border-radius:18px; font-size:11.5px; font-weight:700; cursor:pointer; border:none; font-family:inherit; box-shadow:0 3px 8px rgba(248,166,181,0.25); }
 
-    /* Calendar grid */
-    .mcal-grid-wrap { background:#fff; border-radius:18px; padding:10px 6px 6px; margin-bottom:12px; box-shadow:var(--mc-shadow); position:relative; overflow:hidden; }
-    .mcal-dow { display:grid; grid-template-columns:repeat(7,1fr); font-size:9.5px; font-weight:700; color:var(--mc-ink-mute); letter-spacing:0.5px; text-align:center; padding-bottom:6px; border-bottom:1px dashed var(--mc-line); margin-bottom:4px; }
-    .mcal-grid { display:grid; grid-template-columns:repeat(7,1fr); grid-auto-rows:auto; gap:3px; }
-    .mcal-cell { position:relative; padding:5px 3px 3px; font-size:11px; border-radius:7px; overflow:visible; cursor:pointer; min-height:72px; }
+    /* Calendar grid — tightened so event names (BERLIN, Kenny, PERSONAL)
+       fit on one line without mid-word wrapping. Reduced container padding,
+       grid gap, cell padding, and event font size; events now truncate with
+       ellipsis instead of breaking words. */
+    .mcal-grid-wrap { background:#fff; border-radius:18px; padding:8px 3px 4px; margin-bottom:12px; box-shadow:var(--mc-shadow); position:relative; overflow:hidden; }
+    .mcal-dow { display:grid; grid-template-columns:repeat(7,1fr); font-size:9px; font-weight:700; color:var(--mc-ink-mute); letter-spacing:0.4px; text-align:center; padding-bottom:6px; border-bottom:1px dashed var(--mc-line); margin-bottom:4px; }
+    .mcal-grid { display:grid; grid-template-columns:repeat(7,1fr); grid-auto-rows:auto; gap:2px; }
+    .mcal-cell { position:relative; padding:4px 2px 3px; font-size:11px; border-radius:7px; overflow:visible; cursor:pointer; min-height:72px; min-width:0; }
     .mcal-cell:active { background:rgba(0,0,0,0.03); }
-    .mcal-cell .num { font-size:12px; font-weight:600; color:var(--mc-ink); display:inline-block; width:20px; height:20px; line-height:20px; text-align:center; }
+    .mcal-cell .num { font-size:11px; font-weight:600; color:var(--mc-ink); display:inline-block; width:18px; height:18px; line-height:18px; text-align:center; }
     .mcal-cell.muted .num { color:var(--mc-ink-mute); }
-    .mcal-cell.today .num { background:var(--mc-red); color:#fff; border-radius:50%; width:24px; height:24px; line-height:24px; font-weight:800; font-size:13px; box-shadow:0 4px 10px rgba(197,37,43,0.4); position:relative; z-index:2; }
-    .mcal-cell .events { display:flex; flex-direction:column; gap:3px; margin-top:3px; }
-    .mcal-evt { font-size:9.5px; font-weight:600; padding:3px 4px; border-radius:5px; line-height:1.3; word-break:break-word; overflow:hidden; }
-    .mcal-evt .t { font-weight:800; display:block; font-size:9px; letter-spacing:-0.1px; margin-bottom:1px; }
+    .mcal-cell.today .num { background:var(--mc-red); color:#fff; border-radius:50%; width:22px; height:22px; line-height:22px; font-weight:800; font-size:12px; box-shadow:0 4px 10px rgba(197,37,43,0.4); position:relative; z-index:2; }
+    .mcal-cell .events { display:flex; flex-direction:column; gap:2px; margin-top:2px; min-width:0; }
+    /* Allow whitespace wrap (time on its own line, name on its own line) but
+       NEVER break mid-word — "Kenny" must stay "Kenny", not "Kenn/y". */
+    .mcal-evt { font-size:8.5px; font-weight:600; padding:2px 3px; border-radius:4px; line-height:1.25; overflow:hidden; word-break:keep-all; overflow-wrap:normal; min-width:0; }
+    .mcal-evt .t { font-weight:800; display:block; font-size:8.5px; letter-spacing:-0.2px; margin-bottom:0; }
     .mcal-evt.red    { background:#FFE0E0; color:var(--mc-red-deep); border-left:2px solid var(--mc-red); }
     .mcal-evt.purple { background:#EDE2FB; color:#5C3FB8; border-left:2px solid var(--mc-purple); }
     .mcal-evt.pink   { background:#FFE0E6; color:#A91C42; border-left:2px solid var(--mc-pink-hot); }
     .mcal-evt.peach  { background:#FFE5D0; color:#A0522D; border-left:2px solid #E89060; }
     .mcal-evt.green  { background:var(--mc-green-soft); color:#0E7935; border-left:2px solid var(--mc-green); }
-    .mcal-evt.allday { background:linear-gradient(135deg,#FCE7F3,#FBCFE8); color:#9D174D; border-left:2px solid #EC4899; font-weight:800; font-size:10px; letter-spacing:0.1px; }
+    .mcal-evt.allday { background:linear-gradient(135deg,#FCE7F3,#FBCFE8); color:#9D174D; border-left:2px solid #EC4899; font-weight:800; font-size:9px; letter-spacing:0.05px; }
     .mcal-evt.pending { opacity:0.7; font-style:italic; }
     .mcal-evt.sync-failed { background:#FFF4E0; color:#8A5A00; border-left:2px solid #E89B2A; opacity:1; font-style:normal; }
     .mcal-evt.sync-failed i { color:#E89B2A; margin-right:2px; font-size:8px; }
