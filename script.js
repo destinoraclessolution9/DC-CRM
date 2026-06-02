@@ -5532,6 +5532,19 @@ In a production system, this would show the actual file contents.
     let _mpTab = 'prospects';   // 'prospects' | 'customers'
     let _mpAgentMap = null;     // id → agent_code, loaded once per session
     let _mpSearch = '';
+    // Mobile-side filters — parity subset of the desktop filter modal.
+    // Status / responsible_agent_id / Ming Gua / score range / pipeline stage.
+    // Empty string / null means "no filter for that field".
+    let _mpFilters = {
+        status: '',           // active | converted | lost | inactive
+        agentId: '',          // responsible_agent_id (string id)
+        mingGua: '',          // MG1..MG9
+        scoreMin: '',         // numeric
+        scoreMax: '',         // numeric
+        pipelineStage: '',    // prospects only
+    };
+    const _mpHasActiveFilters = () => Object.values(_mpFilters).some(v => v !== '' && v != null);
+    const _mpActiveFilterCount = () => Object.values(_mpFilters).filter(v => v !== '' && v != null).length;
     const showMobileProspectsView = async (viewport) => {
         if (!viewport) return;
         viewport.classList.add('mprospects-active');
@@ -5585,6 +5598,10 @@ In a production system, this would show the actual file contents.
                     <i class="fas fa-search"></i>
                     <input type="text" id="mp-search-input" class="mp-search-input" placeholder="Search by name, phone or email…" oninput="app.mpSearchInput(this.value)" value="${_mhomeEsc(_mpSearch)}">
                 </div>
+                <button class="mp-filter-btn ${_mpHasActiveFilters() ? 'active' : ''}" onclick="app.mpOpenFilters()" aria-label="Filters">
+                    <i class="fas fa-sliders"></i>
+                    ${_mpHasActiveFilters() ? `<span class="mp-filter-badge">${_mpActiveFilterCount()}</span>` : ''}
+                </button>
             </div>
 
             <div id="mp-list" class="mp-list">${_mpHasSnap ? _mpSnapHtml : ''}</div>
@@ -5633,6 +5650,31 @@ In a production system, this would show the actual file contents.
                 const blob = `${r.full_name || ''} ${r.phone || ''} ${r.email || ''} ${r.nickname || ''}`.toLowerCase();
                 return blob.includes(q);
             });
+        }
+
+        // Filter modal — applied AFTER search so the filter button count
+        // reflects the user's narrowed query. Each filter is opt-in: a blank
+        // string means "no filter on this field" so we only narrow when set.
+        const F = _mpFilters;
+        if (F.status) {
+            rows = rows.filter(r => String(r.status || '').toLowerCase() === F.status.toLowerCase());
+        }
+        if (F.agentId) {
+            rows = rows.filter(r => String(r.responsible_agent_id || '') === String(F.agentId));
+        }
+        if (F.mingGua) {
+            rows = rows.filter(r => String(r.ming_gua || '').toUpperCase() === F.mingGua.toUpperCase());
+        }
+        if (F.scoreMin !== '' && F.scoreMin != null) {
+            const min = Number(F.scoreMin);
+            if (!isNaN(min)) rows = rows.filter(r => (Number(r.score) || 0) >= min);
+        }
+        if (F.scoreMax !== '' && F.scoreMax != null) {
+            const max = Number(F.scoreMax);
+            if (!isNaN(max)) rows = rows.filter(r => (Number(r.score) || 0) <= max);
+        }
+        if (F.pipelineStage && _mpTab !== 'customers') {
+            rows = rows.filter(r => String(r.pipeline_stage || '').toLowerCase() === F.pipelineStage.toLowerCase());
         }
 
         // Sort: most recent first
@@ -5707,6 +5749,140 @@ In a production system, this would show the actual file contents.
             try { openAddProspectModal(); return; } catch (_) {}
         }
         UI.toast.success('Add');
+    };
+
+    // ── Mobile filters modal ─────────────────────────────────
+    // Bottom-sheet style filter modal matching the desktop's filter set
+    // (subset: status, agent, ming gua, score range, pipeline stage for
+    // prospects). UI.showModal handles the bottom-sheet styling on mobile
+    // because the modal-overlay aligns to flex-end on <=768px.
+    const mpOpenFilters = async () => {
+        const isCust = _mpTab === 'customers';
+        // Build agent options from _mpAgentMap (already loaded by the list).
+        // If somehow empty, fall back to a one-off fetch.
+        let agentEntries = _mpAgentMap ? Array.from(_mpAgentMap.entries()) : [];
+        if (!agentEntries.length) {
+            try {
+                const agents = await AppDataStore.getAll('users');
+                _mpAgentMap = new Map(
+                    (agents || []).filter(u => u.agent_code || u.full_name)
+                        .map(u => [String(u.id), { code: u.agent_code || '', name: u.full_name || '' }])
+                );
+                agentEntries = Array.from(_mpAgentMap.entries());
+            } catch (_) {}
+        }
+        agentEntries.sort((a, b) => (a[1].name || '').localeCompare(b[1].name || ''));
+        const agentOptions = agentEntries.map(([id, e]) => {
+            const label = e.code ? `${e.name || 'Unknown'} (${e.code})` : (e.name || 'Unknown');
+            const sel = String(_mpFilters.agentId) === String(id) ? 'selected' : '';
+            return `<option value="${_mhomeEsc(id)}" ${sel}>${_mhomeEsc(label)}</option>`;
+        }).join('');
+
+        const statusOpts = isCust
+            ? [['active','Active'],['inactive','Inactive']]
+            : [['active','Active'],['converted','Converted'],['lost','Lost']];
+        const statusHtml = statusOpts.map(([v, l]) =>
+            `<option value="${v}" ${_mpFilters.status === v ? 'selected' : ''}>${l}</option>`
+        ).join('');
+
+        const mgOpts = [
+            ['MG1','MG1 坎'],['MG2','MG2 坤'],['MG3','MG3 震'],['MG4','MG4 巽'],
+            ['MG5','MG5'],['MG6','MG6 乾'],['MG7','MG7 兑'],['MG8','MG8 艮'],['MG9','MG9 离'],
+        ];
+        const mgHtml = mgOpts.map(([v, l]) =>
+            `<option value="${v}" ${_mpFilters.mingGua === v ? 'selected' : ''}>${l}</option>`
+        ).join('');
+
+        const pipelineOpts = [
+            ['new','New'],['contacted','Contacted'],['qualified','Qualified'],
+            ['proposal','Proposal'],['negotiation','Negotiation'],
+            ['closed_won','Closed Won'],['closed_lost','Closed Lost'],
+        ];
+        const pipelineHtml = pipelineOpts.map(([v, l]) =>
+            `<option value="${v}" ${_mpFilters.pipelineStage === v ? 'selected' : ''}>${l}</option>`
+        ).join('');
+
+        const body = `
+            <div class="mp-filter-form">
+                <div class="mp-filter-group">
+                    <label for="mpf-status">Status</label>
+                    <select id="mpf-status" class="form-control">
+                        <option value="">All</option>
+                        ${statusHtml}
+                    </select>
+                </div>
+                <div class="mp-filter-group">
+                    <label for="mpf-agent">Responsible Agent</label>
+                    <select id="mpf-agent" class="form-control">
+                        <option value="">All Agents</option>
+                        ${agentOptions}
+                    </select>
+                </div>
+                <div class="mp-filter-group">
+                    <label for="mpf-minggua">Ming Gua</label>
+                    <select id="mpf-minggua" class="form-control">
+                        <option value="">All</option>
+                        ${mgHtml}
+                    </select>
+                </div>
+                <div class="mp-filter-group">
+                    <label>Score Range</label>
+                    <div style="display:flex;gap:8px;">
+                        <input type="number" id="mpf-score-min" class="form-control" placeholder="Min" value="${_mhomeEsc(String(_mpFilters.scoreMin ?? ''))}" inputmode="numeric">
+                        <input type="number" id="mpf-score-max" class="form-control" placeholder="Max" value="${_mhomeEsc(String(_mpFilters.scoreMax ?? ''))}" inputmode="numeric">
+                    </div>
+                </div>
+                ${!isCust ? `
+                <div class="mp-filter-group">
+                    <label for="mpf-pipeline">Pipeline Stage</label>
+                    <select id="mpf-pipeline" class="form-control">
+                        <option value="">All Stages</option>
+                        ${pipelineHtml}
+                    </select>
+                </div>
+                ` : ''}
+            </div>
+        `;
+        const buttons = [
+            { text: 'Clear', class: 'secondary', action: 'app.mpClearFilters()' },
+            { text: 'Apply', class: 'primary', action: 'app.mpApplyFilters()' },
+        ];
+        UI.showModal(`Filter ${isCust ? 'Customers' : 'Prospects'}`, body, buttons);
+    };
+
+    const mpApplyFilters = async () => {
+        const v = (id) => (document.getElementById(id)?.value || '').trim();
+        _mpFilters = {
+            status: v('mpf-status'),
+            agentId: v('mpf-agent'),
+            mingGua: v('mpf-minggua'),
+            scoreMin: v('mpf-score-min'),
+            scoreMax: v('mpf-score-max'),
+            pipelineStage: v('mpf-pipeline'),
+        };
+        UI.hideModal();
+        // Drop the snapshot so the filtered list paints immediately instead
+        // of being briefly overwritten by the cached unfiltered HTML.
+        try { localStorage.removeItem(`mp-list-snap-${_mpTab}`); } catch(_) {}
+        // Re-render search row to update the filter button's active state + badge.
+        const vp = document.getElementById('content-viewport');
+        if (vp && vp.classList.contains('mprospects-active')) {
+            await showMobileProspectsView(vp);
+        } else {
+            await _mpRenderList();
+        }
+    };
+
+    const mpClearFilters = async () => {
+        _mpFilters = { status: '', agentId: '', mingGua: '', scoreMin: '', scoreMax: '', pipelineStage: '' };
+        UI.hideModal();
+        try { localStorage.removeItem(`mp-list-snap-${_mpTab}`); } catch(_) {}
+        const vp = document.getElementById('content-viewport');
+        if (vp && vp.classList.contains('mprospects-active')) {
+            await showMobileProspectsView(vp);
+        } else {
+            await _mpRenderList();
+        }
     };
 
     // ── Table data-label injection ───────────────────────────
@@ -40248,6 +40424,9 @@ const initImportDemoData = async () => {
         mpSwitchTab,
         mpSearchInput,
         mpAdd,
+        mpOpenFilters,
+        mpApplyFilters,
+        mpClearFilters,
         initSwipeActions,
         initPullToRefresh,
 

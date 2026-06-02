@@ -1634,11 +1634,25 @@
     .mp-tab.active { background:var(--mp-red); color:#fff; box-shadow:0 4px 12px rgba(197,37,43,0.32); }
 
     /* Search */
-    .mp-search-row { margin-bottom:14px; }
-    .mp-search-input-wrap { position:relative; }
+    .mp-search-row { margin-bottom:14px; display:flex; gap:8px; align-items:stretch; }
+    .mp-search-input-wrap { position:relative; flex:1; min-width:0; }
     .mp-search-input-wrap > i { position:absolute; left:14px; top:50%; transform:translateY(-50%); color:var(--mp-ink-mute); font-size:13px; }
     .mp-search-input { width:100%; background:#fff; border:1px solid var(--mp-line); border-radius:14px; padding:11px 14px 11px 38px; font-size:13px; font-family:inherit; box-shadow:var(--mp-shadow); transition:all 0.2s; }
     .mp-search-input:focus { outline:none; border-color:rgba(197,37,43,0.4); box-shadow:0 0 0 4px rgba(197,37,43,0.1); }
+    /* Filter button — sits to the right of the search input. Active state
+       (filters applied) flips to the brand red so the user spots that the
+       list is narrowed. Badge shows the count of active filter fields. */
+    .mp-filter-btn { position:relative; flex-shrink:0; background:#fff; border:1px solid var(--mp-line); border-radius:14px; padding:0 14px; font-size:15px; color:var(--mp-ink); cursor:pointer; box-shadow:var(--mp-shadow); display:flex; align-items:center; justify-content:center; transition:all 0.2s; min-width:46px; }
+    .mp-filter-btn:active { transform:scale(0.96); }
+    .mp-filter-btn.active { background:var(--mp-red); color:#fff; border-color:var(--mp-red); }
+    .mp-filter-badge { position:absolute; top:-4px; right:-4px; background:var(--mp-red); color:#fff; font-size:9.5px; font-weight:800; min-width:16px; height:16px; padding:0 4px; border-radius:8px; display:flex; align-items:center; justify-content:center; box-shadow:0 2px 4px rgba(0,0,0,0.15); border:1.5px solid #fff; }
+    .mp-filter-btn.active .mp-filter-badge { background:#fff; color:var(--mp-red); border-color:var(--mp-red); }
+    /* Filter modal body — vertical stack of labeled groups */
+    .mp-filter-form { display:flex; flex-direction:column; gap:14px; }
+    .mp-filter-group { display:flex; flex-direction:column; gap:6px; }
+    .mp-filter-group label { font-size:12px; font-weight:700; color:var(--mp-ink-mute); letter-spacing:0.3px; text-transform:uppercase; }
+    .mp-filter-form .form-control { width:100%; background:#fff; border:1px solid var(--mp-line); border-radius:10px; padding:10px 12px; font-size:14px; font-family:inherit; color:var(--mp-ink); }
+    .mp-filter-form .form-control:focus { outline:none; border-color:rgba(197,37,43,0.4); box-shadow:0 0 0 3px rgba(197,37,43,0.1); }
 
     /* List */
     .mp-list { display:flex; flex-direction:column; gap:10px; }
