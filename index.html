@@ -65,9 +65,9 @@
          it before the parser reaches the <script> tag near </body>.
          script.js is ~2.5 MB so getting it in flight ASAP is the single
          biggest perceived-load win on first visit. -->
-    <link rel="preload" href="script.4d7c4e845f.min.js" as="script">
+    <link rel="preload" href="script.00e73348c0.min.js" as="script">
     <link rel="preload" href="data.8e3188779e.min.js" as="script">
-    <link rel="preload" href="styles-fixed.daa855119e.min.css" as="style">
+    <link rel="preload" href="styles-fixed.45be0cfafa.min.css" as="style">
 
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" integrity="sha512-9usAa10IRO0HhonpyAIVpjrylPvoDwiPUiKdWk5t3PyolY1cOd4DSE0Ga+ri4AuTroPR5aQvXU9xC6qOPnzFeg==" crossorigin="anonymous" referrerpolicy="no-referrer" media="print" onload="this.media='all'; this.onload=null;">
     <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" integrity="sha512-9usAa10IRO0HhonpyAIVpjrylPvoDwiPUiKdWk5t3PyolY1cOd4DSE0Ga+ri4AuTroPR5aQvXU9xC6qOPnzFeg==" crossorigin="anonymous"></noscript>
@@ -76,7 +76,7 @@
          in parallel from /fonts/* during HTML parse. -->
     <link rel="stylesheet" href="/fonts/local-fonts.css?v=20260531o">
     <link rel="icon" href="favicon.ico" type="image/x-icon">
-    <link rel="stylesheet" href="styles-fixed.daa855119e.min.css">
+    <link rel="stylesheet" href="styles-fixed.45be0cfafa.min.css">
     <!-- styles-mobile.css contains top-level (non-@media) rules that hide
          the mobile drawer overlay on ALL viewports. Gating it by media
          query would expose those rules only to mobile and the drawer
@@ -208,7 +208,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="FS CRM">
     <link rel="apple-touch-icon" href="icons/icon-192x192.png">
-<script>window.__ASSET_MANIFEST={"script.min.js":"script.4d7c4e845f.min.js","script-features.min.js":"script-features.69a95bf648.min.js","data.min.js":"data.8e3188779e.min.js","app-init.min.js":"app-init.7bef14e669.min.js","ui.min.js":"ui.32556cfe35.min.js","auth.min.js":"auth.8fef230596.min.js","supabase-init.min.js":"supabase-init.9bcd3a058f.min.js","two-factor.min.js":"two-factor.0f11c12431.min.js","push-notifications.min.js":"push-notifications.406fb9b19d.min.js","chunks/script-egg.min.js":"chunks/script-egg.9631e3961f.min.js","chunks/script-boss-report.min.js":"chunks/script-boss-report.b2de97b1c4.min.js","chunks/script-stock-take.min.js":"chunks/script-stock-take.37b0b78e22.min.js","chunks/script-knowledge.min.js":"chunks/script-knowledge.71cb11d661.min.js","chunks/script-formula.min.js":"chunks/script-formula.48c3aa1179.min.js","chunks/script-marketing.min.js":"chunks/script-marketing.6ebbb1b641.min.js","chunks/script-reporting.min.js":"chunks/script-reporting.a8bf96bc81.min.js","chunks/script-cases.min.js":"chunks/script-cases.a4502119e6.min.js","chunks/script-referrals.min.js":"chunks/script-referrals.6185cec831.min.js","styles-fixed.min.css":"styles-fixed.daa855119e.min.css","styles-mobile.min.css":"styles-mobile.5c2e7e65a7.min.css","styles-mobile-v2.min.css":"styles-mobile-v2.c9b89a69be.min.css","styles-theme.min.css":"styles-theme.67758a1098.min.css"};</script>
+<script>window.__ASSET_MANIFEST={"script.min.js":"script.00e73348c0.min.js","script-features.min.js":"script-features.69a95bf648.min.js","data.min.js":"data.8e3188779e.min.js","app-init.min.js":"app-init.7bef14e669.min.js","ui.min.js":"ui.32556cfe35.min.js","auth.min.js":"auth.8fef230596.min.js","supabase-init.min.js":"supabase-init.9bcd3a058f.min.js","two-factor.min.js":"two-factor.0f11c12431.min.js","push-notifications.min.js":"push-notifications.406fb9b19d.min.js","chunks/script-egg.min.js":"chunks/script-egg.9631e3961f.min.js","chunks/script-boss-report.min.js":"chunks/script-boss-report.b2de97b1c4.min.js","chunks/script-stock-take.min.js":"chunks/script-stock-take.37b0b78e22.min.js","chunks/script-knowledge.min.js":"chunks/script-knowledge.71cb11d661.min.js","chunks/script-formula.min.js":"chunks/script-formula.48c3aa1179.min.js","chunks/script-marketing.min.js":"chunks/script-marketing.6ebbb1b641.min.js","chunks/script-reporting.min.js":"chunks/script-reporting.a8bf96bc81.min.js","chunks/script-cases.min.js":"chunks/script-cases.a4502119e6.min.js","chunks/script-referrals.min.js":"chunks/script-referrals.6185cec831.min.js","styles-fixed.min.css":"styles-fixed.45be0cfafa.min.css","styles-mobile.min.css":"styles-mobile.5c2e7e65a7.min.css","styles-mobile-v2.min.css":"styles-mobile-v2.c9b89a69be.min.css","styles-theme.min.css":"styles-theme.67758a1098.min.css"};</script>
 </head>
 
 <body>
@@ -686,7 +686,7 @@
          before spending bandwidth on the 2.1 MB app bundle. defer already prevents
          parser-blocking; low fetchpriority additionally pushes the download below
          CSS + fonts in the network queue so FCP happens sooner. -->
-    <script defer fetchpriority="low" src="script.4d7c4e845f.min.js"></script>
+    <script defer fetchpriority="low" src="script.00e73348c0.min.js"></script>
 
     <!--
       The following libraries are loaded on-demand via window._loadScriptOnce()

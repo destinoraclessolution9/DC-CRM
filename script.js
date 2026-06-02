@@ -11749,15 +11749,37 @@ function _wireLoginBtn() {
         // Opt-out list: views that clear then refill DOM with the same content
         // (e.g. month nav) skip transitions to avoid a flash.
         const _NO_TRANSITION_VIEWS = new Set(['month']);
-        const _withViewTransition = (fn) => {
-            if (
-                typeof document.startViewTransition === 'function'
-                && _currentView !== viewId
-                && !_NO_TRANSITION_VIEWS.has(viewId)
-            ) {
-                return document.startViewTransition(fn).finished.catch(() => {});
+        const _withViewTransition = async (fn) => {
+            const skip = typeof document.startViewTransition !== 'function'
+                || _currentView === viewId
+                || _NO_TRANSITION_VIEWS.has(viewId)
+                || document.visibilityState !== 'visible';
+            if (skip) return fn();
+            // Track whether the callback actually ran inside the transition.
+            // If startViewTransition aborts BEFORE invoking the callback
+            // (e.g. "InvalidStateError: Transition was aborted because of
+            // invalid state" when the document was just hidden or another
+            // transition is mid-flight), the DOM never updates and the user
+            // is stuck on the prior view. We detect that case and run fn()
+            // directly so the bottom-nav tap always navigates.
+            let callbackRan = false;
+            const wrapped = async () => { callbackRan = true; return await fn(); };
+            try {
+                const t = document.startViewTransition(wrapped);
+                // Silence unhandled rejections from ALL transition promises —
+                // any may reject if the transition is aborted by another
+                // in-flight transition or by the document becoming hidden.
+                // Must attach .catch on updateCallbackDone synchronously here:
+                // a later try/catch on `await` is too late to suppress the
+                // unhandled-rejection event on the original promise.
+                t.finished.catch(() => {});
+                t.ready.catch(() => {});
+                t.updateCallbackDone.catch(() => {});
+                // Await DOM update (faster than .finished which waits for animation).
+                await t.updateCallbackDone;
+            } catch (_) {
+                if (!callbackRan) await fn();
             }
-            return fn();
         };
 
         // Update document title BEFORE awaiting the view render. If the render
@@ -15741,10 +15763,10 @@ function _wireLoginBtn() {
                                    <button class="act-action-btn act-btn-doc" onclick="app.uploadAPUForm(${activityId}, ${activity.prospect_id})"><span class="act-icon"><i class="fas fa-file-alt"></i></span><span class="act-label">APU</span></button>`
                                 : '';
                             const _outcomeBtn = (_isMeetup && _entityId)
-                                ? `<button class="act-action-btn act-btn-outcome" onclick="(async () => { await app.openMeetingOutcomeModal(${activityId}); })()"><span class="act-icon"><i class="fas fa-clipboard-check"></i></span><span class="act-label">Outcome</span></button>`
+                                ? `<button class="act-action-btn act-btn-outcome" onclick="(async () => { await app.openMeetingOutcomeModal(${activityId}); })()"><span class="act-icon"><i class="fas fa-clipboard-check"></i></span><span class="act-label">Closing</span></button>`
                                 : '';
                             const _notesBtn = (_isMeetup && _entityId)
-                                ? `<button class="act-action-btn act-btn-notes" onclick="(async () => { await app.openPostMeetupNotesModal(${activityId}, ${_entityId}); })()"><span class="act-icon"><i class="fas fa-sticky-note"></i></span><span class="act-label">Notes</span></button>`
+                                ? `<button class="act-action-btn act-btn-notes" onclick="(async () => { await app.openPostMeetupNotesModal(${activityId}, ${_entityId}); })()"><span class="act-icon"><i class="fas fa-sticky-note"></i></span><span class="act-label">Minutes</span></button>`
                                 : '';
                             const _liveBtn = (_isMeetup || activity.activity_type === 'AGENT_TRAINING')
                                 ? `<button class="act-action-btn act-btn-edit" onclick="(async()=>{ UI.hideModal(); await app.openMeetingCapture(${activityId}); })()"><span class="act-icon"><i class="fas fa-microphone-alt"></i></span><span class="act-label">Live Notes</span></button>`
@@ -17964,6 +17986,53 @@ function _wireLoginBtn() {
     const clearBasicInfoReferrer = (prefix) => {
         if (prefix === 'cps') return clearSelectedReferrer();
         if (prefix === 'prospect') return clearProspectReferrer();
+    };
+
+    // Mirror of the canonical list in chunks/script-marketing.js so the
+    // Post-Meetup Notes block can build the "Next Actions" picker without
+    // depending on the marketing chunk being loaded (it is L1/L2-gated).
+    const EVENT_CATEGORIES = [
+        '个人风水基础课',
+        '环境风水基础课',
+        '老板每月主题课',
+        '运程讲座',
+        '新春活动',
+        '博物馆',
+        '汇聚-专案',
+        '汇集-商业',
+        '汇集-灵活',
+        '汇集-简易',
+        '个人改命分享会',
+        '风水改命分享会-简易',
+        '风水改命分享会-专案',
+        '画作分享会',
+        '艺品分享会',
+        'Bujishu 分享会',
+        'Bujishu 新品发布会',
+        'DC 招商会',
+        'DC 日',
+        'Formula 新品发布会',
+        'Formula 分享会',
+        'Formula 展览',
+        'Formula Member Day',
+        '游一游',
+        '福气分享会',
+        '代理重要会议',
+        '代理培训',
+        '代理补习班',
+        '课程',
+        '聚餐-代理',
+        '聚餐-客户'
+    ];
+    const parseEventCategories = (raw) => {
+        if (!raw) return [];
+        if (Array.isArray(raw)) return raw;
+        try {
+            const parsed = JSON.parse(raw);
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (_) {
+            return String(raw).split(',').map(s => s.trim()).filter(Boolean);
+        }
     };
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -24144,7 +24213,7 @@ function _wireLoginBtn() {
                         </div>
                         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:6px 0 8px;">
                             <span style="font-size:22px;font-weight:700;line-height:1.3;flex-shrink:0;">${prospect.full_name}</span>${prospect.nickname ? `<span style="font-size:15px;font-weight:400;color:var(--gray-500);">"${prospect.nickname}"</span>` : ''}
-                            <button title="Edit" onclick="app.editProspect(${prospect.id})" style="width:24px;height:24px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--gray-500);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fas fa-edit"></i></button><button title="Convert to Customer" onclick="app.convertToCustomer(${prospect.id})" style="width:24px;height:24px;border-radius:50%;border:none;background:var(--primary);color:#fff;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'"><i class="fas fa-user-check"></i></button><button title="Meet-Up History" onclick="app.openMeetupHistoryModal(${prospect.id})" style="width:24px;height:24px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--primary);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fas fa-history"></i></button><button title="Save to Phone Contacts" onclick="app.downloadProspectVCard(${prospect.id})" style="width:24px;height:24px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--success);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fas fa-address-book"></i></button>
+                            <button title="Edit" aria-label="Edit prospect" onclick="app.editProspect(${prospect.id})" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--gray-500);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fa-solid fa-pen-to-square" aria-hidden="true"></i></button><button title="Convert to Customer" aria-label="Convert to customer" onclick="app.convertToCustomer(${prospect.id})" style="width:30px;height:30px;border-radius:50%;border:none;background:var(--primary);color:#fff;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'"><i class="fa-solid fa-user-check" aria-hidden="true"></i></button><button title="Meet-Up History" aria-label="Meet-up history" onclick="app.openMeetupHistoryModal(${prospect.id})" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--primary);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i></button><button title="Save to Phone Contacts" aria-label="Save to phone contacts" onclick="app.downloadProspectVCard(${prospect.id})" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--success);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fa-solid fa-address-book" aria-hidden="true"></i></button>
                         </div>
                     </div>
                     ${cpsPhoto ? `<img loading="lazy" decoding="async" data-attach-src="${cpsPhoto.url}" onclick="event.stopPropagation();app.zoomCpsPhoto('${cpsPhoto.url}')" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:2px solid var(--gray-200);cursor:zoom-in;flex-shrink:0;margin-top:4px;" title="CPS Photo — click to enlarge">` : ''}
@@ -24524,7 +24593,7 @@ function _wireLoginBtn() {
                                 { lbl: 'Next Action',             val: a.next_action,      action: true },
                                 { lbl: 'Outcome',                 val: a.note_outcome },
                             ].filter(f => f.val);
-                            if (!fields.length) return `<div class="meet-summary"><div class="msf-empty">No discussion notes yet — tap <b>Notes</b> to add.</div></div>`;
+                            if (!fields.length) return `<div class="meet-summary"><div class="msf-empty">No discussion notes yet — tap <b>Minutes</b> to add.</div></div>`;
                             return `<div class="meet-summary">
                                 <div class="meet-summary-hdr"><i class="fas fa-file-alt"></i>&nbsp; Discussion Notes</div>
                                 ${fields.map(f => `<div class="msf"><span class="msf-lbl">${f.lbl}</span><p class="msf-txt${f.action ? ' action' : ''}">${_esc(f.val)}</p></div>`).join('')}
@@ -24533,7 +24602,7 @@ function _wireLoginBtn() {
                         ${a.score_value ? `<div style="margin-bottom:6px;"><span class="badge success" style="font-size:11px;">+${a.score_value} pts</span></div>` : ''}
                         <div class="meet-actions">
                             <button class="btn btn-sm secondary" onclick="event.stopPropagation();app.attachActivityPhoto(${a.id})"><i class="fas fa-camera"></i> Photo</button>
-                            <button class="btn btn-sm secondary" onclick="event.stopPropagation();app.openPostMeetupNotesModal(${a.id}, ${prospect.id})"><i class="fas fa-sticky-note"></i> Notes</button>
+                            <button class="btn btn-sm secondary" onclick="event.stopPropagation();app.openPostMeetupNotesModal(${a.id}, ${prospect.id})"><i class="fas fa-sticky-note"></i> Minutes</button>
                             ${a.is_closed ? `<span class="badge success" style="align-self:center;font-size:12px;"><i class="fas fa-handshake"></i> Sale Closed</span>` : `<button class="btn btn-sm primary" onclick="event.stopPropagation();app.openMeetingOutcomeModal(${a.id})"><i class="fas fa-handshake"></i> Close Sale</button>`}
                         </div>
                         ${a.photo_urls && a.photo_urls.length > 0 ? `
