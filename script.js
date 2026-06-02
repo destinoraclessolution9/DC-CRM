@@ -15680,7 +15680,16 @@ function _wireLoginBtn() {
                 ? AppDataStore.getById('events', activity.event_id)
                 : null,
         ]);
-        const entityName = prospect?.full_name || customer?.full_name || 'Unknown';
+        // Orphan detection: activity carries a prospect_id / customer_id but the
+        // row was deleted (or scoped out). The buttons that depend on the entity
+        // would just throw "record not found" toasts, so we render a Repair Link
+        // action instead and label the row with the broken ID.
+        const entityOrphaned = !!((activity.prospect_id && !prospect) || (activity.customer_id && !customer));
+        const orphanKind = activity.prospect_id ? 'prospect' : (activity.customer_id ? 'customer' : null);
+        const orphanId = activity.prospect_id || activity.customer_id;
+        const entityName = prospect?.full_name
+            || customer?.full_name
+            || (entityOrphaned ? `⚠ Deleted ${orphanKind} (ID: ${orphanId})` : 'Unknown');
 
         let attendeeHtml = '';
         const isAttendeeType = ['EVENT', 'AGENT_MEETING', 'AGENT_TRAINING'].includes(activity.activity_type);
@@ -15931,6 +15940,14 @@ function _wireLoginBtn() {
                             const _isProspect = !!activity.prospect_id;
                             const _entityKind = _isProspect ? 'prospect' : 'customer';
                             const _entityLabel = _isProspect ? 'Prospect' : 'Customer';
+                            // Orphaned link: skip the entity-dependent buttons (they would just
+                            // surface "record not found") and offer a single Repair action.
+                            if (entityOrphaned) {
+                                return `
+                            <button class="act-action-btn act-btn-profile" style="background:#fef3c7;border-color:#f59e0b;color:#92400e;" onclick="(async () => { await app.openActivityRepairModal(${activityId}); })()"><span class="act-icon"><i class="fas fa-link"></i></span><span class="act-label">Repair Link</span></button>
+                            <button class="act-action-btn act-btn-edit" onclick="app.editActivityTiming(${activityId})"><span class="act-icon"><i class="fas fa-pen"></i></span><span class="act-label">Edit</span></button>
+                            <button class="act-action-btn act-action-delete" onclick="(async () => { await app.deleteActivity(${activityId}); })()"><i class="fas fa-trash-alt"></i> Delete</button>`;
+                            }
                             const _profileBtn = (_isMeetup && _entityId)
                                 ? `<button class="act-action-btn act-btn-profile" onclick="(async()=>{ const p=await AppDataStore.getById('${_entityKind}s',${_entityId}); if(!p){UI.toast.error('${_entityLabel} record not found');return;} UI.hideModal(); app.${_isProspect ? 'showProspectDetail' : 'showCustomerDetail'}(${_entityId}); })()"><span class="act-icon"><i class="fas fa-user"></i></span><span class="act-label">${_entityLabel}</span></button>`
                                 : '';
@@ -15962,6 +15979,115 @@ function _wireLoginBtn() {
         `;
 
         UI.showModal('Activity Details', content, []);
+    };
+
+    // ========== ORPHAN ACTIVITY REPAIR ==========
+    // Activities can outlive their linked prospect/customer (manual delete,
+    // dedup cleanup, conversion that didn't migrate the FK). The repair modal
+    // lets a user relink the activity to an existing prospect/customer or
+    // detach the broken FK entirely — no SQL required.
+    const openActivityRepairModal = async (activityId) => {
+        const activity = await AppDataStore.getById('activities', activityId);
+        if (!activity) { UI.toast.error('Activity not found'); return; }
+
+        const brokenId = activity.prospect_id || activity.customer_id;
+        const brokenKind = activity.prospect_id ? 'Prospect' : (activity.customer_id ? 'Customer' : 'Entity');
+
+        const content = `
+            <div style="display:flex; flex-direction:column; gap:14px;">
+                <div style="padding:10px 12px; background:#fef3c7; border:1px solid #f59e0b; border-radius:6px; font-size:13px; color:#92400e;">
+                    <i class="fas fa-exclamation-triangle" style="margin-right:6px;"></i>
+                    This activity points at <strong>${brokenKind} #${brokenId}</strong>, which no longer exists.
+                    Pick a contact below to relink, or detach the link entirely.
+                </div>
+                <div>
+                    <label style="display:block; font-size:13px; color:var(--gray-600); margin-bottom:4px;">Search prospects &amp; customers</label>
+                    <input type="text" id="repair-search-input" class="form-control" placeholder="Name or phone…" autocomplete="off" oninput="app.repairSearchEntities(this.value, ${activityId})">
+                    <div id="repair-search-results" style="margin-top:8px; max-height:280px; overflow:auto;">
+                        <div style="padding:10px; color:#9CA3AF; font-size:12px;">Type 2 or more characters…</div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        UI.showModal('Repair Activity Link', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: '<i class="fas fa-unlink"></i> Detach (Leave Unlinked)', type: 'secondary', action: `(async () => { await app.repairActivityDetach(${activityId}); })()` },
+        ]);
+        setTimeout(() => document.getElementById('repair-search-input')?.focus(), 60);
+    };
+
+    const repairSearchEntities = async (term, activityId) => {
+        const resultsDiv = document.getElementById('repair-search-results');
+        if (!resultsDiv) return;
+        const q = (term || '').trim();
+        if (q.length < 2) {
+            resultsDiv.innerHTML = '<div style="padding:10px; color:#9CA3AF; font-size:12px;">Type 2 or more characters…</div>';
+            return;
+        }
+        // Debounce — coalesce keystrokes so we don't fire on every character.
+        if (window._repairSearchTimer) clearTimeout(window._repairSearchTimer);
+        if (typeof window._repairSearchSeq !== 'number') window._repairSearchSeq = 0;
+        window._repairSearchSeq += 1;
+        const seq = window._repairSearchSeq;
+        resultsDiv.innerHTML = '<div style="padding:10px; color:#6b7280; font-size:12px;"><i class="fas fa-circle-notch fa-spin" style="margin-right:6px;"></i>Searching…</div>';
+
+        window._repairSearchTimer = setTimeout(async () => {
+            try {
+                const [prospects, customers] = await Promise.all([
+                    AppDataStore.searchProspects(q, { limit: 10, includeDormant: true }).catch(() => []),
+                    AppDataStore.searchCustomers(q, { limit: 10 }).catch(() => []),
+                ]);
+                if (seq !== window._repairSearchSeq) return;
+                const items = [
+                    ...(prospects || []).map(p => ({ ...p, _kind: 'prospect' })),
+                    ...(customers || []).map(c => ({ ...c, _kind: 'customer' })),
+                ];
+                if (items.length === 0) {
+                    resultsDiv.innerHTML = '<div style="padding:10px; color:#9CA3AF; font-size:12px;">No matches.</div>';
+                    return;
+                }
+                resultsDiv.innerHTML = items.map(p => {
+                    const badgeBg = p._kind === 'prospect' ? '#dbeafe' : '#dcfce7';
+                    const badgeColor = p._kind === 'prospect' ? '#1e40af' : '#166534';
+                    return `<div style="padding:8px 12px; border:1px solid #eee; border-radius:6px; cursor:pointer; margin-bottom:6px; background:#fff;" onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background='#fff'" onclick="app.repairActivityRelink(${activityId}, ${p.id}, '${p._kind}')">
+                        <strong>${escapeHtml(p.full_name || '(No Name)')}</strong>
+                        <span style="font-size:11px; margin-left:6px; padding:1px 8px; border-radius:10px; background:${badgeBg}; color:${badgeColor};">${p._kind}</span>
+                        <div style="font-size:11px; color:gray; margin-top:2px;">${escapeHtml(p.phone || '—')}</div>
+                    </div>`;
+                }).join('');
+            } catch (e) {
+                if (seq !== window._repairSearchSeq) return;
+                resultsDiv.innerHTML = '<div style="padding:10px; color:#b91c1c; font-size:12px;">Search failed.</div>';
+            }
+        }, 220);
+    };
+
+    const repairActivityRelink = async (activityId, newId, kind) => {
+        try {
+            const patch = kind === 'prospect'
+                ? { prospect_id: newId, customer_id: null }
+                : { customer_id: newId, prospect_id: null };
+            await AppDataStore.update('activities', activityId, patch);
+            UI.hideModal();
+            UI.toast.success(`Activity relinked to ${kind}.`);
+            // Re-open the detail view so the user immediately sees the fixed state.
+            setTimeout(() => { try { app.viewActivityDetails(activityId); } catch (_) {} }, 200);
+        } catch (e) {
+            UI.toast.error('Relink failed: ' + (e.message || e));
+        }
+    };
+
+    const repairActivityDetach = async (activityId) => {
+        if (!confirm('Remove the broken entity link from this activity?\n\nThe activity will remain on the calendar but will no longer point at a prospect or customer.')) return;
+        try {
+            await AppDataStore.update('activities', activityId, { prospect_id: null, customer_id: null });
+            UI.hideModal();
+            UI.toast.success('Activity detached.');
+            setTimeout(() => { try { app.viewActivityDetails(activityId); } catch (_) {} }, 200);
+        } catch (e) {
+            UI.toast.error('Detach failed: ' + (e.message || e));
+        }
     };
 
     // ========== MEETING LIVE NOTES (QUICK CAPTURE) ==========
@@ -39927,6 +40053,10 @@ const initImportDemoData = async () => {
         saveActivity,
         saveAndAddAnother,
         viewActivityDetails,
+        openActivityRepairModal,
+        repairSearchEntities,
+        repairActivityRelink,
+        repairActivityDetach,
         uploadCPSForm,
         editActivityTiming,
         autoSetEndTime,
