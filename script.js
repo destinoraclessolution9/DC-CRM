@@ -16707,6 +16707,15 @@ function _wireLoginBtn() {
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
             { label: 'Save', type: 'primary', action: `(async () => { await app.saveMeetingOutcome(${activityId}); })()` }
         ]);
+
+        // Backup load of existing order-form photos — the inline <img onload> trick
+        // in the closing block also triggers this, but if CSP blocks data URIs the
+        // explicit call here still fires.
+        if (activity.prospect_id) {
+            setTimeout(() => {
+                try { loadOrderFormThumbnails('mo', activity.prospect_id); } catch (e) { console.warn(e); }
+            }, 0);
+        }
     };
 
     const saveMeetingOutcome = async (activityId) => {
@@ -16718,6 +16727,14 @@ function _wireLoginBtn() {
         if (isClosed && (!mo.amount_closed || parseFloat(mo.amount_closed) <= 0)) {
             UI.toast.error('Please enter the Amount Closed (RM) — it is required to record a sales closing.');
             document.getElementById('mo-amount-closed')?.focus();
+            return;
+        }
+
+        // Require an Order Form photo when closing — covers the 3 PREON templates.
+        // Only enforced when the photo capture UI was rendered (i.e. linked to a prospect).
+        if (isClosed && document.getElementById('mo-order-form-thumbs') && !hasOrderFormPhoto('mo')) {
+            UI.toast.error('Please attach the Order Form photo before saving the closing.');
+            document.getElementById('mo-order-form-camera')?.parentElement?.scrollIntoView({ behavior: 'smooth', block: 'center' });
             return;
         }
 
@@ -18615,6 +18632,37 @@ function _wireLoginBtn() {
                     </label>
                 </div>
                 <div id="${prefix}-closing-fields" style="display:${isClosingChecked ? 'block' : 'none'};padding-left:20px;">
+                    ${!readOnly && a.prospect_id ? `
+                    <div style="margin:0 0 14px;padding:14px;background:linear-gradient(135deg,#fef3c7 0%,#fde68a 100%);border:2px dashed #f59e0b;border-radius:10px;">
+                        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+                            <i class="fas fa-camera" style="color:#b45309;font-size:18px;"></i>
+                            <strong style="color:#92400e;">📸 Order Form Photo <span style="color:#dc2626;" title="Required">*</span></strong>
+                        </div>
+                        <p style="margin:0 0 10px;font-size:12px;color:#78350f;line-height:1.4;">
+                            Take a photo of the signed order form (any of the 3 templates — PRN Installment, PRN Receipt, or Old Paper Form). AI will auto-fill product, amount, payment, and customer details.
+                        </p>
+                        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+                            <button type="button" class="btn primary btn-sm" onclick="document.getElementById('${prefix}-order-form-camera').click()" ${disabled}>
+                                <i class="fas fa-camera"></i> Take Photo
+                            </button>
+                            <button type="button" class="btn secondary btn-sm" onclick="document.getElementById('${prefix}-order-form-file').click()" ${disabled}>
+                                <i class="fas fa-upload"></i> Choose File
+                            </button>
+                            <span style="font-size:11px;color:#78350f;margin-left:6px;">Form type:</span>
+                            <select id="${prefix}-order-form-type" class="form-control" style="width:auto;padding:4px 8px;font-size:12px;" ${disabled}>
+                                <option value="auto">Auto-detect</option>
+                                <option value="A">A — PRN Installment</option>
+                                <option value="B">B — PRN Receipt</option>
+                                <option value="C">C — Paper Form</option>
+                            </select>
+                            <input type="file" id="${prefix}-order-form-camera" accept="image/*" capture="environment" style="display:none;" onchange="app.handleOrderFormFile(this,'${prefix}',${a.prospect_id})">
+                            <input type="file" id="${prefix}-order-form-file" accept="image/png,image/jpeg" style="display:none;" onchange="app.handleOrderFormFile(this,'${prefix}',${a.prospect_id})">
+                        </div>
+                        <div id="${prefix}-order-form-thumbs" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;"></div>
+                        <div id="${prefix}-order-form-status" style="margin-top:6px;"></div>
+                        <img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt="" style="display:none;" onload="window.app && app.loadOrderFormThumbnails && app.loadOrderFormThumbnails('${prefix}',${a.prospect_id})">
+                    </div>
+                    ` : ''}
                     ${customerInfoSection}
                     <div class="form-row">
                         <div class="form-group half">
@@ -18933,6 +18981,500 @@ function _wireLoginBtn() {
             statusEl.style.color = '#b71c1c';
             console.error('[scanInvoiceWithAI]', err);
         }
+    };
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Order Form Photo Capture + AI Auto-Fill (Templates A, B, C)
+    // 1. Agent takes photo in closing modal
+    // 2. Photo uploaded to attachments/order_forms/{prospect}_{ts}_{type}.jpg
+    // 3. Sent to order-form-ocr edge function (Gemini 2.5 Flash) — classifies template + extracts
+    // 4. Review modal shows photo + extracted fields with confidence dots
+    // 5. Selected fields applied to closing modal (Customer Info / Product / Amount / Payment)
+    // 6. prospect_attachments row created with metadata = { form_type, fields, confidence, raw_text }
+    // ═══════════════════════════════════════════════════════════════════════
+
+    let _orderFormScanCache = null;
+
+    // [scan_key, closing_field_suffix, label, strategy]
+    // strategy ∈ 'fill' | 'fill_if_empty' | 'fuzzy_select' | 'map_payment' | 'fill_pop'
+    const ORDER_FORM_FIELD_MAP = [
+        ['customer_name',            'full-name',       'Full Name',          'fill_if_empty'],
+        ['customer_phone',           'phone',           'Phone',              'fill_if_empty'],
+        ['customer_email',           'email',           'Email',              'fill_if_empty'],
+        ['customer_nric',            'ic',              'NRIC',               'fill_if_empty'],
+        ['customer_address',         'address',         'Address',            'fill_if_empty'],
+        ['product_solar_bd',         'dob',             'Date of Birth',      'fill_if_empty'],
+        ['order_date',               'order-date',      'Order Date',         'fill'],
+        ['product_name',             'solution-sold',   'Product',            'fuzzy_select'],
+        ['amount_total_due',         'amount-closed',   'Amount Closed (RM)', 'fill'],
+        ['payment_type',             'payment-method',  'Payment Method',     'map_payment'],
+        ['installment_monthly',      'pop-monthly',     'Monthly Payment',    'fill_pop'],
+        ['installment_tenure_months','pop-tenure',      'Tenure (months)',    'fill_pop'],
+        ['amount_down_payment',      'pop-down',        'Down Payment',       'fill_pop'],
+        ['prn_number',               'invoice-number',  'PRN / Invoice No.',  'fill_if_empty'],
+        ['order_date',               'collection-date', 'Collection Date',    'fill_if_empty'],
+    ];
+
+    // Map extracted payment_type/method to closing dropdown enum
+    const _mapPaymentToClosingValue = (payment_type, payment_method) => {
+        const t = (payment_type || '').toLowerCase();
+        const m = (payment_method || '').toLowerCase();
+        if (m.includes('standing') || t.includes('standing')) return 'POP';
+        if (m.includes('online') || m.includes('mpgs')) return 'Credit Card';
+        if (t === 'visa' || t === 'master' || t.includes('credit') || t.includes('debit')) return 'Credit Card';
+        if (t.includes('cheque')) return 'Cheque';
+        if (m.includes('direct') || t.includes('direct')) return 'Bank Transfer';
+        if (t.includes('cash')) return 'Cash';
+        return null;
+    };
+
+    // Strip "RM", commas, and stray whitespace so values write cleanly into
+    // <input type="number"> fields. Only applied to keys we know are amounts.
+    const _ORDER_FORM_AMOUNT_KEYS = new Set([
+        'amount_unit_price','amount_down_payment','amount_security_deposit',
+        'amount_total_due','amount_grand_total',
+        'installment_amount','installment_monthly',
+    ]);
+    const _cleanScannedValue = (key, val) => {
+        if (val == null) return val;
+        let s = String(val).trim();
+        if (_ORDER_FORM_AMOUNT_KEYS.has(key)) {
+            s = s.replace(/\bRM\b/gi, '').replace(/,/g, '').replace(/\s+/g, '').trim();
+            // Defensive: if still not a clean number string, leave as-is so the
+            // agent sees something instead of silently nuking the value.
+            if (!/^[\d.]+$/.test(s)) s = String(val).trim();
+        }
+        return s;
+    };
+
+    const _fuzzyMatchProduct = (selectId, scannedName) => {
+        const sel = document.getElementById(selectId);
+        if (!sel || !scannedName) return false;
+        const target = scannedName.toLowerCase().trim();
+        let best = null;
+        for (const opt of sel.options) {
+            const val = (opt.value || opt.textContent).toLowerCase();
+            if (val === target) { sel.value = opt.value; return true; }
+            if (val && (val.includes(target) || target.includes(val))) {
+                if (!best) best = opt.value;
+            }
+        }
+        if (best) { sel.value = best; return true; }
+        return false;
+    };
+
+    const handleOrderFormFile = async (input, prefix, prospectId) => {
+        const file = input.files && input.files[0];
+        if (!file) return;
+        if (!file.type.startsWith('image/')) {
+            UI.toast.error('Please select an image file (JPG or PNG).');
+            input.value = '';
+            return;
+        }
+        if (file.size > 8 * 1024 * 1024) {
+            UI.toast.error('Image too large. Use a photo under 8 MB.');
+            input.value = '';
+            return;
+        }
+        if (!prospectId) {
+            UI.toast.error('Order form photo requires a linked prospect.');
+            input.value = '';
+            return;
+        }
+
+        const statusEl = document.getElementById(`${prefix}-order-form-status`);
+        const formTypeSel = document.getElementById(`${prefix}-order-form-type`);
+        const formTypeHint = formTypeSel ? (formTypeSel.value || 'auto') : 'auto';
+
+        const setStatus = (bg, fg, html) => {
+            if (statusEl) {
+                statusEl.innerHTML = `<div style="padding:7px 11px;background:${bg};color:${fg};border-radius:6px;font-size:12px;display:flex;align-items:center;gap:6px;">${html}</div>`;
+            }
+        };
+
+        try {
+            const sb = window.supabase || window.supabaseClient;
+            if (!sb || !sb.storage) throw new Error('Supabase storage not available (offline mode?)');
+
+            // 1. Upload photo to Supabase Storage
+            setStatus('#e3f2fd', '#1565c0', '<i class="fas fa-spinner fa-spin"></i> Uploading photo…');
+            const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+            const path = `order_forms/${prospectId}_${Date.now()}_${formTypeHint}_${safeName}`;
+            const { error: upErr } = await sb.storage.from('attachments').upload(path, file, { upsert: false, contentType: file.type });
+            if (upErr) throw upErr;
+            const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
+            const photoUrl = urlData?.publicUrl || null;
+            if (!photoUrl) throw new Error('Photo uploaded but URL not returned');
+
+            // 2. base64 → edge function
+            setStatus('#fef3c7', '#92400e', '<i class="fas fa-spinner fa-spin"></i> Reading order form with AI… (3–6s)');
+            const dataUrl = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = () => reject(new Error('Could not read file'));
+                reader.readAsDataURL(file);
+            });
+            const [meta, b64] = String(dataUrl).split(',');
+            const mime = (meta.match(/data:(.*?);base64/) || [])[1] || file.type || 'image/jpeg';
+
+            if (!sb.functions) throw new Error('Supabase functions client not available');
+
+            const { data: res, error } = await sb.functions.invoke('order-form-ocr', {
+                body: { image_base64: b64, mime_type: mime, form_type: formTypeHint },
+            });
+            if (error) throw new Error(error.message || 'Edge function call failed');
+            if (!res || res.ok === false) throw new Error(res?.detail || res?.error || 'OCR failed');
+
+            const fields = res.fields || {};
+            const confidence = res.confidence || {};
+            const detectedType = res.form_type || fields.form_type || 'unknown';
+            const rawText = res.raw_text || '';
+
+            // 3. Mean confidence summary
+            const confValue = (c) => c === 'high' ? 1.0 : c === 'medium' ? 0.6 : c === 'low' ? 0.3 : null;
+            const confValues = Object.values(confidence).map(confValue).filter(v => v !== null);
+            const meanConf = confValues.length > 0
+                ? Math.round((confValues.reduce((a, b) => a + b, 0) / confValues.length) * 100) / 100
+                : null;
+
+            // 4. Persist attachment row (graceful fallback if metadata column not yet migrated)
+            let attachment = null;
+            try {
+                attachment = await AppDataStore.create('prospect_attachments', {
+                    prospect_id: prospectId,
+                    attachment_type: 'order_form',
+                    file_url: photoUrl,
+                    filename: safeName,
+                    metadata: {
+                        form_type: detectedType,
+                        prn_number: fields.prn_number || null,
+                        fields,
+                        confidence,
+                        raw_text: rawText,
+                        edited_by_agent: [],
+                    },
+                    scanned_at: new Date().toISOString(),
+                    scan_confidence: meanConf,
+                });
+            } catch (e) {
+                console.warn('[order-form] metadata insert failed, retrying without:', e?.message || e);
+                attachment = await AppDataStore.create('prospect_attachments', {
+                    prospect_id: prospectId,
+                    attachment_type: 'order_form',
+                    file_url: photoUrl,
+                    filename: safeName,
+                }).catch(err2 => { console.error('[order-form] basic insert failed too:', err2); return null; });
+            }
+
+            _orderFormScanCache = {
+                prefix,
+                prospectId,
+                attachmentId: attachment?.id || null,
+                photoUrl,
+                detectedType,
+                fields,
+                confidence,
+                rawText,
+            };
+
+            if (statusEl) statusEl.innerHTML = '';
+            renderOrderFormScanReview();
+        } catch (err) {
+            console.error('Order form scan failed:', err);
+            setStatus('#ffebee', '#b71c1c', `<i class="fas fa-exclamation-triangle"></i> ${escapeHtml(err.message || 'Scan failed')}`);
+            UI.toast.error('Order form scan failed: ' + (err.message || 'Unknown error'));
+        } finally {
+            // Reset the input so re-selecting the same file fires onchange
+            if (input) input.value = '';
+        }
+    };
+
+    const renderOrderFormScanReview = () => {
+        if (!_orderFormScanCache) return;
+        const { prefix, photoUrl, detectedType, fields, confidence, rawText } = _orderFormScanCache;
+        const norm = v => (v == null ? '' : String(v).trim());
+
+        const formTypeLabel = {
+            A: 'A — PRN Modern (Installment)',
+            B: 'B — PRN Receipt (Direct)',
+            C: 'C — Old Paper Form',
+            unknown: 'Unknown',
+        }[detectedType] || detectedType;
+
+        const confBadge = (c) => {
+            if (!c) return '';
+            const color = c === 'high' ? '#10b981' : c === 'medium' ? '#f59e0b' : '#ef4444';
+            return `<span style="display:inline-block;padding:1px 6px;border-radius:10px;background:${color}1a;color:${color};font-size:10px;font-weight:600;text-transform:uppercase;">${c}</span>`;
+        };
+
+        const rows = ORDER_FORM_FIELD_MAP.map(([key, suffix, label, strategy], idx) => {
+            let scn = norm(_cleanScannedValue(key, fields[key]));
+            // Fallback: if total_due missing, use unit_price (templates B/C direct purchase)
+            if (key === 'amount_total_due' && !scn) scn = norm(_cleanScannedValue('amount_unit_price', fields.amount_unit_price));
+            const conf = confidence[key] || null;
+            const curEl = document.getElementById(`${prefix}-${suffix}`);
+            const cur = curEl ? norm(curEl.value || curEl.textContent) : '';
+
+            let status, defaultChecked;
+            if (!scn) { status = 'no-scan'; defaultChecked = false; }
+            else if (!cur) { status = 'fill-empty'; defaultChecked = true; }
+            else if (cur.toLowerCase() === scn.toLowerCase()) { status = 'same'; defaultChecked = false; }
+            else { status = 'conflict'; defaultChecked = (strategy === 'fill'); }
+
+            return { idx, key, suffix, label, strategy, scn, cur, conf, status, defaultChecked };
+        });
+
+        // Read-only meta rows (PRN, agent code, card details — stored on attachment only)
+        const metaRows = [
+            ['prn_number',              'PRN / PR Number'],
+            ['consultant',              'Consultant'],
+            ['agent_code',              'Agent Code'],
+            ['collection_branch',       'Collection Branch'],
+            ['product_ringsize',        'Ring Size'],
+            ['product_lifesign',        'Lifesign'],
+            ['product_lunar_bd',        'Lunar Birth Date'],
+            ['amount_security_deposit', 'Security Deposit'],
+            ['installment_amount',      'Installment Amount'],
+            ['card_holder',             'Card Holder'],
+            ['card_last4',              'Card (last 4)'],
+            ['card_issuing_bank',       'Issuing Bank'],
+            ['transaction_reference',   'Transaction Reference'],
+            ['transaction_receipt_no',  'Receipt Number'],
+        ].map(([key, label]) => ({ key, label, val: norm(fields[key]), conf: confidence[key] || null }))
+         .filter(r => r.val);
+
+        const statusBadge = (s) => {
+            if (s === 'same')       return '<span style="color:#10b981;font-size:11px;font-weight:600;">✓ MATCH</span>';
+            if (s === 'fill-empty') return '<span style="color:#7c3aed;font-size:11px;font-weight:600;">+ FILL</span>';
+            if (s === 'conflict')   return '<span style="color:#d97706;font-size:11px;font-weight:600;">⚠ CONFLICT</span>';
+            if (s === 'no-scan')    return '<span style="color:#9ca3af;font-size:11px;">— blank</span>';
+            return '';
+        };
+        const rowBg = (s) => {
+            if (s === 'conflict')   return '#fffbeb';
+            if (s === 'fill-empty') return '#f5f3ff';
+            if (s === 'same')       return '#f0fdf4';
+            return '#ffffff';
+        };
+
+        const html = `
+            <div style="display:grid;grid-template-columns:1fr 1.4fr;gap:14px;max-height:70vh;">
+                <div style="overflow:auto;">
+                    <div style="font-size:11px;color:var(--gray-500);margin-bottom:4px;">DETECTED TEMPLATE</div>
+                    <div style="font-weight:600;color:var(--gray-900);margin-bottom:10px;">${escapeHtml(formTypeLabel)} ${confBadge(confidence.form_type)}</div>
+                    <img loading="lazy" src="${escapeHtml(photoUrl)}" style="max-width:100%;border:1px solid var(--gray-200);border-radius:8px;cursor:zoom-in;" onclick="window._openAttachment && window._openAttachment('${escapeHtml(photoUrl)}')">
+                    ${metaRows.length ? `
+                        <div style="margin-top:12px;font-size:12px;">
+                            <div style="font-weight:600;color:var(--gray-700);margin-bottom:6px;">Extra extracted info (saved with photo)</div>
+                            <table style="width:100%;border-collapse:collapse;font-size:11px;">
+                                ${metaRows.map(r => `
+                                    <tr>
+                                        <td style="padding:4px 6px;color:var(--gray-500);width:45%;">${escapeHtml(r.label)}</td>
+                                        <td style="padding:4px 6px;color:var(--gray-900);">${escapeHtml(r.val)} ${confBadge(r.conf)}</td>
+                                    </tr>
+                                `).join('')}
+                            </table>
+                        </div>
+                    ` : ''}
+                </div>
+                <div style="overflow:auto;">
+                    <p style="margin:0 0 10px;color:var(--gray-600);font-size:13px;">
+                        Tick rows to apply to the closing form. <strong style="color:#d97706;">Conflicts</strong> need explicit confirmation.
+                    </p>
+                    <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                        <thead>
+                            <tr style="background:var(--gray-100);text-align:left;">
+                                <th style="padding:6px;width:28px;"></th>
+                                <th style="padding:6px;">Field</th>
+                                <th style="padding:6px;">Current</th>
+                                <th style="padding:6px;">Scanned</th>
+                                <th style="padding:6px;width:80px;">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${rows.map(r => `
+                                <tr style="background:${rowBg(r.status)};border-bottom:1px solid #e5e7eb;">
+                                    <td style="padding:6px;text-align:center;">
+                                        ${r.status === 'no-scan' || r.status === 'same' ? '' :
+                                            `<input type="checkbox" class="order-form-pick" data-idx="${r.idx}" ${r.defaultChecked ? 'checked' : ''}>`}
+                                    </td>
+                                    <td style="padding:6px;font-weight:500;color:var(--gray-700);">${r.label}</td>
+                                    <td style="padding:6px;color:${r.cur ? 'var(--gray-700)' : 'var(--gray-400)'};">${r.cur ? escapeHtml(r.cur) : '<em style="font-size:11px;">(empty)</em>'}</td>
+                                    <td style="padding:6px;color:${r.scn ? 'var(--gray-900)' : 'var(--gray-400)'};">
+                                        ${r.scn ? escapeHtml(r.scn) : '<em style="font-size:11px;">(blank)</em>'}
+                                        ${r.conf ? ' ' + confBadge(r.conf) : ''}
+                                    </td>
+                                    <td style="padding:6px;">${statusBadge(r.status)}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                    <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+                        <button type="button" class="btn secondary btn-sm" onclick="app.toggleOrderFormScanAll(true)"><i class="fas fa-check-square"></i> Tick all available</button>
+                        <button type="button" class="btn secondary btn-sm" onclick="app.toggleOrderFormScanAll(false)"><i class="far fa-square"></i> Untick all</button>
+                    </div>
+                    ${rawText ? `
+                        <details style="margin-top:10px;font-size:11px;color:var(--gray-500);">
+                            <summary style="cursor:pointer;">Show raw AI text</summary>
+                            <pre style="white-space:pre-wrap;background:var(--gray-100);padding:8px;border-radius:6px;margin-top:6px;font-size:10px;max-height:140px;overflow:auto;">${escapeHtml(rawText)}</pre>
+                        </details>
+                    ` : ''}
+                </div>
+            </div>
+        `;
+
+        // Use the shared scan-overlay (sits ON TOP of the Meeting Outcome modal so
+        // the closing form DOM stays intact while we write into its fields).
+        _showCpsScanOverlay('Review Scanned Order Form', html, [
+            { type: 'secondary', label: 'Skip Auto-Fill (keep photo)', action: 'app.dismissOrderFormScanReview()' },
+            { type: 'primary',   label: 'Apply Selected', action: '(async () => { await app.applyOrderFormScanSelection(); })()' },
+        ]);
+    };
+
+    const toggleOrderFormScanAll = (checked) => {
+        document.querySelectorAll('.order-form-pick').forEach(cb => { cb.checked = !!checked; });
+    };
+
+    const dismissOrderFormScanReview = () => {
+        _hideCpsScanOverlay();
+        _renderOrderFormThumb(_orderFormScanCache);
+        _orderFormScanCache = null;
+    };
+
+    const applyOrderFormScanSelection = async () => {
+        if (!_orderFormScanCache) { UI.hideModal(); return; }
+        const { prefix, fields } = _orderFormScanCache;
+
+        const picked = Array.from(document.querySelectorAll('.order-form-pick:checked'))
+            .map(cb => parseInt(cb.dataset.idx, 10))
+            .filter(n => !isNaN(n));
+
+        let applied = 0;
+        const editedFields = [];
+
+        for (const idx of picked) {
+            const row = ORDER_FORM_FIELD_MAP[idx];
+            if (!row) continue;
+            const [key, suffix, label, strategy] = row;
+
+            let val = fields[key];
+            if (key === 'amount_total_due' && !val) val = fields.amount_unit_price;
+            if (val == null || String(val).trim() === '') continue;
+            val = _cleanScannedValue(key, val);
+            if (val == null || String(val).trim() === '') continue;
+            val = String(val).trim();
+
+            const fieldId = `${prefix}-${suffix}`;
+            const el = document.getElementById(fieldId);
+            if (!el) continue;
+
+            if (strategy === 'fuzzy_select') {
+                if (_fuzzyMatchProduct(fieldId, val)) { applied++; editedFields.push(key); }
+            } else if (strategy === 'map_payment') {
+                const closingVal = _mapPaymentToClosingValue(fields.payment_type, fields.payment_method);
+                if (closingVal && el.tagName === 'SELECT') {
+                    let matched = false;
+                    for (const opt of el.options) {
+                        if (opt.value === closingVal) { el.value = closingVal; matched = true; break; }
+                    }
+                    if (matched) { el.dispatchEvent(new Event('change')); applied++; editedFields.push(key); }
+                }
+            } else if (strategy === 'fill_pop') {
+                const popSel = document.getElementById(`${prefix}-payment-method`);
+                if (popSel && popSel.value !== 'POP') {
+                    popSel.value = 'POP';
+                    popSel.dispatchEvent(new Event('change'));
+                }
+                el.value = val; applied++; editedFields.push(key);
+            } else {
+                el.value = val; applied++; editedFields.push(key);
+            }
+        }
+
+        // Persist agent edits for audit
+        if (_orderFormScanCache.attachmentId) {
+            try {
+                await AppDataStore.update('prospect_attachments', _orderFormScanCache.attachmentId, {
+                    metadata: {
+                        form_type: _orderFormScanCache.detectedType,
+                        prn_number: fields.prn_number || null,
+                        fields,
+                        confidence: _orderFormScanCache.confidence,
+                        raw_text: _orderFormScanCache.rawText,
+                        edited_by_agent: editedFields,
+                    },
+                });
+            } catch (e) {
+                console.warn('Could not persist edited_by_agent:', e?.message || e);
+            }
+        }
+
+        _hideCpsScanOverlay();
+        _renderOrderFormThumb(_orderFormScanCache);
+        _orderFormScanCache = null;
+
+        if (applied > 0) {
+            UI.toast.success(`Applied ${applied} field${applied === 1 ? '' : 's'} from order form. Please review before saving.`);
+        } else {
+            UI.toast.info('No fields applied — photo is still saved.');
+        }
+    };
+
+    const _renderOrderFormThumb = (cache) => {
+        if (!cache) return;
+        const { prefix, photoUrl, detectedType, attachmentId, fields } = cache;
+        const thumbWrap = document.getElementById(`${prefix}-order-form-thumbs`);
+        if (!thumbWrap) return;
+        const typeLabel = { A: 'PRN Installment', B: 'PRN Direct', C: 'Paper Form', unknown: 'Unknown' }[detectedType] || detectedType;
+        const prn = fields?.prn_number;
+        const item = document.createElement('div');
+        item.style.cssText = 'display:inline-flex;flex-direction:column;align-items:center;gap:2px;position:relative;';
+        item.innerHTML = `
+            <img src="${escapeHtml(photoUrl)}" style="width:80px;height:80px;border-radius:6px;object-fit:cover;cursor:pointer;border:1px solid var(--gray-200);" onclick="window._openAttachment && window._openAttachment('${escapeHtml(photoUrl)}')">
+            <div style="font-size:10px;color:var(--gray-600);text-align:center;line-height:1.2;">${escapeHtml(typeLabel)}</div>
+            ${prn ? `<div style="font-size:9px;color:var(--gray-400);">${escapeHtml(prn)}</div>` : ''}
+            ${attachmentId ? `<button type="button" title="Remove" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:white;border:none;border-radius:50%;width:20px;height:20px;font-size:10px;padding:0;cursor:pointer;" onclick="app.removeOrderFormAttachment(${attachmentId}, this.parentElement)"><i class="fas fa-times"></i></button>` : ''}
+        `;
+        thumbWrap.appendChild(item);
+    };
+
+    const loadOrderFormThumbnails = async (prefix, prospectId) => {
+        if (!prospectId) return;
+        const thumbWrap = document.getElementById(`${prefix}-order-form-thumbs`);
+        if (!thumbWrap) return;
+        try {
+            const rows = await AppDataStore.query('prospect_attachments', { prospect_id: prospectId, attachment_type: 'order_form' });
+            thumbWrap.innerHTML = '';
+            (rows || []).forEach(row => {
+                const meta = row.metadata || {};
+                _renderOrderFormThumb({
+                    prefix,
+                    photoUrl: row.file_url,
+                    detectedType: meta.form_type || 'unknown',
+                    attachmentId: row.id,
+                    fields: meta.fields || { prn_number: meta.prn_number },
+                });
+            });
+        } catch (e) {
+            console.warn('Could not load order form thumbnails:', e?.message || e);
+        }
+    };
+
+    const removeOrderFormAttachment = async (attachmentId, btnParent) => {
+        if (!confirm('Remove this order form photo? This cannot be undone.')) return;
+        try {
+            await AppDataStore.delete('prospect_attachments', attachmentId);
+            if (btnParent && btnParent.parentElement) btnParent.parentElement.removeChild(btnParent);
+            UI.toast.success('Order form photo removed');
+        } catch (e) {
+            UI.toast.error('Could not remove: ' + (e.message || e));
+        }
+    };
+
+    // Block save when closing is ticked but no order-form photo attached.
+    const hasOrderFormPhoto = (prefix) => {
+        const thumbWrap = document.getElementById(`${prefix}-order-form-thumbs`);
+        return !!(thumbWrap && thumbWrap.children.length > 0);
     };
 
     // Standard Functions page — Level 1 only. Shows a read-only preview of
@@ -40066,6 +40608,15 @@ const initImportDemoData = async () => {
         openMeetingOutcomeModal,
         saveMeetingOutcome,
         scanInvoiceWithAI,
+        // Order Form Photo Capture + AI Auto-Fill (Templates A/B/C)
+        handleOrderFormFile,
+        renderOrderFormScanReview,
+        toggleOrderFormScanAll,
+        dismissOrderFormScanReview,
+        applyOrderFormScanSelection,
+        loadOrderFormThumbnails,
+        removeOrderFormAttachment,
+        hasOrderFormPhoto,
         openPostMeetupNotesModal,
         savePostMeetupNotes,
         openAttendeePostEventModal,
