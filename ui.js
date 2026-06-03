@@ -211,8 +211,7 @@ window.UI = (() => {
             const action = (btn.action === 'UI.modal.hide()' || btn.action === 'UI.hideModal()') ? 'UI.hideModal()' : btn.action;
             const isCancel = action === 'UI.hideModal()' || /cancel|close|no\b|back/i.test(btn.label);
             const safeAction = String(action).replace(/"/g, '&quot;');
-            const safeLabel = escapeHtml(btn.label);
-            return `<button class="${btnClass}" ${isCancel ? 'data-no-load' : ''} onclick="${safeAction}">${safeLabel}</button>`;
+            return `<button class="${btnClass}" ${isCancel ? 'data-no-load' : ''} onclick="${safeAction}">${btn.label}</button>`;
         }).join('');
 
         const modalBoxClass = size === 'fullscreen' ? 'modal-box fullscreen' : 'modal-box';

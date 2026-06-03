@@ -76,6 +76,19 @@ class DataStore {
         this._cacheTTL = 300_000; // 5 min (was 30s — too aggressive for 500 concurrent users)
         this._cacheMaxEntries = 256; // LRU eviction threshold (app has 70+ tables; 64 was too aggressive)
 
+        // ── Primed-row side cache ─────────────────────────────────────────
+        // Some rows reach the client via SECURITY DEFINER RPCs (e.g. the calendar
+        // hot-detail RPC pulls activities where the user is a consultant or
+        // co-agent — rows that the user's own RLS would NOT return on a direct
+        // `activities.select().eq('id', x)`). Before, callers stashed those rows
+        // in script-local Maps and any downstream handler that called
+        // AppDataStore.getById went straight to the network, got nothing back,
+        // and surfaced a confusing "X not found" toast next to the already-open
+        // detail modal. primeRow() lets a caller hand the row to us so getById
+        // returns it instantly. Keyed by `tableName -> Map(idString -> row)`.
+        // Cleared on update/delete/invalidateCache so we never serve stale data.
+        this._primedRows = new Map();
+
         // ── In-flight request cancellation ──────────────────────────────────
         // A single AbortController whose signal is chained onto every Supabase
         // read (.abortSignal(signal) — supported since supabase-js@2.20). When
@@ -498,6 +511,37 @@ class DataStore {
         }
     }
 
+    // Hand a single row to the store from an out-of-band source (RPC, push event,
+    // server-render hydration, …). Subsequent get(tableName, id) calls return it
+    // instantly without a network round-trip. Use this when you already have the
+    // row in hand and want sibling code paths to see it — particularly when the
+    // row was obtained via a SECURITY DEFINER RPC and the calling user's own
+    // RLS would not return it on a direct table SELECT.
+    primeRow(tableName, row) {
+        if (!row || row.id == null) return;
+        let bucket = this._primedRows.get(tableName);
+        if (!bucket) { bucket = new Map(); this._primedRows.set(tableName, bucket); }
+        bucket.set(String(row.id), row);
+    }
+
+    primeRows(tableName, rows) {
+        if (!Array.isArray(rows)) return;
+        for (const r of rows) this.primeRow(tableName, r);
+    }
+
+    _getPrimedRow(tableName, id) {
+        const bucket = this._primedRows.get(tableName);
+        if (!bucket) return null;
+        return bucket.get(String(id)) || null;
+    }
+
+    _evictPrimedRow(tableName, id) {
+        const bucket = this._primedRows.get(tableName);
+        if (!bucket) return;
+        bucket.delete(String(id));
+        if (bucket.size === 0) this._primedRows.delete(tableName);
+    }
+
     // Strip fields that must never be sent to the client (e.g. legacy plaintext password
     // column on public.users — column is now REVOKED at DB level but guard here too).
     _sanitizeForStorage(tableName, records) {
@@ -519,6 +563,9 @@ class DataStore {
     // Invalidate cache for a table (and any table that depends on it)
     invalidateCache(tableName) {
         this._cache.delete(tableName);
+        // Drop any primed rows for this table — they're a side cache and must
+        // never outlive a write or a deliberate refresh.
+        this._primedRows.delete(tableName);
         // Derived caches that must expire whenever their source table changes.
         // `__prospects_active_{days}` is populated by getActiveProspects() and
         // depends on prospects.last_activity_date, which is kept in sync by a
@@ -1175,6 +1222,12 @@ class DataStore {
 
     async get(tableName, id) {
         if (id == null || id === 'null' || id === 'undefined') return null;
+
+        // Primed-row side cache — see primeRow(). Rows handed to us via an RPC
+        // or other out-of-band path live here so callers under tighter RLS
+        // still resolve them via getById without a network miss.
+        const primed = this._getPrimedRow(tableName, id);
+        if (primed) return primed;
 
         // If the whole table is already cached, do a synchronous in-memory lookup
         // instead of a network round trip. For tables with heavy columns excluded

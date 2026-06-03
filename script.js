@@ -14156,11 +14156,18 @@ function _wireLoginBtn() {
         const lightRes = await window.supabase.rpc('get_calendar_window', lightParams);
         _calPerf('rpc:light:done');
         // Fire-and-forget hot RPC. Once it lands we drop the rows into
-        // _hotActivityCache so subsequent activity-card taps still feel instant.
+        // _hotActivityCache so subsequent activity-card taps still feel instant,
+        // AND prime them into AppDataStore so every downstream handler that
+        // calls AppDataStore.getById('activities', id) finds them — even when
+        // the calling user's RLS would not return the row on a direct table
+        // SELECT (e.g. consultants on an activity they didn't create). Without
+        // the prime call, the modal would render via _hotActivityCache but the
+        // Accept/Reject/Repair-Link handlers would surface "Activity not found".
         Promise.resolve(window.supabase.rpc('get_calendar_hot_details', hotParams))
             .then(hotRes => {
                 if (hotRes && hotRes.data && hotRes.data.length > 0) {
                     for (const a of hotRes.data) _hotActivityCache.set(String(a.id), a);
+                    try { AppDataStore.primeRows('activities', hotRes.data); } catch (_) {}
                 }
             })
             .catch(e => { console.warn('[calendar] hot warm-up failed:', e?.message || e); });
@@ -14970,7 +14977,7 @@ function _wireLoginBtn() {
     // if opening WhatsApp from the app still fails, they can just alt-tab to
     // their already-open WhatsApp and paste.
     const sendDescriptionInvite = async (activityId) => {
-        const activity = await AppDataStore.getById('activities', activityId);
+        const activity = await _lookupActivityRobust(activityId);
         if (!activity) { UI.toast.error('Activity not found'); return; }
 
         const event = (activity.event_id) ? await AppDataStore.getById('events', activity.event_id) : null;
@@ -15654,20 +15661,75 @@ function _wireLoginBtn() {
         UI.toast.info(msg);
     };
 
+    // Robust activity lookup used by viewActivityDetails AND every downstream
+    // handler the modal can trigger (Accept/Reject, Repair Link, Live Notes,
+    // WhatsApp invite, …). _hotActivityCache holds rows fetched via the calendar
+    // RPC, which can include activities the user is on as a consultant — those
+    // rows aren't always returned by a direct `activities.select().eq('id', …)`
+    // under RLS, so handlers that only used AppDataStore.getById would show
+    // "Activity not found" while the modal was open with valid data right next
+    // to them. This helper mirrors viewActivityDetails's lookup chain so the
+    // two code paths can never disagree.
+    //
+    // _recentActivities is a per-session pin-board of every activity that has
+    // been successfully rendered in this tab. The moment a modal opens with
+    // valid data, the row gets pinned here — so any downstream click handler
+    // (Accept, Reject, Repair, Live Notes, WhatsApp, Edit) is GUARANTEED to
+    // resolve the same row, no matter what subsequently happened to the SWR
+    // snapshot, the in-memory cache, or the network's RLS verdict.
+    const _recentActivities = new Map();
+    const _pinRecentActivity = (a) => {
+        if (!a || a.id == null) return;
+        _recentActivities.set(String(a.id), a);
+        // Cap to 200 rows so the map can't grow without bound across a long session.
+        if (_recentActivities.size > 200) {
+            const oldest = _recentActivities.keys().next().value;
+            if (oldest !== undefined) _recentActivities.delete(oldest);
+        }
+    };
+    const _lookupActivityRobust = async (activityId) => {
+        if (activityId == null || activityId === 'null' || activityId === 'undefined') return null;
+        const idStr = String(activityId);
+        // Tier 0 — pinned row from a successful prior render in this tab.
+        // Survives invalidateCache(), SWR refresh, and any RLS flap.
+        const pinned = _recentActivities.get(idStr);
+        if (pinned) return pinned;
+        // Tier 1 — calendar hot RPC (SECURITY DEFINER, RLS-bypassing).
+        let activity = _hotActivityCache.get(idStr) || null;
+        // Tier 2 — AppDataStore (which now checks primedRows, then SWR, then network).
+        if (!activity) {
+            activity = await AppDataStore.getById('activities', activityId);
+        }
+        // Tier 3 — full-table scan via getAll (uses light-select projection).
+        if (!activity) {
+            const all = await AppDataStore.getAll('activities');
+            activity = all.find(a => String(a.id) === idStr) || null;
+        }
+        // Tier 4 — raw localStorage snapshot, in case getAll just got a stale RLS denial.
+        if (!activity) {
+            try {
+                const raw = localStorage.getItem('fs_crm_activities');
+                if (raw) {
+                    const rows = JSON.parse(raw);
+                    if (Array.isArray(rows)) {
+                        activity = rows.find(a => a && String(a.id) === idStr) || null;
+                    }
+                }
+            } catch (_) {}
+        }
+        if (activity) _pinRecentActivity(activity);
+        return activity;
+    };
+
     const viewActivityDetails = async (activityId) => {
         // Hot cache hit: activity is in the yesterday→today+7 window pre-warmed by
         // the last renderCalendar(). Skip the network round-trip entirely so the
         // detail modal opens instantly on near-term taps.
-        let activity = _hotActivityCache.get(String(activityId)) || null;
-        if (!activity) {
-            activity = await AppDataStore.getById('activities', activityId);
-        }
-        if (!activity) {
-            // Fallback for locally-stored activities (timestamp IDs not yet synced to Supabase)
-            const all = await AppDataStore.getAll('activities');
-            activity = all.find(a => a.id == activityId);
-        }
+        const activity = await _lookupActivityRobust(activityId);
         if (!activity) { UI.toast.error('Activity not found'); return; }
+        // Pin BEFORE we kick off prospect/customer lookups so any concurrent
+        // click handler reading the same id resolves instantly.
+        _pinRecentActivity(activity);
 
         // Parallelise the three independent lookups — prospect, customer and
         // the linked marketing event are all keyed off fields we already have
@@ -15839,6 +15901,21 @@ function _wireLoginBtn() {
                 : Promise.resolve(''),
         ]);
 
+        // Inline "open profile" icon next to the Entity row so the user can jump
+        // straight to the prospect/customer profile (and read the saved meeting
+        // notes) without first hunting in the Actions strip. When the entity is
+        // orphaned (deleted prospect/customer) the same slot becomes a yellow
+        // "Repair Link" pill — clear visual cue that the link is broken AND
+        // a one-tap fix.
+        const _entityActionId = activity.prospect_id || activity.customer_id;
+        const _entityIsProspect = !!activity.prospect_id;
+        const _entityProfileFn = _entityIsProspect ? 'showProspectDetail' : 'showCustomerDetail';
+        const _entityIconBtn = _entityActionId
+            ? (entityOrphaned
+                ? `<button title="Relink this activity to a contact" style="margin-left:8px; height:26px; padding:0 10px; border-radius:13px; border:1px solid #f59e0b; background:#fef3c7; color:#92400e; cursor:pointer; display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:600;" onclick="event.stopPropagation();(async()=>{ await app.openActivityRepairModal(${activity.id}); })()"><i class="fas fa-link"></i> Repair</button>`
+                : `<button title="Open ${_entityIsProspect ? 'prospect' : 'customer'} profile" style="margin-left:8px; width:26px; height:26px; border-radius:50%; border:none; background:#dbeafe; color:#1e40af; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; font-size:13px;" onclick="event.stopPropagation();(async()=>{ const p=await AppDataStore.getById('${_entityIsProspect ? 'prospects' : 'customers'}', ${_entityActionId}); if(!p){UI.toast.error('${_entityIsProspect ? 'Prospect' : 'Customer'} record not found'); return;} UI.hideModal(); app.${_entityProfileFn}(${_entityActionId}); })()"><i class="fas fa-user-circle"></i></button>`)
+            : '';
+
         const content = `
             <div class="activity-details">
                 <div class="detail-section">
@@ -15847,7 +15924,7 @@ function _wireLoginBtn() {
                     <div class="info-row"><span class="info-label">Title:</span> <span>${marketingEvent?.event_title || marketingEvent?.title || activity.activity_title || 'N/A'}</span></div>
                     <div class="info-row"><span class="info-label">Date:</span> <span>${activity.activity_date}</span></div>
                     <div class="info-row"><span class="info-label">Time:</span> <span>${activity.start_time} - ${activity.end_time}</span></div>
-                    ${activity.activity_type !== 'EVENT' ? `<div class="info-row"><span class="info-label">Entity:</span> <span>${entityName}</span></div>` : ''}
+                    ${activity.activity_type !== 'EVENT' ? `<div class="info-row"><span class="info-label">Entity:</span> <span style="display:inline-flex; align-items:center; flex-wrap:wrap; gap:4px;">${entityName}${_entityIconBtn}</span></div>` : ''}
                     ${activity.location_address ? `<div class="info-row"><span class="info-label">Location:</span> <span>${activity.location_address}</span></div>` : ''}
                     ${marketingEvent?.description ? `<div class="info-row" style="flex-direction:column; align-items:flex-start; gap:4px;"><div style="display:flex; align-items:center; gap:8px; width:100%;"><span class="info-label">Description:</span><button style="width:30px;height:30px;border-radius:50%;border:none;background:#25d366;color:#fff;font-size:17px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 2px 8px rgba(37,211,102,0.4);flex-shrink:0;" onclick="event.stopPropagation();app.sendDescriptionInvite(${activity.id})" title="Send WhatsApp Invite"><i class="fab fa-whatsapp"></i></button></div><span style="white-space:pre-wrap; color:var(--gray-700);">${marketingEvent.description}</span></div>` : ''}
                     ${activity.summary ? `<div class="info-row"><span class="info-label">Summary:</span> <span>${activity.summary}</span></div>` : ''}
@@ -15987,7 +16064,7 @@ function _wireLoginBtn() {
     // lets a user relink the activity to an existing prospect/customer or
     // detach the broken FK entirely — no SQL required.
     const openActivityRepairModal = async (activityId) => {
-        const activity = await AppDataStore.getById('activities', activityId);
+        const activity = await _lookupActivityRobust(activityId);
         if (!activity) { UI.toast.error('Activity not found'); return; }
 
         const brokenId = activity.prospect_id || activity.customer_id;
@@ -16183,7 +16260,7 @@ function _wireLoginBtn() {
     };
 
     const openMeetingCapture = async (activityId) => {
-        const activity = await AppDataStore.getById('activities', activityId);
+        const activity = await _lookupActivityRobust(activityId);
         if (!activity) { UI.toast.error('Activity not found'); return; }
         const config = _MC_CONFIG[activity.activity_type];
         if (!config) { UI.toast.error('Live Notes not available for this activity type'); return; }
@@ -20714,7 +20791,7 @@ function _wireLoginBtn() {
 
     // Called by consultant to accept/reject — from notification or activity detail
     const respondConsultantInvite = async (activityId, consultantId, response) => {
-        const activity = await AppDataStore.getById('activities', activityId);
+        const activity = await _lookupActivityRobust(activityId);
         if (!activity) return UI.toast.error('Activity not found');
         const consultants = (activity.consultants || []).map(c =>
             c.id === consultantId ? { ...c, status: response } : c
@@ -20979,7 +21056,8 @@ function _wireLoginBtn() {
             UI.toast.error('Invalid response');
             return;
         }
-        const activity = await AppDataStore.getByIdFull('activities', activityId);
+        const activity = (await AppDataStore.getByIdFull('activities', activityId))
+            || (await _lookupActivityRobust(activityId));
         if (!activity) { UI.toast.error('Activity not found'); return; }
         const coAgents = Array.isArray(activity.co_agents) ? activity.co_agents : [];
         const myEntry = coAgents.find(ca => String(ca.id) === String(_currentUser.id));
