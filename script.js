@@ -9251,8 +9251,11 @@ function _wireLoginBtn() {
         if (hasError) return;
         try {
             btn.disabled = true;
-            btn.textContent = 'Logging in...';
-            // Wrap every login attempt in a 20-second timeout so a hung mobile
+            btn.querySelector('span').textContent = 'Logging in...';
+            // Show "Still connecting…" after 5 s so the user knows we're working.
+            // Cleared in the finally block whether login succeeds or fails.
+            const _slowHint = setTimeout(() => { if (btn.disabled) btn.querySelector('span').textContent = 'Still connecting…'; }, 5000);
+            // Wrap every login attempt in a 10-second timeout so a hung mobile
             // network never leaves the button stuck on "Logging in..." forever.
             const _withTimeout = (promise, ms, label) => Promise.race([
                 promise,
@@ -9260,16 +9263,16 @@ function _wireLoginBtn() {
             ]);
             let user;
             try {
-                user = await _withTimeout(Auth.login(email, password), 20000, 'Connection timed out. Check your internet and try again.');
+                user = await _withTimeout(Auth.login(email, password), 10000, 'Connection timed out. Check your internet and try again.');
             } catch (loginErr) {
                 if (_isQuotaErr(loginErr)) {
                     // Auth-token write failed because localStorage is full of
                     // cached table snapshots. Wipe the SWR cache (recoverable
                     // from Supabase) and retry once. If retry also fails,
                     // bubble up to the outer catch.
-                    btn.textContent = 'Clearing cache…';
+                    btn.querySelector('span').textContent = 'Clearing cache…';
                     _purgeLocalCache();
-                    user = await _withTimeout(Auth.login(email, password), 20000, 'Connection timed out. Check your internet and try again.');
+                    user = await _withTimeout(Auth.login(email, password), 10000, 'Connection timed out. Check your internet and try again.');
                     UI.toast?.warning?.('Local cache cleared to make room for login.');
                 } else {
                     throw loginErr;
@@ -9512,10 +9515,23 @@ function _wireLoginBtn() {
                 }
             }
         } finally {
+            clearTimeout(_slowHint);
             btn.disabled = false;
-            btn.textContent = 'Login';
+            btn.querySelector('span').textContent = 'LOGIN';
         }
     };
+
+    // Wire the form's submit event so "Go" on the iOS/Android keyboard triggers
+    // login directly — bypasses the iOS behaviour where the first button tap only
+    // dismisses the keyboard instead of firing the click.
+    const _loginForm = document.getElementById('loginForm');
+    if (_loginForm && !_loginForm._loginWired) {
+        _loginForm._loginWired = true;
+        _loginForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            if (!btn.disabled) btn.onclick();
+        });
+    }
 }
 
     // ==================== INIT ====================
@@ -9618,6 +9634,10 @@ function _wireLoginBtn() {
                 _currentUser = null;
             }
         }
+
+        // Remove the loading screen — session check is complete, we now know
+        // whether to show the login form or the app shell.
+        document.getElementById('app-loading')?.remove();
 
         // If no user, show login screen and wire the button, then stop
         if (!_currentUser) {
@@ -9822,6 +9842,7 @@ function _wireLoginBtn() {
     } catch (err) {
         console.error('App init failed:', err);
         // Fallback: show login screen again
+        document.getElementById('app-loading')?.remove();
         document.getElementById('login-container').style.display = 'flex';
         document.getElementById('app-shell').style.display = 'none';
         _wireLoginBtn();
