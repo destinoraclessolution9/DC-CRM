@@ -31600,24 +31600,24 @@ const deactivateAgent = async (agentId) => {
     };
 
     const assignProspectToAgent = async (prospectId, agentId) => {
-        await AppDataStore.update('prospects', prospectId, { responsible_agent_id: agentId });
-
-        // Cascade agent change to the converted customer record and all linked activities
-        const [allCustomers, allActivities] = await Promise.all([
-            AppDataStore.getAll('customers'),
-            AppDataStore.getAll('activities')
-        ]);
-        await Promise.all([
-            ...allCustomers
-                .filter(c => String(c.converted_from_prospect_id) === String(prospectId))
-                .map(c => AppDataStore.update('customers', c.id, { responsible_agent_id: agentId })),
-            ...allActivities
-                .filter(a => String(a.prospect_id) === String(prospectId))
-                .map(a => AppDataStore.update('activities', a.id, { lead_agent_id: agentId }))
-        ]);
-
-        UI.toast.success('Prospect reassigned');
-        await app.showProspectDetail(prospectId);
+        // Legacy entry — historically used by the agent-deactivation cascade.
+        // Routed through cascadeProspectReassign so all writes go through the
+        // single audited path, hit the reassignment_history audit table, and
+        // respect rollback semantics. No confirmation popup here because the
+        // caller (deactivation flow) already gates this action.
+        try {
+            const earliest = '1970-01-01'; // capture all activity dates
+            await cascadeProspectReassign(prospectId, agentId, {
+                reason: 'system_reassign',
+                reasonNotes: 'Programmatic reassign (assignProspectToAgent)',
+                cascadeCustomer: true,
+                cascadeActivitiesAfter: earliest
+            });
+            UI.toast.success('Prospect reassigned');
+            await app.showProspectDetail(prospectId);
+        } catch (err) {
+            UI.toast.error('Reassignment failed: ' + err.message);
+        }
     };
 
     const sendRenewalReminder = (agentId) => {
@@ -35730,11 +35730,44 @@ container.innerHTML = `
     const cancelPendingReassign = async () => {
         const p = _pendingReassign;
         _pendingReassign = null;
-        if (p && p.kind === 'quick' && p.selectEl && p.fromAgentId != null) {
-            // Revert dropdown so it doesn't visually lie
-            try { p.selectEl.value = String(p.fromAgentId); } catch (_) {}
-        }
         UI.hideModal();
+        if (!p) return;
+
+        // Quick dropdown: dropdown was already pre-reverted at popup-open time,
+        // so this is just a safety belt in case anything mutated it.
+        if (p.kind === 'quick' && p.selectEl && p.fromAgentId != null) {
+            try { p.selectEl.value = String(p.fromAgentId); } catch (_) {}
+            return;
+        }
+
+        // Full reassign modal: re-open the original modal so the user doesn't
+        // lose the reason / justification / cascade checkbox state they typed.
+        if (p.kind === 'modalSingle' && p.prospectId && p.formSnapshot) {
+            try {
+                await openReassignModal(p.prospectId);
+                // Give the modal a moment to render before restoring values
+                await new Promise(r => setTimeout(r, 40));
+                const snap = p.formSnapshot;
+                const a = document.getElementById('reassign-agent');
+                if (a && snap.agentValue) a.value = snap.agentValue;
+                const j = document.getElementById('reassign-justification');
+                if (j) j.value = snap.justification || '';
+                if (snap.reason) {
+                    const r = document.querySelector(`input[name="reassign-reason"][value="${snap.reason}"]`);
+                    if (r) r.checked = true;
+                }
+                const cc = document.getElementById('reassign-cascade-customer');
+                if (cc) cc.checked = !!snap.cascadeCustomerChecked;
+                const ca = document.getElementById('reassign-cascade-activities');
+                if (ca) ca.checked = !!snap.cascadeActivitiesChecked;
+                const cd = document.getElementById('reassign-cascade-activities-from');
+                if (cd && snap.cascadeActivitiesFromValue) cd.value = snap.cascadeActivitiesFromValue;
+                const rp = document.getElementById('reassign-reset-protection');
+                if (rp) rp.checked = !!snap.resetProtectionChecked;
+                const nf = document.getElementById('reassign-notify');
+                if (nf) nf.checked = !!snap.notifyChecked;
+            } catch (_) {}
+        }
     };
 
     const openReassignModal = async (prospectId) => {
@@ -35883,7 +35916,18 @@ container.innerHTML = `
                 cascadeCustomer,
                 cascadeActivitiesAfter: cascadeActivitiesChecked ? cascadeFromDate : null,
                 resetProtection,
-                reason, reasonNotes, daysInactive
+                reason, reasonNotes, daysInactive,
+                // Snapshot of form state — used by cancelPendingReassign to
+                // restore the modal if the user backs out of the confirmation.
+                formSnapshot: {
+                    agentValue: String(toAgentId),
+                    reason, justification: reasonNotes,
+                    cascadeCustomerChecked: cascadeCustomer,
+                    cascadeActivitiesChecked,
+                    cascadeActivitiesFromValue: cascadeFromDate || '',
+                    resetProtectionChecked: resetProtection,
+                    notifyChecked: !!document.getElementById('reassign-notify')?.checked
+                }
             };
 
             const summaryHtml = _renderReassignSummary({
@@ -35981,6 +36025,14 @@ container.innerHTML = `
             return;
         }
 
+        // Revert dropdown to OLD agent immediately. The dropdown only flips to
+        // the new agent if the user explicitly clicks "Yes, Shift Everything
+        // Over" in the popup. This way the × close button can't leave the
+        // dropdown lying about its DB state.
+        if (selectEl && fromAgentId != null) {
+            try { selectEl.value = String(fromAgentId); } catch (_) {}
+        }
+
         _pendingReassign = {
             kind: 'quick',
             entityType, id, newAgentId,
@@ -36010,6 +36062,11 @@ container.innerHTML = `
         if (!p || p.kind !== 'quick') return;
         _pendingReassign = null;
         UI.hideModal();
+        // Flip dropdown to NEW agent now that user confirmed (we reverted to old
+        // when showing the popup so that × close left it correct).
+        if (p.selectEl && p.newAgentId != null) {
+            try { p.selectEl.value = String(p.newAgentId); } catch (_) {}
+        }
         try {
             if (p.entityType === 'customer') {
                 const result = await cascadeCustomerReassign(p.id, p.newAgentId);
