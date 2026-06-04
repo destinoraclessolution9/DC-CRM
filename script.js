@@ -8944,23 +8944,40 @@ In a production system, this would show the actual file contents.
     }
 
 // Simple Auth wrapper using Supabase
+// Defensive: every Supabase call is null-guarded so a broken client (storage
+// blocked on iPad Private mode, partial library load, content-blocker
+// stripping the response) surfaces a clear message instead of Safari's
+// cryptic "undefined is not an object (evaluating 'data.user')" toast.
 const Auth = {
     async login(email, password) {
-        const { data, error } = await window.supabase.auth.signInWithPassword({
+        const response = await window.supabase.auth.signInWithPassword({
             email,
             password
         });
+        if (!response || typeof response !== 'object') {
+            throw new Error('Login service returned no response. Please clear Safari data (Settings → Safari → Clear History and Website Data) and try again.');
+        }
+        const { data, error } = response;
         if (error) throw error;
+        if (!data || !data.user) {
+            // Most commonly hit on iPad Safari with "Block All Cookies" ON or
+            // in Private Browsing — sign-in succeeds on the wire but the
+            // session can't be persisted, so supabase-js bails with no user.
+            throw new Error('Login could not complete on this device. Please turn off "Block All Cookies" (Settings → Safari → Privacy), exit Private Browsing, and try again.');
+        }
         return data.user;
     },
     async logout() {
-        const { error } = await window.supabase.auth.signOut();
+        const response = await window.supabase.auth.signOut();
+        const error = response && response.error;
         if (error) throw error;
     },
     async getCurrentUser() {
-        const { data: { user }, error } = await window.supabase.auth.getUser();
+        const response = await window.supabase.auth.getUser();
+        if (!response || typeof response !== 'object') return null;
+        const { data, error } = response;
         if (error) throw error;
-        return user;
+        return (data && data.user) || null;
     }
 };
 
@@ -9088,6 +9105,41 @@ function _wireLoginBtn() {
         }
     }
 
+    // Detect blocked localStorage / cookies BEFORE the user types credentials —
+    // primary iPad failure mode: Settings → Safari → "Block All Cookies" ON, or
+    // Private Browsing tab. In that state, supabase-js can't persist the auth
+    // session and signInWithPassword may return undefined data, which the user
+    // sees as the cryptic "undefined is not an object" error after they click
+    // Login. Showing the banner up-front saves them a failed attempt.
+    const _detectStorageBlocked = () => {
+        try {
+            const probe = '__fs_crm_probe__';
+            window.localStorage.setItem(probe, '1');
+            const ok = window.localStorage.getItem(probe) === '1';
+            window.localStorage.removeItem(probe);
+            return !ok;
+        } catch (_) {
+            return true;
+        }
+    };
+    if (_detectStorageBlocked()) {
+        const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+        const fixHint = isIOS
+            ? 'On iPhone/iPad: Settings → Safari → Privacy & Security → turn OFF "Block All Cookies". Also exit any Private Browsing tab and reload.'
+            : 'Your browser is blocking site storage. Disable Private/Incognito mode, allow cookies for this site, and reload.';
+        const sBanner = document.createElement('div');
+        sBanner.id = 'storage-blocked-banner';
+        sBanner.style.cssText = 'margin:10px 0;padding:12px 14px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:8px;font-size:13px;line-height:1.45;text-align:left;';
+        const sStrong = document.createElement('strong');
+        sStrong.textContent = 'Login will fail on this device. ';
+        sBanner.appendChild(sStrong);
+        sBanner.appendChild(document.createTextNode(fixHint));
+        const lc = document.getElementById('loginBtn')?.parentElement;
+        if (lc && !document.getElementById('storage-blocked-banner')) {
+            lc.insertBefore(sBanner, lc.firstChild);
+        }
+    }
+
     btn.onclick = async () => {
         const emailEl = document.getElementById('loginEmail');
         const passwordEl = document.getElementById('loginPassword');
@@ -9161,7 +9213,15 @@ function _wireLoginBtn() {
                     throw loginErr;
                 }
             }
-            
+
+            // Defensive: Auth.login should always throw on failure, but a future
+            // refactor or a partial supabase-js could leak undefined back here.
+            // Without this guard, the next line throws Safari's cryptic
+            // "undefined is not an object (evaluating 'user.email')" on iPad.
+            if (!user || !user.email) {
+                throw new Error('Login completed but no account information was returned. Please reload the page and try again.');
+            }
+
             // Try to get profile from 'users' table using service-role client to bypass RLS
             const profileMatches = await AppDataStore.query('users', { email: user.email });
             // If multiple profiles share the email (e.g. old auto-created Level 12 ghosts),
@@ -9235,7 +9295,15 @@ function _wireLoginBtn() {
             } else if (!profile && profileError) {
                 throw profileError;
             }
-            
+
+            // Defensive: AppDataStore.create can return undefined on RLS failure
+            // or a flaky network. Without this guard, the next reference to
+            // profile.id (UserPreferences.load) throws Safari's cryptic
+            // "undefined is not an object (evaluating 'profile.id')" on iPad.
+            if (!profile || profile.id == null) {
+                throw new Error('Logged in but your account profile could not be loaded. Please contact your admin or try again in a minute.');
+            }
+
             _currentUser = profile;
             // Flush stale SWR snapshots on every login so the user always
             // sees fresh prospect/customer data rather than a cached view
@@ -9402,7 +9470,12 @@ function _wireLoginBtn() {
         // offline / on slow mobile networks). getUser() always makes a network round-trip
         // and will kick the user to the login screen if the connection is slow on startup.
         try {
-            const { data: { session } } = await window.supabase.auth.getSession();
+            // Defensive destructure — on iPad Safari with blocked storage,
+            // getSession() can resolve to undefined and the nested destructure
+            // would throw "undefined is not an object" before our outer catch
+            // could log a useful message.
+            const sessionResponse = await window.supabase.auth.getSession();
+            const session = (sessionResponse && sessionResponse.data && sessionResponse.data.session) || null;
             const authUser = session?.user ?? null;
             if (authUser) {
                 // Fetch the full profile from the users table (has integer id + role),
@@ -30710,15 +30783,17 @@ const renderCurrentAssignments = async (agentId) => {
 
         // Verify current password via re-auth
         try {
-            const { error: verifyErr } = await window.supabase.auth.signInWithPassword({
+            const verifyRes = await window.supabase.auth.signInWithPassword({
                 email: _currentUser.email,
                 password: currentPwd
             });
+            const verifyErr = verifyRes && verifyRes.error;
             if (verifyErr) return UI.toast.error('Current password is incorrect');
-            const { error: updateErr } = await window.supabase.auth.updateUser({ password: newPwd });
+            const updateRes = await window.supabase.auth.updateUser({ password: newPwd });
+            const updateErr = updateRes && updateRes.error;
             if (updateErr) throw updateErr;
         } catch (e) {
-            console.warn('Supabase password change (offline?):', e.message);
+            console.warn('Supabase password change (offline?):', e?.message || e);
         }
         await AppDataStore.update('users', _currentUser.id, {
             password: newPwd,
