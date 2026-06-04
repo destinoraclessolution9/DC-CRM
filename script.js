@@ -25812,16 +25812,10 @@ function _wireLoginBtn() {
                         })()}
                         ${a.score_value ? `<div style="margin-bottom:6px;"><span class="badge success" style="font-size:11px;">+${a.score_value} pts</span></div>` : ''}
                         <div class="meet-actions">
-                            <button class="btn btn-sm secondary" onclick="event.stopPropagation();app.attachActivityPhoto(${a.id})"><i class="fas fa-camera"></i> Photo</button>
+                            <button class="btn btn-sm secondary" onclick="event.stopPropagation();app.viewActivityPhotos(${a.id})">${(a.photo_urls && a.photo_urls.length > 0) ? `<i class="fas fa-images"></i> Photos (${a.photo_urls.length})` : `<i class="fas fa-camera"></i> Photo`}</button>
                             <button class="btn btn-sm secondary" onclick="event.stopPropagation();app.openPostMeetupNotesModal(${a.id}, ${prospect.id})"><i class="fas fa-sticky-note"></i> Minutes</button>
                             ${a.is_closed ? `<span class="badge success" style="align-self:center;font-size:12px;"><i class="fas fa-handshake"></i> Sale Closed</span>` : `<button class="btn btn-sm primary" onclick="event.stopPropagation();app.openMeetingOutcomeModal(${a.id})"><i class="fas fa-handshake"></i> Close Sale</button>`}
                         </div>
-                        ${a.photo_urls && a.photo_urls.length > 0 ? `
-                        <div class="meet-photos">
-                            <button class="btn btn-sm secondary" onclick="event.stopPropagation();app.attachActivityPhoto(${a.id})" style="font-size:11px;margin-top:4px;">
-                                <i class="fas fa-images"></i> ${a.photo_urls.length} photo${a.photo_urls.length > 1 ? 's' : ''}
-                            </button>
-                        </div>` : ''}
                     </div>
                 `).join('') : '<p style="text-align:center;padding:20px;color:var(--gray-400);">No meet up history recorded yet.</p>'}
             `;
@@ -27161,6 +27155,35 @@ NOTIFY pgrst, 'reload schema';`;
         UI.showModal('Attach Meet Up Photo', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
             { label: 'Upload', type: 'primary', action: `(async () => { await app.saveActivityPhoto(${activityId}); })()` }
+        ]);
+    };
+
+    // Photo VIEWER for a meet-up activity — opens a gallery of existing photos.
+    // Falls back to the upload flow when there are no photos yet.
+    const viewActivityPhotos = async (activityId) => {
+        const activity = await AppDataStore.getById('activities', activityId);
+        if (!activity) { UI.toast.error('Meet up record not found'); return; }
+        const photos = Array.isArray(activity.photo_urls) ? activity.photo_urls : [];
+
+        // Nothing to view → jump straight to the upload modal so the tap still feels useful.
+        if (photos.length === 0) {
+            return attachActivityPhoto(activityId);
+        }
+
+        const content = `
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;max-height:60vh;overflow:auto;padding:4px;">
+                ${photos.map((url, i) => `
+                    <div style="position:relative;">
+                        <img loading="lazy" decoding="async" src="${url}" style="width:100%;height:120px;border-radius:6px;object-fit:cover;cursor:zoom-in;border:1px solid var(--gray-200);" onclick="window._openAttachment && window._openAttachment('${url}')">
+                        <button type="button" class="btn-icon" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:white;border-radius:50%;width:22px;height:22px;font-size:11px;padding:0;" title="Remove" onclick="event.stopPropagation();app.removeActivityPhoto(${activityId}, ${i})"><i class="fas fa-times"></i></button>
+                    </div>
+                `).join('')}
+            </div>
+            <p style="color:var(--gray-500);font-size:12px;margin-top:10px;text-align:center;">Tap a photo to view full size. Tap × to remove.</p>
+        `;
+        UI.showModal(`Photos (${photos.length})`, content, [
+            { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
+            { label: '+ Add more', type: 'primary', action: `(async () => { UI.hideModal(); await app.attachActivityPhoto(${activityId}); })()` }
         ]);
     };
 
@@ -41585,6 +41608,7 @@ const initImportDemoData = async () => {
         addNote,
         deleteNote,
         attachActivityPhoto,
+        viewActivityPhotos,
         saveActivityPhoto,
         removeActivityPhoto,
         attachAppraisalForm,
