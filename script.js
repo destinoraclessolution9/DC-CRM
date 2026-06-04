@@ -5753,16 +5753,55 @@ In a production system, this would show the actual file contents.
         }).join('');
 
         listHost.innerHTML = html;
-        if (!_mpSearch) {
+        // Only cache the snapshot when there's no active search AND no active
+        // filters. Caching a filtered list under the canonical key means a
+        // page reload would paint that narrowed list while the in-memory
+        // filter state is empty — UI says "no filters" but list is narrowed.
+        if (!_mpSearch && !_mpHasActiveFilters()) {
             try { localStorage.setItem(`mp-list-snap-${_mpTab}`, JSON.stringify({ ts: Date.now(), val: html })); } catch(_) {}
         }
     };
 
     const mpSwitchTab = async (tab, btn) => {
+        // Drop filters that don't apply to the new tab so the badge count
+        // stays honest and the user doesn't get an empty list from a
+        // tab-foreign filter (e.g. status='converted' on Customers).
+        if (tab !== _mpTab) {
+            const prospectStatuses = new Set(['active','converted','lost']);
+            const customerStatuses = new Set(['active','inactive']);
+            const validStatuses = tab === 'customers' ? customerStatuses : prospectStatuses;
+            if (_mpFilters.status && !validStatuses.has(_mpFilters.status)) _mpFilters.status = '';
+            if (tab === 'customers') _mpFilters.pipelineStage = '';
+        }
         _mpTab = tab;
         document.querySelectorAll('.mp-tab').forEach(t => t.classList.remove('active'));
         if (btn) btn.classList.add('active');
+        // Update only the filter badge inline rather than re-rendering the
+        // shell — re-rendering would blow away the search-input focus state.
+        _mpUpdateFilterBtn();
         await _mpRenderList();
+    };
+
+    // Keep the filter-button .active state + badge in sync with _mpFilters
+    // without re-rendering the whole search row (preserves input focus).
+    const _mpUpdateFilterBtn = () => {
+        const btn = document.querySelector('.mp-filter-btn');
+        if (!btn) return;
+        const active = _mpHasActiveFilters();
+        btn.classList.toggle('active', active);
+        const oldBadge = btn.querySelector('.mp-filter-badge');
+        if (active) {
+            const count = String(_mpActiveFilterCount());
+            if (oldBadge) oldBadge.textContent = count;
+            else {
+                const b = document.createElement('span');
+                b.className = 'mp-filter-badge';
+                b.textContent = count;
+                btn.appendChild(b);
+            }
+        } else if (oldBadge) {
+            oldBadge.remove();
+        }
     };
     let _mpSearchTimer = null;
     const mpSearchInput = (v) => {
@@ -5872,9 +5911,11 @@ In a production system, this would show the actual file contents.
                 ` : ''}
             </div>
         `;
+        // UI.showModal expects { label, type, action } — not { text, class, action }.
+        // Passing the wrong keys silently renders the button text as "undefined".
         const buttons = [
-            { text: 'Clear', class: 'secondary', action: 'app.mpClearFilters()' },
-            { text: 'Apply', class: 'primary', action: 'app.mpApplyFilters()' },
+            { label: 'Clear', type: 'secondary', action: 'app.mpClearFilters()' },
+            { label: 'Apply', type: 'primary',   action: 'app.mpApplyFilters()' },
         ];
         UI.showModal(`Filter ${isCust ? 'Customers' : 'Prospects'}`, body, buttons);
     };
@@ -5890,28 +5931,20 @@ In a production system, this would show the actual file contents.
             pipelineStage: v('mpf-pipeline'),
         };
         UI.hideModal();
-        // Drop the snapshot so the filtered list paints immediately instead
-        // of being briefly overwritten by the cached unfiltered HTML.
+        // Drop the snapshot so a stale unfiltered cache doesn't paint over the
+        // narrowed list on the next visit. _mpRenderList skips saving while
+        // filters are active, so this stays clear until filters are reset.
         try { localStorage.removeItem(`mp-list-snap-${_mpTab}`); } catch(_) {}
-        // Re-render search row to update the filter button's active state + badge.
-        const vp = document.getElementById('content-viewport');
-        if (vp && vp.classList.contains('mprospects-active')) {
-            await showMobileProspectsView(vp);
-        } else {
-            await _mpRenderList();
-        }
+        _mpUpdateFilterBtn();
+        await _mpRenderList();
     };
 
     const mpClearFilters = async () => {
         _mpFilters = { status: '', agentId: '', mingGua: '', scoreMin: '', scoreMax: '', pipelineStage: '' };
         UI.hideModal();
         try { localStorage.removeItem(`mp-list-snap-${_mpTab}`); } catch(_) {}
-        const vp = document.getElementById('content-viewport');
-        if (vp && vp.classList.contains('mprospects-active')) {
-            await showMobileProspectsView(vp);
-        } else {
-            await _mpRenderList();
-        }
+        _mpUpdateFilterBtn();
+        await _mpRenderList();
     };
 
     // ── Table data-label injection ───────────────────────────
@@ -27294,12 +27327,21 @@ NOTIFY pgrst, 'reload schema';`;
         if (index < 0 || index >= existing.length) return;
         existing.splice(index, 1);
         await AppDataStore.update('activities', activityId, { photo_urls: existing });
-        UI.hideModal();
         UI.toast.success('Photo removed');
+
+        // Refresh the activity row in the background so the Photo button count updates.
         const prospectId = activity.prospect_id;
         const bodyEl = document.getElementById(`acc-body-activity-${prospectId}`);
         if (bodyEl) {
             await switchProspectTab('activity', prospectId, null, bodyEl);
+        }
+
+        // Keep the user in the gallery viewer when there are still photos to manage;
+        // otherwise close the modal (nothing left to look at).
+        if (existing.length > 0) {
+            await viewActivityPhotos(activityId);
+        } else {
+            UI.hideModal();
         }
     };
 
