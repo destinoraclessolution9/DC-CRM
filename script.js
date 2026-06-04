@@ -23799,15 +23799,50 @@ function _wireLoginBtn() {
         const cascadeCustomer = document.getElementById('bulk-cascade-customer')?.checked ?? true;
         const cascadeActivitiesChecked = document.getElementById('bulk-cascade-activities')?.checked ?? false;
         const cascadeFromDate = document.getElementById('bulk-cascade-activities-from')?.value || null;
+
+        const selectedIds = Array.from(_selectedProspects);
+        const [allUsers, allCustomers] = await Promise.all([
+            AppDataStore.getAll('users'),
+            AppDataStore.getAll('customers')
+        ]);
+        const toAgentName = ((allUsers || []).find(u => String(u.id) === String(agentId))?.full_name)
+            || `Agent #${agentId}`;
+        const selectedSet = new Set(selectedIds.map(String));
+        const linkedCount = (allCustomers || []).filter(c =>
+            selectedSet.has(String(c.converted_from_prospect_id))).length;
+
+        _pendingReassign = {
+            kind: 'bulkProspects',
+            agentId,
+            cascadeCustomer,
+            cascadeActivitiesAfter: cascadeActivitiesChecked ? cascadeFromDate : null,
+            selectedIds
+        };
+
+        const summaryHtml = _renderReassignSummary({
+            kind: 'bulk',
+            toAgentName,
+            bulkCount: selectedIds.length,
+            bulkLinkedCustomers: linkedCount,
+            bulkCustomerCascadeEnabled: cascadeCustomer,
+            bulkActivityCascadeEnabled: cascadeActivitiesChecked
+        });
+        _showReassignConfirmPopup('Confirm Bulk Reassignment', summaryHtml, 'executeConfirmedBulkReassign');
+    };
+
+    const executeConfirmedBulkReassign = async () => {
+        const p = _pendingReassign;
+        if (!p || p.kind !== 'bulkProspects') return;
+        _pendingReassign = null;
         UI.hideModal();
         let errors = 0, totalCust = 0, totalActs = 0;
-        for (const id of _selectedProspects) {
+        for (const id of p.selectedIds) {
             try {
-                const result = await cascadeProspectReassign(id, agentId, {
+                const result = await cascadeProspectReassign(id, p.agentId, {
                     reason: 'bulk_reassignment',
                     reasonNotes: 'Bulk reassign from prospects table',
-                    cascadeCustomer,
-                    cascadeActivitiesAfter: cascadeActivitiesChecked ? cascadeFromDate : null
+                    cascadeCustomer: p.cascadeCustomer,
+                    cascadeActivitiesAfter: p.cascadeActivitiesAfter
                 });
                 totalCust += result.customersCascaded || 0;
                 totalActs += result.activitiesCascaded || 0;
@@ -35556,6 +35591,77 @@ container.innerHTML = `
         return { skipped: false, fromAgentId, toAgentId: newAgentId, prospectSynced };
     };
 
+    // ────────────────────────────────────────────────────────────────────────
+    // Confirmation popup layer: every reassignment path stashes its intent in
+    // _pendingReassign and shows a summary popup. Only the user's explicit
+    // "Yes, Shift Everything Over" click triggers the actual cascade write.
+    let _pendingReassign = null;
+
+    const _renderReassignSummary = (s) => {
+        const lines = [];
+        if (s.kind === 'single') {
+            lines.push(`<li><strong>${escapeHtml(s.prospectName || 'This prospect')}</strong>'s ownership will move from <strong>${escapeHtml(s.fromAgentName)}</strong> to <strong>${escapeHtml(s.toAgentName)}</strong>.</li>`);
+            if (s.willCascadeCustomer && s.linkedCustomerCount > 0) {
+                lines.push(`<li>✓ <strong>${s.linkedCustomerCount}</strong> linked customer record${s.linkedCustomerCount > 1 ? 's' : ''} will also move (incl. future commission &amp; renewal credit).</li>`);
+            } else if (s.linkedCustomerCount > 0) {
+                lines.push(`<li>⚠ ${s.linkedCustomerCount} linked customer record${s.linkedCustomerCount > 1 ? 's' : ''} will <strong>stay with ${escapeHtml(s.fromAgentName)}</strong> (customer commission stays on old agent).</li>`);
+            } else {
+                lines.push(`<li>No converted customer linked — nothing to cascade on the customer side.</li>`);
+            }
+            if (s.willCascadeActivities && s.activityTransferCount > 0) {
+                lines.push(`<li>⚠ <strong>${s.activityTransferCount}</strong> past activit${s.activityTransferCount > 1 ? 'ies' : 'y'} will flip to ${escapeHtml(s.toAgentName)} — historical KPI credit rewrites.</li>`);
+            } else if (s.willCascadeActivities) {
+                lines.push(`<li>Activity transfer was enabled but no matching activities fell in range — history preserved.</li>`);
+            } else {
+                lines.push(`<li>Past activity credit stays with ${escapeHtml(s.fromAgentName)} (KPI history preserved).</li>`);
+            }
+            if (s.protectionResetEnabled) lines.push(`<li>Protection deadline resets to today + 30 days.</li>`);
+        } else {
+            lines.push(`<li><strong>${s.bulkCount}</strong> prospect${s.bulkCount > 1 ? 's' : ''} will be reassigned${s.toAgentName ? ` to <strong>${escapeHtml(s.toAgentName)}</strong>` : ' across multiple agents (distribution)'}.</li>`);
+            if (s.bulkCustomerCascadeEnabled && s.bulkLinkedCustomers > 0) {
+                lines.push(`<li>✓ <strong>${s.bulkLinkedCustomers}</strong> linked customer record${s.bulkLinkedCustomers > 1 ? 's' : ''} will also move with their prospect.</li>`);
+            } else if (s.bulkLinkedCustomers > 0) {
+                lines.push(`<li>⚠ ${s.bulkLinkedCustomers} linked customer record${s.bulkLinkedCustomers > 1 ? 's' : ''} will <strong>stay on the old agent</strong>.</li>`);
+            } else {
+                lines.push(`<li>None of the selected prospects are converted — no customer cascade.</li>`);
+            }
+            if (s.bulkActivityCascadeEnabled) {
+                lines.push(`<li>⚠ Past activities currently credited to source agent(s) will flip — historical KPI rewrites.</li>`);
+            } else {
+                lines.push(`<li>Past activity credit is preserved on the source agents.</li>`);
+            }
+        }
+        return `
+            <div style="padding:4px 0;">
+                <div style="background:#fef3c7;border-left:4px solid #f59e0b;padding:14px;border-radius:6px;margin-bottom:14px;">
+                    <div style="font-weight:700;color:#92400e;font-size:14px;">⚠️ Are you sure you want to shift this?</div>
+                    <div style="color:#78350f;font-size:13px;margin-top:6px;line-height:1.5;">Once confirmed, the change writes to the database and is logged in the reassignment history. Reverting requires another reassignment.</div>
+                </div>
+                <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px;font-size:13px;">
+                    <div style="font-weight:600;margin-bottom:10px;font-size:14px;color:#1f2937;">What will shift:</div>
+                    <ul style="margin:0;padding-left:20px;line-height:1.7;color:#334155;">${lines.join('')}</ul>
+                </div>
+            </div>
+        `;
+    };
+
+    const _showReassignConfirmPopup = (titleText, summaryHtml, executeFnName) => {
+        UI.showModal(titleText, summaryHtml, [
+            { label: 'Cancel', type: 'secondary', action: `(async () => { await app.cancelPendingReassign(); })()` },
+            { label: '✓ Yes, Shift Everything Over', type: 'primary', action: `(async () => { await app.${executeFnName}(); })()` }
+        ]);
+    };
+
+    const cancelPendingReassign = async () => {
+        const p = _pendingReassign;
+        _pendingReassign = null;
+        if (p && p.kind === 'quick' && p.selectEl && p.fromAgentId != null) {
+            // Revert dropdown so it doesn't visually lie
+            try { p.selectEl.value = String(p.fromAgentId); } catch (_) {}
+        }
+        UI.hideModal();
+    };
+
     const openReassignModal = async (prospectId) => {
         const [prospect, allActivities, allUsers, allProspectsForCap, allCustomers] = await Promise.all([
             AppDataStore.getById('prospects', prospectId),
@@ -35665,17 +35771,76 @@ container.innerHTML = `
             const cascadeFromDate = document.getElementById('reassign-cascade-activities-from')?.value || null;
             const resetProtection = document.getElementById('reassign-reset-protection')?.checked ?? false;
             const daysInactive = parseInt(document.querySelector('[data-days-inactive]')?.dataset.daysInactive) || 0;
+            const reason = document.querySelector('input[name="reassign-reason"]:checked')?.value || 'inactive';
+            const reasonNotes = document.getElementById('reassign-justification')?.value || '';
 
-            const result = await cascadeProspectReassign(prospectId, toAgentId, {
-                reason: document.querySelector('input[name="reassign-reason"]:checked')?.value || 'inactive',
-                reasonNotes: document.getElementById('reassign-justification')?.value || '',
-                resetProtection,
+            // Build preview before showing confirm popup
+            const [prospect, allUsers, allCustomers, allActivities] = await Promise.all([
+                AppDataStore.getById('prospects', prospectId),
+                AppDataStore.getAll('users'),
+                AppDataStore.getAll('customers'),
+                AppDataStore.getAll('activities'),
+            ]);
+            const fromAgentId = prospect?.responsible_agent_id || null;
+            const fromAgentName = ((allUsers || []).find(u => String(u.id) === String(fromAgentId))?.full_name)
+                || (fromAgentId ? `Agent #${fromAgentId}` : 'Unassigned');
+            const toAgentName = ((allUsers || []).find(u => String(u.id) === String(toAgentId))?.full_name)
+                || `Agent #${toAgentId}`;
+            const linkedCustomers = (allCustomers || []).filter(c => String(c.converted_from_prospect_id) === String(prospectId));
+            const linkedCustomerCount = linkedCustomers.length;
+            let activityTransferCount = 0;
+            if (cascadeActivitiesChecked && cascadeFromDate) {
+                const cutoffMs = new Date(cascadeFromDate).getTime();
+                const linkedIds = new Set(linkedCustomers.map(c => String(c.id)));
+                activityTransferCount = (allActivities || []).filter(a => {
+                    const matchesEntity = String(a.prospect_id) === String(prospectId)
+                        || (a.customer_id && linkedIds.has(String(a.customer_id)));
+                    if (!matchesEntity) return false;
+                    if (fromAgentId != null && String(a.lead_agent_id) !== String(fromAgentId)) return false;
+                    if (!a.activity_date) return false;
+                    return new Date(a.activity_date).getTime() >= cutoffMs;
+                }).length;
+            }
+
+            _pendingReassign = {
+                kind: 'modalSingle',
+                prospectId, toAgentId,
                 cascadeCustomer,
                 cascadeActivitiesAfter: cascadeActivitiesChecked ? cascadeFromDate : null,
-                daysInactive
-            });
+                resetProtection,
+                reason, reasonNotes, daysInactive
+            };
 
-            UI.hideModal();
+            const summaryHtml = _renderReassignSummary({
+                kind: 'single',
+                prospectName: prospect?.full_name,
+                fromAgentName, toAgentName,
+                linkedCustomerCount,
+                willCascadeCustomer: cascadeCustomer,
+                activityTransferCount,
+                willCascadeActivities: cascadeActivitiesChecked,
+                protectionResetEnabled: resetProtection
+            });
+            _showReassignConfirmPopup('Confirm Prospect Reassignment', summaryHtml, 'executeConfirmedReassignment');
+        } catch (err) {
+            UI.toast.error('Could not prepare confirmation: ' + err.message);
+        }
+    };
+
+    const executeConfirmedReassignment = async () => {
+        const p = _pendingReassign;
+        if (!p || p.kind !== 'modalSingle') return;
+        _pendingReassign = null;
+        UI.hideModal();
+        try {
+            const result = await cascadeProspectReassign(p.prospectId, p.toAgentId, {
+                reason: p.reason,
+                reasonNotes: p.reasonNotes,
+                resetProtection: p.resetProtection,
+                cascadeCustomer: p.cascadeCustomer,
+                cascadeActivitiesAfter: p.cascadeActivitiesAfter,
+                daysInactive: p.daysInactive
+            });
             if (result.skipped) {
                 UI.toast.info('No change — already assigned to this agent.');
             } else {
@@ -35694,28 +35859,90 @@ container.innerHTML = `
     };
 
     const quickReassign = async (entityId, newAgentId, entityType = 'prospect') => {
-        // Quick dropdown reassignment from the prospects/customers tables.
-        // Default behavior:
-        //   • prospect table → cascade to linked customer record (safe — avoids split ownership)
-        //   • customer table → reverse-sync the source prospect (safe — keeps them aligned)
-        // Activity credit is preserved by default (history is sacred). To
-        // transfer activities, use the full "Reassign" modal in Protection
-        // Monitoring instead.
+        // Quick dropdown reassignment. Now requires explicit confirmation via
+        // popup before the write fires. Cancel reverts the dropdown.
         newAgentId = parseInt(newAgentId);
         const id = parseInt(entityId);
         if (!id || !newAgentId) return;
 
         const selectEl = document.querySelector(`select[onchange*="quickReassign(${id}"]`);
-        const optimisticName = selectEl?.options[selectEl.selectedIndex]?.text || 'Agent';
+        const dropdownName = selectEl?.options[selectEl.selectedIndex]?.text || '';
 
+        let fromAgentId = null;
+        let fromAgentName = 'Unassigned';
+        let toAgentName = dropdownName;
+        let entityName = entityType === 'customer' ? 'This customer' : 'This prospect';
+        let linkedCustomerCount = 0;
         try {
+            const users = await AppDataStore.getAll('users');
+            const userById = (uid) => ((users || []).find(u => String(u.id) === String(uid))?.full_name) || null;
+            const toAgentLookup = userById(newAgentId);
+            if (!toAgentName || /^Agent$/i.test(toAgentName.trim())) {
+                toAgentName = toAgentLookup || `Agent #${newAgentId}`;
+            }
             if (entityType === 'customer') {
-                const result = await cascadeCustomerReassign(id, newAgentId);
+                const customer = await AppDataStore.getById('customers', id);
+                if (!customer) throw new Error('Customer not found');
+                fromAgentId = customer.responsible_agent_id || customer.agent_id || null;
+                if (fromAgentId != null && String(fromAgentId) === String(newAgentId)) return;
+                entityName = customer.full_name || entityName;
+                fromAgentName = userById(fromAgentId)
+                    || (fromAgentId ? `Agent #${fromAgentId}` : 'Unassigned');
+            } else {
+                const prospect = await AppDataStore.getById('prospects', id);
+                if (!prospect) throw new Error('Prospect not found');
+                fromAgentId = prospect.responsible_agent_id || null;
+                if (fromAgentId != null && String(fromAgentId) === String(newAgentId)) return;
+                entityName = prospect.full_name || entityName;
+                const customers = await AppDataStore.getAll('customers');
+                fromAgentName = userById(fromAgentId)
+                    || (fromAgentId ? `Agent #${fromAgentId}` : 'Unassigned');
+                linkedCustomerCount = (customers || []).filter(c =>
+                    String(c.converted_from_prospect_id) === String(id)).length;
+            }
+        } catch (err) {
+            if (selectEl && fromAgentId != null) selectEl.value = String(fromAgentId);
+            UI.toast.error('Could not load: ' + err.message);
+            return;
+        }
+
+        _pendingReassign = {
+            kind: 'quick',
+            entityType, id, newAgentId,
+            selectEl, fromAgentId, optimisticName: toAgentName
+        };
+
+        const summaryHtml = _renderReassignSummary({
+            kind: 'single',
+            prospectName: entityName,
+            fromAgentName,
+            toAgentName,
+            linkedCustomerCount: entityType === 'prospect' ? linkedCustomerCount : 0,
+            willCascadeCustomer: entityType === 'prospect',
+            activityTransferCount: 0,
+            willCascadeActivities: false,
+            protectionResetEnabled: false
+        });
+        _showReassignConfirmPopup(
+            entityType === 'customer' ? 'Confirm Customer Reassignment' : 'Confirm Prospect Reassignment',
+            summaryHtml,
+            'executeConfirmedQuickReassign'
+        );
+    };
+
+    const executeConfirmedQuickReassign = async () => {
+        const p = _pendingReassign;
+        if (!p || p.kind !== 'quick') return;
+        _pendingReassign = null;
+        UI.hideModal();
+        try {
+            if (p.entityType === 'customer') {
+                const result = await cascadeCustomerReassign(p.id, p.newAgentId);
                 if (result.skipped) return;
                 const extra = result.prospectSynced ? ' (source prospect synced)' : '';
-                UI.toast.success(`Customer reassigned to ${optimisticName}${extra}`);
+                UI.toast.success(`Customer reassigned to ${p.optimisticName}${extra}`);
             } else {
-                const result = await cascadeProspectReassign(id, newAgentId, {
+                const result = await cascadeProspectReassign(p.id, p.newAgentId, {
                     reason: 'manual',
                     reasonNotes: 'Quick reassign from table',
                     cascadeCustomer: true,
@@ -35725,21 +35952,12 @@ container.innerHTML = `
                 const extra = result.customersCascaded
                     ? ` (also moved ${result.customersCascaded} customer record)`
                     : '';
-                UI.toast.success(`Reassigned to ${optimisticName}${extra}`);
+                UI.toast.success(`Reassigned to ${p.optimisticName}${extra}`);
             }
         } catch (err) {
-            // Revert the dropdown on failure so it doesn't visually lie.
-            try {
-                let prevId = null;
-                if (entityType === 'customer') {
-                    const c = await AppDataStore.getById('customers', id);
-                    prevId = c?.responsible_agent_id || c?.agent_id || null;
-                } else {
-                    const p = await AppDataStore.getById('prospects', id);
-                    prevId = p?.responsible_agent_id || null;
-                }
-                if (selectEl && prevId != null) selectEl.value = String(prevId);
-            } catch (_e) {}
+            if (p.selectEl && p.fromAgentId != null) {
+                try { p.selectEl.value = String(p.fromAgentId); } catch (_) {}
+            }
             UI.toast.error('Reassignment failed: ' + err.message);
         }
     };
@@ -35852,23 +36070,59 @@ container.innerHTML = `
             const cascadeActivitiesChecked = document.getElementById('bulkmon-cascade-activities')?.checked ?? false;
             const cascadeFromDate = document.getElementById('bulkmon-cascade-activities-from')?.value || null;
 
+            // Preview cascade scope
+            const allCustomers = await AppDataStore.getAll('customers');
+            const matchedIds = new Set(matchedProspects.map(p => String(p.id)));
+            const linkedCount = (allCustomers || []).filter(c =>
+                matchedIds.has(String(c.converted_from_prospect_id))).length;
+
+            _pendingReassign = {
+                kind: 'bulkMonitoring',
+                option,
+                fromAgentId,
+                cascadeCustomer,
+                cascadeActivitiesAfter: cascadeActivitiesChecked ? cascadeFromDate : null,
+                justification,
+                matchedProspects: matchedProspects.map(p => ({ id: p.id, responsible_agent_id: p.responsible_agent_id })),
+                targetAgents: targetAgents.map(a => ({ id: a.id, full_name: a.full_name }))
+            };
+
+            const summaryHtml = _renderReassignSummary({
+                kind: 'bulk',
+                toAgentName: option === 'single' ? targetAgents[0]?.full_name : null,
+                bulkCount: matchedProspects.length,
+                bulkLinkedCustomers: linkedCount,
+                bulkCustomerCascadeEnabled: cascadeCustomer,
+                bulkActivityCascadeEnabled: cascadeActivitiesChecked
+            });
+            _showReassignConfirmPopup('Confirm Bulk Reassignment', summaryHtml, 'executeConfirmedBulkReassignment');
+        } catch (err) {
+            UI.toast.error('Could not prepare confirmation: ' + err.message);
+        }
+    };
+
+    const executeConfirmedBulkReassignment = async () => {
+        const p = _pendingReassign;
+        if (!p || p.kind !== 'bulkMonitoring') return;
+        _pendingReassign = null;
+        UI.hideModal();
+        try {
             let count = 0, totalCust = 0, totalActs = 0, errors = 0;
-            for (let i = 0; i < matchedProspects.length; i++) {
-                const prospect = matchedProspects[i];
-                const targetAgent = targetAgents[i % targetAgents.length];
+            for (let i = 0; i < p.matchedProspects.length; i++) {
+                const prospect = p.matchedProspects[i];
+                const targetAgent = p.targetAgents[i % p.targetAgents.length];
                 try {
                     const result = await cascadeProspectReassign(prospect.id, targetAgent.id, {
                         reason: 'bulk_reassignment',
-                        reasonNotes: justification,
-                        cascadeCustomer,
-                        cascadeActivitiesAfter: cascadeActivitiesChecked ? cascadeFromDate : null
+                        reasonNotes: p.justification,
+                        cascadeCustomer: p.cascadeCustomer,
+                        cascadeActivitiesAfter: p.cascadeActivitiesAfter
                     });
                     totalCust += result.customersCascaded || 0;
                     totalActs += result.activitiesCascaded || 0;
                     if (!result.skipped) count++;
                 } catch { errors++; }
             }
-            UI.hideModal();
             const bits = [];
             if (totalCust) bits.push(`${totalCust} customer record${totalCust > 1 ? 's' : ''}`);
             if (totalActs) bits.push(`${totalActs} activit${totalActs > 1 ? 'ies' : 'y'}`);
@@ -41560,6 +41814,11 @@ const initImportDemoData = async () => {
         renderReassignmentHistory,
         openReassignModal,
         confirmReassignment,
+        executeConfirmedReassignment,
+        executeConfirmedQuickReassign,
+        executeConfirmedBulkReassign,
+        executeConfirmedBulkReassignment,
+        cancelPendingReassign,
         bulkReassign,
         confirmBulkReassignment,
         refreshFollowupStats,
