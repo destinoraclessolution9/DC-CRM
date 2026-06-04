@@ -22559,7 +22559,7 @@ function _wireLoginBtn() {
                     <td data-label="Customer Since">${c.customer_since || '—'}</td>
                     <td data-label="Ming Gua">${c.ming_gua || '—'}</td>
                     <td data-label="Agent" onclick="event.stopPropagation()">${canReassignCust
-                        ? `<select class="form-control" style="padding:2px 6px;font-size:12px;min-width:120px;border:1px solid var(--border);border-radius:4px;background:var(--surface);cursor:pointer;" onchange="app.quickReassign(${c.id}, this.value)" title="Reassign agent">${(() => {
+                        ? `<select class="form-control" style="padding:2px 6px;font-size:12px;min-width:120px;border:1px solid var(--border);border-radius:4px;background:var(--surface);cursor:pointer;" onchange="app.quickReassign(${c.id}, this.value, 'customer')" title="Reassign agent">${(() => {
                             const cid = (c.responsible_agent_id || c.agent_id) ? String(c.responsible_agent_id || c.agent_id) : '';
                             if (!cid) return '<option value="" selected></option>';
                             if (activeAgentsCust.some(a => String(a.id) === cid)) return '';
@@ -23262,7 +23262,7 @@ function _wireLoginBtn() {
                         ${p.unable_to_serve ? `<br><span class="badge-unable">Unable to Serve</span>` : ''}
                     </td>
                     <td data-label="Agent" onclick="event.stopPropagation()">${canReassign
-                        ? `<select class="form-control" style="padding:2px 6px;font-size:12px;min-width:120px;border:1px solid var(--border);border-radius:4px;background:var(--surface);cursor:pointer;" onchange="app.quickReassign(${p.id}, this.value)" title="Reassign agent">${(() => {
+                        ? `<select class="form-control" style="padding:2px 6px;font-size:12px;min-width:120px;border:1px solid var(--border);border-radius:4px;background:var(--surface);cursor:pointer;" onchange="app.quickReassign(${p.id}, this.value, 'prospect')" title="Reassign agent">${(() => {
                             // Render a selected placeholder so the dropdown can't fall back to showing
                             // the alphabetically-first agent (e.g. "Lim Chi Kin") for unassigned or
                             // off-list-owned prospects. Truly unassigned → blank label. Owner is an
@@ -23750,9 +23750,14 @@ function _wireLoginBtn() {
     const bulkReassignProspects = async () => {
         const n = _selectedProspects.size;
         if (!n) return;
-        const allUsers = await AppDataStore.getAll('users');
+        const [allUsers, allCustomers] = await Promise.all([
+            AppDataStore.getAll('users'),
+            AppDataStore.getAll('customers')
+        ]);
         const agents = allUsers.filter(u => { const lvl = _getUserLevel(u); return lvl >= 3 && lvl <= 11 && u.status !== 'deleted'; })
             .sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''));
+        const selectedIds = Array.from(_selectedProspects).map(String);
+        const linkedCount = (allCustomers || []).filter(c => selectedIds.includes(String(c.converted_from_prospect_id))).length;
         const content = `
             <div style="padding:4px 0 8px;">
                 <p style="margin-bottom:12px;color:var(--text-secondary);">Reassigning <strong>${n}</strong> prospect${n > 1 ? 's' : ''} to:</p>
@@ -23760,6 +23765,27 @@ function _wireLoginBtn() {
                     <option value="">— Select agent —</option>
                     ${agents.map(a => `<option value="${a.id}">${escapeHtml(a.full_name || 'Agent')}</option>`).join('')}
                 </select>
+                <div style="margin-top:14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;">
+                    <label style="font-weight:600;display:block;margin-bottom:8px;font-size:13px;">What else should follow the new agent?</label>
+                    <label class="checkbox-label" style="display:flex;align-items:flex-start;gap:8px;margin-bottom:6px;">
+                        <input type="checkbox" id="bulk-cascade-customer" checked style="margin-top:3px;">
+                        <span>
+                            <strong>Transfer linked customer records</strong> ${linkedCount > 0 ? `(${linkedCount} converted customer${linkedCount > 1 ? 's' : ''} linked)` : '(none of the selected prospects are converted)'}
+                            <div style="font-size:11px;color:#475569;margin-top:2px;">Recommended — keeps prospect ownership and customer commission aligned.</div>
+                        </span>
+                    </label>
+                    <label class="checkbox-label" style="display:flex;align-items:flex-start;gap:8px;">
+                        <input type="checkbox" id="bulk-cascade-activities" style="margin-top:3px;">
+                        <span>
+                            <strong>Transfer activity credit</strong>
+                            <div style="font-size:11px;color:#92400e;margin-top:2px;">⚠️ Off by default — flipping this rewrites who gets KPI credit for past CPS / calls / visits. Only enable when correcting a wrong-assignment.</div>
+                            <div style="margin-top:6px;display:flex;align-items:center;gap:6px;font-size:12px;">
+                                <span style="color:#475569;">From date:</span>
+                                <input type="date" id="bulk-cascade-activities-from" class="form-control" style="font-size:12px;padding:2px 6px;width:auto;" value="${new Date(Date.now() - 365*24*60*60*1000).toISOString().split('T')[0]}">
+                            </div>
+                        </span>
+                    </label>
+                </div>
             </div>`;
         UI.showModal('Bulk Reassign', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
@@ -23768,17 +23794,36 @@ function _wireLoginBtn() {
     };
 
     const confirmBulkReassign = async () => {
-        const agentId = document.getElementById('bulk-reassign-agent')?.value;
+        const agentId = parseInt(document.getElementById('bulk-reassign-agent')?.value);
         if (!agentId) { UI.toast.error('Please select an agent.'); return; }
+        const cascadeCustomer = document.getElementById('bulk-cascade-customer')?.checked ?? true;
+        const cascadeActivitiesChecked = document.getElementById('bulk-cascade-activities')?.checked ?? false;
+        const cascadeFromDate = document.getElementById('bulk-cascade-activities-from')?.value || null;
         UI.hideModal();
-        let errors = 0;
+        let errors = 0, totalCust = 0, totalActs = 0;
         for (const id of _selectedProspects) {
-            try { await AppDataStore.update('prospects', id, { responsible_agent_id: agentId }); }
-            catch { errors++; }
+            try {
+                const result = await cascadeProspectReassign(id, agentId, {
+                    reason: 'bulk_reassignment',
+                    reasonNotes: 'Bulk reassign from prospects table',
+                    cascadeCustomer,
+                    cascadeActivitiesAfter: cascadeActivitiesChecked ? cascadeFromDate : null
+                });
+                totalCust += result.customersCascaded || 0;
+                totalActs += result.activitiesCascaded || 0;
+            } catch { errors++; }
         }
         _selectedProspects.clear();
-        if (errors) UI.toast.error(`${errors} could not be reassigned.`);
-        else UI.toast.success('Prospects reassigned.');
+        if (errors) {
+            UI.toast.error(`${errors} could not be reassigned.`);
+        } else {
+            const bits = [];
+            if (totalCust) bits.push(`${totalCust} customer record${totalCust > 1 ? 's' : ''}`);
+            if (totalActs) bits.push(`${totalActs} activit${totalActs > 1 ? 'ies' : 'y'}`);
+            UI.toast.success(bits.length
+                ? `Prospects reassigned (also transferred: ${bits.join(', ')})`
+                : 'Prospects reassigned.');
+        }
         await renderProspectsTable();
     };
 
@@ -35341,17 +35386,196 @@ container.innerHTML = `
         return `<table class="agent-performance-table"><thead><tr><th scope="col">Date</th><th scope="col">Prospect ID</th><th scope="col">From Agent</th><th scope="col">To Agent</th><th scope="col">Reason</th><th scope="col">By</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
     };
 
+    // ────────────────────────────────────────────────────────────────────────
+    // Single shared cascade for prospect→agent reassignment.
+    // Always updates prospects.responsible_agent_id; optionally cascades to
+    // the linked converted customer (responsible_agent_id + legacy agent_id)
+    // and to historical activities (lead_agent_id) currently credited to the
+    // old agent. Writes a reassignment_history audit row with a cascade note.
+    // Best-effort client-side rollback if any write fails mid-flight.
+    const cascadeProspectReassign = async (prospectId, toAgentId, opts = {}) => {
+        const pid = parseInt(prospectId);
+        const newAgentId = parseInt(toAgentId);
+        if (!pid || !newAgentId) throw new Error('Missing prospect or agent id');
+
+        const prospect = await AppDataStore.getById('prospects', pid);
+        if (!prospect) throw new Error('Prospect not found');
+        const fromAgentId = prospect.responsible_agent_id || null;
+
+        if (fromAgentId != null && String(fromAgentId) === String(newAgentId)) {
+            return { skipped: true, reason: 'same_agent', fromAgentId, toAgentId: newAgentId,
+                     linkedCustomerCount: 0, customersCascaded: 0, activitiesCascaded: 0 };
+        }
+
+        const allCustomers = await AppDataStore.getAll('customers');
+        const linkedCustomers = (allCustomers || []).filter(c =>
+            String(c.converted_from_prospect_id) === String(pid));
+
+        let activitiesToTransfer = [];
+        const cascadeActivitiesAfter = opts.cascadeActivitiesAfter ?? null;
+        if (cascadeActivitiesAfter) {
+            const allActs = await AppDataStore.getAll('activities');
+            const cutoffMs = new Date(cascadeActivitiesAfter).getTime();
+            const linkedCustomerIds = new Set(linkedCustomers.map(c => String(c.id)));
+            activitiesToTransfer = (allActs || []).filter(a => {
+                const matchesEntity = String(a.prospect_id) === String(pid)
+                    || (a.customer_id && linkedCustomerIds.has(String(a.customer_id)));
+                if (!matchesEntity) return false;
+                if (fromAgentId != null && String(a.lead_agent_id) !== String(fromAgentId)) return false;
+                if (!a.activity_date) return false;
+                return new Date(a.activity_date).getTime() >= cutoffMs;
+            });
+        }
+
+        const now = new Date().toISOString();
+        const prospectPatch = { responsible_agent_id: newAgentId };
+        let protectionResetTo = null;
+        if (opts.resetProtection) {
+            protectionResetTo = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+            prospectPatch.protection_deadline = protectionResetTo;
+        }
+
+        const customersDone = [];
+        const activitiesDone = [];
+        let prospectDone = false;
+        try {
+            await AppDataStore.update('prospects', pid, prospectPatch);
+            prospectDone = true;
+
+            if (opts.cascadeCustomer !== false && linkedCustomers.length) {
+                for (const c of linkedCustomers) {
+                    await AppDataStore.update('customers', c.id, {
+                        responsible_agent_id: newAgentId,
+                        agent_id: newAgentId
+                    });
+                    customersDone.push({ id: c.id,
+                        prev_responsible: c.responsible_agent_id ?? null,
+                        prev_agent: c.agent_id ?? null });
+                }
+            }
+
+            for (const a of activitiesToTransfer) {
+                await AppDataStore.update('activities', a.id, { lead_agent_id: newAgentId });
+                activitiesDone.push({ id: a.id, prev_lead: a.lead_agent_id });
+            }
+        } catch (err) {
+            try {
+                if (prospectDone) {
+                    const rollback = { responsible_agent_id: fromAgentId };
+                    if (protectionResetTo) rollback.protection_deadline = prospect.protection_deadline ?? null;
+                    await AppDataStore.update('prospects', pid, rollback);
+                }
+                for (const c of customersDone) {
+                    await AppDataStore.update('customers', c.id, {
+                        responsible_agent_id: c.prev_responsible,
+                        agent_id: c.prev_agent
+                    });
+                }
+                for (const a of activitiesDone) {
+                    await AppDataStore.update('activities', a.id, { lead_agent_id: a.prev_lead });
+                }
+            } catch (_rb) { /* rollback best-effort */ }
+            throw new Error(`Reassignment failed and was rolled back: ${err.message}`);
+        }
+
+        try {
+            const cascadeBits = [];
+            if (customersDone.length) cascadeBits.push(`customer×${customersDone.length}`);
+            if (activitiesDone.length) cascadeBits.push(`activities×${activitiesDone.length}`);
+            const notes = (opts.reasonNotes || '') + (cascadeBits.length
+                ? ` [cascaded: ${cascadeBits.join(', ')}]`
+                : '');
+            await AppDataStore.create('reassignment_history', {
+                prospect_id: pid,
+                from_agent_id: fromAgentId,
+                to_agent_id: newAgentId,
+                reassigned_by: _currentUser?.id,
+                reassignment_date: now,
+                reassignment_reason: opts.reason || 'manual',
+                reason_notes: notes,
+                days_inactive: opts.daysInactive || 0,
+                protection_deadline: protectionResetTo || prospect.protection_deadline || '',
+                created_at: now
+            });
+        } catch (_h) { /* audit log best-effort */ }
+
+        return {
+            skipped: false,
+            fromAgentId,
+            toAgentId: newAgentId,
+            linkedCustomerCount: linkedCustomers.length,
+            customersCascaded: customersDone.length,
+            activitiesCascaded: activitiesDone.length,
+            protectionResetTo
+        };
+    };
+
+    // Customer-side reassignment. Reverse-syncs to the source prospect (if
+    // converted) so the two stay aligned. Activity history is preserved.
+    const cascadeCustomerReassign = async (customerId, toAgentId) => {
+        const cid = parseInt(customerId);
+        const newAgentId = parseInt(toAgentId);
+        if (!cid || !newAgentId) throw new Error('Missing customer or agent id');
+
+        const customer = await AppDataStore.getById('customers', cid);
+        if (!customer) throw new Error('Customer not found');
+        const fromAgentId = customer.responsible_agent_id || customer.agent_id || null;
+        if (fromAgentId != null && String(fromAgentId) === String(newAgentId)) {
+            return { skipped: true, reason: 'same_agent' };
+        }
+
+        await AppDataStore.update('customers', cid, {
+            responsible_agent_id: newAgentId,
+            agent_id: newAgentId
+        });
+
+        let prospectSynced = false;
+        const sourceProspectId = customer.converted_from_prospect_id;
+        if (sourceProspectId) {
+            try {
+                const sourceProspect = await AppDataStore.getById('prospects', sourceProspectId);
+                if (sourceProspect && String(sourceProspect.responsible_agent_id) !== String(newAgentId)) {
+                    await AppDataStore.update('prospects', sourceProspectId, { responsible_agent_id: newAgentId });
+                    try {
+                        await AppDataStore.create('reassignment_history', {
+                            prospect_id: sourceProspectId,
+                            from_agent_id: sourceProspect.responsible_agent_id || null,
+                            to_agent_id: newAgentId,
+                            reassigned_by: _currentUser?.id,
+                            reassignment_date: new Date().toISOString(),
+                            reassignment_reason: 'customer_dropdown_sync',
+                            reason_notes: `Synced from customer #${cid} reassignment`,
+                            created_at: new Date().toISOString()
+                        });
+                    } catch (_h) {}
+                    prospectSynced = true;
+                }
+            } catch (_p) {}
+        }
+
+        return { skipped: false, fromAgentId, toAgentId: newAgentId, prospectSynced };
+    };
+
     const openReassignModal = async (prospectId) => {
-        const [prospect, allActivities, allUsers, allProspectsForCap] = await Promise.all([
+        const [prospect, allActivities, allUsers, allProspectsForCap, allCustomers] = await Promise.all([
             AppDataStore.getById('prospects', prospectId),
             AppDataStore.getAll('activities'),
             AppDataStore.getAll('users'),
             AppDataStore.getAll('prospects'),
+            AppDataStore.getAll('customers'),
         ]);
         if (!prospect) { UI.toast.error('Prospect not found'); return; }
         const currentAgent = prospect.responsible_agent_id
             ? allUsers.find(u => String(u.id) === String(prospect.responsible_agent_id)) || null
             : null;
+        const linkedCustomers = (allCustomers || []).filter(c => String(c.converted_from_prospect_id) === String(prospectId));
+        const linkedCustomerCount = linkedCustomers.length;
+        const fromAgentActivityCount = allActivities.filter(a => {
+            const pidMatch = String(a.prospect_id) === String(prospectId);
+            const cidMatch = a.customer_id && linkedCustomers.some(c => String(c.id) === String(a.customer_id));
+            return (pidMatch || cidMatch) && prospect.responsible_agent_id != null
+                && String(a.lead_agent_id) === String(prospect.responsible_agent_id);
+        }).length;
         const pActs = allActivities.filter(a => String(a.prospect_id) === String(prospectId)).sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
         const lastAct = pActs[0];
         const daysSince = lastAct ? Math.floor((Date.now() - new Date(lastAct.activity_date)) / (1000 * 60 * 60 * 24)) : 999;
@@ -35398,6 +35622,31 @@ container.innerHTML = `
                     <label class="checkbox-label"><input type="checkbox" id="reassign-notify" checked> Send notification to new agent</label>
                     <label class="checkbox-label"><input type="checkbox" id="reassign-reset-protection" checked> Reset protection period (30 days)</label>
                 </div>
+                <div class="form-group" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;">
+                    <label style="font-weight:600;display:block;margin-bottom:8px;">What else should follow the new agent?</label>
+                    ${linkedCustomerCount > 0 ? `
+                        <label class="checkbox-label" style="display:flex;align-items:flex-start;gap:8px;margin-bottom:4px;">
+                            <input type="checkbox" id="reassign-cascade-customer" checked style="margin-top:3px;">
+                            <span>
+                                <strong>Transfer linked customer record</strong> (${linkedCustomerCount} converted customer${linkedCustomerCount > 1 ? 's' : ''})
+                                <div style="font-size:11px;color:#475569;margin-top:2px;">Recommended — otherwise the new agent owns the prospect but old agent keeps the customer & future commission.</div>
+                            </span>
+                        </label>
+                    ` : `
+                        <div style="font-size:12px;color:#64748b;margin-bottom:8px;font-style:italic;">No converted customer linked to this prospect.</div>
+                    `}
+                    <label class="checkbox-label" style="display:flex;align-items:flex-start;gap:8px;margin-top:8px;">
+                        <input type="checkbox" id="reassign-cascade-activities" style="margin-top:3px;">
+                        <span>
+                            <strong>Transfer activity credit</strong> ${fromAgentActivityCount > 0 ? `(${fromAgentActivityCount} historical activit${fromAgentActivityCount > 1 ? 'ies' : 'y'} on old agent)` : '(no historical activities to transfer)'}
+                            <div style="font-size:11px;color:#92400e;margin-top:2px;">⚠️ Off by default — flipping this rewrites who gets KPI credit for past CPS / calls / visits. Only enable when correcting a wrong-assignment.</div>
+                            <div style="margin-top:6px;display:flex;align-items:center;gap:6px;font-size:12px;">
+                                <span style="color:#475569;">From date:</span>
+                                <input type="date" id="reassign-cascade-activities-from" class="form-control" style="font-size:12px;padding:2px 6px;width:auto;" value="${new Date(Date.now() - 365*24*60*60*1000).toISOString().split('T')[0]}">
+                            </div>
+                        </span>
+                    </label>
+                </div>
             </div>`;
         UI.showModal(`Reassign Prospect: ${prospect.full_name || 'Unknown'}`, content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
@@ -35408,31 +35657,35 @@ container.innerHTML = `
     const confirmReassignment = async () => {
         try {
             const prospectId = parseInt(document.getElementById('reassign-prospect-id')?.value);
-            const fromAgentId = parseInt(document.getElementById('reassign-from-agent-id')?.value) || null;
             const toAgentId = parseInt(document.getElementById('reassign-agent')?.value);
             if (!prospectId || !toAgentId) { UI.toast.error('Missing prospect or agent'); return; }
-            await AppDataStore.update('prospects', prospectId, { responsible_agent_id: toAgentId });
-            const resetProtection = document.getElementById('reassign-reset-protection')?.checked;
-            if (resetProtection) {
-                const newDeadline = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-                await AppDataStore.update('prospects', prospectId, { protection_deadline: newDeadline });
-            }
+
+            const cascadeCustomer = document.getElementById('reassign-cascade-customer')?.checked ?? false;
+            const cascadeActivitiesChecked = document.getElementById('reassign-cascade-activities')?.checked ?? false;
+            const cascadeFromDate = document.getElementById('reassign-cascade-activities-from')?.value || null;
+            const resetProtection = document.getElementById('reassign-reset-protection')?.checked ?? false;
             const daysInactive = parseInt(document.querySelector('[data-days-inactive]')?.dataset.daysInactive) || 0;
-            const prospect = await AppDataStore.getById('prospects', prospectId);
-            await AppDataStore.create('reassignment_history', {
-                prospect_id: prospectId,
-                from_agent_id: fromAgentId,
-                to_agent_id: toAgentId,
-                reassigned_by: _currentUser?.id,
-                reassignment_date: new Date().toISOString(),
-                reassignment_reason: document.querySelector('input[name="reassign-reason"]:checked')?.value || 'inactive',
-                reason_notes: document.getElementById('reassign-justification')?.value || '',
-                days_inactive: daysInactive,
-                protection_deadline: prospect?.protection_deadline || '',
-                created_at: new Date().toISOString()
+
+            const result = await cascadeProspectReassign(prospectId, toAgentId, {
+                reason: document.querySelector('input[name="reassign-reason"]:checked')?.value || 'inactive',
+                reasonNotes: document.getElementById('reassign-justification')?.value || '',
+                resetProtection,
+                cascadeCustomer,
+                cascadeActivitiesAfter: cascadeActivitiesChecked ? cascadeFromDate : null,
+                daysInactive
             });
+
             UI.hideModal();
-            UI.toast.success('Prospect reassigned successfully');
+            if (result.skipped) {
+                UI.toast.info('No change — already assigned to this agent.');
+            } else {
+                const bits = [];
+                if (result.customersCascaded) bits.push(`${result.customersCascaded} customer record`);
+                if (result.activitiesCascaded) bits.push(`${result.activitiesCascaded} activit${result.activitiesCascaded > 1 ? 'ies' : 'y'}`);
+                UI.toast.success(bits.length
+                    ? `Prospect reassigned (also transferred: ${bits.join(', ')})`
+                    : 'Prospect reassigned successfully');
+            }
             const container = document.getElementById('content-viewport');
             if (container) await showProtectionMonitoringView(container);
         } catch (err) {
@@ -35440,40 +35693,53 @@ container.innerHTML = `
         }
     };
 
-    const quickReassign = async (prospectId, newAgentId) => {
-        // Optimistic UI: the <select> already shows the new agent the moment
-        // the user changes it. We read fromAgentId from the in-memory cache
-        // (no extra network round-trip), fire the DB writes in the background,
-        // and only revert the dropdown if something fails.
+    const quickReassign = async (entityId, newAgentId, entityType = 'prospect') => {
+        // Quick dropdown reassignment from the prospects/customers tables.
+        // Default behavior:
+        //   • prospect table → cascade to linked customer record (safe — avoids split ownership)
+        //   • customer table → reverse-sync the source prospect (safe — keeps them aligned)
+        // Activity credit is preserved by default (history is sacred). To
+        // transfer activities, use the full "Reassign" modal in Protection
+        // Monitoring instead.
         newAgentId = parseInt(newAgentId);
-        if (!prospectId || !newAgentId) return;
+        const id = parseInt(entityId);
+        if (!id || !newAgentId) return;
 
-        // Pull fromAgentId from cache — avoids a blocking getById round-trip.
-        const cachedProspect = (AppDataStore._cacheGet('__prospects_active_500') || [])
-            .find(p => String(p.id) === String(prospectId));
-        const fromAgentId = cachedProspect?.responsible_agent_id;
-        if (fromAgentId != null && String(fromAgentId) === String(newAgentId)) return;
-
-        // Show toast optimistically using the agent name already in the dropdown.
-        const selectEl = document.querySelector(`select[onchange*="quickReassign(${prospectId}"]`);
+        const selectEl = document.querySelector(`select[onchange*="quickReassign(${id}"]`);
         const optimisticName = selectEl?.options[selectEl.selectedIndex]?.text || 'Agent';
-        UI.toast.success(`Reassigned to ${optimisticName}`);
 
         try {
-            await AppDataStore.update('prospects', prospectId, { responsible_agent_id: newAgentId });
-            await AppDataStore.create('reassignment_history', {
-                prospect_id: prospectId,
-                from_agent_id: fromAgentId,
-                to_agent_id: newAgentId,
-                reassigned_by: _currentUser?.id,
-                reassignment_date: new Date().toISOString(),
-                reassignment_reason: 'manual',
-                reason_notes: 'Quick reassign from table',
-                created_at: new Date().toISOString()
-            });
+            if (entityType === 'customer') {
+                const result = await cascadeCustomerReassign(id, newAgentId);
+                if (result.skipped) return;
+                const extra = result.prospectSynced ? ' (source prospect synced)' : '';
+                UI.toast.success(`Customer reassigned to ${optimisticName}${extra}`);
+            } else {
+                const result = await cascadeProspectReassign(id, newAgentId, {
+                    reason: 'manual',
+                    reasonNotes: 'Quick reassign from table',
+                    cascadeCustomer: true,
+                    cascadeActivitiesAfter: null
+                });
+                if (result.skipped) return;
+                const extra = result.customersCascaded
+                    ? ` (also moved ${result.customersCascaded} customer record)`
+                    : '';
+                UI.toast.success(`Reassigned to ${optimisticName}${extra}`);
+            }
         } catch (err) {
-            // Revert the dropdown to previous value on failure.
-            if (selectEl && fromAgentId != null) selectEl.value = String(fromAgentId);
+            // Revert the dropdown on failure so it doesn't visually lie.
+            try {
+                let prevId = null;
+                if (entityType === 'customer') {
+                    const c = await AppDataStore.getById('customers', id);
+                    prevId = c?.responsible_agent_id || c?.agent_id || null;
+                } else {
+                    const p = await AppDataStore.getById('prospects', id);
+                    prevId = p?.responsible_agent_id || null;
+                }
+                if (selectEl && prevId != null) selectEl.value = String(prevId);
+            } catch (_e) {}
             UI.toast.error('Reassignment failed: ' + err.message);
         }
     };
@@ -35527,6 +35793,27 @@ container.innerHTML = `
             </div>
             <div class="distribution-preview"><h4>Distribution Preview</h4><ul>${distPreview || '<li>No agents available</li>'}</ul></div>
             <div class="form-group"><label>Justification</label><textarea class="form-control" rows="3">${agent.full_name || 'Agent'} has ${inactiveProspects.length} inactive prospect${inactiveProspects.length !== 1 ? 's' : ''}. Redistributing to other agents.</textarea></div>
+            <div class="form-group" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;">
+                <label style="font-weight:600;display:block;margin-bottom:8px;font-size:13px;">What else should follow the new agent?</label>
+                <label class="checkbox-label" style="display:flex;align-items:flex-start;gap:8px;margin-bottom:6px;">
+                    <input type="checkbox" id="bulkmon-cascade-customer" checked style="margin-top:3px;">
+                    <span>
+                        <strong>Transfer linked customer records</strong>
+                        <div style="font-size:11px;color:#475569;margin-top:2px;">Recommended — keeps prospect ownership and customer commission aligned.</div>
+                    </span>
+                </label>
+                <label class="checkbox-label" style="display:flex;align-items:flex-start;gap:8px;">
+                    <input type="checkbox" id="bulkmon-cascade-activities" style="margin-top:3px;">
+                    <span>
+                        <strong>Transfer activity credit</strong>
+                        <div style="font-size:11px;color:#92400e;margin-top:2px;">⚠️ Off by default — rewrites who gets KPI credit for past CPS / calls / visits.</div>
+                        <div style="margin-top:6px;display:flex;align-items:center;gap:6px;font-size:12px;">
+                            <span style="color:#475569;">From date:</span>
+                            <input type="date" id="bulkmon-cascade-activities-from" class="form-control" style="font-size:12px;padding:2px 6px;width:auto;" value="${new Date(Date.now() - 365*24*60*60*1000).toISOString().split('T')[0]}">
+                        </div>
+                    </span>
+                </label>
+            </div>
         </div>`;
         UI.showModal('Bulk Reassignment', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
@@ -35561,25 +35848,33 @@ container.innerHTML = `
             }
             if (!targetAgents.length) { UI.toast.error('No active agents to assign to'); return; }
 
-            let count = 0;
+            const cascadeCustomer = document.getElementById('bulkmon-cascade-customer')?.checked ?? true;
+            const cascadeActivitiesChecked = document.getElementById('bulkmon-cascade-activities')?.checked ?? false;
+            const cascadeFromDate = document.getElementById('bulkmon-cascade-activities-from')?.value || null;
+
+            let count = 0, totalCust = 0, totalActs = 0, errors = 0;
             for (let i = 0; i < matchedProspects.length; i++) {
                 const prospect = matchedProspects[i];
                 const targetAgent = targetAgents[i % targetAgents.length];
-                await AppDataStore.update('prospects', prospect.id, { responsible_agent_id: targetAgent.id });
-                await AppDataStore.create('reassignment_history', {
-                    prospect_id: prospect.id,
-                    from_agent_id: prospect.responsible_agent_id,
-                    to_agent_id: targetAgent.id,
-                    reassigned_by: _currentUser?.id,
-                    reassignment_date: new Date().toISOString(),
-                    reassignment_reason: 'bulk_reassignment',
-                    reason_notes: justification,
-                    created_at: new Date().toISOString()
-                });
-                count++;
+                try {
+                    const result = await cascadeProspectReassign(prospect.id, targetAgent.id, {
+                        reason: 'bulk_reassignment',
+                        reasonNotes: justification,
+                        cascadeCustomer,
+                        cascadeActivitiesAfter: cascadeActivitiesChecked ? cascadeFromDate : null
+                    });
+                    totalCust += result.customersCascaded || 0;
+                    totalActs += result.activitiesCascaded || 0;
+                    if (!result.skipped) count++;
+                } catch { errors++; }
             }
             UI.hideModal();
-            UI.toast.success(`${count} prospect${count !== 1 ? 's' : ''} reassigned successfully`);
+            const bits = [];
+            if (totalCust) bits.push(`${totalCust} customer record${totalCust > 1 ? 's' : ''}`);
+            if (totalActs) bits.push(`${totalActs} activit${totalActs > 1 ? 'ies' : 'y'}`);
+            const tail = bits.length ? ` (also transferred: ${bits.join(', ')})` : '';
+            const errTail = errors ? ` — ${errors} failed.` : '';
+            UI.toast.success(`${count} prospect${count !== 1 ? 's' : ''} reassigned${tail}${errTail}`);
             const container = document.getElementById('content-viewport');
             if (container) await showProtectionMonitoringView(container);
         } catch (err) {
