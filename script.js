@@ -17903,7 +17903,7 @@ function _wireLoginBtn() {
                         </div>
                         <div class="form-group half">
                             <label>Start Time</label>
-                            <input type="time" id="start-time" class="form-control" value="09:00" onchange="app.calculateDuration()">
+                            <input type="time" id="start-time" class="form-control" value="09:00" onchange="app.onStartTimeChange()">
                         </div>
                     </div>
                     <div class="form-row">
@@ -20138,6 +20138,19 @@ function _wireLoginBtn() {
             const duration = endMin - startMin;
             durationField.value = duration > 0 ? `${duration} min` : 'Invalid';
         }
+    };
+
+    const onStartTimeChange = () => {
+        const startEl = document.getElementById('start-time');
+        const endEl = document.getElementById('end-time');
+        if (startEl?.value && endEl) {
+            const [h, m] = startEl.value.split(':').map(Number);
+            const totalMin = h * 60 + m + 60;
+            const endH = String(Math.floor(totalMin / 60) % 24).padStart(2, '0');
+            const endM = String(totalMin % 60).padStart(2, '0');
+            endEl.value = `${endH}:${endM}`;
+        }
+        calculateDuration();
     };
 
     const toggleCoAgentSection = () => {
@@ -41547,6 +41560,7 @@ const initImportDemoData = async () => {
         savePastRecord,
         updateActivityForm,
         calculateDuration,
+        onStartTimeChange,
         toggleCoAgentSection,
         toggleEventForm,
         openCpsCreateEventModal,
