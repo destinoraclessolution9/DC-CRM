@@ -10885,7 +10885,7 @@ function _wireLoginBtn() {
         // following lines would otherwise glue onto the value.
         const fields = {
             name:       grab(/(?:姓\s*名|Name)\s*[:：]\s*([^\r\n]+)/i),
-            ic:         grab(/(?:身\s*分\s*号?\s*码|身\s*份\s*证(?:\s*号\s*码)?|IC(?:\s*No\.?)?)\s*[:：]\s*([^\r\n]+)/i),
+            ic:         grab(/(?:身\s*[分份](?:\s*[号证码])+|IC(?:\s*No\.?)?|NRIC)\s*[:：]\s*([^\r\n]+)/i),
             occupation: grab(/(?:职\s*业|工\s*作|Occupation|Job)\s*[:：]\s*([^\r\n]+)/i),
             phone:      grab(/(?:联\s*络\s*号?\s*码|电\s*话|手\s*机|Phone(?:\s*no\.?)?|Tel(?:ephone)?|Mobile|Contact\s*(?:no\.?|number))\s*[:：]\s*([^\r\n]+)/i),
             email:      grab(/(?:邮\s*箱|电\s*邮|Email|E[-\s]?mail)\s*[:：]\s*([^\s,;，；]+)/i),
