@@ -459,12 +459,23 @@ const appLogic = (() => {
     // are wiped by data mutations (saveProspect, dataChanged event, etc.).
     // Safe because the codebase uses inline onclick="app.fn()" everywhere —
     // no listeners to re-bind after innerHTML restore.
-    const _viewHtmlCache = new Map(); // viewId -> { html, className, scrollTop, ts }
+    const _viewHtmlCache = new Map(); // cacheKey -> { html, className, scrollTop, ts }
     const _VIEW_HTML_CACHE_TTL_MS = 60_000;
     const _CACHEABLE_VIEWS = new Set(['prospects', 'calendar', 'month', 'pipeline']);
+    // Mobile + desktop render entirely different DOM for the same viewId
+    // (mobile uses _mpRenderList card layout, desktop uses renderProspectsTable).
+    // Without a viewport-tier suffix on the cache key, a desktop snapshot
+    // would be restored on a mobile viewport (or vice versa) — that's exactly
+    // how iPhone users were landing on the desktop TABLE view squeezed into a
+    // narrow viewport, with applyMobileTableLabels() decorating each <td>
+    // with data-label="NAME" etc. to look like a fake card.
+    const _viewCacheKey = (viewId) => {
+        const tier = (typeof window !== 'undefined' && window.innerWidth <= 768) ? 'm' : 'd';
+        return `${viewId}:${tier}`;
+    };
     const _saveViewToCache = (viewId, viewport) => {
         if (!viewId || !viewport || !_CACHEABLE_VIEWS.has(viewId)) return;
-        _viewHtmlCache.set(viewId, {
+        _viewHtmlCache.set(_viewCacheKey(viewId), {
             html: viewport.innerHTML,
             className: viewport.className,
             scrollTop: viewport.scrollTop || 0,
@@ -473,10 +484,11 @@ const appLogic = (() => {
     };
     const _restoreViewFromCache = (viewId, viewport) => {
         if (!viewId || !viewport || !_CACHEABLE_VIEWS.has(viewId)) return false;
-        const entry = _viewHtmlCache.get(viewId);
+        const key = _viewCacheKey(viewId);
+        const entry = _viewHtmlCache.get(key);
         if (!entry) return false;
         if (Date.now() - entry.ts > _VIEW_HTML_CACHE_TTL_MS) {
-            _viewHtmlCache.delete(viewId);
+            _viewHtmlCache.delete(key);
             return false;
         }
         viewport.innerHTML = entry.html;
@@ -487,7 +499,12 @@ const appLogic = (() => {
     };
     const _invalidateViewCache = (...viewIds) => {
         if (!viewIds.length) { _viewHtmlCache.clear(); return; }
-        for (const v of viewIds) _viewHtmlCache.delete(v);
+        // Drop BOTH mobile and desktop snapshots for each requested viewId so
+        // an invalidation on one tier never leaves a stale snapshot on the other.
+        for (const v of viewIds) {
+            _viewHtmlCache.delete(`${v}:m`);
+            _viewHtmlCache.delete(`${v}:d`);
+        }
     };
 
     // ========== ROLE HELPERS ==========
@@ -5611,6 +5628,18 @@ In a production system, this would show the actual file contents.
         // Fresh snapshot → show it and stop (no background fetch). Otherwise load.
         if (_mpHasSnap && !_mpForce) return;
         await _mpRenderList(!_mpHasSnap);
+    };
+
+    // Mobile-aware prospects dispatcher. Use this from ANY callsite outside the
+    // main navigateTo router (Back-to-List buttons, post-delete redirects,
+    // post-convert redirects, post-import redirects, auxiliary routers).
+    // Without this, mobile users get bounced to the desktop TABLE view squeezed
+    // into a narrow viewport — looks like the "old card view" because
+    // applyMobileTableLabels() decorates each <td> with data-label="NAME" etc.
+    const showProspectsViewSmart = async (viewport) => {
+        if (!viewport) viewport = document.getElementById('content-viewport');
+        if (isMobile()) return showMobileProspectsView(viewport);
+        return showProspectsView(viewport);
     };
 
     const _mpRenderList = async (silent = false) => {
@@ -25398,7 +25427,7 @@ function _wireLoginBtn() {
                     .cr-status.approved{background:#d1fae5;color:#065f46;}
                 </style>
                 <div class="pv-back">
-                    <button class="btn secondary btn-sm" onclick="app.showProspectsView(document.getElementById('content-viewport'))">
+                    <button class="btn secondary btn-sm" onclick="app.showProspectsViewSmart(document.getElementById('content-viewport'))">
                         <i class="fas fa-arrow-left"></i> Back to List
                     </button>
                 </div>
@@ -29135,7 +29164,7 @@ for (const p of allPackages) {
             ]);
             await AppDataStore.delete('prospects', id);
             UI.toast.success('Prospect deleted successfully');
-            await showProspectsView(document.getElementById('content-viewport'));
+            await showProspectsViewSmart(document.getElementById('content-viewport'));
         } catch (err) {
             UI.toast.error('Failed to delete: ' + (err.message || 'Unknown error'));
         }
@@ -29468,7 +29497,7 @@ const openAddSolutionModal = async (prospectId) => {
         UI.toast.success('Converted to customer successfully!');
 
         const content = document.getElementById('main-content');
-        if (content) await showProspectsView(content);
+        if (content) await showProspectsViewSmart(content);
     };
 
     const extendProtection = async (prospectId) => {
@@ -29705,7 +29734,7 @@ const openAddSolutionModal = async (prospectId) => {
         UI.hideModal();
         UI.toast.success(`${prospect.full_name} is now a Customer!`);
         const viewport = document.getElementById('content-viewport');
-        if (viewport && _currentView === 'prospects') await showProspectsView(viewport);
+        if (viewport && _currentView === 'prospects') await showProspectsViewSmart(viewport);
     };
 
     const rejectProspectConversion = async (prospectId) => {
@@ -35262,7 +35291,7 @@ container.innerHTML = `
         const vp = document.getElementById('content-viewport');
         if (vp) {
             if (_importData.importType === 'prospects') {
-                await showProspectsView(vp);
+                await showProspectsViewSmart(vp);
             } else if (['products', 'events', 'promotions'].includes(_importData.importType)) {
                 _currentMarketingListTab = _importData.importType;
                 await showMarketingListsView(vp);
@@ -41569,6 +41598,7 @@ const initImportDemoData = async () => {
 
         // Phase 3 Prospect Management Functions
         showProspectsView,
+        showProspectsViewSmart,
         showProspectDetail,
         zoomCpsPhoto,
         openAddProspectModal: openProspectModal,
@@ -42134,7 +42164,7 @@ const initImportDemoData = async () => {
                 break;
             case 'prospects':
                 if (_currentDetailView) break;
-                if (typeof showProspectsView === 'function') await showProspectsView(viewport);
+                if (typeof showProspectsViewSmart === 'function') await showProspectsViewSmart(viewport);
                 break;
             case 'pipeline':
                 if (typeof showPipelineView === 'function') await showPipelineView(viewport);
