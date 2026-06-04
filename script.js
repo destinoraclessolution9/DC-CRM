@@ -5576,7 +5576,7 @@ In a production system, this would show the actual file contents.
         // Client lists rarely change between visits, so a fresh snapshot is served
         // as-is with no background refetch; it refreshes only on edit, pull-to-
         // refresh, or after the TTL expires.
-        const _mpSnapKey = `mp-list-snap-${_mpTab}`;
+        const _mpSnapKey = `mp-list-snap-v2-${_mpTab}`;
         let _mpSnapHtml;
         if (!_mpForce) {
             try {
@@ -5758,7 +5758,7 @@ In a production system, this would show the actual file contents.
         // page reload would paint that narrowed list while the in-memory
         // filter state is empty — UI says "no filters" but list is narrowed.
         if (!_mpSearch && !_mpHasActiveFilters()) {
-            try { localStorage.setItem(`mp-list-snap-${_mpTab}`, JSON.stringify({ ts: Date.now(), val: html })); } catch(_) {}
+            try { localStorage.setItem(`mp-list-snap-v2-${_mpTab}`, JSON.stringify({ ts: Date.now(), val: html })); } catch(_) {}
         }
     };
 
@@ -5934,7 +5934,7 @@ In a production system, this would show the actual file contents.
         // Drop the snapshot so a stale unfiltered cache doesn't paint over the
         // narrowed list on the next visit. _mpRenderList skips saving while
         // filters are active, so this stays clear until filters are reset.
-        try { localStorage.removeItem(`mp-list-snap-${_mpTab}`); } catch(_) {}
+        try { localStorage.removeItem(`mp-list-snap-v2-${_mpTab}`); } catch(_) {}
         _mpUpdateFilterBtn();
         await _mpRenderList();
     };
@@ -5942,7 +5942,7 @@ In a production system, this would show the actual file contents.
     const mpClearFilters = async () => {
         _mpFilters = { status: '', agentId: '', mingGua: '', scoreMin: '', scoreMax: '', pipelineStage: '' };
         UI.hideModal();
-        try { localStorage.removeItem(`mp-list-snap-${_mpTab}`); } catch(_) {}
+        try { localStorage.removeItem(`mp-list-snap-v2-${_mpTab}`); } catch(_) {}
         _mpUpdateFilterBtn();
         await _mpRenderList();
     };
@@ -27208,7 +27208,7 @@ NOTIFY pgrst, 'reload schema';`;
                     ${existing.map((url, i) => `
                         <div style="position:relative;">
                             <img loading="lazy" decoding="async" data-attach-src="${url}" style="height:70px;border-radius:4px;object-fit:cover;cursor:pointer;" onclick="window._openAttachment('${url}')">
-                            <button type="button" class="btn-icon" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:white;border-radius:50%;width:20px;height:20px;font-size:10px;padding:0;" title="Remove" onclick="app.removeActivityPhoto(${activityId}, ${i})"><i class="fas fa-times"></i></button>
+                            <button type="button" class="btn-icon" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:white;border-radius:50%;width:20px;height:20px;font-size:10px;padding:0;" title="Remove" onclick="app.removeActivityPhoto(${activityId}, ${i}, 'upload')"><i class="fas fa-times"></i></button>
                         </div>
                     `).join('')}
                 </div>
@@ -27237,7 +27237,7 @@ NOTIFY pgrst, 'reload schema';`;
                 ${photos.map((url, i) => `
                     <div style="position:relative;">
                         <img loading="lazy" decoding="async" src="${url}" style="width:100%;height:120px;border-radius:6px;object-fit:cover;cursor:zoom-in;border:1px solid var(--gray-200);" onclick="window._openAttachment && window._openAttachment('${url}')">
-                        <button type="button" class="btn-icon" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:white;border-radius:50%;width:22px;height:22px;font-size:11px;padding:0;" title="Remove" onclick="event.stopPropagation();app.removeActivityPhoto(${activityId}, ${i})"><i class="fas fa-times"></i></button>
+                        <button type="button" class="btn-icon" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:white;border-radius:50%;width:22px;height:22px;font-size:11px;padding:0;" title="Remove" onclick="event.stopPropagation();app.removeActivityPhoto(${activityId}, ${i}, 'view')"><i class="fas fa-times"></i></button>
                     </div>
                 `).join('')}
             </div>
@@ -27320,7 +27320,12 @@ NOTIFY pgrst, 'reload schema';`;
         }
     };
 
-    const removeActivityPhoto = async (activityId, index) => {
+    // source: 'view'   → after delete, reopen the gallery viewer with fresh
+    //                    data (or close it when no photos remain).
+    //         'upload' → reopen the upload modal so the user can keep adding
+    //                    photos in the same flow.
+    //         undefined → default to 'view' behaviour for back-compat.
+    const removeActivityPhoto = async (activityId, index, source) => {
         const activity = await AppDataStore.getById('activities', activityId);
         if (!activity) return;
         const existing = Array.isArray(activity.photo_urls) ? [...activity.photo_urls] : [];
@@ -27336,9 +27341,11 @@ NOTIFY pgrst, 'reload schema';`;
             await switchProspectTab('activity', prospectId, null, bodyEl);
         }
 
-        // Keep the user in the gallery viewer when there are still photos to manage;
-        // otherwise close the modal (nothing left to look at).
-        if (existing.length > 0) {
+        // Reopen the originating modal so consecutive deletions don't force
+        // the user to re-tap Photos between each ×.
+        if (source === 'upload') {
+            await attachActivityPhoto(activityId);
+        } else if (existing.length > 0) {
             await viewActivityPhotos(activityId);
         } else {
             UI.hideModal();
