@@ -10808,6 +10808,137 @@ function _wireLoginBtn() {
         if (overlay) overlay.remove();
     };
 
+    // ─── CPS Paste-Text Parser ───────────────────────────────────────────
+    // Lets agents paste the standard WhatsApp "请填妥基本资料" reply and
+    // auto-fill Name / IC / Occupation / Phone / Email. The IC also derives
+    // Date of Birth and Gender. Sits on the same overlay layer as the
+    // photo-scan flow so the underlying form DOM stays intact.
+    const openCpsPasteModal = (prefix = 'cps') => {
+        const placeholder = `请填妥基本资料 Basic information
+1. 姓名 Name : CHEE CHUN CHING
+2. 身分号码 IC: 740315-04-5427
+3. 职业 Occupation: Driver
+4. 联络号码 Phone no: 0122034218
+5. 邮箱 Email: thomaschee@gmail.com`;
+        const contentHtml = `
+            <div style="margin-bottom:10px;color:var(--gray-600);font-size:13px;line-height:1.5;">
+                Paste the customer's bilingual reply below. The system will auto-fill
+                <strong>Name</strong>, <strong>IC</strong>, <strong>Occupation</strong>,
+                <strong>Phone</strong>, <strong>Email</strong> — and derive
+                <strong>Date of Birth</strong> and <strong>Gender</strong> from the IC.
+            </div>
+            <textarea id="cps-paste-input" class="form-control" rows="10"
+                style="font-family:inherit;font-size:13px;"
+                placeholder="${placeholder.replace(/"/g, '&quot;')}"></textarea>
+            <div style="margin-top:8px;font-size:11px;color:var(--gray-400);">
+                Also accepts variants like "电话", "Tel", "手机", "Mobile", "E-mail", "身份证", etc.
+            </div>
+        `;
+        _showCpsScanOverlay('Paste Customer Info', contentHtml, [
+            { type: 'secondary', label: 'Cancel', action: 'app._hideCpsScanOverlay()' },
+            { type: 'primary',   label: 'Auto-Fill Form', action: `app.parseCpsPastedText('${prefix}')` },
+        ]);
+        setTimeout(() => {
+            const ta = document.getElementById('cps-paste-input');
+            if (ta) ta.focus();
+        }, 50);
+    };
+
+    // Malaysian IC (NRIC) format: YYMMDD-PB-###G
+    //   YYMMDD → birth date · last digit G → odd=Male, even=Female
+    // Returns { dob: 'YYYY-MM-DD', gender: 'Male'|'Female' } or null on bad input.
+    const _parseMalaysianIc = (ic) => {
+        const clean = String(ic || '').replace(/[^0-9]/g, '');
+        if (clean.length !== 12) return null;
+        const yy = parseInt(clean.slice(0, 2), 10);
+        const mm = parseInt(clean.slice(2, 4), 10);
+        const dd = parseInt(clean.slice(4, 6), 10);
+        if (mm < 1 || mm > 12 || dd < 1 || dd > 31) return null;
+        // Century window: anything within ~5 years of "future" maps to 20YY,
+        // older years map to 19YY. Works for both elderly customers and babies.
+        const nowYY = new Date().getFullYear() % 100;
+        const century = (yy <= nowYY + 5) ? 2000 : 1900;
+        const dob = `${century + yy}-${String(mm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
+        const last = parseInt(clean.slice(-1), 10);
+        const gender = (last % 2 === 0) ? 'Female' : 'Male';
+        return { dob, gender };
+    };
+
+    const parseCpsPastedText = (prefix = 'cps') => {
+        const ta = document.getElementById('cps-paste-input');
+        if (!ta) return;
+        const text = (ta.value || '').trim();
+        if (!text) {
+            UI.toast.error('Please paste the message first.');
+            return;
+        }
+
+        // Tolerates ":" or "：", leading numbering ("1.", "1)", "-"), spacing
+        // inside Chinese labels, and either Chinese or English keyword.
+        const grab = (re) => {
+            const m = text.match(re);
+            return m && m[1] ? m[1].trim() : '';
+        };
+
+        // Value captures use [^\r\n]+ so they never spill into the next labelled
+        // line — important for numeric IC/Phone where "3." or "5." prefixes on
+        // following lines would otherwise glue onto the value.
+        const fields = {
+            name:       grab(/(?:姓\s*名|Name)\s*[:：]\s*([^\r\n]+)/i),
+            ic:         grab(/(?:身\s*分\s*号?\s*码|身\s*份\s*证(?:\s*号\s*码)?|IC(?:\s*No\.?)?)\s*[:：]\s*([^\r\n]+)/i),
+            occupation: grab(/(?:职\s*业|工\s*作|Occupation|Job)\s*[:：]\s*([^\r\n]+)/i),
+            phone:      grab(/(?:联\s*络\s*号?\s*码|电\s*话|手\s*机|Phone(?:\s*no\.?)?|Tel(?:ephone)?|Mobile|Contact\s*(?:no\.?|number))\s*[:：]\s*([^\r\n]+)/i),
+            email:      grab(/(?:邮\s*箱|电\s*邮|Email|E[-\s]?mail)\s*[:：]\s*([^\s,;，；]+)/i),
+        };
+
+        Object.keys(fields).forEach(k => {
+            fields[k] = (fields[k] || '').replace(/[。；;,，]\s*$/, '').trim();
+        });
+        if (fields.phone) fields.phone = fields.phone.replace(/[^\d+()]/g, '');
+        if (fields.ic)    fields.ic    = fields.ic.replace(/[^0-9A-Za-z\-]/g, '');
+
+        const map = [
+            ['name',       'name'],
+            ['ic',         'ic'],
+            ['occupation', 'occupation'],
+            ['phone',      'phone'],
+            ['email',      'email'],
+        ];
+        let filled = 0;
+        map.forEach(([key, suffix]) => {
+            if (fields[key]) {
+                _writeCpsField(prefix, suffix, fields[key]);
+                filled++;
+            }
+        });
+
+        // Derive DOB + Gender from a Malaysian IC if one was supplied and the
+        // form fields are empty — never overwrite a value the agent already entered.
+        let derived = 0;
+        if (fields.ic) {
+            const parsed = _parseMalaysianIc(fields.ic);
+            if (parsed) {
+                if (!_readCpsField(prefix, 'dob')) {
+                    _writeCpsField(prefix, 'dob', parsed.dob);
+                    derived++;
+                }
+                const genderEl = document.getElementById(`${prefix}-gender`);
+                if (genderEl && !genderEl.value) {
+                    genderEl.value = parsed.gender;
+                    derived++;
+                }
+            }
+        }
+
+        _hideCpsScanOverlay();
+        if (filled === 0) {
+            UI.toast.error('No recognizable fields found in the pasted text.');
+        } else {
+            const extra = derived ? ` (+${derived} derived from IC)` : '';
+            UI.toast.success(`Auto-filled ${filled} field${filled === 1 ? '' : 's'}${extra}.`);
+        }
+    };
+
     const scanCpsForm = (prefix = 'cps') => {
         const input = document.getElementById(`${prefix}-scan-input`);
         if (!input) {
@@ -18169,13 +18300,18 @@ function _wireLoginBtn() {
                 <div style="display:flex;align-items:center;gap:10px;min-width:0;">
                     <div style="width:36px;height:36px;background:#7c3aed;border-radius:8px;display:flex;align-items:center;justify-content:center;color:white;font-size:16px;flex-shrink:0;"><i class="fas fa-camera"></i></div>
                     <div style="min-width:0;">
-                        <div style="font-weight:600;font-size:14px;color:#111827;">Scan CPS Form</div>
-                        <div style="font-size:12px;color:#6b7280;">Snap a photo of the paper form to auto-fill</div>
+                        <div style="font-weight:600;font-size:14px;color:#111827;">Scan or Paste CPS Form</div>
+                        <div style="font-size:12px;color:#6b7280;">Snap a photo of the form, or paste the customer's reply to auto-fill</div>
                     </div>
                 </div>
-                <button type="button" class="btn primary btn-sm" style="white-space:nowrap;" onclick="app.scanCpsForm('${prefix}')">
-                    <i class="fas fa-camera"></i> Take Photo
-                </button>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                    <button type="button" class="btn secondary btn-sm" style="white-space:nowrap;" onclick="app.openCpsPasteModal('${prefix}')">
+                        <i class="fas fa-paste"></i> Paste Info
+                    </button>
+                    <button type="button" class="btn primary btn-sm" style="white-space:nowrap;" onclick="app.scanCpsForm('${prefix}')">
+                        <i class="fas fa-camera"></i> Take Photo
+                    </button>
+                </div>
                 <input type="file" id="${prefix}-scan-input" accept="image/*" capture="environment" style="display:none;" onchange="app.handleCpsScanFile(this, '${prefix}')">
             </div>`;
 
@@ -41502,6 +41638,10 @@ const initImportDemoData = async () => {
         applyCpsScanSelection,
         _hideCpsScanOverlay,
         _uploadCpsFormFile,
+
+        // CPS Form Paste-Text Parser
+        openCpsPasteModal,
+        parseCpsPastedText,
 
         // Lead Capture Forms
         showLeadFormsView,
