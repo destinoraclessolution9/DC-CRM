@@ -4987,8 +4987,8 @@ In a production system, this would show the actual file contents.
             <div class="mcal-filter-row">
                 <button class="mcal-filter" onclick="app.mcalFilter()"><i class="fas fa-sliders"></i> All Events <i class="fas fa-chevron-down"></i></button>
                 <div class="mcal-quick">
-                    <button class="mcal-quick-btn wa" onclick="app.mcalWa()" aria-label="WhatsApp"><i class="fab fa-whatsapp"></i></button>
-                    <button class="mcal-quick-btn add" onclick="app.mcalAdd()" aria-label="Add activity"><i class="fas fa-plus"></i></button>
+                    <button class="mcal-quick-btn wa" onclick="app.mcalWa()" aria-label="WhatsApp"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M17.498 14.382c-.301-.15-1.767-.867-2.04-.966-.273-.101-.473-.15-.673.15-.197.295-.771.964-.944 1.162-.175.195-.349.21-.646.075-.3-.15-1.263-.465-2.403-1.485-.888-.795-1.484-1.77-1.66-2.07-.174-.3-.019-.465.13-.615.136-.135.301-.345.451-.523.146-.181.194-.301.297-.496.1-.21.049-.375-.025-.524-.075-.15-.672-1.62-.922-2.206-.24-.584-.487-.51-.672-.51-.172-.015-.371-.015-.571-.015-.2 0-.523.074-.797.359-.273.3-1.045 1.02-1.045 2.475s1.07 2.865 1.219 3.075c.149.195 2.105 3.195 5.1 4.485.714.3 1.27.48 1.704.629.714.227 1.365.195 1.88.121.574-.091 1.767-.721 2.016-1.426.255-.705.255-1.29.18-1.425-.074-.135-.27-.21-.57-.345m-5.446 7.443h-.016c-1.77 0-3.524-.48-5.055-1.38l-.36-.214-3.75.975 1.005-3.645-.239-.375a9.869 9.869 0 0 1-1.516-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413Z"/></svg></button>
+                    <button class="mcal-quick-btn add" onclick="app.mcalAdd()" aria-label="Add activity" style="font-size:20px;line-height:1;">+</button>
                 </div>
                 <button class="mcal-today" onclick="app.mcalToday()">Today</button>
             </div>
@@ -5300,8 +5300,17 @@ In a production system, this would show the actual file contents.
                         const freshRaw = (res?.data || []).filter(a => a.activity_type !== 'EVENT');
                         // Preserve any optimistic rows still pending — they're not
                         // in Supabase yet but the user expects to see them.
+                        // Check both localStorage (normal path) AND the in-memory
+                        // _mcalOptimisticRows Map, which survives _clearMobileSnapshots
+                        // cache clears triggered by the AppDataStore.create mutation hook.
                         const cached = _lsGetRaw(_mcalActsKey) || [];
-                        const pending = cached.filter(a => a._pending && a.id && String(a.id).startsWith('tmp-'));
+                        const lsPending = cached.filter(a => a._pending && a.id && String(a.id).startsWith('tmp-'));
+                        const freshIds = new Set(freshRaw.map(a => String(a.id)));
+                        const memPending = [..._mcalOptimisticRows.values()]
+                            .map(e => e.row)
+                            .filter(p => !freshIds.has(String(p.id)));
+                        const pending = [...lsPending, ...memPending]
+                            .filter((r, i, arr) => arr.findIndex(x => String(x.id) === String(r.id)) === i);
                         const merged = [...freshRaw, ...pending];
                         const freshSig = _sig(merged);
                         if (freshSig === _staleSig) return; // no change, no re-render
@@ -5364,8 +5373,15 @@ In a production system, this would show the actual file contents.
             cached.push({ ...realRow, _pending: false });
         }
         try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), val: cached })); } catch(_) {}
-        // No re-render needed — the visible cell already shows the activity;
-        // only the id changed under the hood.
+        // Re-render the mobile calendar if it's still showing the same month —
+        // the SWR revalidation may have raced ahead and wiped the optimistic cell
+        // before the real row arrived, so we repaint to ensure it stays visible.
+        const [_swY, _swM] = key.replace('mcal-acts-', '').split('-').map(Number);
+        const _swVp = document.getElementById('content-viewport');
+        if (_swVp && _swVp.classList.contains('mcal-active') &&
+            !isNaN(_swY) && !isNaN(_swM) && _mcalYear === _swY && _mcalMonth === _swM) {
+            showMobileCalendarView(_swVp).catch(() => {});
+        }
     };
 
     // Mark an optimistic row as failed-to-sync. Keeps it visible (so the
@@ -9249,12 +9265,17 @@ function _wireLoginBtn() {
             hasError = true;
         }
         if (hasError) return;
+        // Declared outside the try block so the finally clause can call
+        // clearTimeout(_slowHint) — const/let inside try{} are NOT in scope
+        // inside finally{} (separate block scopes), which would throw a
+        // ReferenceError and prevent btn.disabled = false from ever running.
+        let _slowHint;
         try {
             btn.disabled = true;
             btn.querySelector('span').textContent = 'Logging in...';
             // Show "Still connecting…" after 5 s so the user knows we're working.
             // Cleared in the finally block whether login succeeds or fails.
-            const _slowHint = setTimeout(() => { if (btn.disabled) btn.querySelector('span').textContent = 'Still connecting…'; }, 5000);
+            _slowHint = setTimeout(() => { if (btn.disabled) btn.querySelector('span').textContent = 'Still connecting…'; }, 5000);
             // Wrap every login attempt in a 10-second timeout so a hung mobile
             // network never leaves the button stuck on "Logging in..." forever.
             const _withTimeout = (promise, ms, label) => Promise.race([
@@ -9541,7 +9562,17 @@ function _wireLoginBtn() {
     if (_initStarted) return; // prevent double-init (synchronous guard)
     _initStarted = true;
     _wireLoginBtn(); // wire immediately — before any async ops so the button is never unresponsive
-    await AppDataStore.init();
+    // Guard AppDataStore.init() separately — it's outside the outer try/catch
+    // below, so an unexpected throw would leave #app-loading on screen forever.
+    try {
+        await AppDataStore.init();
+    } catch (_dsErr) {
+        console.error('[init] AppDataStore.init failed:', _dsErr);
+        document.getElementById('app-loading')?.remove();
+        document.getElementById('login-container').style.display = 'flex';
+        _wireLoginBtn();
+        return;
+    }
 
     try {
         // Try to restore session — use getSession() first (reads localStorage, works
@@ -22024,6 +22055,16 @@ function _wireLoginBtn() {
                 }
             }
         } catch (e) { console.warn('Activity tab auto-refresh failed:', e); }
+
+        // Mobile calendar: ensure the saved activity is visible before the modal
+        // closes. The fire-and-forget render from _mcalOptimisticInsert may not
+        // have finished by now, so we do one final await here so the user never
+        // sees the calendar in an un-updated state when the modal dismisses.
+        if (_mcalActiveForSave) {
+            const _mcVp = document.getElementById('content-viewport');
+            if (_mcVp && _mcVp.classList.contains('mcal-active'))
+                await showMobileCalendarView(_mcVp).catch(() => {});
+        }
 
         if (!stayOpen) {
             UI.hideModal();
