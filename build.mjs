@@ -66,6 +66,10 @@ const JS_TARGETS = [
   'chunks/script-pipeline.js',
   // Phase 4L: Import System + Follow-up Monitoring (extracted 2026-06-05)
   'chunks/script-import.js',
+  // Phase 4M: Scoring + Features bundle (extracted 2026-06-05)
+  'chunks/script-features2.js',
+  // Phase 4N: 福德 View + Reward CRUD (extracted 2026-06-05)
+  'chunks/script-fude.js',
 ];
 
 const CSS_TARGETS = [

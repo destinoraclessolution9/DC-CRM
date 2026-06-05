@@ -1,0 +1,2552 @@
+/**
+ * CRM Lazy Chunk: 福德 View + Story + Highlight + Reward CRUD
+ * Covers: showFudeView, 福德 rewards, Candle/Fude tracking, story/highlight CRUD,
+ *   Destiny Blueprint, CPS analysis, Appraisal modal.
+ * Loaded on-demand when navigating to the fude view.
+ * Extracted 2026-06-05 (~2483 lines).
+ */
+(() => {
+    const _state = window._appState;
+    const _utils = window._crmUtils;
+    const esc    = (...a) => _utils.escapeHtml(...a);
+    const isMobile = () => _utils.isMobile();
+    const isSystemAdmin        = (u) => _utils.isSystemAdmin(u || _state.cu);
+    const isMarketingManager   = (u) => _utils.isMarketingManager(u || _state.cu);
+    const isAgent              = (u) => _utils.isAgent(u || _state.cu);
+    const isManagement         = (u) => _utils.isManagement(u || _state.cu);
+    const isTeamLeaderOrAbove  = (u) => _utils.isTeamLeaderOrAbove(u || _state.cu);
+    const isCustomer           = (u) => _utils.isCustomer(u || _state.cu);
+    const isReferrer           = (u) => _utils.isReferrer(u || _state.cu);
+    const _getUserLevel        = (u) => _utils.getUserLevel(u);
+    const navigateTo           = (v) => window.app.navigateTo(v);
+    let _currentUser = _state.cu;
+    window._syncFudeUser = () => { _currentUser = _state.cu; };
+
+// ========== LEVEL 13/14: 福德 VIEW ==========
+const showFudeView = async (container) => {
+    const currentUser = _currentUser;
+    if (!currentUser) return;
+
+    const userLevel = (() => {
+        const m = (currentUser.role || '').match(/Level\s+(\d+)/i);
+        return m ? parseInt(m[1]) : 12;
+    })();
+    const isAdmin   = userLevel <= 2 || ['mianformula@gmail.com', 'destinyoracles@gmail.com', 'shilynateh7689@gmail.com'].includes((currentUser.email || '').toLowerCase());
+    const isL1314   = userLevel >= 13;
+    const isCustomer = userLevel === 13;
+
+    // --- Data loading ---
+    let highlights = [], myRewards = [], myPurchases = [], allRewards = [];
+    try {
+        highlights = isAdmin
+            ? await AppDataStore.getAll('news_highlights')
+            : await AppDataStore.query('news_highlights', { is_active: true });
+    } catch(e) {}
+    try { myRewards = await AppDataStore.query('recommendation_rewards', { user_id: currentUser.id }); } catch(e) {}
+    if (isCustomer && currentUser.customer_id) {
+        try { myPurchases = await AppDataStore.query('purchases', { customer_id: currentUser.customer_id }); } catch(e) {}
+    }
+    let allUsersForReward = [];
+    if (isAdmin) {
+        try { allUsersForReward = (await AppDataStore.getAll('users')).filter(u => u.role && u.role.match(/Level\s*1[34]/i)); } catch(e) {}
+        try { allRewards = await AppDataStore.getAll('recommendation_rewards'); } catch(e) {}
+    }
+
+    // --- Helpers ---
+    const fmtDate = d => { try { return new Date(d).toLocaleDateString(); } catch(e) { return d || '-'; } };
+    const fmtAmt  = v => { try { return 'RM ' + parseFloat(v || 0).toLocaleString('en-MY', { minimumFractionDigits: 2 }); } catch(e) { return v; } };
+    const badge   = (txt, bg, col) => `<span style="padding:2px 8px;border-radius:12px;font-size:0.78rem;background:${bg};color:${col};">${txt}</span>`;
+
+    // --- Content filters ---
+    // Sort highlights/news by created_at desc so the newest one is slide 0
+    // (the user expects to see freshly-added highlights immediately, not
+    // hidden behind the carousel's next-arrow).
+    const publicNews         = highlights.filter(h => h.type === 'highlight').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    const successStories     = highlights.filter(h => h.type === 'success_story').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    const recommendationTips = highlights.filter(h => h.type === 'recommendation_tip').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+    // --- Pre-sign highlight images so render doesn't depend on DOM resolver ---
+    const withImg = [...publicNews, ...successStories].filter(h => h.image_url);
+    if (withImg.length && AppDataStore.resolveAttachmentSrc) {
+        await Promise.all(withImg.map(async h => {
+            try { h._signedUrl = await AppDataStore.resolveAttachmentSrc(h.image_url); } catch(e) {}
+        }));
+    }
+
+    // --- Totals & summary sync ---
+    const totalPoints  = myRewards.reduce((s, r) => s + (parseInt(r.fudi_points)    || 0), 0);
+    const totalReturns = myRewards.reduce((s, r) => s + (parseFloat(r.sharing_return) || 0), 0);
+    if (myRewards.length > 0) { try { await syncFudiSummary(currentUser.id, totalPoints, totalReturns); } catch(e) {} }
+
+    // --- Helper: pre-signed image src attr ---
+    const imgSrc = (h) => h._signedUrl ? `src="${h._signedUrl}"` : '';
+
+    // --- Summary tiles (L13/14) ---
+    const summaryBanner = isL1314 ? `
+        <div class="fude-summary-grid">
+            <div class="fude-summary-tile" style="background:linear-gradient(135deg,#be185d,#e91e8c);">
+                <div class="fude-summary-tile-val">${totalPoints}</div>
+                <div class="fude-summary-tile-label">福气 Points</div>
+            </div>
+            <div class="fude-summary-tile" style="background:linear-gradient(135deg,#065f46,#10b981);">
+                <div class="fude-summary-tile-val">RM ${totalReturns.toFixed(2)}</div>
+                <div class="fude-summary-tile-label">Sharing Returns</div>
+            </div>
+        </div>` : '';
+
+    // --- Admin: leaderboard ---
+    const leaderboardSection = isAdmin ? (() => {
+        const totals = {};
+        allRewards.forEach(r => {
+            if (!totals[r.user_id]) totals[r.user_id] = { pts: 0, ret: 0 };
+            totals[r.user_id].pts += parseInt(r.fudi_points)    || 0;
+            totals[r.user_id].ret += parseFloat(r.sharing_return) || 0;
+        });
+        const ranked = Object.entries(totals)
+            .map(([uid, t]) => { const u = allUsersForReward.find(u => u.id === parseInt(uid)); return { name: u?.full_name || 'User ' + uid, ...t }; })
+            .sort((a, b) => b.pts - a.pts);
+        if (!ranked.length) return '';
+        const medals = ['🥇','🥈','🥉'];
+        return `<div class="fude-section">
+            <div class="fude-sec-bar"><div class="fude-sec-bar-icon news">🏆</div><h2>福气 Leaderboard</h2></div>
+            <div class="fude-sec-body"><div style="overflow-x:auto;"><table class="data-table"><thead><tr>
+                <th scope="col">#</th><th scope="col">Name</th><th scope="col">福气 Points</th><th scope="col">Sharing Returns (RM)</th>
+            </tr></thead><tbody>
+                ${ranked.map((r, i) => `<tr>
+                    <td>${medals[i] || (i + 1)}</td>
+                    <td style="font-weight:600;">${r.name}</td>
+                    <td>${r.pts}</td>
+                    <td>${r.ret.toFixed(2)}</td>
+                </tr>`).join('')}
+            </tbody></table></div></div>
+        </div>`;
+    })() : '';
+
+    // --- Admin: manage highlights table ---
+    const adminHighlightsSection = isAdmin ? `
+        <div class="fude-section">
+            <div class="fude-sec-bar" style="justify-content:space-between;">
+                <div style="display:flex;align-items:center;gap:12px;"><div class="fude-sec-bar-icon news">⚙️</div><h2>Manage Highlights &amp; Stories</h2></div>
+                <button class="btn primary btn-sm" onclick="app.openHighlightModal()"><i class="fas fa-plus"></i> Add New</button>
+            </div>
+            <div class="fude-sec-body"><div style="overflow-x:auto;"><table class="data-table"><thead><tr>
+                <th scope="col">Title</th><th scope="col">Type</th><th scope="col">Status</th><th scope="col">Created</th><th scope="col">Actions</th>
+            </tr></thead><tbody>
+                ${highlights.length ? highlights.map(h => `<tr>
+                    <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;">${h.title}</td>
+                    <td>${badge(h.type || '-', '#e0e7ff', '#3730a3')}</td>
+                    <td>${badge(h.is_active ? 'Active' : 'Hidden', h.is_active ? '#d1fae5' : '#f3f4f6', h.is_active ? '#065f46' : '#6b7280')}</td>
+                    <td>${fmtDate(h.created_at)}</td>
+                    <td style="white-space:nowrap;">
+                        <button class="btn secondary btn-sm" onclick="event.stopPropagation();app.openHighlightModal(${h.id})"><i class="fas fa-edit"></i></button>
+                        <button class="btn danger btn-sm" style="margin-left:4px;" onclick="event.stopPropagation();app.deleteHighlight(${h.id})"><i class="fas fa-trash"></i></button>
+                    </td>
+                </tr>`).join('') : '<tr><td colspan="5" style="text-align:center;color:var(--gray-400);">No highlights yet.</td></tr>'}
+            </tbody></table></div></div>
+        </div>` : '';
+
+    // --- Admin: manage rewards table ---
+    const adminRewardsSection = isAdmin ? `
+        <div class="fude-section">
+            <div class="fude-sec-bar" style="justify-content:space-between;">
+                <div style="display:flex;align-items:center;gap:12px;"><div class="fude-sec-bar-icon gem">🎁</div><h2>Manage Rewards &amp; 福气 Points</h2></div>
+                <button class="btn primary btn-sm" onclick="app.openRewardModal()"><i class="fas fa-plus"></i> Award Points</button>
+            </div>
+            <div class="fude-sec-body"><div style="overflow-x:auto;"><table class="data-table"><thead><tr>
+                <th scope="col">User</th><th scope="col">Action</th><th scope="col">福气 Pts</th><th scope="col">Sharing Return</th><th scope="col">Description</th><th scope="col">Date</th><th scope="col"></th>
+            </tr></thead><tbody>
+                ${allRewards.length ? allRewards.map(r => {
+                    const u = allUsersForReward.find(u => u.id === r.user_id);
+                    return `<tr>
+                        <td style="font-weight:600;">${u ? u.full_name : 'User ' + r.user_id}</td>
+                        <td>${badge(r.action_type || '-', '#e0e7ff', '#3730a3')}</td>
+                        <td>${r.fudi_points || 0}</td>
+                        <td>${parseFloat(r.sharing_return || 0).toFixed(2)}</td>
+                        <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;">${r.description || '-'}</td>
+                        <td>${fmtDate(r.created_at)}</td>
+                        <td><button class="btn danger btn-sm" onclick="event.stopPropagation();app.deleteReward(${r.id})"><i class="fas fa-trash"></i></button></td>
+                    </tr>`;
+                }).join('') : '<tr><td colspan="7" style="text-align:center;color:var(--gray-400);">No rewards yet.</td></tr>'}
+            </tbody></table></div></div>
+        </div>` : '';
+
+    // --- Purchases section (L13 only) ---
+    let purchasesSection = '';
+    if (isCustomer) {
+        const rows = myPurchases.length
+            ? myPurchases.map(p => `<tr>
+                <td>${p.product_name || p.package_name || p.solution || '-'}</td>
+                <td>${fmtAmt(p.amount || p.total_amount)}</td>
+                <td>${badge(p.status || 'pending', p.status === 'completed' ? '#d1fae5' : '#fef3c7', p.status === 'completed' ? '#065f46' : '#92400e')}</td>
+                <td>${fmtDate(p.purchase_date || p.created_at)}</td>
+              </tr>`).join('')
+            : '<tr><td colspan="4" style="text-align:center;color:var(--gray-400);">No purchases found.</td></tr>';
+        purchasesSection = `<div class="fude-section">
+            <div class="fude-sec-bar"><div class="fude-sec-bar-icon story">🛍️</div><h2>My Purchase History</h2></div>
+            <div class="fude-sec-body"><div style="overflow-x:auto;"><table class="data-table"><thead><tr>
+                <th scope="col">Product / Package</th><th scope="col">Amount</th><th scope="col">Status</th><th scope="col">Date</th>
+            </tr></thead><tbody>${rows}</tbody></table></div></div></div>`;
+    }
+
+    // --- News carousel HTML ---
+    const carouselSection = (() => {
+        if (!publicNews.length) return `
+            <div class="fude-section">
+                <div class="fude-sec-bar"><div class="fude-sec-bar-icon news">📰</div><h2>Highlights &amp; News</h2></div>
+                <div class="fude-sec-body"><p style="color:var(--gray-500,#6b7280);margin:0;">No highlights yet.</p></div>
+            </div>`;
+        const slides = publicNews.map((n, i) => `
+            <div class="fude-carousel-slide" onclick="app.openStoryDetail(${n.id})" style="cursor:pointer;">
+                ${n._signedUrl ? `<img loading="lazy" decoding="async" ${imgSrc(n)} alt="" onerror="this.style.display='none'">` : ''}
+                <div class="fude-carousel-overlay">
+                    <span class="fude-carousel-badge">${i === 0 ? 'Latest News' : 'News'}</span>
+                    <h3>${n.title}</h3>
+                    ${n.content ? `<p>${n.content}</p>` : ''}
+                    <span class="fude-carousel-date">📅 ${fmtDate(n.created_at)}</span>
+                    <button class="fude-carousel-readmore" onclick="event.stopPropagation(); app.openStoryDetail(${n.id})">Read More</button>
+                </div>
+            </div>`).join('');
+        const dots = publicNews.length > 1
+            ? `<div class="fude-carousel-dots">${publicNews.map((_, i) => `<button class="fude-carousel-dot${i === 0 ? ' active' : ''}" data-idx="${i}"></button>`).join('')}</div>`
+            : '';
+        const arrows = publicNews.length > 1
+            ? `<button class="fude-carousel-arrow prev" onclick="event.stopPropagation();(function(){var w=this.closest('.fude-carousel-wrap');var t=w.querySelector('.fude-carousel-track');var n=parseInt(t.dataset.idx||0);var tot=t.children.length;var ni=(n-1+tot)%tot;t.dataset.idx=ni;t.style.transform='translateX(-'+ni*100+'%)';w.querySelectorAll('.fude-carousel-dot').forEach(function(d,i){d.classList.toggle('active',i===ni);});}).call(this)">&#8249;</button>
+              <button class="fude-carousel-arrow next" onclick="event.stopPropagation();(function(){var w=this.closest('.fude-carousel-wrap');var t=w.querySelector('.fude-carousel-track');var n=parseInt(t.dataset.idx||0);var tot=t.children.length;var ni=(n+1)%tot;t.dataset.idx=ni;t.style.transform='translateX(-'+ni*100+'%)';w.querySelectorAll('.fude-carousel-dot').forEach(function(d,i){d.classList.toggle('active',i===ni);});}).call(this)">&#8250;</button>`
+            : '';
+        return `
+            <div class="fude-section">
+                <div class="fude-sec-bar" style="justify-content:space-between;">
+                    <div style="display:flex;align-items:center;gap:12px;"><div class="fude-sec-bar-icon news">📰</div><h2>Highlights &amp; News</h2></div>
+                    <a class="fude-sec-link">See all news →</a>
+                </div>
+                <div class="fude-carousel-wrap">
+                    ${arrows}
+                    <div class="fude-carousel-track" data-idx="0">${slides}</div>
+                </div>
+                ${dots}
+            </div>`;
+    })();
+
+    // --- Success Stories grid ---
+    const storiesSection = (() => {
+        const PREVIEW = 6;
+        const shown = successStories.slice(0, PREVIEW);
+        const hasMore = successStories.length > PREVIEW;
+        if (!successStories.length) return `
+            <div class="fude-section fude-stories-section">
+                <div class="fude-stories-masthead">
+                    <div class="fude-stories-masthead-line"></div>
+                    <div class="fude-stories-masthead-center">
+                        <div class="fude-stories-masthead-icon">🏆</div>
+                        <div class="fude-stories-title">成功案例分享</div>
+                        <div class="fude-stories-subtitle">Success&nbsp;&nbsp;Stories</div>
+                    </div>
+                    <div class="fude-stories-masthead-line"></div>
+                </div>
+                <div style="padding:20px;color:var(--gray-500,#6b7280);">No success stories yet.</div>
+            </div>`;
+        const cards = shown.map((s) => {
+            const imgEl = s._signedUrl
+                ? `<img loading="lazy" decoding="async" class="fude-story-card-img" ${imgSrc(s)} alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+                : '';
+            const ph = `<div class="fude-story-card-img-ph" style="display:${s._signedUrl ? 'none' : 'flex'};">📖</div>`;
+            const tags = (s.tags || '').split(',').filter(Boolean).slice(0, 2)
+                .map(t => `<span class="fude-story-tag">${t.trim()}</span>`).join('');
+            return `<div class="fude-story-card" onclick="app.openStoryDetail(${s.id})" style="cursor:pointer;">
+                ${imgEl}${ph}
+                <div class="fude-story-card-body">
+                    ${tags ? `<div class="fude-story-card-tags">${tags}</div>` : ''}
+                    <h3>${s.title}</h3>
+                    ${s.content ? `<p>${s.content}</p>` : '<p style="flex:1"></p>'}
+                    <div class="fude-story-card-footer">
+                        <div class="fude-story-card-meta">
+                            <div class="fude-story-card-avatar">${(s.title || 'D')[0].toUpperCase()}</div>
+                            <span>${fmtDate(s.created_at)}</span>
+                        </div>
+                        <button class="fude-story-readmore" onclick="event.stopPropagation(); app.openStoryDetail(${s.id})">Read More →</button>
+                    </div>
+                </div>
+            </div>`;
+        }).join('');
+        return `
+            <div class="fude-section fude-stories-section">
+                <div class="fude-stories-masthead">
+                    <div class="fude-stories-masthead-line"></div>
+                    <div class="fude-stories-masthead-center">
+                        <div class="fude-stories-masthead-icon">🏆</div>
+                        <div class="fude-stories-title">成功案例分享</div>
+                        <div class="fude-stories-subtitle">Success&nbsp;&nbsp;Stories</div>
+                    </div>
+                    <div class="fude-stories-masthead-line"></div>
+                </div>
+                <div class="fude-story-grid">${cards}</div>
+                ${hasMore ? `<button class="fude-stories-more-btn">✦ Explore More Success Stories</button>` : ''}
+            </div>`;
+    })();
+
+    // --- Tips row (dynamic + 2 static) ---
+    const dynamicTips = recommendationTips.slice(0, 1);
+    const tipsSection = (() => {
+        const tipCols = [];
+        if (dynamicTips.length) {
+            tipCols.push(`<div class="fude-tip-col">
+                <div class="fude-tip-icon">💡</div>
+                <h3>${dynamicTips[0].title}</h3>
+                ${dynamicTips[0].content ? `<p>${dynamicTips[0].content}</p>` : ''}
+                <button class="fude-tip-link">Learn More →</button>
+            </div>`);
+        } else {
+            tipCols.push(`<div class="fude-tip-col">
+                <div class="fude-tip-icon">🛡️</div>
+                <h3>账户安全</h3>
+                <p>定期更新密码，避免使用常见密码，并开启双重验证，防止账户被盗用。</p>
+                <button class="fude-tip-link">Learn More →</button>
+            </div>`);
+        }
+        tipCols.push(`<div class="fude-tip-col">
+            <div class="fude-tip-icon">🎁</div>
+            <h3>积分攻略</h3>
+            <p>每日签到、参与活动、分享推荐好友，都能累积积分！</p>
+            <button class="fude-tip-link">Learn More →</button>
+        </div>`);
+        tipCols.push(`<div class="fude-tip-col">
+            <div class="fude-tip-icon" style="background:#fee2e2;">🎧</div>
+            <h3>需要帮助?</h3>
+            <p>遇到问题？我们的客服团队随时为您提供支持。</p>
+            <button class="fude-tip-link">Contact Us →</button>
+        </div>`);
+        return `
+            <div class="fude-tips-section">
+                <div class="fude-tips-header">
+                    <span class="fude-tips-header-icon">💡</span>
+                    <h2>今日 Tips</h2>
+                </div>
+                <div class="fude-tips-row">${tipCols.join('')}</div>
+            </div>`;
+    })();
+
+    // --- My Recommendations & Returns ---
+    const rewardsTableHtml = myRewards.length === 0
+        ? '<p style="color:var(--gray-500,#6b7280);margin:8px 0 0;">No recommendations or rewards yet.</p>'
+        : `<div style="overflow-x:auto;"><table class="data-table"><thead><tr>
+            <th scope="col">Action</th><th scope="col">福气 Points</th><th scope="col">Sharing Return (RM)</th><th scope="col">Description</th><th scope="col">Date</th>
+           </tr></thead><tbody>
+            ${myRewards.map(r => `<tr>
+                <td>${badge(r.action_type || '-', '#e0e7ff', '#3730a3')}</td>
+                <td style="font-weight:600;">${r.fudi_points || 0}</td>
+                <td>${parseFloat(r.sharing_return || 0).toFixed(2)}</td>
+                <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;">${r.description || '-'}</td>
+                <td>${fmtDate(r.created_at)}</td>
+            </tr>`).join('')}
+           </tbody></table></div>`;
+
+    const returnsSection = `
+        <div class="fude-returns-section">
+            <div class="fude-returns-header">
+                <h2>My Recommendations &amp; Returns</h2>
+                <button class="fude-returns-viewall" onclick="(function(btn){var d=btn.closest('.fude-returns-section').querySelector('.fude-rewards-detail');var ic=btn.closest('.fude-returns-section').querySelector('.fude-rewards-toggle');d.classList.toggle('open');ic.querySelector('.fude-rewards-toggle-icon').classList.toggle('open');btn.textContent=d.classList.contains('open')?'View less':'View all →';}).call(this, this)">View all →</button>
+            </div>
+            <div class="fude-returns-cards">
+                <div class="fude-returns-card">
+                    <div class="fude-returns-card-img-ph pink">🎀</div>
+                    <div class="fude-returns-card-body">
+                        <h3>推荐奖励</h3>
+                        <p>推荐好友加入，双方都能获得积分奖励！</p>
+                        <button class="fude-returns-card-cta">Learn More →</button>
+                    </div>
+                </div>
+            </div>
+            <div class="fude-rewards-table-wrap">
+                <button class="fude-rewards-toggle">
+                    <span class="fude-rewards-toggle-icon">▾</span>
+                    积分 &amp; 推荐记录 (${myRewards.length})
+                </button>
+                <div class="fude-rewards-detail">${rewardsTableHtml}</div>
+            </div>
+        </div>`;
+
+    // --- Render ---
+    container.innerHTML = `
+        <div class="fude-tab">
+            <div class="fude-inner">
+                ${summaryBanner}
+                ${isL1314 && totalPoints > 0 ? `
+                <div class="fude-points-banner">
+                    <span class="fude-points-banner-text">🎉 当前累积 <strong>${totalPoints}</strong> 福气积分，可兑换精选奖励！</span>
+                    <button class="fude-points-banner-cta" onclick="app.todo('Redeem Points')">立即兑换 →</button>
+                </div>` : ''}
+                ${leaderboardSection}
+                ${adminHighlightsSection}
+                ${adminRewardsSection}
+            </div>
+            ${carouselSection}
+            ${storiesSection}
+            ${purchasesSection}
+        </div>
+    `;
+
+    // Wire carousel dot clicks
+    container.querySelectorAll('.fude-carousel-dot').forEach((dot, i) => {
+        dot.addEventListener('click', () => {
+            const track = dot.closest('.fude-carousel-wrap').querySelector('.fude-carousel-track');
+            track.dataset.idx = i;
+            track.style.transform = `translateX(-${i * 100}%)`;
+            dot.closest('.fude-carousel-dots').querySelectorAll('.fude-carousel-dot').forEach((d, j) => d.classList.toggle('active', j === i));
+        });
+    });
+};
+
+// ========== Story / Highlight detail viewer (everyone) ==========
+const openStoryDetail = async (highlightId) => {
+    try {
+        const h = await AppDataStore.getById('news_highlights', highlightId);
+        if (!h) { UI.toast.error('Story not found'); return; }
+        let imgSrc = null;
+        try { imgSrc = h.image_url ? await AppDataStore.resolveAttachmentSrc(h.image_url) : null; } catch (_) {}
+        const fmtDate = d => { try { return new Date(d).toLocaleDateString(); } catch (e) { return d || ''; } };
+        const tags = (h.tags || '').split(',').filter(Boolean)
+            .map(t => `<span style="display:inline-block;background:var(--primary-50,#fef3c7);color:var(--primary-700,#92400e);border:1px solid var(--primary-200,#fde68a);border-radius:10px;padding:2px 8px;margin:2px 4px 2px 0;font-size:11px;">${t.trim()}</span>`).join('');
+        const content = `
+            <div style="max-height:75vh;overflow-y:auto;padding-right:4px;">
+                ${imgSrc ? `<div style="margin:-4px -4px 16px;"><img loading="lazy" decoding="async" src="${imgSrc}" style="width:100%;max-height:320px;object-fit:cover;border-radius:8px;display:block;"></div>` : ''}
+                ${tags ? `<div style="margin-bottom:8px;">${tags}</div>` : ''}
+                <h2 style="margin:0 0 8px;font-size:1.4rem;">${h.title || ''}</h2>
+                <div style="font-size:12px;color:var(--gray-500,#6b7280);margin-bottom:14px;">📅 ${fmtDate(h.created_at)}</div>
+                <div style="font-size:14px;line-height:1.7;color:var(--gray-700,#374151);white-space:pre-wrap;">${h.content || '<em>No content.</em>'}</div>
+            </div>`;
+        UI.showModal(h.title || 'Story', content, [
+            { label: 'Close', type: 'secondary', action: 'UI.hideModal()' }
+        ]);
+    } catch (err) {
+        UI.toast.error('Failed to open story: ' + (err.message || 'Unknown error'));
+    }
+};
+
+// ========== LEVEL 13/14: Highlight CRUD (Admin only) ==========
+const openHighlightModal = async (highlightId = null) => {
+    const h = highlightId ? await AppDataStore.getById('news_highlights', highlightId) : null;
+    const isEdit = !!h;
+
+    const content = `
+        <div class="form-section">
+            <input type="hidden" id="edit-highlight-id" value="${highlightId || ''}">
+            <div class="form-group">
+                <label>Title <span class="required">*</span></label>
+                <input type="text" id="highlight-title" class="form-control" value="${h?.title || ''}" placeholder="Enter title">
+            </div>
+            <div class="form-group">
+                <label>Content</label>
+                <textarea id="highlight-content" class="form-control" rows="4" placeholder="Enter content...">${h?.content || ''}</textarea>
+            </div>
+            <div class="form-group">
+                <label>Photo</label>
+                <div style="display:flex;flex-direction:column;gap:8px;">
+                    <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;background:var(--gray-100,#f3f4f6);border:1px dashed var(--gray-300,#d1d5db);border-radius:8px;padding:10px 14px;font-size:14px;color:var(--gray-600,#4b5563);">
+                        <i class="fas fa-upload"></i> Upload image file
+                        <input type="file" id="highlight-image-file" accept="image/*" style="display:none;" onchange="
+                            const file = this.files[0];
+                            if (file) {
+                                const reader = new FileReader();
+                                reader.onload = e => {
+                                    const prev = document.getElementById('highlight-image-preview');
+                                    if (prev) { prev.src = e.target.result; prev.style.display='block'; }
+                                    document.getElementById('highlight-image-url').value = '';
+                                    document.getElementById('highlight-url-preview').style.display='none';
+                                };
+                                reader.readAsDataURL(file);
+                            }
+                        ">
+                    </label>
+                    <img loading="lazy" decoding="async" id="highlight-image-preview" style="width:100%;max-height:140px;object-fit:cover;border-radius:8px;display:none;" onerror="this.style.display='none'">
+                    <div style="display:flex;align-items:center;gap:8px;color:var(--gray-400,#9ca3af);font-size:13px;"><span style="flex:1;height:1px;background:currentColor;opacity:.4;"></span>or paste a URL<span style="flex:1;height:1px;background:currentColor;opacity:.4;"></span></div>
+                    <input type="url" id="highlight-image-url" class="form-control" value="${h?.image_url || ''}" placeholder="https://example.com/photo.jpg" oninput="
+                        const prev = document.getElementById('highlight-url-preview');
+                        if (this.value) { prev.src = this.value; prev.style.display='block'; document.getElementById('highlight-image-file').value=''; document.getElementById('highlight-image-preview').style.display='none'; }
+                        else { prev.style.display='none'; }
+                    ">
+                    <img loading="lazy" decoding="async" id="highlight-url-preview" src="${h?.image_url || ''}" style="width:100%;max-height:140px;object-fit:cover;border-radius:8px;${h?.image_url ? '' : 'display:none;'}" onerror="this.style.display='none'">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Type</label>
+                <select id="highlight-type" class="form-control">
+                    <option value="highlight" ${(!h || h.type === 'highlight') ? 'selected' : ''}>Highlight / News</option>
+                    <option value="success_story" ${h?.type === 'success_story' ? 'selected' : ''}>Success Story</option>
+                    <option value="recommendation_tip" ${h?.type === 'recommendation_tip' ? 'selected' : ''}>Recommendation Tip</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                    <input type="checkbox" id="highlight-active" ${!h || h.is_active ? 'checked' : ''}>
+                    Show publicly (active)
+                </label>
+            </div>
+        </div>
+    `;
+
+    UI.showModal(isEdit ? 'Edit Highlight' : 'Add New Highlight', content, [
+        { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+        { label: isEdit ? 'Save Changes' : 'Add Highlight', type: 'primary', action: '(async () => { await app.saveHighlight(); })()' }
+    ]);
+};
+
+const saveHighlight = async () => {
+    const id    = document.getElementById('edit-highlight-id')?.value;
+    const title = document.getElementById('highlight-title')?.value?.trim();
+    if (!title) { UI.toast.error('Title is required.'); return; }
+
+    // Resolve image URL: uploaded file takes priority over pasted URL
+    let imageUrl = document.getElementById('highlight-image-url')?.value?.trim() || null;
+    const fileInput = document.getElementById('highlight-image-file');
+    const file = fileInput?.files?.[0];
+    if (file) {
+        const sb = window.supabase || window.supabaseClient;
+        if (!sb || !sb.storage) {
+            UI.toast.error('Supabase not connected — cannot upload image');
+            return;
+        }
+        if (file.size > 5 * 1024 * 1024) { UI.toast.error('Image too large (max 5MB)'); return; }
+        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const path = `highlights/${Date.now()}_${safeName}`;
+        const { error: upErr } = await sb.storage.from('attachments').upload(path, file, { upsert: false, contentType: file.type });
+        if (upErr) { UI.toast.error('Upload failed: ' + upErr.message); return; }
+        imageUrl = path; // store path; signed URL resolved at render time
+    }
+
+    const payload = {
+        title,
+        content:   document.getElementById('highlight-content')?.value || '',
+        image_url: imageUrl,
+        type:      document.getElementById('highlight-type')?.value || 'highlight',
+        is_active: document.getElementById('highlight-active')?.checked ?? true,
+        author_id: _currentUser?.id || null
+    };
+
+    try {
+        const isNew = !id;
+        if (id) {
+            await AppDataStore.update('news_highlights', parseInt(id), payload);
+            UI.toast.success('Highlight updated.');
+        } else {
+            await AppDataStore.create('news_highlights', { id: Date.now(), ...payload, created_at: new Date().toISOString() });
+            UI.toast.success('Highlight added.');
+        }
+        // Push notification fan-out (non-blocking, best-effort)
+        _notifyHighlightSaved(payload, isNew).catch(() => {});
+        UI.hideModal();
+        const viewport = document.getElementById('content-viewport');
+        if (viewport) await showFudeView(viewport);
+    } catch(err) {
+        UI.toast.error('Save failed: ' + (err.message || 'Unknown error'));
+    }
+};
+
+const deleteHighlight = async (highlightId) => {
+    UI.showModal('Delete Highlight', '<p>Are you sure you want to delete this highlight? This cannot be undone.</p>', [
+        { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+        { label: 'Delete', type: 'danger', action: `(async () => { await app.confirmDeleteHighlight(${highlightId}); })()` }
+    ]);
+};
+
+const confirmDeleteHighlight = async (highlightId) => {
+    try {
+        await AppDataStore.delete('news_highlights', highlightId);
+        UI.hideModal();
+        UI.toast.success('Highlight deleted.');
+        const viewport = document.getElementById('content-viewport');
+        if (viewport) await showFudeView(viewport);
+    } catch(err) {
+        UI.toast.error('Delete failed: ' + (err.message || 'Unknown error'));
+    }
+};
+
+// ========== LEVEL 13/14: Reward CRUD + 福气 Summary Sync ==========
+
+const syncFudiSummary = async (userId, totalPoints, totalReturns) => {
+    try {
+        const existing = await AppDataStore.query('user_fudi_summary', { user_id: userId });
+        const payload  = { total_fudi_points: totalPoints, total_sharing_return: totalReturns, updated_at: new Date().toISOString() };
+        if (existing.length > 0) {
+            await AppDataStore.update('user_fudi_summary', existing[0].user_id, payload);
+        } else {
+            await AppDataStore.create('user_fudi_summary', { user_id: userId, ...payload });
+        }
+    } catch(e) { console.warn('syncFudiSummary error:', e); }
+};
+
+const openRewardModal = async (rewardId = null) => {
+    const r = rewardId ? await AppDataStore.getById('recommendation_rewards', rewardId) : null;
+    const isEdit = !!r;
+
+    let eligibleUsers = [];
+    try { eligibleUsers = (await AppDataStore.getAll('users')).filter(u => u.role && u.role.match(/Level\s*1[34]/i)); } catch(e) {}
+    const userOptions = eligibleUsers.map(u =>
+        `<option value="${u.id}" ${r?.user_id === u.id ? 'selected' : ''}>${u.full_name} (${u.role})</option>`
+    ).join('');
+
+    const content = `
+        <div class="form-section">
+            <input type="hidden" id="edit-reward-id" value="${rewardId || ''}">
+            <div class="form-group">
+                <label>Recipient <span class="required">*</span></label>
+                <select id="reward-user" class="form-control">
+                    <option value="">— Select user —</option>
+                    ${userOptions}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Action Type <span class="required">*</span></label>
+                <select id="reward-action" class="form-control">
+                    <option value="recommendation"   ${(!r || r.action_type === 'recommendation')   ? 'selected' : ''}>Recommendation</option>
+                    <option value="sharing"          ${r?.action_type === 'sharing'          ? 'selected' : ''}>Sharing</option>
+                    <option value="class_attendance" ${r?.action_type === 'class_attendance' ? 'selected' : ''}>Class Attendance</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>福气 Points</label>
+                <input type="number" id="reward-points" class="form-control" value="${r?.fudi_points || 0}" min="0">
+            </div>
+            <div class="form-group">
+                <label>Sharing Return (RM)</label>
+                <input type="number" id="reward-return" class="form-control" value="${parseFloat(r?.sharing_return || 0).toFixed(2)}" min="0" step="0.01">
+            </div>
+            <div class="form-group">
+                <label>Description</label>
+                <input type="text" id="reward-desc" class="form-control" value="${r?.description || ''}" placeholder="e.g. Referred Tan Ah Kow to CPS session">
+            </div>
+        </div>
+    `;
+
+    UI.showModal(isEdit ? 'Edit Reward' : 'Award 福气 Points', content, [
+        { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+        { label: isEdit ? 'Save Changes' : 'Award', type: 'primary', action: '(async () => { await app.saveReward(); })()' }
+    ]);
+};
+
+const saveReward = async () => {
+    const id     = document.getElementById('edit-reward-id')?.value;
+    const userId = parseInt(document.getElementById('reward-user')?.value);
+    if (!userId) { UI.toast.error('Please select a recipient.'); return; }
+
+    const payload = {
+        user_id:        userId,
+        action_type:    document.getElementById('reward-action')?.value || 'recommendation',
+        fudi_points:    parseInt(document.getElementById('reward-points')?.value) || 0,
+        sharing_return: parseFloat(document.getElementById('reward-return')?.value) || 0,
+        description:    document.getElementById('reward-desc')?.value || ''
+    };
+
+    try {
+        if (id) {
+            await AppDataStore.update('recommendation_rewards', parseInt(id), payload);
+            UI.toast.success('Reward updated.');
+        } else {
+            await AppDataStore.create('recommendation_rewards', { id: Date.now(), ...payload, created_at: new Date().toISOString() });
+            UI.toast.success('Reward awarded!');
+        }
+        // Recalculate and sync summary for the recipient
+        const allRewards = await AppDataStore.query('recommendation_rewards', { user_id: userId });
+        await syncFudiSummary(
+            userId,
+            allRewards.reduce((s, r) => s + (parseInt(r.fudi_points)    || 0), 0),
+            allRewards.reduce((s, r) => s + (parseFloat(r.sharing_return) || 0), 0)
+        );
+        UI.hideModal();
+        const viewport = document.getElementById('content-viewport');
+        if (viewport) await showFudeView(viewport);
+    } catch(err) {
+        UI.toast.error('Save failed: ' + (err.message || 'Unknown error'));
+    }
+};
+
+const deleteReward = async (rewardId) => {
+    UI.showModal('Delete Reward', "<p>Remove this reward record? The user's 福气 points will be recalculated.</p>", [
+        { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+        { label: 'Delete', type: 'danger', action: `(async () => { await app.confirmDeleteReward(${rewardId}); })()` }
+    ]);
+};
+
+const confirmDeleteReward = async (rewardId) => {
+    try {
+        const r = await AppDataStore.getById('recommendation_rewards', rewardId);
+        await AppDataStore.delete('recommendation_rewards', rewardId);
+        if (r?.user_id) {
+            const remaining = await AppDataStore.query('recommendation_rewards', { user_id: r.user_id });
+            await syncFudiSummary(
+                r.user_id,
+                remaining.reduce((s, x) => s + (parseInt(x.fudi_points)    || 0), 0),
+                remaining.reduce((s, x) => s + (parseFloat(x.sharing_return) || 0), 0)
+            );
+        }
+        UI.hideModal();
+        UI.toast.success('Reward deleted.');
+        const viewport = document.getElementById('content-viewport');
+        if (viewport) await showFudeView(viewport);
+    } catch(err) {
+        UI.toast.error('Delete failed: ' + (err.message || 'Unknown error'));
+    }
+};
+
+// ==========================================================================
+// STUB IMPLEMENTATIONS (replacing app.todo placeholders) — 2026-04-11
+// ==========================================================================
+
+// Stub 1: View Roadmap — was: onclick="app.todo('Feature development')"
+// Shows a modal listing shipped features vs. the planned backlog so users
+// on a placeholder view have context on what's coming.
+const showRoadmap = () => {
+    const content = `
+        <div style="max-height:60vh; overflow-y:auto; padding:4px 2px; font-size:14px;">
+            <div style="background:#fef3c7; border-left:4px solid #f59e0b; padding:12px; border-radius:4px; margin-bottom:16px;">
+                <strong>📍 DestinOraclesSolution CRM</strong><br>
+                Core modules are live. This list tracks what's shipped and what's planned.
+            </div>
+            <h3 style="margin-top:12px;">✅ Shipped</h3>
+            <ul style="margin-left:16px;">
+                <li>Prospects &amp; Customers pipeline</li>
+                <li>Activity tracking (FSA, CPS, Site Visit, Events, Meetings, Training)</li>
+                <li>Relationship Tree with fast-rendering synchronous DFS</li>
+                <li>Referrals leaderboard, period filter, and rewards</li>
+                <li>Events with check-in &amp; engagement scoring</li>
+                <li>Document upload per prospect</li>
+                <li>Recruitment approval workflow</li>
+                <li>KPI dashboard with agent filter</li>
+                <li>Marketing Automation (Monthly Promotions, Bujishu, Formula)</li>
+                <li>Agent reassignment (single &amp; bulk)</li>
+            </ul>
+            <h3 style="margin-top:16px;">🚧 Planned</h3>
+            <ul style="margin-left:16px;">
+                <li>WhatsApp Business deep integration</li>
+                <li>Mobile PWA + biometric auth</li>
+                <li>Advanced analytics dashboards</li>
+                <li>Multi-tenant support</li>
+                <li>Automated compliance reports (GDPR / DSAR)</li>
+                <li>Export Tree to PDF (CSV already ships)</li>
+            </ul>
+        </div>
+    `;
+    UI.showModal('Feature Roadmap', content, [
+        { label: 'Close', type: 'secondary', action: 'UI.hideModal()' }
+    ]);
+};
+
+// Stub 2: Export Tree — was: onclick="app.todo('Export Tree')"
+// Walks the currently-loaded _currentTreeData object (depth-first) and
+// downloads a CSV with one row per node (parent link + key fields).
+const exportRelationshipTree = () => {
+    if (!_currentTreeData) {
+        UI.toast.error('No tree loaded — search for a person first.');
+        return;
+    }
+    const rows = [];
+    const walk = (node, parentName = '', depth = 0) => {
+        rows.push({
+            depth,
+            parent: parentName,
+            name: node.name || '',
+            type: node.type || '',
+            role: node.role || '',
+            pipeline: node.pipeline_stage || '',
+            last_activity: node.last_activity_date || '',
+            join_date: node.join_date || ''
+        });
+        (node.children || []).forEach(c => walk(c, node.name, depth + 1));
+    };
+    walk(_currentTreeData);
+    const esc = v => {
+        const s = String(v ?? '');
+        return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    };
+    const header = 'Depth,Parent,Name,Type,Role,Pipeline Stage,Last Activity,Join Date\n';
+    const body = rows.map(r => [r.depth, r.parent, r.name, r.type, r.role, r.pipeline, r.last_activity, r.join_date].map(esc).join(',')).join('\n');
+    const csv = '\ufeff' + header + body; // BOM so Excel reads UTF-8 (Chinese names) correctly
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const safeName = String(_currentTreeData.name || 'export').replace(/[^\w\u4e00-\u9fff-]+/g, '_');
+    a.download = `relationship-tree-${safeName}-${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    UI.toast.success(`Exported ${rows.length} nodes to CSV`);
+};
+
+// Stub 3: Change leaderboard period — was: onchange="app.todo('Change period')"
+// Stores the selected period in a module-level variable that renderLeaderboard
+// reads to filter referrals by date before grouping.
+const changeLeaderboardPeriod = async (label) => {
+    const map = { 'All Time': 'all', 'This Year': 'year', 'This Month': 'month' };
+    _leaderboardPeriod = map[label] || 'all';
+    await renderLeaderboard();
+};
+
+// Stub 4: Customer-initiated referral workflow — was: onclick="app.todo('Referral workflow')"
+// The openCustomerReferralModal function already existed at line ~15515;
+// this stub was purely a wiring fix — the onclick now points at the real function.
+
+// Stub 5: Upload document on prospect detail — was: onclick="app.todo('Upload document')"
+// Opens a hidden file input, reads as base64, stores in `documents` table
+// linked to the prospect via filename prefix.
+const uploadProspectDocument = async (prospectId) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*,application/pdf,.doc,.docx,.txt';
+    input.onchange = async (ev) => {
+        const file = ev.target.files && ev.target.files[0];
+        if (!file) return;
+        const MAX_BYTES = 5 * 1024 * 1024; // 5 MB
+        if (file.size > MAX_BYTES) {
+            UI.toast.error('File too large — 5 MB max');
+            return;
+        }
+        try {
+            const dataUrl = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+            await AppDataStore.create('documents', {
+                filename: `prospect_${prospectId}/${file.name}`,
+                size: file.size,
+                mime_type: file.type || 'application/octet-stream',
+                data: String(dataUrl || ''),
+                current_version: 1,
+                created_by: _currentUser?.id || null,
+                description: `Uploaded for prospect #${prospectId}`,
+                is_starred: false
+            });
+            UI.toast.success('Document uploaded');
+            // Re-render the prospect detail so the new doc shows up
+            if (typeof app.showProspectDetail === 'function') {
+                await app.showProspectDetail(prospectId);
+            }
+        } catch (err) {
+            UI.toast.error('Upload failed: ' + (err.message || 'Unknown error'));
+        }
+    };
+    input.click();
+};
+
+// Stub 6: Submit recruitment approval — was: action="app.todo('Recruitment approval workflow submitted')"
+// Captures recruitment form data and writes to approval_queue as pending.
+const submitRecruitmentApproval = async () => {
+    try {
+        const modal = document.getElementById('modal-content') || document;
+        const textareas = modal.querySelectorAll('textarea');
+        const inputs = modal.querySelectorAll('input.form-control, select.form-control');
+        const snapshot = {};
+        inputs.forEach((el, i) => {
+            const label = el.closest('.form-group')?.querySelector('label')?.textContent?.trim() || `field_${i}`;
+            snapshot[label] = el.value;
+        });
+        textareas.forEach((el, i) => {
+            const label = el.closest('.form-group')?.querySelector('label')?.textContent?.trim() || `textarea_${i}`;
+            snapshot[label] = el.value;
+        });
+        await AppDataStore.create('approval_queue', {
+            approval_type: 'recruitment',
+            status: 'pending',
+            submitted_by: _currentUser?.id || null,
+            submitted_at: new Date().toISOString(),
+            description: 'Recruitment: Convert customer to agent',
+            snapshot_after: snapshot,
+            created_at: new Date().toISOString()
+        });
+        UI.hideModal();
+        UI.toast.success('Recruitment submitted for approval');
+    } catch (err) {
+        UI.toast.error('Submit failed: ' + (err.message || 'Unknown error'));
+    }
+};
+
+// [CHUNK: egg] Section extracted to chunks/script-egg.js — loaded role-gated by navigateTo().
+
+// [CHUNK: boss_report] Section extracted to chunks/script-boss-report.js — loaded role-gated by navigateTo().
+
+// [CHUNK: formula] 32 functions extracted to chunks/script-formula.js — loaded role-gated by navigateTo().
+
+// [CHUNK: stock_take] Section extracted to chunks/script-stock-take.js — loaded role-gated by navigateTo().
+
+// ==================== BUG AUDIT 2026-04-24: fill 3 missing function impls ====================
+// Single-file delete — mirrors confirmDeleteSelected pattern (line ~3103)
+const deleteFile = async (fileId) => {
+    if (!fileId) return;
+    UI.showModal('Delete File',
+        `<p>Are you sure you want to delete this file?</p><p class="text-error">This action cannot be undone.</p>`,
+        [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Delete', type: 'primary', action: `(async () => { await app._confirmDeleteFile(${fileId}); })()` }
+        ]
+    );
+};
+const _confirmDeleteFile = async (fileId) => {
+    await AppDataStore.delete('documents', fileId);
+    UI.hideModal();
+    UI.toast.success('File deleted');
+    if (typeof window.app.loadFolderContents === 'function') await window.app.loadFolderContents();
+};
+
+// Route Last-Transactions modal profile-link to the right detail view
+const showProfile = async (id, type) => {
+    if (!id) return;
+    if (type === 'prospect' && window.app.showProspectDetail) return window.app.showProspectDetail(id);
+    if (window.app.showCustomerDetail) return window.app.showCustomerDetail(id);
+};
+
+// Placeholder — export-data flow needs product scoping before full impl
+const exportKPIDashboard = () => (window.app.todo || (() => {}))('Export KPI Dashboard');
+
+// [CHUNK: knowledge] Section extracted to chunks/script-knowledge.js — loaded role-gated by navigateTo().
+
+// =========================================================================
+// CUSTOMER FORMS — Survey + CPS + APU (Marketing > Forms sub-tab)
+// 3 official Destin Oracles forms with bilingual labels, bagua grids,
+// canvas signatures, mobile-responsive, print-friendly.
+// =========================================================================
+
+// ── Signature pad: bare HTML5 canvas, no external lib (~120 lines covers it)
+const _bindSignaturePad = (canvasId) => {
+    const c = document.getElementById(canvasId);
+    if (!c) return;
+    // Make the backing buffer match displayed size × DPR so strokes stay crisp on mobile.
+    const dpr = window.devicePixelRatio || 1;
+    const rect = c.getBoundingClientRect();
+    c.width = rect.width * dpr;
+    c.height = rect.height * dpr;
+    const ctx = c.getContext('2d');
+    ctx.scale(dpr, dpr);
+    ctx.lineWidth = 2.2;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = '#0f172a';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, c.width, c.height);
+
+    let drawing = false, last = null, hasInk = false;
+    const getXY = (e) => {
+        const r = c.getBoundingClientRect();
+        if (e.touches && e.touches[0]) {
+            return { x: e.touches[0].clientX - r.left, y: e.touches[0].clientY - r.top };
+        }
+        return { x: e.clientX - r.left, y: e.clientY - r.top };
+    };
+    const start = (e) => {
+        e.preventDefault();
+        drawing = true;
+        last = getXY(e);
+    };
+    const move = (e) => {
+        if (!drawing) return;
+        e.preventDefault();
+        const p = getXY(e);
+        ctx.beginPath();
+        ctx.moveTo(last.x, last.y);
+        ctx.lineTo(p.x, p.y);
+        ctx.stroke();
+        last = p;
+        hasInk = true;
+    };
+    const end = () => { drawing = false; last = null; };
+
+    c.addEventListener('mousedown', start);
+    c.addEventListener('mousemove', move);
+    c.addEventListener('mouseup', end);
+    c.addEventListener('mouseleave', end);
+    c.addEventListener('touchstart', start, { passive: false });
+    c.addEventListener('touchmove', move, { passive: false });
+    c.addEventListener('touchend', end);
+
+    c._hasInk = () => hasInk;
+    c._reset = () => {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, c.width, c.height);
+        hasInk = false;
+    };
+
+    // If a saved signature was preloaded into c.dataset.preload, paint it.
+    if (c.dataset.preload) {
+        const img = new Image();
+        img.onload = () => {
+            ctx.drawImage(img, 0, 0, rect.width, rect.height);
+            hasInk = true;
+        };
+        img.src = c.dataset.preload;
+    }
+};
+
+const _clearSignaturePad = (canvasId) => {
+    const c = document.getElementById(canvasId);
+    if (c && c._reset) c._reset();
+};
+// Exposed as app.cfClearSignature for inline onclick handlers
+const cfClearSignature = (canvasId) => _clearSignaturePad(canvasId);
+
+const _getSignatureDataUrl = (canvasId) => {
+    const c = document.getElementById(canvasId);
+    if (!c || !c._hasInk || !c._hasInk()) return null;
+    return c.toDataURL('image/png');
+};
+
+// ── Helpers ──────────────────────────────────────────────────────────────
+const _cfFmtDate = (iso) => {
+    if (!iso) return '';
+    try { return new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }); }
+    catch (_) { return iso; }
+};
+const _cfEscape = (s) => (s == null ? '' : String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])));
+
+// ── Forms TAB main view ──────────────────────────────────────────────────
+let _cfState = { prospectId: null, prospectQuery: '' };
+
+const renderFormsTab = async () => {
+    // Wrap each fetch with a short timeout so a missing migration (the 3 new
+    // customer-form tables) doesn't hang the whole tab for 15+ seconds.
+    const _quickFetch = (table, ms = 4000) => Promise.race([
+        AppDataStore.getAll(table).catch(() => []),
+        new Promise(resolve => setTimeout(() => resolve([]), ms))
+    ]);
+    const [prospects, surveys, cps, apus, blueprints] = await Promise.all([
+        _quickFetch('prospects', 6000),
+        _quickFetch('customer_surveys'),
+        _quickFetch('cps_analyses'),
+        _quickFetch('apu_appraisals'),
+        _quickFetch('destiny_blueprints')
+    ]);
+
+    // Build per-prospect status map
+    const byProspect = new Map();
+    prospects.forEach(p => byProspect.set(p.id, {
+        id: p.id,
+        name: p.full_name || p.nickname || '(no name)',
+        phone: p.phone || '',
+        survey: null, cps: null, apu: null, blueprint: null
+    }));
+    surveys.forEach(s => { const e = byProspect.get(s.prospect_id); if (e) e.survey = s; });
+    cps.forEach(c => { const e = byProspect.get(c.prospect_id); if (e) e.cps = c; });
+    apus.forEach(a => { const e = byProspect.get(a.prospect_id); if (e) e.apu = a; });
+    blueprints.forEach(b => { const e = byProspect.get(b.prospect_id); if (e) e.blueprint = b; });
+
+    const q = (_cfState.prospectQuery || '').toLowerCase();
+    const filtered = Array.from(byProspect.values())
+        .filter(p => !q || p.name.toLowerCase().includes(q) || (p.phone || '').includes(q))
+        .sort((a, b) => {
+            // Show prospects with any form filled in first, then by name
+            const ax = (a.survey || a.cps || a.apu || a.blueprint) ? 0 : 1;
+            const bx = (b.survey || b.cps || b.apu || b.blueprint) ? 0 : 1;
+            return ax - bx || a.name.localeCompare(b.name);
+        })
+        .slice(0, 200);
+
+    const badge = (val, label, color) => val
+        ? `<span class="cf-badge cf-badge-done" title="${_cfEscape(label)} · ${_cfFmtDate(val.created_at)}"><i class="fas fa-check"></i> ${label}</span>`
+        : `<span class="cf-badge cf-badge-pending">${label}</span>`;
+
+    return `
+        <style>
+            .cf-wrap{ max-width:1100px; margin:0 auto; padding:8px 4px; }
+            .cf-header{ display:flex; flex-wrap:wrap; gap:12px; justify-content:space-between; align-items:center; margin-bottom:18px; }
+            .cf-header h2{ margin:0 0 4px; font-size:20px; }
+            .cf-header p{ margin:0; color:#6B7280; font-size:13px; }
+            .cf-search{ flex:1; min-width:200px; max-width:340px; padding:9px 12px; border:1px solid #E5E7EB; border-radius:8px; font-size:14px; }
+            .cf-flow{ display:flex; gap:10px; align-items:center; background:#F9FAFB; border:1px dashed #D1D5DB; border-radius:10px; padding:12px 16px; margin-bottom:18px; color:#374151; font-size:13px; flex-wrap:wrap; }
+            .cf-flow .num{ display:inline-flex; width:22px; height:22px; border-radius:50%; background:#7C3AED; color:white; font-weight:700; font-size:12px; align-items:center; justify-content:center; }
+            .cf-list{ display:grid; gap:10px; }
+            .cf-row{ background:white; border:1px solid #E5E7EB; border-radius:10px; padding:14px 16px; display:flex; flex-wrap:wrap; gap:12px; align-items:center; }
+            .cf-name{ font-weight:600; font-size:15px; color:#111827; flex:1; min-width:160px; }
+            .cf-name .sub{ display:block; color:#6B7280; font-weight:400; font-size:12px; margin-top:2px; }
+            .cf-badges{ display:flex; gap:6px; flex-wrap:wrap; }
+            .cf-badge{ font-size:11px; font-weight:600; padding:3px 9px; border-radius:999px; white-space:nowrap; }
+            .cf-badge-done{ background:#D1FAE5; color:#065F46; }
+            .cf-badge-pending{ background:#F3F4F6; color:#9CA3AF; }
+            .cf-actions{ display:flex; gap:6px; flex-wrap:wrap; }
+            .cf-btn{ padding:7px 12px; border-radius:7px; border:1px solid #E5E7EB; background:white; cursor:pointer; font-size:12px; font-weight:600; color:#374151; display:inline-flex; align-items:center; gap:5px; }
+            .cf-btn:hover{ background:#F9FAFB; }
+            .cf-btn.cf-btn-survey{ background:#EEF2FF; color:#4338CA; border-color:#C7D2FE; }
+            .cf-btn.cf-btn-cps{ background:#FEF3C7; color:#92400E; border-color:#FCD34D; }
+            .cf-btn.cf-btn-apu{ background:#FCE7F3; color:#9D174D; border-color:#F9A8D4; }
+            .cf-btn.cf-btn-blueprint{ background:#E0E7FF; color:#3730A3; border-color:#A5B4FC; }
+            .cf-empty{ padding:40px; text-align:center; color:#9CA3AF; background:white; border:1px dashed #E5E7EB; border-radius:10px; }
+
+            /* ── Form modal styling (shared by Survey/CPS/APU) ── */
+            .cf-form{ display:flex; flex-direction:column; gap:14px; }
+            .cf-form .cf-section-title{ font-weight:700; font-size:14px; color:#111827; border-bottom:2px solid #7C3AED; padding-bottom:6px; margin-top:8px; }
+            .cf-form .cf-section-title .zh{ color:#7C3AED; margin-left:6px; }
+            .cf-grid{ display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; }
+            .cf-grid-3{ display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:10px; }
+            @media (max-width: 640px){ .cf-grid, .cf-grid-3{ grid-template-columns:1fr; } }
+            .cf-field label{ display:block; font-size:12px; font-weight:600; color:#374151; margin-bottom:4px; }
+            .cf-field label .zh{ color:#7C3AED; font-weight:500; margin-left:4px; }
+            .cf-field input, .cf-field select, .cf-field textarea{
+                width:100%; padding:8px 10px; border:1px solid #D1D5DB; border-radius:6px; font-size:14px; font-family:inherit;
+            }
+            .cf-field textarea{ resize:vertical; min-height:64px; }
+            .cf-radio-group{ display:flex; gap:14px; flex-wrap:wrap; margin-top:2px; }
+            .cf-radio-group label{ display:flex; align-items:center; gap:6px; font-size:13px; font-weight:500; color:#374151; cursor:pointer; }
+            .cf-radio-group input{ width:auto; margin:0; }
+
+            /* Bagua 3×3 grid (Lunar / Solar) */
+            .cf-bagua-wrap{ display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:18px; }
+            @media (max-width: 640px){ .cf-bagua-wrap{ grid-template-columns:1fr; } }
+            .cf-bagua{ background:#FAFAF9; border:1px solid #E5E7EB; border-radius:10px; padding:12px; }
+            .cf-bagua-title{ text-align:center; font-weight:700; font-size:14px; margin-bottom:10px; color:#111827; }
+            .cf-bagua-grid{ display:grid; grid-template-columns:repeat(3, 1fr); gap:4px; }
+            .cf-bagua-cell{ aspect-ratio:1; border:1px solid #D1D5DB; border-radius:6px; background:white; display:flex; flex-direction:column; align-items:stretch; padding:4px; position:relative; }
+            .cf-bagua-cell .tg{ font-size:18px; font-weight:700; color:#7C3AED; text-align:center; line-height:1; }
+            .cf-bagua-cell textarea{ flex:1; border:none; outline:none; resize:none; padding:2px 4px; font-size:12px; font-family:inherit; color:#111827; background:transparent; min-height:0; }
+            .cf-bagua-cell.cf-bagua-center{ background:#FEF3C7; }
+            .cf-bagua-cell.cf-bagua-center .tg{ color:#92400E; }
+
+            /* Signature canvas */
+            .cf-sig-wrap{ display:flex; flex-direction:column; gap:6px; }
+            .cf-sig-canvas{ width:100%; height:120px; border:1px dashed #9CA3AF; border-radius:6px; background:white; touch-action:none; }
+            .cf-sig-actions{ display:flex; justify-content:space-between; align-items:center; }
+            .cf-sig-actions small{ color:#6B7280; font-size:11px; }
+
+            /* Likert 5-point */
+            .cf-likert{ display:grid; grid-template-columns:repeat(5, 1fr); gap:6px; }
+            @media (max-width: 480px){ .cf-likert{ grid-template-columns:repeat(2, 1fr); } }
+            .cf-likert label{ display:flex; flex-direction:column; align-items:center; gap:4px; padding:8px 4px; border:1px solid #E5E7EB; border-radius:6px; background:white; cursor:pointer; font-size:11px; font-weight:600; color:#374151; text-align:center; line-height:1.2; }
+            .cf-likert label.cf-likert-on{ background:#7C3AED; border-color:#7C3AED; color:white; }
+            .cf-likert input{ display:none; }
+            .cf-likert .zh{ display:block; font-size:10px; opacity:0.85; }
+
+            /* Referral table (APU Q7) */
+            .cf-ref-table{ width:100%; border-collapse:collapse; font-size:13px; }
+            .cf-ref-table th, .cf-ref-table td{ border:1px solid #D1D5DB; padding:6px 8px; }
+            .cf-ref-table th{ background:#F3F4F6; font-weight:600; font-size:12px; }
+            .cf-ref-table input{ width:100%; border:none; outline:none; padding:4px 2px; font-size:13px; }
+            @media (max-width: 640px){
+                .cf-ref-table thead{ display:none; }
+                .cf-ref-table tr{ display:block; border:1px solid #D1D5DB; border-radius:8px; padding:8px; margin-bottom:10px; }
+                .cf-ref-table td{ display:block; border:none; padding:4px 0; }
+                .cf-ref-table td::before{ content:attr(data-label) ': '; font-weight:600; color:#6B7280; font-size:11px; }
+            }
+        </style>
+
+        <div class="cf-wrap">
+            <div class="cf-header">
+                <div>
+                    <h2>Customer Forms 客户表格</h2>
+                    <p>Survey → CPS Analysis → APU Appraisal. Pick a prospect to start.</p>
+                </div>
+                <input type="search" class="cf-search" placeholder="Search by name or phone…"
+                    value="${_cfEscape(_cfState.prospectQuery)}"
+                    oninput="app.cfSearchProspects(this.value)">
+            </div>
+
+            <div class="cf-flow">
+                <span><span class="num">1</span> 新客户调查表 Survey</span>
+                <i class="fas fa-arrow-right" style="color:#9CA3AF;"></i>
+                <span><span class="num">2</span> 細解命盤 CPS Form</span>
+                <i class="fas fa-arrow-right" style="color:#9CA3AF;"></i>
+                <span><span class="num">3</span> APU Appraisal 反馈</span>
+                <i class="fas fa-arrow-right" style="color:#9CA3AF;"></i>
+                <span><span class="num">4</span> 九運改命藍圖表 Blueprint</span>
+            </div>
+
+            ${filtered.length === 0 ? `
+                <div class="cf-empty">
+                    <i class="fas fa-clipboard-list" style="font-size:42px; margin-bottom:10px;"></i>
+                    <div>No prospects match. Try a different search.</div>
+                </div>
+            ` : `
+                <div class="cf-list">
+                    ${filtered.map(p => `
+                        <div class="cf-row">
+                            <div class="cf-name">
+                                ${_cfEscape(p.name)}
+                                <span class="sub">${_cfEscape(p.phone || 'No phone')}</span>
+                            </div>
+                            <div class="cf-badges">
+                                ${badge(p.survey, 'Survey')}
+                                ${badge(p.cps, 'CPS')}
+                                ${badge(p.apu, 'APU')}
+                                ${badge(p.blueprint, 'Blueprint')}
+                            </div>
+                            <div class="cf-actions">
+                                <button class="cf-btn cf-btn-survey" onclick="app.openCustomerSurveyModal(${p.id}${p.survey ? ',' + p.survey.id : ''})">
+                                    <i class="fas fa-edit"></i> ${p.survey ? 'Edit' : 'Fill'} Survey
+                                </button>
+                                <button class="cf-btn cf-btn-cps" onclick="app.openCpsAnalysisModal(${p.id}${p.cps ? ',' + p.cps.id : ''})">
+                                    <i class="fas fa-edit"></i> ${p.cps ? 'Edit' : 'Fill'} CPS
+                                </button>
+                                <button class="cf-btn cf-btn-apu" onclick="app.openApuAppraisalModal(${p.id}${p.apu ? ',' + p.apu.id : ''})">
+                                    <i class="fas fa-edit"></i> ${p.apu ? 'Edit' : 'Fill'} APU
+                                </button>
+                                <button class="cf-btn cf-btn-blueprint" onclick="app.openDestinyBlueprintInTab(${p.id}${p.blueprint ? ',' + p.blueprint.id : ''})">
+                                    <i class="fas fa-external-link-alt"></i> ${p.blueprint ? 'Edit' : 'Fill'} Blueprint
+                                </button>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `}
+        </div>
+    `;
+};
+
+const cfSearchProspects = (val) => {
+    _cfState.prospectQuery = val || '';
+    // Debounce-light: re-render on next tick so user can keep typing
+    clearTimeout(_cfState._t);
+    _cfState._t = setTimeout(async () => {
+        const target = document.getElementById('marketing-tab-content');
+        if (target && _currentMarketingTab === 'forms') {
+            target.innerHTML = await renderFormsTab();
+        }
+    }, 220);
+};
+
+// ── Likert helper ────────────────────────────────────────────────────────
+const _cfLikertHtml = (name, value, options) => `
+    <div class="cf-likert" data-likert="${name}">
+        ${options.map(o => `
+            <label class="${value === o.v ? 'cf-likert-on' : ''}" onclick="this.parentNode.querySelectorAll('label').forEach(l=>l.classList.remove('cf-likert-on'));this.classList.add('cf-likert-on');this.querySelector('input').checked=true;">
+                <input type="radio" name="${name}" value="${o.v}" ${value === o.v ? 'checked' : ''}>
+                <span>${o.en}</span>
+                <span class="zh">${o.zh}</span>
+            </label>
+        `).join('')}
+    </div>
+`;
+const _cfReadLikert = (name) => {
+    const el = document.querySelector(`input[name="${name}"]:checked`);
+    return el ? parseInt(el.value, 10) : null;
+};
+
+// =========================================================================
+// Shared paper-styled CSS for the 3 official forms (Survey / CPS / APU).
+// Mirrors the paper PDFs: serif title, tight bordered info box, square
+// checkboxes (□), bilingual labels, print-friendly.
+// =========================================================================
+const _cfPaperStyles = () => `<style>
+    .cf-paper{ background:#fff; color:#1f2937; font-family:'Times New Roman','SimSun',serif; padding:28px 32px; max-width:880px; margin:0 auto; line-height:1.45; border:1px solid #e5e7eb; border-radius:4px; }
+    .cf-paper *{ box-sizing:border-box; }
+    .cf-paper-head{ display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:18px; gap:16px; flex-wrap:wrap; }
+    .cf-paper-title-en{ font-size:22px; font-weight:700; letter-spacing:1px; }
+    .cf-paper-title-zh{ font-size:24px; font-weight:700; margin-top:4px; letter-spacing:2px; }
+    .cf-paper-brand{ text-align:right; font-family:'Times New Roman',serif; }
+    .cf-paper-brand .cf-brand-zh{ display:block; font-size:14px; font-weight:700; color:#B89F4A; letter-spacing:1px; }
+    .cf-paper-brand .cf-brand-en{ display:block; font-size:11px; font-weight:700; color:#B89F4A; letter-spacing:3px; margin-top:2px; }
+    .cf-paper-info{ border:1px solid #000; padding:8px 14px; margin-bottom:14px; }
+    .cf-info-2col{ display:grid; grid-template-columns:1fr 1fr; column-gap:24px; }
+    @media (max-width:640px){ .cf-info-2col{ grid-template-columns:1fr; } }
+    .cf-info-row{ display:grid; grid-template-columns:130px 1fr; align-items:baseline; padding:6px 0; gap:8px; border-bottom:1px dotted #d1d5db; }
+    .cf-info-row:last-child, .cf-info-row:nth-last-child(2){ border-bottom:none; }
+    .cf-info-lbl{ font-size:13px; font-weight:600; color:#111827; text-align:right; }
+    .cf-info-lbl em{ display:block; font-style:italic; font-size:11px; font-weight:500; color:#6b7280; margin-top:1px; }
+    .cf-paper-input{ width:100%; border:none; border-bottom:1px solid #6b7280; background:transparent; padding:4px 6px; font-family:inherit; font-size:13px; color:#1f2937; }
+    .cf-paper-input:focus{ outline:none; border-bottom-color:#7C3AED; }
+    .cf-line-input{ border:none; border-bottom:1px solid #6b7280; background:transparent; padding:2px 6px; font-family:inherit; font-size:13px; min-width:120px; flex:1; }
+    .cf-line-input.cf-full{ display:block; width:100%; margin-top:6px; }
+
+    .cf-paper-instr{ font-size:13px; margin:12px 0 8px; font-weight:600; }
+
+    .cf-paper-qs{ display:flex; flex-direction:column; gap:10px; }
+    .cf-q{ font-size:13.5px; }
+    .cf-q-line{ line-height:1.6; margin-bottom:4px; }
+    .cf-q-n{ font-weight:700; margin-right:4px; }
+    .cf-cb-row{ display:flex; flex-wrap:wrap; gap:12px 22px; align-items:center; margin:4px 0; }
+    .cf-cb{ display:inline-flex; align-items:center; gap:6px; cursor:pointer; font-size:13px; user-select:none; }
+    .cf-cb input{ -webkit-appearance:none; appearance:none; width:14px; height:14px; min-width:14px; border:1.5px solid #1f2937; background:#fff; cursor:pointer; margin:0; position:relative; border-radius:0; }
+    .cf-cb input:checked{ background:#1f2937; }
+    .cf-cb input:checked::after{ content:""; position:absolute; left:3px; top:0px; width:4px; height:8px; border:solid #fff; border-width:0 2px 2px 0; transform:rotate(45deg); }
+    .cf-cb-txt{ line-height:1.3; }
+    .cf-cb-en{ font-size:11px; color:#6b7280; font-style:italic; margin-left:2px; }
+    .cf-cb-stack{ flex-direction:column; align-items:center; text-align:center; padding:6px 4px; min-width:90px; }
+    .cf-cb-stack .cf-cb-txt{ font-size:12px; margin-top:4px; }
+
+    .cf-paper-sig-row{ display:grid; grid-template-columns:1.4fr 1fr; gap:24px; margin-top:28px; }
+    @media (max-width:640px){ .cf-paper-sig-row{ grid-template-columns:1fr; } }
+    .cf-paper-sig-block{ text-align:center; }
+    .cf-paper-sig-canvas{ width:100%; height:74px; border-bottom:1px solid #1f2937; background:#fff; touch-action:none; display:block; }
+    .cf-paper-sig-cap{ font-size:12px; color:#1f2937; margin-top:4px; }
+    .cf-paper-sig-date{ border-bottom:1px solid #1f2937; padding:24px 0 4px; font-size:13px; color:#374151; text-align:center; }
+    .cf-mini-btn{ background:transparent; border:1px solid #d1d5db; padding:3px 8px; border-radius:4px; font-size:11px; cursor:pointer; color:#6b7280; }
+
+    .cf-paper-thanks{ margin-top:22px; padding-top:14px; border-top:1px dashed #6b7280; text-align:center; font-size:12.5px; line-height:1.7; color:#1f2937; }
+    .cf-paper-copyright{ text-align:center; font-size:11px; color:#6b7280; margin-top:8px; letter-spacing:1px; }
+
+    /* CPS bagua grid — paper styled */
+    .cf-bagua-box{ border:1px solid #000; padding:18px 22px; margin:14px 0; }
+    .cf-bagua-2col{ display:grid; grid-template-columns:1fr 1fr; gap:36px; }
+    @media (max-width:640px){ .cf-bagua-2col{ grid-template-columns:1fr; } }
+    .cf-bagua-lbl{ font-weight:700; font-size:15px; margin-bottom:10px; padding-left:4px; }
+    .cf-bagua-cells{ display:grid; grid-template-columns:repeat(3, 1fr); border:1.5px solid #1f2937; }
+    .cf-bagua-cell{ aspect-ratio:1; border:1px solid #1f2937; position:relative; padding:6px 6px 4px; background:#fff; display:flex; flex-direction:column; }
+    .cf-bagua-cell .tg{ position:absolute; top:6px; left:8px; font-size:24px; font-weight:700; color:#cbd5e1; line-height:1; pointer-events:none; font-family:'SimSun','PMingLiU',serif; }
+    .cf-bagua-cell textarea{ width:100%; flex:1; border:none; resize:none; padding:24px 4px 4px; font-size:12px; font-family:inherit; color:#1f2937; background:transparent; outline:none; }
+
+    /* CPS notes — 6 lines */
+    .cf-notes-lines{ margin:10px 0 14px; }
+    .cf-notes-lines .nline{ border-bottom:1px solid #6b7280; height:26px; }
+
+    /* FOR OFFICE USE black banner */
+    .cf-office-banner{ background:#000; color:#fff; padding:5px 14px; font-weight:700; font-size:12.5px; letter-spacing:1px; margin:14px 0 12px; }
+    .cf-office-row{ display:grid; grid-template-columns:1fr 1fr; gap:36px; padding:6px 4px 0; }
+    @media (max-width:640px){ .cf-office-row{ grid-template-columns:1fr; } }
+    .cf-office-sig-line{ border-bottom:1px solid #1f2937; height:54px; position:relative; }
+    .cf-office-sig-line canvas{ width:100%; height:100%; touch-action:none; display:block; }
+    .cf-office-sig-cap{ font-size:12px; color:#1f2937; margin-top:4px; }
+    .cf-office-sig-cap .ndate{ display:grid; grid-template-columns:50px 1fr; gap:4px; font-size:12px; margin-top:6px; }
+    .cf-office-sig-cap .ndate input,.cf-office-sig-cap .ndate select{ border:none; border-bottom:1px dotted #6b7280; background:transparent; font-family:inherit; font-size:12px; padding:1px 2px; }
+
+    /* APU likert 5 in a row */
+    .cf-apu-q{ border-bottom:1px solid #e5e7eb; padding:8px 0; }
+    .cf-apu-q:last-child{ border-bottom:none; }
+    .cf-apu-likert{ display:grid; grid-template-columns:repeat(5, 1fr); gap:8px; margin:6px 0 6px; }
+    @media (max-width:640px){ .cf-apu-likert{ grid-template-columns:repeat(2, 1fr); } }
+    .cf-apu-reason{ display:flex; align-items:baseline; gap:6px; margin-top:4px; font-size:12px; }
+    .cf-apu-reason .lbl{ white-space:nowrap; font-weight:500; }
+
+    /* APU referral table */
+    .cf-apu-ref{ width:100%; border-collapse:collapse; margin:8px 0; font-size:12.5px; }
+    .cf-apu-ref th,.cf-apu-ref td{ border:1px solid #1f2937; padding:6px 8px; vertical-align:middle; }
+    .cf-apu-ref th{ background:#f3f4f6; font-weight:600; text-align:left; }
+    .cf-apu-ref td{ height:30px; }
+    .cf-apu-ref input{ width:100%; border:none; background:transparent; font-family:inherit; font-size:12.5px; padding:2px 0; }
+    @media (max-width:640px){
+        .cf-apu-ref thead{ display:none; }
+        .cf-apu-ref tr{ display:block; border:1px solid #1f2937; padding:6px 8px; margin-bottom:8px; }
+        .cf-apu-ref td{ display:grid; grid-template-columns:90px 1fr; gap:6px; border:none; padding:3px 0; }
+        .cf-apu-ref td::before{ content:attr(data-label); font-weight:600; font-size:11px; color:#6b7280; }
+    }
+
+    /* APU 3 signatures */
+    .cf-sig-3{ display:grid; grid-template-columns:repeat(3, 1fr); gap:24px; margin-top:24px; }
+    @media (max-width:640px){ .cf-sig-3{ grid-template-columns:1fr; } }
+
+    /* Print */
+    @media print {
+        body * { visibility:hidden !important; }
+        .cf-paper, .cf-paper * { visibility:visible !important; }
+        .cf-paper{ position:absolute; left:0; top:0; box-shadow:none; border:none; max-width:none; padding:18px; }
+        .cf-no-print{ display:none !important; }
+        .modal-overlay,.modal-footer{ display:none !important; }
+    }
+</style>`;
+
+// =========================================================================
+// 1) NEW CUSTOMER SURVEY (新客户调查表) — 6 Qs + signature
+// =========================================================================
+const openCustomerSurveyModal = async (prospectId, surveyId = null) => {
+    const prospect = await AppDataStore.getById('prospects', prospectId).catch(() => null);
+    if (!prospect) { UI.toast.error('Prospect not found.'); return; }
+
+    let existing = null;
+    if (surveyId) {
+        existing = await AppDataStore.getById('customer_surveys', surveyId).catch(() => null);
+    }
+
+    const users = await AppDataStore.getAll('users').catch(() => []);
+    const consultantOpts = users
+        .filter(u => u.status !== 'inactive')
+        .map(u => `<option value="${u.id}" ${existing?.consultant_id == u.id ? 'selected' : ''}>${_cfEscape(u.full_name || u.email)}</option>`)
+        .join('');
+
+    const today = new Date().toISOString().slice(0, 10);
+    const data = existing || {};
+
+    const cb = (name, val, en, zh, extra = '') => `
+        <label class="cf-cb"><input type="radio" name="${name}" value="${val}" ${data[name] === val ? 'checked' : ''}>
+            <span class="cf-cb-txt">${zh}${en ? ` <span class="cf-cb-en">${en}</span>` : ''}${extra}</span>
+        </label>`;
+
+    UI.showModal(`新客户调查表 · ${_cfEscape(prospect.full_name || '')}`, `
+        ${_cfPaperStyles()}
+        <div class="cf-paper" id="cf-survey-paper">
+            <input type="hidden" id="cf-survey-prospect-id" value="${prospect.id}">
+            <input type="hidden" id="cf-survey-id" value="${surveyId || ''}">
+
+            <div class="cf-paper-head">
+                <div>
+                    <div class="cf-paper-title-en">DESTINY CODE</div>
+                    <div class="cf-paper-title-zh">新客户调查表</div>
+                </div>
+                <div class="cf-paper-brand">
+                    <span class="cf-brand-zh">天　命　定　數<sup>®</sup></span>
+                    <span class="cf-brand-en">DESTINY CODE</span>
+                </div>
+            </div>
+
+            <div class="cf-paper-info">
+                <div class="cf-info-2col">
+                    <div class="cf-info-row">
+                        <span class="cf-info-lbl">顾问姓名 <em>Consultant</em></span>
+                        <select class="cf-paper-input" id="cf-survey-consultant"><option value="">—</option>${consultantOpts}</select>
+                    </div>
+                    <div class="cf-info-row">
+                        <span class="cf-info-lbl">解盘日期 <em>Date</em></span>
+                        <input type="date" class="cf-paper-input" id="cf-survey-date" value="${data.analysis_date || today}">
+                    </div>
+                    <div class="cf-info-row">
+                        <span class="cf-info-lbl">客户姓名 <em>Customer Name</em></span>
+                        <input type="text" class="cf-paper-input" id="cf-survey-name" value="${_cfEscape(data.customer_name || prospect.full_name || '')}">
+                    </div>
+                    <div class="cf-info-row">
+                        <span class="cf-info-lbl">电邮 <em>Email</em></span>
+                        <input type="email" class="cf-paper-input" id="cf-survey-email" value="${_cfEscape(data.email || prospect.email || '')}">
+                    </div>
+                    <div class="cf-info-row">
+                        <span class="cf-info-lbl">联络电话 <em>Phone</em></span>
+                        <input type="tel" class="cf-paper-input" id="cf-survey-phone" value="${_cfEscape(data.phone || prospect.phone || '')}">
+                    </div>
+                    <div class="cf-info-row">
+                        <span class="cf-info-lbl">职业 <em>Occupation</em></span>
+                        <input type="text" class="cf-paper-input" id="cf-survey-occupation" value="${_cfEscape(data.occupation || prospect.occupation || '')}">
+                    </div>
+                </div>
+            </div>
+
+            <div class="cf-paper-instr">* 请在格子里打勾 <span style="color:#888;">(Tick the appropriate box)</span> ︰－</div>
+
+            <div class="cf-paper-qs">
+                <div class="cf-q">
+                    <div class="cf-q-line"><span class="cf-q-n">1)</span> 请问您从哪里听闻及认识到DC?</div>
+                    <div class="cf-cb-row">
+                        ${cb('q1_source','family','','亲属')}
+                        ${cb('q1_source','friend','','朋友')}
+                        ${cb('q1_source','other','','其他')}
+                        <input type="text" id="cf-survey-q1-other" class="cf-line-input" placeholder="(请说明)" value="${_cfEscape(data.q1_source_other || '')}">
+                    </div>
+                </div>
+
+                <div class="cf-q">
+                    <div class="cf-q-line"><span class="cf-q-n">2)</span> 请问您目前或之前有使用过风水或相关风水服务?</div>
+                    <div class="cf-cb-row">
+                        <label class="cf-cb"><input type="radio" name="q2_used_before" value="true" ${data.q2_used_before === true ? 'checked' : ''}><span class="cf-cb-txt">有</span></label>
+                        <label class="cf-cb"><input type="radio" name="q2_used_before" value="false" ${data.q2_used_before === false ? 'checked' : ''}><span class="cf-cb-txt">没有</span></label>
+                    </div>
+                </div>
+
+                <div class="cf-q">
+                    <div class="cf-q-line"><span class="cf-q-n">3)</span> 请问您个人或家庭之前或目前相信风水的功效吗?</div>
+                    <div class="cf-cb-row">
+                        <label class="cf-cb"><input type="radio" name="q3_belief" value="believe" ${data.q3_belief === 'believe' ? 'checked' : ''}><span class="cf-cb-txt">相信, 为什麼</span></label>
+                        <label class="cf-cb"><input type="radio" name="q3_belief" value="disbelieve" ${data.q3_belief === 'disbelieve' ? 'checked' : ''}><span class="cf-cb-txt">不相信, 为什麼</span></label>
+                        <label class="cf-cb"><input type="radio" name="q3_belief" value="neutral" ${data.q3_belief === 'neutral' ? 'checked' : ''}><span class="cf-cb-txt">中立</span></label>
+                    </div>
+                    <input type="text" id="cf-survey-q3-reason" class="cf-line-input cf-full" placeholder="(请说明原因)" value="${_cfEscape(data.q3_belief_reason || '')}">
+                </div>
+
+                <div class="cf-q">
+                    <div class="cf-q-line"><span class="cf-q-n">4)</span> 如果传承7000年的玄空风水, 确实有效, 您会否愿意尝试使用?</div>
+                    <div class="cf-cb-row">
+                        ${cb('q4_willing','yes','','愿意')}
+                        ${cb('q4_willing','maybe','','可能愿意')}
+                        ${cb('q4_willing','no','','不愿意')}
+                    </div>
+                </div>
+
+                <div class="cf-q">
+                    <div class="cf-q-line"><span class="cf-q-n">5)</span> 为了个人及家人拥有更好的利益、更安全的生活环境, 倘若有能力及良好机会, 您是否愿意使用DC风水的解决方案, 以帮助及改善全家人的财富状况、事业发展、工作绩效、夫妻关系、孩子教育及人缘关系等?</div>
+                    <div class="cf-cb-row">
+                        ${cb('q5_use_dc','willing','','愿意使用')}
+                        ${cb('q5_use_dc','consider','','考虑使用')}
+                        ${cb('q5_use_dc','neutral','','中立')}
+                    </div>
+                </div>
+
+                <div class="cf-q">
+                    <div class="cf-q-line"><span class="cf-q-n">6)</span> 若您明白到DC风水知识的种种好处与利益, 您会否主动分享给亲友一起获得这个利益?</div>
+                    <div class="cf-cb-row">
+                        ${cb('q6_share','definitely','','一定分享')}
+                        ${cb('q6_share','when_opportunity','','有机会就分享')}
+                        ${cb('q6_share','no','','不愿分享')}
+                    </div>
+                </div>
+            </div>
+
+            <div class="cf-paper-sig-row">
+                <div class="cf-paper-sig-block">
+                    <canvas id="cf-survey-sig" class="cf-paper-sig-canvas" data-preload="${data.signature_data_url || ''}"></canvas>
+                    <div class="cf-paper-sig-cap">客户签名 / Customer Signature</div>
+                </div>
+                <div class="cf-paper-sig-block">
+                    <div class="cf-paper-sig-date">${_cfFmtDate(data.signed_at) || _cfFmtDate(new Date().toISOString())}</div>
+                    <div class="cf-paper-sig-cap">日期 / Date</div>
+                </div>
+            </div>
+            <div class="cf-no-print" style="text-align:right;margin-top:-8px;"><button type="button" class="cf-mini-btn" onclick="app.cfClearSignature('cf-survey-sig')">Clear signature</button></div>
+
+            <div class="cf-paper-thanks">
+                助人为乐, DC全体同仁感谢您无私地参与本次的调查,<br>
+                有助於我们提升服务水准, 帮助更多朋友获得利益. 谢谢.
+            </div>
+            <div class="cf-paper-copyright">~ 版权所有, 翻印必究 ~</div>
+        </div>
+    `, [
+        { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+        { label: 'Print', type: 'secondary', action: 'window.print()' },
+        { label: 'Save Survey', type: 'primary', action: '(async () => { await app.saveCustomerSurvey(); })()' }
+    ]);
+
+    // Bind signature pad after modal renders
+    setTimeout(() => _bindSignaturePad('cf-survey-sig'), 60);
+};
+
+const saveCustomerSurvey = async () => {
+    const prospectId = parseInt(document.getElementById('cf-survey-prospect-id')?.value, 10);
+    const surveyId = document.getElementById('cf-survey-id')?.value || null;
+    if (!prospectId) { UI.toast.error('Missing prospect.'); return; }
+
+    const q2Raw = document.querySelector('input[name="q2_used_before"]:checked')?.value;
+    const q2 = q2Raw == null ? null : q2Raw === 'true';
+
+    const payload = {
+        prospect_id: prospectId,
+        consultant_id: parseInt(document.getElementById('cf-survey-consultant')?.value, 10) || null,
+        analysis_date: document.getElementById('cf-survey-date')?.value || null,
+        customer_name: document.getElementById('cf-survey-name')?.value?.trim() || null,
+        email: document.getElementById('cf-survey-email')?.value?.trim() || null,
+        phone: document.getElementById('cf-survey-phone')?.value?.trim() || null,
+        occupation: document.getElementById('cf-survey-occupation')?.value?.trim() || null,
+        q1_source: document.querySelector('input[name="q1_source"]:checked')?.value || null,
+        q1_source_other: document.getElementById('cf-survey-q1-other')?.value?.trim() || null,
+        q2_used_before: q2,
+        q3_belief: document.querySelector('input[name="q3_belief"]:checked')?.value || null,
+        q3_belief_reason: document.getElementById('cf-survey-q3-reason')?.value?.trim() || null,
+        q4_willing: document.querySelector('input[name="q4_willing"]:checked')?.value || null,
+        q5_use_dc: document.querySelector('input[name="q5_use_dc"]:checked')?.value || null,
+        q6_share: document.querySelector('input[name="q6_share"]:checked')?.value || null,
+        signature_data_url: _getSignatureDataUrl('cf-survey-sig'),
+        signed_at: _getSignatureDataUrl('cf-survey-sig') ? new Date().toISOString() : null,
+        created_by: _currentUser?.id || null
+    };
+
+    try {
+        if (surveyId) {
+            await AppDataStore.update('customer_surveys', surveyId, payload);
+            UI.toast.success('Survey updated.');
+        } else {
+            await AppDataStore.create('customer_surveys', { ...payload, created_at: new Date().toISOString() });
+            UI.toast.success('Survey saved.');
+        }
+        UI.hideModal();
+        const target = document.getElementById('marketing-tab-content');
+        if (target && _currentMarketingTab === 'forms') target.innerHTML = await renderFormsTab();
+    } catch (err) {
+        UI.toast.error('Save failed: ' + (err?.message || err));
+    }
+};
+
+// =========================================================================
+// 2) CPS FORM — Personal Life Chart Analysis (細解命盤) with bagua grids
+// =========================================================================
+const _cfBaguaHtml = (which, data) => {
+    // 後天八卦 standard arrangement (3x3):
+    //   xun (SE)   | li  (S) | kun (SW)
+    //   zhen (E)   | center | dui (W)
+    //   gen  (NE)  | kan (N) | qian (NW)
+    const cells = [
+        { k: 'xun',    tg: '巽' },
+        { k: 'li',     tg: '離' },
+        { k: 'kun',    tg: '坤' },
+        { k: 'zhen',   tg: '震' },
+        { k: 'center', tg: '中' },
+        { k: 'dui',    tg: '兌' },
+        { k: 'gen',    tg: '艮' },
+        { k: 'kan',    tg: '坎' },
+        { k: 'qian',   tg: '乾' }
+    ];
+    return `
+        <div class="cf-bagua">
+            <div class="cf-bagua-title">${which === 'lunar' ? 'Lunar 農曆' : 'Solar 陽曆'}</div>
+            <div class="cf-bagua-grid">
+                ${cells.map(c => `
+                    <div class="cf-bagua-cell ${c.k === 'center' ? 'cf-bagua-center' : ''}">
+                        <div class="tg">${c.tg}</div>
+                        <textarea id="cf-cps-${which}-${c.k}" placeholder="…">${_cfEscape((data && data[c.k]) || '')}</textarea>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `;
+};
+
+const _cfReadBagua = (which) => {
+    const out = {};
+    ['xun','li','kun','zhen','center','dui','gen','kan','qian'].forEach(k => {
+        out[k] = document.getElementById(`cf-cps-${which}-${k}`)?.value?.trim() || '';
+    });
+    return out;
+};
+
+const openCpsAnalysisModal = async (prospectId, cpsId = null) => {
+    const prospect = await AppDataStore.getById('prospects', prospectId).catch(() => null);
+    if (!prospect) { UI.toast.error('Prospect not found.'); return; }
+
+    let existing = null;
+    if (cpsId) existing = await AppDataStore.getById('cps_analyses', cpsId).catch(() => null);
+
+    const users = await AppDataStore.getAll('users').catch(() => []);
+    const dealerOpts = users
+        .filter(u => u.status !== 'inactive')
+        .map(u => `<option value="${u.id}" ${existing?.dealer_id == u.id ? 'selected' : ''}>${_cfEscape(u.full_name || u.email)}</option>`)
+        .join('');
+    const cpsByOpts = users
+        .filter(u => u.status !== 'inactive')
+        .map(u => `<option value="${u.id}" ${existing?.cps_by_id == u.id ? 'selected' : ''}>${_cfEscape(u.full_name || u.email)}</option>`)
+        .join('');
+
+    const today = new Date().toISOString().slice(0, 10);
+    const data = existing || {};
+
+    // Bagua cells in 後天八卦 standard arrangement (matches paper):
+    //   xun (NW) | li (N) | kun (NE)
+    //   zhen (W) |        | dui (E)
+    //   gen (SW) | kan(S) | qian(SE)
+    const baguaPaper = (which, chartData) => {
+        const cells = [
+            { k: 'xun',  tg: '巽' }, { k: 'li',   tg: '離' }, { k: 'kun',  tg: '坤' },
+            { k: 'zhen', tg: '震' }, { k: 'center', tg: '' },  { k: 'dui',  tg: '兌' },
+            { k: 'gen',  tg: '艮' }, { k: 'kan',  tg: '坎' }, { k: 'qian', tg: '乾' }
+        ];
+        return `
+            <div>
+                <div class="cf-bagua-lbl">${which === 'lunar' ? 'Lunar' : 'Solar'}</div>
+                <div class="cf-bagua-cells">
+                    ${cells.map(c => `
+                        <div class="cf-bagua-cell">
+                            <span class="tg">${c.tg}</span>
+                            <textarea id="cf-cps-${which}-${c.k}">${_cfEscape((chartData && chartData[c.k]) || '')}</textarea>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>`;
+    };
+
+    UI.showModal(`細解命盤 · ${_cfEscape(prospect.full_name || '')}`, `
+        ${_cfPaperStyles()}
+        <div class="cf-paper" id="cf-cps-paper">
+            <input type="hidden" id="cf-cps-prospect-id" value="${prospect.id}">
+            <input type="hidden" id="cf-cps-id" value="${cpsId || ''}">
+
+            <div class="cf-paper-head">
+                <div>
+                    <div class="cf-paper-title-en">PERSONAL LIFE CHART ANALYSIS</div>
+                    <div class="cf-paper-title-zh">細解命盤</div>
+                </div>
+                <div class="cf-paper-brand">
+                    <span class="cf-brand-zh">天　命　定　數<sup>®</sup></span>
+                    <span class="cf-brand-en">DESTINY CODE</span>
+                </div>
+            </div>
+
+            <!-- Date / SN row (above the info box, like paper) -->
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:32px; margin-bottom:12px;">
+                <div class="cf-info-row" style="border-bottom:none; grid-template-columns:80px 1fr;">
+                    <span class="cf-info-lbl"><strong>Date</strong></span>
+                    <input type="date" class="cf-paper-input" id="cf-cps-date" value="${data.form_date || today}">
+                </div>
+                <div class="cf-info-row" style="border-bottom:none; grid-template-columns:80px 1fr;">
+                    <span class="cf-info-lbl"><strong>SN</strong></span>
+                    <input type="text" class="cf-paper-input" id="cf-cps-sn" value="${_cfEscape(data.serial_number || '')}" placeholder="…">
+                </div>
+            </div>
+
+            <!-- Customer info bordered box, 2 columns x 5 rows like paper.
+                 CPS-specific overrides: tighter label column, inline-nowrap
+                 checkboxes for Gender/Marital, Birthdate cell holds BOTH
+                 Solar+Lunar inputs side-by-side. -->
+            <style>
+                #cf-cps-paper .cf-info-row{ grid-template-columns:108px 1fr; gap:6px; }
+                #cf-cps-paper .cf-info-lbl{ font-size:12px; }
+                #cf-cps-paper .cf-info-lbl em{ font-size:10.5px; }
+                #cf-cps-paper .cf-info-row .cf-cb-row{ flex-wrap:nowrap; gap:12px; }
+                #cf-cps-paper .cf-info-row .cf-cb{ font-size:12px; white-space:nowrap; }
+                #cf-cps-paper .cf-bd-cell{ display:grid; grid-template-columns:auto 1fr; gap:4px 6px; align-items:center; }
+                #cf-cps-paper .cf-bd-cell .lbl{ font-size:10.5px; color:#6b7280; white-space:nowrap; }
+                #cf-cps-paper .cf-bd-cell input{ min-width:0; }
+                #cf-cps-paper .cf-paper-input{ min-width:0; }
+                @media (max-width:640px){
+                    #cf-cps-paper .cf-info-row .cf-cb-row{ flex-wrap:wrap; }
+                }
+            </style>
+            <div class="cf-paper-info">
+                <div class="cf-info-2col">
+                    <!-- Row 1: Customer Name | Gender -->
+                    <div class="cf-info-row">
+                        <span class="cf-info-lbl">Customer Name<em>客戶姓名</em></span>
+                        <input type="text" class="cf-paper-input" id="cf-cps-name" value="${_cfEscape(data.customer_name || prospect.full_name || '')}" placeholder="(中文)">
+                    </div>
+                    <div class="cf-info-row">
+                        <span class="cf-info-lbl">Gender<em>性別</em></span>
+                        <div class="cf-cb-row">
+                            <label class="cf-cb"><input type="radio" name="cps_gender" value="female" ${data.gender === 'female' ? 'checked' : ''}><span class="cf-cb-txt">女&nbsp;<span class="cf-cb-en">Female</span></span></label>
+                            <label class="cf-cb"><input type="radio" name="cps_gender" value="male"   ${data.gender === 'male'   ? 'checked' : ''}><span class="cf-cb-txt">男&nbsp;<span class="cf-cb-en">Male</span></span></label>
+                        </div>
+                    </div>
+                    <!-- Row 2: Birthdate (Solar + Lunar inline) | Phone -->
+                    <div class="cf-info-row">
+                        <span class="cf-info-lbl">Birthdate<em>生日日期</em></span>
+                        <div class="cf-bd-cell">
+                            <span class="lbl">Solar 陽曆</span>
+                            <input type="date" class="cf-paper-input" id="cf-cps-bd-solar" value="${data.birthdate_solar || prospect.date_of_birth || ''}">
+                            <span class="lbl">Lunar 農曆</span>
+                            <input type="date" class="cf-paper-input" id="cf-cps-bd-lunar" value="${data.birthdate_lunar || prospect.lunar_birth || ''}">
+                        </div>
+                    </div>
+                    <div class="cf-info-row">
+                        <span class="cf-info-lbl">Phone Number<em>手提號碼</em></span>
+                        <input type="tel" class="cf-paper-input" id="cf-cps-phone" value="${_cfEscape(data.phone || prospect.phone || '')}">
+                    </div>
+                    <!-- Row 3: Occupation | Email -->
+                    <div class="cf-info-row">
+                        <span class="cf-info-lbl">Current Occupation<em>目前職業</em></span>
+                        <input type="text" class="cf-paper-input" id="cf-cps-occupation" value="${_cfEscape(data.occupation || prospect.occupation || '')}">
+                    </div>
+                    <div class="cf-info-row">
+                        <span class="cf-info-lbl">Email<em>電郵</em></span>
+                        <input type="email" class="cf-paper-input" id="cf-cps-email" value="${_cfEscape(data.email || prospect.email || '')}">
+                    </div>
+                    <!-- Row 4: Living Area | Introducer -->
+                    <div class="cf-info-row">
+                        <span class="cf-info-lbl">Living Area<em>居住地區</em></span>
+                        <input type="text" class="cf-paper-input" id="cf-cps-area" value="${_cfEscape(data.living_area || prospect.city || '')}">
+                    </div>
+                    <div class="cf-info-row">
+                        <span class="cf-info-lbl">Introducer<em>介紹人</em></span>
+                        <input type="text" class="cf-paper-input" id="cf-cps-introducer" value="${_cfEscape(data.introducer || prospect.referred_by || '')}">
+                    </div>
+                    <!-- Row 5: Marital Status | Dealer Name -->
+                    <div class="cf-info-row">
+                        <span class="cf-info-lbl">Marital Status<em>婚姻狀況</em></span>
+                        <div class="cf-cb-row">
+                            <label class="cf-cb"><input type="radio" name="cps_marital" value="single"  ${data.marital_status === 'single'  ? 'checked' : ''}><span class="cf-cb-txt">Single</span></label>
+                            <label class="cf-cb"><input type="radio" name="cps_marital" value="married" ${data.marital_status === 'married' ? 'checked' : ''}><span class="cf-cb-txt">Married</span></label>
+                            <label class="cf-cb"><input type="radio" name="cps_marital" value="others"  ${data.marital_status === 'others'  ? 'checked' : ''}><span class="cf-cb-txt">Others</span></label>
+                        </div>
+                    </div>
+                    <div class="cf-info-row">
+                        <span class="cf-info-lbl">Dealer Name<em>代理姓名</em></span>
+                        <select class="cf-paper-input" id="cf-cps-dealer"><option value="">—</option>${dealerOpts}</select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Bagua: Lunar | Solar -->
+            <div class="cf-bagua-box">
+                <div class="cf-bagua-2col">
+                    ${baguaPaper('lunar', data.lunar_chart || {})}
+                    ${baguaPaper('solar', data.solar_chart || {})}
+                </div>
+            </div>
+
+            <!-- 6 horizontal notes lines (combined into one textarea backing) -->
+            <textarea id="cf-cps-notes" style="width:100%; min-height:160px; border:1px solid #6b7280; padding:6px 8px; font-family:inherit; font-size:12.5px; line-height:26px; background:repeating-linear-gradient(transparent, transparent 25px, #6b7280 25px, #6b7280 26px);">${_cfEscape(data.notes || '')}</textarea>
+
+            <!-- FOR OFFICE USE black banner + 2 signature blocks -->
+            <div class="cf-office-banner">FOR OFFICE USE</div>
+            <div class="cf-office-row">
+                <div>
+                    <div class="cf-office-sig-line">
+                        <canvas id="cf-cps-sig-dealer" data-preload="${data.dealer_signature_data_url || ''}"></canvas>
+                    </div>
+                    <div class="cf-office-sig-cap">
+                        <strong>Dealer's Signature</strong>
+                        <div class="ndate"><span>Name</span><input type="text" id="cf-cps-dealer-name" value="${_cfEscape(data.dealer_signed_name || '')}"></div>
+                        <div class="ndate"><span>Date</span><input type="date" id="cf-cps-dealer-date" value="${data.dealer_signed_at ? data.dealer_signed_at.slice(0,10) : today}"></div>
+                        <button type="button" class="cf-mini-btn cf-no-print" style="margin-top:4px;" onclick="app.cfClearSignature('cf-cps-sig-dealer')">Clear signature</button>
+                    </div>
+                </div>
+                <div>
+                    <div class="cf-office-sig-line">
+                        <canvas id="cf-cps-sig-cps" data-preload="${data.cps_signature_data_url || ''}"></canvas>
+                    </div>
+                    <div class="cf-office-sig-cap">
+                        <strong>CPS by</strong>
+                        <div class="ndate"><span>Name</span><select id="cf-cps-by"><option value="">—</option>${cpsByOpts}</select></div>
+                        <div class="ndate"><span></span><input type="text" id="cf-cps-by-name" value="${_cfEscape(data.cps_signed_name || '')}" placeholder="or write name"></div>
+                        <div class="ndate"><span>Date</span><input type="date" id="cf-cps-by-date" value="${data.cps_signed_at ? data.cps_signed_at.slice(0,10) : today}"></div>
+                        <button type="button" class="cf-mini-btn cf-no-print" style="margin-top:4px;" onclick="app.cfClearSignature('cf-cps-sig-cps')">Clear signature</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `, [
+        { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+        { label: 'Print', type: 'secondary', action: 'window.print()' },
+        { label: 'Save CPS', type: 'primary', action: '(async () => { await app.saveCpsAnalysis(); })()' }
+    ]);
+
+    setTimeout(() => {
+        _bindSignaturePad('cf-cps-sig-dealer');
+        _bindSignaturePad('cf-cps-sig-cps');
+    }, 60);
+};
+
+const saveCpsAnalysis = async () => {
+    const prospectId = parseInt(document.getElementById('cf-cps-prospect-id')?.value, 10);
+    const cpsId = document.getElementById('cf-cps-id')?.value || null;
+    if (!prospectId) { UI.toast.error('Missing prospect.'); return; }
+
+    const dealerSig = _getSignatureDataUrl('cf-cps-sig-dealer');
+    const cpsSig    = _getSignatureDataUrl('cf-cps-sig-cps');
+
+    const payload = {
+        prospect_id: prospectId,
+        serial_number: document.getElementById('cf-cps-sn')?.value?.trim() || null,
+        form_date: document.getElementById('cf-cps-date')?.value || null,
+        customer_name: document.getElementById('cf-cps-name')?.value?.trim() || null,
+        customer_name_chinese: document.getElementById('cf-cps-name-zh')?.value?.trim() || null,
+        gender: document.querySelector('input[name="cps_gender"]:checked')?.value || null,
+        birthdate_solar: document.getElementById('cf-cps-bd-solar')?.value || null,
+        birthdate_lunar: document.getElementById('cf-cps-bd-lunar')?.value || null,
+        phone: document.getElementById('cf-cps-phone')?.value?.trim() || null,
+        email: document.getElementById('cf-cps-email')?.value?.trim() || null,
+        occupation: document.getElementById('cf-cps-occupation')?.value?.trim() || null,
+        living_area: document.getElementById('cf-cps-area')?.value?.trim() || null,
+        introducer: document.getElementById('cf-cps-introducer')?.value?.trim() || null,
+        marital_status: document.querySelector('input[name="cps_marital"]:checked')?.value || null,
+        dealer_id: parseInt(document.getElementById('cf-cps-dealer')?.value, 10) || null,
+        lunar_chart: _cfReadBagua('lunar'),
+        solar_chart: _cfReadBagua('solar'),
+        notes: document.getElementById('cf-cps-notes')?.value?.trim() || null,
+        dealer_signature_data_url: dealerSig,
+        dealer_signed_name: document.getElementById('cf-cps-dealer-name')?.value?.trim() || null,
+        dealer_signed_at: dealerSig ? new Date().toISOString() : null,
+        cps_by_id: parseInt(document.getElementById('cf-cps-by')?.value, 10) || null,
+        cps_signature_data_url: cpsSig,
+        cps_signed_name: document.getElementById('cf-cps-by-name')?.value?.trim() || null,
+        cps_signed_at: cpsSig ? new Date().toISOString() : null,
+        created_by: _currentUser?.id || null
+    };
+
+    try {
+        if (cpsId) {
+            await AppDataStore.update('cps_analyses', cpsId, payload);
+            UI.toast.success('CPS form updated.');
+        } else {
+            await AppDataStore.create('cps_analyses', { ...payload, created_at: new Date().toISOString() });
+            UI.toast.success('CPS form saved.');
+        }
+        UI.hideModal();
+        const target = document.getElementById('marketing-tab-content');
+        if (target && _currentMarketingTab === 'forms') target.innerHTML = await renderFormsTab();
+    } catch (err) {
+        UI.toast.error('Save failed: ' + (err?.message || err));
+    }
+};
+
+// =========================================================================
+// 3) APU APPRAISAL FORM — 7 Qs + 3 referrals + 3 signatures
+// =========================================================================
+const openApuAppraisalModal = async (prospectId, apuId = null) => {
+    const prospect = await AppDataStore.getById('prospects', prospectId).catch(() => null);
+    if (!prospect) { UI.toast.error('Prospect not found.'); return; }
+
+    let existing = null, refs = [];
+    if (apuId) {
+        existing = await AppDataStore.getById('apu_appraisals', apuId).catch(() => null);
+        const allRefs = await AppDataStore.getAll('apu_referrals').catch(() => []);
+        refs = allRefs.filter(r => r.appraisal_id == apuId).sort((a, b) => (a.position || 0) - (b.position || 0));
+    }
+
+    const users = await AppDataStore.getAll('users').catch(() => []);
+    const consultantOpts = users
+        .filter(u => u.status !== 'inactive')
+        .map(u => `<option value="${u.id}" ${existing?.consultant_id == u.id ? 'selected' : ''}>${_cfEscape(u.full_name || u.email)}</option>`)
+        .join('');
+    const dealerOpts = users
+        .filter(u => u.status !== 'inactive')
+        .map(u => `<option value="${u.id}" ${existing?.dealer_ea_id == u.id ? 'selected' : ''}>${_cfEscape(u.full_name || u.email)}</option>`)
+        .join('');
+
+    const today = new Date().toISOString().slice(0, 10);
+    const data = existing || {};
+
+    const satOpts = [
+        { v: 5, en: 'Extremely Satisfied', zh: '非常滿意' },
+        { v: 4, en: 'Satisfactory',         zh: '滿意' },
+        { v: 3, en: 'Average',              zh: '一般' },
+        { v: 2, en: 'Unsatisfactory',       zh: '不滿意' },
+        { v: 1, en: 'Poor',                 zh: '非常不滿意' }
+    ];
+    const valueOpts = [
+        { v: 5, en: 'Extremely Exceeded',  zh: '最高價值' },
+        { v: 4, en: 'High Value',          zh: '高價值' },
+        { v: 3, en: 'Adequate',            zh: '值得' },
+        { v: 2, en: 'Marginal',            zh: '一般' },
+        { v: 1, en: 'Poor',                zh: '低價值' }
+    ];
+    const knowOpts = [
+        { v: 5, en: 'Excellent',      zh: '很好' },
+        { v: 4, en: 'Good',           zh: '好' },
+        { v: 3, en: 'Average',        zh: '一般' },
+        { v: 2, en: 'Below Average',  zh: '不好' },
+        { v: 1, en: 'Unacceptable',   zh: '非常不好' }
+    ];
+
+    const refRow = (i) => {
+        const r = refs[i] || {};
+        return `
+            <tr>
+                <td data-label="NO.">${i + 1}.</td>
+                <td data-label="姓名 / NAME"><input type="text" id="cf-apu-ref-name-${i}" value="${_cfEscape(r.name || '')}"></td>
+                <td data-label="身份證 / NRIC"><input type="text" id="cf-apu-ref-nric-${i}" value="${_cfEscape(r.nric || '')}"></td>
+                <td data-label="電話 / CONTACT"><input type="tel" id="cf-apu-ref-contact-${i}" value="${_cfEscape(r.contact || '')}"></td>
+                <td data-label="職業 / OCCUPATION"><input type="text" id="cf-apu-ref-occ-${i}" value="${_cfEscape(r.occupation || '')}"></td>
+            </tr>
+        `;
+    };
+
+    // Paper-style Likert: 5 stacked checkboxes side-by-side with zh on top, en italicized below
+    const likertPaper = (name, currentVal, options) => `
+        <div class="cf-apu-likert">
+            ${options.map(o => `
+                <label class="cf-cb cf-cb-stack">
+                    <input type="radio" name="${name}" value="${o.v}" ${currentVal === o.v ? 'checked' : ''}>
+                    <span class="cf-cb-txt">${o.zh}<br><span class="cf-cb-en">${o.en}</span></span>
+                </label>
+            `).join('')}
+        </div>
+    `;
+
+    UI.showModal(`DC APPRAISAL FORM · ${_cfEscape(prospect.full_name || '')}`, `
+        ${_cfPaperStyles()}
+        <div class="cf-paper" id="cf-apu-paper">
+            <input type="hidden" id="cf-apu-prospect-id" value="${prospect.id}">
+            <input type="hidden" id="cf-apu-id" value="${apuId || ''}">
+
+            <div class="cf-paper-head">
+                <div>
+                    <div class="cf-paper-title-zh">DC 個人風水之析運論勢 <span style="color:#9ca3af;">|</span> 評估表</div>
+                    <div class="cf-paper-title-en" style="font-size:14px; margin-top:4px; color:#374151;">DC PERSONAL CHART ANALYSIS <span style="color:#9ca3af;">|</span> APPRAISAL FORM</div>
+                </div>
+                <div class="cf-paper-brand">
+                    <span class="cf-brand-zh">天　命　定　數<sup>®</sup></span>
+                    <span class="cf-brand-en">DESTINY CODE</span>
+                </div>
+            </div>
+
+            <!-- Header info: DATE / CONSULTANT then DEALER/EA / ID / 傳福者 -->
+            <div class="cf-paper-info">
+                <div class="cf-info-2col">
+                    <div class="cf-info-row">
+                        <span class="cf-info-lbl"><strong>DATE</strong></span>
+                        <input type="date" class="cf-paper-input" id="cf-apu-date" value="${data.appraisal_date || today}">
+                    </div>
+                    <div class="cf-info-row">
+                        <span class="cf-info-lbl"><strong>CONSULTANT</strong></span>
+                        <select class="cf-paper-input" id="cf-apu-consultant"><option value="">—</option>${consultantOpts}</select>
+                    </div>
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-top:6px;">
+                    <div class="cf-info-row" style="grid-template-columns:90px 1fr; border-bottom:none;">
+                        <span class="cf-info-lbl"><strong>DEALER / EA</strong></span>
+                        <select class="cf-paper-input" id="cf-apu-dealer"><option value="">—</option>${dealerOpts}</select>
+                    </div>
+                    <div class="cf-info-row" style="grid-template-columns:30px 1fr; border-bottom:none;">
+                        <span class="cf-info-lbl"><strong>ID</strong></span>
+                        <input type="text" class="cf-paper-input" id="cf-apu-cust-id" value="${_cfEscape(data.customer_identifier || '')}">
+                    </div>
+                    <div class="cf-info-row" style="grid-template-columns:70px 1fr; border-bottom:none;">
+                        <span class="cf-info-lbl"><strong>傳福者</strong></span>
+                        <input type="text" class="cf-paper-input" id="cf-apu-referrer" value="${_cfEscape(data.referrer || prospect.referred_by || '')}">
+                    </div>
+                </div>
+            </div>
+
+            <!-- 7 questions -->
+            <div class="cf-apu-q">
+                <div class="cf-q-line"><span class="cf-q-n">1)</span> 您所得到的個人風水解盤服務,您覺得︰<br><em style="font-size:11px;color:#6b7280;">How do you rate the personal chart analysis service received:</em></div>
+                ${likertPaper('q1_service_rating', data.q1_service_rating, satOpts)}
+                <div class="cf-apu-reason"><span class="lbl">原因 Reason :</span><input type="text" id="cf-apu-q1-reason" class="cf-line-input" value="${_cfEscape(data.q1_reason || '')}"></div>
+            </div>
+
+            <div class="cf-apu-q">
+                <div class="cf-q-line"><span class="cf-q-n">2)</span> 您對這位風水顧問的解盤能力及其他表現,您認為︰<br><em style="font-size:11px;color:#6b7280;">Please rate your opinion on the chart analysis ability and overall performance of the Consultant:</em></div>
+                ${likertPaper('q2_consultant_rating', data.q2_consultant_rating, satOpts)}
+                <div class="cf-apu-reason"><span class="lbl">原因 Reason :</span><input type="text" id="cf-apu-q2-reason" class="cf-line-input" value="${_cfEscape(data.q2_reason || '')}"></div>
+            </div>
+
+            <div class="cf-apu-q">
+                <div class="cf-q-line"><span class="cf-q-n">3)</span> 您對整個解盤的安排與流程,是否感到︰<br><em style="font-size:11px;color:#6b7280;">Please indicate your level of satisfaction on the arrangement and flow of the chart analysis:</em></div>
+                ${likertPaper('q3_arrangement_rating', data.q3_arrangement_rating, satOpts)}
+                <div class="cf-apu-reason"><span class="lbl">原因 Reason :</span><input type="text" id="cf-apu-q3-reason" class="cf-line-input" value="${_cfEscape(data.q3_reason || '')}"></div>
+            </div>
+
+            <div class="cf-apu-q">
+                <div class="cf-q-line"><span class="cf-q-n">4)</span> 雖然這是DC送予的免費個人風水解盤,您認為本服務給您的收獲為︰<br><em style="font-size:11px;color:#6b7280;">This is a complimentary chart analysis service provided by DC, how do you rate the result of the analysis:</em></div>
+                ${likertPaper('q4_value_rating', data.q4_value_rating, valueOpts)}
+                <div class="cf-apu-reason"><span class="lbl">原因 Reason :</span><input type="text" id="cf-apu-q4-reason" class="cf-line-input" value="${_cfEscape(data.q4_reason || '')}"></div>
+            </div>
+
+            <div class="cf-apu-q">
+                <div class="cf-q-line"><span class="cf-q-n">5)</span> 您對這位風水顧問有何評價? 包括其對風水知識的理解、分享及解答疑問。<br><em style="font-size:11px;color:#6b7280;">How do you rate the Consultant? Including His/Her knowledge and understanding of Fengshui and responsiveness?</em></div>
+                ${likertPaper('q5_knowledge_rating', data.q5_knowledge_rating, knowOpts)}
+                <div class="cf-apu-reason"><span class="lbl">原因 Reason :</span><input type="text" id="cf-apu-q5-reason" class="cf-line-input" value="${_cfEscape(data.q5_reason || '')}"></div>
+            </div>
+
+            <div class="cf-apu-q">
+                <div class="cf-q-line"><span class="cf-q-n">6)</span> 您是否知道,必須有人推薦,方可免費得到DC個人風水高價值解盤服務?<br><em style="font-size:11px;color:#6b7280;">Are you aware that complementary DC Personal Chart Analysis service will only be accorded by referral?</em></div>
+                <div class="cf-cb-row" style="margin-top:4px;">
+                    <label class="cf-cb cf-cb-stack" style="min-width:60px;"><input type="radio" name="q6_aware_referral" value="true" ${data.q6_aware_referral === true ? 'checked' : ''}><span class="cf-cb-txt">知道<br><span class="cf-cb-en">Yes</span></span></label>
+                    <label class="cf-cb cf-cb-stack" style="min-width:60px;"><input type="radio" name="q6_aware_referral" value="false" ${data.q6_aware_referral === false ? 'checked' : ''}><span class="cf-cb-txt">不知道<br><span class="cf-cb-en">No</span></span></label>
+                    <div class="cf-apu-reason" style="flex:1; margin-top:0;"><span class="lbl">原因 Reason :</span><input type="text" id="cf-apu-q6-reason" class="cf-line-input" value="${_cfEscape(data.q6_reason || '')}"></div>
+                </div>
+            </div>
+
+            <div class="cf-apu-q">
+                <div class="cf-q-line"><span class="cf-q-n">7)</span> 若您認同DC個人風水解盤服務物有所值,您最想推薦哪三位親友得到此高價值服務?<br><em style="font-size:11px;color:#6b7280;">Whom are the three relatives/friends that you would strongly recommend to receive this high value DC Personal Chart Analysis service?</em></div>
+                <table class="cf-apu-ref">
+                    <thead>
+                        <tr>
+                            <th style="width:38px;">NO.</th>
+                            <th>姓名 / NAME</th>
+                            <th>身份證 / NRIC</th>
+                            <th>電話 / CONTACT</th>
+                            <th>職業 / OCCUPATION</th>
+                        </tr>
+                    </thead>
+                    <tbody>${[0,1,2].map(refRow).join('')}</tbody>
+                </table>
+            </div>
+
+            <!-- 3 signatures -->
+            <div class="cf-sig-3">
+                <div class="cf-paper-sig-block">
+                    <canvas id="cf-apu-sig-cust" class="cf-paper-sig-canvas" data-preload="${data.customer_signature_data_url || ''}"></canvas>
+                    <div class="cf-paper-sig-cap"><strong>Signature</strong><br>DC CUSTOMER</div>
+                    <button type="button" class="cf-mini-btn cf-no-print" onclick="app.cfClearSignature('cf-apu-sig-cust')">Clear</button>
+                </div>
+                <div class="cf-paper-sig-block">
+                    <canvas id="cf-apu-sig-apu" class="cf-paper-sig-canvas" data-preload="${data.apu_signature_data_url || ''}"></canvas>
+                    <div class="cf-paper-sig-cap"><strong>Signature</strong><br>DC APU</div>
+                    <button type="button" class="cf-mini-btn cf-no-print" onclick="app.cfClearSignature('cf-apu-sig-apu')">Clear</button>
+                </div>
+                <div class="cf-paper-sig-block">
+                    <canvas id="cf-apu-sig-head" class="cf-paper-sig-canvas" data-preload="${data.head_apu_signature_data_url || ''}"></canvas>
+                    <div class="cf-paper-sig-cap"><strong>Signature</strong><br>HEAD OF DC APU</div>
+                    <button type="button" class="cf-mini-btn cf-no-print" onclick="app.cfClearSignature('cf-apu-sig-head')">Clear</button>
+                </div>
+            </div>
+        </div>
+    `, [
+        { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+        { label: 'Print', type: 'secondary', action: 'window.print()' },
+        { label: 'Save APU', type: 'primary', action: '(async () => { await app.saveApuAppraisal(); })()' }
+    ]);
+
+    setTimeout(() => {
+        _bindSignaturePad('cf-apu-sig-cust');
+        _bindSignaturePad('cf-apu-sig-apu');
+        _bindSignaturePad('cf-apu-sig-head');
+    }, 60);
+};
+
+const saveApuAppraisal = async () => {
+    const prospectId = parseInt(document.getElementById('cf-apu-prospect-id')?.value, 10);
+    const apuId = document.getElementById('cf-apu-id')?.value || null;
+    if (!prospectId) { UI.toast.error('Missing prospect.'); return; }
+
+    const q6Raw = document.querySelector('input[name="q6_aware_referral"]:checked')?.value;
+    const q6 = q6Raw == null ? null : q6Raw === 'true';
+    const custSig = _getSignatureDataUrl('cf-apu-sig-cust');
+    const apuSig  = _getSignatureDataUrl('cf-apu-sig-apu');
+    const headSig = _getSignatureDataUrl('cf-apu-sig-head');
+
+    const payload = {
+        prospect_id: prospectId,
+        appraisal_date: document.getElementById('cf-apu-date')?.value || null,
+        consultant_id: parseInt(document.getElementById('cf-apu-consultant')?.value, 10) || null,
+        dealer_ea_id: parseInt(document.getElementById('cf-apu-dealer')?.value, 10) || null,
+        customer_identifier: document.getElementById('cf-apu-cust-id')?.value?.trim() || null,
+        referrer: document.getElementById('cf-apu-referrer')?.value?.trim() || null,
+        q1_service_rating: _cfReadLikert('q1_service_rating'),
+        q1_reason: document.getElementById('cf-apu-q1-reason')?.value?.trim() || null,
+        q2_consultant_rating: _cfReadLikert('q2_consultant_rating'),
+        q2_reason: document.getElementById('cf-apu-q2-reason')?.value?.trim() || null,
+        q3_arrangement_rating: _cfReadLikert('q3_arrangement_rating'),
+        q3_reason: document.getElementById('cf-apu-q3-reason')?.value?.trim() || null,
+        q4_value_rating: _cfReadLikert('q4_value_rating'),
+        q4_reason: document.getElementById('cf-apu-q4-reason')?.value?.trim() || null,
+        q5_knowledge_rating: _cfReadLikert('q5_knowledge_rating'),
+        q5_reason: document.getElementById('cf-apu-q5-reason')?.value?.trim() || null,
+        q6_aware_referral: q6,
+        q6_reason: document.getElementById('cf-apu-q6-reason')?.value?.trim() || null,
+        customer_signature_data_url: custSig,
+        customer_signed_at: custSig ? new Date().toISOString() : null,
+        apu_signature_data_url: apuSig,
+        apu_signed_at: apuSig ? new Date().toISOString() : null,
+        apu_signed_by: apuSig ? (_currentUser?.id || null) : null,
+        head_apu_signature_data_url: headSig,
+        head_apu_signed_at: headSig ? new Date().toISOString() : null,
+        head_apu_signed_by: headSig ? (_currentUser?.id || null) : null,
+        created_by: _currentUser?.id || null
+    };
+
+    try {
+        let savedId = apuId;
+        if (apuId) {
+            await AppDataStore.update('apu_appraisals', apuId, payload);
+        } else {
+            const row = await AppDataStore.create('apu_appraisals', { ...payload, created_at: new Date().toISOString() });
+            savedId = row?.id;
+        }
+
+        if (savedId) {
+            // Wipe + re-write the 3 referral rows so re-saving replaces them cleanly.
+            const existingRefs = (await AppDataStore.getAll('apu_referrals').catch(() => []))
+                .filter(r => r.appraisal_id == savedId);
+            for (const r of existingRefs) {
+                try { await AppDataStore.delete('apu_referrals', r.id); } catch (_) {}
+            }
+            for (let i = 0; i < 3; i++) {
+                const name = document.getElementById(`cf-apu-ref-name-${i}`)?.value?.trim();
+                const nric = document.getElementById(`cf-apu-ref-nric-${i}`)?.value?.trim();
+                const contact = document.getElementById(`cf-apu-ref-contact-${i}`)?.value?.trim();
+                const occ = document.getElementById(`cf-apu-ref-occ-${i}`)?.value?.trim();
+                if (name || nric || contact || occ) {
+                    await AppDataStore.create('apu_referrals', {
+                        appraisal_id: savedId,
+                        position: i + 1,
+                        name: name || null,
+                        nric: nric || null,
+                        contact: contact || null,
+                        occupation: occ || null,
+                        created_at: new Date().toISOString()
+                    });
+                }
+            }
+        }
+
+        UI.toast.success(apuId ? 'APU updated.' : 'APU saved.');
+        UI.hideModal();
+        const target = document.getElementById('marketing-tab-content');
+        if (target && _currentMarketingTab === 'forms') target.innerHTML = await renderFormsTab();
+    } catch (err) {
+        UI.toast.error('Save failed: ' + (err?.message || err));
+    }
+};
+
+// =========================================================================
+// 4) DESTINY CODE 3-YEAR BLUEPRINT (九運改命藍圖表)
+// Sections: 命卦大運 → 成效與需求 → 未來3年運盤 → 行動與結果 → 簽名
+// Default 3-year window: 2026–2028 (start_year configurable per-form).
+// =========================================================================
+
+// Opens the Blueprint form in-place. We tried opening a separate tab via
+// window.open earlier, but tab boundaries don't reliably share the Supabase
+// session in production (the new tab landed on the login screen). Modal
+// in-place keeps the user inside the authenticated session and reuses the
+// same data store cache, so saves are instant.
+const openDestinyBlueprintInTab = (prospectId, dbId = null) =>
+    openDestinyBlueprintModal(prospectId, dbId);
+
+const openDestinyBlueprintModal = async (prospectId, dbId = null) => {
+    const prospect = await AppDataStore.getById('prospects', prospectId).catch(() => null);
+    if (!prospect) { UI.toast.error('Prospect not found.'); return; }
+
+    let existing = null;
+    if (dbId) existing = await AppDataStore.getById('destiny_blueprints', dbId).catch(() => null);
+
+    const users = await AppDataStore.getAll('users').catch(() => []);
+    const userOpts = (selectedId) => users
+        .filter(u => u.status !== 'inactive')
+        .map(u => `<option value="${u.id}" ${selectedId == u.id ? 'selected' : ''}>${_cfEscape(u.full_name || u.email)}</option>`)
+        .join('');
+
+    const today = new Date().toISOString().slice(0, 10);
+    const data = existing || {};
+    const startYear = data.start_year || 2026;
+    const y1 = startYear, y2 = startYear + 1, y3 = startYear + 2;
+
+    UI.showModal(`九運改命藍圖表 Destiny Code Blueprint · ${_cfEscape(prospect.full_name || '')}`, `
+        <style>
+            /* ── Destiny Blueprint — paper-form-faithful layout ── */
+            .db-form{ font-family: 'Inter', sans-serif; color:#111827; }
+            .db-form input[type="text"], .db-form input[type="tel"], .db-form input[type="number"], .db-form input[type="date"], .db-form select, .db-form textarea{
+                width:100%; padding:6px 8px; border:1px solid #D1D5DB; border-radius:4px; font-size:13px; font-family:inherit; background:white; box-sizing:border-box;
+            }
+            .db-form textarea{ resize:vertical; min-height:38px; }
+
+            /* Top branding row */
+            .db-brand{
+                display:flex; align-items:flex-start; justify-content:space-between;
+                border-bottom:1px solid #E5E7EB; padding-bottom:10px; margin-bottom:12px;
+            }
+            .db-brand-left{ display:flex; flex-direction:column; gap:4px; }
+            .db-brand-tag{
+                display:inline-block; background:#1E3A8A; color:white; font-size:11px; font-weight:600;
+                padding:3px 10px; border-radius:3px; letter-spacing:1px; width:fit-content;
+            }
+            .db-brand-title{
+                background:#1E3A8A; color:white; font-size:18px; font-weight:700;
+                padding:6px 14px; border-radius:4px; letter-spacing:2px; width:fit-content;
+            }
+            .db-brand-right{ text-align:right; font-size:11px; color:#6B7280; letter-spacing:2px; }
+            .db-brand-right strong{ font-size:14px; color:#111827; letter-spacing:3px; display:block; }
+
+            /* Header fields row (姓名/聯絡 / 代理/組別) */
+            .db-header-grid{ display:grid; grid-template-columns:1fr 1fr; gap:8px 16px; margin-bottom:14px; }
+            @media (max-width:600px){ .db-header-grid{ grid-template-columns:1fr; } }
+            .db-header-grid .db-cell{ display:flex; align-items:center; gap:8px; }
+            .db-header-grid .db-cell label{ font-size:13px; font-weight:600; white-space:nowrap; color:#1F2937; min-width:90px; }
+
+            /* Section header bar (number badge + Chinese title) */
+            .db-section-bar{
+                display:flex; align-items:center; gap:0; margin:18px 0 8px;
+                border:1px solid #1E3A8A; border-radius:4px; overflow:hidden;
+            }
+            .db-section-num{
+                background:#1E3A8A; color:white; font-weight:700; font-size:14px;
+                width:30px; text-align:center; padding:6px 0;
+            }
+            .db-section-title{ background:#1E3A8A; color:white; font-weight:600; font-size:14px; padding:6px 14px; flex:1; }
+            .db-section-en{ color:#BFDBFE; font-size:11px; font-weight:400; margin-left:6px; }
+
+            .db-section-hint{ font-size:11px; color:#4B5563; margin:4px 0 8px; padding-left:4px; }
+
+            /* Section 1: 命卦大運 — 4-quadrant grid + score/advice row */
+            .db-quadrant{ display:grid; grid-template-columns:1fr 1fr; gap:6px 14px; margin-bottom:8px; }
+            @media (max-width:600px){ .db-quadrant{ grid-template-columns:1fr; } }
+            .db-quadrant .db-qcell{ display:flex; align-items:center; gap:8px; }
+            .db-quadrant .db-qcell label{ font-weight:600; min-width:38px; font-size:13px; color:#1F2937; }
+            .db-score-row{ display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-top:6px; }
+            .db-score-row .db-score-wrap{ display:flex; align-items:center; gap:8px; }
+            .db-score-row .db-score-wrap label{ font-weight:600; font-size:13px; min-width:38px; }
+            .db-score-row .db-score-wrap input{ width:70px; text-align:center; font-weight:700; }
+            .db-score-row .db-advice-wrap{ display:flex; align-items:center; gap:8px; flex:1; min-width:200px; }
+            .db-score-row .db-advice-wrap label{ font-weight:600; font-size:13px; }
+
+            /* Paper-style tables (sections 2, 3, 4) */
+            .db-table{ width:100%; border-collapse:collapse; font-size:13px; }
+            .db-table th, .db-table td{ border:1px solid #9CA3AF; padding:6px 8px; vertical-align:middle; }
+            .db-table thead th{ background:#F3F4F6; font-weight:600; text-align:center; font-size:12px; color:#1F2937; }
+            .db-table th.db-row-label{ background:#F9FAFB; font-weight:700; text-align:center; width:80px; font-size:13px; }
+            .db-table td input, .db-table td textarea{ border:none; padding:2px 4px; background:transparent; }
+            .db-table td input:focus, .db-table td textarea:focus{ outline:1px solid #1E3A8A; border-radius:2px; }
+            .db-year-cell{ background:#F9FAFB; font-weight:700; text-align:center; font-size:14px; }
+
+            .db-advice-block{ margin-top:8px; display:flex; align-items:flex-start; gap:8px; }
+            .db-advice-block label{ font-weight:600; font-size:13px; min-width:50px; padding-top:6px; }
+            .db-advice-block textarea{ flex:1; }
+
+            /* Footer signature row */
+            .db-footer{ display:grid; grid-template-columns:1fr 1fr; gap:24px; margin-top:20px; padding-top:14px; border-top:1px dashed #9CA3AF; }
+            @media (max-width:600px){ .db-footer{ grid-template-columns:1fr; } }
+            .db-footer .db-sigbox{ display:flex; flex-direction:column; gap:6px; }
+            .db-footer .db-sig-label{ font-size:12px; font-weight:700; color:#1F2937; }
+            .db-footer .db-sig-name{ font-size:11px; color:#6B7280; }
+            .db-footer canvas{ width:100%; height:90px; border:1px solid #9CA3AF; border-radius:4px; background:white; touch-action:none; }
+            .db-footer .db-sig-date-row{ display:flex; justify-content:space-between; align-items:center; font-size:11px; color:#4B5563; }
+            .db-footer .db-clear{ background:white; border:1px solid #D1D5DB; padding:3px 8px; border-radius:4px; cursor:pointer; font-size:11px; }
+            .db-footer .db-clear:hover{ background:#F9FAFB; }
+
+            .db-copyright{ text-align:right; font-size:10px; color:#9CA3AF; margin-top:10px; font-style:italic; }
+        </style>
+
+        <div class="db-form">
+            <input type="hidden" id="cf-db-prospect-id" value="${prospect.id}">
+            <input type="hidden" id="cf-db-id" value="${dbId || ''}">
+
+            <!-- Top branding (matches paper form) -->
+            <div class="db-brand">
+                <div class="db-brand-left">
+                    <span class="db-brand-tag">DC 個人風水</span>
+                    <span class="db-brand-title">九運改命藍圖表</span>
+                </div>
+                <div class="db-brand-right">
+                    天 命 定 數
+                    <strong>DESTINY CODE</strong>
+                </div>
+            </div>
+
+            <!-- Header fields: 姓名/聯絡, 代理/組別 -->
+            <div class="db-header-grid">
+                <div class="db-cell"><label>姓名</label>
+                    <input type="text" id="cf-db-name" value="${_cfEscape(data.customer_name || prospect.full_name || '')}">
+                </div>
+                <div class="db-cell"><label>聯絡號碼</label>
+                    <input type="tel" id="cf-db-phone" value="${_cfEscape(data.contact_number || prospect.phone || '')}">
+                </div>
+                <div class="db-cell"><label>代理</label>
+                    <select id="cf-db-agent"><option value="">--</option>${userOpts(data.agent_id)}</select>
+                </div>
+                <div class="db-cell"><label>組別</label>
+                    <input type="text" id="cf-db-group" value="${_cfEscape(data.group_name || '')}">
+                </div>
+                <div class="db-cell"><label>日期</label>
+                    <input type="date" id="cf-db-date" value="${data.form_date || today}">
+                </div>
+            </div>
+
+            <!-- Section 1: 命卦大運 -->
+            <div class="db-section-bar">
+                <div class="db-section-num">1</div>
+                <div class="db-section-title">命卦大運<span class="db-section-en">Life Trigram Fortune</span></div>
+            </div>
+            <div class="db-quadrant">
+                <div class="db-qcell"><label>吉:</label><textarea id="cf-db-ji" rows="1">${_cfEscape(data.section1_ji || '')}</textarea></div>
+                <div class="db-qcell"><label>悔:</label><textarea id="cf-db-hui" rows="1">${_cfEscape(data.section1_hui || '')}</textarea></div>
+                <div class="db-qcell"><label>凶:</label><textarea id="cf-db-xiong" rows="1">${_cfEscape(data.section1_xiong || '')}</textarea></div>
+                <div class="db-qcell"><label>吝:</label><textarea id="cf-db-lin" rows="1">${_cfEscape(data.section1_lin || '')}</textarea></div>
+            </div>
+            <div class="db-score-row">
+                <div class="db-score-wrap"><label>分數:</label>
+                    <input type="number" id="cf-db-score" min="0" max="100" value="${data.section1_score ?? ''}">
+                </div>
+                <div class="db-advice-wrap"><label>建言:</label>
+                    <input type="text" id="cf-db-s1-advice" value="${_cfEscape(data.section1_advice || '')}">
+                </div>
+            </div>
+
+            <!-- Section 2: 成效與需求 -->
+            <div class="db-section-bar">
+                <div class="db-section-num">2</div>
+                <div class="db-section-title">成效與需求<span class="db-section-en">Effectiveness & Needs</span></div>
+            </div>
+            <div class="db-section-hint">按命盤解析,已採用之方案</div>
+            <table class="db-table">
+                <thead>
+                    <tr><th colspan="2">現在及未來可能需要之方案</th></tr>
+                </thead>
+                <tbody>
+                    <tr><th class="db-row-label">個人</th><td><input type="text" id="cf-db-s2-personal" value="${_cfEscape(data.section2_personal || '')}"></td></tr>
+                    <tr><th class="db-row-label">家居</th><td><input type="text" id="cf-db-s2-home" value="${_cfEscape(data.section2_home || '')}"></td></tr>
+                    <tr><th class="db-row-label">工作</th><td><input type="text" id="cf-db-s2-work" value="${_cfEscape(data.section2_work || '')}"></td></tr>
+                    <tr><th class="db-row-label">生意</th><td><input type="text" id="cf-db-s2-business" value="${_cfEscape(data.section2_business || '')}"></td></tr>
+                    <tr><th class="db-row-label">關係</th><td><input type="text" id="cf-db-s2-relationship" value="${_cfEscape(data.section2_relationship || '')}"></td></tr>
+                    <tr><th class="db-row-label">子女</th><td><input type="text" id="cf-db-s2-children" value="${_cfEscape(data.section2_children || '')}"></td></tr>
+                </tbody>
+            </table>
+            <div class="db-advice-block">
+                <label>建言:</label>
+                <textarea id="cf-db-s2-advice" rows="2">${_cfEscape(data.section2_advice || '')}</textarea>
+            </div>
+
+            <!-- Section 3: Future 3-year fortune -->
+            <div class="db-section-bar">
+                <div class="db-section-num">3</div>
+                <div class="db-section-title">未來3年運盤<span class="db-section-en">Future 3-Year Fortune</span></div>
+            </div>
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
+                <label style="font-size:11px; color:#4B5563; font-weight:600;">起始年 Start Year:</label>
+                <input type="number" id="cf-db-start-year" min="2024" max="2099" value="${startYear}" style="width:90px; text-align:center;">
+            </div>
+            <table class="db-table">
+                <thead>
+                    <tr>
+                        <th style="width:80px;">&nbsp;</th>
+                        <th>未來3年運盤重大剋應</th>
+                        <th>未來3年最想要之藍圖目標</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="db-year-cell" id="cf-db-y1-label">${y1}</td>
+                        <td><input type="text" id="cf-db-y1-event" value="${_cfEscape(data.year_1_event || '')}"></td>
+                        <td><input type="text" id="cf-db-y1-goal" value="${_cfEscape(data.year_1_goal || '')}"></td>
+                    </tr>
+                    <tr>
+                        <td class="db-year-cell" id="cf-db-y2-label">${y2}</td>
+                        <td><input type="text" id="cf-db-y2-event" value="${_cfEscape(data.year_2_event || '')}"></td>
+                        <td><input type="text" id="cf-db-y2-goal" value="${_cfEscape(data.year_2_goal || '')}"></td>
+                    </tr>
+                    <tr>
+                        <td class="db-year-cell" id="cf-db-y3-label">${y3}</td>
+                        <td><input type="text" id="cf-db-y3-event" value="${_cfEscape(data.year_3_event || '')}"></td>
+                        <td><input type="text" id="cf-db-y3-goal" value="${_cfEscape(data.year_3_goal || '')}"></td>
+                    </tr>
+                </tbody>
+            </table>
+            <div class="db-section-hint">*藍圖目標與結果,每年可以是一個,也可以三年是一個,或三年三個皆可。卻不可過多。</div>
+            <div class="db-advice-block">
+                <label>結論:</label>
+                <textarea id="cf-db-s3-conclusion" rows="2">${_cfEscape(data.section3_conclusion || '')}</textarea>
+            </div>
+
+            <!-- Section 4: 行動與結果 -->
+            <div class="db-section-bar">
+                <div class="db-section-num">4</div>
+                <div class="db-section-title">行動與結果<span class="db-section-en">Action & Results</span></div>
+            </div>
+            <table class="db-table">
+                <thead>
+                    <tr><th colspan="2">面對未來,其藍圖目標可能之結果變化</th></tr>
+                </thead>
+                <tbody>
+                    <tr><th class="db-row-label">得到</th><td><input type="text" id="cf-db-s4-gain" value="${_cfEscape(data.section4_gain || '')}"></td></tr>
+                    <tr><th class="db-row-label">損失</th><td><input type="text" id="cf-db-s4-loss" value="${_cfEscape(data.section4_loss || '')}"></td></tr>
+                    <tr><th class="db-row-label">保持</th><td><input type="text" id="cf-db-s4-maintain" value="${_cfEscape(data.section4_maintain || '')}"></td></tr>
+                    <tr><th class="db-row-label">衰退</th><td><input type="text" id="cf-db-s4-decline" value="${_cfEscape(data.section4_decline || '')}"></td></tr>
+                </tbody>
+            </table>
+            <div class="db-advice-block">
+                <label style="min-width:auto;">*把風險降低提高成率的最佳輔助方案或決定是:</label>
+                <textarea id="cf-db-s4-best" rows="2">${_cfEscape(data.section4_best_solution || '')}</textarea>
+            </div>
+
+            <!-- Footer signatures (customer + consultant) -->
+            <div class="db-footer">
+                <div class="db-sigbox">
+                    <span class="db-sig-label">客戶姓名 Customer</span>
+                    <input type="text" id="cf-db-cust-signed-name" placeholder="Customer signed name" value="${_cfEscape(data.customer_signed_name || '')}">
+                    <canvas id="cf-db-sig-cust" data-preload="${data.customer_signature_data_url || ''}"></canvas>
+                    <div class="db-sig-date-row">
+                        <span>日期: ${_cfFmtDate(data.customer_signed_at) || today}</span>
+                        <button type="button" class="db-clear" onclick="app.cfClearSignature('cf-db-sig-cust')"><i class="fas fa-eraser"></i> Clear</button>
+                    </div>
+                </div>
+                <div class="db-sigbox">
+                    <span class="db-sig-label">顧問姓名 Consultant</span>
+                    <select id="cf-db-consultant"><option value="">--</option>${userOpts(data.consultant_id)}</select>
+                    <canvas id="cf-db-sig-cons" data-preload="${data.consultant_signature_data_url || ''}"></canvas>
+                    <div class="db-sig-date-row">
+                        <span>日期: ${_cfFmtDate(data.consultant_signed_at) || today}</span>
+                        <button type="button" class="db-clear" onclick="app.cfClearSignature('cf-db-sig-cons')"><i class="fas fa-eraser"></i> Clear</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="db-copyright">copyright reserved by DESTINY CODE SDN BHD 2024</div>
+        </div>
+    `, [
+        { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+        { label: 'Save Blueprint', type: 'primary', action: '(async () => { await app.saveDestinyBlueprint(); })()' }
+    ], 'fullscreen');
+
+    // Bind signature pads + live year-label updates
+    setTimeout(() => {
+        _bindSignaturePad('cf-db-sig-cust');
+        _bindSignaturePad('cf-db-sig-cons');
+        const syEl = document.getElementById('cf-db-start-year');
+        if (syEl) {
+            syEl.addEventListener('input', () => {
+                const sy = parseInt(syEl.value, 10);
+                if (!sy || sy < 2024 || sy > 2099) return;
+                const l1 = document.getElementById('cf-db-y1-label');
+                const l2 = document.getElementById('cf-db-y2-label');
+                const l3 = document.getElementById('cf-db-y3-label');
+                if (l1) l1.textContent = sy;
+                if (l2) l2.textContent = sy + 1;
+                if (l3) l3.textContent = sy + 2;
+            });
+        }
+    }, 60);
+};
+
+const saveDestinyBlueprint = async () => {
+    const prospectId = parseInt(document.getElementById('cf-db-prospect-id')?.value, 10);
+    const dbId = document.getElementById('cf-db-id')?.value || null;
+    if (!prospectId) { UI.toast.error('Missing prospect.'); return; }
+
+    const custSig = _getSignatureDataUrl('cf-db-sig-cust');
+    const consSig = _getSignatureDataUrl('cf-db-sig-cons');
+    const scoreRaw = document.getElementById('cf-db-score')?.value;
+    const startYearRaw = document.getElementById('cf-db-start-year')?.value;
+
+    const payload = {
+        prospect_id: prospectId,
+        form_date: document.getElementById('cf-db-date')?.value || null,
+        customer_name: document.getElementById('cf-db-name')?.value?.trim() || null,
+        contact_number: document.getElementById('cf-db-phone')?.value?.trim() || null,
+        agent_id: parseInt(document.getElementById('cf-db-agent')?.value, 10) || null,
+        group_name: document.getElementById('cf-db-group')?.value?.trim() || null,
+
+        section1_ji: document.getElementById('cf-db-ji')?.value?.trim() || null,
+        section1_xiong: document.getElementById('cf-db-xiong')?.value?.trim() || null,
+        section1_hui: document.getElementById('cf-db-hui')?.value?.trim() || null,
+        section1_lin: document.getElementById('cf-db-lin')?.value?.trim() || null,
+        section1_score: scoreRaw === '' || scoreRaw == null ? null : parseInt(scoreRaw, 10),
+        section1_advice: document.getElementById('cf-db-s1-advice')?.value?.trim() || null,
+
+        section2_personal: document.getElementById('cf-db-s2-personal')?.value?.trim() || null,
+        section2_home: document.getElementById('cf-db-s2-home')?.value?.trim() || null,
+        section2_work: document.getElementById('cf-db-s2-work')?.value?.trim() || null,
+        section2_business: document.getElementById('cf-db-s2-business')?.value?.trim() || null,
+        section2_relationship: document.getElementById('cf-db-s2-relationship')?.value?.trim() || null,
+        section2_children: document.getElementById('cf-db-s2-children')?.value?.trim() || null,
+        section2_advice: document.getElementById('cf-db-s2-advice')?.value?.trim() || null,
+
+        start_year: startYearRaw ? parseInt(startYearRaw, 10) : 2026,
+        year_1_event: document.getElementById('cf-db-y1-event')?.value?.trim() || null,
+        year_1_goal: document.getElementById('cf-db-y1-goal')?.value?.trim() || null,
+        year_2_event: document.getElementById('cf-db-y2-event')?.value?.trim() || null,
+        year_2_goal: document.getElementById('cf-db-y2-goal')?.value?.trim() || null,
+        year_3_event: document.getElementById('cf-db-y3-event')?.value?.trim() || null,
+        year_3_goal: document.getElementById('cf-db-y3-goal')?.value?.trim() || null,
+        section3_conclusion: document.getElementById('cf-db-s3-conclusion')?.value?.trim() || null,
+
+        section4_gain: document.getElementById('cf-db-s4-gain')?.value?.trim() || null,
+        section4_loss: document.getElementById('cf-db-s4-loss')?.value?.trim() || null,
+        section4_maintain: document.getElementById('cf-db-s4-maintain')?.value?.trim() || null,
+        section4_decline: document.getElementById('cf-db-s4-decline')?.value?.trim() || null,
+        section4_best_solution: document.getElementById('cf-db-s4-best')?.value?.trim() || null,
+
+        customer_signed_name: document.getElementById('cf-db-cust-signed-name')?.value?.trim() || null,
+        customer_signature_data_url: custSig,
+        customer_signed_at: custSig ? new Date().toISOString() : null,
+        consultant_id: parseInt(document.getElementById('cf-db-consultant')?.value, 10) || null,
+        consultant_signature_data_url: consSig,
+        consultant_signed_at: consSig ? new Date().toISOString() : null,
+
+        created_by: _currentUser?.id || null
+    };
+
+    try {
+        if (dbId) {
+            await AppDataStore.update('destiny_blueprints', dbId, payload);
+            UI.toast.success('Blueprint updated.');
+        } else {
+            await AppDataStore.create('destiny_blueprints', { ...payload, created_at: new Date().toISOString() });
+            UI.toast.success('Blueprint saved.');
+        }
+        UI.hideModal();
+        const target = document.getElementById('marketing-tab-content');
+        if (target && _currentMarketingTab === 'forms') target.innerHTML = await renderFormsTab();
+    } catch (err) {
+        UI.toast.error('Save failed: ' + (err?.message || err));
+    }
+};
+
+    Object.assign(window.app, {
+        showFudeView,
+        openStoryDetail,
+        openHighlightModal,
+        saveHighlight,
+        deleteHighlight,
+        confirmDeleteHighlight,
+        syncFudiSummary,
+        openRewardModal,
+        saveReward,
+        deleteReward,
+        confirmDeleteReward,
+        showRoadmap,
+        exportRelationshipTree,
+        changeLeaderboardPeriod,
+        uploadProspectDocument,
+        submitRecruitmentApproval,
+        deleteFile,
+        _confirmDeleteFile,
+        showProfile,
+        exportKPIDashboard,
+        _bindSignaturePad,
+        _clearSignaturePad,
+        cfClearSignature,
+        _getSignatureDataUrl,
+        _cfFmtDate,
+        _cfEscape,
+        renderFormsTab,
+        cfSearchProspects,
+        _cfLikertHtml,
+        _cfReadLikert,
+        _cfPaperStyles,
+        openCustomerSurveyModal,
+        saveCustomerSurvey,
+        _cfBaguaHtml,
+        _cfReadBagua,
+        openCpsAnalysisModal,
+        saveCpsAnalysis,
+        openApuAppraisalModal,
+        saveApuAppraisal,
+        openDestinyBlueprintInTab,
+        openDestinyBlueprintModal,
+        saveDestinyBlueprint,
+    });
+})();
