@@ -42,6 +42,8 @@ const JS_TARGETS = [
   'chunks/script-reporting.js',
   'chunks/script-cases.js',
   'chunks/script-referrals.js',
+  // Phase: Ranking + Workflow + Noticeboard (extracted 2026-06-05)
+  'chunks/script-performance.js',
 ];
 
 const CSS_TARGETS = [
