@@ -5575,6 +5575,12 @@ function _wireLoginBtn() {
         'contracts':            { src: 'chunks/script-forms.min.js',       minLevel: null, exactLevels: null },
         'custom_fields':        { src: 'chunks/script-forms.min.js',       minLevel: null, exactLevels: null },
         'booking_settings':     { src: 'chunks/script-forms.min.js',       minLevel: null, exactLevels: null },
+        // Phase 4K-N: new operation chunks
+        'pipeline':             { src: 'chunks/script-pipeline.min.js',    minLevel: null, exactLevels: null },
+        'import':               { src: 'chunks/script-import.min.js',      minLevel: null, exactLevels: null },
+        'protection':           { src: 'chunks/script-import.min.js',      minLevel: null, exactLevels: null },
+        'fude':                 { src: 'chunks/script-fude.min.js',        minLevel: null, exactLevels: null },
+        'milestones':           { src: 'chunks/script-features2.min.js',   minLevel: null, exactLevels: null },
         // Existing role-gated chunks
         'stock_take':           { src: 'chunks/script-stock-take.min.js',  minLevel: null, exactLevels: [1, 15] },
         'egg_purchasing':       { src: 'chunks/script-egg.min.js',         minLevel: null, exactLevels: [1] },
@@ -5949,9 +5955,6 @@ function _wireLoginBtn() {
         } else if (viewId === 'ai_insights' || viewId === 'ai_prediction') {
             _currentView = 'ai_insights';
             await (window.app.showAIInsightsDashboard || (() => {}))(viewport);
-        } else if (viewId === 'integrations') {
-            _currentView = 'integrations';
-            await (window.app.showIntegrationHub || (() => {}))(viewport);
         } else if (viewId === 'egg_purchasing') {
             // Super Admin only gate — bounce non-admins to calendar
             if (!isSystemAdmin(_currentUser)) {
@@ -6688,20 +6691,20 @@ function _wireLoginBtn() {
                 if (typeof window.app.showReferralsView === 'function') await window.app.showReferralsView(viewport);
                 break;
             case 'cases':
-                if (typeof showCasesView === 'function') await (window.app.showCasesView               || (() => {}))(viewport);
+                if (window.app.showCasesView) await window.app.showCasesView(viewport);
                 break;
             case 'promotions':
                 await showMonthlyPromotionView(viewport);
                 break;
             case 'marketing_automation':
-                if (typeof showMarketingAutomationView === 'function') await (window.app.showMarketingAutomationView || (() => {}))(viewport);
+                if (window.app.showMarketingAutomationView) await window.app.showMarketingAutomationView(viewport);
                 break;
             case 'ranking':
                 if (typeof window.app.showRankingPerformanceView === 'function') await window.app.showRankingPerformanceView(viewport);
                 break;
             case 'workflows':
                 _currentMarketingTab = 'automation';
-                if (typeof showMarketingAutomationView === 'function') await (window.app.showMarketingAutomationView || (() => {}))(viewport);
+                if (window.app.showMarketingAutomationView) await window.app.showMarketingAutomationView(viewport);
                 break;
             case 'milestones':
                 if (window.app.showMilestonesView) await window.app.showMilestonesView(viewport);
@@ -6710,7 +6713,7 @@ function _wireLoginBtn() {
                 if (window.app.showFudeView) await window.app.showFudeView(viewport);
                 break;
             case 'egg_purchasing':
-                if (typeof showEggPurchasingView === 'function') await (window.app.showEggPurchasingView || (() => {}))(viewport);
+                if (window.app.showEggPurchasingView) await window.app.showEggPurchasingView(viewport);
                 break;
             case 'purchases_history':
                 await (window.app.showPurchasesHistoryView || (() => {}))(viewport);
