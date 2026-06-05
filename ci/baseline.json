@@ -1,8 +1,8 @@
 {
-  "generated": "2026-06-05T11:53:27.708Z",
+  "generated": "2026-06-05T11:56:38.381Z",
   "script": {
-    "lines": 43397,
-    "hash": "bdb897de",
+    "lines": 43460,
+    "hash": "cd47c883",
     "definedCount": 1358,
     "stateVars": [
       "_currentView",

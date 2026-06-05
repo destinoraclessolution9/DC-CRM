@@ -22801,22 +22801,85 @@ function _wireLoginBtn() {
     let _customerPage = 0;
     const _customerPageSize = 50;
 
-    // Live app-state for script-features.js
+    // Live app-state bridge for lazy-loaded chunks.
+    // Every getter/setter delegates to the private IIFE `let` — the local
+    // variable remains authoritative; chunks read/write via this object.
+    //
+    // Key conventions (short to minimise minified output):
+    //   cu    → _currentUser        cv    → _currentView
+    //   pp    → _prospectPage       cp    → _customerPage
+    //   cmt   → _currentMarketingTab  cmlt → _currentMarketingListTab
+    //   ial   → isAdminOrL2 check
+    //   se    → _selectedEntity     sat   → _selectedAttendees
+    //   sca   → _selectedCoAgents   scon  → _selectedConsultants
+    //   sr    → _selectedReferrer   cd    → _currentDate
+    //   flt   → _filters            cdv   → _currentDetailView
+    //   hac   → _hotActivityCache   vc    → _venuesCache
+    //   pc    → _productsCache      rct   → _renderCalendarToken
+    //   pii   → _pendingIntakeId    pir   → _pendingIntakeRow
+    //   cppf  → _cpsPendingPhotoFiles
     window._appState = {
-        get cu() { return _currentUser; },
+        // ── Auth / user ──────────────────────────────────────────────────
+        get cu()  { return _currentUser; },
         get ial() { return !!(_currentUser && (isSystemAdmin(_currentUser) || isMarketingManager(_currentUser))); },
-        get pp() { return _prospectPage; },
-        set pp(v) { _prospectPage = v; },
-        get cp() { return _customerPage; },
-        set cp(v) { _customerPage = v; },
-        get cv() { return _currentView; },
+
+        // ── Navigation ───────────────────────────────────────────────────
+        get cv()  { return _currentView; },
         set cv(v) { _currentView = v; },
-        // Marketing tab state — chunked marketing module mutates these through
-        // the getter/setter so script.js's local `let` stays authoritative.
-        get cmt()  { return _currentMarketingTab; },
-        set cmt(v) { _currentMarketingTab = v; },
-        get cmlt() { return _currentMarketingListTab; },
-        set cmlt(v){ _currentMarketingListTab = v; },
+
+        // ── Pagination ───────────────────────────────────────────────────
+        get pp()  { return _prospectPage; },
+        set pp(v) { _prospectPage = v; },
+        get cp()  { return _customerPage; },
+        set cp(v) { _customerPage = v; },
+
+        // ── Marketing tab state ──────────────────────────────────────────
+        get cmt()   { return _currentMarketingTab; },
+        set cmt(v)  { _currentMarketingTab = v; },
+        get cmlt()  { return _currentMarketingListTab; },
+        set cmlt(v) { _currentMarketingListTab = v; },
+
+        // ── Selection state (activity modal, prospect ctx) ───────────────
+        get se()    { return _selectedEntity; },
+        set se(v)   { _selectedEntity = v; },
+        get sat()   { return _selectedAttendees; },
+        set sat(v)  { _selectedAttendees = v; },
+        get sca()   { return _selectedCoAgents; },
+        set sca(v)  { _selectedCoAgents = v; },
+        get scon()  { return _selectedConsultants; },
+        set scon(v) { _selectedConsultants = v; },
+        get sr()    { return _selectedReferrer; },
+        set sr(v)   { _selectedReferrer = v; },
+
+        // ── Date / filter state ──────────────────────────────────────────
+        get cd()    { return _currentDate; },
+        set cd(v)   { _currentDate = v; },
+        get flt()   { return _filters; },
+        set flt(v)  { _filters = v; },
+
+        // ── View-detail state ────────────────────────────────────────────
+        get cdv()   { return _currentDetailView; },
+        set cdv(v)  { _currentDetailView = v; },
+
+        // ── Lookup caches (shared with calendar & activity modal) ────────
+        get hac()   { return _hotActivityCache; },        // Map — mutated by ref
+        get vc()    { return _venuesCache; },
+        set vc(v)   { _venuesCache = v; },
+        get pc()    { return _productsCache; },
+        set pc(v)   { _productsCache = v; },
+
+        // ── Calendar render token (monotonic counter) ────────────────────
+        get rct()   { return _renderCalendarToken; },
+        set rct(v)  { _renderCalendarToken = v; },
+
+        // ── CPS intake pending state ─────────────────────────────────────
+        get pii()   { return _pendingIntakeId; },
+        set pii(v)  { _pendingIntakeId = v; },
+        get pir()   { return _pendingIntakeRow; },
+        set pir(v)  { _pendingIntakeRow = v; },
+
+        // ── CPS photo upload pending ─────────────────────────────────────
+        get cppf()  { return _cpsPendingPhotoFiles; },
     };
 
     const renderCustomersTable = async () => {
