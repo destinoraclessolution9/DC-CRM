@@ -6115,10 +6115,14 @@ In a production system, this would show the actual file contents.
         }
 
         if (!_isOnline) {
-            indicator.innerHTML = `<i class="fas fa-wifi" style="text-decoration:line-through;"></i> Offline(${_offlineQueue.length} pending)`;
+            const n = _offlineQueue.length;
+            indicator.innerHTML = `<i class="fas fa-wifi-slash" aria-hidden="true"></i> Offline${n ? ` — ${n} change${n === 1 ? '' : 's'} queued` : ''}`;
+            indicator.setAttribute('aria-label', `You are offline${n ? `, ${n} change${n === 1 ? '' : 's'} will sync when reconnected` : ''}`);
             indicator.style.display = 'flex';
         } else if (_offlineQueue.length > 0) {
-            indicator.innerHTML = `<i class="fas fa-sync-alt fa-spin"></i> Syncing(${_offlineQueue.length} pending)`;
+            const n = _offlineQueue.length;
+            indicator.innerHTML = `<i class="fas fa-sync-alt fa-spin" aria-hidden="true"></i> Syncing ${n} change${n === 1 ? '' : 's'}…`;
+            indicator.setAttribute('aria-label', `Syncing ${n} offline change${n === 1 ? '' : 's'}`);
             indicator.style.display = 'flex';
         } else {
             indicator.style.display = 'none';
@@ -9554,6 +9558,67 @@ function _wireLoginBtn() {
         _loginForm.addEventListener('submit', (e) => {
             e.preventDefault();
             if (!btn.disabled) btn.onclick();
+        });
+    }
+
+    // #20 Login validation — real-time blur feedback so the user sees inline
+    // errors the moment they leave a field, before they press the login button.
+    const _blurEmailEl   = document.getElementById('loginEmail');
+    const _blurPwEl      = document.getElementById('loginPassword');
+    const _blurEmailErr  = document.getElementById('loginEmailErr');
+    const _blurPwErr     = document.getElementById('loginPasswordErr');
+    const _emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    if (_blurEmailEl && _blurEmailErr && !_blurEmailEl._blurWired) {
+        _blurEmailEl._blurWired = true;
+        _blurEmailEl.addEventListener('blur', () => {
+            const v = _blurEmailEl.value.trim();
+            if (!v) {
+                _blurEmailErr.textContent = 'Email is required.';
+                _blurEmailErr.style.display = 'block';
+                _blurEmailEl.setAttribute('aria-invalid', 'true');
+            } else if (!_emailRe.test(v)) {
+                _blurEmailErr.textContent = 'Enter a valid email address.';
+                _blurEmailErr.style.display = 'block';
+                _blurEmailEl.setAttribute('aria-invalid', 'true');
+            } else {
+                _blurEmailErr.textContent = '';
+                _blurEmailErr.style.display = 'none';
+                _blurEmailEl.removeAttribute('aria-invalid');
+            }
+        });
+        _blurEmailEl.addEventListener('input', () => {
+            if (_blurEmailEl.getAttribute('aria-invalid') && _emailRe.test(_blurEmailEl.value.trim())) {
+                _blurEmailErr.textContent = '';
+                _blurEmailErr.style.display = 'none';
+                _blurEmailEl.removeAttribute('aria-invalid');
+            }
+        });
+    }
+
+    if (_blurPwEl && _blurPwErr && !_blurPwEl._blurWired) {
+        _blurPwEl._blurWired = true;
+        _blurPwEl.addEventListener('blur', () => {
+            if (!_blurPwEl.value) {
+                _blurPwErr.textContent = 'Password is required.';
+                _blurPwErr.style.display = 'block';
+                _blurPwEl.setAttribute('aria-invalid', 'true');
+            } else if (_blurPwEl.value.length < 6) {
+                _blurPwErr.textContent = 'Password must be at least 6 characters.';
+                _blurPwErr.style.display = 'block';
+                _blurPwEl.setAttribute('aria-invalid', 'true');
+            } else {
+                _blurPwErr.textContent = '';
+                _blurPwErr.style.display = 'none';
+                _blurPwEl.removeAttribute('aria-invalid');
+            }
+        });
+        _blurPwEl.addEventListener('input', () => {
+            if (_blurPwEl.getAttribute('aria-invalid') && _blurPwEl.value.length >= 6) {
+                _blurPwErr.textContent = '';
+                _blurPwErr.style.display = 'none';
+                _blurPwEl.removeAttribute('aria-invalid');
+            }
         });
     }
 }

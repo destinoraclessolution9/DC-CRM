@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#be185d">
+  <title>Offline — 悅客匯 CRM</title>
+  <link rel="icon" href="icons/icon-192x192.png">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f9fafb;
+      color: #111827;
+      min-height: 100dvh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 20px;
+      box-shadow: 0 4px 24px rgba(0,0,0,.08);
+      padding: 48px 40px;
+      max-width: 420px;
+      width: 100%;
+      text-align: center;
+    }
+
+    .icon-wrap {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      background: #fce7f3;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 24px;
+    }
+
+    .icon-wrap svg {
+      width: 38px;
+      height: 38px;
+      stroke: #be185d;
+      fill: none;
+      stroke-width: 1.8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #111827;
+      margin-bottom: 12px;
+    }
+
+    p {
+      font-size: 0.95rem;
+      color: #6b7280;
+      line-height: 1.6;
+      margin-bottom: 32px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: #be185d;
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      padding: 12px 28px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      transition: background 0.15s;
+    }
+    .btn:hover { background: #9d174d; }
+    .btn:active { background: #831843; }
+
+    .brand {
+      margin-top: 40px;
+      font-size: 0.8rem;
+      color: #d1d5db;
+      letter-spacing: 0.04em;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      body { background: #111827; color: #f9fafb; }
+      .card { background: #1f2937; box-shadow: 0 4px 24px rgba(0,0,0,.4); }
+      h1 { color: #f9fafb; }
+      p { color: #9ca3af; }
+      .icon-wrap { background: #3b0764; }
+      .brand { color: #4b5563; }
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon-wrap" aria-hidden="true">
+      <!-- wifi-off icon -->
+      <svg viewBox="0 0 24 24">
+        <line x1="1" y1="1" x2="23" y2="23"/>
+        <path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/>
+        <path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/>
+        <path d="M10.71 5.05A16 16 0 0 1 22.56 9"/>
+        <path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/>
+        <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/>
+        <circle cx="12" cy="20" r="1" fill="#be185d" stroke="none"/>
+      </svg>
+    </div>
+
+    <h1>You're Offline</h1>
+    <p>
+      No internet connection detected. Check your WiFi or mobile data,
+      then try again. Any changes you made while offline will sync
+      automatically once you reconnect.
+    </p>
+
+    <button class="btn" onclick="window.location.reload()">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+      </svg>
+      Try Again
+    </button>
+
+    <p class="brand">悅客匯 CRM</p>
+  </div>
+
+  <script>
+    // Auto-reload when connection is restored
+    window.addEventListener('online', () => window.location.reload());
+  </script>
+</body>
+</html>

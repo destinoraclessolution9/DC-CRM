@@ -1,60 +1,67 @@
-// CRM Service Worker — Phase D performance: stale-while-revalidate for static assets.
-// Cache version is keyed by date so a deploy invalidates old caches.
-const CACHE_VERSION = 'crm-v2026-06-05-1';
-const STATIC_CACHE = `${CACHE_VERSION}-static`;
+// CRM Service Worker — stale-while-revalidate for static assets.
+//
+// #15 SW cleanup: PRECACHE_URLS now lists only non-hashed, stable resources.
+//   Hashed JS/CSS bundles (script.abc123.min.js etc.) are cached at runtime by
+//   the SWR strategy on first request — no need to enumerate them here.
+//   This keeps the SW maintainable without a build step to inject hashes.
+//
+// #27 PWA offline page: /offline.html added to precache; navigation requests
+//   that fail network fall back to it instead of the browser's default error page.
+//
+// Cache version bumped on each deploy to invalidate old caches.
+const CACHE_VERSION = 'crm-v2026-06-05-2';
+const STATIC_CACHE  = `${CACHE_VERSION}-static`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 
-// Same-origin static assets we want pre-warmed. CDN libs (fontawesome, supabase-js)
-// are still cached at runtime via the SWR strategy below.
-// Precache the .min.* variants — those are what index.html actually loads; the
-// non-minified sources are dev-only and would waste ~50% bandwidth on first visit.
+// Only precache assets that are truly stable (no content hash in the filename).
+// Hashed bundles (script.*.min.js, data.*.min.js, styles-*.*.min.css, chunks/*)
+// are served with long Cache-Control max-age by Vercel and get SWR-cached on
+// first request. Adding them here would just race the build hash update.
 const PRECACHE_URLS = [
     '/',
     '/index.html',
-    '/styles-fixed.min.css',
-    '/styles-mobile.min.css',
-    '/styles-mobile-v2.min.css',
-    '/styles-theme.min.css',
-    '/data.min.js',
-    '/auth.min.js',
-    '/ui.min.js',
-    '/script.min.js',
-    '/supabase-init.min.js',
-    '/app-init.min.js',
+    '/offline.html',       // #27 — navigation fallback when offline
     '/manifest.json',
-    '/fonts/local-fonts.css'
+    '/fonts/local-fonts.css',
 ];
 
 self.addEventListener('install', (event) => {
     event.waitUntil(
-        caches.open(STATIC_CACHE).then((cache) =>
-            // Don't fail install if a single optional asset is missing.
-            Promise.all(PRECACHE_URLS.map((u) => cache.add(u).catch(() => null)))
-        ).then(() => self.skipWaiting())
+        caches.open(STATIC_CACHE)
+            .then((cache) =>
+                // Soft install — don't fail if one optional asset is missing.
+                Promise.all(PRECACHE_URLS.map((u) => cache.add(u).catch(() => null)))
+            )
+            .then(() => self.skipWaiting())
     );
 });
 
 self.addEventListener('activate', (event) => {
     event.waitUntil(
-        caches.keys().then((keys) =>
-            Promise.all(
-                keys.filter((k) => !k.startsWith(CACHE_VERSION)).map((k) => caches.delete(k))
+        caches.keys()
+            .then((keys) =>
+                Promise.all(
+                    keys
+                        .filter((k) => !k.startsWith(CACHE_VERSION))
+                        .map((k) => caches.delete(k))
+                )
             )
-        ).then(() => self.clients.claim())
+            .then(() => self.clients.claim())
     );
 });
 
-// Strategy:
-//   - Supabase / API / auth requests → network only (never cache user data).
-//   - Same-origin JS/CSS/HTML       → stale-while-revalidate (instant load, update in background).
-//   - Fonts + 3rd-party static CDN  → cache-first.
+// Fetch strategy:
+//   Supabase / API / auth / realtime → network only (never cache user data)
+//   Same-origin navigation (HTML)    → network-first, fall back to /offline.html
+//   Same-origin JS / CSS / assets    → stale-while-revalidate
+//   3rd-party CDN (fonts, FA, etc.)  → cache-first
 self.addEventListener('fetch', (event) => {
     const req = event.request;
     if (req.method !== 'GET') return;
 
     const url = new URL(req.url);
 
-    // Never cache API / auth / realtime — always go to network.
+    // Never cache Supabase API traffic.
     if (
         url.hostname.includes('supabase.co') ||
         url.hostname.includes('supabase.io') ||
@@ -63,10 +70,23 @@ self.addEventListener('fetch', (event) => {
         url.pathname.startsWith('/realtime/') ||
         url.pathname.startsWith('/functions/')
     ) {
-        return; // default network handling
+        return;
     }
 
-    // Same-origin static assets — stale-while-revalidate.
+    // Same-origin navigation (page loads): network-first → offline fallback.
+    if (url.origin === self.location.origin && req.mode === 'navigate') {
+        event.respondWith(
+            fetch(req)
+                .catch(() =>
+                    caches.match('/offline.html') ||
+                    caches.match('/index.html') ||
+                    Response.error()
+                )
+        );
+        return;
+    }
+
+    // Same-origin static assets (JS, CSS, images, chunks) — stale-while-revalidate.
     if (url.origin === self.location.origin) {
         event.respondWith(staleWhileRevalidate(req));
         return;
@@ -84,7 +104,7 @@ self.addEventListener('fetch', (event) => {
 });
 
 async function staleWhileRevalidate(req) {
-    const cache = await caches.open(RUNTIME_CACHE);
+    const cache  = await caches.open(RUNTIME_CACHE);
     const cached = await cache.match(req);
     const fetchPromise = fetch(req)
         .then((res) => {
@@ -98,7 +118,7 @@ async function staleWhileRevalidate(req) {
 }
 
 async function cacheFirst(req) {
-    const cache = await caches.open(RUNTIME_CACHE);
+    const cache  = await caches.open(RUNTIME_CACHE);
     const cached = await cache.match(req);
     if (cached) return cached;
     try {
@@ -107,7 +127,7 @@ async function cacheFirst(req) {
             cache.put(req, res.clone()).catch(() => {});
         }
         return res;
-    } catch (e) {
+    } catch {
         return cached || Response.error();
     }
 }
