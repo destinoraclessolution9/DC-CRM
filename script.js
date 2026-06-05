@@ -16921,9 +16921,8 @@ function _wireLoginBtn() {
     };
 
     const editActivityTiming = async (activityId) => {
-        const all = await AppDataStore.getAll('activities');
-        const activity = (await AppDataStore.getById('activities', activityId)) || all.find(a => a.id == activityId);
-        if (!activity) return;
+        const activity = await _lookupActivityRobust(activityId);
+        if (!activity) { UI.toast.error('Activity not found'); return; }
         const venues = await AppDataStore.getAll('venues').catch(() => []);
         const venueRequiredTypes = ['CPS','FTF','EVENT','GR','XG'];
         const venueRequired = venueRequiredTypes.includes(activity.activity_type);
@@ -17119,7 +17118,10 @@ function _wireLoginBtn() {
     };
 
     const openMeetingOutcomeModal = async (activityId) => {
-        const activity = await AppDataStore.getById('activities', activityId) || {};
+        // Use the robust lookup so the Closing modal opens with the right data
+        // even when the row is only reachable via the calendar hot cache / pin
+        // board (consultant scope under RLS).
+        const activity = (await _lookupActivityRobust(activityId)) || {};
         const products = (await AppDataStore.getAll('products')).filter(p => p.is_active !== false);
 
         // When linked to a prospect, prefill from closing_record → activity → prospect.
@@ -17414,7 +17416,7 @@ function _wireLoginBtn() {
     };
 
     const openPostMeetupNotesModal = async (activityId, prospectId) => {
-        const activity = await AppDataStore.getById('activities', activityId) || {};
+        const activity = (await _lookupActivityRobust(activityId)) || {};
 
         // Fetch product/event data for the multi-select checkbox groups.
         const [products, bujishu, formula, events] = await Promise.all([
@@ -17512,7 +17514,7 @@ function _wireLoginBtn() {
     const openAttendeePostEventModal = async (attendeeId, activityId, prospectId) => {
         const attendee = await AppDataStore.getById('event_attendees', attendeeId);
         if (!attendee) { UI.toast.error('Attendee not found'); return; }
-        const activity = await AppDataStore.getById('activities', activityId) || {};
+        const activity = (await _lookupActivityRobust(activityId)) || {};
 
         const [products, bujishu, formula, events] = await Promise.all([
             AppDataStore.getAll('products').then(r => r.filter(p => p.is_active !== false)),
@@ -17647,8 +17649,8 @@ function _wireLoginBtn() {
     };
 
     const editActivity = async (activityId) => {
-        const activity = await AppDataStore.getById('activities', activityId);
-        if (!activity) return;
+        const activity = await _lookupActivityRobust(activityId);
+        if (!activity) { UI.toast.error('Activity not found'); return; }
         UI.hideModal(); // close any open modal
         await openActivityModal(null, null, activity);
     };
@@ -17674,8 +17676,8 @@ function _wireLoginBtn() {
     };
 
     const markActivityComplete = async (activityId) => {
-        const activity = await AppDataStore.getById('activities', activityId);
-        if (!activity) return;
+        const activity = await _lookupActivityRobust(activityId);
+        if (!activity) { UI.toast.error('Activity not found'); return; }
 
         activity.status = 'completed';
         activity.completed_at = new Date().toISOString();
@@ -18390,8 +18392,8 @@ function _wireLoginBtn() {
 };
 
     const updateActivity = async (activityId) => {
-    const activity = await AppDataStore.getById('activities', activityId);
-    if (!activity) return;
+    const activity = await _lookupActivityRobust(activityId);
+    if (!activity) { UI.toast.error('Activity not found'); return; }
 
     const venueVal = document.getElementById('activity-venue')?.value;
     const locationAddressEl = document.getElementById('location-address');
@@ -27308,7 +27310,10 @@ NOTIFY pgrst, 'reload schema';`;
     };
 
     const attachActivityPhoto = async (activityId) => {
-        const activity = await AppDataStore.getById('activities', activityId);
+        // Use the robust lookup chain so consultants/co-agents whose RLS scope
+        // doesn't expose the row directly can still attach photos — the row is
+        // already in _hotActivityCache / pin board from the calendar render.
+        const activity = await _lookupActivityRobust(activityId);
         if (!activity) { UI.toast.error('Meet up record not found'); return; }
 
         // Verify the Supabase schema is ready — otherwise photos would only live in localStorage
@@ -27344,7 +27349,7 @@ NOTIFY pgrst, 'reload schema';`;
     // Photo VIEWER for a meet-up activity — opens a gallery of existing photos.
     // Falls back to the upload flow when there are no photos yet.
     const viewActivityPhotos = async (activityId) => {
-        const activity = await AppDataStore.getById('activities', activityId);
+        const activity = await _lookupActivityRobust(activityId);
         if (!activity) { UI.toast.error('Meet up record not found'); return; }
         const photos = Array.isArray(activity.photo_urls) ? activity.photo_urls : [];
 
@@ -27397,7 +27402,7 @@ NOTIFY pgrst, 'reload schema';`;
         const files = input?.files;
         if (!files || files.length === 0) { UI.toast.error('Please select at least one photo'); return; }
 
-        const activity = await AppDataStore.getById('activities', activityId);
+        const activity = await _lookupActivityRobust(activityId);
         if (!activity) { UI.toast.error('Meet up record not found'); return; }
         const existing = Array.isArray(activity.photo_urls) ? activity.photo_urls : [];
         const newUrls = [];
@@ -27473,7 +27478,9 @@ NOTIFY pgrst, 'reload schema';`;
         // instead of just the last-clicked one surviving the overwrite race.
         const prev = _photoRemoveLocks.get(activityId) || Promise.resolve();
         const job = prev.catch(() => {}).then(async () => {
-            const activity = await AppDataStore.getById('activities', activityId);
+            // Robust lookup so the delete actually fires for activities the user
+            // sees via the hot RPC but can't SELECT directly under RLS.
+            const activity = await _lookupActivityRobust(activityId);
             if (!activity) return { updated: [], skipped: true };
             const existing = Array.isArray(activity.photo_urls) ? activity.photo_urls : [];
 
