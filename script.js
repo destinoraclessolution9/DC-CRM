@@ -11135,13 +11135,16 @@ function _wireLoginBtn() {
             }
         }
 
-        _hideCpsScanOverlay();
+        // Only dismiss the overlay on success — if the parser found nothing,
+        // keep the textarea open so the agent can correct their paste and
+        // retry without having to copy and paste the message a second time.
         if (filled === 0) {
-            UI.toast.error('No recognizable fields found in the pasted text.');
-        } else {
-            const extra = derived ? ` (+${derived} derived from IC)` : '';
-            UI.toast.success(`Auto-filled ${filled} field${filled === 1 ? '' : 's'}${extra}.`);
+            UI.toast.error('No recognizable fields found — please check the pasted text and try again.');
+            return;
         }
+        _hideCpsScanOverlay();
+        const extra = derived ? ` (+${derived} derived from IC)` : '';
+        UI.toast.success(`Auto-filled ${filled} field${filled === 1 ? '' : 's'}${extra}.`);
     };
 
     const scanCpsForm = (prefix = 'cps') => {
