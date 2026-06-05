@@ -40899,7 +40899,6 @@ const initImportDemoData = async () => {
         exportRelationshipTree,
         changeLeaderboardPeriod,
         uploadProspectDocument,
-        submitRecruitmentApproval,
         logout,
         switchAccount,
         _wireLoginBtn,
@@ -41265,7 +41264,6 @@ const initImportDemoData = async () => {
         openEditSolutionModal,
         saveSolutionEdit,
         deleteSolution,
-        dispatchPendingSolutionReminders,
         renderPendingSolutionsWidget,
 
         // Phase 6 Pipeline Functions
