@@ -46,6 +46,8 @@ const JS_TARGETS = [
   'chunks/script-performance.js',
   // Phase 4A: WhatsApp Business Integration (extracted 2026-06-05)
   'chunks/script-whatsapp.js',
+  // Phase 4B: AI Analytics (extracted 2026-06-05)
+  'chunks/script-ai.js',
 ];
 
 const CSS_TARGETS = [
