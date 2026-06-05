@@ -1,0 +1,21 @@
+# Exclude development dependencies — not served by the static site
+node_modules
+
+# Exclude Python utility scripts (contacts, audit tools, etc.)
+*.py
+
+# Exclude data/admin files that should never be publicly served
+*.xlsx
+apply_log.txt
+contacts_*.csv
+three_styles_sample.csv
+*_queue.json
+*_queue_*.json
+*_Results.xlsx
+*_Phones.xlsx
+missing_*.xlsx
+"diamond and jeweler.txt"
+
+# Exclude test infrastructure
+test-results
+playwright-report
