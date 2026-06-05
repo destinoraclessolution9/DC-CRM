@@ -60,6 +60,8 @@ const JS_TARGETS = [
   'chunks/script-activities.js',
   // Phase 4I: Full Calendar + Follow-up Automation Engine (extracted 2026-06-05)
   'chunks/script-calendar.js',
+  // Phase 4J: Prospect & Customer Management (extracted 2026-06-05)
+  'chunks/script-prospects.js',
 ];
 
 const CSS_TARGETS = [
