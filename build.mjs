@@ -70,6 +70,8 @@ const JS_TARGETS = [
   'chunks/script-features2.js',
   // Phase 4N: 福德 View + Reward CRUD (extracted 2026-06-05)
   'chunks/script-fude.js',
+  // Phase 5A: Notifications + Health + Scheduler + CPS (extracted 2026-06-05)
+  'chunks/script-cps.js',
 ];
 
 const CSS_TARGETS = [
