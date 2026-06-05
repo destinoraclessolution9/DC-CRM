@@ -56,6 +56,8 @@ const JS_TARGETS = [
   'chunks/script-gcal.js',
   // Phase 4F-G: Lead Forms, Surveys, Contracts, Custom Fields, Portal (extracted 2026-06-05)
   'chunks/script-forms.js',
+  // Phase 4H: Activity Modal + Appt + Push Notifications + Past Record (extracted 2026-06-05)
+  'chunks/script-activities.js',
 ];
 
 const CSS_TARGETS = [
