@@ -67,12 +67,15 @@ if (!fs.existsSync(BASELINE_PATH)) {
     pass(`script.js lines: ${baseline.script.lines} → ${current.script.lines} (${baseline.script.lines - current.script.lines} removed)`);
   }
 
-  // Return keys must not shrink (we can add but not silently remove exports)
+  // Return keys: a key dropped from the static return object is acceptable
+  // IF it is now provided by a chunk's Object.assign (lazy-loaded API).
   const baseRet = new Set(baseline.script.returnKeys);
   const currRet = new Set(current.script.returnKeys);
-  const dropped = [...baseRet].filter(k => !currRet.has(k));
+  // Build set of all functions now exported by chunks
+  const chunkExports = new Set(current.chunks.flatMap(c => c.exports));
+  const dropped = [...baseRet].filter(k => !currRet.has(k) && !chunkExports.has(k));
   if (dropped.length) {
-    fail(`Return keys DROPPED (app.* APIs removed!): ${dropped.join(', ')}`);
+    fail(`Return keys DROPPED and not in any chunk: ${dropped.join(', ')}`);
   } else {
     pass(`Return keys: ${baseline.script.returnKeys.length} → ${current.script.returnKeys.length} (none dropped)`);
   }

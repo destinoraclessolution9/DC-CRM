@@ -44,6 +44,8 @@ const JS_TARGETS = [
   'chunks/script-referrals.js',
   // Phase: Ranking + Workflow + Noticeboard (extracted 2026-06-05)
   'chunks/script-performance.js',
+  // Phase 4A: WhatsApp Business Integration (extracted 2026-06-05)
+  'chunks/script-whatsapp.js',
 ];
 
 const CSS_TARGETS = [
