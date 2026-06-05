@@ -1,9 +1,9 @@
 {
-  "generated": "2026-06-05T16:54:50.333Z",
+  "generated": "2026-06-05T22:05:22.337Z",
   "script": {
-    "lines": 4153,
-    "hash": "567bb895",
-    "definedCount": 221,
+    "lines": 4179,
+    "hash": "3647606f",
+    "definedCount": 223,
     "stateVars": [
       "_currentView",
       "_currentUser",
@@ -1941,7 +1941,7 @@
     "chunks/script-search.min.js",
     "styles-fixed.min.css",
     "styles-mobile.min.css",
-    "styles-mobile-v2.min.css",
+    "styles-login-v2.min.css",
     "styles-theme.min.css"
   ]
 }

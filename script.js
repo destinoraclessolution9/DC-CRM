@@ -1212,7 +1212,8 @@ const appLogic = (() => {
         updateOfflineIndicator();
 
         let success = 0;
-        let fail = 0;
+        let retried = 0;   // transient (network) — re-queued, will retry
+        let dropped = 0;   // permanent (API/permission) — not re-queued
         for (const item of queue) {
             try {
                 if (item.action.startsWith('create_')) {
@@ -1222,15 +1223,25 @@ const appLogic = (() => {
                 }
                 success++;
             } catch (e) {
-                fail++;
-                _offlineQueue.push(item);
+                const msg = e?.message || '';
+                // Distinguish transient (network down) from permanent (RLS deny, FK, etc.)
+                const isNetwork = /Failed to fetch|NetworkError|OFFLINE|network|timeout/i.test(msg);
+                if (isNetwork) {
+                    retried++;
+                    _offlineQueue.push(item); // will retry on next reconnect
+                } else {
+                    dropped++;
+                    console.error('[offline-queue] Dropped item (permanent error):', e, item);
+                }
             }
         }
         localStorage.setItem('offline_queue', JSON.stringify(_offlineQueue));
         updateOfflineIndicator();
 
-        if (fail === 0) UI.toast.success(`Synced ${success} offline actions`);
-        else UI.toast.warning(`Synced ${success}, failed ${fail} `);
+        if (dropped > 0) UI.toast.error(`${dropped} offline change${dropped === 1 ? '' : 's'} couldn't be saved (permission or server error) and ${dropped === 1 ? 'was' : 'were'} removed from the queue.`);
+        if (retried > 0) UI.toast.warning(`${retried} change${retried === 1 ? '' : 's'} still offline — will retry when connection improves.`);
+        if (success > 0 && retried === 0 && dropped === 0) UI.toast.success(`Synced ${success} offline action${success === 1 ? '' : 's'} successfully.`);
+        else if (success > 0) UI.toast.info(`Synced ${success} of ${success + retried + dropped} offline action${success === 1 ? '' : 's'}.`);
     };
 
     const offlineCreate = async (tableName, data) => {
@@ -1616,6 +1627,11 @@ function _wireLoginBtn() {
         let hasError = false;
         if (!email) {
             if (emailErrEl) { emailErrEl.textContent = 'Email is required.'; emailErrEl.style.display = 'block'; }
+            emailEl?.setAttribute('aria-invalid', 'true');
+            emailEl?.focus();
+            hasError = true;
+        } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
+            if (emailErrEl) { emailErrEl.textContent = 'Please enter a valid email address.'; emailErrEl.style.display = 'block'; }
             emailEl?.setAttribute('aria-invalid', 'true');
             emailEl?.focus();
             hasError = true;
@@ -4109,8 +4125,18 @@ const scheduleRetentionJobs = async () => {
 };
 
 
+// Toggle login-page password visibility (called from index.html onclick="app.toggleLoginPassword(this)")
+function toggleLoginPassword(btn) {
+    const inp = document.getElementById('loginPassword');
+    if (!inp) return;
+    inp.type = inp.type === 'password' ? 'text' : 'password';
+    const icon = btn.querySelector('i');
+    if (icon) icon.className = 'fas ' + (inp.type === 'text' ? 'fa-eye-slash' : 'fa-eye');
+}
+
 // Export startup-critical security functions (dashboards moved to script-admin.js chunk)
 Object.assign(window.app, {
+    toggleLoginPassword,
     initSecurity,
     initSessionTimeout,
     logoutDueToInactivity,

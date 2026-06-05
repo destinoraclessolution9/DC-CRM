@@ -83,7 +83,7 @@ const JS_TARGETS = [
 const CSS_TARGETS = [
   'styles-fixed.css',
   'styles-mobile.css',
-  'styles-mobile-v2.css',
+  'styles-login-v2.css',
   'styles-theme.css',
 ];
 

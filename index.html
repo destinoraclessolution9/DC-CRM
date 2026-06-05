@@ -67,7 +67,7 @@
          it before the parser reaches the <script> tag near </body>.
          script.js is ~2.5 MB so getting it in flight ASAP is the single
          biggest perceived-load win on first visit. -->
-    <link rel="preload" href="script.b08d877edc.min.js" as="script">
+    <link rel="preload" href="script.75785c24b9.min.js" as="script">
     <link rel="preload" href="data.f97e121898.min.js" as="script">
     <link rel="preload" href="styles-fixed.49a116f2c2.min.css" as="style">
 
@@ -88,18 +88,13 @@
          overlay would default to display:block on desktop, covering the
          page. Keep it unconditional. -->
     <link rel="stylesheet" href="styles-mobile.5c2e7e65a7.min.css">
-    <!-- styles-mobile-v2 — NOT "pure responsive overrides" as the prior
-         comment claimed. It carries the entire .login-v2 / .lv2-* decoration
-         system (~700 lines, position:absolute branches, blobs, petals,
-         SVG flowers) — the login screen's PRIMARY visual styling. Loading
-         it async via media=print/onload swap created a race window where
-         first paint showed the login page with all decorations rendering
-         in normal flow (broken vertical stack). Load it synchronously like
-         the other layout-critical stylesheets; 63 KB minified parallel-
-         downloads with the rest of the CSS over HTTP/2 with negligible
-         first-paint cost. If the file is ever cleaned up to be truly
-         responsive-only, this can revert to the async pattern. -->
-    <link rel="stylesheet" href="styles-mobile-v2.07cc3bf384.min.css">
+    <!-- styles-login-v2 (renamed from styles-mobile-v2) — carries the entire
+         .login-v2 / .lv2-* decoration system: the login screen's primary visual
+         styling (blobs, petals, SVG flowers, ~700 lines). Load synchronously —
+         async swap caused a race where decorations rendered in broken flow on
+         first paint. 63 KB minified, parallel-downloads with other CSS over
+         HTTP/2. -->
+    <link rel="stylesheet" href="styles-login-v2.1cb29beb90.min.css">
     <link rel="stylesheet" href="styles-theme.67758a1098.min.css">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#800020">
@@ -213,7 +208,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="悅客匯">
     <link rel="apple-touch-icon" href="icons/icon-192x192.png">
-<script>window.__ASSET_MANIFEST={"script.min.js":"script.b08d877edc.min.js","script-features.min.js":"script-features.69a95bf648.min.js","data.min.js":"data.f97e121898.min.js","app-init.min.js":"app-init.6e7500dfe9.min.js","ui.min.js":"ui.5e13152572.min.js","auth.min.js":"auth.8fef230596.min.js","supabase-init.min.js":"supabase-init.9bcd3a058f.min.js","two-factor.min.js":"two-factor.0f11c12431.min.js","push-notifications.min.js":"push-notifications.406fb9b19d.min.js","chunks/script-egg.min.js":"chunks/script-egg.9631e3961f.min.js","chunks/script-boss-report.min.js":"chunks/script-boss-report.b2de97b1c4.min.js","chunks/script-stock-take.min.js":"chunks/script-stock-take.37b0b78e22.min.js","chunks/script-knowledge.min.js":"chunks/script-knowledge.71cb11d661.min.js","chunks/script-formula.min.js":"chunks/script-formula.48c3aa1179.min.js","chunks/script-marketing.min.js":"chunks/script-marketing.853c145fa6.min.js","chunks/script-reporting.min.js":"chunks/script-reporting.fa3a6fe19d.min.js","chunks/script-cases.min.js":"chunks/script-cases.a4502119e6.min.js","chunks/script-referrals.min.js":"chunks/script-referrals.a50493088a.min.js","chunks/script-performance.min.js":"chunks/script-performance.5bb2b38494.min.js","chunks/script-whatsapp.min.js":"chunks/script-whatsapp.8e63d615d2.min.js","chunks/script-ai.min.js":"chunks/script-ai.3cad39a6aa.min.js","chunks/script-documents.min.js":"chunks/script-documents.4baac7d072.min.js","chunks/script-mobile.min.js":"chunks/script-mobile.ac01246232.min.js","chunks/script-gcal.min.js":"chunks/script-gcal.bc4db3bce6.min.js","chunks/script-forms.min.js":"chunks/script-forms.d1902f9b4a.min.js","chunks/script-activities.min.js":"chunks/script-activities.fd66dd7326.min.js","chunks/script-calendar.min.js":"chunks/script-calendar.f23975d9e2.min.js","chunks/script-prospects.min.js":"chunks/script-prospects.41077e04e5.min.js","chunks/script-pipeline.min.js":"chunks/script-pipeline.ae3c3678d1.min.js","chunks/script-import.min.js":"chunks/script-import.fb116ac9ab.min.js","chunks/script-features2.min.js":"chunks/script-features2.3d1e395e24.min.js","chunks/script-fude.min.js":"chunks/script-fude.8c76715dcb.min.js","chunks/script-cps.min.js":"chunks/script-cps.20989b76dc.min.js","chunks/script-admin.min.js":"chunks/script-admin.fe07c1ec99.min.js","chunks/script-org.min.js":"chunks/script-org.33da91c936.min.js","chunks/script-search.min.js":"chunks/script-search.8303db7051.min.js","styles-fixed.min.css":"styles-fixed.49a116f2c2.min.css","styles-mobile.min.css":"styles-mobile.5c2e7e65a7.min.css","styles-mobile-v2.min.css":"styles-mobile-v2.07cc3bf384.min.css","styles-theme.min.css":"styles-theme.67758a1098.min.css"};</script>
+<script>window.__ASSET_MANIFEST={"script.min.js":"script.75785c24b9.min.js","script-features.min.js":"script-features.69a95bf648.min.js","data.min.js":"data.f97e121898.min.js","app-init.min.js":"app-init.6e7500dfe9.min.js","ui.min.js":"ui.5e13152572.min.js","auth.min.js":"auth.8fef230596.min.js","supabase-init.min.js":"supabase-init.9bcd3a058f.min.js","two-factor.min.js":"two-factor.0f11c12431.min.js","push-notifications.min.js":"push-notifications.406fb9b19d.min.js","chunks/script-egg.min.js":"chunks/script-egg.9631e3961f.min.js","chunks/script-boss-report.min.js":"chunks/script-boss-report.b2de97b1c4.min.js","chunks/script-stock-take.min.js":"chunks/script-stock-take.37b0b78e22.min.js","chunks/script-knowledge.min.js":"chunks/script-knowledge.71cb11d661.min.js","chunks/script-formula.min.js":"chunks/script-formula.48c3aa1179.min.js","chunks/script-marketing.min.js":"chunks/script-marketing.853c145fa6.min.js","chunks/script-reporting.min.js":"chunks/script-reporting.fa3a6fe19d.min.js","chunks/script-cases.min.js":"chunks/script-cases.a4502119e6.min.js","chunks/script-referrals.min.js":"chunks/script-referrals.a50493088a.min.js","chunks/script-performance.min.js":"chunks/script-performance.5bb2b38494.min.js","chunks/script-whatsapp.min.js":"chunks/script-whatsapp.8e63d615d2.min.js","chunks/script-ai.min.js":"chunks/script-ai.3cad39a6aa.min.js","chunks/script-documents.min.js":"chunks/script-documents.4baac7d072.min.js","chunks/script-mobile.min.js":"chunks/script-mobile.ac01246232.min.js","chunks/script-gcal.min.js":"chunks/script-gcal.bc4db3bce6.min.js","chunks/script-forms.min.js":"chunks/script-forms.d1902f9b4a.min.js","chunks/script-activities.min.js":"chunks/script-activities.fd66dd7326.min.js","chunks/script-calendar.min.js":"chunks/script-calendar.f23975d9e2.min.js","chunks/script-prospects.min.js":"chunks/script-prospects.41077e04e5.min.js","chunks/script-pipeline.min.js":"chunks/script-pipeline.ae3c3678d1.min.js","chunks/script-import.min.js":"chunks/script-import.fb116ac9ab.min.js","chunks/script-features2.min.js":"chunks/script-features2.3d1e395e24.min.js","chunks/script-fude.min.js":"chunks/script-fude.8c76715dcb.min.js","chunks/script-cps.min.js":"chunks/script-cps.20989b76dc.min.js","chunks/script-admin.min.js":"chunks/script-admin.fe07c1ec99.min.js","chunks/script-org.min.js":"chunks/script-org.33da91c936.min.js","chunks/script-search.min.js":"chunks/script-search.8303db7051.min.js","styles-fixed.min.css":"styles-fixed.49a116f2c2.min.css","styles-mobile.min.css":"styles-mobile.5c2e7e65a7.min.css","styles-login-v2.min.css":"styles-login-v2.1cb29beb90.min.css","styles-theme.min.css":"styles-theme.67758a1098.min.css"};</script>
 </head>
 
 <body>
@@ -317,7 +312,7 @@
                     <div class="lv2-input-wrap">
                         <i class="lv2-ico fas fa-lock" aria-hidden="true"></i>
                         <input type="password" id="loginPassword" class="form-control lv2-input" placeholder="••••••••" required aria-required="true" aria-describedby="loginPasswordErr" autocomplete="current-password" enterkeyhint="go">
-                        <button type="button" class="lv2-eye-btn" onclick="(function(b){var i=document.getElementById('loginPassword');i.type=i.type==='password'?'text':'password';b.querySelector('i').className='fas '+(i.type==='text'?'fa-eye-slash':'fa-eye');})(this)" aria-label="Toggle password visibility" tabindex="-1"><i class="fas fa-eye"></i></button>
+                        <button type="button" class="lv2-eye-btn" onclick="app.toggleLoginPassword(this)" aria-label="Toggle password visibility" tabindex="-1"><i class="fas fa-eye"></i></button>
                     </div>
                     <span id="loginPasswordErr" role="alert" aria-live="polite" class="lv2-err"></span>
                 </div>
@@ -678,7 +673,7 @@
          before spending bandwidth on the 2.1 MB app bundle. defer already prevents
          parser-blocking; low fetchpriority additionally pushes the download below
          CSS + fonts in the network queue so FCP happens sooner. -->
-    <script defer fetchpriority="low" src="script.b08d877edc.min.js"></script>
+    <script defer fetchpriority="low" src="script.75785c24b9.min.js"></script>
 
     <!--
       The following libraries are loaded on-demand via window._loadScriptOnce()
