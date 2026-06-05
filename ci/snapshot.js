@@ -40,8 +40,13 @@ scriptLines.forEach((l, i) => {
   if (m) defined.push({ name: m[1], line: i + 1, kind: 'function' });
 });
 
-// Return object keys
-const returnSection = scriptLines.slice(39000).join('\n');
+// Return object keys — dynamically locate the main app return object
+// (its start moves as we extract chunks). The IIFE return is the only
+// top-level `    return {` line; all others are deeper inside functions.
+const returnObjStart = scriptLines.findIndex(l => /^    return \{/.test(l));
+const returnSection = returnObjStart >= 0
+  ? scriptLines.slice(returnObjStart).join('\n')
+  : scriptLines.slice(39000).join('\n');  // fallback
 const returnKeys = [...returnSection.matchAll(/^        ([a-zA-Z_$][a-zA-Z0-9_$]*),\s*$/gm)]
   .map(m => m[1]);
 
