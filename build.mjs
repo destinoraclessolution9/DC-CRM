@@ -62,6 +62,8 @@ const JS_TARGETS = [
   'chunks/script-calendar.js',
   // Phase 4J: Prospect & Customer Management (extracted 2026-06-05)
   'chunks/script-prospects.js',
+  // Phase 4K: Pipeline & Sales Force Module (extracted 2026-06-05)
+  'chunks/script-pipeline.js',
 ];
 
 const CSS_TARGETS = [
