@@ -27317,7 +27317,7 @@ NOTIFY pgrst, 'reload schema';`;
                     ${existing.map((url, i) => `
                         <div style="position:relative;">
                             <img loading="lazy" decoding="async" data-attach-src="${url}" style="height:70px;border-radius:4px;object-fit:cover;cursor:pointer;" onclick="window._openAttachment('${url}')">
-                            <button type="button" class="btn-icon" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:white;border-radius:50%;width:20px;height:20px;font-size:10px;padding:0;" title="Remove" onclick="app.removeActivityPhoto(${activityId}, ${i}, 'upload')"><i class="fas fa-times"></i></button>
+                            <button type="button" class="btn-icon" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:white;border-radius:50%;width:20px;height:20px;font-size:10px;padding:0;" title="Remove" onclick="app.removeActivityPhoto(${activityId}, '${url}', 'upload')"><i class="fas fa-times"></i></button>
                         </div>
                     `).join('')}
                 </div>
@@ -27346,7 +27346,7 @@ NOTIFY pgrst, 'reload schema';`;
                 ${photos.map((url, i) => `
                     <div style="position:relative;">
                         <img loading="lazy" decoding="async" src="${url}" style="width:100%;height:120px;border-radius:6px;object-fit:cover;cursor:zoom-in;border:1px solid var(--gray-200);" onclick="window._openAttachment && window._openAttachment('${url}')">
-                        <button type="button" class="btn-icon" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:white;border-radius:50%;width:22px;height:22px;font-size:11px;padding:0;" title="Remove" onclick="event.stopPropagation();app.removeActivityPhoto(${activityId}, ${i}, 'view')"><i class="fas fa-times"></i></button>
+                        <button type="button" class="btn-icon" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:white;border-radius:50%;width:22px;height:22px;font-size:11px;padding:0;" title="Remove" onclick="event.stopPropagation();app.removeActivityPhoto(${activityId}, '${url}', 'view')"><i class="fas fa-times"></i></button>
                     </div>
                 `).join('')}
             </div>
@@ -27434,13 +27434,70 @@ NOTIFY pgrst, 'reload schema';`;
     //         'upload' → reopen the upload modal so the user can keep adding
     //                    photos in the same flow.
     //         undefined → default to 'view' behaviour for back-compat.
-    const removeActivityPhoto = async (activityId, index, source) => {
-        const activity = await AppDataStore.getById('activities', activityId);
-        if (!activity) return;
-        const existing = Array.isArray(activity.photo_urls) ? [...activity.photo_urls] : [];
-        if (index < 0 || index >= existing.length) return;
-        existing.splice(index, 1);
-        await AppDataStore.update('activities', activityId, { photo_urls: existing });
+    // Per-activity serialization lock for photo removal. Rapid × taps fire
+    // multiple removeActivityPhoto calls before any of them commits — without
+    // serialization, each call would read the same starting photo_urls,
+    // compute its own filtered copy, and the last write would overwrite all
+    // earlier writes (last-write-wins ⇒ deletions silently undone).
+    //
+    // The map holds the currently-running tail Promise per activityId; each
+    // new call chains onto it so the read-modify-write happens sequentially.
+    // Entries are cleared when their tail completes so the Map doesn't grow
+    // unboundedly over a long session.
+    const _photoRemoveLocks = new Map();
+
+    // photoTarget: the URL string of the photo to remove. Identification by URL
+    //     (not index) keeps the operation idempotent — re-removing an
+    //     already-gone URL is a no-op rather than removing the wrong photo.
+    // source: see removeActivityPhoto reference below.
+    //
+    // (Accepts a legacy numeric `index` too — any cached HTML from a prior
+    //  build will still work; treated as an index into the freshly-fetched
+    //  photo_urls array.)
+    const removeActivityPhoto = async (activityId, photoTarget, source) => {
+        // Serialize per activity: wait for the prior in-flight remove on this
+        // activity (if any) to commit before we read photo_urls. This is what
+        // makes 5 concurrent × taps end up with all 5 photos actually gone
+        // instead of just the last-clicked one surviving the overwrite race.
+        const prev = _photoRemoveLocks.get(activityId) || Promise.resolve();
+        const job = prev.catch(() => {}).then(async () => {
+            const activity = await AppDataStore.getById('activities', activityId);
+            if (!activity) return { updated: [], skipped: true };
+            const existing = Array.isArray(activity.photo_urls) ? activity.photo_urls : [];
+
+            // Resolve target → URL string regardless of how the caller addressed
+            // the photo. Legacy numeric callers use the freshly-fetched array,
+            // so the index is interpreted against live state.
+            let targetUrl;
+            if (typeof photoTarget === 'number') {
+                if (photoTarget < 0 || photoTarget >= existing.length) return { updated: existing, skipped: true };
+                targetUrl = existing[photoTarget];
+            } else {
+                targetUrl = String(photoTarget);
+            }
+
+            const updated = existing.filter(u => u !== targetUrl);
+            // If the URL is already gone (an earlier serialized remove won the
+            // race), skip the DB round-trip — nothing to update.
+            if (updated.length !== existing.length) {
+                await AppDataStore.update('activities', activityId, { photo_urls: updated });
+            }
+            return { activity, updated, skipped: false };
+        });
+        _photoRemoveLocks.set(activityId, job);
+        let result;
+        try {
+            result = await job;
+        } finally {
+            // Only clear if we're still the tail — a later remove might have
+            // already chained onto our promise.
+            if (_photoRemoveLocks.get(activityId) === job) {
+                _photoRemoveLocks.delete(activityId);
+            }
+        }
+        if (!result || result.skipped) return;
+        const { activity, updated } = result;
+
         UI.toast.success('Photo removed');
 
         // Refresh the activity row in the background so the Photo button count updates.
@@ -27454,7 +27511,7 @@ NOTIFY pgrst, 'reload schema';`;
         // the user to re-tap Photos between each ×.
         if (source === 'upload') {
             await attachActivityPhoto(activityId);
-        } else if (existing.length > 0) {
+        } else if (updated.length > 0) {
             await viewActivityPhotos(activityId);
         } else {
             UI.hideModal();
