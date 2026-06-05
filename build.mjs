@@ -76,6 +76,8 @@ const JS_TARGETS = [
   'chunks/script-admin.js',
   // Phase 5C: Org Chart Consultant (extracted 2026-06-05)
   'chunks/script-org.js',
+  // Phase 5D: Advanced Search + Filter Panel (extracted 2026-06-05)
+  'chunks/script-search.js',
 ];
 
 const CSS_TARGETS = [
