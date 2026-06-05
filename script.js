@@ -17995,7 +17995,7 @@ function _wireLoginBtn() {
                     <div class="form-row">
                         <div class="form-group half">
                             <label>End Time</label>
-                            <input type="time" id="end-time" class="form-control" value="10:00" onchange="app.calculateDuration()">
+                            <input type="time" id="end-time" class="form-control" value="10:00" onchange="app.onEndTimeChange()">
                         </div>
                         <div class="form-group half">
                             <label>Duration</label>
@@ -20229,16 +20229,25 @@ function _wireLoginBtn() {
     const onStartTimeChange = () => {
         const startEl = document.getElementById('start-time');
         const endEl = document.getElementById('end-time');
-        // Only auto-fill end-time when it's blank — never overwrite an
-        // end-time the user has already typed (would silently destroy
-        // explicit input like 09:00-17:00 -> 10:00-11:00 when start moves).
-        if (startEl?.value && endEl && !endEl.value) {
+        // Auto-fill end-time to start+60 min, UNLESS the user has already
+        // manually typed a different end time in this modal session.
+        // We use data-user-modified to distinguish a user edit from the
+        // HTML default value="10:00" (which is never blank, so !endEl.value
+        // would always block auto-fill — that was the prior bug).
+        if (startEl?.value && endEl && !endEl.dataset.userModified) {
             const [h, m] = startEl.value.split(':').map(Number);
             const totalMin = h * 60 + m + 60;
             const endH = String(Math.floor(totalMin / 60) % 24).padStart(2, '0');
             const endM = String(totalMin % 60).padStart(2, '0');
             endEl.value = `${endH}:${endM}`;
         }
+        calculateDuration();
+    };
+
+    const onEndTimeChange = () => {
+        const endEl = document.getElementById('end-time');
+        // Mark as user-modified so onStartTimeChange stops auto-filling it.
+        if (endEl) endEl.dataset.userModified = '1';
         calculateDuration();
     };
 
@@ -41717,6 +41726,7 @@ const initImportDemoData = async () => {
         updateActivityForm,
         calculateDuration,
         onStartTimeChange,
+        onEndTimeChange,
         toggleCoAgentSection,
         toggleEventForm,
         openCpsCreateEventModal,
