@@ -310,7 +310,7 @@ const renderQuickHealthBadge = (customer) => {
 // ========== MEETING SCHEDULER / BOOKING LINKS ==========
 
 const showBookingSettingsView = async (container) => {
-    _currentView = 'booking_settings';
+    _state.cv = 'booking_settings';
     const allSlots = await AppDataStore.getAll('booking_slots').catch(() => []);
     const agentSlots = allSlots.filter(s => s.agent_id === (_currentUser?.id || 1));
     const allAppts = await AppDataStore.getAll('booking_appointments').catch(() => []);
@@ -774,8 +774,8 @@ const openApproveCpsIntakeModal = async (intakeId) => {
     }
 
     // Stash id + full row so saveActivity can mark approved and send WhatsApp
-    _pendingIntakeId  = intakeId;
-    _pendingIntakeRow = intake;
+    _state.pii = intakeId;
+    _state.pir = intake;
 
     // Open the standard Quick Add Activity modal — it defaults to CPS type
     await (window.app.openActivityModal || (() => {}))(intake.activity_date);

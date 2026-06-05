@@ -26,6 +26,12 @@
     const debounceCall         = (...a) => window.app.debounceCall(...a);
     const navigateTo           = (v)   => window.app.navigateTo(v);
     // AppDataStore, UI, supabase, XLSX (on demand) are globals — no alias needed.
+    // ── Chunk-local: referral tree UI state ──
+    let _currentSelectedPerson = null;
+    let _treeZoom = null;
+    let _treeSvg = null;
+    let _treeNavStack = [];
+    let _treeActiveFilter = 'all';
 
     // ========== PHASE 7: REFERRALS MODULE IMPLEMENTATION (VERTICAL LAYOUT) ==========
 
@@ -303,7 +309,7 @@
         try {
             const sb = window.supabase;
             if (sb && sb.rpc) {
-                const { data, error } = await sb.rpc('get_referral_leaderboard', { p_period: _leaderboardPeriod });
+                const { data, error } = await sb.rpc('get_referral_leaderboard', { p_period: _state.lbp });
                 if (!error && Array.isArray(data)) {
                     sorted = data.map(r => ({
                         id: r.referrer_id,
@@ -321,8 +327,8 @@
             const allReferrals = await getVisibleReferrals();
             const now = new Date();
             let cutoff = null;
-            if (_leaderboardPeriod === 'year') cutoff = new Date(now.getFullYear(), 0, 1);
-            else if (_leaderboardPeriod === 'month') cutoff = new Date(now.getFullYear(), now.getMonth(), 1);
+            if (_state.lbp === 'year') cutoff = new Date(now.getFullYear(), 0, 1);
+            else if (_state.lbp === 'month') cutoff = new Date(now.getFullYear(), now.getMonth(), 1);
             const referrals = cutoff
                 ? allReferrals.filter(r => r.created_at && new Date(r.created_at) >= cutoff)
                 : allReferrals;
@@ -373,9 +379,9 @@
             <div class="leaderboard-controls-v2">
                 <div style="display:flex; gap:12px; align-items:center;">
                     <select class="form-control" style="width:150px" onchange="app.changeLeaderboardPeriod(this.value)">
-                        <option${_leaderboardPeriod === 'all' ? ' selected' : ''}>All Time</option>
-                        <option${_leaderboardPeriod === 'year' ? ' selected' : ''}>This Year</option>
-                        <option${_leaderboardPeriod === 'month' ? ' selected' : ''}>This Month</option>
+                        <option${_state.lbp === 'all' ? ' selected' : ''}>All Time</option>
+                        <option${_state.lbp === 'year' ? ' selected' : ''}>This Year</option>
+                        <option${_state.lbp === 'month' ? ' selected' : ''}>This Month</option>
                     </select>
                     <button class="btn secondary btn-sm" onclick="app.resetHiddenReferrers()">Reset Hidden</button>
                 </div>
@@ -491,12 +497,12 @@
         if (placeholder) placeholder.style.display = 'none';
         if (svg) svg.style.display = 'block';
 
-        _currentTreeData = await buildTreeData(personId, personType);
-        if (!_currentTreeData) {
+        _state.ctd = await buildTreeData(personId, personType);
+        if (!_state.ctd) {
             UI.toast.error('Could not build tree for this person');
             return;
         }
-        await renderD3Tree(_currentTreeData);
+        await renderD3Tree(_state.ctd);
     };
 
     // Prefetches every table once, then walks the tree synchronously using Maps.
@@ -1151,7 +1157,7 @@
         document.querySelectorAll('.tree-filter-chip').forEach(chip => {
             chip.classList.toggle('active', chip.dataset.filter === filter);
         });
-        if (_currentTreeData) await renderD3Tree(_currentTreeData);
+        if (_state.ctd) await renderD3Tree(_state.ctd);
     };
 
     // Navigate back to the previous tree root
@@ -1162,8 +1168,8 @@
         if (backBtn) backBtn.style.display = _treeNavStack.length > 0 ? 'flex' : 'none';
 
         _currentSelectedPerson = prev;
-        _currentTreeData = await buildTreeData(prev.id, prev.type);
-        if (_currentTreeData) await renderD3Tree(_currentTreeData);
+        _state.ctd = await buildTreeData(prev.id, prev.type);
+        if (_state.ctd) await renderD3Tree(_state.ctd);
     };
 
     // ========== ADD REFERRAL MODAL & FLOW ==========
@@ -1325,7 +1331,7 @@
         
         // Refresh views
         await renderReferralSummaryAndLeaderboard();
-        if (_currentSelectedPerson && String(_currentSelectedPerson.id) === String(_selectedReferrer.id)) {
+        if (_currentSelectedPerson && String(_currentSelectedPerson.id) === String(_state.sr.id)) {
             await showReferralTree(_currentSelectedPerson.id, _currentSelectedPerson.type);
         }
     };

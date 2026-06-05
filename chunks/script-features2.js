@@ -1240,7 +1240,7 @@ const saveSpecialProgram = async (programId = null) => {
 // Refresh whichever view currently hosts the special programs UI
 const refreshSpecialProgramView = async () => {
     const mlContent = document.getElementById('marketing-list-content');
-    if (mlContent && _currentMarketingListTab === 'special_programs') {
+    if (mlContent && _state.cmlt === 'special_programs') {
         mlContent.innerHTML = await renderMarketingListTable();
         return;
     }

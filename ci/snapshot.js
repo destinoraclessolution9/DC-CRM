@@ -78,9 +78,14 @@ const mMatch = html.match(/window\.__ASSET_MANIFEST\s*=\s*(\{[^;]+\})/);
 const manifest = mMatch ? JSON.parse(mMatch[1]) : {};
 
 // ── _appState bridge coverage ──────────────────────────────────────────────
-const appStateMatch = scriptSrc.match(/window\._appState\s*=\s*\{([^}]+)\}/s);
-const bridgedKeys = appStateMatch
-  ? [...appStateMatch[1].matchAll(/(?:get|set)\s+([a-zA-Z_$]\w*)\s*\(/g)].map(m => m[1])
+// The object has getter/setter bodies like `get cu() { return _x; }` which
+// contain `}` chars — [^}]+ would stop at the first one. Instead, find the
+// block by its start marker and scan forward to the IIFE-level `};` close.
+const asIdx  = scriptSrc.indexOf('window._appState = {');
+const asEnd  = asIdx >= 0 ? scriptSrc.indexOf('\n    };', asIdx) : -1;
+const asBlock = asIdx >= 0 && asEnd >= 0 ? scriptSrc.slice(asIdx, asEnd) : '';
+const bridgedKeys = asBlock
+  ? [...new Set([...asBlock.matchAll(/\b(?:get|set)\s+([a-zA-Z_$]\w*)\s*\(/g)].map(m => m[1]))]
   : [];
 
 const snapshot = {

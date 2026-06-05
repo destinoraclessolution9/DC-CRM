@@ -11,6 +11,14 @@
 (() => {
     const _state = window._appState;
     const esc    = (s) => window._crmUtils.escapeHtml(s);
+    // ── Chunk-local state (documents view only) ──
+    let _currentFolder = null;
+    let _viewMode = 'list';
+    let _selectedFiles = [];
+    let _fileSortBy = 'name';
+    let _fileSortDirection = 'asc';
+    let _fileFilter = '';
+    let _draggedFileId = null;
     const showDocumentManagementView = async (container) => {
         container.innerHTML = `
             <div class="dms-view">

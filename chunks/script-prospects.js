@@ -41,6 +41,11 @@ let _prospectPage = 0;
 const _prospectPageSize = 50;
 let _prospectViewMode = 'table';
 const _selectedProspects = new Set();
+// ── Purchases history cache (chunk-local) ──
+let _purchasesHistoryCache = null;
+let _purchasesHistoryCacheTs = 0;
+let _phFilter = { search: '', agent: 'all', delivery: 'all', from: '', to: '' };
+let _phPage = 0;
 
 const sortProspects = async (field) => {
     if (_sortField === field) {
@@ -911,7 +916,7 @@ const exportData = async (type, format) => {
         UI.toast.success(`Exported ${data.length} consultants/agents`);
 
     } else if (['products','events','promotions'].includes(type)) {
-        _currentMarketingListTab = type;
+        _state.cmlt = type;
         await exportMarketingList(format);
     }
 };
@@ -1777,7 +1782,7 @@ const openProspectModal = async (prospectId = null) => {
         }
     }
     const prospect = prospectId ? await AppDataStore.getById('prospects', prospectId) : null;
-    _selectedProspectReferrer = prospect?.referred_by ? { name: prospect.referred_by, id: prospect.referred_by_id || null, type: prospect.referred_by_type || null } : null;
+    _state.sprr = prospect?.referred_by ? { name: prospect.referred_by, id: prospect.referred_by_id || null, type: prospect.referred_by_type || null } : null;
     const allUsers = await AppDataStore.getAll('users');
     const isEdit = !!prospect;
 
@@ -1938,7 +1943,7 @@ const saveProspect = async () => {
     }
 
     // Validate compulsory referral fields
-    if (!_selectedProspectReferrer) {
+    if (!_state.sprr) {
         UI.toast.error('Referred By is required. Please search and select a referrer.');
         return;
     }
@@ -1955,9 +1960,9 @@ const saveProspect = async () => {
         ...basic,
         full_name: name, // validated above
         phone: phone,    // validated above
-        referred_by: _selectedProspectReferrer?.name || null,
-        referred_by_id: _selectedProspectReferrer?.id || null,
-        referred_by_type: _selectedProspectReferrer?.type || null,
+        referred_by: _state.sprr?.name || null,
+        referred_by_id: _state.sprr?.id || null,
+        referred_by_type: _state.sprr?.type || null,
         responsible_agent_id: _currentUser?.id || null,
         cps_assignment_date: new Date().toISOString().split('T')[0],
         pipeline_stage: 'new',
@@ -2044,7 +2049,7 @@ const showCustomerDetail = async (customerId) => {
         await navigateTo('prospects');
         return;
     }
-    _currentDetailView = { type: 'customer', id: customerId };
+    _state.cdv = { type: 'customer', id: customerId };
 
     setTimeout(async () => {
         await addWhatsAppButtonToProfile('customer', customerId);
@@ -3102,7 +3107,7 @@ const showProspectDetail = async (prospectId) => {
         await navigateTo('prospects');
         return;
     }
-    _currentDetailView = { type: 'prospect', id: prospectId };
+    _state.cdv = { type: 'prospect', id: prospectId };
 
     const container = document.getElementById('content-viewport');
     if (!container) return;
@@ -7579,7 +7584,7 @@ const approveProspectConversion = async (prospectId) => {
     UI.hideModal();
     UI.toast.success(`${prospect.full_name} is now a Customer!`);
     const viewport = document.getElementById('content-viewport');
-    if (viewport && _currentView === 'prospects') await (window.app.showProspectsViewSmart || (() => {}))(viewport);
+    if (viewport && _state.cv === 'prospects') await (window.app.showProspectsViewSmart || (() => {}))(viewport);
 };
 
 const rejectProspectConversion = async (prospectId) => {

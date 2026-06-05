@@ -54,7 +54,7 @@
     let _revenueChart = null;
 
     const showKPIDashboard = async (container) => {
-        _selectedEntity = null; // Clear selection
+        _state.se = null; // Clear selection
         // Agent dropdown filled after paint — don't block initial render
         const _kpiAgentOptions = `<option value="all">All Agents</option>`;
         container.innerHTML = `

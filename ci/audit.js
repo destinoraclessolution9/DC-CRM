@@ -83,7 +83,55 @@ if (missingRet.length) {
   issues += missingRet.length;
 }
 
-// ── 3. Manifest vs chunk files ─────────────────────────────────────────────
+// ── 3. Ghost IIFE-var refs in chunks ──────────────────────────────────────
+// Chunks are separate script files and cannot access `let _*` vars declared
+// inside script.js's IIFE.  Detect bare references before they ReferenceError.
+// Allowed: (a) chunk declares its own `let/const _name` alias, or (b) var is
+// accessed only via `_state.key` (the _appState bridge).
+const privateVars = [];
+scriptLines.forEach(l => {
+  const m = l.match(/^    let (_[a-zA-Z_$][a-zA-Z0-9_$]*)\s*[=;]/);
+  if (m) privateVars.push(m[1]);
+});
+
+chunkFiles.forEach(cf => {
+  const csrc  = fs.readFileSync(path.join(chunkDir, cf), 'utf8');
+  const clines = csrc.split('\n');
+
+  // Names declared locally in this chunk (let/const/var aliases)
+  const localDecls = new Set();
+  clines.forEach(l => {
+    const m = l.match(/\b(?:const|let|var)\s+(_[a-zA-Z_$][a-zA-Z0-9_$]*)\s*[=;]/);
+    if (m) localDecls.add(m[1]);
+  });
+
+  privateVars.forEach(varName => {
+    if (localDecls.has(varName)) return;
+    const ePat = varName.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
+    // Flag bare word-boundary matches; skip lines where the only match is
+    // prefixed by a dot (i.e. it's a property access, not a bare variable ref)
+    const hits = [];
+    clines.forEach((line, i) => {
+      const noComment = line.replace(/\/\/.*/, '');
+      if (/^\s*\*/.test(noComment)) return;               // block comment line
+      const re = new RegExp('\\b' + ePat + '\\b', 'g');
+      let m2;
+      while ((m2 = re.exec(noComment)) !== null) {
+        const before = noComment[m2.index - 1];
+        if (before === '.') continue;                      // property access
+        hits.push({ n: i + 1, text: noComment.trim().slice(0, 80) });
+        break;
+      }
+    });
+    if (hits.length) {
+      console.error(`GHOSTVAR  ${cf} → ${varName} (not locally declared, not via _state):`);
+      hits.slice(0, 2).forEach(h => console.error(`          L${h.n}: ${h.text}`));
+      issues++;
+    }
+  });
+});
+
+// ── 4. Manifest vs chunk files ─────────────────────────────────────────────
 const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
 const manifestMatch = html.match(/window\.__ASSET_MANIFEST\s*=\s*(\{[^;]+\})/);
 if (manifestMatch) {

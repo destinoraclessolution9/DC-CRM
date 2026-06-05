@@ -3338,7 +3338,7 @@
     };
 
     const selectProspectReferrer = (id, name, type) => {
-        _selectedProspectReferrer = { id, name, type };
+        _state.sprr = { id, name, type };
         const infoDiv = document.getElementById('prospect-referrer-info');
         // SECURITY: escape user-controlled name/type to prevent XSS (e.g. "<img loading="lazy" decoding="async" onerror=...>")
         if (infoDiv) infoDiv.innerHTML = `<div class="selected-entity-badge"><span>${escapeHtml(type)}: <strong>${escapeHtml(name)}</strong></span><button class="btn btn-sm secondary" onclick="app.clearProspectReferrer()">Clear</button></div>`;
@@ -3349,7 +3349,7 @@
     };
 
     const clearProspectReferrer = () => {
-        _selectedProspectReferrer = null;
+        _state.sprr = null;
         const infoDiv = document.getElementById('prospect-referrer-info');
         if (infoDiv) infoDiv.innerHTML = '';
     };

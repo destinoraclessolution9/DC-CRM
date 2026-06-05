@@ -3112,6 +3112,22 @@ function _wireLoginBtn() {
 
         // ── CPS photo upload pending ─────────────────────────────────────
         get cppf()  { return _cpsPendingPhotoFiles; },
+
+        // ── Cache timestamps (shared with calendar + activities chunks) ──
+        get vcts()  { return _venuesCacheTs; },
+        set vcts(v) { _venuesCacheTs = v; },
+        get pcts()  { return _productsCacheTs; },
+        set pcts(v) { _productsCacheTs = v; },
+
+        // ── Prospect referrer selection (shared: prospects ↔ activities) ─
+        get sprr()  { return _selectedProspectReferrer; },
+        set sprr(v) { _selectedProspectReferrer = v; },
+
+        // ── Referral tree state (shared: fude ↔ referrals) ──────────────
+        get ctd()   { return _currentTreeData; },
+        set ctd(v)  { _currentTreeData = v; },
+        get lbp()   { return _leaderboardPeriod; },
+        set lbp(v)  { _leaderboardPeriod = v; },
     };
 
     // [CHUNK: prospects] all prospect/customer/agent functions in chunks/script-prospects.js

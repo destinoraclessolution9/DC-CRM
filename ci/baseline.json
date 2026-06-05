@@ -1,8 +1,8 @@
 {
-  "generated": "2026-06-05T15:51:59.028Z",
+  "generated": "2026-06-05T16:54:50.333Z",
   "script": {
-    "lines": 4137,
-    "hash": "34c841dd",
+    "lines": 4153,
+    "hash": "567bb895",
     "definedCount": 221,
     "stateVars": [
       "_currentView",
@@ -498,7 +498,33 @@
     ]
   },
   "appStateBridge": [
-    "cu"
+    "cu",
+    "ial",
+    "cv",
+    "pp",
+    "cp",
+    "cmt",
+    "cmlt",
+    "se",
+    "sat",
+    "sca",
+    "scon",
+    "sr",
+    "cd",
+    "flt",
+    "cdv",
+    "hac",
+    "vc",
+    "pc",
+    "rct",
+    "pii",
+    "pir",
+    "cppf",
+    "vcts",
+    "pcts",
+    "sprr",
+    "ctd",
+    "lbp"
   ],
   "chunks": [
     {
@@ -659,7 +685,7 @@
     },
     {
       "file": "script-calendar.js",
-      "lines": 5477,
+      "lines": 5479,
       "exports": [
         "showCalendarView",
         "loadFollowUpTemplates",
@@ -831,7 +857,7 @@
     },
     {
       "file": "script-documents.js",
-      "lines": 1041,
+      "lines": 1049,
       "exports": [
         "showDocumentManagementView",
         "renderFolderTree",
@@ -1217,7 +1243,7 @@
     },
     {
       "file": "script-marketing.js",
-      "lines": 4365,
+      "lines": 4367,
       "exports": [
         "openMarketingListAddModal",
         "switchMarketingListTab",
@@ -1289,7 +1315,7 @@
     },
     {
       "file": "script-mobile.js",
-      "lines": 2322,
+      "lines": 2328,
       "exports": [
         "addCustomerNote",
         "deleteCustomerNote",
@@ -1465,7 +1491,7 @@
     },
     {
       "file": "script-prospects.js",
-      "lines": 9765,
+      "lines": 9770,
       "exports": [
         "sortProspects",
         "showProspectsView",
@@ -1704,7 +1730,7 @@
     },
     {
       "file": "script-referrals.js",
-      "lines": 1466,
+      "lines": 1472,
       "exports": [
         "searchTreePerson",
         "openAddReferralModal",

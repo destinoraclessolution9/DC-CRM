@@ -9,7 +9,7 @@
     // ========== LEAD CAPTURE FORMS ==========
 
     const showLeadFormsView = async (container) => {
-        _currentView = 'lead_forms';
+        _state.cv = 'lead_forms';
         const forms = await AppDataStore.getAll('lead_forms').catch(() => []);
         container.innerHTML = `
             <div style="padding:24px; max-width:1000px; margin:0 auto;">
@@ -188,7 +188,7 @@
     // ========== NPS / SATISFACTION SURVEYS ==========
 
     const showSurveysView = async (container) => {
-        _currentView = 'surveys';
+        _state.cv = 'surveys';
         const surveys = await AppDataStore.getAll('surveys').catch(() => []);
         container.innerHTML = `
             <div style="padding:24px; max-width:1000px; margin:0 auto;">
@@ -353,7 +353,7 @@
     };
 
     const showContractsView = async (container) => {
-        _currentView = 'contracts';
+        _state.cv = 'contracts';
         const contracts = await AppDataStore.getAll('contracts').catch(() => []);
         container.innerHTML = `
             <div style="padding:24px; max-width:1000px; margin:0 auto;">
@@ -511,7 +511,7 @@
     // ========== CUSTOM FIELDS ==========
 
     const showCustomFieldsAdmin = async (container) => {
-        _currentView = 'custom_fields';
+        _state.cv = 'custom_fields';
         const defs = await AppDataStore.getAll('custom_field_definitions').catch(() => []);
         const prospectFields = defs.filter(d => d.entity_type === 'prospect');
         const customerFields = defs.filter(d => d.entity_type === 'customer');

@@ -9,6 +9,8 @@
     const _state = window._appState;
     const _utils = window._crmUtils;
     const esc    = (...a) => _utils.escapeHtml(...a);
+    // _filters is an object; alias by reference so in-place mutations are shared.
+    const _filters = _state.flt;
     const isMobile   = () => _utils.isMobile();
     const timeAgo    = (...a) => _utils.timeAgo(...a);
     const debounceCall = (...a) => window.app.debounceCall(...a);
@@ -1615,17 +1617,17 @@
 
     const _getVenuesCached = async () => {
         const now = Date.now();
-        if (_venuesCache && (now - _venuesCacheTs) < _LOOKUP_CACHE_TTL_MS) return _venuesCache;
-        _venuesCache = await AppDataStore.getAll('venues').catch(() => []);
-        _venuesCacheTs = Date.now();
-        return _venuesCache;
+        if (_state.vc && (now - _state.vcts) < _LOOKUP_CACHE_TTL_MS) return _state.vc;
+        _state.vc = await AppDataStore.getAll('venues').catch(() => []);
+        _state.vcts = Date.now();
+        return _state.vc;
     };
     const _getProductsCached = async () => {
         const now = Date.now();
-        if (_productsCache && (now - _productsCacheTs) < _LOOKUP_CACHE_TTL_MS) return _productsCache;
-        _productsCache = await AppDataStore.getAll('products').catch(() => []);
-        _productsCacheTs = Date.now();
-        return _productsCache;
+        if (_state.pc && (now - _state.pcts) < _LOOKUP_CACHE_TTL_MS) return _state.pc;
+        _state.pc = await AppDataStore.getAll('products').catch(() => []);
+        _state.pcts = Date.now();
+        return _state.pc;
     };
 
     // Legacy multi-query calendar fetch — the pre-2026-05-03 path. Kept as a
@@ -2356,7 +2358,7 @@
     };
 
     const clearCalendarFilters = async () => {
-        _filters = { agent: 'all', type: 'all', from: '', to: '', caseStatus: 'all' };
+        Object.assign(_filters, { agent: 'all', type: 'all', from: '', to: '', caseStatus: 'all' });
         sessionStorage.removeItem('calendar_filters');
         UI.hideModal();
         if (_state.cv === 'month') await renderCalendar();
@@ -2367,7 +2369,7 @@
     const storedFilters = sessionStorage.getItem('calendar_filters');
     if (storedFilters) {
         try {
-            _filters = JSON.parse(storedFilters);
+            Object.assign(_filters, JSON.parse(storedFilters));
         } catch (e) { }
     }
 
@@ -3482,7 +3484,7 @@
     };
 
     const clearFilters = async () => {
-        _filters = { agent: 'all', type: 'all', from: '', to: '', search: '' };
+        Object.assign(_filters, { agent: 'all', type: 'all', from: '', to: '', search: '' });
         sessionStorage.setItem('calendar_filters', JSON.stringify(_filters));
         UI.hideModal();
         await renderCalendar();

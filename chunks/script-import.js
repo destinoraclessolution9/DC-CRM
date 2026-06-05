@@ -792,7 +792,7 @@ const startImport = async () => {
         if (_importData.importType === 'prospects') {
             await (window.app.showProspectsViewSmart || (() => {}))(vp);
         } else if (['products', 'events', 'promotions'].includes(_importData.importType)) {
-            _currentMarketingListTab = _importData.importType;
+            _state.cmlt = _importData.importType;
             await (window.app.showMarketingListsView || (() => Promise.resolve()))(vp);
         } else {
             await showImportDashboard(vp);
@@ -857,7 +857,7 @@ const downloadTemplate = async (type, format) => {
 };
 
 const exportMarketingList = async (format) => {
-    const type = _currentMarketingListTab;
+    const type = _state.cmlt;
     const data = await AppDataStore.getAll(type);
     if (!data.length) { UI.toast.error('No data to export'); return; }
     let cols, rows;

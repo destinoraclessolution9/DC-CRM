@@ -731,10 +731,10 @@ const showRoadmap = () => {
 };
 
 // Stub 2: Export Tree — was: onclick="app.todo('Export Tree')"
-// Walks the currently-loaded _currentTreeData object (depth-first) and
+// Walks the currently-loaded _state.ctd object (depth-first) and
 // downloads a CSV with one row per node (parent link + key fields).
 const exportRelationshipTree = () => {
-    if (!_currentTreeData) {
+    if (!_state.ctd) {
         UI.toast.error('No tree loaded — search for a person first.');
         return;
     }
@@ -752,7 +752,7 @@ const exportRelationshipTree = () => {
         });
         (node.children || []).forEach(c => walk(c, node.name, depth + 1));
     };
-    walk(_currentTreeData);
+    walk(_state.ctd);
     const esc = v => {
         const s = String(v ?? '');
         return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
@@ -764,7 +764,7 @@ const exportRelationshipTree = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    const safeName = String(_currentTreeData.name || 'export').replace(/[^\w\u4e00-\u9fff-]+/g, '_');
+    const safeName = String(_state.ctd.name || 'export').replace(/[^\w\u4e00-\u9fff-]+/g, '_');
     a.download = `relationship-tree-${safeName}-${new Date().toISOString().split('T')[0]}.csv`;
     document.body.appendChild(a);
     a.click();
@@ -778,7 +778,7 @@ const exportRelationshipTree = () => {
 // reads to filter referrals by date before grouping.
 const changeLeaderboardPeriod = async (label) => {
     const map = { 'All Time': 'all', 'This Year': 'year', 'This Month': 'month' };
-    _leaderboardPeriod = map[label] || 'all';
+    _state.lbp = map[label] || 'all';
     await renderLeaderboard();
 };
 
@@ -1194,7 +1194,7 @@ const cfSearchProspects = (val) => {
     clearTimeout(_cfState._t);
     _cfState._t = setTimeout(async () => {
         const target = document.getElementById('marketing-tab-content');
-        if (target && _currentMarketingTab === 'forms') {
+        if (target && _state.cmt === 'forms') {
             target.innerHTML = await renderFormsTab();
         }
     }, 220);
@@ -1527,7 +1527,7 @@ const saveCustomerSurvey = async () => {
         }
         UI.hideModal();
         const target = document.getElementById('marketing-tab-content');
-        if (target && _currentMarketingTab === 'forms') target.innerHTML = await renderFormsTab();
+        if (target && _state.cmt === 'forms') target.innerHTML = await renderFormsTab();
     } catch (err) {
         UI.toast.error('Save failed: ' + (err?.message || err));
     }
@@ -1826,7 +1826,7 @@ const saveCpsAnalysis = async () => {
         }
         UI.hideModal();
         const target = document.getElementById('marketing-tab-content');
-        if (target && _currentMarketingTab === 'forms') target.innerHTML = await renderFormsTab();
+        if (target && _state.cmt === 'forms') target.innerHTML = await renderFormsTab();
     } catch (err) {
         UI.toast.error('Save failed: ' + (err?.message || err));
     }
@@ -2118,7 +2118,7 @@ const saveApuAppraisal = async () => {
         UI.toast.success(apuId ? 'APU updated.' : 'APU saved.');
         UI.hideModal();
         const target = document.getElementById('marketing-tab-content');
-        if (target && _currentMarketingTab === 'forms') target.innerHTML = await renderFormsTab();
+        if (target && _state.cmt === 'forms') target.innerHTML = await renderFormsTab();
     } catch (err) {
         UI.toast.error('Save failed: ' + (err?.message || err));
     }
@@ -2499,7 +2499,7 @@ const saveDestinyBlueprint = async () => {
         }
         UI.hideModal();
         const target = document.getElementById('marketing-tab-content');
-        if (target && _currentMarketingTab === 'forms') target.innerHTML = await renderFormsTab();
+        if (target && _state.cmt === 'forms') target.innerHTML = await renderFormsTab();
     } catch (err) {
         UI.toast.error('Save failed: ' + (err?.message || err));
     }

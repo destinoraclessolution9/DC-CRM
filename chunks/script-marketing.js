@@ -12,6 +12,8 @@
     // ── Live bindings to IIFE-private state ──────────────────────────────
     const _state = window._appState;
     const _utils = window._crmUtils;
+    // Chunk-local: marketing asset folder selection (unrelated to DMS _currentFolder)
+    let _currentFolder = null;
     const isSystemAdmin        = (u) => _utils.isSystemAdmin(u || _state.cu);
     const isMarketingManager   = (u) => _utils.isMarketingManager(u || _state.cu);
     const isAgent              = (u) => _utils.isAgent(u || _state.cu);

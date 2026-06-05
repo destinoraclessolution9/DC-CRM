@@ -16,6 +16,12 @@
     const isMobile = () => _utils.isMobile();
     const escapeHtml = (...a) => _utils.escapeHtml(...a);
     const navigateTo = (v) => window.app.navigateTo(v);
+    // ── Chunk-local: voice recording state ──
+    let _mediaRecorder = null;
+    let _audioChunks = [];
+    let _recordingStartTime = null;
+    let _recordingTimer = null;
+    let _recordingStream = null;
     // ==================== PHASE 14: CUSTOMER & AGENT NOTE HELPERS ====================
 
     const addCustomerNote = async (customerId) => {
