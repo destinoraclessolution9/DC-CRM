@@ -50,6 +50,8 @@ const JS_TARGETS = [
   'chunks/script-ai.js',
   // Phase 4C: Document Management System (extracted 2026-06-05)
   'chunks/script-documents.js',
+  // Phase 4D: Notes + Voice Recording + Mobile UI (extracted 2026-06-05)
+  'chunks/script-mobile.js',
 ];
 
 const CSS_TARGETS = [
