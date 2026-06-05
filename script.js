@@ -35535,7 +35535,7 @@ container.innerHTML = `
                 await showProspectsViewSmart(vp);
             } else if (['products', 'events', 'promotions'].includes(_importData.importType)) {
                 _currentMarketingListTab = _importData.importType;
-                await showMarketingListsView(vp);
+                await (window.app.showMarketingListsView || (() => Promise.resolve()))(vp);
             } else {
                 await showImportDashboard(vp);
             }
@@ -41352,9 +41352,9 @@ const initImportDemoData = async () => {
         dispatchPendingSolutionReminders,
         invalidateFollowUpTemplatesCache,
 
-        // Phase 12 Marketing Functions
-        editTemplate: async (id) => await openCreateTemplateModal(id),
-        editCampaign: async (id) => await openCreateCampaignModal(id),
+        // Phase 12 Marketing Functions (chunk-loaded — call via window.app.*)
+        editTemplate: async (id) => await (window.app.openCreateTemplateModal || (() => {}))(id),
+        editCampaign: async (id) => await (window.app.openCreateCampaignModal || (() => {}))(id),
 
         // Monthly Promotions ledger
 
