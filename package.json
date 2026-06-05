@@ -9,6 +9,7 @@
     "puppeteer": "^24.40.0"
   },
   "devDependencies": {
+    "@fortawesome/fontawesome-free": "^6.7.2",
     "@playwright/test": "^1.44.0",
     "esbuild": "^0.28.0",
     "gifsicle": "^7.0.1",

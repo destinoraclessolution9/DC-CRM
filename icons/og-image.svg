@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a0508"/>
+      <stop offset="50%" style="stop-color:#2d0c14"/>
+      <stop offset="100%" style="stop-color:#1a0508"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#E84393"/>
+      <stop offset="100%" style="stop-color:#F06292"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="630" fill="url(#bg)"/>
+
+  <!-- Decorative radial glow -->
+  <ellipse cx="200" cy="120" rx="300" ry="200" fill="rgba(194,24,91,0.18)"/>
+  <ellipse cx="1050" cy="520" rx="250" ry="180" fill="rgba(240,98,146,0.10)"/>
+
+  <!-- Brand circle -->
+  <circle cx="180" cy="315" r="110" fill="none" stroke="rgba(232,67,147,0.25)" stroke-width="1.5"/>
+  <circle cx="180" cy="315" r="82" fill="rgba(232,67,147,0.12)"/>
+  <text x="180" y="335" text-anchor="middle" font-family="'Noto Serif SC', serif, sans-serif" font-size="68" font-weight="700" fill="#E84393" filter="url(#glow)">悅</text>
+
+  <!-- Brand name CN -->
+  <text x="340" y="265" font-family="'Noto Serif SC', serif, sans-serif" font-size="72" font-weight="700" fill="white">悅客匯</text>
+
+  <!-- Brand name EN -->
+  <text x="342" y="320" font-family="'Segoe UI', Arial, sans-serif" font-size="22" font-weight="400" fill="rgba(240,180,200,0.80)" letter-spacing="3">DestinOraclesSolution</text>
+
+  <!-- Divider line -->
+  <rect x="340" y="345" width="560" height="2" fill="url(#accent)" opacity="0.6" rx="1"/>
+
+  <!-- Tagline -->
+  <text x="340" y="395" font-family="'Segoe UI', Arial, sans-serif" font-size="26" font-weight="400" fill="rgba(255,220,235,0.85)">专业风水顾问客户关系管理平台</text>
+
+  <!-- Sub-tagline -->
+  <text x="340" y="435" font-family="'Segoe UI', Arial, sans-serif" font-size="18" fill="rgba(200,150,170,0.70)">Feng Shui Consultant CRM · Built for DestinOraclesSolution</text>
+
+  <!-- URL badge -->
+  <rect x="340" y="480" width="340" height="44" rx="22" fill="rgba(232,67,147,0.18)" stroke="rgba(232,67,147,0.35)" stroke-width="1"/>
+  <text x="510" y="508" text-anchor="middle" font-family="'Segoe UI', Arial, sans-serif" font-size="16" fill="rgba(240,180,210,0.90)" letter-spacing="1">destinoraclessolution.com</text>
+
+  <!-- Cherry blossom decorations (right side) -->
+  <circle cx="1050" cy="160" r="18" fill="#FFB2C8" opacity="0.7"/>
+  <circle cx="1085" cy="145" r="13" fill="#FFAAC0" opacity="0.65"/>
+  <circle cx="1020" cy="148" r="15" fill="#FFD0E0" opacity="0.6"/>
+  <circle cx="1055" cy="130" r="10" fill="#FFB2C8" opacity="0.55"/>
+  <circle cx="1110" cy="200" r="12" fill="#FFAAC0" opacity="0.5"/>
+  <circle cx="1000" cy="200" r="9" fill="#FFD0E0" opacity="0.45"/>
+  <circle cx="1140" cy="240" r="14" fill="#FFB2C8" opacity="0.4"/>
+  <circle cx="980" cy="240" r="11" fill="#FFAAC0" opacity="0.4"/>
+</svg>

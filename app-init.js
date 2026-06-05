@@ -33,22 +33,59 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 
 // ── Nav dropdown toggle (AI Insights / Security / Admin) ──────────────────
+// Manages display, aria-expanded, and keyboard navigation for dropdown menus.
 document.addEventListener('DOMContentLoaded', function () {
-    const triggers = document.querySelectorAll('.dropdown-trigger');
+    function closeAllDropdowns() {
+        document.querySelectorAll('.dropdown-trigger').forEach(function (t) {
+            var m = t.querySelector('.dropdown-menu');
+            if (m) m.style.display = 'none';
+            t.setAttribute('aria-expanded', 'false');
+        });
+    }
+
+    var triggers = document.querySelectorAll('.dropdown-trigger');
     triggers.forEach(function (trigger) {
         trigger.addEventListener('click', function (e) {
-            if (e.target.tagName.toLowerCase() !== 'li' || !e.target.hasAttribute('onclick')) {
-                const menu = this.querySelector('.dropdown-menu');
-                if (menu) menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+            // Close dropdown when a menu item is clicked (action handled by inline onclick)
+            if (e.target.getAttribute('role') === 'menuitem') { closeAllDropdowns(); return; }
+            var menu = this.querySelector('.dropdown-menu');
+            if (!menu) return;
+            var isOpen = menu.style.display !== 'none';
+            closeAllDropdowns();
+            if (!isOpen) {
+                menu.style.display = 'block';
+                this.setAttribute('aria-expanded', 'true');
+            }
+        });
+
+        // Keyboard: Escape closes; ArrowDown focuses first item
+        trigger.addEventListener('keydown', function (e) {
+            var menu = this.querySelector('.dropdown-menu');
+            if (!menu) return;
+            if (e.key === 'Escape') { closeAllDropdowns(); this.focus(); }
+            if (e.key === 'ArrowDown' && menu.style.display === 'block') {
+                e.preventDefault();
+                var first = menu.querySelector('[role="menuitem"]');
+                if (first) first.focus();
             }
         });
     });
+
+    // ArrowDown/Up navigation between menu items
+    document.addEventListener('keydown', function (e) {
+        if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Escape') return;
+        var item = document.activeElement;
+        if (!item || item.getAttribute('role') !== 'menuitem') return;
+        var items = Array.from(item.closest('.dropdown-menu').querySelectorAll('[role="menuitem"]'));
+        var idx = items.indexOf(item);
+        if (e.key === 'ArrowDown') { e.preventDefault(); if (items[idx + 1]) items[idx + 1].focus(); }
+        if (e.key === 'ArrowUp')   { e.preventDefault(); if (items[idx - 1]) items[idx - 1].focus(); }
+        if (e.key === 'Escape') { closeAllDropdowns(); }
+    });
+
+    // Click outside closes all dropdowns
     document.addEventListener('click', function (e) {
-        if (!e.target.closest('.dropdown-trigger')) {
-            document.querySelectorAll('.dropdown-menu').forEach(function (menu) {
-                menu.style.display = 'none';
-            });
-        }
+        if (!e.target.closest('.dropdown-trigger')) closeAllDropdowns();
     });
 });
 
@@ -300,7 +337,16 @@ window.addEventListener('beforeinstallprompt', function (e) {
     });
     document.addEventListener('DOMContentLoaded', function () {
         const input = document.getElementById('cmdk-input');
-        if (input) input.addEventListener('input', function (e) { render(e.target.value); });
+        if (input) {
+            // 180ms debounce: prevents N searches-per-keystroke on fast typists.
+            // The command list is static (no network call) so the delay is
+            // imperceptible yet eliminates redundant DOM rebuilds on each keyup.
+            let _cmdkDebounce = null;
+            input.addEventListener('input', function (e) {
+                clearTimeout(_cmdkDebounce);
+                _cmdkDebounce = setTimeout(function () { render(e.target.value); }, 180);
+            });
+        }
         const trigger = document.getElementById('cmdk-trigger');
         if (trigger) trigger.addEventListener('click', open);
     });

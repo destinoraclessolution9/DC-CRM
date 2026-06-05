@@ -52,11 +52,16 @@ body {
     border-bottom: 1px solid var(--gray-200);
     display: flex;
     align-items: center;
+    /* Changed: was overflow:hidden which clipped dropdown menus.
+       Now uses clip on the bar itself but allows overflow from children
+       via a negative-margin trick. Dropdowns escape via position:absolute. */
+    overflow: visible;
     padding: 0 24px;
     position: sticky;
     top: 0;
     z-index: 100;
-    overflow: hidden;
+    /* Prevent the bar from growing taller than 64px when content is wide */
+    max-height: 64px;
 }
 
 .brand {
@@ -103,6 +108,49 @@ body {
 .nav-links li.active {
     color: var(--primary);
     border-bottom-color: var(--primary);
+}
+
+/* ── Dropdown menus (AI Insights / Security / Admin in top nav) ────────────
+   Replaces hardcoded background:white inline styles that broke dark mode.
+   All visual properties are now theme-aware via CSS variables. The only
+   inline style kept on the <ul> is display:none (toggled by JS). */
+.dropdown-menu {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    z-index: 1000;
+    min-width: 210px;
+    padding: 6px 0;
+    border-radius: 10px;
+    background: var(--bg-surface, #ffffff);
+    border: 1px solid var(--border-soft, rgba(0,0,0,0.08));
+    box-shadow: var(--shadow-md, 0 6px 20px rgba(0,0,0,0.12));
+    list-style: none;
+    /* Prevent dropdown from inheriting the horizontal-scroll shimmy of .nav-links */
+    overflow: visible;
+}
+[data-theme="dark"] .dropdown-menu {
+    background: var(--bg-elevated, #281519);
+    border-color: var(--border-strong, rgba(255,200,200,0.14));
+}
+.dropdown-menu li[role="menuitem"] {
+    padding: 10px 16px;
+    font-size: 14px;
+    color: var(--text-primary, var(--gray-700));
+    cursor: pointer;
+    white-space: nowrap;
+    border-bottom: none; /* override .nav-links li border */
+    transition: background 0.15s, color 0.15s;
+}
+.dropdown-menu li[role="menuitem"]:hover {
+    background: var(--bg-elevated, rgba(232,67,147,0.07));
+    color: var(--accent, var(--primary));
+    border-bottom: none;
+}
+/* Keep keyboard-focus ring visible for accessibility */
+.dropdown-menu li[role="menuitem"]:focus {
+    outline: 2px solid var(--accent, var(--primary));
+    outline-offset: -2px;
 }
 
 .bar-right {

@@ -9702,8 +9702,26 @@ function _wireLoginBtn() {
             return m ? parseInt(m[1]) : 0;
         })();
 
+        // ── Deep-link / bookmark restoration ──────────────────────────────
+        // If the user bookmarked or shared a URL with a hash (e.g. #prospects),
+        // navigate there directly. Falls back to the default view if the hash
+        // is absent, unrecognised, or corresponds to a view the user can't access.
+        // Customer/referrer roles (L13+) always land on fude regardless of hash —
+        // they have no access to the operational views.
+        const _KNOWN_VIEWS = new Set([
+            'home','calendar','prospects','pipeline','referrals','promotions',
+            'marketing_automation','cases','agents','performance','reports','risk',
+            'knowledge','documents','import','integrations','settings','protection',
+            'custom_fields','milestones','fude','noticeboard','stock_take',
+            'egg_purchasing','formula_purchaser','boss_report','standard_functions',
+            'lead_forms','surveys','contracts','purchases_history','booking_settings',
+            'workflows','marketing_lists',
+        ]);
+        const _rawHash = (location.hash || '').replace(/^#/, '').trim().toLowerCase();
+        const _hashView = (_rawHash && _KNOWN_VIEWS.has(_rawHash)) ? _rawHash : null;
         // Mobile users land on the AI Home dashboard; desktop on calendar.
-        const _initialView = _initLevel >= 13 ? 'fude' : (isMobile() ? 'home' : 'calendar');
+        const _defaultView = _initLevel >= 13 ? 'fude' : (isMobile() ? 'home' : 'calendar');
+        const _initialView = (_initLevel < 13 && _hashView) ? _hashView : _defaultView;
         await navigateTo(_initialView);
 
         // Background pre-warm: silently fetch the most-navigated tables 2 seconds
@@ -12299,6 +12317,19 @@ function _wireLoginBtn() {
             org_chart: 'Org Chart Consultant',
         };
         document.title = `${VIEW_TITLES[viewId] || viewId} — 悅客匯 CRM`;
+
+        // ── URL hash deep linking ──────────────────────────────────────────
+        // Keeps the address bar in sync so users can bookmark, share, or use
+        // browser back/forward to reach a specific view. 'month' canonicalises
+        // to 'calendar' so the URL stays human-readable. replaceState (not
+        // pushState) avoids flooding the history stack on rapid tab-switching.
+        try {
+            const _hashId = (viewId === 'month') ? 'calendar' : viewId;
+            const _targetHash = '#' + _hashId;
+            if (location.hash !== _targetHash) {
+                history.replaceState({ view: _hashId }, '', _targetHash);
+            }
+        } catch (_) { /* no-op in environments that restrict history API */ }
 
         const viewport = document.getElementById('content-viewport');
 

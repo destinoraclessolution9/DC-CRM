@@ -16,6 +16,7 @@ _*.json
 _*.js
 _*.tsv
 _*.csv
+_*.py
 _chunks/
 _chunks2/
 _make_*.py
@@ -76,3 +77,5 @@ merge_*.py
 
 # Stray temp files written by Windows tools
 "C\357\200\272UsersDCAppDataLocalTempcps_stash_out.txt"
+
+.vercel
