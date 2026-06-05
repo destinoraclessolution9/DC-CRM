@@ -563,6 +563,7 @@ const appLogic = (() => {
     // doesn't match the strict `Level N` regex (e.g. legacy "Level 7 Senior").
     const isAgentOrLeader = (user) =>
         isAgent(user) || user?.role === 'team_leader' || user?.role?.includes('Level 7');
+    Object.assign(window._crmUtils, { isAgentOrLeader });
 
     // Memoized agents-and-leaders fetch. getAll('users') is already in-memory
     // cached by data.js, so the savings here are modest — but having a single
@@ -584,6 +585,7 @@ const appLogic = (() => {
     window.addEventListener('dataChanged', (e) => {
         if (e?.detail?.table === 'users') { _agentsLeadersCache = null; _agentsLeadersCacheTs = 0; }
     });
+    Object.assign(window._crmUtils, { getAgentsAndLeaders: () => getAgentsAndLeaders() });
 
     // Phase 10: Search Panel State
     let _searchPanelVisible = false;
@@ -1112,6 +1114,10 @@ const appLogic = (() => {
             try { fn(); } catch (e) { console.error('debounceCall error:', e); }
         }, delay);
     };
+    Object.assign(window._crmUtils, {
+        debounce: (fn, delay) => debounce(fn, delay),
+        debounceCall: (key, fn, delay) => debounceCall(key, fn, delay),
+    });
 
     // Ensure referrals have the new fields (id, referrer_id, referrer_type, referred_prospect_id)
     const ensureReferralFields = async () => {
