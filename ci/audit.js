@@ -29,7 +29,10 @@ let exported = 0;
 
 chunkFiles.forEach(cf => {
   const src  = fs.readFileSync(path.join(chunkDir, cf), 'utf8');
-  const m    = src.match(/Object\.assign\(window\.app\s*,\s*\{([^}]+)\}/s);
+  // Use matchAll + take last match so inline comments like
+  // "// Object.assign(window.app, { ... })" don't shadow the real one.
+  const allMatches = [...src.matchAll(/Object\.assign\(window\.app\s*,\s*\{([^}]+)\}/gs)];
+  const m = allMatches.length ? allMatches[allMatches.length - 1] : null;
   if (!m) return;
 
   const keys = [...m[1].matchAll(/([a-zA-Z_$][a-zA-Z0-9_$]*),/g)].map(x => x[1]);

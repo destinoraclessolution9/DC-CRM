@@ -52,6 +52,10 @@ const JS_TARGETS = [
   'chunks/script-documents.js',
   // Phase 4D: Notes + Voice Recording + Mobile UI (extracted 2026-06-05)
   'chunks/script-mobile.js',
+  // Phase 4E: Google Calendar + Integrations Hub (extracted 2026-06-05)
+  'chunks/script-gcal.js',
+  // Phase 4F-G: Lead Forms, Surveys, Contracts, Custom Fields, Portal (extracted 2026-06-05)
+  'chunks/script-forms.js',
 ];
 
 const CSS_TARGETS = [

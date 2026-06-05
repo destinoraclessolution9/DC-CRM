@@ -62,8 +62,10 @@ const chunkFiles = fs.readdirSync(chunkDir)
   .filter(f => f.endsWith('.js') && !f.includes('.min'));
 
 const chunks = chunkFiles.map(cf => {
-  const src = fs.readFileSync(path.join(chunkDir, cf), 'utf8');
-  const m   = src.match(/Object\.assign\(window\.app\s*,\s*\{([^}]+)\}/s);
+  const src  = fs.readFileSync(path.join(chunkDir, cf), 'utf8');
+  // Take the LAST Object.assign match so inline comments don't shadow the real export block
+  const all  = [...src.matchAll(/Object\.assign\(window\.app\s*,\s*\{([^}]+)\}/gs)];
+  const m    = all.length ? all[all.length - 1] : null;
   const keys = m
     ? [...m[1].matchAll(/([a-zA-Z_$][a-zA-Z0-9_$]*),/g)].map(x => x[1])
     : [];
