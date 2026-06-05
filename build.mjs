@@ -58,6 +58,8 @@ const JS_TARGETS = [
   'chunks/script-forms.js',
   // Phase 4H: Activity Modal + Appt + Push Notifications + Past Record (extracted 2026-06-05)
   'chunks/script-activities.js',
+  // Phase 4I: Full Calendar + Follow-up Automation Engine (extracted 2026-06-05)
+  'chunks/script-calendar.js',
 ];
 
 const CSS_TARGETS = [
