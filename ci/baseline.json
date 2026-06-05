@@ -1,9 +1,9 @@
 {
-  "generated": "2026-06-05T12:50:00.071Z",
+  "generated": "2026-06-05T14:09:24.156Z",
   "script": {
-    "lines": 26190,
-    "hash": "3eddfb81",
-    "definedCount": 884,
+    "lines": 26690,
+    "hash": "6ed47185",
+    "definedCount": 892,
     "stateVars": [
       "_currentView",
       "_currentUser",
@@ -68,6 +68,7 @@
       "_initStarted",
       "_cpsScanCache",
       "_cpsPendingPhotoFiles",
+      "_predictivePrefetchRan",
       "_sortField",
       "_sortDirection",
       "_prospectPage",
@@ -872,7 +873,7 @@
     },
     {
       "file": "script-forms.js",
-      "lines": 1207,
+      "lines": 726,
       "exports": [
         "showLeadFormsView",
         "openFormBuilderModal",
