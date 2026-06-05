@@ -20229,7 +20229,10 @@ function _wireLoginBtn() {
     const onStartTimeChange = () => {
         const startEl = document.getElementById('start-time');
         const endEl = document.getElementById('end-time');
-        if (startEl?.value && endEl) {
+        // Only auto-fill end-time when it's blank — never overwrite an
+        // end-time the user has already typed (would silently destroy
+        // explicit input like 09:00-17:00 -> 10:00-11:00 when start moves).
+        if (startEl?.value && endEl && !endEl.value) {
             const [h, m] = startEl.value.split(':').map(Number);
             const totalMin = h * 60 + m + 60;
             const endH = String(Math.floor(totalMin / 60) % 24).padStart(2, '0');
