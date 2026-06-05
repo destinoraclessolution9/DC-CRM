@@ -72,6 +72,10 @@ const JS_TARGETS = [
   'chunks/script-fude.js',
   // Phase 5A: Notifications + Health + Scheduler + CPS (extracted 2026-06-05)
   'chunks/script-cps.js',
+  // Phase 5B: Security Dashboard + System Administration (extracted 2026-06-05)
+  'chunks/script-admin.js',
+  // Phase 5C: Org Chart Consultant (extracted 2026-06-05)
+  'chunks/script-org.js',
 ];
 
 const CSS_TARGETS = [

@@ -1,9 +1,9 @@
 {
-  "generated": "2026-06-05T15:37:44.695Z",
+  "generated": "2026-06-05T15:46:35.388Z",
   "script": {
-    "lines": 7043,
-    "hash": "706f9a3b",
-    "definedCount": 366,
+    "lines": 5853,
+    "hash": "3f6f986c",
+    "definedCount": 267,
     "stateVars": [
       "_currentView",
       "_currentUser",
@@ -494,8 +494,7 @@
       "saveApuAppraisal",
       "openDestinyBlueprintModal",
       "openDestinyBlueprintInTab",
-      "saveDestinyBlueprint",
-      "name"
+      "saveDestinyBlueprint"
     ]
   },
   "appStateBridge": [
@@ -600,6 +599,26 @@
         "saveAndAddAnother",
         "openPastRecordModal",
         "savePastRecord"
+      ]
+    },
+    {
+      "file": "script-admin.js",
+      "lines": 565,
+      "exports": [
+        "showAdminDashboard",
+        "showTenantManagement",
+        "openCreateTenantModal",
+        "submitNewTenant",
+        "showSystemHealth",
+        "showBackupManager",
+        "createBackup",
+        "restoreBackup",
+        "showPerformanceMonitor",
+        "showDeploymentCenter",
+        "executeDeployment",
+        "rollbackDeployment",
+        "showSystemLogs",
+        "entity"
       ]
     },
     {
@@ -1322,6 +1341,27 @@
       ]
     },
     {
+      "file": "script-org.js",
+      "lines": 677,
+      "exports": [
+        "showOrgChartView",
+        "openNewOrgConsultation",
+        "_orgUpdatePricePreview",
+        "saveNewOrgConsultation",
+        "openOrgConsultationDetail",
+        "openOrgMemberAddModal",
+        "saveOrgMember",
+        "removeOrgMember",
+        "openOrgMemberBulkPaste",
+        "importOrgMembersCsv",
+        "runOrgAnalysis",
+        "generateOrgReport",
+        "previewOrgReport",
+        "markOrgConsultationPaid",
+        "saveOrgConsultationNotes"
+      ]
+    },
+    {
       "file": "script-performance.js",
       "lines": 906,
       "exports": [
@@ -1815,6 +1855,8 @@
     "chunks/script-features2.min.js",
     "chunks/script-fude.min.js",
     "chunks/script-cps.min.js",
+    "chunks/script-admin.min.js",
+    "chunks/script-org.min.js",
     "styles-fixed.min.css",
     "styles-mobile.min.css",
     "styles-mobile-v2.min.css",
