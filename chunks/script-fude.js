@@ -373,7 +373,7 @@ const showFudeView = async (container) => {
                 ${isL1314 && totalPoints > 0 ? `
                 <div class="fude-points-banner">
                     <span class="fude-points-banner-text">🎉 当前累积 <strong>${totalPoints}</strong> 福气积分，可兑换精选奖励！</span>
-                    <button class="fude-points-banner-cta" onclick="app.todo('Redeem Points')">立即兑换 →</button>
+                    <button class="fude-points-banner-cta" onclick="app.openFudeRedeemModal()">立即兑换 →</button>
                 </div>` : ''}
                 ${leaderboardSection}
                 ${adminHighlightsSection}
@@ -2505,6 +2505,43 @@ const saveDestinyBlueprint = async () => {
     }
 };
 
+// #4 — Redeem Fude points modal (replaces app.todo('Redeem Points'))
+const openFudeRedeemModal = () => {
+    const user = window.app._currentUser || window._currentUser;
+    const pts = (() => {
+        try {
+            const el = document.querySelector('.fude-points-banner-text strong');
+            return el ? parseInt(el.textContent, 10) || 0 : 0;
+        } catch { return 0; }
+    })();
+    UI.showModal('立即兑换福气积分', `
+        <div style="font-size:14px;line-height:1.7;">
+            <div style="background:#fef3c7;border-left:4px solid #f59e0b;padding:12px 14px;border-radius:6px;margin-bottom:16px;">
+                <strong>当前积分：${pts} 福气积分</strong>
+            </div>
+            <p style="margin-bottom:12px;">福气积分可用于兑换以下奖励，请联系顾问团队处理兑换申请：</p>
+            <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                <thead>
+                    <tr style="background:#f9fafb;">
+                        <th style="text-align:left;padding:8px 10px;border-bottom:1px solid #e5e7eb;">奖励</th>
+                        <th style="text-align:right;padding:8px 10px;border-bottom:1px solid #e5e7eb;">所需积分</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td style="padding:8px 10px;">精选礼品兑换</td><td style="text-align:right;padding:8px 10px;">500+</td></tr>
+                    <tr style="background:#f9fafb;"><td style="padding:8px 10px;">专属顾问咨询（1小时）</td><td style="text-align:right;padding:8px 10px;">1,000</td></tr>
+                    <tr><td style="padding:8px 10px;">DestinOracles 会员升级</td><td style="text-align:right;padding:8px 10px;">2,000</td></tr>
+                    <tr style="background:#f9fafb;"><td style="padding:8px 10px;">现金抵用券 (RM 50)</td><td style="text-align:right;padding:8px 10px;">5,000</td></tr>
+                </tbody>
+            </table>
+            <div style="margin-top:16px;padding:10px 14px;background:#eff6ff;border-radius:6px;font-size:13px;">
+                📩 发送兑换申请至 <a href="mailto:destinoraclessolution9@gmail.com" style="color:#1d4ed8;">destinoraclessolution9@gmail.com</a>，
+                注明您的姓名、积分数量及所选奖励，团队将在 3 个工作日内回复。
+            </div>
+        </div>
+    `, [{ label: '关闭', action: 'UI.hideModal()', class: 'btn primary' }]);
+};
+
     Object.assign(window.app, {
         showFudeView,
         openStoryDetail,
@@ -2548,5 +2585,6 @@ const saveDestinyBlueprint = async () => {
         openDestinyBlueprintInTab,
         openDestinyBlueprintModal,
         saveDestinyBlueprint,
+        openFudeRedeemModal,
     });
 })();

@@ -1061,6 +1061,19 @@ class DataStore {
                 return local ? JSON.parse(local).filter(r => !deletedIds.has(String(r.id))) : [];
             }
             console.warn(`Offline/error: falling back for ${tableName}`, e);
+            if (!window._offlineNotified) {
+                window._offlineNotified = true;
+                const banner = document.createElement('div');
+                banner.id = 'offline-banner';
+                banner.setAttribute('role', 'alert');
+                banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99998;background:#b45309;color:#fff;text-align:center;padding:8px 16px;font-size:13px;font-weight:600;';
+                banner.textContent = '⚠️ 离线模式 — 无法连接服务器，显示缓存数据。请检查网络后刷新。';
+                document.body?.prepend(banner);
+                window.addEventListener('online', function _removeOfflineBanner() {
+                    document.getElementById('offline-banner')?.remove();
+                    window._offlineNotified = false;
+                }, { once: true });
+            }
             // Even when read fails, still try to push queued writes — write endpoint is separate from read
             this._pushQueuedWrites(tableName).catch(() => {});
             // Always strip tombstoned IDs from any fallback path so deleted records can never reappear

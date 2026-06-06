@@ -1,14 +1,26 @@
-// CRM Service Worker — stale-while-revalidate for static assets.
+// CRM Service Worker — explicit offline strategy (#27).
 //
-// #15 SW cleanup: PRECACHE_URLS now lists only non-hashed, stable resources.
-//   Hashed JS/CSS bundles (script.abc123.min.js etc.) are cached at runtime by
-//   the SWR strategy on first request — no need to enumerate them here.
-//   This keeps the SW maintainable without a build step to inject hashes.
+// ┌─────────────────────────────────────────────────────────────────────────┐
+// │ Fetch strategy summary                                                  │
+// ├──────────────────────────┬──────────────────────────────────────────────┤
+// │ Supabase / auth / RT     │ Network-only. Never cache user data.         │
+// │ Same-origin navigation   │ Network-first → /offline.html fallback.      │
+// │ Hashed static assets     │ Cache-first. Content-addressed = immutable.  │
+// │   (*.abc12345.min.js/css)│                                              │
+// │ Other same-origin assets │ Stale-while-revalidate. Serve cached         │
+// │   (images, fonts, etc.)  │ immediately, update in background.           │
+// │ 3rd-party CDN assets     │ Cache-first (fonts, fontawesome, papaparse). │
+// └──────────────────────────┴──────────────────────────────────────────────┘
 //
-// #27 PWA offline page: /offline.html added to precache; navigation requests
-//   that fail network fall back to it instead of the browser's default error page.
+// Install precache: shell assets that must be available offline (non-hashed,
+//   stable filenames). Hashed bundles are NOT listed here — they get SWR-cached
+//   on first request, which is equivalent to cache-first for content-addressed
+//   URLs (the hash changes → new URL → new cache entry).
 //
-// Cache version bumped on each deploy to invalidate old caches.
+// #15 SW cleanup: see sw-init.js for the legacy-SW unregistration logic.
+//   sw-init.js is loaded as <script defer> from index.html.
+//
+// Cache version: bump CACHE_VERSION on each deploy to expire old caches.
 const CACHE_VERSION = 'crm-v2026-06-05-2';
 const STATIC_CACHE  = `${CACHE_VERSION}-static`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
@@ -86,7 +98,14 @@ self.addEventListener('fetch', (event) => {
         return;
     }
 
-    // Same-origin static assets (JS, CSS, images, chunks) — stale-while-revalidate.
+    // Hashed same-origin assets (content-addressed, immutable) — cache-first.
+    // Pattern: filename contains an 8-12 hex char hash segment before .min.js/.min.css
+    if (url.origin === self.location.origin && /\.[a-f0-9]{8,12}\.min\.(js|css)$/.test(url.pathname)) {
+        event.respondWith(cacheFirst(req));
+        return;
+    }
+
+    // Other same-origin static assets — stale-while-revalidate.
     if (url.origin === self.location.origin) {
         event.respondWith(staleWhileRevalidate(req));
         return;

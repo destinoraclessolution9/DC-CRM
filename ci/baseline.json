@@ -1,9 +1,9 @@
 {
-  "generated": "2026-06-06T01:32:39.578Z",
+  "generated": "2026-06-06T02:02:33.925Z",
   "script": {
-    "lines": 4492,
-    "hash": "7a99d49a",
-    "definedCount": 505,
+    "lines": 4593,
+    "hash": "afa41198",
+    "definedCount": 604,
     "stateVars": [
       "_currentView",
       "_currentUser",
@@ -1073,7 +1073,7 @@
     },
     {
       "file": "script-fude.js",
-      "lines": 2552,
+      "lines": 2590,
       "exports": [
         "showFudeView",
         "openStoryDetail",
@@ -1116,7 +1116,8 @@
         "saveApuAppraisal",
         "openDestinyBlueprintInTab",
         "openDestinyBlueprintModal",
-        "saveDestinyBlueprint"
+        "saveDestinyBlueprint",
+        "openFudeRedeemModal"
       ]
     },
     {
@@ -1491,7 +1492,7 @@
     },
     {
       "file": "script-prospects.js",
-      "lines": 9775,
+      "lines": 9774,
       "exports": [
         "sortProspects",
         "showProspectsView",
@@ -1643,7 +1644,6 @@
         "saveCustomer",
         "openAddPurchaseModal",
         "savePurchase",
-        "found",
         "_setDelivery",
         "updatePurchaseDelivery",
         "updateConversionDelivery",

@@ -23,25 +23,37 @@
     <script type="application/ld+json">
     {
       "@context": "https://schema.org",
-      "@type": "WebApplication",
-      "name": "悅客匯 CRM",
-      "alternateName": "DestinOraclesSolution CRM",
-      "url": "https://destinoraclessolution.com/",
-      "description": "专业风水顾问客户关系管理平台，助力顾问团队高效管理客户、追踪销售与绩效。",
-      "applicationCategory": "BusinessApplication",
-      "operatingSystem": "Web",
-      "inLanguage": ["zh-TW", "en"],
-      "author": {
-        "@type": "Organization",
-        "name": "DestinOraclesSolution",
-        "email": "destinoraclessolution9@gmail.com",
-        "url": "https://destinoraclessolution.com/"
-      },
-      "offers": {
-        "@type": "Offer",
-        "price": "0",
-        "priceCurrency": "MYR"
-      }
+      "@graph": [
+        {
+          "@type": "WebApplication",
+          "name": "悅客匯 CRM",
+          "alternateName": "DestinOraclesSolution CRM",
+          "url": "https://destinoraclessolution.com/",
+          "description": "专业风水顾问客户关系管理平台，助力顾问团队高效管理客户、追踪销售与绩效。",
+          "applicationCategory": "BusinessApplication",
+          "operatingSystem": "Web",
+          "inLanguage": ["zh-TW", "en"],
+          "author": {
+            "@type": "Organization",
+            "name": "DestinOraclesSolution",
+            "url": "https://destinoraclessolution.com/"
+          },
+          "offers": {
+            "@type": "Offer",
+            "price": "0",
+            "priceCurrency": "MYR"
+          }
+        },
+        {
+          "@type": "Organization",
+          "name": "DestinOraclesSolution",
+          "url": "https://destinoraclessolution.com/",
+          "email": "destinoraclessolution9@gmail.com",
+          "description": "风水顾问与命理咨询服务",
+          "areaServed": "MY",
+          "serviceType": "Feng Shui Consulting"
+        }
+      ]
     }
     </script>
 
@@ -67,9 +79,9 @@
          it before the parser reaches the <script> tag near </body>.
          script.js is ~2.5 MB so getting it in flight ASAP is the single
          biggest perceived-load win on first visit. -->
-    <link rel="preload" href="script.4153b6dea4.min.js" as="script">
+    <link rel="preload" href="script.32f839bff0.min.js" as="script">
     <link rel="preload" href="data.5578c6f3bd.min.js" as="script">
-    <link rel="preload" href="styles-fixed.49a116f2c2.min.css" as="style">
+    <link rel="preload" href="styles-fixed.eb30713732.min.css" as="style">
 
     <!-- Font Awesome 6.7.2 self-hosted (2026-06-05) — eliminates CDN dependency.
          Previously loaded from cdnjs.cloudflare.com/libs/font-awesome/6.0.0.
@@ -81,7 +93,7 @@
          in parallel from /fonts/* during HTML parse. -->
     <link rel="stylesheet" href="/fonts/local-fonts.css?v=20260531o">
     <link rel="icon" href="favicon.ico" type="image/x-icon">
-    <link rel="stylesheet" href="styles-fixed.49a116f2c2.min.css">
+    <link rel="stylesheet" href="styles-fixed.eb30713732.min.css">
     <!-- styles-mobile.css contains top-level (non-@media) rules that hide
          the mobile drawer overlay on ALL viewports. Gating it by media
          query would expose those rules only to mobile and the drawer
@@ -108,59 +120,9 @@
         })();
     </script>
 
-    <!-- ═══ Service-worker cleanup v2 (covers iOS Safari disk-cache quirk) ═══
-         History: this codebase historically registered TWO service workers
-         for the same scope:
-           1) /service-worker.js  — legacy SW (app-init.js registered it)
-           2) /sw.js              — newer SW (registered inline below)
-         Whichever installed first won the scope. The legacy SW also had a
-         silent caching bug (resp.type === 'basic' check skipped caching of
-         Vercel's CORS responses), pinning users to stale assets.
-
-         v2 changes (2026-05-31):
-           a) Sentinel key bumped to crm_sw_cleanup_v2 so users who already
-              ran v1 (which exited early without doing anything if they had
-              no orphan) get re-evaluated.
-           b) Detection is broader: ANY SW whose scriptURL ends with
-              /service-worker.js (legacy) OR which manages any cache prefixed
-              crm-cache- / crm-runtime- gets unregistered.
-           c) Even when no orphan SW is present, ALL legacy caches (crm-cache-*,
-              crm-runtime-*) are cleared — these are leftovers from the legacy
-              SW that don't get cleaned by Safari otherwise.
-           d) location.replace(href + '?_=' + ts) — forces iOS Safari to
-              bypass its disk cache layer (separate from SW cache, persists
-              after SW unregister; this is the iOS-specific bug v1 missed).
-           e) The reload is only performed when something actually changed,
-              so healthy users don't see a flicker. -->
-    <script>
-        (async function () {
-            try {
-                if (!('serviceWorker' in navigator)) return;
-                if (localStorage.getItem('crm_sw_cleanup_v2') === 'done') return;
-                var regs = await navigator.serviceWorker.getRegistrations();
-                var orphans = regs.filter(function (r) {
-                    var url = (r.active || r.waiting || r.installing || {}).scriptURL || '';
-                    return url.indexOf('/service-worker.js') !== -1;
-                });
-                var cacheNames = (typeof caches !== 'undefined' && caches.keys) ? await caches.keys() : [];
-                var legacyCaches = cacheNames.filter(function (n) {
-                    return n.indexOf('crm-cache-') === 0 || n.indexOf('crm-runtime-') === 0;
-                });
-                // Sentinel set FIRST so partial failures can't loop.
-                localStorage.setItem('crm_sw_cleanup_v2', 'done');
-                if (orphans.length === 0 && legacyCaches.length === 0) return;
-                await Promise.all(orphans.map(function (r) { return r.unregister(); }));
-                await Promise.all(legacyCaches.map(function (n) { return caches.delete(n); }));
-                console.info('[crm] cleanup v2: removed ' + orphans.length + ' orphan SW + ' + legacyCaches.length + ' legacy cache(s)');
-                // iOS Safari ignores location.reload() vs disk cache — force a
-                // unique URL via querystring so the browser MUST hit network.
-                var sep = location.search ? '&' : '?';
-                location.replace(location.pathname + location.search + sep + '_swclean=' + Date.now());
-            } catch (e) {
-                console.warn('[crm] SW cleanup v2 failed:', e);
-            }
-        })();
-    </script>
+    <!-- SW cleanup v2 + registration extracted to sw-init.js (#15).
+         Full history comment preserved in sw-init.js. -->
+    <script defer src="sw-init.js"></script>
 
     <!-- Skeleton CSS inlined so the shimmer paints on first frame, even
          before styles-fixed.css arrives. FB/IG philosophy: the user must
@@ -208,17 +170,16 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="悅客匯">
     <link rel="apple-touch-icon" href="icons/icon-192x192.png">
-<script>window.__ASSET_MANIFEST={"script.min.js":"script.4153b6dea4.min.js","script-features.min.js":"script-features.69a95bf648.min.js","data.min.js":"data.5578c6f3bd.min.js","app-init.min.js":"app-init.6e7500dfe9.min.js","ui.min.js":"ui.5e13152572.min.js","auth.min.js":"auth.8fef230596.min.js","supabase-init.min.js":"supabase-init.9bcd3a058f.min.js","two-factor.min.js":"two-factor.0f11c12431.min.js","push-notifications.min.js":"push-notifications.406fb9b19d.min.js","chunks/script-egg.min.js":"chunks/script-egg.9631e3961f.min.js","chunks/script-boss-report.min.js":"chunks/script-boss-report.b2de97b1c4.min.js","chunks/script-stock-take.min.js":"chunks/script-stock-take.37b0b78e22.min.js","chunks/script-knowledge.min.js":"chunks/script-knowledge.71cb11d661.min.js","chunks/script-formula.min.js":"chunks/script-formula.48c3aa1179.min.js","chunks/script-marketing.min.js":"chunks/script-marketing.853c145fa6.min.js","chunks/script-reporting.min.js":"chunks/script-reporting.fa3a6fe19d.min.js","chunks/script-cases.min.js":"chunks/script-cases.a4502119e6.min.js","chunks/script-referrals.min.js":"chunks/script-referrals.a50493088a.min.js","chunks/script-performance.min.js":"chunks/script-performance.5bb2b38494.min.js","chunks/script-whatsapp.min.js":"chunks/script-whatsapp.8e63d615d2.min.js","chunks/script-ai.min.js":"chunks/script-ai.3cad39a6aa.min.js","chunks/script-documents.min.js":"chunks/script-documents.4baac7d072.min.js","chunks/script-mobile.min.js":"chunks/script-mobile.ac01246232.min.js","chunks/script-gcal.min.js":"chunks/script-gcal.bc4db3bce6.min.js","chunks/script-forms.min.js":"chunks/script-forms.d1902f9b4a.min.js","chunks/script-activities.min.js":"chunks/script-activities.fd66dd7326.min.js","chunks/script-calendar.min.js":"chunks/script-calendar.e597130e7b.min.js","chunks/script-prospects.min.js":"chunks/script-prospects.52a2b65837.min.js","chunks/script-pipeline.min.js":"chunks/script-pipeline.ae3c3678d1.min.js","chunks/script-import.min.js":"chunks/script-import.fb116ac9ab.min.js","chunks/script-features2.min.js":"chunks/script-features2.3d1e395e24.min.js","chunks/script-fude.min.js":"chunks/script-fude.b0c1e4c8ee.min.js","chunks/script-cps.min.js":"chunks/script-cps.20989b76dc.min.js","chunks/script-admin.min.js":"chunks/script-admin.fe07c1ec99.min.js","chunks/script-org.min.js":"chunks/script-org.33da91c936.min.js","chunks/script-search.min.js":"chunks/script-search.8303db7051.min.js","styles-fixed.min.css":"styles-fixed.49a116f2c2.min.css","styles-mobile.min.css":"styles-mobile.5c2e7e65a7.min.css","styles-login-v2.min.css":"styles-login-v2.1cb29beb90.min.css","styles-theme.min.css":"styles-theme.67758a1098.min.css"};</script>
+<script>window.__ASSET_MANIFEST={"script.min.js":"script.32f839bff0.min.js","script-features.min.js":"script-features.69a95bf648.min.js","data.min.js":"data.5578c6f3bd.min.js","app-init.min.js":"app-init.6e7500dfe9.min.js","ui.min.js":"ui.5e13152572.min.js","auth.min.js":"auth.8fef230596.min.js","supabase-init.min.js":"supabase-init.9bcd3a058f.min.js","two-factor.min.js":"two-factor.0f11c12431.min.js","push-notifications.min.js":"push-notifications.406fb9b19d.min.js","chunks/script-egg.min.js":"chunks/script-egg.9631e3961f.min.js","chunks/script-boss-report.min.js":"chunks/script-boss-report.b2de97b1c4.min.js","chunks/script-stock-take.min.js":"chunks/script-stock-take.37b0b78e22.min.js","chunks/script-knowledge.min.js":"chunks/script-knowledge.71cb11d661.min.js","chunks/script-formula.min.js":"chunks/script-formula.48c3aa1179.min.js","chunks/script-marketing.min.js":"chunks/script-marketing.853c145fa6.min.js","chunks/script-reporting.min.js":"chunks/script-reporting.fa3a6fe19d.min.js","chunks/script-cases.min.js":"chunks/script-cases.a4502119e6.min.js","chunks/script-referrals.min.js":"chunks/script-referrals.a50493088a.min.js","chunks/script-performance.min.js":"chunks/script-performance.5bb2b38494.min.js","chunks/script-whatsapp.min.js":"chunks/script-whatsapp.8e63d615d2.min.js","chunks/script-ai.min.js":"chunks/script-ai.3cad39a6aa.min.js","chunks/script-documents.min.js":"chunks/script-documents.4baac7d072.min.js","chunks/script-mobile.min.js":"chunks/script-mobile.ac01246232.min.js","chunks/script-gcal.min.js":"chunks/script-gcal.bc4db3bce6.min.js","chunks/script-forms.min.js":"chunks/script-forms.d1902f9b4a.min.js","chunks/script-activities.min.js":"chunks/script-activities.fd66dd7326.min.js","chunks/script-calendar.min.js":"chunks/script-calendar.e597130e7b.min.js","chunks/script-prospects.min.js":"chunks/script-prospects.52a2b65837.min.js","chunks/script-pipeline.min.js":"chunks/script-pipeline.ae3c3678d1.min.js","chunks/script-import.min.js":"chunks/script-import.fb116ac9ab.min.js","chunks/script-features2.min.js":"chunks/script-features2.3d1e395e24.min.js","chunks/script-fude.min.js":"chunks/script-fude.b0c1e4c8ee.min.js","chunks/script-cps.min.js":"chunks/script-cps.20989b76dc.min.js","chunks/script-admin.min.js":"chunks/script-admin.fe07c1ec99.min.js","chunks/script-org.min.js":"chunks/script-org.33da91c936.min.js","chunks/script-search.min.js":"chunks/script-search.8303db7051.min.js","styles-fixed.min.css":"styles-fixed.eb30713732.min.css","styles-mobile.min.css":"styles-mobile.5c2e7e65a7.min.css","styles-login-v2.min.css":"styles-login-v2.1cb29beb90.min.css","styles-theme.min.css":"styles-theme.67758a1098.min.css"};</script>
 </head>
 
 <body>
     <noscript><div style="position:fixed;top:0;left:0;right:0;z-index:99999;background:#b91c1c;color:#fff;text-align:center;padding:12px 16px;font-size:14px;font-weight:600;">⚠️ 悅客匯 CRM requires JavaScript to be enabled. Please enable JavaScript in your browser to continue.</div></noscript>
-    <a href="#content-viewport" class="skip-to-content" style="position:absolute;left:-9999px;top:4px;z-index:9999;padding:8px 16px;background:var(--primary,#800020);color:#fff;border-radius:4px;font-size:14px;font-weight:600;text-decoration:none;" onfocus="this.style.left='4px'" onblur="this.style.left='-9999px'">Skip to main content</a>
+    <a href="#content-viewport" class="skip-to-content">Skip to main content</a>
     <!-- Loading screen shown while session check runs — hidden after init resolves -->
-    <div id="app-loading" style="position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:linear-gradient(160deg,#1a0508 0%,#2d0c14 60%,#1a0508 100%);z-index:99999;">
-        <div style="width:52px;height:52px;border:3px solid rgba(255,255,255,0.12);border-top-color:#C0607A;border-radius:50%;animation:_appSpin 0.85s linear infinite;"></div>
-        <style>@keyframes _appSpin{to{transform:rotate(360deg)}}</style>
-        <div style="margin-top:18px;color:rgba(255,200,210,0.65);font-size:15px;font-family:'Noto Serif SC',serif,sans-serif;letter-spacing:0.12em;">悅客匯</div>
+    <div id="app-loading">
+        <div class="app-loading-spinner"></div>
+        <div class="app-loading-text">悅客匯</div>
     </div>
     <div id="login-container" class="login-container login-v2" style="display:none;">
         <!-- Background mesh + decorations -->
@@ -373,26 +334,28 @@
                 <i class="fas fa-bars" aria-hidden="true"></i>
             </div>
 
+            <!-- All nav-links items start hidden; updateNavVisibility() shows only
+                 the items the logged-in user's role permits (#28). -->
             <ul class="nav-links" id="nav-links">
                 <!-- Group 1: Core CRM -->
-                <li id="nav-calendar" data-view="calendar">Calendar</li>
-                <li id="nav-prospects" data-view="prospects">Prospect/Customer</li>
-                <li id="nav-referrals" data-view="referrals">Referral Relationship Management</li>
-                <li id="nav-pipeline" data-view="pipeline">Potential Pipeline Management</li>
-                <li id="nav-promotions" data-view="promotions">Monthly Promotion</li>
-                <li id="nav-marketing-automation" data-view="marketing_automation">Marketing Automation</li>
+                <li id="nav-calendar" data-view="calendar" style="display:none;">Calendar</li>
+                <li id="nav-prospects" data-view="prospects" style="display:none;">Prospect/Customer</li>
+                <li id="nav-referrals" data-view="referrals" style="display:none;">Referral Relationship Management</li>
+                <li id="nav-pipeline" data-view="pipeline" style="display:none;">Potential Pipeline Management</li>
+                <li id="nav-promotions" data-view="promotions" style="display:none;">Monthly Promotion</li>
+                <li id="nav-marketing-automation" data-view="marketing_automation" style="display:none;">Marketing Automation</li>
                 <li id="nav-milestones" data-view="milestones" onclick="app.navigateTo('milestones')" style="display:none;">增运九法</li>
                 <li id="nav-fude" data-view="fude" onclick="app.navigateTo('fude')" style="display:none;">福运相随</li>
                 <li id="nav-noticeboard" data-view="noticeboard" onclick="app.navigateTo('noticeboard')" style="display:none;">📢 公告栏</li>
-                <li id="nav-cases" data-view="cases">Success Case Library</li>
+                <li id="nav-cases" data-view="cases" style="display:none;">Success Case Library</li>
                 <li id="nav-purchases_history" data-view="purchases_history" style="display:none;">Purchases History</li>
 
                 <!-- Group 2: Consultant & Analytics -->
-                <li id="nav-agents" data-view="agents">Consultant</li>
+                <li id="nav-agents" data-view="agents" style="display:none;">Consultant</li>
                 <li id="nav-marketing-lists" data-view="marketing_lists" style="display:none;">Marketing Lists</li>
-                <li id="nav-performance" data-view="performance">Ranking Performance Overview</li>
-                <li id="nav-reports" data-view="reports">Reporting KPI</li>
-                <li id="nav-risk" data-view="risk">Consultant Attrition Risk Analysis</li>
+                <li id="nav-performance" data-view="performance" style="display:none;">Ranking Performance Overview</li>
+                <li id="nav-reports" data-view="reports" style="display:none;">Reporting KPI</li>
+                <li id="nav-risk" data-view="risk" style="display:none;">Consultant Attrition Risk Analysis</li>
 
                 <!-- Phase 17: AI Insights -->
                 <li id="nav-ai-insights" class="dropdown-trigger" style="display:none; position:relative; cursor:pointer;" aria-haspopup="true" aria-expanded="false">
@@ -418,12 +381,12 @@
                 </li>
 
                 <!-- Group 3: Documents & Admin -->
-                <li id="nav-knowledge" data-view="knowledge" onclick="app.navigateTo('knowledge')">Knowledge HQ</li>
-                <li id="nav-documents" data-view="documents">Document Management</li>
-                <li id="nav-import" data-view="import">Import / Export</li>
+                <li id="nav-knowledge" data-view="knowledge" onclick="app.navigateTo('knowledge')" style="display:none;">Knowledge HQ</li>
+                <li id="nav-documents" data-view="documents" style="display:none;">Document Management</li>
+                <li id="nav-import" data-view="import" style="display:none;">Import / Export</li>
 
                 <!-- Phase 20: System Administration & Deployment -->
-                <li class="dropdown-trigger" style="position:relative; cursor:pointer;" id="nav-admin" aria-haspopup="true" aria-expanded="false">
+                <li class="dropdown-trigger" style="display:none; position:relative; cursor:pointer;" id="nav-admin" aria-haspopup="true" aria-expanded="false">
                     Admin <i class="fas fa-caret-down" aria-hidden="true"></i>
                     <ul class="dropdown-menu" role="menu" style="display:none;">
                         <li role="menuitem" onclick="app.showAdminDashboard()" tabindex="-1">System Dashboard</li>
@@ -440,7 +403,7 @@
 
                 <!-- Group 4: Tools & Settings -->
                 <li id="nav-workflows" data-view="workflows" style="display:none;">Workflow Automation</li>
-                <li id="nav-protection" data-view="protection">Protection Monitoring</li>
+                <li id="nav-protection" data-view="protection" style="display:none;">Protection Monitoring</li>
                 <!-- Operations (Super Admin only) -->
                 <li id="nav-stock-take" data-view="stock_take" onclick="app.navigateTo('stock_take')" style="display:none;">Stock Take</li>
                 <li id="nav-egg-purchasing" data-view="egg_purchasing" onclick="app.navigateTo('egg_purchasing')" style="display:none;">Egg Purchasing</li>
@@ -450,9 +413,9 @@
                 <li id="nav-lead_forms" data-view="lead_forms" onclick="app.navigateTo('lead_forms')" style="display:none;">Lead Capture Forms</li>
                 <li id="nav-surveys" data-view="surveys" onclick="app.navigateTo('surveys')" style="display:none;">NPS Surveys</li>
                 <li id="nav-contracts" data-view="contracts" onclick="app.navigateTo('contracts')" style="display:none;">Contracts</li>
-                <li id="nav-custom_fields" data-view="custom_fields" onclick="app.navigateTo('custom_fields')">Custom Fields</li>
-                <li id="nav-integrations" data-view="integrations" onclick="app.navigateTo('integrations')">Integrations</li>
-                <li id="nav-settings" data-view="settings">Setting - Account</li>
+                <li id="nav-custom_fields" data-view="custom_fields" onclick="app.navigateTo('custom_fields')" style="display:none;">Custom Fields</li>
+                <li id="nav-integrations" data-view="integrations" onclick="app.navigateTo('integrations')" style="display:none;">Integrations</li>
+                <li id="nav-settings" data-view="settings" style="display:none;">Setting - Account</li>
                 <li id="nav-booking_settings" data-view="booking_settings" onclick="app.navigateTo('booking_settings')" style="display:none;">Booking Scheduler</li>
             </ul>
 
@@ -646,12 +609,12 @@
                 </div>
             </main>
         </div>
-        <footer role="contentinfo" class="app-footer" style="text-align:center;padding:8px 16px;font-size:11px;color:var(--text-secondary);border-top:1px solid var(--border,rgba(0,0,0,0.08));background:var(--surface,#fff);flex-shrink:0;">
+        <footer role="contentinfo" class="app-footer">
             &copy; <span id="footer-year"></span> DestinOraclesSolution. All rights reserved.
             &nbsp;|&nbsp;
-            <a href="/privacy.html" style="color:var(--text-secondary);text-decoration:underline;" target="_blank">Privacy Policy</a>
+            <a href="/privacy.html" target="_blank">Privacy Policy</a>
             &nbsp;|&nbsp;
-            <a href="mailto:destinoraclessolution9@gmail.com" style="color:var(--text-secondary);text-decoration:underline;">Contact</a>
+            <a href="mailto:destinoraclessolution9@gmail.com">Contact</a>
         </footer>
         <!-- footer year set by app-init.js -->
     </div>
@@ -673,7 +636,7 @@
          before spending bandwidth on the 2.1 MB app bundle. defer already prevents
          parser-blocking; low fetchpriority additionally pushes the download below
          CSS + fonts in the network queue so FCP happens sooner. -->
-    <script defer fetchpriority="low" src="script.4153b6dea4.min.js"></script>
+    <script defer fetchpriority="low" src="script.32f839bff0.min.js"></script>
 
     <!--
       The following libraries are loaded on-demand via window._loadScriptOnce()
@@ -703,23 +666,7 @@
     <!-- <script src="rbac.js"></script> -->
     <script defer src="two-factor.0f11c12431.min.js"></script>
 
-    <!-- Phase D: Service Worker for stale-while-revalidate static asset caching.
-         /sw.js is the SOLE service worker (legacy /service-worker.js removed
-         from app-init.js 2026-05-31; orphan registrations cleaned up by the
-         inline block in <head>). Expose registration on window._swRegistration
-         so script.js + push-notifications.js can read it for push subscription. -->
-    <script>
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/sw.js').then((reg) => {
-                    console.info('[SW] registered, scope:', reg.scope);
-                    window._swRegistration = reg;
-                }).catch((err) => {
-                    console.warn('[SW] registration failed:', err);
-                });
-            });
-        }
-    </script>
+    <!-- SW registration moved to sw-init.js (#15) -->
 
     <!-- Phase 20: System Administration Scripts -->
     <!-- <script src="tenant-manager.js"></script> -->
