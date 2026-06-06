@@ -78,6 +78,10 @@ const JS_TARGETS = [
   'chunks/script-org.js',
   // Phase 5D: Advanced Search + Filter Panel (extracted 2026-06-05)
   'chunks/script-search.js',
+  // Order Form Extract — standalone scanner page
+  'chunks/script-order-form-extract.js',
+  // Phase 6A: Journey System — 5-year automated follow-up (2026-06-06)
+  'chunks/script-journey.js',
 ];
 
 const CSS_TARGETS = [

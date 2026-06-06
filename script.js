@@ -1346,12 +1346,12 @@ const appLogic = (() => {
 
         // Map Level 1-14 to visible nav IDs (suffix after 'nav-')
         // Order in array = display order in nav (first item leftmost / top).
-        const _l12 = ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'reports', 'documents', 'knowledge', 'settings', 'fude', 'milestones'];
+        const _l12 = ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'reports', 'documents', 'knowledge', 'settings', 'fude', 'milestones', 'order-form-extract'];
         const levelPermissions = {
-            1: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'purchases_history', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'knowledge', 'import', 'integrations', 'settings', 'fude', 'milestones', 'noticeboard', 'custom_fields', 'egg-purchasing', 'standard-functions', 'formula-purchaser', 'stock-take', 'boss-report', 'org-chart'],
-            2: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'knowledge', 'import', 'integrations', 'settings', 'fude', 'milestones', 'noticeboard', 'custom_fields', 'org-chart'],
-            3: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'performance', 'reports', 'protection', 'documents', 'knowledge', 'settings', 'fude'],
-            4: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'performance', 'reports', 'protection', 'documents', 'knowledge', 'settings', 'fude'],
+            1: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'purchases_history', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'knowledge', 'import', 'integrations', 'settings', 'fude', 'milestones', 'noticeboard', 'custom_fields', 'egg-purchasing', 'standard-functions', 'formula-purchaser', 'stock-take', 'boss-report', 'org-chart', 'order-form-extract'],
+            2: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'knowledge', 'import', 'integrations', 'settings', 'fude', 'milestones', 'noticeboard', 'custom_fields', 'org-chart', 'order-form-extract'],
+            3: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'performance', 'reports', 'protection', 'documents', 'knowledge', 'settings', 'fude', 'order-form-extract'],
+            4: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'performance', 'reports', 'protection', 'documents', 'knowledge', 'settings', 'fude', 'order-form-extract'],
             5: _l12, 6: _l12, 7: _l12, 8: _l12, 9: _l12, 10: _l12,
             11: ['calendar', 'prospects', 'referrals', 'promotions', 'cases', 'knowledge', 'settings', 'fude', 'milestones'],
             12: ['noticeboard', 'fude', 'milestones', 'prospects', 'referrals'],          // 传福大使
@@ -1376,7 +1376,8 @@ const appLogic = (() => {
             'performance', 'reports', 'risk', 'admin',
             'integrations', 'settings', 'milestones', 'fude', 'noticeboard',
             'custom_fields', 'egg-purchasing', 'standard-functions', 'formula-purchaser',
-            'purchases_history', 'stock-take', 'boss-report', 'org-chart'
+            'purchases_history', 'stock-take', 'boss-report', 'org-chart',
+            'order-form-extract',
         ];
 
         allNavIds.forEach(id => {
@@ -2615,6 +2616,9 @@ function _wireLoginBtn() {
         'ai_insights':          { src: 'chunks/script-ai.min.js',          minLevel: 1,    exactLevels: [1, 2] },
         'documents':            { src: 'chunks/script-documents.min.js', minLevel: null, exactLevels: null },
         'integrations':         { src: 'chunks/script-gcal.min.js',       minLevel: 1,    exactLevels: null },
+        'order_form_extract':   { src: 'chunks/script-order-form-extract.min.js', minLevel: null, exactLevels: null },
+        // Phase 6A: Journey System — 5-year automated follow-up (2026-06-06)
+        'journey':              { src: 'chunks/script-journey.min.js',    minLevel: null, exactLevels: null },
     };
 
     // Predictive prefetch — after login, queue rel=prefetch for every chunk
@@ -2834,6 +2838,7 @@ function _wireLoginBtn() {
             risk: 'Attrition Risk', nps: 'NPS Surveys',
             knowledge: 'Knowledge HQ',
             org_chart: 'Org Chart Consultant',
+            order_form_extract: 'Order Form Extract',
         };
         document.title = `${VIEW_TITLES[viewId] || viewId} — 悅客匯 CRM`;
 
@@ -3033,6 +3038,12 @@ function _wireLoginBtn() {
             } else {
                 viewport.innerHTML = '<div style="padding:24px;color:var(--gray-500);">Org Chart Consultant module is loading…</div>';
             }
+        } else if (viewId === 'order_form_extract') {
+            _currentView = 'order_form_extract';
+            await (window.app.showOrderFormExtractView || (() => {}))(viewport);
+        } else if (viewId === 'journey') {
+            _currentView = 'journey';
+            await (window.app.showAgentJourneyDashboard || (() => {}))(viewport);
         } else {
             viewport.innerHTML = `
                 <div class="placeholder-view">
@@ -3922,6 +3933,22 @@ function _wireLoginBtn() {
         openPrepareGiftModal,
         logBirthdayGift,
 
+        // Phase 6A: Journey System — implemented by chunks/script-journey.js
+        // (Object.assign after chunk load overrides these forwarding stubs)
+        renderJourneyTab:          async (...a) => (window.app.renderJourneyTab           || (() => {}))(...a),
+        markJourneyTouchpointDone: async (...a) => (window.app.markJourneyTouchpointDone  || (() => {}))(...a),
+        skipJourneyTouchpoint:     async (...a) => (window.app.skipJourneyTouchpoint      || (() => {}))(...a),
+        snoozeJourneyTouchpoint:   async (...a) => (window.app.snoozeJourneyTouchpoint    || (() => {}))(...a),
+        executeSnooze:             async (...a) => (window.app.executeSnooze              || (() => {}))(...a),
+        sendJourneyWhatsApp:       async (...a) => (window.app.sendJourneyWhatsApp        || (() => {}))(...a),
+        switchJourneyTrackDisplay: async (...a) => (window.app.switchJourneyTrackDisplay  || (() => {}))(...a),
+        switchJourneyTrack:        async (...a) => (window.app.switchJourneyTrack         || (() => {}))(...a),
+        confirmSwitchJourneyTrack: async (...a) => (window.app.confirmSwitchJourneyTrack  || (() => {}))(...a),
+        openSpawnTouchpointsModal: async (...a) => (window.app.openSpawnTouchpointsModal  || (() => {}))(...a),
+        executeSpawnTouchpoints:   async (...a) => (window.app.executeSpawnTouchpoints    || (() => {}))(...a),
+        showAgentJourneyDashboard: async (...a) => (window.app.showAgentJourneyDashboard  || (() => {}))(...a),
+        showAgentJourneyLoad:      async (...a) => (window.app.showAgentJourneyLoad       || (() => {}))(...a),
+
         // Calendar + Follow-Up Engine — implemented by chunks/script-calendar.js
         // Phase 11: DMS — implemented by chunks/script-documents.js
 
@@ -3989,6 +4016,8 @@ function _wireLoginBtn() {
         offlineUpdate,
 
         // Phase 15: Integrations — implemented by chunks/script-gcal.js
+
+        // [CHUNK: order_form_extract] showOrderFormExtractView + ofeHandleFile Object.assigned by chunks/script-order-form-extract.js
 
         // Phase 17: AI Analytics — implemented by chunks/script-ai.js
         // (chunk Object.assign overwrites these stubs after navigateTo('ai_insights') loads it)

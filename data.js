@@ -58,7 +58,10 @@ class DataStore {
             // Knowledge HQ — personal knowledge hub
             'knowledge_entries', 'knowledge_links', 'knowledge_daily_notes',
             // Product price history
-            'product_price_history'
+            'product_price_history',
+            // Journey System — 5-year automated follow-up (2026-06-06)
+            'journey_templates', 'journey_touchpoints', 'journey_stage_log',
+            'conditional_rules', 'prospect_score_log'
         ];
         this.initialized = false;
         this._events = {};
@@ -2505,6 +2508,225 @@ class DataStore {
         if (!publicUrl || typeof publicUrl !== 'string') return null;
         const m = publicUrl.match(/\/storage\/v1\/object\/public\/attachments\/(.+?)(?:\?|$)/);
         return m ? decodeURIComponent(m[1]) : null;
+    }
+
+    // ── Journey System methods ────────────────────────────────────────────────
+
+    // Fetch all touchpoints for a single prospect or customer, newest-due first.
+    async getJourneyTouchpoints(entityType, entityId) {
+        if (!entityId) return [];
+        const col = entityType === 'customer' ? 'customer_id' : 'prospect_id';
+        try {
+            const { data, error } = await window.supabase
+                .from('journey_touchpoints')
+                .select('*')
+                .eq(col, entityId)
+                .order('due_date', { ascending: true });
+            if (error) throw error;
+            return data || [];
+        } catch (e) {
+            console.warn('[journey] getJourneyTouchpoints', e?.message);
+            return [];
+        }
+    }
+
+    // Touchpoints due today for a specific agent (or all agents if null).
+    async getJourneyTouchpointsDueToday(agentId = null) {
+        const today = new Date().toISOString().slice(0, 10);
+        try {
+            let q = window.supabase
+                .from('journey_touchpoints')
+                .select('*, prospects(full_name,phone), customers(full_name,phone)')
+                .in('status', ['pending', 'overdue'])
+                .lte('due_date', today)
+                .order('priority', { ascending: false })
+                .order('due_date', { ascending: true });
+            if (agentId) q = q.eq('assigned_to', agentId);
+            const { data, error } = await q;
+            if (error) throw error;
+            return data || [];
+        } catch (e) {
+            console.warn('[journey] getJourneyTouchpointsDueToday', e?.message);
+            return [];
+        }
+    }
+
+    // Overdue touchpoints for an agent (status='overdue').
+    async getOverdueTouchpointsForAgent(agentId) {
+        if (!agentId) return [];
+        try {
+            const { data, error } = await window.supabase
+                .from('journey_touchpoints')
+                .select('*')
+                .eq('assigned_to', agentId)
+                .eq('status', 'overdue')
+                .order('due_date', { ascending: true });
+            if (error) throw error;
+            return data || [];
+        } catch (e) {
+            console.warn('[journey] getOverdueTouchpointsForAgent', e?.message);
+            return [];
+        }
+    }
+
+    // Mark a touchpoint done / skipped / snoozed.
+    // opts: { notes?, snooze_days? (for snoozed status) }
+    async updateTouchpointStatus(touchpointId, status, opts = {}) {
+        if (!touchpointId) return false;
+        const payload = { status, updated_at: new Date().toISOString() };
+        if (status === 'done') {
+            payload.completed_at = new Date().toISOString();
+            if (window._currentUser?.id) payload.completed_by = window._currentUser.id;
+        }
+        if (status === 'snoozed' && opts.snooze_days) {
+            const d = new Date();
+            d.setDate(d.getDate() + opts.snooze_days);
+            payload.snooze_until = d.toISOString().slice(0, 10);
+            payload.status = 'pending';  // re-activate; cron will re-mark overdue if missed
+        }
+        if (opts.notes) payload.notes = opts.notes;
+        try {
+            const { error } = await window.supabase
+                .from('journey_touchpoints')
+                .update(payload)
+                .eq('id', touchpointId);
+            if (error) throw error;
+            this.invalidateCache('journey_touchpoints');
+            return true;
+        } catch (e) {
+            console.warn('[journey] updateTouchpointStatus', e?.message);
+            return false;
+        }
+    }
+
+    // Get all active journey templates.
+    async getJourneyTemplates(track = null) {
+        try {
+            let q = window.supabase
+                .from('journey_templates')
+                .select('*')
+                .eq('is_active', true)
+                .order('sort_order', { ascending: true });
+            if (track) q = q.eq('track', track);
+            const { data, error } = await q;
+            if (error) throw error;
+            return data || [];
+        } catch (e) {
+            console.warn('[journey] getJourneyTemplates', e?.message);
+            return [];
+        }
+    }
+
+    // Spawn touchpoints for an entity from a given stage.
+    // startDate: Date object = when the stage begins (defaults to today).
+    async spawnTouchpointsForStage(entityType, entityId, stageName, opts = {}) {
+        const { startDate = new Date(), track = 'active', assignedTo = null } = opts;
+        try {
+            const templates = await this.getJourneyTemplates(track);
+            const stageTemplates = templates.filter(t => t.stage_name === stageName);
+            if (!stageTemplates.length) return 0;
+
+            const entityCol = entityType === 'customer' ? 'customer_id' : 'prospect_id';
+            const rows = stageTemplates.map(t => {
+                const dueDate = new Date(startDate);
+                dueDate.setDate(dueDate.getDate() + t.days_offset);
+                return {
+                    [entityCol]:        entityId,
+                    template_id:        t.id,
+                    stage_name:         t.stage_name,
+                    track:              t.track,
+                    touchpoint_type:    t.touchpoint_type,
+                    message_template:   t.message_template,
+                    title:              t.name,
+                    due_date:           dueDate.toISOString().slice(0, 10),
+                    priority:           t.priority,
+                    status:             'pending',
+                    assigned_to:        assignedTo,
+                    escalates_to:       null,
+                    escalate_after_days: t.escalate_after_days,
+                };
+            });
+
+            const { error } = await window.supabase
+                .from('journey_touchpoints')
+                .insert(rows);
+            if (error) throw error;
+            this.invalidateCache('journey_touchpoints');
+            return rows.length;
+        } catch (e) {
+            console.warn('[journey] spawnTouchpointsForStage', e?.message);
+            return 0;
+        }
+    }
+
+    // Log a stage transition (immutable).
+    async logStageTransition(entityType, entityId, fromStage, toStage, notes = '') {
+        try {
+            const { error } = await window.supabase
+                .from('journey_stage_log')
+                .insert({
+                    entity_type:     entityType,
+                    entity_id:       entityId,
+                    from_stage:      fromStage || null,
+                    to_stage:        toStage,
+                    transitioned_by: window._currentUser?.id || null,
+                    notes:           notes || null,
+                });
+            if (error) throw error;
+            this.invalidateCache('journey_stage_log');
+            return true;
+        } catch (e) {
+            console.warn('[journey] logStageTransition', e?.message);
+            return false;
+        }
+    }
+
+    // Append a score snapshot for a prospect.
+    async logProspectScore(prospectId, score, delta, triggerEvent = '') {
+        if (!prospectId) return false;
+        try {
+            const { error } = await window.supabase
+                .from('prospect_score_log')
+                .insert({ prospect_id: prospectId, score, delta, trigger_event: triggerEvent });
+            if (error) throw error;
+            return true;
+        } catch (e) {
+            console.warn('[journey] logProspectScore', e?.message);
+            return false;
+        }
+    }
+
+    // Get the full stage transition log for an entity.
+    async getJourneyStageLog(entityType, entityId) {
+        if (!entityId) return [];
+        try {
+            const { data, error } = await window.supabase
+                .from('journey_stage_log')
+                .select('*')
+                .eq('entity_type', entityType)
+                .eq('entity_id', entityId)
+                .order('transitioned_at', { ascending: false });
+            if (error) throw error;
+            return data || [];
+        } catch (e) {
+            console.warn('[journey] getJourneyStageLog', e?.message);
+            return [];
+        }
+    }
+
+    // Get conditional rules for evaluating triggers.
+    async getConditionalRules() {
+        try {
+            const { data, error } = await window.supabase
+                .from('conditional_rules')
+                .select('*')
+                .eq('is_active', true);
+            if (error) throw error;
+            return data || [];
+        } catch (e) {
+            console.warn('[journey] getConditionalRules', e?.message);
+            return [];
+        }
     }
 
 }

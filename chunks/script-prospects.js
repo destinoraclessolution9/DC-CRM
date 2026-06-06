@@ -2220,11 +2220,29 @@ const showCustomerDetail = async (customerId) => {
                     <div class="acc-body" id="cust-acc-body-tags-${customer.id}" style="display:none" data-loaded="false"></div>
                 </div>
 
+                <!-- 12 Journey Tracker -->
+                <div class="acc-item" id="cust-acc-journey-${customer.id}">
+                    <div class="acc-hdr" onclick="app.toggleCustomerAccordion('journey',${customer.id},this.parentElement)">
+                        <span><i class="fas fa-route" style="color:#7c3aed;"></i> Journey Tracker <span id="cust-jny-badge-${customer.id}" style="display:none;background:#dc2626;color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:10px;margin-left:6px;vertical-align:middle;"></span></span>
+                        <i class="fas fa-chevron-down acc-chev"></i>
+                    </div>
+                    <div class="acc-body" id="cust-acc-body-journey-${customer.id}" style="display:none" data-loaded="false"></div>
+                </div>
+
             </div>
         </div>
     `;
     // Pre-load the Info accordion body (open by default)
     await switchCustomerProfileTab('info', customerId, document.getElementById(`cust-acc-body-info-${customerId}`));
+    // Async: populate journey overdue badge
+    AppDataStore.getJourneyTouchpoints('customer', customer.id).then(tps => {
+        const overdue = tps.filter(t => t.status === 'overdue').length;
+        const badge = document.getElementById(`cust-jny-badge-${customer.id}`);
+        if (badge && overdue > 0) {
+            badge.textContent = `${overdue} overdue`;
+            badge.style.display = 'inline';
+        }
+    }).catch(() => {});
 };
 
 const switchProfileTab = async (btn, tabName, cId) => {
@@ -2427,6 +2445,10 @@ const switchCustomerProfileTab = async (tab, customerId, container) => {
                 <button class="btn-sm secondary" style="border-radius:20px;font-size:11px;" onclick="app.openAddTagModal(${customer.id},'customer')">+ Add Tag</button>
             </div>
         `;
+    }
+    else if (tab === 'journey') {
+        await window._loadChunkOnce('chunks/script-journey.min.js');
+        await (window.app.renderJourneyTab || (() => {}))('customer', customer.id, container);
     }
 };
 
@@ -3368,10 +3390,28 @@ const showProspectDetail = async (prospectId) => {
                         <div class="acc-body" id="acc-body-names-${prospect.id}" style="display:none" data-loaded="false"></div>
                     </div>
 
+                    <!-- ⑫ Journey Tracker -->
+                    <div class="acc-item" id="acc-journey-${prospect.id}">
+                        <div class="acc-hdr" onclick="app.toggleAccordion('journey',${prospect.id},this.parentElement)">
+                            <span><i class="fas fa-route" style="color:#7c3aed;"></i> Journey Tracker <span id="jny-badge-${prospect.id}" style="display:none;background:#dc2626;color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:10px;margin-left:6px;vertical-align:middle;"></span></span>
+                            <i class="fas fa-chevron-down acc-chev"></i>
+                        </div>
+                        <div class="acc-body" id="acc-body-journey-${prospect.id}" style="display:none" data-loaded="false"></div>
+                    </div>
+
                 </div>
         </div>
     `;
     // All accordions start collapsed — no pre-load needed
+    // Async: populate journey overdue badge if touchpoints exist
+    AppDataStore.getJourneyTouchpoints('prospect', prospect.id).then(tps => {
+        const overdue = tps.filter(t => t.status === 'overdue').length;
+        const badge = document.getElementById(`jny-badge-${prospect.id}`);
+        if (badge && overdue > 0) {
+            badge.textContent = `${overdue} overdue`;
+            badge.style.display = 'inline';
+        }
+    }).catch(() => {});
 };
 
 const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
@@ -4485,6 +4525,11 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                 </div>
             `}
         `;
+    }
+    else if (tab === 'journey') {
+        // Lazy-load the journey chunk then render
+        await window._loadChunkOnce('chunks/script-journey.min.js');
+        await (window.app.renderJourneyTab || (() => {}))('prospect', prospectId, container);
     }
 };
 
