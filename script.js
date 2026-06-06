@@ -2573,6 +2573,7 @@ function _wireLoginBtn() {
     // add the viewId entry below.
     const _CHUNK_VIEWS = {
         // Core view chunks (extracted 2026-06-05)
+        'home':                 { src: 'chunks/script-mobile.min.js',      minLevel: null, exactLevels: null },
         'calendar':             { src: 'chunks/script-calendar.min.js',    minLevel: null, exactLevels: null },
         'month':                { src: 'chunks/script-calendar.min.js',    minLevel: null, exactLevels: null },
         // Prospect/Customer management (Phase 4J)
@@ -2650,6 +2651,7 @@ function _wireLoginBtn() {
 
             // Tier 1 — immediate: the views agents open most
             [
+                'chunks/script-mobile.min.js',
                 'chunks/script-prospects.min.js',
                 'chunks/script-calendar.min.js',
                 'chunks/script-pipeline.min.js',
