@@ -104,9 +104,11 @@
         const result = { customer: null, agent: null, product: null };
 
         await Promise.all([
-            // 1. Customer lookup — try phone first (most reliable), then name
+            // 1. Customer lookup — try phone first (most reliable), then name.
+            //    Use the original phone string (with dashes/spaces) for ilike search so
+            //    "012-3456789" matches CRM records that store it with dashes.
             (async () => {
-                const phone = (fields.customer_phone || '').replace(/\D/g, '');
+                const phone = (fields.customer_phone || '').trim();   // keep original format
                 const name  = (fields.customer_name  || '').trim();
                 if (!phone && !name) return;
 
@@ -206,7 +208,7 @@
             ? `<div style="display:flex;align-items:center;gap:8px;">
                 <i class="fas fa-gem" style="color:#7c3aed;"></i>
                 <span style="font-weight:600;color:#5b21b6;">${esc(ref.product.name)}</span>
-                ${ref.product.name.toLowerCase() !== (fields.product_name || '').toLowerCase()
+                ${(ref.product.name || '').toLowerCase() !== (fields.product_name || '').toLowerCase()
                     ? `<span style="font-size:10px;color:#a78bfa;">(OCR: ${esc(fields.product_name)})</span>` : ''}
                </div>`
             : `<span style="color:#9ca3af;font-size:12px;">"${esc(fields.product_name || '—')}" not matched in product catalog</span>`;
@@ -547,10 +549,18 @@
                 throw error;
             }
 
-            // Update local cache
+            // Update local cache then re-render, keeping the expanded row open
             const row = _ofeAllRows.find(r => String(r.id) === String(id));
             if (row) row.collection_status = newStatus;
             _ofeRenderHistory();
+            // Re-open the same row so the user doesn't lose their place
+            const expRow = document.getElementById(`ofe-expand-${id}`);
+            const expBody = document.getElementById(`ofe-expand-body-${id}`);
+            if (expRow && expBody) {
+                expRow.style.display = '';
+                const record = _ofeAllRows.find(r => String(r.id) === String(id));
+                if (record) expBody.innerHTML = _ofeFieldCard(record);
+            }
             UI.toast.success(`Marked as ${newStatus}`);
         } catch (err) {
             UI.toast.error('Could not update status: ' + (err.message || String(err)));
@@ -681,7 +691,7 @@
         return isNaN(n) ? null : n;
     };
 
-    const _ofeRenderClosingPanel = (fields, confidence) => {
+    const _ofeRenderClosingPanel = (fields) => {
         const resultEl = document.getElementById('ofe-result');
         if (!resultEl) return;
         _ofeLinkedProspect = null;
@@ -928,9 +938,10 @@
                         ? Math.round((confValues.reduce((a, b) => a + b, 0) / confValues.length) * 100) / 100
                         : null;
 
+                    // prospect_attachments only has prospect_id — customers are stored in the
+                    // same prospects table (status='customer'), so always use prospect_id.
                     const { data: att } = await sb.from('prospect_attachments').insert({
-                        prospect_id:       _ofeLinkedProspect.entityType === 'prospect' ? _ofeLinkedProspect.id : null,
-                        customer_id:       _ofeLinkedProspect.entityType === 'customer' ? _ofeLinkedProspect.id : null,
+                        prospect_id:       _ofeLinkedProspect.id,
                         attachment_type:   'order_form',
                         filename:          `order_form_${prn || today}.jpg`,
                         metadata: {
@@ -1073,7 +1084,7 @@
 
             if (statusEl) statusEl.innerHTML = '';
             _ofeRenderScanResult(res, previewUrl);
-            _ofeRenderClosingPanel(res.fields || {}, res.confidence || {});
+            _ofeRenderClosingPanel(res.fields || {});
             setTimeout(() => URL.revokeObjectURL(previewUrl), 90000);
 
         } catch (err) {

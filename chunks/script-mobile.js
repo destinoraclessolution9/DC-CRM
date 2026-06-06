@@ -376,11 +376,15 @@
     };
 
     // ── Side Drawer ──────────────────────────────────────────
+    // #15 fix: added noticeboard, knowledge, ai-insights, security, admin-gated items
+    // that were missing from DRAWER_SECTIONS — their perms entries were correct
+    // but renderMobileDrawer iterates DRAWER_SECTIONS, so missing entries = invisible.
     const DRAWER_SECTIONS = [
         {
             title: 'Core CRM',
             items: [
                 { view: 'calendar',             label: 'Calendar',                    icon: 'fas fa-calendar-alt' },
+                { view: 'noticeboard',          label: '📢 公告栏',                    icon: 'fas fa-bullhorn' },
                 { view: 'prospects',            label: 'Prospect / Customer',          icon: 'fas fa-users' },
                 { view: 'referrals',            label: 'Referral Management',          icon: 'fas fa-project-diagram' },
                 { view: 'pipeline',             label: 'Pipeline Management',          icon: 'fas fa-filter' },
@@ -395,18 +399,22 @@
         {
             title: 'Consultant & Analytics',
             items: [
-                { view: 'agents',      label: 'Consultant',              icon: 'fas fa-user-tie' },
-                { view: 'performance', label: 'Ranking Performance',     icon: 'fas fa-trophy' },
-                { view: 'reports',     label: 'Reporting KPI',           icon: 'fas fa-chart-bar' },
-                { view: 'risk',        label: 'Attrition Risk Analysis', icon: 'fas fa-exclamation-triangle' },
+                { view: 'agents',       label: 'Consultant',              icon: 'fas fa-user-tie' },
+                { view: 'performance',  label: 'Ranking Performance',     icon: 'fas fa-trophy' },
+                { view: 'reports',      label: 'Reporting KPI',           icon: 'fas fa-chart-bar' },
+                { view: 'risk',         label: 'Attrition Risk Analysis', icon: 'fas fa-exclamation-triangle' },
+                { view: 'ai-insights',  label: 'AI Insights',             icon: 'fas fa-brain' },
+                { view: 'security',     label: 'Security',                icon: 'fas fa-shield-halved' },
             ]
         },
         {
             title: 'Documents & Admin',
             items: [
-                { view: 'documents', label: 'Document Management', icon: 'fas fa-folder-open' },
-                { view: 'import',    label: 'Import / Export',     icon: 'fas fa-file-import' },
-                { view: 'settings',  label: 'Settings',            icon: 'fas fa-cog' },
+                { view: 'documents',      label: 'Document Management', icon: 'fas fa-folder-open' },
+                { view: 'knowledge',      label: 'Knowledge HQ',        icon: 'fas fa-brain' },
+                { view: 'import',         label: 'Import / Export',     icon: 'fas fa-file-import' },
+                { view: 'contracts',      label: 'Contracts',           icon: 'fas fa-file-contract' },
+                { view: 'settings',       label: 'Settings',            icon: 'fas fa-cog' },
             ]
         },
         {
@@ -414,6 +422,9 @@
             items: [
                 { view: 'protection',         label: 'Protection Monitor',  icon: 'fas fa-shield-alt' },
                 { view: 'integrations',       label: 'Integrations',        icon: 'fas fa-plug' },
+                { view: 'lead_forms',         label: 'Lead Capture Forms',  icon: 'fas fa-wpforms' },
+                { view: 'surveys',            label: 'NPS Surveys',         icon: 'fas fa-poll' },
+                { view: 'booking_settings',   label: 'Booking Scheduler',   icon: 'fas fa-calendar-check' },
                 { view: 'egg_purchasing',     label: 'Egg Purchasing',      icon: 'fas fa-egg' },
                 { view: 'formula_purchaser',  label: 'Formula Purchaser',   icon: 'fas fa-flask' },
                 { view: 'stock_take',         label: 'Stock Take',          icon: 'fas fa-boxes' },
@@ -426,17 +437,20 @@
 
     // Returns the set of allowed nav IDs for the current user (mirrors updateNavVisibility logic)
     const _getAllowedNavIds = () => {
-        const _l12 = ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'reports', 'documents', 'settings', 'fude', 'milestones'];
+        // #5 fix: added 'knowledge' and 'noticeboard' to _l12 (mirrors desktop script.js:1349)
+        const _l12 = ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'reports', 'documents', 'knowledge', 'settings', 'fude', 'milestones'];
         const perms = {
-            1: ['calendar','prospects','referrals','pipeline','promotions','marketing-automation','marketing-lists','cases','purchases_history','agents','performance','reports','risk','ai-insights','security','admin','protection','documents','import','integrations','settings','fude','milestones','lead_forms','surveys','contracts','custom_fields','booking_settings','egg-purchasing','formula-purchaser','stock-take','org-chart'],
-            2: ['calendar','prospects','referrals','pipeline','promotions','marketing-automation','marketing-lists','cases','agents','performance','reports','risk','ai-insights','security','admin','protection','documents','import','integrations','settings','fude','milestones','lead_forms','surveys','contracts','custom_fields','booking_settings','org-chart'],
-            3: ['calendar','prospects','referrals','pipeline','promotions','cases','performance','reports','protection','documents','settings','fude'],
-            4: ['calendar','prospects','referrals','pipeline','promotions','cases','performance','reports','protection','documents','settings','fude'],
+            // #5 fix: added 'knowledge' to L1-L4 and 'noticeboard'/'knowledge' to match desktop levelPermissions
+            1: ['calendar','prospects','referrals','pipeline','promotions','marketing-automation','marketing-lists','cases','purchases_history','agents','performance','reports','risk','ai-insights','security','admin','protection','documents','knowledge','import','integrations','settings','fude','milestones','noticeboard','lead_forms','surveys','contracts','custom_fields','booking_settings','egg-purchasing','formula-purchaser','stock-take','org-chart'],
+            2: ['calendar','prospects','referrals','pipeline','promotions','marketing-automation','marketing-lists','cases','agents','performance','reports','risk','ai-insights','security','admin','protection','documents','knowledge','import','integrations','settings','fude','milestones','noticeboard','lead_forms','surveys','contracts','custom_fields','booking_settings','org-chart'],
+            3: ['calendar','prospects','referrals','pipeline','promotions','cases','performance','reports','protection','documents','knowledge','settings','fude'],
+            4: ['calendar','prospects','referrals','pipeline','promotions','cases','performance','reports','protection','documents','knowledge','settings','fude'],
             5: _l12, 6: _l12, 7: _l12, 8: _l12, 9: _l12, 10: _l12,
-            11: ['calendar','prospects','referrals','promotions','cases','settings','fude','milestones'],
-            12: ['calendar','prospects','referrals','fude','milestones'],
-            13: ['calendar','prospects','fude','milestones'],
-            14: ['calendar','prospects','fude','milestones'],
+            11: ['calendar','prospects','referrals','promotions','cases','knowledge','settings','fude','milestones'],
+            // #6 fix: added 'noticeboard' to L12/L13/L14 (customers must reach Noticeboard on mobile)
+            12: ['noticeboard','prospects','referrals','fude','milestones'],
+            13: ['noticeboard','prospects','fude','milestones'],
+            14: ['noticeboard','prospects','fude','milestones'],
             // Level 15 Stock Take Staff — per-store counter accounts that only
             // see the Stock Take tab. Inside the module they only get the
             // count / recount / summary sub-tabs (gated in showStockTakeView).

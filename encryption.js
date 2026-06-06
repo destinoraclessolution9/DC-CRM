@@ -204,7 +204,7 @@ const SecureDataStore = {
 
     // Read with decryption
     getById: async (table, id) => {
-        const data = AppDataStore.getById(table, id);
+        const data = await AppDataStore.getById(table, id); // #9 fix: was missing await
         if (!data) return null;
 
         // Check if data is encrypted
@@ -229,7 +229,7 @@ const SecureDataStore = {
 
     // Update with encryption
     update: async (table, id, data) => {
-        const existing = AppDataStore.getById(table, id);
+        const existing = await AppDataStore.getById(table, id); // #9 fix: was missing await
         if (!existing) return null;
 
         const encryptedFields = EncryptedFields[table] || [];

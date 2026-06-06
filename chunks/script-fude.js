@@ -76,7 +76,7 @@ const showFudeView = async (container) => {
     // --- Totals & summary sync ---
     const totalPoints  = myRewards.reduce((s, r) => s + (parseInt(r.fudi_points)    || 0), 0);
     const totalReturns = myRewards.reduce((s, r) => s + (parseFloat(r.sharing_return) || 0), 0);
-    if (myRewards.length > 0) { try { await syncFudiSummary(currentUser.id, totalPoints, totalReturns); } catch(e) {} }
+    if (myRewards.length > 0) { try { await syncFudiSummary(currentUser.id, totalPoints, totalReturns); } catch(e) { console.warn('[fude] syncFudiSummary failed:', e?.message || e); } }
 
     // --- Helper: pre-signed image src attr ---
     const imgSrc = (h) => h._signedUrl ? `src="${h._signedUrl}"` : '';
@@ -373,7 +373,7 @@ const showFudeView = async (container) => {
                 ${isL1314 && totalPoints > 0 ? `
                 <div class="fude-points-banner">
                     <span class="fude-points-banner-text">🎉 当前累积 <strong>${totalPoints}</strong> 福气积分，可兑换精选奖励！</span>
-                    <button class="fude-points-banner-cta" onclick="app.openFudeRedeemModal()">立即兑换 →</button>
+                    <button class="fude-points-banner-cta" onclick="app.openFudeRedeemModal(${totalPoints})">立即兑换 →</button>
                 </div>` : ''}
                 ${leaderboardSection}
                 ${adminHighlightsSection}
@@ -567,7 +567,8 @@ const syncFudiSummary = async (userId, totalPoints, totalReturns) => {
         const existing = await AppDataStore.query('user_fudi_summary', { user_id: userId });
         const payload  = { total_fudi_points: totalPoints, total_sharing_return: totalReturns, updated_at: new Date().toISOString() };
         if (existing.length > 0) {
-            await AppDataStore.update('user_fudi_summary', existing[0].user_id, payload);
+            // #3 — must pass the row's primary key (id), not user_id; update() filters by id column
+            await AppDataStore.update('user_fudi_summary', existing[0].id, payload);
         } else {
             await AppDataStore.create('user_fudi_summary', { user_id: userId, ...payload });
         }
@@ -2505,15 +2506,11 @@ const saveDestinyBlueprint = async () => {
     }
 };
 
-// #4 — Redeem Fude points modal (replaces app.todo('Redeem Points'))
-const openFudeRedeemModal = () => {
-    const user = window.app._currentUser || window._currentUser;
-    const pts = (() => {
-        try {
-            const el = document.querySelector('.fude-points-banner-text strong');
-            return el ? parseInt(el.textContent, 10) || 0 : 0;
-        } catch { return 0; }
-    })();
+// #4 — Redeem Fude points modal.
+// #8  fix: use `type: 'primary'` (UI.showModal reads btn.type, not btn.class).
+// #10 fix: accept pts as a parameter passed from the onclick — avoids fragile DOM
+//          scrape that returns 0 if the fude view re-renders before button click.
+const openFudeRedeemModal = (pts = 0) => {
     UI.showModal('立即兑换福气积分', `
         <div style="font-size:14px;line-height:1.7;">
             <div style="background:#fef3c7;border-left:4px solid #f59e0b;padding:12px 14px;border-radius:6px;margin-bottom:16px;">
@@ -2539,7 +2536,7 @@ const openFudeRedeemModal = () => {
                 注明您的姓名、积分数量及所选奖励，团队将在 3 个工作日内回复。
             </div>
         </div>
-    `, [{ label: '关闭', action: 'UI.hideModal()', class: 'btn primary' }]);
+    `, [{ label: '关闭', action: 'UI.hideModal()', type: 'primary' }]);
 };
 
     Object.assign(window.app, {

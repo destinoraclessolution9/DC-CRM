@@ -1348,8 +1348,8 @@ const appLogic = (() => {
         // Order in array = display order in nav (first item leftmost / top).
         const _l12 = ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'reports', 'documents', 'knowledge', 'settings', 'fude', 'milestones', 'order-form-extract'];
         const levelPermissions = {
-            1: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'purchases_history', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'knowledge', 'import', 'integrations', 'settings', 'fude', 'milestones', 'noticeboard', 'custom_fields', 'egg-purchasing', 'standard-functions', 'formula-purchaser', 'stock-take', 'boss-report', 'org-chart', 'order-form-extract'],
-            2: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'knowledge', 'import', 'integrations', 'settings', 'fude', 'milestones', 'noticeboard', 'custom_fields', 'org-chart', 'order-form-extract'],
+            1: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'purchases_history', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'knowledge', 'import', 'integrations', 'settings', 'fude', 'milestones', 'noticeboard', 'custom_fields', 'egg-purchasing', 'standard-functions', 'formula-purchaser', 'stock-take', 'boss-report', 'org-chart', 'ai-insights', 'security', 'workflows', 'lead_forms', 'surveys', 'contracts', 'booking_settings', 'order-form-extract'],
+            2: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'knowledge', 'import', 'integrations', 'settings', 'fude', 'milestones', 'noticeboard', 'custom_fields', 'org-chart', 'ai-insights', 'security', 'lead_forms', 'surveys', 'contracts', 'booking_settings', 'order-form-extract'],
             3: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'performance', 'reports', 'protection', 'documents', 'knowledge', 'settings', 'fude', 'order-form-extract'],
             4: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'performance', 'reports', 'protection', 'documents', 'knowledge', 'settings', 'fude', 'order-form-extract'],
             5: _l12, 6: _l12, 7: _l12, 8: _l12, 9: _l12, 10: _l12,
@@ -1374,9 +1374,13 @@ const appLogic = (() => {
             'calendar', 'pipeline', 'protection', 'agents', 'prospects', 'referrals',
             'cases', 'documents', 'knowledge', 'import', 'promotions', 'marketing-automation', 'marketing-lists',
             'performance', 'reports', 'risk', 'admin',
+            // Phase 17/19 dropdowns + gated tools — previously missing from this list,
+            // causing them to stay permanently hidden for all roles after #28 hide-by-default fix.
+            'ai-insights', 'security', 'workflows',
             'integrations', 'settings', 'milestones', 'fude', 'noticeboard',
             'custom_fields', 'egg-purchasing', 'standard-functions', 'formula-purchaser',
             'purchases_history', 'stock-take', 'boss-report', 'org-chart',
+            'lead_forms', 'surveys', 'contracts', 'booking_settings',
             'order-form-extract',
         ];
 

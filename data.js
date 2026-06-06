@@ -1072,10 +1072,31 @@ class DataStore {
                 banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99998;background:#b45309;color:#fff;text-align:center;padding:8px 16px;font-size:13px;font-weight:600;';
                 banner.textContent = '⚠️ 离线模式 — 无法连接服务器，显示缓存数据。请检查网络后刷新。';
                 document.body?.prepend(banner);
+                // #7 — iOS Safari doesn't reliably fire 'online' on WiFi reconnection.
+                // Belt-and-suspenders: also probe on visibilitychange (tab re-focus)
+                // and pageshow (back-navigation). Both are reliable cross-platform.
+                const _dismissOfflineBanner = () => {
+                    if (!window._offlineNotified) return;
+                    // Quick connectivity probe — if it reaches the server, we're back online.
+                    fetch('/manifest.json', { cache: 'no-store', signal: AbortSignal.timeout ? AbortSignal.timeout(4000) : undefined })
+                        .then(() => {
+                            document.getElementById('offline-banner')?.remove();
+                            window._offlineNotified = false;
+                            document.removeEventListener('visibilitychange', _onVisibilityChange);
+                            window.removeEventListener('pageshow', _onPageShow);
+                        })
+                        .catch(() => {}); // still offline — leave banner
+                };
+                const _onVisibilityChange = () => { if (document.visibilityState === 'visible') _dismissOfflineBanner(); };
+                const _onPageShow = () => _dismissOfflineBanner();
                 window.addEventListener('online', function _removeOfflineBanner() {
                     document.getElementById('offline-banner')?.remove();
                     window._offlineNotified = false;
+                    document.removeEventListener('visibilitychange', _onVisibilityChange);
+                    window.removeEventListener('pageshow', _onPageShow);
                 }, { once: true });
+                document.addEventListener('visibilitychange', _onVisibilityChange);
+                window.addEventListener('pageshow', _onPageShow);
             }
             // Even when read fails, still try to push queued writes — write endpoint is separate from read
             this._pushQueuedWrites(tableName).catch(() => {});

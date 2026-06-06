@@ -86,14 +86,15 @@ self.addEventListener('fetch', (event) => {
     }
 
     // Same-origin navigation (page loads): network-first → offline fallback.
+    // NOTE: caches.match() returns a Promise (always truthy), so we must chain
+    // .then() to inspect the resolved value — never use || on Promise objects.
     if (url.origin === self.location.origin && req.mode === 'navigate') {
         event.respondWith(
-            fetch(req)
-                .catch(() =>
-                    caches.match('/offline.html') ||
-                    caches.match('/index.html') ||
-                    Response.error()
-                )
+            fetch(req).catch(() =>
+                caches.match('/offline.html')
+                    .then((r) => r || caches.match('/index.html'))
+                    .then((r) => r || Response.error())
+            )
         );
         return;
     }
@@ -146,7 +147,9 @@ async function cacheFirst(req) {
             cache.put(req, res.clone()).catch(() => {});
         }
         return res;
-    } catch {
+    } catch (err) {
+        // #13 — log cache+network misses so blank-screen failures are diagnosable.
+        console.warn('[SW] cache+network miss:', req.url, err && err.message);
         return cached || Response.error();
     }
 }

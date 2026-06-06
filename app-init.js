@@ -14,7 +14,7 @@ const __idle = (function () {
     if (typeof window.scheduler !== 'undefined' && typeof window.scheduler.postTask === 'function') {
         return function (cb, opts) {
             try {
-                return window.scheduler.postTask(cb, { priority: 'background', delay: (opts && opts.timeout) ? 0 : 0 });
+                return window.scheduler.postTask(cb, { priority: 'background', delay: (opts && opts.timeout) ? opts.timeout : 0 });
             } catch (_) {
                 return setTimeout(cb, 1);
             }
