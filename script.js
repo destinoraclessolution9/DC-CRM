@@ -2623,19 +2623,18 @@ function _wireLoginBtn() {
         '_activities':          { src: 'chunks/script-activities.min.js', minLevel: null, exactLevels: null },
     };
 
-    // Eager chunk loader — after login, actually execute every chunk the
-    // current role is allowed to see. This restores the "everything in memory"
-    // smoothness of the old monolithic script.js: all functions are ready
-    // before the user taps a nav item, so navigation is instant.
+    // Eager chunk loader — after login, execute every permitted chunk so all
+    // functions are in memory before the user taps anything (same feel as the
+    // old monolithic script.js).
     //
-    // Two-tier to avoid competing with the dashboard first-paint:
-    //   Tier 1 — top 5 highest-traffic chunks start immediately after login.
-    //   Tier 2 — all remaining chunks start 400 ms later (dashboard has painted).
-    //
-    // _loadChunkOnce is idempotent — re-calling for a loaded chunk is a no-op.
-    // Chunks download in parallel (browser opens ~6 TCP streams) and execute in
-    // insertion order; even if one chunk is large the others are already cached
-    // in the SW by the time the user navigates.
+    // Two-tier to avoid blocking Supabase data at login:
+    //   Tier 1 (immediate) — 6 highest-traffic chunks start right away.
+    //             async=true means each executes as soon as it downloads,
+    //             without blocking other tasks.
+    //   Tier 2 (3 s delay) — remaining chunks load after the dashboard data
+    //             has had time to fetch from Supabase. Loading all 25+ scripts
+    //             at once on login was saturating the main-thread task queue
+    //             and causing Supabase fetch callbacks to time out.
     let _predictivePrefetchRan = false;
     const _runPredictivePrefetch = () => {
         if (_predictivePrefetchRan || !_currentUser) return;
@@ -2645,11 +2644,23 @@ function _wireLoginBtn() {
             const seen = new Set();
             const _load = (src) => { if (!seen.has(src)) { seen.add(src); _loadChunkOnce(src); } };
 
-            // All chunks — load immediately, no delay
-            for (const def of Object.values(_CHUNK_VIEWS)) {
-                const ok = !def.exactLevels || def.exactLevels.includes(lvl);
-                if (ok) _load(def.src);
-            }
+            // Tier 1 — immediate: the views agents open most
+            [
+                'chunks/script-prospects.min.js',
+                'chunks/script-calendar.min.js',
+                'chunks/script-pipeline.min.js',
+                'chunks/script-activities.min.js',
+                'chunks/script-cps.min.js',
+                'chunks/script-forms.min.js',
+            ].forEach(_load);
+
+            // Tier 2 — after 3 s: everything else, Supabase data is loaded by then
+            setTimeout(() => {
+                for (const def of Object.values(_CHUNK_VIEWS)) {
+                    const ok = !def.exactLevels || def.exactLevels.includes(lvl);
+                    if (ok) _load(def.src);
+                }
+            }, 3000);
         } catch (e) { console.warn('eager chunk load failed', e); }
     };
 
